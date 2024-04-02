@@ -2774,10 +2774,10 @@ impl GlobalStreamManager {
                     streaming_parallelisms
                         .into_iter()
                         .map(|(table_id, parallelism)| {
-                            // no custom for sql backend
                             let table_parallelism = match parallelism {
                                 StreamingParallelism::Adaptive => TableParallelism::Adaptive,
                                 StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n),
+                                StreamingParallelism::Custom => TableParallelism::Custom,
                             };
 
                             (table_id as u32, table_parallelism)

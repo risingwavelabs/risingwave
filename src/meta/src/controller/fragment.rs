@@ -336,6 +336,7 @@ impl CatalogController {
             ctx: Some(ctx.unwrap_or_default()),
             parallelism: Some(
                 match parallelism {
+                    StreamingParallelism::Custom => TableParallelism::Custom,
                     StreamingParallelism::Adaptive => TableParallelism::Adaptive,
                     StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n as _),
                 }
@@ -1302,6 +1303,39 @@ impl CatalogController {
         }
 
         Ok(Self::compose_fragment(fragment, actors, actor_dispatchers)?.0)
+    }
+
+    /// Get the actor count of `Materialize` or `Sink` fragment of the specified table.
+    pub async fn get_actual_job_fragment_parallelism(
+        &self,
+        job_id: ObjectId,
+    ) -> MetaResult<Option<usize>> {
+        let inner = self.inner.read().await;
+        let mut fragments: Vec<(FragmentId, i32, i64)> = Fragment::find()
+            .join(JoinType::InnerJoin, fragment::Relation::Actor.def())
+            .select_only()
+            .columns([
+                fragment::Column::FragmentId,
+                fragment::Column::FragmentTypeMask,
+            ])
+            .column_as(actor::Column::ActorId.count(), "count")
+            .filter(fragment::Column::JobId.eq(job_id))
+            .group_by(fragment::Column::FragmentId)
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        fragments.retain(|(_, mask, _)| {
+            *mask & PbFragmentTypeFlag::Mview as i32 != 0
+                || *mask & PbFragmentTypeFlag::Sink as i32 != 0
+        });
+
+        Ok(fragments
+            .into_iter()
+            .at_most_one()
+            .ok()
+            .flatten()
+            .map(|(_, _, count)| count as usize))
     }
 }
 
