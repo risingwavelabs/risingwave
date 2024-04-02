@@ -8,7 +8,7 @@ def format_sse(data: str | None, event=None) -> str:
         msg = f'data: {data}\n\n'
     else:
         msg = '\n'
-    
+
     if event is not None:
         msg = f'event: {event}\n{msg}'
 
@@ -29,7 +29,7 @@ def stream():
                 }
             }
             yield format_sse(json.dumps(data), "next")
-        
+
         yield format_sse(None, "complete")
     return Response(eventStream(), mimetype="text/event-stream")
 
