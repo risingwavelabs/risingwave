@@ -953,7 +953,7 @@ impl HummockManager {
             // compaction group has been deleted.
             return Ok(None);
         }
-
+        let _timer = start_measure_real_process_timer!(self);
         let can_trivial_move = matches!(selector.task_type(), compact_task::TaskType::Dynamic)
             || matches!(selector.task_type(), compact_task::TaskType::Emergency);
 
@@ -1245,13 +1245,11 @@ impl HummockManager {
         Ok(())
     }
 
-    #[named]
     pub async fn get_compact_task(
         &self,
         compaction_group_id: CompactionGroupId,
         selector: &mut Box<dyn CompactionSelector>,
     ) -> Result<Option<CompactTask>> {
-        let _timer = start_measure_real_process_timer!(self);
         fail_point!("fp_get_compact_task", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore error")
         )));
@@ -1326,7 +1324,6 @@ impl HummockManager {
         table_stats_change: Option<PbTableStatsMap>,
     ) -> Result<bool> {
         let mut guard = write_lock!(self, compaction).await;
-        let _timer = start_measure_real_process_timer!(self);
         self.report_compact_task_impl(
             task_id,
             None,
@@ -1394,6 +1391,8 @@ impl HummockManager {
         {
             // The compaction task is finished.
             let mut versioning_guard = write_lock!(self, versioning).await;
+            let _timer = start_measure_real_process_timer!(self);
+
             let versioning = versioning_guard.deref_mut();
             let mut current_version = versioning.current_version.clone();
             // purge stale compact_status
