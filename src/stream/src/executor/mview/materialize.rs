@@ -90,7 +90,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
         let row_serde: BasicSerde = BasicSerde::new(
             Arc::from_iter(table_catalog.value_indices.iter().map(|val| *val as usize)),
-            Arc::from(table_columns.clone().into_boxed_slice()),
+            Arc::from(table_columns.into_boxed_slice()),
         );
 
         let arrange_key_indices: Vec<usize> = arrange_key.iter().map(|k| k.column_index).collect();
@@ -296,14 +296,8 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             .map(|(column_id, field)| ColumnDesc::unnamed(column_id, field.data_type()))
             .collect_vec();
 
-        let value_indices = None;
         let row_serde = BasicSerde::new(
-            Arc::from(
-                value_indices
-                    .clone()
-                    .unwrap_or_else(|| (0..columns.len()).collect_vec())
-                    .into_boxed_slice(),
-            ),
+            Arc::from((0..columns.len()).collect_vec()),
             Arc::from(columns.clone().into_boxed_slice()),
         );
         let state_table = StateTableInner::new_without_distribution(
@@ -510,6 +504,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         self.fetch_keys(key_set.iter().map(|v| v.deref()), table, conflict_behavior)
             .await?;
         let mut fixed_changes = MaterializeBuffer::new();
+        let row_serde = self.row_serde.clone();
         for (op, key, value) in row_ops {
             let mut update_cache = false;
             let fixed_changes = &mut fixed_changes;
@@ -541,7 +536,6 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                         }
 
                         ConflictBehavior::DoUpdateIfNotNull => {
-                            let row_serde = self.row_serde.clone();
                             match self.force_get(&key) {
                                 Some(old_row) => {
                                     let old_row_deserialized =
@@ -549,10 +543,9 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
 
                                     let new_row_deserialized =
                                         row_serde.deserializer.deserialize(value.clone())?;
-
                                     let new_row = do_update_if_not_null(
-                                        old_row_deserialized.clone(),
-                                        new_row_deserialized.clone(),
+                                        old_row_deserialized,
+                                        new_row_deserialized,
                                     );
 
                                     let new_value_serialized =
@@ -675,15 +668,23 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
     }
 }
 fn do_update_if_not_null(old_row: OwnedRow, new_row: OwnedRow) -> OwnedRow {
-    let res = old_row
-        .into_inner()
-        .iter()
-        .enumerate()
-        .map(|(i, value)| match value {
-            Some(_) => new_row.clone().into_inner().get(i).cloned().unwrap(),
-            None => None,
-        })
-        .collect_vec();
+    let mut res = vec![];
+    for (old_col, new_col) in old_row.into_inner().iter_mut().zip(new_row.into_iter()) {
+        if old_col.as_ref().is_some() {
+            res.push(new_col);
+        } else {
+            res.push(None);
+        }
+    }
+    // let res = old_row
+    //     .into_inner()
+    //     .iter()
+    //     .enumerate()
+    //     .map(|(i, value)| match value {
+    //         Some(_) => new_row.clone().into_inner().get(i).cloned().unwrap(),
+    //         None => None,
+    //     })
+    //     .collect_vec();
     OwnedRow::new(res)
 }
 #[cfg(test)]
