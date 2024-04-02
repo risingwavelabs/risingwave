@@ -1520,7 +1520,6 @@ impl HummockManager {
             } else {
                 false
             };
-            rets[idx] = is_success;
             if is_success {
                 success_count += 1;
                 let version_delta = gen_version_delta(
