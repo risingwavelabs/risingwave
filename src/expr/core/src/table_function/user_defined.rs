@@ -247,40 +247,18 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
                 },
             };
 
-            let body = match udtf.function_type.as_deref() {
-                Some("async") => {
-                    format!(
-                        "export async function {}({}) {{ {} }}",
-                        identifier,
-                        udtf.arg_names.join(","),
-                        body
-                    )
-                }
-                Some("async_generator") => {
-                    format!(
-                        "export async function* {}({}) {{ {} }}",
-                        identifier,
-                        udtf.arg_names.join(","),
-                        body
-                    )
-                }
-                Some("sync") => {
-                    format!(
-                        "export function {}({}) {{ {} }}",
-                        identifier,
-                        udtf.arg_names.join(","),
-                        body
-                    )
-                }
-                _ => {
-                    format!(
-                        "export function* {}({}) {{ {} }}",
-                        identifier,
-                        udtf.arg_names.join(","),
-                        body
-                    )
-                }
-            };
+            let body = format!(
+                "export {} {}({}) {{ {} }}",
+                match udtf.function_type.as_deref() {
+                    Some("async") => "async function",
+                    Some("async_generator") => "async function*",
+                    Some("sync") => "function",
+                    _ => "function*",
+                },
+                identifier,
+                udtf.arg_names.join(","),
+                body
+            );
 
             futures::executor::block_on(rt.add_function(
                 identifier,

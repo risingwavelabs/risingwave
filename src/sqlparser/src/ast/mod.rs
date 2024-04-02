@@ -2983,26 +2983,6 @@ impl fmt::Display for FunctionRuntime {
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum CreateFunctionParamFunctionType {
-    Normal,
-    Async,
-    Generator,
-    AsyncGenerator,
-}
-
-impl fmt::Display for CreateFunctionParamFunctionType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            CreateFunctionParamFunctionType::Normal => write!(f, "normal"),
-            CreateFunctionParamFunctionType::Async => write!(f, "async"),
-            CreateFunctionParamFunctionType::Generator => write!(f, "generator"),
-            CreateFunctionParamFunctionType::AsyncGenerator => write!(f, "async_generator"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CreateFunctionType {
     Sync,
     Async,
