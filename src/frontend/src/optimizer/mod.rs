@@ -615,13 +615,12 @@ impl PlanRoot {
             .map(|c| c.column_desc.clone())
             .collect();
 
-        let version_column_idx = if let Some(version_column) = with_version_column {
+        let version_column_index = if let Some(version_column) = with_version_column {
             find_version_column_index(&columns, version_column)
-        }else{
+        } else {
             None
         };
 
-       
         let union_inputs = if with_external_source {
             let mut external_source_node = stream_plan;
             external_source_node =
@@ -749,11 +748,11 @@ impl PlanRoot {
             columns,
             definition,
             conflict_behavior,
+            version_column_index,
             pk_column_indices,
             row_id_index,
             version,
             retention_seconds,
-            version_column_idx
         )
     }
 
@@ -903,9 +902,8 @@ fn find_version_column_index(
     column_catalog: &Vec<ColumnCatalog>,
     version_column_name: String,
 ) -> Option<usize> {
-
     for (index, column) in column_catalog.iter().enumerate() {
-        if column.column_desc.name == version_column_name{
+        if column.column_desc.name == version_column_name {
             return Some(index);
         }
     }

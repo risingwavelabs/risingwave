@@ -93,6 +93,7 @@ impl StreamMaterialize {
             ConflictBehavior::NoCheck,
             None,
             None,
+            None,
             table_type,
             None,
             cardinality,
@@ -116,11 +117,11 @@ impl StreamMaterialize {
         columns: Vec<ColumnCatalog>,
         definition: String,
         conflict_behavior: ConflictBehavior,
+        version_column_index: Option<usize>,
         pk_column_indices: Vec<usize>,
         row_id_index: Option<usize>,
         version: Option<TableVersion>,
         retention_seconds: Option<NonZeroU32>,
-        version_column_idx: Option<usize>,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, TableType::Table)?;
 
@@ -131,6 +132,7 @@ impl StreamMaterialize {
             columns,
             definition,
             conflict_behavior,
+            version_column_index,
             Some(pk_column_indices),
             row_id_index,
             TableType::Table,
@@ -201,6 +203,7 @@ impl StreamMaterialize {
         columns: Vec<ColumnCatalog>,
         definition: String,
         conflict_behavior: ConflictBehavior,
+        version_column_index: Option<usize>,
         pk_column_indices: Option<Vec<usize>>, // Is some when create table
         row_id_index: Option<usize>,
         table_type: TableType,
@@ -247,6 +250,7 @@ impl StreamMaterialize {
             value_indices,
             definition,
             conflict_behavior,
+            version_column_index,
             read_prefix_len_hint,
             version,
             watermark_columns,

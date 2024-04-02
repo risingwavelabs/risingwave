@@ -63,6 +63,8 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
     materialize_cache: MaterializeCache<SD>,
 
     conflict_behavior: ConflictBehavior,
+
+    _version_column_index: Option<u32>,
 }
 
 impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
@@ -80,6 +82,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         table_catalog: &Table,
         watermark_epoch: AtomicU64Ref,
         conflict_behavior: ConflictBehavior,
+        _version_column_index: Option<u32>,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         let arrange_key_indices: Vec<usize> = arrange_key.iter().map(|k| k.column_index).collect();
@@ -105,6 +108,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             actor_context,
             materialize_cache: MaterializeCache::new(watermark_epoch, metrics_info),
             conflict_behavior,
+            _version_column_index,
         }
     }
 
@@ -299,6 +303,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             actor_context: ActorContext::for_test(0),
             materialize_cache: MaterializeCache::new(watermark_epoch, MetricsInfo::for_test()),
             conflict_behavior,
+            _version_column_index: None,
         }
     }
 }

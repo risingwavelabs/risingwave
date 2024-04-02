@@ -345,9 +345,13 @@ message Table {
   // TTL of the record in the table, to ensure the consistency with other tables in the streaming plan, it only applies to append-only tables.
   optional uint32 retention_seconds = 37;
 
+  optional uint32 version_column_index= 38;
+
   // Per-table catalog version, used by schema change. `None` for internal tables and tests.
   // Not to be confused with the global catalog version for notification service.
   TableVersion version = 100;
+
+  
 }
 
 enum HandleConflictBehavior {
