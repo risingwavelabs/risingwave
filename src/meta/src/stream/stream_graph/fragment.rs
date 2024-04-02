@@ -317,7 +317,7 @@ pub struct StreamFragmentGraph {
 
     /// The default parallelism of the job, specified by the `STREAMING_PARALLELISM` session
     /// variable. If not specified, all active parallel units will be used.
-    default_parallelism: Option<NonZeroUsize>,
+    specified_parallelism: Option<NonZeroUsize>,
 }
 
 impl StreamFragmentGraph {
@@ -390,7 +390,7 @@ impl StreamFragmentGraph {
             .map(TableId::from)
             .collect();
 
-        let default_parallelism = if let Some(Parallelism { parallelism }) = proto.parallelism {
+        let specified_parallelism = if let Some(Parallelism { parallelism }) = proto.parallelism {
             Some(NonZeroUsize::new(parallelism as usize).context("parallelism should not be 0")?)
         } else {
             None
@@ -401,7 +401,7 @@ impl StreamFragmentGraph {
             downstreams,
             upstreams,
             dependent_table_ids,
-            default_parallelism,
+            specified_parallelism,
         })
     }
 
@@ -496,9 +496,9 @@ impl StreamFragmentGraph {
         &self.dependent_table_ids
     }
 
-    /// Get the default parallelism of the job.
-    pub fn default_parallelism(&self) -> Option<NonZeroUsize> {
-        self.default_parallelism
+    /// Get the parallelism of the job, if specified by the user.
+    pub fn specified_parallelism(&self) -> Option<NonZeroUsize> {
+        self.specified_parallelism
     }
 
     /// Get downstreams of a fragment.
