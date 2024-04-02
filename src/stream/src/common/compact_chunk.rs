@@ -27,6 +27,8 @@ use risingwave_common::row::{Project, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 
+use crate::consistency::consistency_panic;
+
 /// A helper to compact the stream chunks by modifying the `Ops` and visibility of the chunk.
 pub struct StreamChunkCompactor {
     chunks: Vec<StreamChunk>,
@@ -43,10 +45,24 @@ impl<'a> OpRowMutRefTuple<'a> {
     fn push(&mut self, mut curr: OpRowMutRef<'a>) -> bool {
         debug_assert!(self.prev.vis());
         match (self.prev.op(), curr.op()) {
-            (Op::Insert, Op::Insert) => panic!("receive duplicated insert on the stream"),
-            (Op::Delete, Op::Delete) => panic!("receive duplicated delete on the stream"),
+            (Op::Insert, Op::Insert) => {
+                consistency_panic!("receive duplicated insert on the stream");
+                // If need to tolerate inconsistency, override the previous insert.
+                // Note that becasue the primary key constraint has been violated, we
+                // don't mind losing some data here.
+                self.prev.set_vis(false);
+                self.prev = curr;
+            }
+            (Op::Delete, Op::Delete) => {
+                consistency_panic!("receive duplicated delete on the stream");
+                // If need to tolerate inconsistency, override the previous delete.
+                // Note that becasue the primary key constraint has been violated, we
+                // don't mind losing some data here.
+                self.prev.set_vis(false);
+                self.prev = curr;
+            }
             (Op::Insert, Op::Delete) => {
-                // delete a row that has been inserted, just hide the two ops
+                // Delete a row that has been inserted, just hide the two ops.
                 self.prev.set_vis(false);
                 curr.set_vis(false);
                 self.prev = if let Some(prev) = self.before_prev.take() {
