@@ -114,6 +114,26 @@ impl<S: StateStore> FsSourceExecutor<S> {
         Ok(apply_rate_limit(stream, self.source_ctrl_opts.rate_limit).boxed())
     }
 
+    async fn rebuild_stream_reader<const BIASED: bool>(
+        &mut self,
+        source_desc: &FsSourceDesc,
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
+    ) -> StreamExecutorResult<()> {
+        let target_state: Vec<SplitImpl> = self
+            .stream_source_core
+            .latest_split_info
+            .values()
+            .cloned()
+            .collect();
+        let reader = self
+            .build_stream_source_reader(source_desc, Some(target_state))
+            .await?
+            .map_err(StreamExecutorError::connector_error);
+        stream.replace_data_stream(reader);
+
+        Ok(())
+    }
+
     async fn apply_split_change<const BIASED: bool>(
         &mut self,
         source_desc: &FsSourceDesc,
@@ -389,6 +409,13 @@ impl<S: StateStore> FsSourceExecutor<S> {
                                         actor_splits,
                                     )
                                     .await?;
+                                }
+                                Mutation::Throttle(actor_to_apply) => {
+                                    if let Some(throttle) = actor_to_apply.get(&self.actor_ctx.id) {
+                                        self.source_ctrl_opts.rate_limit = *throttle;
+                                        self.rebuild_stream_reader(&source_desc, &mut stream)
+                                            .await?;
+                                    }
                                 }
                                 _ => {}
                             }

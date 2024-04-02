@@ -529,6 +529,14 @@ impl<S: StateStore> SourceExecutor<S> {
                                 )
                                 .await?;
                             }
+                            Mutation::Throttle(actor_to_apply) => {
+                                if let Some(throttle) = actor_to_apply.get(&self.actor_ctx.id) {
+                                    self.source_ctrl_opts.rate_limit = *throttle;
+                                    // recreate from latest_split_info
+                                    self.rebuild_stream_reader(&source_desc, &mut stream)
+                                        .await?;
+                                }
+                            }
                             _ => {}
                         }
                     }

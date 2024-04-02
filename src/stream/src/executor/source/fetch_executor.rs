@@ -237,10 +237,18 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                         Either::Left(msg) => {
                             match &msg {
                                 Message::Barrier(barrier) => {
+                                    let mut need_rebuild_reader = false;
+
                                     if let Some(mutation) = barrier.mutation.as_deref() {
                                         match mutation {
                                             Mutation::Pause => stream.pause_stream(),
                                             Mutation::Resume => stream.resume_stream(),
+                                            Mutation::Throttle(actor_to_apply) => {
+                                                if let Some(throttle) = actor_to_apply.get(&self.actor_ctx.id) {
+                                                    self.source_ctrl_opts.rate_limit = *throttle;
+                                                    need_rebuild_reader = true;
+                                                }
+                                            }
                                             _ => (),
                                         }
                                     }
@@ -264,7 +272,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         }
                                     }
 
-                                    if splits_on_fetch == 0 {
+                                    if splits_on_fetch == 0 || need_rebuild_reader {
                                         Self::replace_with_new_batch_reader(
                                             &mut splits_on_fetch,
                                             &state_store_handler,
