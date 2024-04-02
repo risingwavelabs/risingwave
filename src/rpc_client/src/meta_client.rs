@@ -1117,11 +1117,7 @@ impl MetaClient {
         Ok(resp.params)
     }
 
-    pub async fn set_session_param(
-        &self,
-        param: String,
-        value: Option<String>,
-    ) -> Result<String> {
+    pub async fn set_session_param(&self, param: String, value: Option<String>) -> Result<String> {
         let req = SetSessionParamRequest { param, value };
         let resp = self.inner.set_session_param(req).await?;
         Ok(resp.params)

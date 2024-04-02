@@ -17,10 +17,11 @@ use risingwave_meta::controller::session_params::SessionParamsControllerRef;
 use risingwave_meta::manager::SessionParamsManagerRef;
 use risingwave_pb::meta::session_param_service_server::SessionParamService;
 use risingwave_pb::meta::{
-    GetSessionParamsRequest, GetSessionParamsResponse, SetSessionParamRequest, SetSessionParamResponse,
+    GetSessionParamsRequest, GetSessionParamsResponse, SetSessionParamRequest,
+    SetSessionParamResponse,
 };
-use tonic::{Request, Response, Status};
 use serde_json;
+use tonic::{Request, Response, Status};
 
 pub enum SessionParamsServiceImpl {
     Controller(SessionParamsControllerRef),
@@ -34,14 +35,11 @@ impl SessionParamService for SessionParamsServiceImpl {
         _request: Request<GetSessionParamsRequest>,
     ) -> Result<Response<GetSessionParamsResponse>, Status> {
         let params = match self {
-            SessionParamsServiceImpl::Controller(controller) => {
-                controller.get_params().await
-            }
-            SessionParamsServiceImpl::Manager(manager) => {
-                manager.get_params().await
-            }
+            SessionParamsServiceImpl::Controller(controller) => controller.get_params().await,
+            SessionParamsServiceImpl::Manager(manager) => manager.get_params().await,
         };
-        let params_str = serde_json::to_string(&params).map_err(|e| Status::internal(format!("Failed to parse session config: {}", e)))?;
+        let params_str = serde_json::to_string(&params)
+            .map_err(|e| Status::internal(format!("Failed to parse session config: {}", e)))?;
 
         Ok(Response::new(GetSessionParamsResponse {
             params: params_str,

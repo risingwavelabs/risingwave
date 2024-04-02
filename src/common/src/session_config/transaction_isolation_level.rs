@@ -15,8 +15,6 @@
 use std::fmt::Formatter;
 use std::str::FromStr;
 
-use crate::error::{bail_not_implemented, NotImplemented};
-
 #[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
 // Some variants are never constructed so allow dead code here.
 #[allow(dead_code)]
@@ -29,10 +27,18 @@ pub enum IsolationLevel {
 }
 
 impl FromStr for IsolationLevel {
-    type Err = NotImplemented;
+    type Err = &'static str;
 
-    fn from_str(_s: &str) -> Result<Self, Self::Err> {
-        bail_not_implemented!(issue = 10736, "isolation level");
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "read committed" => Ok(Self::ReadCommitted),
+            "read uncommitted" => Ok(Self::ReadUncommitted),
+            "repeatable read" => Ok(Self::RepeatableRead),
+            "serializable" => Ok(Self::Serializable),
+            _ => Err(
+                "expect one of [read committed, read uncommitted, repeatable read, serializable]",
+            ),
+        }
     }
 }
 

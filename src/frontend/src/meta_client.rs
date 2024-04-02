@@ -83,11 +83,7 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn get_session_params(&self) -> Result<SessionConfig>;
 
-    async fn set_session_param(
-        &self,
-        param: String,
-        value: Option<String>,
-    ) -> Result<String>;
+    async fn set_session_param(&self, param: String, value: Option<String>) -> Result<String>;
 
     async fn list_ddl_progress(&self) -> Result<Vec<DdlProgress>>;
 
@@ -194,15 +190,13 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
     }
 
     async fn get_session_params(&self) -> Result<SessionConfig> {
-        let session_config: SessionConfig = serde_json::from_str(&self.0.get_session_params().await?).context("failed to parse session config")?;
+        let session_config: SessionConfig =
+            serde_json::from_str(&self.0.get_session_params().await?)
+                .context("failed to parse session config")?;
         Ok(session_config)
     }
 
-    async fn set_session_param(
-        &self,
-        param: String,
-        value: Option<String>,
-    ) -> Result<String> {
+    async fn set_session_param(&self, param: String, value: Option<String>) -> Result<String> {
         self.0.set_session_param(param, value).await
     }
 

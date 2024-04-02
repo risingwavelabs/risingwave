@@ -42,6 +42,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
     let mut show_all_list = vec![];
     let mut list_all_list = vec![];
     let mut alias_to_entry_name_branches = vec![];
+    let mut entry_name_list = vec![];
 
     for field in fields {
         let field_ident = field.ident.expect_or_abort("Field need to be named");
@@ -236,10 +237,15 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
         if !flags.contains(&"NO_SHOW_ALL") {
             show_all_list.push(var_info);
         }
+        entry_name_list.push(entry_name);
     }
 
     let struct_ident = input.ident;
     quote! {
+        use std::collections::HashSet;
+        use std::sync::LazyLock;
+        static PARAM_NAMES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| HashSet::from([#(#entry_name_list, )*]));
+
         impl Default for #struct_ident {
             #[allow(clippy::useless_conversion)]
             fn default() -> Self {
@@ -306,6 +312,11 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
                 vec![
                     #(#list_all_list)*
                 ]
+            }
+
+            /// Check if `SessionConfig` has a parameter.
+            pub fn has_param(key_name: &str) -> bool {
+                PARAM_NAMES.contains(key_name)
             }
         }
     }

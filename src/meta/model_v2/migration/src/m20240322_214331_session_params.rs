@@ -1,4 +1,5 @@
 use sea_orm_migration::prelude::*;
+
 use crate::{assert_not_has_tables, drop_tables};
 
 #[derive(DeriveMigrationName)]

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::StatementType;
+use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_sqlparser::ast::{Ident, SetVariableValue};
 
@@ -31,23 +32,25 @@ pub async fn handle_alter_system(
     value: SetVariableValue,
 ) -> Result<RwPgResponse> {
     let value = set_var_to_param_str(&value);
-    let params = handler_args
-        .session
-        .env()
-        .meta_client()
-        .set_system_param(param.to_string(), value)
-        .await?;
+    let param_name = param.to_string();
+    let meta_client = handler_args.session.env().meta_client();
     let mut builder = RwPgResponse::builder(StatementType::ALTER_SYSTEM);
-    if let Some(params) = params {
-        if params.barrier_interval_ms() >= NOTICE_BARRIER_INTERVAL_MS {
-            builder = builder.notice(
-                format!("Barrier interval is set to {} ms >= {} ms. This can hurt freshness and potentially cause OOM.",
-                         params.barrier_interval_ms(), NOTICE_BARRIER_INTERVAL_MS));
-        }
-        if params.checkpoint_frequency() >= NOTICE_CHECKPOINT_FREQUENCY {
-            builder = builder.notice(
-                format!("Checkpoint frequency is set to {} >= {}. This can hurt freshness and potentially cause OOM.",
-                         params.checkpoint_frequency(), NOTICE_CHECKPOINT_FREQUENCY));
+
+    if SessionConfig::has_param(&param_name) {
+        meta_client.set_session_param(param_name, value).await?;
+    } else {
+        let params = meta_client.set_system_param(param_name, value).await?;
+        if let Some(params) = params {
+            if params.barrier_interval_ms() >= NOTICE_BARRIER_INTERVAL_MS {
+                builder = builder.notice(
+                    format!("Barrier interval is set to {} ms >= {} ms. This can hurt freshness and potentially cause OOM.",
+                             params.barrier_interval_ms(), NOTICE_BARRIER_INTERVAL_MS));
+            }
+            if params.checkpoint_frequency() >= NOTICE_CHECKPOINT_FREQUENCY {
+                builder = builder.notice(
+                    format!("Checkpoint frequency is set to {} >= {}. This can hurt freshness and potentially cause OOM.",
+                             params.checkpoint_frequency(), NOTICE_CHECKPOINT_FREQUENCY));
+            }
         }
     }
     Ok(builder.into())

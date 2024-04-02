@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use parking_lot::RwLock;
-use risingwave_common::session_config::{SessionConfig, SearchPath};
+use risingwave_common::session_config::{SearchPath, SessionConfig};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_sqlparser::ast::{

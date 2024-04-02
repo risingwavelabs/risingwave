@@ -23,7 +23,9 @@ use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
 use sea_orm::EntityTrait;
 
-use super::{SessionParamsManager, SessionParamsManagerRef, SystemParamsManager, SystemParamsManagerRef};
+use super::{
+    SessionParamsManager, SessionParamsManagerRef, SystemParamsManager, SystemParamsManagerRef,
+};
 use crate::controller::id::{
     IdGeneratorManager as SqlIdGeneratorManager, IdGeneratorManagerRef as SqlIdGeneratorManagerRef,
 };
@@ -79,7 +81,7 @@ pub struct MetaSrvEnv {
     session_params_manager: Option<SessionParamsManagerRef>,
 
     /// Session param controller
-    session_params_controller: Option< SessionParamsControllerRef>,
+    session_params_controller: Option<SessionParamsControllerRef>,
 
     /// Unique identifier of the cluster.
     cluster_id: ClusterId,
@@ -292,35 +294,44 @@ impl MetaSrvEnv {
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
         let stream_client_pool = Arc::new(StreamClientPool::default());
 
-        let (id_gen_manager, mut cluster_id, system_params_manager, session_params_manager) = match meta_store.clone() {
-            Some(meta_store) => {
-                // change to sync after refactor `IdGeneratorManager::new` sync.
-                let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
-                let (cluster_id, cluster_first_launch) =
-                    if let Some(id) = ClusterId::from_meta_store(&meta_store).await? {
-                        (id, false)
-                    } else {
-                        (ClusterId::new(), true)
-                    };
-                let system_params_manager = Arc::new(
-                    SystemParamsManager::new(
-                        meta_store.clone(),
-                        notification_manager.clone(),
-                        init_system_params.clone(),
-                        cluster_first_launch,
+        let (id_gen_manager, mut cluster_id, system_params_manager, session_params_manager) =
+            match meta_store.clone() {
+                Some(meta_store) => {
+                    // change to sync after refactor `IdGeneratorManager::new` sync.
+                    let id_gen_manager =
+                        Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
+                    let (cluster_id, cluster_first_launch) =
+                        if let Some(id) = ClusterId::from_meta_store(&meta_store).await? {
+                            (id, false)
+                        } else {
+                            (ClusterId::new(), true)
+                        };
+                    let system_params_manager = Arc::new(
+                        SystemParamsManager::new(
+                            meta_store.clone(),
+                            notification_manager.clone(),
+                            init_system_params.clone(),
+                            cluster_first_launch,
+                        )
+                        .await?,
+                    );
+                    let session_params_manager = Arc::new(
+                        SessionParamsManager::new(
+                            meta_store.clone(),
+                            init_session_config.clone(),
+                            cluster_first_launch,
+                        )
+                        .await?,
+                    );
+                    (
+                        Some(id_gen_manager),
+                        Some(cluster_id),
+                        Some(system_params_manager),
+                        Some(session_params_manager),
                     )
-                    .await?,
-                );
-                let session_params_manager = Arc::new(SessionParamsManager::new(meta_store.clone(), init_session_config.clone(), cluster_first_launch).await?);
-                (
-                    Some(id_gen_manager),
-                    Some(cluster_id),
-                    Some(system_params_manager),
-                    Some(session_params_manager),
-                )
-            }
-            None => (None, None, None, None),
-        };
+                }
+                None => (None, None, None, None),
+            };
         let system_params_controller = match &meta_store_sql {
             Some(store) => {
                 cluster_id = Some(
@@ -342,7 +353,9 @@ impl MetaSrvEnv {
             None => None,
         };
         let session_params_controller = if let Some(store) = &meta_store_sql {
-            Some(Arc::new(SessionParamsController::new(store.clone(), init_session_config).await?))
+            Some(Arc::new(
+                SessionParamsController::new(store.clone(), init_session_config).await?,
+            ))
         } else {
             None
         };

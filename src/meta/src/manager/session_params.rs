@@ -19,10 +19,9 @@ use risingwave_common::session_config::{SessionConfig, SessionConfigError};
 use thiserror_ext::AsReport;
 use tokio::sync::RwLock;
 use tracing::info;
-use crate::storage::{MetaStore, MetaStoreRef, Transaction, Snapshot};
-
 
 use crate::model::{ValTransaction, VarTransaction};
+use crate::storage::{MetaStore, MetaStoreRef, Snapshot, Transaction};
 use crate::{MetaError, MetaResult};
 
 pub type SessionParamsManagerRef = Arc<SessionParamsManager>;
@@ -42,7 +41,9 @@ impl SessionParamsManager {
     ) -> MetaResult<Self> {
         let params = if cluster_first_launch {
             init_params
-        } else if let Some(params) = <SessionConfig as SessionParamsModel>::get(&meta_store, init_params).await? {
+        } else if let Some(params) =
+            <SessionConfig as SessionParamsModel>::get(&meta_store, init_params).await?
+        {
             params
         } else {
             return Err(MetaError::system_params(
@@ -99,7 +100,10 @@ const SESSION_PARAMS_CF_NAME: &str = "cf/session_params";
 #[async_trait]
 pub trait SessionParamsModel: Sized {
     fn cf_name() -> String;
-    async fn get<S: MetaStore>(store: &S,init_params: SessionConfig) -> MetadataModelResult<Option<Self>>;
+    async fn get<S: MetaStore>(
+        store: &S,
+        init_params: SessionConfig,
+    ) -> MetadataModelResult<Option<Self>>;
     async fn get_at_snapshot<S: MetaStore>(
         store: &S::Snapshot,
         init_params: SessionConfig,
@@ -121,7 +125,10 @@ impl SessionParamsModel for SessionConfig {
         Self::get_at_snapshot::<S>(&store.snapshot().await, init_params).await
     }
 
-    async fn get_at_snapshot<S>(snapshot: &S::Snapshot, mut init_params: SessionConfig) -> MetadataModelResult<Option<SessionConfig>>
+    async fn get_at_snapshot<S>(
+        snapshot: &S::Snapshot,
+        mut init_params: SessionConfig,
+    ) -> MetadataModelResult<Option<SessionConfig>>
     where
         S: MetaStore,
     {
@@ -134,11 +141,11 @@ impl SessionParamsModel for SessionConfig {
                 let v = std::str::from_utf8(v.as_ref()).unwrap();
                 if let Err(e) = init_params.set(k, v.to_string(), &mut ()) {
                     match e {
-                        SessionConfigError::InvalidValue {.. } => {
-                            tracing::error!(error = %e.as_report(), "failed to set parameter from meta databse, using default value {}", init_params.get(k).unwrap())
+                        SessionConfigError::InvalidValue { .. } => {
+                            tracing::error!(error = %e.as_report(), "failed to set parameter from meta database, using default value {}", init_params.get(k).unwrap())
                         }
                         SessionConfigError::UnrecognizedEntry(_) => {
-                            tracing::error!(error = %e.as_report(), "failed to set parameter from meta databse")
+                            tracing::error!(error = %e.as_report(), "failed to set parameter from meta database")
                         }
                     }
                 }
@@ -162,7 +169,11 @@ impl SessionParamsModel for SessionConfig {
 #[async_trait]
 impl Transactional<Transaction> for SessionConfig {
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
-        for (k, v) in self.list_all().iter().map(|info| (info.name.clone(), info.setting.clone())) {
+        for (k, v) in self
+            .list_all()
+            .iter()
+            .map(|info| (info.name.clone(), info.setting.clone()))
+        {
             trx.put(Self::cf_name(), k.into_bytes(), v.into_bytes());
         }
         Ok(())

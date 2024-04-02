@@ -80,10 +80,11 @@ pub struct LocalFrontend {
     env: FrontendEnv,
 }
 
+#[async_trait::async_trait]
 impl SessionManager for LocalFrontend {
     type Session = SessionImpl;
 
-    fn connect(
+    async fn connect(
         &self,
         _database: &str,
         _user_name: &str,
@@ -195,6 +196,7 @@ impl LocalFrontend {
                 6666,
             ))
             .into(),
+            Default::default(),
         ))
     }
 }
@@ -991,11 +993,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(Default::default())
     }
 
-    async fn set_session_param(
-        &self,
-        _param: String,
-        _value: Option<String>,
-    ) -> RpcResult<String> {
+    async fn set_session_param(&self, _param: String, _value: Option<String>) -> RpcResult<String> {
         Ok("".to_string())
     }
 

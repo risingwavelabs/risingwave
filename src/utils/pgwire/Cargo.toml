@@ -16,6 +16,7 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = { version = "1.0", default-features = false }
+async-trait = "0.1"
 auto_enums = { version = "0.8", features = ["tokio1"] }
 byteorder = "1.5"
 bytes = "1"

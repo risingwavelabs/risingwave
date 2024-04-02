@@ -16,7 +16,6 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::session_config::{SessionConfig, SessionConfigError};
-
 use risingwave_meta_model_v2::prelude::SessionParameter;
 use risingwave_meta_model_v2::session_parameter;
 use sea_orm::ActiveValue::Set;
@@ -36,8 +35,6 @@ pub struct SessionParamsController {
     params: RwLock<SessionConfig>,
 }
 
-
-
 impl SessionParamsController {
     pub async fn new(
         sql_meta_store: SqlMetaStore,
@@ -48,11 +45,11 @@ impl SessionParamsController {
         for param in params {
             if let Err(e) = init_params.set(&param.name, param.value, &mut ()) {
                 match e {
-                    SessionConfigError::InvalidValue {.. } => {
-                        tracing::error!(error = %e.as_report(), "failed to set parameter from meta databse, using default value {}", init_params.get(&param.name)?)
+                    SessionConfigError::InvalidValue { .. } => {
+                        tracing::error!(error = %e.as_report(), "failed to set parameter from meta database, using default value {}", init_params.get(&param.name)?)
                     }
                     SessionConfigError::UnrecognizedEntry(_) => {
-                        tracing::error!(error = %e.as_report(), "failed to set parameter from meta databse")
+                        tracing::error!(error = %e.as_report(), "failed to set parameter from meta database")
                     }
                 }
             }
@@ -76,12 +73,15 @@ impl SessionParamsController {
 
     async fn flush_params(&self) -> MetaResult<()> {
         let params = self.params.read().await.list_all();
-        let models = params.into_iter().map(|param| session_parameter::ActiveModel {
-            name: Set(param.name),
-            value: Set(param.setting),
-            is_mutable: Set(true),
-            description: Set(Some(param.description))
-        }).collect_vec();
+        let models = params
+            .into_iter()
+            .map(|param| session_parameter::ActiveModel {
+                name: Set(param.name),
+                value: Set(param.setting),
+                is_mutable: Set(true),
+                description: Set(Some(param.description)),
+            })
+            .collect_vec();
         let txn = self.db.begin().await?;
         // delete all params first and then insert all params. It follows the same logic
         // as the old code, we'd better change it to another way later to keep consistency.
@@ -137,12 +137,10 @@ mod tests {
         let init_params = SessionConfig::default();
 
         // init system parameter controller as first launch.
-        let session_param_ctl = SessionParamsController::new(
-            meta_store.clone(),
-            init_params.clone(),
-        )
-        .await
-        .unwrap();
+        let session_param_ctl =
+            SessionParamsController::new(meta_store.clone(), init_params.clone())
+                .await
+                .unwrap();
         let params = session_param_ctl.get_params().await;
         assert_eq!(params, init_params);
 
@@ -159,15 +157,15 @@ mod tests {
             is_mutable: Set(true),
             description: Set(None),
         };
-        deprecated_param.insert(&session_param_ctl.db).await.unwrap();
+        deprecated_param
+            .insert(&session_param_ctl.db)
+            .await
+            .unwrap();
 
         // init system parameter controller as not first launch.
-        let session_param_ctl = SessionParamsController::new(
-            meta_store,
-            init_params.clone(),
-        )
-        .await
-        .unwrap();
+        let session_param_ctl = SessionParamsController::new(meta_store, init_params.clone())
+            .await
+            .unwrap();
         // check deprecated params are cleaned up.
         assert!(SessionParameter::find_by_id("deprecated_param".to_string())
             .one(&session_param_ctl.db)
@@ -178,10 +176,12 @@ mod tests {
         let params = session_param_ctl.get_params().await;
         assert_eq!(params.get("rw_implicit_flush").unwrap(), new_params);
         // check db consistency.
-        let models = SessionParameter::find().filter(session_parameter::Column::Name.eq("rw_implicit_flush"))
+        let models = SessionParameter::find()
+            .filter(session_parameter::Column::Name.eq("rw_implicit_flush"))
             .one(&session_param_ctl.db)
             .await
-            .unwrap().unwrap();
+            .unwrap()
+            .unwrap();
         assert_eq!(models.value, params.get("rw_implicit_flush").unwrap());
     }
 }

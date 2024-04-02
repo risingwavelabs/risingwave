@@ -44,10 +44,11 @@ pub type SessionId = (ProcessId, SecretKey);
 
 /// The interface for a database system behind pgwire protocol.
 /// We can mock it for testing purpose.
+#[async_trait::async_trait]
 pub trait SessionManager: Send + Sync + 'static {
     type Session: Session;
 
-    fn connect(
+    async fn connect(
         &self,
         database: &str,
         user_name: &str,
@@ -329,10 +330,11 @@ mod tests {
     struct MockSessionManager {}
     struct MockSession {}
 
+    #[async_trait::async_trait]
     impl SessionManager for MockSessionManager {
         type Session = MockSession;
 
-        fn connect(
+        async fn connect(
             &self,
             _database: &str,
             _user_name: &str,

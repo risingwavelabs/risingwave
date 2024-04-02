@@ -363,7 +363,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 enable_dropped_column_reclaim: config.meta.enable_dropped_column_reclaim,
             },
             config.system.into_init_system_params(),
-            config.session,
+            Default::default(),
         )
         .await
         .unwrap();

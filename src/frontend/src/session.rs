@@ -47,7 +47,7 @@ use risingwave_common::catalog::{
 use risingwave_common::config::{
     load_config, BatchConfig, MetaConfig, MetricLevel, StreamingConfig,
 };
-use risingwave_common::session_config::{SessionConfig, ConfigReporter, VisibilityMode};
+use risingwave_common::session_config::{ConfigReporter, SessionConfig, VisibilityMode};
 use risingwave_common::system_param::local_manager::{
     LocalSystemParamsManager, LocalSystemParamsManagerRef,
 };
@@ -607,12 +607,13 @@ impl SessionImpl {
         user_authenticator: UserAuthenticator,
         id: SessionId,
         peer_addr: AddressRef,
+        session_config: SessionConfig,
     ) -> Self {
         Self {
             env,
             auth_context,
             user_authenticator,
-            config_map: Default::default(),
+            config_map: Arc::new(RwLock::new(session_config)),
             id,
             peer_addr,
             txn: Default::default(),
@@ -937,95 +938,103 @@ pub struct SessionManagerImpl {
     number: AtomicI32,
 }
 
+#[async_trait::async_trait]
 impl SessionManager for SessionManagerImpl {
     type Session = SessionImpl;
 
-    fn connect(
+    async fn connect(
         &self,
         database: &str,
         user_name: &str,
         peer_addr: AddressRef,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
-        let catalog_reader = self.env.catalog_reader();
-        let reader = catalog_reader.read_guard();
-        let database_id = reader
-            .get_database_by_name(database)
-            .map_err(|_| {
-                Box::new(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!("database \"{}\" does not exist", database),
-                ))
-            })?
-            .id();
-        let user_reader = self.env.user_info_reader();
-        let reader = user_reader.read_guard();
-        if let Some(user) = reader.get_user_by_name(user_name) {
-            if !user.can_login {
-                return Err(Box::new(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!("User {} is not allowed to login", user_name),
-                )));
-            }
-            let has_privilege =
-                user.check_privilege(&Object::DatabaseId(database_id), AclMode::Connect);
-            if !user.is_super && !has_privilege {
-                return Err(Box::new(Error::new(
-                    ErrorKind::PermissionDenied,
-                    "User does not have CONNECT privilege.",
-                )));
-            }
-            let user_authenticator = match &user.auth_info {
-                None => UserAuthenticator::None,
-                Some(auth_info) => {
-                    if auth_info.encryption_type == EncryptionType::Plaintext as i32 {
-                        UserAuthenticator::ClearText(auth_info.encrypted_value.clone())
-                    } else if auth_info.encryption_type == EncryptionType::Md5 as i32 {
-                        let mut salt = [0; 4];
-                        let mut rng = rand::thread_rng();
-                        rng.fill_bytes(&mut salt);
-                        UserAuthenticator::Md5WithSalt {
-                            encrypted_password: md5_hash_with_salt(
-                                &auth_info.encrypted_value,
-                                &salt,
-                            ),
-                            salt,
-                        }
-                    } else if auth_info.encryption_type == EncryptionType::Oauth as i32 {
-                        UserAuthenticator::OAuth(auth_info.metadata.clone())
-                    } else {
-                        return Err(Box::new(Error::new(
-                            ErrorKind::Unsupported,
-                            format!("Unsupported auth type: {}", auth_info.encryption_type),
-                        )));
-                    }
+        let (auth_ctx, user_authenticator) = {
+            let catalog_reader = self.env.catalog_reader();
+            let reader = catalog_reader.read_guard();
+            let database_id = reader
+                .get_database_by_name(database)
+                .map_err(|_| {
+                    Box::new(Error::new(
+                        ErrorKind::InvalidInput,
+                        format!("database \"{}\" does not exist", database),
+                    ))
+                })?
+                .id();
+            let user_reader = self.env.user_info_reader();
+            let reader = user_reader.read_guard();
+            if let Some(user) = reader.get_user_by_name(user_name) {
+                if !user.can_login {
+                    return Err(Box::new(Error::new(
+                        ErrorKind::InvalidInput,
+                        format!("User {} is not allowed to login", user_name),
+                    )));
                 }
-            };
+                let has_privilege =
+                    user.check_privilege(&Object::DatabaseId(database_id), AclMode::Connect);
+                if !user.is_super && !has_privilege {
+                    return Err(Box::new(Error::new(
+                        ErrorKind::PermissionDenied,
+                        "User does not have CONNECT privilege.",
+                    )));
+                }
+                let user_authenticator = match &user.auth_info {
+                    None => UserAuthenticator::None,
+                    Some(auth_info) => {
+                        if auth_info.encryption_type == EncryptionType::Plaintext as i32 {
+                            UserAuthenticator::ClearText(auth_info.encrypted_value.clone())
+                        } else if auth_info.encryption_type == EncryptionType::Md5 as i32 {
+                            let mut salt = [0; 4];
+                            let mut rng = rand::thread_rng();
+                            rng.fill_bytes(&mut salt);
+                            UserAuthenticator::Md5WithSalt {
+                                encrypted_password: md5_hash_with_salt(
+                                    &auth_info.encrypted_value,
+                                    &salt,
+                                ),
+                                salt,
+                            }
+                        } else if auth_info.encryption_type == EncryptionType::Oauth as i32 {
+                            UserAuthenticator::OAuth(auth_info.metadata.clone())
+                        } else {
+                            return Err(Box::new(Error::new(
+                                ErrorKind::Unsupported,
+                                format!("Unsupported auth type: {}", auth_info.encryption_type),
+                            )));
+                        }
+                    }
+                };
 
-            // Assign a session id and insert into sessions map (for cancel request).
-            let secret_key = self.number.fetch_add(1, Ordering::Relaxed);
-            // Use a trivial strategy: process_id and secret_key are equal.
-            let id = (secret_key, secret_key);
-            let session_impl: Arc<SessionImpl> = SessionImpl::new(
-                self.env.clone(),
-                Arc::new(AuthContext::new(
+                let auth_ctx = Arc::new(AuthContext::new(
                     database.to_string(),
                     user_name.to_string(),
                     user.id,
-                )),
-                user_authenticator,
-                id,
-                peer_addr,
-            )
-            .into();
-            self.insert_session(session_impl.clone());
+                ));
+                (auth_ctx, user_authenticator)
+            } else {
+                return Err(Box::new(Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("Role {} does not exist", user_name),
+                )));
+            }
+        };
+        let session_config = self.env.meta_client().get_session_params().await?;
+        // Assign a session id and insert into sessions map (for cancel request).
+        let secret_key = self.number.fetch_add(1, Ordering::Relaxed);
+        // Use a trivial strategy: process_id and secret_key are equal.
+        let id = (secret_key, secret_key);
 
-            Ok(session_impl)
-        } else {
-            Err(Box::new(Error::new(
-                ErrorKind::InvalidInput,
-                format!("Role {} does not exist", user_name),
-            )))
-        }
+        let session_impl: Arc<SessionImpl> = SessionImpl::new(
+            self.env.clone(),
+            auth_ctx,
+            user_authenticator,
+            id,
+            peer_addr,
+            session_config,
+        )
+        .into();
+        self.insert_session(session_impl.clone());
+
+        Ok(session_impl)
     }
 
     /// Used when cancel request happened.
