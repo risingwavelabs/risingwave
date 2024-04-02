@@ -43,6 +43,8 @@
 #![feature(negative_impls)]
 #![feature(bound_map)]
 #![feature(array_methods)]
+#![feature(register_tool)]
+#![register_tool(rw)]
 
 #[cfg_attr(not(test), allow(unused_extern_crates))]
 extern crate self as risingwave_common;

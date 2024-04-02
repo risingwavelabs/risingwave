@@ -31,9 +31,9 @@ use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
-    AddMutation, BarrierMutation, CombinedMutation, Dispatcher, Dispatchers, FragmentTypeFlag,
-    PauseMutation, ResumeMutation, SourceChangeSplitMutation, StopMutation, StreamActor,
-    ThrottleMutation, UpdateMutation,
+    AddMutation, BarrierMutation, CombinedMutation, Dispatcher, Dispatchers, PauseMutation,
+    ResumeMutation, SourceChangeSplitMutation, StopMutation, StreamActor, ThrottleMutation,
+    UpdateMutation,
 };
 use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use thiserror_ext::AsReport;
@@ -158,7 +158,8 @@ pub enum Command {
     /// will be set to `Created`.
     CreateStreamingJob {
         table_fragments: TableFragments,
-        upstream_mview_actors: HashMap<TableId, Vec<ActorId>>,
+        /// Refer to the doc on [`MetadataManager::get_upstream_root_fragments`] for the meaning of "root".
+        upstream_root_actors: HashMap<TableId, Vec<ActorId>>,
         dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
         init_split_assignment: SplitAssignment,
         definition: String,
@@ -690,29 +691,16 @@ impl CommandContext {
         }
     }
 
-    /// For `CreateStreamingJob`, returns the actors of the `StreamScan` nodes. For other commands,
+    /// For `CreateStreamingJob`, returns the actors of the `StreamScan`, and `StreamValue` nodes. For other commands,
     /// returns an empty set.
     pub fn actors_to_track(&self) -> HashSet<ActorId> {
         match &self.command {
             Command::CreateStreamingJob {
-                dispatchers,
-                table_fragments,
-                ..
-            } => {
-                // cdc backfill table job doesn't need to be tracked
-                if table_fragments.fragments().iter().any(|fragment| {
-                    fragment.fragment_type_mask & FragmentTypeFlag::CdcFilter as u32 != 0
-                }) {
-                    Default::default()
-                } else {
-                    dispatchers
-                        .values()
-                        .flatten()
-                        .flat_map(|dispatcher| dispatcher.downstream_actor_id.iter().copied())
-                        .chain(table_fragments.values_actor_ids())
-                        .collect()
-                }
-            }
+                table_fragments, ..
+            } => table_fragments
+                .tracking_progress_actor_ids()
+                .into_iter()
+                .collect(),
             _ => Default::default(),
         }
     }
@@ -793,7 +781,7 @@ impl CommandContext {
                     .await?;
                 self.barrier_manager_context
                     .source_manager
-                    .apply_source_change(None, Some(split_assignment.clone()), None)
+                    .apply_source_change(None, None, Some(split_assignment.clone()), None)
                     .await;
             }
 
@@ -883,7 +871,7 @@ impl CommandContext {
             Command::CreateStreamingJob {
                 table_fragments,
                 dispatchers,
-                upstream_mview_actors,
+                upstream_root_actors,
                 init_split_assignment,
                 definition: _,
                 replace_table,
@@ -892,8 +880,8 @@ impl CommandContext {
                 match &self.barrier_manager_context.metadata_manager {
                     MetadataManager::V1(mgr) => {
                         let mut dependent_table_actors =
-                            Vec::with_capacity(upstream_mview_actors.len());
-                        for (table_id, actors) in upstream_mview_actors {
+                            Vec::with_capacity(upstream_root_actors.len());
+                        for (table_id, actors) in upstream_root_actors {
                             let downstream_actors = dispatchers
                                 .iter()
                                 .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
@@ -966,11 +954,12 @@ impl CommandContext {
 
                 // Extract the fragments that include source operators.
                 let source_fragments = table_fragments.stream_source_fragments();
-
+                let backfill_fragments = table_fragments.source_backfill_fragments()?;
                 self.barrier_manager_context
                     .source_manager
                     .apply_source_change(
                         Some(source_fragments),
+                        Some(backfill_fragments),
                         Some(init_split_assignment.clone()),
                         None,
                     )
@@ -1034,10 +1023,13 @@ impl CommandContext {
                     .drop_source_fragments(std::slice::from_ref(old_table_fragments))
                     .await;
                 let source_fragments = new_table_fragments.stream_source_fragments();
+                // XXX: is it possible to have backfill fragments here?
+                let backfill_fragments = new_table_fragments.source_backfill_fragments()?;
                 self.barrier_manager_context
                     .source_manager
                     .apply_source_change(
                         Some(source_fragments),
+                        Some(backfill_fragments),
                         Some(init_split_assignment.clone()),
                         None,
                     )
