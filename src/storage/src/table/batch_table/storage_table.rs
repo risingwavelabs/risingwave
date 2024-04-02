@@ -998,7 +998,6 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
 struct ColumnarStoreStorageTableInnerIterInner<S: StateStore> {
     iters: VecDeque<S::Iter>,
     mapping: ColumnMapping,
-    output_indices: Vec<usize>,
     output_pk_position_in_pk_indices: Vec<usize>,
     non_pk_position_in_output_indices: Vec<usize>,
     data_types: Vec<DataType>,
@@ -1090,7 +1089,6 @@ impl<S: StateStore> ColumnarStoreStorageTableInnerIterInner<S> {
         let iter = Self {
             iters: iters.into(),
             mapping: ColumnMapping::new(iter_to_output_mapping),
-            output_indices,
             non_pk_position_in_output_indices,
             output_pk_position_in_pk_indices,
             data_types,

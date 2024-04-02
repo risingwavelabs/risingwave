@@ -303,6 +303,10 @@ enum TableCommands {
         mv_name: String,
         // data directory for hummock state store. None: use default
         data_dir: Option<String>,
+        #[clap(long, value_delimiter = ',')]
+        output_columns_ids: Option<Vec<i32>>,
+        #[clap(long, default_value_t = false)]
+        silent: bool,
     },
     /// scan a state table using Id
     ScanById {
@@ -310,6 +314,10 @@ enum TableCommands {
         table_id: u32,
         // data directory for hummock state store. None: use default
         data_dir: Option<String>,
+        #[clap(long, value_delimiter = ',')]
+        output_columns_ids: Option<Vec<i32>>,
+        #[clap(long, default_value_t = false)]
+        silent: bool,
     },
     /// list all state tables
     List,
@@ -724,11 +732,20 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::hummock::print_user_key_in_archive(context, archive_ids, data_dir, user_key)
                 .await?;
         }
-        Commands::Table(TableCommands::Scan { mv_name, data_dir }) => {
-            cmd_impl::table::scan(context, mv_name, data_dir).await?
-        }
-        Commands::Table(TableCommands::ScanById { table_id, data_dir }) => {
-            cmd_impl::table::scan_id(context, table_id, data_dir).await?
+        Commands::Table(TableCommands::Scan {
+            mv_name,
+            data_dir,
+            output_columns_ids,
+            silent,
+        }) => cmd_impl::table::scan(context, mv_name, data_dir, output_columns_ids, silent).await?,
+        Commands::Table(TableCommands::ScanById {
+            table_id,
+            data_dir,
+            output_columns_ids,
+            silent,
+        }) => {
+            cmd_impl::table::scan_id(context, table_id, data_dir, output_columns_ids, silent)
+                .await?
         }
         Commands::Table(TableCommands::List) => cmd_impl::table::list(context).await?,
         Commands::Bench(cmd) => cmd_impl::bench::do_bench(context, cmd).await?,

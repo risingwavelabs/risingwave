@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::Instant;
+
 use anyhow::{anyhow, Result};
 use futures::{pin_mut, StreamExt};
+use risingwave_common::catalog::ColumnId;
 use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_rpc_client::MetaClient;
@@ -72,12 +75,16 @@ pub async fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -
 pub fn make_storage_table<S: StateStore>(
     hummock: S,
     table: &TableCatalog,
+    output_columns_ids: Option<Vec<i32>>,
 ) -> Result<StorageTable<S>> {
-    let output_columns_ids = table
-        .columns()
-        .iter()
-        .map(|x| x.column_desc.column_id)
-        .collect();
+    let output_columns_ids = match output_columns_ids {
+        None => table
+            .columns()
+            .iter()
+            .map(|x| x.column_desc.column_id)
+            .collect(),
+        Some(output_columns_ids) => output_columns_ids.into_iter().map(ColumnId::new).collect(),
+    };
     Ok(StorageTable::new_partial(
         hummock,
         output_columns_ids,
@@ -86,30 +93,61 @@ pub fn make_storage_table<S: StateStore>(
     ))
 }
 
-pub async fn scan(context: &CtlContext, mv_name: String, data_dir: Option<String>) -> Result<()> {
+pub async fn scan(
+    context: &CtlContext,
+    mv_name: String,
+    data_dir: Option<String>,
+    output_columns_ids: Option<Vec<i32>>,
+    silent: bool,
+) -> Result<()> {
     let meta_client = context.meta_client().await?;
     let hummock = context
         .hummock_store(HummockServiceOpts::from_env(data_dir)?)
         .await?;
     let table = get_table_catalog(meta_client, mv_name).await?;
-    do_scan(table, hummock).await
+    do_scan(table, hummock, output_columns_ids, silent).await
 }
 
-pub async fn scan_id(context: &CtlContext, table_id: u32, data_dir: Option<String>) -> Result<()> {
+pub async fn scan_id(
+    context: &CtlContext,
+    table_id: u32,
+    data_dir: Option<String>,
+    output_columns_ids: Option<Vec<i32>>,
+    silent: bool,
+) -> Result<()> {
     let meta_client = context.meta_client().await?;
     let hummock = context
         .hummock_store(HummockServiceOpts::from_env(data_dir)?)
         .await?;
     let table = get_table_catalog_by_id(meta_client, table_id).await?;
-    do_scan(table, hummock).await
+    do_scan(table, hummock, output_columns_ids, silent).await
 }
 
-async fn do_scan(table: TableCatalog, hummock: MonitoredStateStore<HummockStorage>) -> Result<()> {
+async fn do_scan(
+    table: TableCatalog,
+    hummock: MonitoredStateStore<HummockStorage>,
+    output_columns_ids: Option<Vec<i32>>,
+    silent: bool,
+) -> Result<()> {
     print_table_catalog(&table);
 
-    println!("Rows:");
+    if let Some(ref output_columns_ids) = output_columns_ids {
+        println!(
+            "output column ids: {}",
+            output_columns_ids
+                .iter()
+                .map(|num| num.to_string())
+                .collect::<Vec<String>>()
+                .join(",")
+        );
+    }
+
+    if !silent {
+        println!("Rows:");
+    }
     let read_epoch = hummock.inner().get_pinned_version().max_committed_epoch();
-    let storage_table = make_storage_table(hummock, &table)?;
+    let storage_table = make_storage_table(hummock, &table, output_columns_ids)?;
+    let instant = Instant::now();
     let stream = storage_table
         .batch_iter(
             HummockReadEpoch::Committed(read_epoch),
@@ -117,9 +155,20 @@ async fn do_scan(table: TableCatalog, hummock: MonitoredStateStore<HummockStorag
             PrefetchOptions::prefetch_for_large_range_scan(),
         )
         .await?;
+    let create_duration = instant.elapsed();
+    let mut counter = 0;
     pin_mut!(stream);
     while let Some(item) = stream.next().await {
-        println!("{:?}", item?.into_owned_row());
+        if !silent {
+            println!("{:?}", item?.into_owned_row());
+        }
+        counter += 1;
     }
+    let scan_duration = instant.elapsed();
+    println!(
+        "{counter} rows in total. create={}ms, scan={}ms",
+        create_duration.as_millis(),
+        scan_duration.as_millis()
+    );
     Ok(())
 }
