@@ -3249,6 +3249,24 @@ fn parse_create_table_on_conflict() {
 }
 
 #[test]
+fn parse_create_table_on_conflict_with_version_column() {
+    let sql1 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT OVERWRITE WITH VERSION COLUMN (v2)";
+    match verified_stmt(sql1) {
+        Statement::CreateTable {
+            name,
+            on_conflict,
+            with_version_column,
+            ..
+        } => {
+            assert_eq!("t", name.to_string());
+            assert_eq!(on_conflict, Some(OnConflict::OverWrite));
+            assert_eq!(with_version_column, Some("v2".to_string()));
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
 fn parse_create_materialized_view_emit_on_window_close() {
     let sql =
         "CREATE MATERIALIZED VIEW myschema.myview AS SELECT foo FROM bar EMIT ON WINDOW CLOSE";

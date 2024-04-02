@@ -349,9 +349,7 @@ message Table {
 
   // Per-table catalog version, used by schema change. `None` for internal tables and tests.
   // Not to be confused with the global catalog version for notification service.
-  TableVersion version = 100;
-
-  
+  TableVersion version = 100; 
 }
 
 enum HandleConflictBehavior {
