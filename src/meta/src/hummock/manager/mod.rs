@@ -29,6 +29,7 @@ use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use parking_lot::Mutex;
+use rand::thread_rng;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::default::compaction_config;
 use risingwave_common::config::ObjectStoreConfig;
@@ -990,6 +991,15 @@ impl HummockManager {
                 }
             }
 
+            let mut table_to_vnode_partition = match self
+                .group_to_table_vnode_partition
+                .read()
+                .get(&compaction_group_id)
+            {
+                Some(table_to_vnode_partition) => table_to_vnode_partition.clone(),
+                None => BTreeMap::default(),
+            };
+
             while let Some(compact_task) = compact_status.get_compact_task(
                 current_version.get_compaction_group_levels(compaction_group_id),
                 task_id as HummockCompactionTaskId,
@@ -1090,24 +1100,18 @@ impl HummockManager {
                         break 'outside;
                     }
                 } else {
-                    let mut table_to_vnode_partition = match self
-                        .group_to_table_vnode_partition
-                        .read()
-                        .get(&compaction_group_id)
-                    {
-                        Some(table_to_vnode_partition) => table_to_vnode_partition.clone(),
-                        None => BTreeMap::default(),
-                    };
-                    table_to_vnode_partition
-                        .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
-
                     if group_config.compaction_config.split_weight_by_vnode > 0 {
                         for table_id in &compact_task.existing_table_ids {
                             compact_task
                                 .table_vnode_partition
                                 .insert(*table_id, vnode_partition_count);
                         }
+                    } else {
+                        compact_task.table_vnode_partition = table_to_vnode_partition.clone();
                     }
+                    compact_task
+                        .table_vnode_partition
+                        .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
                     compact_task.table_watermarks = current_version
                         .safe_epoch_table_watermarks(&compact_task.existing_table_ids);
 
@@ -1288,13 +1292,14 @@ impl HummockManager {
 
     pub async fn get_compact_tasks(
         &self,
-        compaction_groups: Vec<CompactionGroupId>,
+        mut compaction_groups: Vec<CompactionGroupId>,
         max_select_count: usize,
         selector: &mut Box<dyn CompactionSelector>,
     ) -> Result<(Vec<CompactTask>, Vec<CompactionGroupId>)> {
         fail_point!("fp_get_compact_task", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore error")
         )));
+        compaction_groups.shuffle(&mut thread_rng());
         let (mut tasks, groups) = self
             .get_compact_tasks_impl(compaction_groups, max_select_count, selector)
             .await?;
