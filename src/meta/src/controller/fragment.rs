@@ -1117,8 +1117,7 @@ impl CatalogController {
                     upstream_ids
                         .into_inner()
                         .into_iter()
-                        .map(|(_, ids)| ids.into_iter())
-                        .flatten()
+                        .flat_map(|(_, ids)| ids.into_iter())
                         .collect(),
                 )
             })
@@ -1727,10 +1726,8 @@ mod tests {
 
             assert_eq!(actor_dispatcher, pb_dispatcher);
             assert_eq!(
-                vnode_bitmap,
-                pb_vnode_bitmap
-                    .as_ref()
-                    .map(|bitmap| VnodeBitmap::from(bitmap))
+                vnode_bitmap.map(|bitmap| bitmap.to_protobuf()),
+                pb_vnode_bitmap,
             );
 
             assert_eq!(mview_definition, "");
