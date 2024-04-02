@@ -34,7 +34,7 @@ impl ExecutorBuilder for SourceBackfillExecutorBuilder {
         node: &Self::Node,
         store: impl StateStore,
     ) -> StreamResult<Executor> {
-        let source_id = TableId::new(node.source_id);
+        let source_id = TableId::new(node.upstream_source_id);
         let source_name = node.source_name.clone();
         let source_info = node.get_info()?;
 

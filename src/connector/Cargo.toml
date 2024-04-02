@@ -25,6 +25,7 @@ arrow-array = { workspace = true }
 arrow-row = { workspace = true }
 arrow-schema = { workspace = true }
 arrow-select = { workspace = true }
+assert_matches = "1"
 async-nats = "0.34"
 async-trait = "0.1"
 auto_enums = { version = "0.8", features = ["futures03"] }
