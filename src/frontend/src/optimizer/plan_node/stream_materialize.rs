@@ -120,6 +120,7 @@ impl StreamMaterialize {
         row_id_index: Option<usize>,
         version: Option<TableVersion>,
         retention_seconds: Option<NonZeroU32>,
+        version_column_idx: Option<usize>,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, TableType::Table)?;
 

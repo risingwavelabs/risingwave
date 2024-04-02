@@ -531,6 +531,7 @@ impl PlanRoot {
         row_id_index: Option<usize>,
         append_only: bool,
         on_conflict: Option<OnConflict>,
+        with_version_column: Option<String>,
         watermark_descs: Vec<WatermarkDesc>,
         version: Option<TableVersion>,
         with_external_source: bool,
@@ -614,6 +615,13 @@ impl PlanRoot {
             .map(|c| c.column_desc.clone())
             .collect();
 
+        let version_column_idx = if let Some(version_column) = with_version_column {
+            find_version_column_index(&columns, version_column)
+        }else{
+            None
+        };
+
+       
         let union_inputs = if with_external_source {
             let mut external_source_node = stream_plan;
             external_source_node =
@@ -745,6 +753,7 @@ impl PlanRoot {
             row_id_index,
             version,
             retention_seconds,
+            version_column_idx
         )
     }
 
@@ -888,6 +897,19 @@ impl PlanRoot {
             .enable_arrangement_backfill;
         arrangement_backfill_enabled && session_ctx.config().streaming_use_arrangement_backfill()
     }
+}
+
+fn find_version_column_index(
+    column_catalog: &Vec<ColumnCatalog>,
+    version_column_name: String,
+) -> Option<usize> {
+
+    for (index, column) in column_catalog.iter().enumerate() {
+        if column.column_desc.name == version_column_name{
+            return Some(index);
+        }
+    }
+    None
 }
 
 fn const_eval_exprs(plan: PlanRef) -> Result<PlanRef> {
