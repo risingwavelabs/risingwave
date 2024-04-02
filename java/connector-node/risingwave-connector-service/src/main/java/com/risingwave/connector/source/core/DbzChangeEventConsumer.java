@@ -116,6 +116,7 @@ public class DbzChangeEventConsumer
             DebeziumEngine.RecordCommitter<ChangeEvent<SourceRecord, SourceRecord>> committer)
             throws InterruptedException {
         var respBuilder = GetEventStreamResponse.newBuilder();
+        currentRecordCommitter = committer;
         for (ChangeEvent<SourceRecord, SourceRecord> event : events) {
             var record = event.value();
             EventType eventType = getEventType(record);

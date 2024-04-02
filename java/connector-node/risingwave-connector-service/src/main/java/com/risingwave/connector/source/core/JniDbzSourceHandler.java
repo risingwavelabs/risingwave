@@ -27,34 +27,25 @@ import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** handler for starting a debezium source connectors for jni */
-public class JniDbzSourceHandler implements Runnable {
+/**
+ * handler for starting a debezium source connectors for jni
+ */
+
+/**
+ * handler for starting a debezium source connectors for jni
+ */
+public class JniDbzSourceHandler {
     static final Logger LOG = LoggerFactory.getLogger(JniDbzSourceHandler.class);
 
     private final DbzConnectorConfig config;
-
-    DbzCdcEngineRunner runner;
-    long channelPtr;
-
-    private final ExecutorService executor =
-            Executors.newSingleThreadExecutor(
-                    new ThreadFactory() {
-                        @Override
-                        public Thread newThread(Runnable r) {
-                            return new Thread(r, "JniDbzSourceHandler-" + config.getSourceId());
-                        }
-                    });
+    private final DbzCdcEngineRunner runner;
 
     public JniDbzSourceHandler(DbzConnectorConfig config, long channelPtr) {
         this.config = config;
-        this.channelPtr = channelPtr;
         this.runner = DbzCdcEngineRunner.create(config, channelPtr);
 
         if (runner == null) {
@@ -62,8 +53,8 @@ public class JniDbzSourceHandler implements Runnable {
         }
     }
 
-    public static JniDbzSourceHandler runJniDbzSourceThread(
-            byte[] getEventStreamRequestBytes, long channelPtr) throws Exception {
+    public static void runJniDbzSourceThread(byte[] getEventStreamRequestBytes, long channelPtr)
+            throws Exception {
         var request =
                 ConnectorServiceProto.GetEventStreamRequest.parseFrom(getEventStreamRequestBytes);
 
@@ -89,15 +80,11 @@ public class JniDbzSourceHandler implements Runnable {
                         request.getSnapshotDone(),
                         isCdcSourceJob);
         JniDbzSourceHandler handler = new JniDbzSourceHandler(config, channelPtr);
-        handler.start();
-        return handler;
+        // register handler to the registry
+        JniDbzSourceRegistry.register(config.getSourceId(), handler);
+        handler.start(channelPtr);
     }
 
-    public void start() {
-        this.executor.submit(this);
-    }
-
-    /** called from split reader in Rust * */
     public void commitOffset(DebeziumOffset offset) throws InterruptedException {
         var changeEventConsumer = runner.getChangeEventConsumer();
         if (changeEventConsumer != null) {
@@ -107,8 +94,8 @@ public class JniDbzSourceHandler implements Runnable {
         }
     }
 
-    @Override
-    public void run() {
+    public void start(long channelPtr) {
+
         try {
             // Start the engine
             var startOk = runner.start();
@@ -155,6 +142,9 @@ public class JniDbzSourceHandler implements Runnable {
                 LOG.warn("Failed to stop Engine#{}", config.getSourceId(), e);
             }
         }
+
+        // remove the handler from registry
+        JniDbzSourceRegistry.unregister(config.getSourceId());
     }
 
     private boolean sendHandshakeMessage(

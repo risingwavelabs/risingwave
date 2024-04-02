@@ -304,7 +304,6 @@ pub type BoxTryStream<M> = BoxStream<'static, crate::error::ConnectorResult<M>>;
 /// stream of parsed [`StreamChunk`]
 #[async_trait]
 pub trait SplitReader: Sized + Send {
-    type ControlCommand: Sized = ();
     type Properties;
     type Split: SplitMetaData;
 
@@ -317,10 +316,6 @@ pub trait SplitReader: Sized + Send {
     ) -> crate::error::ConnectorResult<Self>;
 
     fn into_stream(self) -> BoxChunkSourceStream;
-
-    fn get_control_sender(&self) -> Option<UnboundedSender<Self::ControlCommand>> {
-        None
-    }
 }
 
 for_all_sources!(impl_connector_properties);

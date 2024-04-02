@@ -670,7 +670,10 @@ impl<S: StateStore> WaitEpochWoker<S> {
                                 .get_or_init()
                                 .expect("jvm should init success");
 
-                            let ret = execute_with_jni_env(&jvm, |env| Ok(()));
+                            let ret = execute_with_jni_env(&jvm, |env| {
+                                // TODO: get source handler from JniDbzSourceRegistry and commit offset
+                                Ok(())
+                            });
 
                             ret.unwrap();
                         }
