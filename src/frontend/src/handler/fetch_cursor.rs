@@ -12,12 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use column_mapping::*;
-pub use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
+use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_sqlparser::ast::ObjectName;
 
-pub mod cache;
-mod column_mapping;
-pub mod compact_chunk;
-pub mod log_store_impl;
-pub mod metrics;
-pub mod table;
+use super::RwPgResponse;
+use crate::error::Result;
+use crate::handler::HandlerArgs;
+
+pub async fn handle_fetch_cursor(
+    handler_args: HandlerArgs,
+    cursor_name: ObjectName,
+    count: Option<i32>,
+) -> Result<RwPgResponse> {
+    let session = handler_args.session;
+    let (rows, pg_descs) = session.cursor_next(&cursor_name, count).await?;
+    Ok(PgResponse::builder(StatementType::FETCH_CURSOR)
+        .values(rows.into(), pg_descs)
+        .into())
+}

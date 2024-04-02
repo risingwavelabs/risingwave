@@ -328,7 +328,7 @@ impl DdlController {
                     &streaming_job,
                     &stream_ctx,
                     table.get_version()?,
-                    &fragment_graph.default_parallelism(),
+                    &fragment_graph.specified_parallelism(),
                 )
                 .await? as u32;
 
@@ -469,7 +469,7 @@ impl DdlController {
                 &streaming_job,
                 &ctx,
                 table.get_version()?,
-                &fragment_graph.default_parallelism(),
+                &fragment_graph.specified_parallelism(),
             )
             .await?;
 

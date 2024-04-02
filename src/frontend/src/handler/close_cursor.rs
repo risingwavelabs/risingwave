@@ -12,12 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use column_mapping::*;
-pub use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
+use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_sqlparser::ast::ObjectName;
 
-pub mod cache;
-mod column_mapping;
-pub mod compact_chunk;
-pub mod log_store_impl;
-pub mod metrics;
-pub mod table;
+use super::RwPgResponse;
+use crate::error::Result;
+use crate::handler::HandlerArgs;
+
+pub async fn handle_close_cursor(
+    handler_args: HandlerArgs,
+    cursor_name: Option<ObjectName>,
+) -> Result<RwPgResponse> {
+    if let Some(name) = cursor_name {
+        handler_args.session.drop_cursor(name).await?;
+    } else {
+        handler_args.session.drop_all_cursors().await;
+    }
+    Ok(PgResponse::empty_result(StatementType::CLOSE_CURSOR))
+}

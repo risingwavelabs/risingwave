@@ -50,8 +50,7 @@ use sea_orm::{
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::utils::{
-    find_stream_source, get_actor_dispatchers, FragmentDesc, PartialActorLocation,
-    PartialFragmentStateTables,
+    get_actor_dispatchers, FragmentDesc, PartialActorLocation, PartialFragmentStateTables,
 };
 use crate::manager::{ActorInfos, LocalNotification};
 use crate::model::TableParallelism;
@@ -1095,6 +1094,24 @@ impl CatalogController {
         Ok(actors)
     }
 
+    /// Get the actor ids, and each actor's upstream actor ids of the fragment with `fragment_id` with `Running` status.
+    pub async fn get_running_actors_and_upstream_of_fragment(
+        &self,
+        fragment_id: FragmentId,
+    ) -> MetaResult<Vec<(ActorId, Vec<ActorId>)>> {
+        let inner = self.inner.read().await;
+        let actors: Vec<(ActorId, Vec<ActorId>)> = Actor::find()
+            .select_only()
+            .column(actor::Column::ActorId)
+            .column(actor::Column::UpstreamActorIds)
+            .filter(actor::Column::FragmentId.eq(fragment_id))
+            .filter(actor::Column::Status.eq(ActorStatus::Running))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        Ok(actors)
+    }
+
     pub async fn get_actors_by_job_ids(&self, job_ids: Vec<ObjectId>) -> MetaResult<Vec<ActorId>> {
         let inner = self.inner.read().await;
         let actors: Vec<ActorId> = Actor::find()
@@ -1209,9 +1226,9 @@ impl CatalogController {
 
         let mut source_fragment_ids = HashMap::new();
         for (fragment_id, _, stream_node) in fragments {
-            if let Some(source) = find_stream_source(&stream_node.to_protobuf()) {
+            if let Some(source_id) = stream_node.to_protobuf().find_stream_source() {
                 source_fragment_ids
-                    .entry(source.source_id as SourceId)
+                    .entry(source_id as SourceId)
                     .or_insert_with(BTreeSet::new)
                     .insert(fragment_id);
             }
@@ -1219,31 +1236,33 @@ impl CatalogController {
         Ok(source_fragment_ids)
     }
 
-    pub async fn get_stream_source_fragment_ids(
+    pub async fn load_backfill_fragment_ids(
         &self,
-        job_id: ObjectId,
-    ) -> MetaResult<HashMap<SourceId, BTreeSet<FragmentId>>> {
+    ) -> MetaResult<HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>> {
         let inner = self.inner.read().await;
-        let mut fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+        let mut fragments: Vec<(FragmentId, Vec<FragmentId>, i32, StreamNode)> = Fragment::find()
             .select_only()
             .columns([
                 fragment::Column::FragmentId,
+                fragment::Column::UpstreamFragmentId,
                 fragment::Column::FragmentTypeMask,
                 fragment::Column::StreamNode,
             ])
-            .filter(fragment::Column::JobId.eq(job_id))
             .into_tuple()
             .all(&inner.db)
             .await?;
-        fragments.retain(|(_, mask, _)| *mask & PbFragmentTypeFlag::Source as i32 != 0);
+        fragments.retain(|(_, _, mask, _)| *mask & PbFragmentTypeFlag::SourceScan as i32 != 0);
 
         let mut source_fragment_ids = HashMap::new();
-        for (fragment_id, _, stream_node) in fragments {
-            if let Some(source) = find_stream_source(&stream_node.to_protobuf()) {
+        for (fragment_id, upstream_fragment_id, _, stream_node) in fragments {
+            if let Some(source_id) = stream_node.to_protobuf().find_source_backfill() {
+                if upstream_fragment_id.len() != 1 {
+                    bail!("SourceBackfill should have only one upstream fragment, found {} for fragment {}", upstream_fragment_id.len(), fragment_id);
+                }
                 source_fragment_ids
-                    .entry(source.source_id as SourceId)
+                    .entry(source_id as SourceId)
                     .or_insert_with(BTreeSet::new)
-                    .insert(fragment_id);
+                    .insert((fragment_id, upstream_fragment_id[0]));
             }
         }
         Ok(source_fragment_ids)
