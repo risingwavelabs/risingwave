@@ -496,6 +496,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         table: &StateTableInner<S, SD>,
         conflict_behavior: &ConflictBehavior,
     ) -> StreamExecutorResult<MaterializeBuffer> {
+        let column_len = table.get_data_types().len();
         let key_set: HashSet<Box<[u8]>> = row_ops
             .iter()
             .map(|(_, k, _)| k.as_slice().into())
@@ -538,30 +539,30 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                         ConflictBehavior::DoUpdateIfNotNull => {
                             match self.force_get(&key) {
                                 Some(old_row) => {
+                                    // In this section, we compare the new row and old row column by column and perform `DoUpdateIfNotNull` replacement.
+                                    // todo(wcy-fdu):find a way to output the resulting new row directly to the downstream chunk, thus avoiding an additional deserialization step.
                                     let old_row_deserialized =
                                         row_serde.deserializer.deserialize(old_row.row.clone())?;
-
                                     let new_row_deserialized =
                                         row_serde.deserializer.deserialize(value.clone())?;
-                                    let new_row = do_update_if_not_null(
-                                        old_row_deserialized,
-                                        new_row_deserialized,
+                                    let new_row_after_replacement =
+                                        execute_do_update_if_not_null_replacement(
+                                            old_row_deserialized,
+                                            new_row_deserialized,
+                                            column_len,
+                                        );
+                                    let new_row_bytes = Bytes::from(
+                                        row_serde.serializer.serialize(new_row_after_replacement),
                                     );
-
-                                    let new_value_serialized =
-                                        row_serde.serializer.serialize(new_row);
-                                    let new_updated_row = Bytes::from(new_value_serialized);
                                     fixed_changes().update(
                                         key.clone(),
                                         old_row.row.clone(),
-                                        new_updated_row.clone(),
+                                        new_row_bytes.clone(),
                                     );
                                     // update cache
                                     self.data.push(
                                         key.clone(),
-                                        Some(CompactedRow {
-                                            row: new_updated_row,
-                                        }),
+                                        Some(CompactedRow { row: new_row_bytes }),
                                     );
                                 }
                                 None => {
@@ -582,7 +583,10 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                             ConflictBehavior::Overwrite | ConflictBehavior::IgnoreConflict => {
                                 self.data.push(key, Some(CompactedRow { row: value }));
                             }
-                            ConflictBehavior::DoUpdateIfNotNull => {}
+                            ConflictBehavior::DoUpdateIfNotNull => {
+                                // Since `DoUpdateIfNotNull` may generate values that differ from both the new and old rows,
+                                // its update cache is handled within the match operation.
+                            }
                             _ => unreachable!(),
                         }
                     }
@@ -667,24 +671,38 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         self.data.evict()
     }
 }
-fn do_update_if_not_null(old_row: OwnedRow, new_row: OwnedRow) -> OwnedRow {
-    let mut res = vec![];
-    for (old_col, new_col) in old_row.into_inner().iter_mut().zip(new_row.into_iter()) {
+
+/// Generates a new row with the behavior of "do update if not null" by replacing non-null columns from the old row.
+///
+/// # Arguments
+///
+/// * `old_row` - The old row containing the original values.
+/// * `new_row` - The new row containing the replacement values.
+///
+/// # Example
+///
+/// ```
+/// let old_row = vec![Some(1), None, Some(3)];
+/// let mut new_row = vec![Some(10), Some(20), Some(30)];
+///
+/// let updated_row = execute_do_update_if_not_null_replacement(old_row, new_row);
+///
+/// // After the function call, updated_row will be [Some(10), None, Some(3)]
+/// ```
+fn execute_do_update_if_not_null_replacement(
+    old_row: OwnedRow,
+    new_row: OwnedRow,
+    column_len: usize,
+) -> OwnedRow {
+    let mut res = Vec::with_capacity(column_len);
+    for (old_col, new_col) in old_row.into_inner().iter().zip_eq(new_row.into_iter()) {
         if old_col.as_ref().is_some() {
             res.push(new_col);
         } else {
             res.push(None);
         }
     }
-    // let res = old_row
-    //     .into_inner()
-    //     .iter()
-    //     .enumerate()
-    //     .map(|(i, value)| match value {
-    //         Some(_) => new_row.clone().into_inner().get(i).cloned().unwrap(),
-    //         None => None,
-    //     })
-    //     .collect_vec();
+
     OwnedRow::new(res)
 }
 #[cfg(test)]
