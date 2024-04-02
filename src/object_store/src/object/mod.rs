@@ -832,26 +832,18 @@ pub async fn build_remote_object_store(
             let gcs = gcs.strip_prefix("gcs://").unwrap();
             let (bucket, root) = gcs.split_once('@').unwrap_or((gcs, ""));
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_gcs_engine(
-                    bucket.to_string(),
-                    root.to_string(),
-                    config.clone(),
-                )
-                .unwrap()
-                .monitored(metrics, config),
+                OpendalObjectStore::new_gcs_engine(bucket.to_string(), root.to_string())
+                    .unwrap()
+                    .monitored(metrics, config),
             )
         }
         obs if obs.starts_with("obs://") => {
             let obs = obs.strip_prefix("obs://").unwrap();
             let (bucket, root) = obs.split_once('@').unwrap_or((obs, ""));
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_obs_engine(
-                    bucket.to_string(),
-                    root.to_string(),
-                    config.clone(),
-                )
-                .unwrap()
-                .monitored(metrics, config),
+                OpendalObjectStore::new_obs_engine(bucket.to_string(), root.to_string())
+                    .unwrap()
+                    .monitored(metrics, config),
             )
         }
 
@@ -859,13 +851,9 @@ pub async fn build_remote_object_store(
             let oss = oss.strip_prefix("oss://").unwrap();
             let (bucket, root) = oss.split_once('@').unwrap_or((oss, ""));
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_oss_engine(
-                    bucket.to_string(),
-                    root.to_string(),
-                    config.clone(),
-                )
-                .unwrap()
-                .monitored(metrics, config),
+                OpendalObjectStore::new_oss_engine(bucket.to_string(), root.to_string())
+                    .unwrap()
+                    .monitored(metrics, config),
             )
         }
         webhdfs if webhdfs.starts_with("webhdfs://") => {
@@ -881,13 +869,9 @@ pub async fn build_remote_object_store(
             let azblob = azblob.strip_prefix("azblob://").unwrap();
             let (container_name, root) = azblob.split_once('@').unwrap_or((azblob, ""));
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_azblob_engine(
-                    container_name.to_string(),
-                    root.to_string(),
-                    config.clone(),
-                )
-                .unwrap()
-                .monitored(metrics, config),
+                OpendalObjectStore::new_azblob_engine(container_name.to_string(), root.to_string())
+                    .unwrap()
+                    .monitored(metrics, config),
             )
         }
         fs if fs.starts_with("fs://") => {

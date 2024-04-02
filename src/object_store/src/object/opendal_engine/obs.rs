@@ -15,18 +15,13 @@
 use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::Obs;
 use opendal::Operator;
-use risingwave_common::config::ObjectStoreConfig;
 
-use super::{new_http_client, EngineType, OpendalObjectStore};
+use super::{EngineType, OpendalObjectStore};
 use crate::object::ObjectResult;
 
 impl OpendalObjectStore {
     /// create opendal obs engine.
-    pub fn new_obs_engine(
-        bucket: String,
-        root: String,
-        object_store_config: ObjectStoreConfig,
-    ) -> ObjectResult<Self> {
+    pub fn new_obs_engine(bucket: String, root: String) -> ObjectResult<Self> {
         // Create obs backend builder.
         let mut builder = Obs::default();
 
@@ -46,8 +41,6 @@ impl OpendalObjectStore {
         builder.access_key_id(&access_key_id);
         builder.secret_access_key(&secret_access_key);
 
-        let http_client = new_http_client(&object_store_config)?;
-        builder.http_client(http_client);
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())
