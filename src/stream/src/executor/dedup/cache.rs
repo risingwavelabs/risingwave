@@ -16,7 +16,7 @@ use std::hash::Hash;
 
 use risingwave_common_estimate_size::EstimateSize;
 
-use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::task::AtomicU64Ref;
 
@@ -27,8 +27,8 @@ pub struct DedupCache<K: Hash + Eq + EstimateSize> {
 }
 
 impl<K: Hash + Eq + EstimateSize> DedupCache<K> {
-    pub fn new(watermark_epoch: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
-        let cache = new_unbounded(watermark_epoch, metrics_info);
+    pub fn new(watermark_sequence: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
+        let cache = ManagedLruCache::unbounded(watermark_sequence, metrics_info);
         Self { inner: cache }
     }
 

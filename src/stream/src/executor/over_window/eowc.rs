@@ -35,7 +35,7 @@ use risingwave_expr::window_function::{
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
-use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::executor::{
@@ -109,7 +109,7 @@ struct ExecutorInner<S: StateStore> {
     order_key_index: usize, // no `OrderType` here, cuz we expect the input is ascending
     state_table: StateTable<S>,
     state_table_schema_len: usize,
-    watermark_epoch: AtomicU64Ref,
+    watermark_sequence: AtomicU64Ref,
 }
 
 struct ExecutionVars<S: StateStore> {
@@ -151,7 +151,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 order_key_index: args.order_key_index,
                 state_table: args.state_table,
                 state_table_schema_len: input_info.schema.len(),
-                watermark_epoch: args.watermark_epoch,
+                watermark_sequence: args.watermark_epoch,
             },
         }
     }
@@ -350,7 +350,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         );
 
         let mut vars = ExecutionVars {
-            partitions: new_unbounded(this.watermark_epoch.clone(), metrics_info),
+            partitions: ManagedLruCache::unbounded(this.watermark_sequence.clone(), metrics_info),
             _phantom: PhantomData::<S>,
         };
 

@@ -36,7 +36,7 @@ use risingwave_storage::mem_table::KeyOp;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::StateStore;
 
-use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTableInner;
 use crate::executor::error::StreamExecutorError;
@@ -449,9 +449,9 @@ pub struct MaterializeCache<SD> {
 type CacheValue = Option<CompactedRow>;
 
 impl<SD: ValueRowSerde> MaterializeCache<SD> {
-    pub fn new(watermark_epoch: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
+    pub fn new(watermark_sequence: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
         let cache: ManagedLruCache<Vec<u8>, CacheValue> =
-            new_unbounded(watermark_epoch, metrics_info.clone());
+            ManagedLruCache::unbounded(watermark_sequence, metrics_info.clone());
         Self {
             data: cache,
             metrics_info,

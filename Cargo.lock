@@ -9020,6 +9020,7 @@ dependencies = [
 name = "risingwave_common"
 version = "1.7.0-alpha"
 dependencies = [
+ "ahash 0.8.6",
  "anyhow",
  "arc-swap",
  "arrow-array 48.0.1",
@@ -9054,6 +9055,7 @@ dependencies = [
  "foyer",
  "futures",
  "governor",
+ "hashbrown 0.14.3",
  "hex",
  "http 0.2.9",
  "http-body",

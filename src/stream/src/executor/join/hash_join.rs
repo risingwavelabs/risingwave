@@ -34,7 +34,7 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use super::row::{DegreeType, EncodedJoinRow};
-use crate::cache::{new_with_hasher_in, ManagedLruCache};
+use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::consistency::enable_strict_consistency;
@@ -233,7 +233,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Create a [`JoinHashMap`] with the given LRU capacity.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        watermark_epoch: AtomicU64Ref,
+        watermark_sequence: AtomicU64Ref,
         join_key_data_types: Vec<DataType>,
         state_join_key_indices: Vec<usize>,
         state_all_data_types: Vec<DataType>,
@@ -287,8 +287,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             &format!("hash join {}", side),
         );
 
-        let cache =
-            new_with_hasher_in(watermark_epoch, metrics_info, PrecomputedBuildHasher, alloc);
+        let cache = ManagedLruCache::unbounded_with_hasher_in(
+            watermark_sequence,
+            metrics_info,
+            PrecomputedBuildHasher,
+            alloc,
+        );
 
         Self {
             inner: cache,

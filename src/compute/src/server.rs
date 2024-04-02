@@ -297,6 +297,18 @@ pub async fn compute_node_serve(
             .streaming
             .developer
             .memory_controller_threshold_stable,
+        eviction_factor_stable: config
+            .streaming
+            .developer
+            .memory_controller_eviction_factor_stable,
+        eviction_factor_graceful: config
+            .streaming
+            .developer
+            .memory_controller_eviction_factor_graceful,
+        eviction_factor_aggressive: config
+            .streaming
+            .developer
+            .memory_controller_eviction_factor_aggressive,
         metrics: streaming_metrics.clone(),
     });
 
@@ -369,7 +381,7 @@ pub async fn compute_node_serve(
         stream_env.clone(),
         streaming_metrics.clone(),
         await_tree_config.clone(),
-        memory_mgr.get_watermark_epoch(),
+        memory_mgr.get_watermark_sequence(),
     );
 
     let grpc_await_tree_reg = await_tree_config
