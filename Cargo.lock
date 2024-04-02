@@ -14475,7 +14475,7 @@ dependencies = [
  "regex-automata 0.4.5",
  "regex-syntax 0.8.2",
  "reqwest",
- "ring 0.16.20",
+ "ring 0.17.5",
  "rust_decimal",
  "rustc-hash",
  "scopeguard",
