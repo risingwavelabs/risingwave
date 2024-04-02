@@ -29,6 +29,7 @@ use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use parking_lot::Mutex;
+use rand::prelude::SliceRandom;
 use rand::thread_rng;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::default::compaction_config;
@@ -991,7 +992,7 @@ impl HummockManager {
                 }
             }
 
-            let mut table_to_vnode_partition = match self
+            let table_to_vnode_partition = match self
                 .group_to_table_vnode_partition
                 .read()
                 .get(&compaction_group_id)
@@ -1266,28 +1267,41 @@ impl HummockManager {
         fail_point!("fp_cancel_compact_task", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore err")
         )));
-        self.cancel_compact_task_impl(task_id, task_status).await
+        let ret = self
+            .cancel_compact_task_impl(vec![task_id], task_status)
+            .await?;
+        Ok(ret[0])
+    }
+
+    pub async fn cancel_compact_tasks(
+        &self,
+        tasks: Vec<u64>,
+        task_status: TaskStatus,
+    ) -> Result<Vec<bool>> {
+        self.cancel_compact_task_impl(tasks, task_status).await
     }
 
     pub async fn cancel_compact_task_impl(
         &self,
-        task_id: u64,
+        task_ids: Vec<u64>,
         task_status: TaskStatus,
-    ) -> Result<bool> {
+    ) -> Result<Vec<bool>> {
         assert!(CANCEL_STATUS_SET.contains(&task_status));
-        let rets = self
-            .report_compact_tasks(vec![ReportTask {
+        let tasks = task_ids
+            .into_iter()
+            .map(|task_id| ReportTask {
                 task_id,
                 task_status: task_status as i32,
                 sorted_output_ssts: vec![],
                 table_stats_change: HashMap::default(),
-            }])
-            .await?;
+            })
+            .collect_vec();
+        let rets = self.report_compact_tasks(tasks).await?;
         #[cfg(test)]
         {
             self.check_state_consistency().await;
         }
-        Ok(rets[0])
+        Ok(rets)
     }
 
     pub async fn get_compact_tasks(
@@ -1506,6 +1520,7 @@ impl HummockManager {
             } else {
                 false
             };
+            rets[idx] = is_success;
             if is_success {
                 success_count += 1;
                 let version_delta = gen_version_delta(
@@ -3082,8 +3097,6 @@ impl HummockManager {
     pub async fn auto_pick_compaction_group_and_type(
         &self,
     ) -> Option<(CompactionGroupId, compact_task::TaskType)> {
-        use rand::prelude::SliceRandom;
-        use rand::thread_rng;
         let mut compaction_group_ids = self.compaction_group_ids().await;
         compaction_group_ids.shuffle(&mut thread_rng());
 
@@ -3102,9 +3115,6 @@ impl HummockManager {
     pub async fn auto_pick_compaction_groups_and_type(
         &self,
     ) -> (Vec<CompactionGroupId>, compact_task::TaskType) {
-        use rand::prelude::SliceRandom;
-        use rand::thread_rng;
-
         let versioning_guard = read_lock!(self, versioning).await;
         let versioning = versioning_guard.deref();
         let mut compaction_group_ids =

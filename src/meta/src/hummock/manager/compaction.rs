@@ -19,7 +19,7 @@ use function_name::named;
 use futures::future::Shared;
 use itertools::Itertools;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId};
-use risingwave_pb::hummock::compact_task::TaskType;
+use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::subscribe_compaction_event_request::{
     self, Event as RequestEvent, PullTask,
 };
@@ -132,10 +132,10 @@ impl HummockManager {
 
                 let mut generated_task_count = 0;
                 let mut existed_groups = groups.clone();
-                let mut meet_error = false;
                 let mut no_task_groups: HashSet<CompactionGroupId> = HashSet::default();
+                let mut failed_tasks = vec![];
 
-                while generated_task_count < pull_task_count && !meet_error {
+                while generated_task_count < pull_task_count && failed_tasks.is_empty() {
                     let compact_ret = self
                         .get_compact_tasks(
                             existed_groups.clone(),
@@ -162,10 +162,11 @@ impl HummockManager {
                                         task_id,
                                         compactor.context_id(),
                                     );
-                                    self.compactor_manager.remove_compactor(context_id);
-                                    meet_error = true;
-                                    break;
+                                    failed_tasks.push(task_id);
                                 }
+                            }
+                            if !failed_tasks.is_empty() {
+                                self.compactor_manager.remove_compactor(context_id);
                             }
                             existed_groups.retain(|group_id| !no_task_groups.contains(group_id));
                         }
@@ -177,6 +178,12 @@ impl HummockManager {
                 }
                 for group in no_task_groups {
                     self.compaction_state.unschedule(group, task_type);
+                }
+                if let Err(err) = self
+                    .cancel_compact_tasks(failed_tasks, TaskStatus::SendFailCanceled)
+                    .await
+                {
+                    tracing::warn!(error = %err.as_report(), "Failed to cancel compaction task");
                 }
             }
 
