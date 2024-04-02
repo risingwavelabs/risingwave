@@ -41,6 +41,7 @@ use super::monitor::StreamingMetrics;
 use super::{ActorContextRef, BoxedMessageStream, Execute, Executor, Message};
 use crate::common::table::state_table::{StateTable, WatermarkCacheParameterizedStateTable};
 use crate::common::StreamChunkBuilder;
+use crate::consistency::consistency_panic;
 use crate::executor::expect_first_barrier_from_aligned_stream;
 use crate::task::ActorEvalErrorReport;
 
@@ -362,10 +363,10 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                                 if Some(row.datum_at(0))
                                     != current_epoch_value.as_ref().map(ToDatumRef::to_datum_ref)
                                 {
-                                    bail!(
-                                        "Inconsistent Delete - current: {:?}, delete: {:?}",
-                                        current_epoch_value,
-                                        row
+                                    consistency_panic!(
+                                        current = ?current_epoch_value,
+                                        to_delete = ?row,
+                                        "inconsistent delete",
                                     );
                                 }
                                 current_epoch_value = None;
