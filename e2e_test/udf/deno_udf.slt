@@ -224,6 +224,9 @@ pip3 install -r e2e_test/udf/sse/requirements.txt
 system ok
 python3 e2e_test/udf/sse/sse.py &
 
+# waits for the server to start
+sleep 5s
+
 statement ok
 CREATE FUNCTION call_sse() RETURNS TABLE ( data struct<data struct<greetings string>>) LANGUAGE javascript RUNTIME deno USING LINK 'fs://e2e_test/udf/sse/bundled.table.js' SYNC;
 
