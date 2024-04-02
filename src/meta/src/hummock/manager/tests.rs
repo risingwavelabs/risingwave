@@ -43,7 +43,6 @@ use crate::hummock::compaction::selector::{
     default_compaction_selector, CompactionSelector, ManualCompactionOption,
     SpaceReclaimCompactionSelector,
 };
-use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Error;
 use crate::hummock::test_utils::*;
 use crate::hummock::{CommitEpochInfo, HummockManager, HummockManagerRef};
@@ -1695,11 +1694,12 @@ async fn test_split_compaction_group_trivial_expired() {
         .unwrap();
     let mut selector: Box<dyn CompactionSelector> =
         Box::<SpaceReclaimCompactionSelector>::default();
-    let reclaim_task = hummock_manager
-        .get_compact_task_impl(2, &mut selector)
+    let (mut normal_tasks, _unscheduled) = hummock_manager
+        .get_compact_tasks_impl(vec![2], 1, &mut selector)
         .await
-        .unwrap()
         .unwrap();
+    use crate::hummock::manager::CompactStatus;
+    let reclaim_task = normal_tasks.pop().unwrap();
     assert!(CompactStatus::is_trivial_reclaim(&reclaim_task));
 
     let current_version = hummock_manager.get_current_version().await;
