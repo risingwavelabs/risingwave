@@ -14,7 +14,6 @@
 
 use risingwave_pb::hummock::PbHummockVersionDelta;
 use sea_orm::entity::prelude::*;
-use sea_orm::FromJsonQueryResult;
 use serde::{Deserialize, Serialize};
 
 use crate::{Epoch, HummockVersionId};
@@ -36,11 +35,11 @@ pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
 
-crate::derive_from_json_struct!(FullVersionDelta, PbHummockVersionDelta);
+crate::derive_from_byte_array!(FullVersionDelta, PbHummockVersionDelta);
 
 impl From<Model> for PbHummockVersionDelta {
     fn from(value: Model) -> Self {
-        let ret = value.full_version_delta.into_inner();
+        let ret = value.full_version_delta.to_protobuf();
         assert_eq!(value.id, ret.id as i64);
         assert_eq!(value.prev_id, ret.prev_id as i64);
         assert_eq!(value.max_committed_epoch, ret.max_committed_epoch as i64);

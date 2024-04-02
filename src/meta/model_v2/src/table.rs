@@ -232,10 +232,10 @@ impl From<PbTable> for ActiveModel {
             watermark_indices: Set(pb_table.watermark_indices.into()),
             dist_key_in_pk: Set(pb_table.dist_key_in_pk.into()),
             dml_fragment_id,
-            cardinality: Set(pb_table.cardinality.map(|x| x.into())),
+            cardinality: Set(pb_table.cardinality.as_ref().map(|x| x.into())),
             cleaned_by_watermark: Set(pb_table.cleaned_by_watermark),
             description: Set(pb_table.description),
-            version: Set(pb_table.version.map(|v| v.into())),
+            version: Set(pb_table.version.as_ref().map(|v| v.into())),
             retention_seconds: Set(pb_table.retention_seconds.map(|i| i as _)),
             incoming_sinks: Set(pb_table.incoming_sinks.into()),
         }

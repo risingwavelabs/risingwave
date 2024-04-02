@@ -119,7 +119,7 @@ impl CatalogController {
             PbUpdateField::CreateDb => user.can_create_db = Set(update_user.can_create_db),
             PbUpdateField::CreateUser => user.can_create_user = Set(update_user.can_create_user),
             PbUpdateField::AuthInfo => {
-                user.auth_info = Set(update_user.auth_info.clone().map(AuthInfo))
+                user.auth_info = Set(update_user.auth_info.as_ref().map(AuthInfo::from))
             }
             PbUpdateField::Rename => user.name = Set(update_user.name.clone()),
         });
@@ -294,7 +294,8 @@ impl CatalogController {
             if *privilege.with_grant_option.as_ref() {
                 on_conflict.update_columns([user_privilege::Column::WithGrantOption]);
             } else {
-                on_conflict.do_nothing();
+                // Workaround to support MYSQL for `DO NOTHING`.
+                on_conflict.update_column(user_privilege::Column::UserId);
             }
 
             UserPrivilege::insert(privilege)
