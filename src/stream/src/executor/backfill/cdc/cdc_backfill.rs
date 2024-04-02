@@ -279,7 +279,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                                     self.chunk_size = rate_limit
                                                         .map(|x| x as usize)
                                                         .unwrap_or(self.chunk_size);
-                                                    // todo: if changed, we need to update the right snapshot stream
+                                                    // rebuild the new reader stream with new chunk size
+                                                    continue 'backfill_loop;
                                                 }
                                             }
                                             _ => (),

@@ -65,6 +65,13 @@ pub struct SourceExecutor<S: StateStore> {
 
 #[try_stream(ok = StreamChunk, error = ConnectorError)]
 pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit: Option<u32>) {
+    if let Some(limit) = rate_limit
+        && limit == 0
+    {
+        // block the stream until the rate limit is reset
+        let future = futures::future::pending::<()>();
+        let () = future.await;
+    }
     let get_rate_limiter = |rate_limit: u32| {
         let quota = Quota::per_second(NonZeroU32::new(rate_limit).unwrap());
         let clock = MonotonicClock;
