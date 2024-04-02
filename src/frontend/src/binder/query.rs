@@ -393,7 +393,11 @@ impl Binder {
                 // `recursive` term is a select expression / statement.
                 let schema = right.schema().clone();
                 // yet another sanity check
-                assert_eq!(schema, recursive.schema().clone(), "expect `schema` to be the same as recursive's");
+                assert_eq!(
+                    schema,
+                    recursive.schema().clone(),
+                    "expect `schema` to be the same as recursive's"
+                );
 
                 let recursive_union = RecursiveUnion {
                     all,
