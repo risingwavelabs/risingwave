@@ -38,6 +38,7 @@ use super::executor_core::StreamSourceCore;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
+use crate::executor::source_executor::apply_rate_limit;
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::*;
 
@@ -104,11 +105,13 @@ impl<S: StateStore> FsSourceExecutor<S> {
             source_desc.source.config.clone(),
             self.stream_source_core.source_name.clone(),
         );
-        source_desc
+        let stream = source_desc
             .source
             .to_stream(state, column_ids, Arc::new(source_ctx))
             .await
-            .map_err(StreamExecutorError::connector_error)
+            .map_err(StreamExecutorError::connector_error)?;
+
+        Ok(apply_rate_limit(stream, self.source_ctrl_opts.rate_limit).boxed())
     }
 
     async fn apply_split_change<const BIASED: bool>(
