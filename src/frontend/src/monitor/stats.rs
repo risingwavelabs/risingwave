@@ -20,6 +20,7 @@ use prometheus::{
     register_int_counter_with_registry, register_int_gauge_with_registry, Histogram, IntGauge,
     Registry,
 };
+use risingwave_common::metrics::TrAdderGauge;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 #[derive(Clone)]
@@ -27,6 +28,7 @@ pub struct FrontendMetrics {
     pub query_counter_local_execution: GenericCounter<AtomicU64>,
     pub latency_local_execution: Histogram,
     pub active_sessions: IntGauge,
+    pub batch_total_mem: TrAdderGauge,
 }
 
 pub static GLOBAL_FRONTEND_METRICS: LazyLock<FrontendMetrics> =
@@ -55,10 +57,21 @@ impl FrontendMetrics {
         )
         .unwrap();
 
+        let batch_total_mem = TrAdderGauge::new(
+            "batch_total_mem",
+            "All memory usage of batch executors in bytes",
+        )
+        .unwrap();
+
+        registry
+            .register(Box::new(batch_total_mem.clone()))
+            .unwrap();
+
         Self {
             query_counter_local_execution,
             latency_local_execution,
             active_sessions,
+            batch_total_mem,
         }
     }
 
