@@ -264,7 +264,8 @@ fn build_fragment(
 
             if let Some(source) = node.source_inner.as_ref()
                 && let Some(source_info) = source.info.as_ref()
-                && source_info.cdc_source_job
+                && source_info.is_shared()
+                && !source_info.is_distributed
             {
                 current_fragment.requires_singleton = true;
             }

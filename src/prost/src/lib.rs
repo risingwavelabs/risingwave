@@ -252,9 +252,9 @@ impl stream_plan::StreamNode {
 }
 
 impl catalog::StreamSourceInfo {
-    /// Also tested `cdc_source_job` for backwards compatibility. Use this instead of `is_shared` directly.
-    pub fn is_shared_compatible(&self) -> bool {
-        self.cdc_source_job || self.is_shared.is_some_and(|b| b)
+    /// Refer to [`Self::cdc_source_job`] for details.
+    pub fn is_shared(&self) -> bool {
+        self.cdc_source_job
     }
 }
 

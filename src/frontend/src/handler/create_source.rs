@@ -511,7 +511,8 @@ fn bind_columns_from_source_for_cdc(
         row_encode: row_encode_to_prost(&source_schema.row_encode) as i32,
         format_encode_options,
         use_schema_registry: json_schema_infer_use_schema_registry(&schema_config),
-        is_shared: Some(true),
+        cdc_source_job: true,
+        is_distributed: false,
         ..Default::default()
     };
     if !format_encode_options_to_consume.is_empty() {
@@ -1321,11 +1322,10 @@ pub async fn handle_create_source(
     } else {
         bind_columns_from_source(&session, &source_schema, &with_properties).await?
     };
-    if create_cdc_source_job {
-        source_info.cdc_source_job = true;
-    }
     if is_shared {
-        source_info.is_shared = Some(true);
+        // Note: this field should be called is_shared. Check field doc for more details.
+        source_info.cdc_source_job = true;
+        source_info.is_distributed = !create_cdc_source_job;
     }
     let columns_from_sql = bind_sql_columns(&stmt.columns)?;
 

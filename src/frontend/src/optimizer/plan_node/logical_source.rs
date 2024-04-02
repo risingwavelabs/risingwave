@@ -532,9 +532,7 @@ impl ToStream for LogicalSource {
             }
             SourceNodeKind::CreateMViewOrBatch => {
                 // Create MV on source.
-                let use_shared_source = self
-                    .source_catalog()
-                    .is_some_and(|c| c.info.is_shared_compatible())
+                let use_shared_source = self.source_catalog().is_some_and(|c| c.info.is_shared())
                     && self.ctx().session_ctx().config().rw_enable_shared_source();
                 if use_shared_source {
                     plan = StreamSourceScan::new(self.core.clone()).into();

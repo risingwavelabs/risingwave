@@ -62,18 +62,22 @@ message StreamSourceInfo {
   SchemaRegistryNameStrategy name_strategy = 10;
   optional string key_message_name = 11;
   plan_common.ExternalTableDesc external_table = 12;
-  // Whether the stream source is a cdc source streaming job.
-  // We need this field to differentiate the cdc source job, because CDC source is a singleton fragment, while Kafka source is not.
-  // If we have other singleton source jobs in the future, we may consider deprecating this field and add a new field `is_distributed`.
-  bool cdc_source_job = 13;
+  // **This field should now be called `is_shared`.** Not renamed for backwards compatibility.
+  //
   // Whether the stream source is a shared source (it has a streaming job).
   // This is related with [RFC: Reusable Source Executor](https://github.com/risingwavelabs/rfcs/pull/72).
-  // Currently, the following sources have streaming jobs:
-  // - Direct CDC sources (mysql & postgresql). Backwards compat note: For old CDC job it's `None`; For new CDC job it's `Some(true)`.
-  // - MQ sources (Kafka, Pulsar, Kinesis, etc.)
   //
-  // **Should also test `cdc_source_job` for backwards compatibility. Use `is_shared_compatible()` instead of this field directly.**
-  optional bool is_shared = 15;
+  // Currently, the following sources can be shared:
+  //
+  // - Direct CDC sources (mysql & postgresql)
+  // - MQ sources (Kafka)
+  bool cdc_source_job = 13;
+  // Only used when `cdc_source_job` is `true`.
+  // If `false`, `requires_singleton` will be set in the stream plan.
+  //
+  // - Direct CDC sources: `false`
+  // - MQ sources (Kafka): `true`
+  bool is_distributed = 15;
   // Options specified by user in the FORMAT ENCODE clause.
   map<string, string> format_encode_options = 14;
 }
