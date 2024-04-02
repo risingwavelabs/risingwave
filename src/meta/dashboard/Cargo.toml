@@ -10,7 +10,7 @@ repository = { workspace = true }
 
 [dependencies]
 anyhow = "1"
-axum = "0.6"
+axum = "0.7"
 bytes = "1"
 hyper = "0.14"
 mime_guess = "2"
