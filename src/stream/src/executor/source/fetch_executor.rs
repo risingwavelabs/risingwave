@@ -244,7 +244,9 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                             Mutation::Pause => stream.pause_stream(),
                                             Mutation::Resume => stream.resume_stream(),
                                             Mutation::Throttle(actor_to_apply) => {
-                                                if let Some(throttle) = actor_to_apply.get(&self.actor_ctx.id) {
+                                                if let Some(throttle) =
+                                                    actor_to_apply.get(&self.actor_ctx.id)
+                                                {
                                                     self.source_ctrl_opts.rate_limit = *throttle;
                                                     need_rebuild_reader = true;
                                                 }

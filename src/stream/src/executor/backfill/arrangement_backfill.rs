@@ -231,7 +231,7 @@ where
                     self.actor_id.to_string().as_str(),
                 ]);
 
-            let limiter = self.rate_limit.map(create_limiter);
+            let limiter = self.rate_limit.and_then(create_limiter);
             'backfill_loop: loop {
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
                 let mut cur_barrier_upstream_processed_rows: u64 = 0;
@@ -248,6 +248,7 @@ where
                         &upstream_table,
                         backfill_state.clone(), // FIXME: Use mutable reference instead.
                         paused,
+                        self.rate_limit,
                     )
                     .map(Either::Right));
 
@@ -628,8 +629,15 @@ where
         upstream_table: &ReplicatedStateTable<S, SD>,
         backfill_state: BackfillState,
         paused: bool,
+        rate_limit: Option<usize>,
     ) {
-        if paused {
+        if paused || {
+            if let Some(rate_limit) = rate_limit {
+                rate_limit == 0
+            } else {
+                false
+            }
+        } {
             #[for_await]
             for _ in tokio_stream::pending() {
                 yield None;

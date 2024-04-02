@@ -816,14 +816,21 @@ pub fn create_builder_and_limiter(
     chunk_size: usize,
     data_types: Vec<DataType>,
 ) -> (DataChunkBuilder, Option<BackfillRateLimiter>) {
-    if let Some(rate_limit) = rate_limit
-        && rate_limit > 0
-        && rate_limit < chunk_size
-    {
-        (
-            DataChunkBuilder::new(data_types, rate_limit),
-            Some(create_limiter(rate_limit)),
-        )
+    if let Some(rate_limit) = rate_limit {
+        if rate_limit < chunk_size && rate_limit > 0 {
+            (
+                DataChunkBuilder::new(data_types, rate_limit),
+                Some(create_limiter(rate_limit)).flatten(),
+            )
+        } else if rate_limit >= chunk_size {
+            (
+                DataChunkBuilder::new(data_types, chunk_size),
+                Some(create_limiter(chunk_size)).flatten(),
+            )
+        } else {
+            // if rate_limit is 0, we rely on check when building the snapshot reader stream.
+            (DataChunkBuilder::new(data_types, chunk_size), None)
+        }
     } else {
         (DataChunkBuilder::new(data_types, chunk_size), None)
     }
@@ -846,10 +853,13 @@ pub fn create_builder(
     }
 }
 
-pub fn create_limiter(rate_limit: usize) -> BackfillRateLimiter {
+pub fn create_limiter(rate_limit: usize) -> Option<BackfillRateLimiter> {
+    if rate_limit == 0 {
+        return None;
+    }
     let quota = Quota::per_second(NonZeroU32::new(rate_limit as u32).unwrap());
     let clock = MonotonicClock;
-    RateLimiter::direct_with_clock(quota, &clock)
+    Some(RateLimiter::direct_with_clock(quota, &clock))
 }
 
 pub async fn wait_for_rate_limiter(limiter: &BackfillRateLimiter, chunk_cardinality: usize) {

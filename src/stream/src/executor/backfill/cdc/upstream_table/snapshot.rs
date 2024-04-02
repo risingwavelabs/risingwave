@@ -112,7 +112,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
             // If limit is 0, we should not read any data from the upstream table.
             // Keep waiting util the stream is rebuilt.
             let future = futures::future::pending::<()>();
-            let () = future.await;
+            future.await;
         }
         let limiter = {
             let quota = Quota::per_second(NonZeroU32::new(args.chunk_size as u32).unwrap());

@@ -253,7 +253,8 @@ where
                         &self.upstream_table,
                         snapshot_read_epoch,
                         current_pos.clone(),
-                        paused
+                        paused,
+                        rate_limit,
                     )
                     .map(Either::Right));
 
@@ -691,8 +692,17 @@ where
         epoch: u64,
         current_pos: Option<OwnedRow>,
         paused: bool,
+        rate_limit: Option<usize>,
     ) {
-        if paused {
+        if paused
+            || (if let Some(rate_limit) = rate_limit
+                && rate_limit == 0
+            {
+                true
+            } else {
+                false
+            })
+        {
             #[for_await]
             for _ in tokio_stream::pending() {
                 yield None;

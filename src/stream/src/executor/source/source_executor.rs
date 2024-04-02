@@ -70,7 +70,7 @@ pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit: Option<u
     {
         // block the stream until the rate limit is reset
         let future = futures::future::pending::<()>();
-        let () = future.await;
+        future.await;
     }
     let get_rate_limiter = |rate_limit: u32| {
         let quota = Quota::per_second(NonZeroU32::new(rate_limit).unwrap());
