@@ -311,7 +311,8 @@ impl KafkaSplitEnumerator {
         for elem in offsets.elements_for_topic(self.topic.as_str()) {
             match elem.offset() {
                 Offset::Offset(offset) => {
-                    result.insert(elem.partition(), Some(offset));
+                    // XXX(rc): currently in RW source, `offset` means the last consumed offset, so we need to subtract 1
+                    result.insert(elem.partition(), Some(offset - 1));
                 }
                 _ => {
                     let (_, high_watermark) = self
