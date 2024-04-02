@@ -58,7 +58,7 @@ impl FrontendMetrics {
         .unwrap();
 
         let batch_total_mem = TrAdderGauge::new(
-            "batch_total_mem",
+            "frontend_batch_total_mem",
             "All memory usage of batch executors in bytes",
         )
         .unwrap();
