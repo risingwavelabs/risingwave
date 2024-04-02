@@ -475,6 +475,7 @@ impl DdlController {
                 .await;
         };
         // 1. Drop source in catalog.
+        // If the source has a streaming job, it's also dropped here.
         let (version, streaming_job_ids) = mgr
             .catalog_manager
             .drop_relation(
@@ -1360,7 +1361,7 @@ impl DdlController {
             .get_upstream_root_fragments(fragment_graph.dependent_table_ids())
             .await?;
 
-        let upstream_actors: HashMap<_, _> = upstream_root_fragments
+        let upstream_root_actors: HashMap<_, _> = upstream_root_fragments
             .iter()
             .map(|(&table_id, fragment)| {
                 (
@@ -1460,7 +1461,7 @@ impl DdlController {
 
         let ctx = CreateStreamingJobContext {
             dispatchers,
-            upstream_mview_actors: upstream_actors,
+            upstream_root_actors,
             internal_tables,
             building_locations,
             existing_locations,
