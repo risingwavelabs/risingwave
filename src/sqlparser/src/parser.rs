@@ -278,6 +278,9 @@ impl Parser {
                 Keyword::EXECUTE => Ok(self.parse_execute()?),
                 Keyword::PREPARE => Ok(self.parse_prepare()?),
                 Keyword::COMMENT => Ok(self.parse_comment()?),
+                Keyword::DECLARE => Ok(self.parse_declare_cursor()?),
+                Keyword::FETCH => Ok(self.parse_fetch_cursor()?),
+                Keyword::CLOSE => Ok(self.parse_close_cursor()?),
                 Keyword::FLUSH => Ok(Statement::Flush),
                 Keyword::WAIT => Ok(Statement::Wait),
                 _ => self.expected(
@@ -5451,6 +5454,40 @@ impl Parser {
             object_name,
             comment,
         })
+    }
+
+    /// Parse a SQL DECLARE statement
+    pub fn parse_declare_cursor(&mut self) -> Result<Statement, ParserError> {
+        let cursor_name = self.parse_object_name()?;
+        self.expect_keyword(Keyword::CURSOR)?;
+        self.expect_keyword(Keyword::FOR)?;
+        let query = Box::new(self.parse_query()?);
+        Ok(Statement::DeclareCursor { cursor_name, query })
+    }
+
+    /// Parse a SQL FETCH statement
+    pub fn parse_fetch_cursor(&mut self) -> Result<Statement, ParserError> {
+        let count = if self.parse_keyword(Keyword::NEXT) {
+            None
+        } else {
+            let count_str = self.parse_number_value()?;
+            Some(count_str.parse::<i32>().map_err(|e| {
+                ParserError::ParserError(format!("Could not parse '{}' as i32: {}", count_str, e))
+            })?)
+        };
+        self.expect_keyword(Keyword::FROM)?;
+        let cursor_name = self.parse_object_name()?;
+        Ok(Statement::FetchCursor { cursor_name, count })
+    }
+
+    /// Parse a SQL CLOSE statement
+    pub fn parse_close_cursor(&mut self) -> Result<Statement, ParserError> {
+        let cursor_name = if self.parse_keyword(Keyword::ALL) {
+            None
+        } else {
+            Some(self.parse_object_name()?)
+        };
+        Ok(Statement::CloseCursor { cursor_name })
     }
 }
 
