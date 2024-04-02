@@ -48,7 +48,7 @@ use uuid::Uuid;
 use with_options::WithOptions;
 use yup_oauth2::ServiceAccountKey;
 
-use super::encoder::{CustomProtoType, ProtoEncoder, ProtoHeader, RowEncoder, SerTo};
+use super::encoder::{ProtoEncoder, ProtoHeader, RowEncoder, SerTo};
 use super::writer::LogSinkerOf;
 use super::{SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::aws_utils::load_file_descriptor_from_s3;
@@ -366,12 +366,11 @@ impl BigQuerySinkWriter {
                     &config.common.table
                 ))
             })?;
-        let row_encoder = ProtoEncoder::new(
+        let row_encoder = ProtoEncoder::new_with_bigquery(
             schema.clone(),
             None,
             message_descriptor.clone(),
             ProtoHeader::None,
-            CustomProtoType::BigQuery,
         )?;
         Ok(Self {
             write_stream: format!(

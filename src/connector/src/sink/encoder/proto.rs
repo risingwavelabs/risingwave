@@ -22,7 +22,11 @@ use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, StructType};
 use risingwave_common::util::iter_util::ZipEqDebug;
 
-use super::{CustomProtoType, FieldEncodeError, Result as SinkResult, RowEncoder, SerTo};
+use super::{
+    DateHandlingMode, DecimalHandlingMode, FieldEncodeError, Int16HandlingMode,
+    IntervalHandlingMode, JsonbHandlingMode, Result as SinkResult, RowEncoder, SerTo,
+    SerialHandlingMode, TimeHandlingMode, TimestampHandlingMode, TimestamptzHandlingMode,
+};
 
 type Result<T> = std::result::Result<T, FieldEncodeError>;
 
@@ -31,7 +35,7 @@ pub struct ProtoEncoder {
     col_indices: Option<Vec<usize>>,
     descriptor: MessageDescriptor,
     header: ProtoHeader,
-    custom_proto_type: CustomProtoType,
+    proto_handling_modes: ProtoHandlingModes,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -44,13 +48,55 @@ pub enum ProtoHeader {
     ConfluentSchemaRegistry(i32),
 }
 
+#[derive(Clone, Copy)]
+struct ProtoHandlingModes {
+    time_handling_mode: TimeHandlingMode,
+    date_handling_mode: DateHandlingMode,
+    timestamp_handling_mode: TimestampHandlingMode,
+    timestamptz_handling_mode: TimestamptzHandlingMode,
+    json_handling_mode: JsonbHandlingMode,
+    int16_handling_mode: Int16HandlingMode,
+    decimal_handling_mode: DecimalHandlingMode,
+    interval_handling_mode: IntervalHandlingMode,
+    serial_handling_mode: SerialHandlingMode,
+}
+impl ProtoHandlingModes {
+    pub fn new_with_default() -> Self {
+        Self {
+            time_handling_mode: TimeHandlingMode::Milli,
+            date_handling_mode: DateHandlingMode::FromEpoch,
+            timestamp_handling_mode: TimestampHandlingMode::Milli,
+            timestamptz_handling_mode: TimestamptzHandlingMode::PbMessage,
+            json_handling_mode: JsonbHandlingMode::Jsonb,
+            int16_handling_mode: Int16HandlingMode::Int16,
+            decimal_handling_mode: DecimalHandlingMode::Decimal,
+            interval_handling_mode: IntervalHandlingMode::Interval,
+            serial_handling_mode: SerialHandlingMode::Serial,
+        }
+    }
+
+    pub fn new_with_bigquery() -> Self {
+        Self {
+            time_handling_mode: TimeHandlingMode::String,
+            date_handling_mode: DateHandlingMode::FromCe,
+            timestamp_handling_mode: TimestampHandlingMode::String,
+            timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
+            json_handling_mode: JsonbHandlingMode::String,
+            int16_handling_mode: Int16HandlingMode::Int64,
+            decimal_handling_mode: DecimalHandlingMode::String,
+            interval_handling_mode: IntervalHandlingMode::String,
+            serial_handling_mode: SerialHandlingMode::Int64,
+        }
+    }
+}
+
 impl ProtoEncoder {
-    pub fn new(
+    fn new(
         schema: Schema,
         col_indices: Option<Vec<usize>>,
         descriptor: MessageDescriptor,
         header: ProtoHeader,
-        custom_proto_type: CustomProtoType,
+        proto_handling_modes: ProtoHandlingModes,
     ) -> SinkResult<Self> {
         match &col_indices {
             Some(col_indices) => validate_fields(
@@ -59,7 +105,7 @@ impl ProtoEncoder {
                     (f.name.as_str(), &f.data_type)
                 }),
                 &descriptor,
-                custom_proto_type.clone(),
+                proto_handling_modes,
             )?,
             None => validate_fields(
                 schema
@@ -67,7 +113,7 @@ impl ProtoEncoder {
                     .iter()
                     .map(|f| (f.name.as_str(), &f.data_type)),
                 &descriptor,
-                custom_proto_type.clone(),
+                proto_handling_modes,
             )?,
         };
 
@@ -76,8 +122,38 @@ impl ProtoEncoder {
             col_indices,
             descriptor,
             header,
-            custom_proto_type,
+            proto_handling_modes,
         })
+    }
+
+    pub fn new_with_default(
+        schema: Schema,
+        col_indices: Option<Vec<usize>>,
+        descriptor: MessageDescriptor,
+        header: ProtoHeader,
+    ) -> SinkResult<Self> {
+        Self::new(
+            schema,
+            col_indices,
+            descriptor,
+            header,
+            ProtoHandlingModes::new_with_default(),
+        )
+    }
+
+    pub fn new_with_bigquery(
+        schema: Schema,
+        col_indices: Option<Vec<usize>>,
+        descriptor: MessageDescriptor,
+        header: ProtoHeader,
+    ) -> SinkResult<Self> {
+        Self::new(
+            schema,
+            col_indices,
+            descriptor,
+            header,
+            ProtoHandlingModes::new_with_default(),
+        )
     }
 }
 
@@ -108,7 +184,7 @@ impl RowEncoder for ProtoEncoder {
                 ((f.name.as_str(), &f.data_type), row.datum_at(idx))
             }),
             &self.descriptor,
-            self.custom_proto_type.clone(),
+            self.proto_handling_modes,
         )
         .map_err(Into::into)
         .map(|m| ProtoEncoded {
@@ -190,14 +266,14 @@ trait MaybeData: std::fmt::Debug {
         self,
         st: &StructType,
         pb: &MessageDescriptor,
-        custom_proto_type: CustomProtoType,
+        proto_handling_modes: ProtoHandlingModes,
     ) -> Result<Self::Out>;
 
     fn on_list(
         self,
         elem: &DataType,
         pb: &FieldDescriptor,
-        custom_proto_type: CustomProtoType,
+        proto_handling_modes: ProtoHandlingModes,
     ) -> Result<Self::Out>;
 }
 
@@ -212,18 +288,18 @@ impl MaybeData for () {
         self,
         st: &StructType,
         pb: &MessageDescriptor,
-        custom_proto_type: CustomProtoType,
+        proto_handling_modes: ProtoHandlingModes,
     ) -> Result<Self::Out> {
-        validate_fields(st.iter(), pb, custom_proto_type)
+        validate_fields(st.iter(), pb, proto_handling_modes)
     }
 
     fn on_list(
         self,
         elem: &DataType,
         pb: &FieldDescriptor,
-        custom_proto_type: CustomProtoType,
+        proto_handling_modes: ProtoHandlingModes,
     ) -> Result<Self::Out> {
-        encode_field(elem, (), pb, true, custom_proto_type)
+        encode_field(elem, (), pb, true, proto_handling_modes)
     }
 }
 
@@ -243,13 +319,13 @@ impl MaybeData for ScalarRefImpl<'_> {
         self,
         st: &StructType,
         pb: &MessageDescriptor,
-        custom_proto_type: CustomProtoType,
+        proto_handling_modes: ProtoHandlingModes,
     ) -> Result<Self::Out> {
         let d = self.into_struct();
         let message = encode_fields(
             st.iter().zip_eq_debug(d.iter_fields_ref()),
             pb,
-            custom_proto_type,
+            proto_handling_modes,
         )?;
         Ok(Value::Message(message))
     }
@@ -258,7 +334,7 @@ impl MaybeData for ScalarRefImpl<'_> {
         self,
         elem: &DataType,
         pb: &FieldDescriptor,
-        custom_proto_type: CustomProtoType,
+        proto_handling_modes: ProtoHandlingModes,
     ) -> Result<Self::Out> {
         let d = self.into_list();
         let vs = d
@@ -271,7 +347,7 @@ impl MaybeData for ScalarRefImpl<'_> {
                     })?,
                     pb,
                     true,
-                    custom_proto_type.clone(),
+                    proto_handling_modes,
                 )
             })
             .try_collect()?;
@@ -282,7 +358,7 @@ impl MaybeData for ScalarRefImpl<'_> {
 fn validate_fields<'a>(
     fields: impl Iterator<Item = (&'a str, &'a DataType)>,
     descriptor: &MessageDescriptor,
-    custom_proto_type: CustomProtoType,
+    proto_handling_modes: ProtoHandlingModes,
 ) -> Result<()> {
     for (name, t) in fields {
         let Some(proto_field) = descriptor.get_field_by_name(name) else {
@@ -291,7 +367,7 @@ fn validate_fields<'a>(
         if proto_field.cardinality() == prost_reflect::Cardinality::Required {
             return Err(FieldEncodeError::new("`required` not supported").with_name(name));
         }
-        encode_field(t, (), &proto_field, false, custom_proto_type.clone())
+        encode_field(t, (), &proto_field, false, proto_handling_modes)
             .map_err(|e| e.with_name(name))?;
     }
     Ok(())
@@ -300,14 +376,14 @@ fn validate_fields<'a>(
 fn encode_fields<'a>(
     fields_with_datums: impl Iterator<Item = ((&'a str, &'a DataType), DatumRef<'a>)>,
     descriptor: &MessageDescriptor,
-    custom_proto_type: CustomProtoType,
+    proto_handling_modes: ProtoHandlingModes,
 ) -> Result<DynamicMessage> {
     let mut message = DynamicMessage::new(descriptor.clone());
     for ((name, t), d) in fields_with_datums {
         let proto_field = descriptor.get_field_by_name(name).unwrap();
         // On `null`, simply skip setting the field.
         if let Some(scalar) = d {
-            let value = encode_field(t, scalar, &proto_field, false, custom_proto_type.clone())
+            let value = encode_field(t, scalar, &proto_field, false, proto_handling_modes)
                 .map_err(|e| e.with_name(name))?;
             message
                 .try_set_field(&proto_field, value)
@@ -328,7 +404,7 @@ fn encode_field<D: MaybeData>(
     maybe: D,
     proto_field: &FieldDescriptor,
     in_repeated: bool,
-    custom_proto_type: CustomProtoType,
+    proto_handling_modes: ProtoHandlingModes,
 ) -> Result<D::Out> {
     // Regarding (proto_field.is_list, in_repeated):
     // (F, T) => impossible
@@ -352,7 +428,6 @@ fn encode_field<D: MaybeData>(
             proto_field.kind()
         )))
     };
-    let is_big_query = matches!(custom_proto_type, CustomProtoType::BigQuery);
     let value = match &data_type {
         // Group A: perfect match between RisingWave types and ProtoBuf types
         DataType::Boolean => match (expect_list, proto_field.kind()) {
@@ -390,16 +465,20 @@ fn encode_field<D: MaybeData>(
             _ => return no_match_err(),
         },
         DataType::Struct(st) => match (expect_list, proto_field.kind()) {
-            (false, Kind::Message(pb)) => maybe.on_struct(st, &pb, custom_proto_type)?,
+            (false, Kind::Message(pb)) => maybe.on_struct(st, &pb, proto_handling_modes)?,
             _ => return no_match_err(),
         },
         DataType::List(elem) => match expect_list {
-            true => maybe.on_list(elem, proto_field, custom_proto_type)?,
+            true => maybe.on_list(elem, proto_field, proto_handling_modes)?,
             false => return no_match_err(),
         },
         // Group B: match between RisingWave types and ProtoBuf Well-Known types
-        DataType::Timestamptz => match (expect_list, proto_field.kind()) {
-            (false, Kind::Message(pb)) if pb.full_name() == WKT_TIMESTAMP => {
+        DataType::Timestamptz => match (
+            expect_list,
+            proto_field.kind(),
+            proto_handling_modes.timestamptz_handling_mode,
+        ) {
+            (false, Kind::Message(pb), _) if pb.full_name() == WKT_TIMESTAMP => {
                 maybe.on_base(|s| {
                     let d = s.into_timestamptz();
                     let message = prost_types::Timestamp {
@@ -409,56 +488,88 @@ fn encode_field<D: MaybeData>(
                     Ok(Value::Message(message.transcode_to_dynamic()))
                 })?
             }
-            (false, Kind::String) if is_big_query => {
+            (false, Kind::String, TimestamptzHandlingMode::UtcString) => {
                 maybe.on_base(|s| Ok(Value::String(s.into_timestamptz().to_string())))?
             }
             _ => return no_match_err(),
         },
-        DataType::Jsonb => match (expect_list, proto_field.kind()) {
-            (false, Kind::String) if is_big_query => {
+        DataType::Jsonb => match (
+            expect_list,
+            proto_field.kind(),
+            proto_handling_modes.json_handling_mode,
+        ) {
+            (false, Kind::String, JsonbHandlingMode::String) => {
                 maybe.on_base(|s| Ok(Value::String(s.into_jsonb().to_string())))?
             }
             _ => return no_match_err(), /* Value, NullValue, Struct (map), ListValue
                                          * Group C: experimental */
         },
-        DataType::Int16 => match (expect_list, proto_field.kind()) {
-            (false, Kind::Int64) if is_big_query => {
+        DataType::Int16 => match (
+            expect_list,
+            proto_field.kind(),
+            proto_handling_modes.int16_handling_mode,
+        ) {
+            (false, Kind::Int64, Int16HandlingMode::Int64) => {
                 maybe.on_base(|s| Ok(Value::I64(s.into_int16() as i64)))?
             }
             _ => return no_match_err(),
         },
-        DataType::Date => match (expect_list, proto_field.kind()) {
-            (false, Kind::Int32) if is_big_query => {
+        DataType::Date => match (
+            expect_list,
+            proto_field.kind(),
+            proto_handling_modes.date_handling_mode,
+        ) {
+            (false, Kind::Int32, DateHandlingMode::FromCe) => {
                 maybe.on_base(|s| Ok(Value::I32(s.into_date().get_nums_days_unix_epoch())))?
             }
             _ => return no_match_err(), // google.type.Date
         },
-        DataType::Time => match (expect_list, proto_field.kind()) {
-            (false, Kind::String) if is_big_query => {
+        DataType::Time => match (
+            expect_list,
+            proto_field.kind(),
+            proto_handling_modes.time_handling_mode,
+        ) {
+            (false, Kind::String, TimeHandlingMode::String) => {
                 maybe.on_base(|s| Ok(Value::String(s.into_time().to_string())))?
             }
             _ => return no_match_err(), // google.type.TimeOfDay
         },
-        DataType::Timestamp => match (expect_list, proto_field.kind()) {
-            (false, Kind::String) if is_big_query => {
+        DataType::Timestamp => match (
+            expect_list,
+            proto_field.kind(),
+            proto_handling_modes.timestamp_handling_mode,
+        ) {
+            (false, Kind::String, TimestampHandlingMode::String) => {
                 maybe.on_base(|s| Ok(Value::String(s.into_timestamp().to_string())))?
             }
             _ => return no_match_err(), // google.type.DateTime
         },
-        DataType::Decimal => match (expect_list, proto_field.kind()) {
-            (false, Kind::String) if is_big_query => {
+        DataType::Decimal => match (
+            expect_list,
+            proto_field.kind(),
+            proto_handling_modes.decimal_handling_mode,
+        ) {
+            (false, Kind::String, DecimalHandlingMode::String) => {
                 maybe.on_base(|s| Ok(Value::String(s.into_decimal().to_string())))?
             }
             _ => return no_match_err(), // google.type.Decimal
         },
-        DataType::Interval => match (expect_list, proto_field.kind()) {
-            (false, Kind::String) if is_big_query => {
+        DataType::Interval => match (
+            expect_list,
+            proto_field.kind(),
+            proto_handling_modes.interval_handling_mode,
+        ) {
+            (false, Kind::String, IntervalHandlingMode::String) => {
                 maybe.on_base(|s| Ok(Value::String(s.into_interval().as_iso_8601())))?
             }
             _ => return no_match_err(), // Group D: unsupported
         },
-        DataType::Serial => match (expect_list, proto_field.kind()) {
-            (false, Kind::Int64) if is_big_query => {
+        DataType::Serial => match (
+            expect_list,
+            proto_field.kind(),
+            proto_handling_modes.serial_handling_mode,
+        ) {
+            (false, Kind::Int64, SerialHandlingMode::Int64) => {
                 maybe.on_base(|s| Ok(Value::I64(s.into_serial().as_row_id())))?
             }
             _ => return no_match_err(), // Group D: unsupported
@@ -528,14 +639,9 @@ mod tests {
             Some(ScalarImpl::Timestamptz(Timestamptz::from_micros(3))),
         ]);
 
-        let encoder = ProtoEncoder::new(
-            schema,
-            None,
-            descriptor.clone(),
-            ProtoHeader::None,
-            CustomProtoType::None,
-        )
-        .unwrap();
+        let encoder =
+            ProtoEncoder::new_with_default(schema, None, descriptor.clone(), ProtoHeader::None)
+                .unwrap();
         let m = encoder.encode(row).unwrap();
         let encoded: Vec<u8> = m.ser_to().unwrap();
         assert_eq!(
@@ -573,7 +679,7 @@ mod tests {
                 .iter()
                 .map(|f| (f.name.as_str(), &f.data_type)),
             &message_descriptor,
-            CustomProtoType::None,
+            ProtoHandlingModes::new_with_default(),
         )
         .unwrap_err();
         assert_eq!(
@@ -599,7 +705,7 @@ mod tests {
                 .map(|f| (f.name.as_str(), &f.data_type))
                 .zip_eq_debug(row.iter()),
             &message_descriptor,
-            CustomProtoType::None,
+            ProtoHandlingModes::new_with_default(),
         )
         .unwrap_err();
         assert_eq!(
@@ -619,7 +725,7 @@ mod tests {
         let err = validate_fields(
             std::iter::once(("not_exists", &DataType::Int16)),
             &message_descriptor,
-            CustomProtoType::None,
+            ProtoHandlingModes::new_with_default(),
         )
         .unwrap_err();
         assert_eq!(
@@ -630,7 +736,7 @@ mod tests {
         let err = validate_fields(
             std::iter::once(("map_field", &DataType::Jsonb)),
             &message_descriptor,
-            CustomProtoType::None,
+            ProtoHandlingModes::new_with_default(),
         )
         .unwrap_err();
         assert_eq!(

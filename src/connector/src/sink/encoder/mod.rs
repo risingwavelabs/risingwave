@@ -110,6 +110,37 @@ pub enum TimestamptzHandlingMode {
     UtcWithoutSuffix,
     Micro,
     Milli,
+    PbMessage,
+}
+
+#[derive(Clone, Copy)]
+pub enum JsonbHandlingMode {
+    Jsonb,
+    String,
+}
+
+#[derive(Clone, Copy)]
+pub enum Int16HandlingMode {
+    Int16,
+    Int64,
+}
+
+#[derive(Clone, Copy)]
+pub enum DecimalHandlingMode {
+    Decimal,
+    String,
+}
+
+#[derive(Clone, Copy)]
+pub enum IntervalHandlingMode {
+    Interval,
+    String,
+}
+
+#[derive(Clone, Copy)]
+pub enum SerialHandlingMode {
+    Serial,
+    Int64,
 }
 
 impl TimestamptzHandlingMode {
@@ -144,12 +175,6 @@ pub enum CustomJsonType {
     Es,
     // starrocks' need jsonb is struct
     StarRocks(HashMap<String, (u8, u8)>),
-    None,
-}
-
-#[derive(Clone)]
-pub enum CustomProtoType {
-    BigQuery,
     None,
 }
 
