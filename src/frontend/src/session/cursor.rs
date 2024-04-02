@@ -21,7 +21,7 @@ use pgwire::pg_response::StatementType;
 use pgwire::types::Row;
 use risingwave_sqlparser::ast::ObjectName;
 
-use super::{transaction, PgResponseStream};
+use super::PgResponseStream;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::query::{create_stream, BatchPlanFragmenterResult};
 use crate::session::SessionImpl;
