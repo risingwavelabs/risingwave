@@ -111,6 +111,7 @@ use crate::user::UserId;
 use crate::{FrontendOpts, PgResponseStream};
 
 pub(crate) mod current;
+pub(crate) mod cursor;
 pub(crate) mod transaction;
 
 /// The global environment for the frontend server.
@@ -580,6 +581,9 @@ pub struct SessionImpl {
 
     /// Last idle instant
     last_idle_instant: Arc<Mutex<Option<Instant>>>,
+
+    /// The cursors declared in the transaction.
+    cursors: tokio::sync::Mutex<HashMap<ObjectName, cursor::Cursor>>,
 }
 
 #[derive(Error, Debug)]
@@ -619,6 +623,7 @@ impl SessionImpl {
             notices: Default::default(),
             exec_context: Mutex::new(None),
             last_idle_instant: Default::default(),
+            cursors: Default::default(),
         }
     }
 
@@ -645,6 +650,7 @@ impl SessionImpl {
             ))
             .into(),
             last_idle_instant: Default::default(),
+            cursors: Default::default(),
         }
     }
 

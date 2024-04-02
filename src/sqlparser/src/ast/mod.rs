@@ -1491,6 +1491,21 @@ pub enum Statement {
         param: Ident,
         value: SetVariableValue,
     },
+    /// DECLARE CURSOR
+    DeclareCursor {
+        cursor_name: ObjectName,
+        query: Box<Query>,
+    },
+    /// FETCH FROM CURSOR
+    FetchCursor {
+        cursor_name: ObjectName,
+        /// Number of rows to fetch. `None` means `FETCH ALL`.
+        count: Option<i32>,
+    },
+    /// CLOSE CURSOR
+    CloseCursor {
+        cursor_name: Option<ObjectName>,
+    },
     /// FLUSH the current barrier.
     ///
     /// Note: RisingWave specific statement.
@@ -2044,6 +2059,23 @@ impl fmt::Display for Statement {
                     f,
                     "{param} = {value}",
                 )
+            }
+            Statement::DeclareCursor { cursor_name, query } => {
+                write!(f, "DECLARE {} CURSOR FOR {}", cursor_name, query)
+            },
+            Statement::FetchCursor { cursor_name , count} => {
+                if let Some(count) = count {
+                    write!(f, "FETCH {} FROM {}", count, cursor_name)
+                } else {
+                    write!(f, "FETCH NEXT FROM {}", cursor_name)
+                }
+            },
+            Statement::CloseCursor { cursor_name } => {
+                if let Some(name) = cursor_name {
+                    write!(f, "CLOSE {}", name)
+                } else {
+                    write!(f, "CLOSE ALL")
+                }
             }
             Statement::Flush => {
                 write!(f, "FLUSH")
