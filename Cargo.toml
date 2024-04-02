@@ -160,6 +160,12 @@ opentelemetry = "0.21"
 opentelemetry-otlp = "0.14"
 opentelemetry_sdk = { version = "0.21", default-features = false }
 opentelemetry-semantic-conventions = "0.13"
+sea-orm = { version = "0.12.14", features = [
+  "sqlx-mysql",
+  "sqlx-postgres",
+  "sqlx-sqlite",
+  "runtime-tokio-native-tls",
+] }
 tokio-util = "0.7"
 tracing-opentelemetry = "0.22"
 
