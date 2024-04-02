@@ -11,6 +11,41 @@ updates:
   ignore:
     - dependency-name: "*"
       update-types: ["version-update:semver-patch"]
+    # List below moved from adhoc `@dependabot ignore` commands
+    # https://github.com/risingwavelabs/risingwave/network/updates/12633318/jobs
+    # view logs -> Job definition
+    # yq -P '.job["ignore-conditions"] | {"u": {"ignore": . | map({"dependency-name": .["dependency-name"], "versions": .["version-requirement"]})}}'
+    - dependency-name: axum
+      versions: '> 0.6.20'
+    - dependency-name: flume
+      versions: '>= 0.11.a, < 0.12'
+    - dependency-name: foyer
+      versions: '> 0.3.0'
+    - dependency-name: hyper-tls
+      versions: '> 0.5.0'
+    - dependency-name: openssl-sys
+      versions: '> 0.9.92'
+    - dependency-name: opentelemetry_sdk
+      versions: '> 0.20.0'
+    - dependency-name: ordered-float
+      versions: '> 3.9.1'
+    - dependency-name: prost-build
+      versions: '> 0.11.9'
+    - dependency-name: prost-types
+      versions: '> 0.11.9'
+    - dependency-name: regex-automata
+      versions: '> 0.3.8'
+    - dependency-name: regex-syntax
+      versions: '> 0.7.5'
+    - dependency-name: ring
+      versions: '> 0.16.20'
+    - dependency-name: sqllogictest
+      versions: '> 0.15.3'
+    - dependency-name: tonic
+      versions: '>= 0.11.a, < 0.12'
+    - dependency-name: tower-http
+      versions: '> 0.4.4'
+
   # Create a group of dependencies to be updated together in one pull request
   groups:
     arrow:
