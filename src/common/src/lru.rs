@@ -153,7 +153,8 @@ where
                             key: MaybeUninit::new(key),
                             value: MaybeUninit::new(value),
                             hash,
-                            sequence: SEQUENCER.with(|s| s.borrow_mut().inc()),
+                            // sequence will be updated by `attach`
+                            sequence: 0,
                         },
                         self.alloc.clone(),
                     );
