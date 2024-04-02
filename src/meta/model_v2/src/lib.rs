@@ -166,6 +166,7 @@ macro_rules! derive_from_json_struct {
     };
 }
 
+/// Defines struct with a byte array that derives `DeriveValueType`, it will helps to map blob stored in database to Pb struct.
 macro_rules! derive_from_byte_array {
     ($struct_name:ident, $field_type:ty) => {
         #[derive(Clone, PartialEq, Eq, Serialize, Deserialize, DeriveValueType)]
@@ -207,6 +208,7 @@ macro_rules! derive_from_byte_array {
     };
 }
 
+/// Defines struct with a byte array that derives `DeriveValueType`, it will helps to map blob stored in database to Pb struct array.
 macro_rules! derive_array_from_byte_array {
     ($struct_name:ident, $field_type:ty, $field_array_name:ident) => {
         #[derive(Clone, PartialEq, Eq, DeriveValueType)]
