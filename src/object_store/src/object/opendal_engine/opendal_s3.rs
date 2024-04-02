@@ -19,7 +19,7 @@ use opendal::services::S3;
 use opendal::Operator;
 use risingwave_common::config::ObjectStoreConfig;
 
-use super::{EngineType, OpendalObjectStore};
+use super::{new_http_client, EngineType, OpendalObjectStore};
 use crate::object::ObjectResult;
 
 impl OpendalObjectStore {
@@ -39,6 +39,9 @@ impl OpendalObjectStore {
         if std::env::var("RW_IS_FORCE_PATH_STYLE").is_err() {
             builder.enable_virtual_host_style();
         }
+
+        let http_client = new_http_client(&object_store_config)?;
+        builder.http_client(http_client);
 
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())

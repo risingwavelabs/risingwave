@@ -13,12 +13,15 @@
 // limitations under the License.
 
 use std::ops::Range;
+use std::time::Duration;
 
 use bytes::Bytes;
 use fail::fail_point;
 use futures::{stream, StreamExt, TryStreamExt};
+use opendal::raw::HttpClient;
 use opendal::services::Memory;
 use opendal::{Metakey, Operator, Writer};
+use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::range::RangeBoundsExt;
 use thiserror_ext::AsReport;
 
@@ -57,6 +60,23 @@ impl OpendalObjectStore {
             engine_type: EngineType::Memory,
         })
     }
+}
+
+pub fn new_http_client(config: &ObjectStoreConfig) -> ObjectResult<HttpClient> {
+    let mut client_builder = reqwest::ClientBuilder::new();
+
+    if let Some(keepalive_ms) = config.s3.object_store_keepalive_ms.as_ref() {
+        client_builder =
+            client_builder.http2_keep_alive_timeout(Duration::from_millis(*keepalive_ms));
+    }
+
+    if let Some(nodelay) = config.s3.object_store_nodelay.as_ref() {
+        client_builder = client_builder.tcp_nodelay(*nodelay);
+    }
+
+    client_builder = client_builder.https_only(false);
+
+    Ok(HttpClient::build(client_builder)?)
 }
 
 #[async_trait::async_trait]

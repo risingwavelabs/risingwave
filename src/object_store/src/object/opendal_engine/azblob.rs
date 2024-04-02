@@ -15,14 +15,19 @@
 use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::Azblob;
 use opendal::Operator;
+use risingwave_common::config::ObjectStoreConfig;
 
-use super::{EngineType, OpendalObjectStore};
+use super::{new_http_client, EngineType, OpendalObjectStore};
 use crate::object::ObjectResult;
 
 const AZBLOB_ENDPOINT: &str = "AZBLOB_ENDPOINT";
 impl OpendalObjectStore {
     /// create opendal azblob engine.
-    pub fn new_azblob_engine(container_name: String, root: String) -> ObjectResult<Self> {
+    pub fn new_azblob_engine(
+        container_name: String,
+        root: String,
+        object_store_config: ObjectStoreConfig,
+    ) -> ObjectResult<Self> {
         // Create azblob backend builder.
         let mut builder = Azblob::default();
         builder.root(&root);
@@ -32,6 +37,10 @@ impl OpendalObjectStore {
             .unwrap_or_else(|_| panic!("AZBLOB_ENDPOINT not found from environment variables"));
 
         builder.endpoint(&endpoint);
+
+        let http_client = new_http_client(&object_store_config)?;
+        builder.http_client(http_client);
+
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())
