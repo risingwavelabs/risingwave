@@ -41,7 +41,6 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
 use risingwave_connector::source::SourceCtrlOpts;
-use risingwave_connector::ConnectorParams;
 use risingwave_dml::dml_manager::DmlManager;
 use risingwave_hummock_sdk::to_committed_batch_query_epoch;
 use risingwave_pb::catalog::StreamSourceInfo;
@@ -175,7 +174,6 @@ async fn test_table_materialize() -> StreamResult<()> {
             barrier_rx,
             system_params_manager.get_params(),
             SourceCtrlOpts::default(),
-            ConnectorParams::default(),
         )
         .boxed(),
     );

@@ -23,7 +23,7 @@ use super::{
     invalid_option_error, InvalidOptionError, SchemaFetchError, MESSAGE_NAME_KEY,
     SCHEMA_LOCATION_KEY, SCHEMA_REGISTRY_KEY,
 };
-use crate::common::AwsAuthProps;
+use crate::connector_common::AwsAuthProps;
 use crate::parser::{EncodingProperties, ProtobufParserConfig, ProtobufProperties};
 
 /// `aws_auth_props` is only required when reading `s3://` URL.

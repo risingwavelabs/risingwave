@@ -116,7 +116,7 @@ aws-types = "1"
 etcd-client = { package = "madsim-etcd-client", version = "0.4" }
 futures-async-stream = "0.2.9"
 hytra = "0.1"
-rdkafka = { package = "madsim-rdkafka", version = "0.3.1", features = [
+rdkafka = { package = "madsim-rdkafka", version = "0.3.4", features = [
   "cmake-build",
 ] }
 hashbrown = { version = "0.14", features = ["ahash", "inline-more", "nightly"] }
@@ -304,6 +304,8 @@ tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev =
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
 # patch: unlimit 4MB message size for grpc client
 etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "4e84d40" }
+# todo(wcy-fdu): remove this patch fork after opendal release a new version to apply azure workload identity change.
+reqsign = { git = "https://github.com/wcy-fdu/reqsign.git", rev = "e6cb304" }
 
 [workspace.metadata.dylint]
 libraries = [{ path = "./lints" }]

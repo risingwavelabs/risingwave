@@ -37,7 +37,6 @@ use crate::scheduler::task_context::FrontendBatchTaskContext;
 mod error;
 pub mod streaming_manager;
 mod task_context;
-pub mod worker_node_manager;
 
 pub use self::error::SchedulerError;
 pub type SchedulerResult<T> = std::result::Result<T, SchedulerError>;
