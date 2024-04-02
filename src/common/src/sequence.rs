@@ -28,7 +28,7 @@ pub struct Sequencer {
 }
 
 impl Sequencer {
-    pub const DEFAULT_LAG: Sequence = Self::DEFAULT_STEP * 16;
+    pub const DEFAULT_LAG: Sequence = Self::DEFAULT_STEP * 32;
     pub const DEFAULT_STEP: Sequence = 64;
 
     pub const fn new(step: Sequence, lag: Sequence) -> Self {

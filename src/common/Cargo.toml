@@ -173,5 +173,9 @@ harness = false
 name = "bench_sequencer"
 harness = false
 
+[[bench]]
+name = "bench_lru"
+harness = false
+
 [lints]
 workspace = true
