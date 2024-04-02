@@ -72,10 +72,9 @@ mkdir -p e2e_test/udf/wasm/target/wasm32-wasi/release/
 buildkite-agent artifact download udf.wasm e2e_test/udf/wasm/target/wasm32-wasi/release/
 buildkite-agent artifact download risingwave-udf-example.jar ./
 mkdir -p e2e_test/udf/sse/server/target/release/
-buildkite-agent artifact download sse-server e2e_test/udf/sse/server/target/release/
+buildkite-agent artifact download e2e_test/udf/sse/server/target/release/
 mv target/debug/risingwave_e2e_extended_mode_test-"$profile" target/debug/risingwave_e2e_extended_mode_test
 
-chmod +x ./e2e_test/udf/sse/server/target/release/sse-server
 chmod +x ./target/debug/risingwave_e2e_extended_mode_test
 
 echo "--- e2e, $mode, streaming"
