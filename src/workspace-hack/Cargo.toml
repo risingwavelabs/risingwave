@@ -129,7 +129,8 @@ sqlx-core = { version = "0.7", features = ["_rt-tokio", "_tls-native-tls", "bigd
 sqlx-mysql = { version = "0.7", default-features = false, features = ["bigdecimal", "chrono", "json", "rust_decimal", "time", "uuid"] }
 sqlx-postgres = { version = "0.7", default-features = false, features = ["bigdecimal", "chrono", "json", "rust_decimal", "time", "uuid"] }
 sqlx-sqlite = { version = "0.7", default-features = false, features = ["chrono", "json", "time", "uuid"] }
-strum = { version = "0.25", features = ["derive"] }
+strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26", features = ["derive"] }
+strum-2ffb4c3fe830441c = { package = "strum", version = "0.25", features = ["derive"] }
 subtle = { version = "2" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1", features = ["extra-traits", "full", "visit", "visit-mut"] }
 target-lexicon = { version = "0.12", features = ["std"] }
