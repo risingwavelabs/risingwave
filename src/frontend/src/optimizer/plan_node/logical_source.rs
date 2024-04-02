@@ -522,7 +522,7 @@ impl ToStream for LogicalSource {
         match self.core.kind {
             SourceNodeKind::CreateTable | SourceNodeKind::CreateSharedSource => {
                 // Note: for create table, row_id and generated columns is created in plan_root.gen_table_plan.
-                // for backfill-able source, row_id and generated columns is created after SourceBackfill node.
+                // for shared source, row_id and generated columns is created after SourceBackfill node.
                 if self.core.is_new_fs_connector() {
                     plan = Self::create_fs_list_plan(self.core.clone())?;
                     plan = StreamFsFetch::new(plan, self.core.clone()).into();
