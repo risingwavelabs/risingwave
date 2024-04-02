@@ -89,14 +89,6 @@ impl Cursor {
 }
 
 impl SessionImpl {
-    pub fn is_in_transaction(&self) -> bool {
-        *self.in_rw_txn.lock()
-            || match &*self.txn.lock() {
-                transaction::State::Initial | transaction::State::Implicit(_) => false,
-                transaction::State::Explicit(_) => true,
-            }
-    }
-
     pub async fn add_cursor(&self, cursor_name: ObjectName, cursor: Cursor) -> Result<()> {
         if self
             .cursors

@@ -583,12 +583,6 @@ pub struct SessionImpl {
     /// Last idle instant
     last_idle_instant: Arc<Mutex<Option<Instant>>>,
 
-    /// Whether in a Read-Write Transaction. We need this because we don't really start a
-    /// transaction when the transaction is read-write but cursors should only be declared
-    /// within transaction blocks. This flag is used to determine whether the session is in
-    /// a transaction
-    pub in_rw_txn: Mutex<bool>,
-
     /// The cursors declared in the transaction.
     cursors: tokio::sync::Mutex<HashMap<ObjectName, cursor::Cursor>>,
 }
@@ -630,7 +624,6 @@ impl SessionImpl {
             notices: Default::default(),
             exec_context: Mutex::new(None),
             last_idle_instant: Default::default(),
-            in_rw_txn: Default::default(),
             cursors: Default::default(),
         }
     }
@@ -658,7 +651,6 @@ impl SessionImpl {
             ))
             .into(),
             last_idle_instant: Default::default(),
-            in_rw_txn: Default::default(),
             cursors: Default::default(),
         }
     }

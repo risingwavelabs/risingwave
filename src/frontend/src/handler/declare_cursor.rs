@@ -17,7 +17,7 @@ use risingwave_sqlparser::ast::{ObjectName, Query, Statement};
 
 use super::query::{gen_batch_plan_by_statement, gen_batch_plan_fragmenter};
 use super::RwPgResponse;
-use crate::error::{ErrorCode, Result};
+use crate::error::Result;
 use crate::handler::HandlerArgs;
 use crate::session::cursor::Cursor;
 use crate::OptimizerContext;
@@ -28,12 +28,6 @@ pub async fn handle_declare_cursor(
     query: Query,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
-    if !session.is_in_transaction() {
-        return Err(ErrorCode::InternalError(
-            "DECLARE CURSOR can only be used in transaction blocks".to_string(),
-        )
-        .into());
-    }
 
     let plan_fragmenter_result = {
         let context = OptimizerContext::from_handler_args(handler_args);

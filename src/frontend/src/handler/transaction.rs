@@ -66,7 +66,6 @@ pub async fn handle_begin(
                     Read-write transaction is not supported yet. Please specify `READ ONLY` to start a read-only transaction.\n\
                     For compatibility, this statement will still succeed but no transaction is actually started.";
                 builder = builder.notice(MESSAGE);
-                *session.in_rw_txn.lock() = true;
                 return Ok(builder.into());
             }
         }
@@ -89,7 +88,6 @@ pub async fn handle_commit(
 
     session.txn_commit_explicit();
     session.drop_all_cursors().await;
-    *session.in_rw_txn.lock() = false;
 
     Ok(RwPgResponse::empty_result(stmt_type))
 }
@@ -107,7 +105,6 @@ pub async fn handle_rollback(
 
     session.txn_rollback_explicit();
     session.drop_all_cursors().await;
-    *session.in_rw_txn.lock() = false;
 
     Ok(RwPgResponse::empty_result(stmt_type))
 }
