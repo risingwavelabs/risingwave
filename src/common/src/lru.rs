@@ -344,5 +344,16 @@ where
     }
 }
 
+impl<K, V, S, A> Drop for LruCache<K, V, S, A>
+where
+    K: Hash + Eq,
+    S: BuildHasher + Send + Sync + 'static,
+    A: Clone + Allocator,
+{
+    fn drop(&mut self) {
+        self.clear()
+    }
+}
+
 #[cfg(test)]
 mod tests {}
