@@ -22,7 +22,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 http = "0.2"
 hyper = "0.14"
 itertools = "0.12.0"
-lru = "0.10.1"
+lru = { workspace = true }
 moka = { version = "0.12", features = ["future"] }
 rand = "0.8"
 risingwave_common = { workspace = true }

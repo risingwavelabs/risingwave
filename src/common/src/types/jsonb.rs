@@ -17,8 +17,8 @@ use std::hash::Hash;
 
 use bytes::Buf;
 use jsonbb::{Value, ValueRef};
+use risingwave_common_estimate_size::EstimateSize;
 
-use crate::estimate_size::EstimateSize;
 use crate::types::{Scalar, ScalarRef};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

@@ -52,7 +52,7 @@ use super::encoder::{ProtoEncoder, ProtoHeader, RowEncoder, SerTo};
 use super::writer::LogSinkerOf;
 use super::{SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::aws_utils::load_file_descriptor_from_s3;
-use crate::common::AwsAuthProps;
+use crate::connector_common::AwsAuthProps;
 use crate::sink::writer::SinkWriterExt;
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriter, SinkWriterParam,

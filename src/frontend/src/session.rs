@@ -35,6 +35,9 @@ use pgwire::pg_server::{
 use pgwire::types::{Format, FormatIterator};
 use rand::RngCore;
 use risingwave_batch::task::{ShutdownSender, ShutdownToken};
+use risingwave_batch::worker_manager::worker_node_manager::{
+    WorkerNodeManager, WorkerNodeManagerRef,
+};
 use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 #[cfg(test)]
@@ -68,7 +71,6 @@ use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient}
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror::Error;
-use thiserror_ext::AsReport;
 use tokio::runtime::Builder;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
@@ -97,7 +99,6 @@ use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::{FrontendMetrics, GLOBAL_FRONTEND_METRICS};
 use crate::observer::FrontendObserverNode;
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
-use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::{
     DistributedQueryMetrics, HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager,
     GLOBAL_DISTRIBUTED_QUERY_METRICS,
@@ -883,9 +884,7 @@ impl SessionImpl {
         formats: Vec<Format>,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
         // Parse sql.
-        let mut stmts = Parser::parse_sql(&sql).inspect_err(
-            |e| tracing::error!(error = %e.as_report(), %sql, "failed to parse sql"),
-        )?;
+        let mut stmts = Parser::parse_sql(&sql)?;
         if stmts.is_empty() {
             return Ok(PgResponse::empty_result(
                 pgwire::pg_response::StatementType::EMPTY,
@@ -899,9 +898,7 @@ impl SessionImpl {
             );
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = handle(self, stmt, sql.clone(), formats).await.inspect_err(
-            |e| tracing::error!(error = %e.as_report(), %sql, "failed to handle sql"),
-        )?;
+        let rsp = handle(self, stmt, sql.clone(), formats).await?;
         Ok(rsp)
     }
 
@@ -1091,11 +1088,7 @@ impl Session for SessionImpl {
         let string = stmt.to_string();
         let sql_str = string.as_str();
         let sql: Arc<str> = Arc::from(sql_str);
-        let rsp = handle(self, stmt, sql.clone(), vec![format])
-            .await
-            .inspect_err(
-                |e| tracing::error!(error = %e.as_report(), %sql, "failed to handle sql"),
-            )?;
+        let rsp = handle(self, stmt, sql.clone(), vec![format]).await?;
         Ok(rsp)
     }
 
@@ -1138,9 +1131,7 @@ impl Session for SessionImpl {
         self: Arc<Self>,
         portal: Portal,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
-        let rsp = handle_execute(self, portal)
-            .await
-            .inspect_err(|e| tracing::error!(error=%e.as_report(), "failed to handle execute"))?;
+        let rsp = handle_execute(self, portal).await?;
         Ok(rsp)
     }
 

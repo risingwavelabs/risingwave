@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use parking_lot::RwLock;
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
@@ -30,7 +31,6 @@ use tokio::sync::watch::Sender;
 
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::FragmentId;
-use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::HummockSnapshotManagerRef;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::UserInfoVersion;
@@ -116,6 +116,7 @@ impl ObserverState for FrontendObserverNode {
             tables,
             indexes,
             views,
+            subscriptions,
             functions,
             connections,
             users,
@@ -127,8 +128,6 @@ impl ObserverState for FrontendObserverNode {
             meta_backup_manifest_id: _,
             hummock_write_limits: _,
             version,
-            // todo!: add subscriptions
-            subscriptions: _,
         } = snapshot;
 
         for db in databases {
@@ -142,6 +141,9 @@ impl ObserverState for FrontendObserverNode {
         }
         for sink in sinks {
             catalog_guard.create_sink(&sink)
+        }
+        for subscription in subscriptions {
+            catalog_guard.create_subscription(&subscription)
         }
         for table in tables {
             catalog_guard.create_table(&table)
@@ -272,6 +274,16 @@ impl FrontendObserverNode {
                             Operation::Update => catalog_guard.update_sink(sink),
                             _ => panic!("receive an unsupported notify {:?}", resp),
                         },
+                        RelationInfo::Subscription(subscription) => match resp.operation() {
+                            Operation::Add => catalog_guard.create_subscription(subscription),
+                            Operation::Delete => catalog_guard.drop_subscription(
+                                subscription.database_id,
+                                subscription.schema_id,
+                                subscription.id,
+                            ),
+                            Operation::Update => catalog_guard.update_subscription(subscription),
+                            _ => panic!("receive an unsupported notify {:?}", resp),
+                        },
                         RelationInfo::Index(index) => match resp.operation() {
                             Operation::Add => catalog_guard.create_index(index),
                             Operation::Delete => catalog_guard.drop_index(
@@ -290,7 +302,6 @@ impl FrontendObserverNode {
                             Operation::Update => catalog_guard.update_view(view),
                             _ => panic!("receive an unsupported notify {:?}", resp),
                         },
-                        RelationInfo::Subscription(_) => todo!(),
                     }
                 }
             }

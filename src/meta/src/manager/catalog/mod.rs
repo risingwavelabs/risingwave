@@ -126,10 +126,10 @@ use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::{Relation, RelationGroup};
 pub(crate) use {commit_meta, commit_meta_with_trx};
 
-use crate::manager::catalog::utils::{
-    alter_relation_rename, alter_relation_rename_refs, refcnt_dec_connection,
-    refcnt_inc_connection, ReplaceTableExprRewriter,
+use crate::controller::rename::{
+    alter_relation_rename, alter_relation_rename_refs, ReplaceTableExprRewriter,
 };
+use crate::manager::catalog::utils::{refcnt_dec_connection, refcnt_inc_connection};
 use crate::rpc::ddl_controller::DropMode;
 use crate::telemetry::MetaTelemetryJobDesc;
 
@@ -1902,7 +1902,7 @@ impl CatalogManager {
         if let Some(source) = &to_update_source {
             sources.insert(source.id, source.clone());
         }
-        commit_meta!(self, tables, views, sinks, sources)?;
+        commit_meta!(self, tables, views, sinks, sources, subscriptions)?;
 
         // 5. notify frontend.
         assert!(

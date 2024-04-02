@@ -139,7 +139,7 @@ syn-dff4ba8e3ae991db = { package = "syn", version = "1", features = ["extra-trai
 target-lexicon = { version = "0.12", features = ["std"] }
 time = { version = "0.3", features = ["local-offset", "macros", "serde-well-known"] }
 tinyvec = { version = "1", features = ["alloc", "grab_spare_slice", "rustc_1_55"] }
-tokio = { version = "1", features = ["full", "stats", "tracing"] }
+tokio = { version = "1", features = ["full", "test-util", "tracing"] }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88", features = ["with-chrono-0_4", "with-uuid-1"] }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e", features = ["fs", "net"] }
 tokio-util = { version = "0.7", features = ["codec", "io"] }

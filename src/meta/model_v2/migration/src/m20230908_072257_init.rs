@@ -1,5 +1,6 @@
 use sea_orm_migration::prelude::{Index as MigrationIndex, Table as MigrationTable, *};
 
+use crate::sea_orm::DbBackend;
 use crate::{assert_not_has_tables, drop_tables};
 
 #[derive(DeriveMigrationName)]
@@ -35,6 +36,16 @@ impl MigrationTrait for Migration {
             CatalogVersion
         );
 
+        // In Mysql, The CHAR, VARCHAR and TEXT types are encoded in utf8_general_ci by default, which is not case sensitive but
+        // required in risingwave. Here we need to change the database collate to utf8_bin.
+        if manager.get_database_backend() == DbBackend::MySql {
+            manager
+                .get_connection()
+                .execute_unprepared("ALTER DATABASE COLLATE utf8_bin")
+                .await
+                .expect("failed to set database collate");
+        }
+
         // 2. create tables.
         manager
             .create_table(
@@ -48,7 +59,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(Cluster::CreatedAt)
-                            .timestamp()
+                            .date_time()
                             .default(Expr::current_timestamp())
                             .not_null(),
                     )
@@ -149,13 +160,13 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Object::DatabaseId).integer())
                     .col(
                         ColumnDef::new(Object::InitializedAt)
-                            .timestamp()
+                            .date_time()
                             .default(Expr::current_timestamp())
                             .not_null(),
                     )
                     .col(
                         ColumnDef::new(Object::CreatedAt)
-                            .timestamp()
+                            .date_time()
                             .default(Expr::current_timestamp())
                             .not_null(),
                     )
@@ -365,7 +376,11 @@ impl MigrationTrait for Migration {
                             .string()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(Fragment::StreamNode).binary().not_null())
+                    .col(
+                        ColumnDef::new(Fragment::StreamNode)
+                            .blob(BlobSize::Long)
+                            .not_null(),
+                    )
                     .col(
                         ColumnDef::new(Fragment::VnodeMapping)
                             .json_binary()
@@ -510,7 +525,7 @@ impl MigrationTrait for Migration {
                             .json_binary()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(Source::Definition).string().not_null())
+                    .col(ColumnDef::new(Source::Definition).text().not_null())
                     .col(ColumnDef::new(Source::SourceInfo).json_binary())
                     .col(
                         ColumnDef::new(Source::WatermarkDescs)
@@ -568,7 +583,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Table::VnodeColIndex).integer())
                     .col(ColumnDef::new(Table::RowIdIndex).integer())
                     .col(ColumnDef::new(Table::ValueIndices).json_binary().not_null())
-                    .col(ColumnDef::new(Table::Definition).string().not_null())
+                    .col(ColumnDef::new(Table::Definition).text().not_null())
                     .col(
                         ColumnDef::new(Table::HandlePkConflictBehavior)
                             .string()
@@ -621,6 +636,7 @@ impl MigrationTrait for Migration {
                             .name("FK_table_fragment_id")
                             .from(Table::Table, Table::FragmentId)
                             .to(Fragment::Table, Fragment::FragmentId)
+                            .on_delete(ForeignKeyAction::Cascade)
                             .to_owned(),
                     )
                     .foreign_key(
@@ -656,7 +672,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Sink::DownstreamPk).json_binary().not_null())
                     .col(ColumnDef::new(Sink::SinkType).string().not_null())
                     .col(ColumnDef::new(Sink::Properties).json_binary().not_null())
-                    .col(ColumnDef::new(Sink::Definition).string().not_null())
+                    .col(ColumnDef::new(Sink::Definition).text().not_null())
                     .col(ColumnDef::new(Sink::ConnectionId).integer())
                     .col(ColumnDef::new(Sink::DbName).string().not_null())
                     .col(ColumnDef::new(Sink::SinkFromName).string().not_null())
@@ -694,7 +710,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(View::ViewId).integer().primary_key())
                     .col(ColumnDef::new(View::Name).string().not_null())
                     .col(ColumnDef::new(View::Properties).json_binary().not_null())
-                    .col(ColumnDef::new(View::Definition).string().not_null())
+                    .col(ColumnDef::new(View::Definition).text().not_null())
                     .col(ColumnDef::new(View::Columns).json_binary().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
@@ -730,6 +746,7 @@ impl MigrationTrait for Migration {
                             .name("FK_index_index_table_id")
                             .from(Index::Table, Index::IndexTableId)
                             .to(Table::Table, Table::TableId)
+                            .on_delete(ForeignKeyAction::Cascade)
                             .to_owned(),
                     )
                     .foreign_key(
@@ -737,6 +754,7 @@ impl MigrationTrait for Migration {
                             .name("FK_index_primary_table_id")
                             .from(Index::Table, Index::PrimaryTableId)
                             .to(Table::Table, Table::TableId)
+                            .on_delete(ForeignKeyAction::Cascade)
                             .to_owned(),
                     )
                     .to_owned(),
@@ -913,25 +931,25 @@ impl MigrationTrait for Migration {
         drop_tables!(
             manager,
             Cluster,
-            Worker,
             WorkerProperty,
-            User,
+            Worker,
             UserPrivilege,
             Database,
             Schema,
             StreamingJob,
-            Fragment,
-            Actor,
             ActorDispatcher,
-            Table,
-            Source,
+            Actor,
             Sink,
+            Index,
+            Table,
+            Fragment,
+            Source,
             Connection,
             View,
-            Index,
             Function,
-            Object,
             ObjectDependency,
+            Object,
+            User,
             SystemParameter,
             CatalogVersion
         );

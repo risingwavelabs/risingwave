@@ -15,9 +15,9 @@
 use std::ops::Range;
 
 use risingwave_common::array::*;
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::Row;
 use risingwave_common::types::*;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::aggregate::{AggCall, AggStateDyn, AggregateFunction, AggregateState};
 use risingwave_expr::{build_aggregate, Result};
 

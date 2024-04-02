@@ -303,7 +303,7 @@ MqttProperties:
     comments: Path to client's private key file (PEM). Required for client authentication.  Can be a file path under fs:// or a string with the private key content.
     required: false
   - name: qos
-    field_type: QualityOfService
+    field_type: MqttQualityOfService
     comments: The quality of service to use when publishing messages. Defaults to at_most_once.  Could be at_most_once, at_least_once or exactly_once
     required: false
 NatsProperties:

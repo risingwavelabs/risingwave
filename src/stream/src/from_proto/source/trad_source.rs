@@ -38,7 +38,7 @@ use super::*;
 use crate::executor::source::{FsListExecutor, StreamSourceCore};
 use crate::executor::source_executor::SourceExecutor;
 use crate::executor::state_table_handler::SourceStateTableHandler;
-use crate::executor::FlowControlExecutor;
+use crate::executor::{FlowControlExecutor, TroublemakerExecutor};
 
 const FS_CONNECTORS: &[&str] = &["s3"];
 pub struct SourceExecutorBuilder;
@@ -145,7 +145,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
     ) -> StreamResult<Executor> {
         let (sender, barrier_receiver) = unbounded_channel();
         params
-            .local_barrier_manager
+            .create_actor_context
             .register_sender(params.actor_context.id, sender);
         let system_params = params.env.system_params_manager_ref().get_params();
 
@@ -230,7 +230,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         barrier_receiver,
                         system_params,
                         source_ctrl_opts.clone(),
-                        params.env.connector_params(),
                     )
                     .boxed()
                 } else {
@@ -241,7 +240,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         barrier_receiver,
                         system_params,
                         source_ctrl_opts.clone(),
-                        params.env.connector_params(),
                     )
                     .boxed()
                 }
@@ -252,7 +250,21 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             let rate_limit = source.rate_limit.map(|x| x as _);
             let exec =
                 FlowControlExecutor::new((info, exec).into(), params.actor_context, rate_limit);
-            Ok((params.info, exec).into())
+
+            if crate::consistency::insane() {
+                let mut info = params.info.clone();
+                info.identity = format!("{} (troubled)", info.identity);
+                Ok((
+                    params.info,
+                    TroublemakerExecutor::new(
+                        (info, exec).into(),
+                        params.env.config().developer.chunk_size,
+                    ),
+                )
+                    .into())
+            } else {
+                Ok((params.info, exec).into())
+            }
         } else {
             // If there is no external stream source, then no data should be persisted. We pass a
             // `PanicStateStore` type here for indication.
@@ -264,7 +276,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 system_params,
                 // we don't expect any data in, so no need to set chunk_sizes
                 SourceCtrlOpts::default(),
-                params.env.connector_params(),
             );
             Ok((params.info, exec).into())
         }

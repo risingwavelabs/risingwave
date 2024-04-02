@@ -18,17 +18,15 @@ use std::sync::LazyLock;
 
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_meta_model_v2::hummock_sequence;
+use risingwave_meta_model_v2::hummock_sequence::{
+    COMPACTION_GROUP_ID, COMPACTION_TASK_ID, META_BACKUP_ID, SSTABLE_OBJECT_ID,
+};
 use risingwave_meta_model_v2::prelude::HummockSequence;
 use sea_orm::{ActiveModelTrait, ActiveValue, DatabaseConnection, EntityTrait, TransactionTrait};
 use tokio::sync::Mutex;
 
 use crate::hummock::error::Result;
 use crate::manager::{IdCategory, MetaSrvEnv};
-
-const COMPACTION_TASK_ID: &str = "compaction_task";
-const COMPACTION_GROUP_ID: &str = "compaction_group";
-const SSTABLE_OBJECT_ID: &str = "sstable_object";
-const META_BACKUP_ID: &str = "meta_backup";
 
 static SEQ_INIT: LazyLock<HashMap<String, i64>> = LazyLock::new(|| {
     maplit::hashmap! {
