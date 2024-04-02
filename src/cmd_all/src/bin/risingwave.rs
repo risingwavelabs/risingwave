@@ -148,7 +148,8 @@ impl Component {
             Component::Frontend => FrontendOpts::augment_args(cmd),
             Component::Compactor => CompactorOpts::augment_args(cmd),
             Component::Ctl => CtlOpts::augment_args(cmd),
-            Component::Playground => cmd,
+            Component::Playground => cmd
+                .about("Shortcut for `single-node --in-memory`, should not be used in production"),
             Component::Standalone => StandaloneOpts::augment_args(cmd),
             Component::SingleNode => SingleNodeOpts::augment_args(cmd),
         }
@@ -158,14 +159,8 @@ impl Component {
     fn commands() -> Vec<Command> {
         Self::iter()
             .map(|c| {
-                let is_playground = matches!(c, Component::Playground);
                 let name: &'static str = c.into();
                 let command = Command::new(name).visible_aliases(c.aliases());
-                let command = if is_playground {
-                    command.hide(true)
-                } else {
-                    command
-                };
                 c.augment_args(command)
             })
             .collect()
