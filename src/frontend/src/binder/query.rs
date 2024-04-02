@@ -283,7 +283,6 @@ impl Binder {
     }
 
     fn bind_with(&mut self, with: With) -> Result<()> {
-        println!("bind_with: {:#?}", with);
         for cte_table in with.cte_tables {
             let share_id = self.next_share_id();
             let Cte { alias, query, .. } = cte_table;
@@ -373,20 +372,28 @@ impl Binder {
                 // We assume `left` is the base term, otherwise the implementation may be very hard.
                 // The behavior is the same as PostgreSQL's.
                 // reference: <https://www.postgresql.org/docs/16/sql-select.html#:~:text=the%20recursive%20self%2Dreference%20must%20appear%20on%20the%20right%2Dhand%20side%20of%20the%20UNION>
-                let base = self.bind_query(left)?;
-
-                println!("base: {:#?}", base);
-
-                let schema = base.schema().clone();
+                let mut base = self.bind_query(left)?;
 
                 entry.borrow_mut().state = BindingCteState::BaseResolved {
-                    schema: schema.clone(),
+                    schema: base.schema().clone(),
                 };
 
                 // bind the rest of the recursive cte
-                let recursive = self.bind_query(right)?;
+                let mut recursive = self.bind_query(right)?;
 
-                println!("recursive: {:#?}", recursive);
+                // todo: add validate check here for *bound* `base` and `recursive`
+                let BoundQuery { body: left, .. } = &mut base;
+                let BoundQuery { body: right, .. } = &mut recursive;
+
+                Self::align_schema(left, right, SetOperator::Union)?;
+
+                // please note that even after aligning, the schema of `left`
+                // may not be the same as `right`; this is because there may
+                // be case(s) where the `base` term is just a value, and the
+                // `recursive` term is a select expression / statement.
+                let schema = right.schema().clone();
+                // yet another sanity check
+                assert_eq!(schema, recursive.schema().clone(), "expect `schema` to be the same as recursive's");
 
                 let recursive_union = RecursiveUnion {
                     all,

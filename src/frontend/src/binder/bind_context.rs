@@ -111,6 +111,8 @@ pub struct RecursiveUnion {
     /// rhs part of the `UNION ALL` operator
     pub recursive: Box<BoundQuery>,
     /// the aligned schema for this union
+    /// will be the *same* schema as recursive's
+    /// this is just for a better readability
     pub schema: Schema,
 }
 
