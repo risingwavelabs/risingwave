@@ -93,10 +93,15 @@ update t3 set v2 = 2 where v1 > 1;
 statement ok
 flush;
 
-
 query IIII rowsort
 select v1, v2, v3 from mv3;
 ----
 1 5 NULL
 2 2 3
 3 2 NULL
+
+statement ok
+drop materialized view mv3;
+
+statement ok
+drop table t3;
