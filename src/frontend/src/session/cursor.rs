@@ -64,13 +64,14 @@ impl Cursor {
     pub async fn next(&mut self, count: Option<i32>) -> Result<Vec<Row>> {
         // `FETCH NEXT` is equivalent to `FETCH 1`.
         let fetch_count = count.unwrap_or(1);
-        let mut ans = vec![];
         if fetch_count <= 0 {
             Err(crate::error::ErrorCode::InternalError(
                 "FETCH a non-positive count is not supported yet".to_string(),
             )
             .into())
         } else {
+            // min with 100 to avoid allocating too many memory at once.
+            let mut ans = Vec::with_capacity(std::cmp::min(100, fetch_count) as usize);
             let mut cur = 0;
             while cur < fetch_count
                 && let Some(row) = self.next_once().await?

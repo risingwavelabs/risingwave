@@ -1493,13 +1493,13 @@ pub enum Statement {
     },
     /// DECLARE CURSOR
     DeclareCursor {
-        /// View name
         cursor_name: ObjectName,
         query: Box<Query>,
     },
     /// FETCH FROM CURSOR
     FetchCursor {
         cursor_name: ObjectName,
+        /// Number of rows to fetch. `None` means `FETCH ALL`.
         count: Option<i32>,
     },
     /// CLOSE CURSOR
