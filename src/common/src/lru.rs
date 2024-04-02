@@ -296,20 +296,15 @@ where
 
     pub fn clear(&mut self) {
         unsafe {
-            while !self.is_empty() {
-                let ptr = self.dummy.next.unwrap_unchecked();
+            let mut map = HashTable::new_in(self.alloc.clone());
+            std::mem::swap(&mut map, &mut self.map);
+
+            for ptr in map.drain() {
                 self.detach(ptr);
-                let entry = Box::from_raw_in(ptr.as_ptr(), self.alloc.clone());
-                let key = entry.key.assume_init();
-                let hash = self.hash_builder.hash_one(&key);
-                match self
-                    .map
-                    .entry(hash, |p| p.as_ref().key() == &key, |p| p.as_ref().hash)
-                {
-                    Entry::Occupied(o) => o.remove(),
-                    Entry::Vacant(_) => unreachable!(),
-                };
+                let _ = Box::from_raw_in(ptr.as_ptr(), self.alloc.clone());
             }
+
+            debug_assert!(self.is_empty());
         }
     }
 
