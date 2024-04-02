@@ -136,6 +136,7 @@ libc = "0.2"
 mach2 = "0.4"
 
 [dev-dependencies]
+coarsetime = "0.1"
 criterion = { workspace = true }
 expect-test = "1"
 more-asserts = "0.3"
@@ -166,6 +167,10 @@ harness = false
 
 [[bench]]
 name = "bench_array"
+harness = false
+
+[[bench]]
+name = "bench_sequencer"
 harness = false
 
 [lints]
