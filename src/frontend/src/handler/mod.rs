@@ -30,7 +30,6 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::*;
 
 use self::util::{DataChunkToRowSetAdapter, SourceSchemaCompatExt};
-use self::variable::handle_set_time_zone;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result};
 use crate::handler::cancel_job::handle_cancel;
@@ -521,7 +520,9 @@ pub async fn handle(
             variable,
             value,
         } => variable::handle_set(handler_args, variable, value),
-        Statement::SetTimeZone { local: _, value } => handle_set_time_zone(handler_args, value),
+        Statement::SetTimeZone { local: _, value } => {
+            variable::handle_set_time_zone(handler_args, value)
+        }
         Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable).await,
         Statement::CreateIndex {
             name,
@@ -932,6 +933,15 @@ pub async fn handle(
             object_name,
             comment,
         } => comment::handle_comment(handler_args, object_type, object_name, comment).await,
+        // Statement::DeclareCursor { cursor_name, query } => {
+        //     declare_cursor::handle_declare_cursor(handler_args, cursor_name, *query).await
+        // }
+        // Statement::FetchCursor { cursor_name, count } => {
+        //     fetch_cursor::handle_fetch_cursor(handler_args, cursor_name, count).await
+        // }
+        // Statement::CloseCursor { cursor_name } => {
+        //     close_cursor::handle_close_cursor(handler_args, cursor_name).await
+        // }
         _ => bail_not_implemented!("Unhandled statement: {}", stmt),
     }
 }

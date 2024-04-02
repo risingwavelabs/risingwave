@@ -634,6 +634,26 @@ impl fmt::Display for CreateSubscriptionStatement {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+enum CursorFrom {
+    Query(Box<Query>),
+    Subscription(ObjectName,Since),
+}
+
+impl fmt::Display for CursorFrom {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut v: Vec<String> = vec![];
+        match self{
+            CursorFrom::Query(query) => v.push(format!("{}", query.as_ref())),
+            CursorFrom::Subscription((name,since)) => {
+                v.push(format!("{}", name));
+                v.push(format!("{}", since));
+            },
+        }
+        v.iter().join(" ").fmt(f)
+    }
+}
 // sql_grammar!(DeclareCursorStatement {
 //     cursor_name: Ident,
 //     [Keyword::CURSOR],
@@ -646,30 +666,26 @@ impl fmt::Display for CreateSubscriptionStatement {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DeclareCursorStatement {
     pub cursor_name: ObjectName,
-    pub cursor_from: ObjectName,
-    pub rw_timestamp: Since,
+    pub cursor_from: CursorFrom,
 }
 
 impl ParseTo for DeclareCursorStatement {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
         impl_parse_to!(cursor_name: ObjectName, p);
 
-        let cursor_from = if p.parse_keyword(Keyword::CURSOR) && p.parse_keyword(Keyword::FOR) {
-            impl_parse_to!(cursor_from: ObjectName, p);
-            cursor_from
-        } else {
-            p.expected(
-                "CURSOR FOR after DECLARE CURSOR cursor_name",
-                p.peek_token(),
-            )?
+        p.expect_keyword(Keyword::CURSOR)?;
+        p.expect_keyword(Keyword::FOR)?;
+        
+        let cursor_from = if let Ok(query) = p.parse_query(){
+            CursorFrom::Query(Box::new(query))
+        }else{
+            impl_parse_to!(rw_timestamp: Since, p);
+            CursorFrom::Subscription(p.parse_object_name()?,rw_timestamp)
         };
-
-        impl_parse_to!(rw_timestamp: Since, p);
 
         Ok(Self {
             cursor_name,
             cursor_from,
-            rw_timestamp,
         })
     }
 }
@@ -677,8 +693,8 @@ impl fmt::Display for DeclareCursorStatement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut v: Vec<String> = vec![];
         impl_fmt_display!(cursor_name, v, self);
-        v.push(format!("CURSOR FOR {}", self.cursor_name));
-        impl_fmt_display!(rw_timestamp, v, self);
+        v.push("CURSOR FOR ".to_string());
+        impl_fmt_display!(cursor_from, v, self);
         v.iter().join(" ").fmt(f)
     }
 }
@@ -690,18 +706,35 @@ impl fmt::Display for DeclareCursorStatement {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct FetchCursorStatement {
     pub cursor_name: ObjectName,
+    pub count: u32,
 }
 
 impl ParseTo for FetchCursorStatement {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        let count = if p.parse_keyword(Keyword::NEXT) {
+            1
+        } else {
+            let count_str = p.parse_number_value()?;
+            count_str.parse::<u32>().map_err(|e| { 
+                ParserError::ParserError(format!("Could not parse '{}' as i32: {}", count_str, e))
+            })?
+        };
+        p.expect_keyword(Keyword::FROM)?;
         impl_parse_to!(cursor_name: ObjectName, p);
 
-        Ok(Self { cursor_name })
+        Ok(Self { cursor_name,count })
     }
 }
+
 impl fmt::Display for FetchCursorStatement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut v: Vec<String> = vec![];
+        if self.count == 1{
+            v.push("NEXT ".to_string());
+        }else {
+            impl_fmt_display!(count, v, self);
+        }
+        v.push("FROM ".to_string());
         impl_fmt_display!(cursor_name, v, self);
         v.iter().join(" ").fmt(f)
     }
@@ -713,12 +746,16 @@ impl fmt::Display for FetchCursorStatement {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CloseCursorStatement {
-    pub cursor_name: ObjectName,
+    pub cursor_name: Option<ObjectName>,
 }
 
 impl ParseTo for CloseCursorStatement {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
-        impl_parse_to!(cursor_name: ObjectName, p);
+        let cursor_name = if p.parse_keyword(Keyword::ALL) {
+            None
+        }else{
+            Some(p.parse_object_name()?)
+        };
 
         Ok(Self { cursor_name })
     }
@@ -726,7 +763,11 @@ impl ParseTo for CloseCursorStatement {
 impl fmt::Display for CloseCursorStatement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut v: Vec<String> = vec![];
-        impl_fmt_display!(cursor_name, v, self);
+        if let Some(cursor_name) = &self.cursor_name {
+            v.push(format!("{}", cursor_name));
+        }else{
+            v.push("ALL".to_string());
+        }
         v.iter().join(" ").fmt(f)
     }
 }

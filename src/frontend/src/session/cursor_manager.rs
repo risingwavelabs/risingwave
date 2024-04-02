@@ -28,7 +28,88 @@ use risingwave_sqlparser::ast::ObjectName;
 use crate::error::{ErrorCode, Result};
 use crate::handler::util::convert_logstore_i64_to_unix_millis;
 use crate::handler::RwPgResponse;
-pub struct Cursor {
+
+pub enum Cursor{
+    Subscription(SubscriptionCursor,Instant),
+    Query(QueryCursor),
+}
+impl Cursor{
+    pub async fn next(&mut self, count: i32) -> Result<Vec<Row>> {
+        match self {
+            Cursor::Subscription(cursor,_) => cursor.next(count).await,
+            Cursor::Query(cursor) => cursor.next(count).await,
+        }
+    }
+    pub fn pg_descs(&self) -> Vec<PgFieldDescriptor> {
+        match self {
+            Cursor::Subscription(cursor,_) => cursor.pg_descs(),
+            Cursor::Query(cursor) => cursor.pg_descs(),
+        }
+    }
+}
+
+pub struct QueryCursor {
+    row_stream: PgResponseStream,
+    pg_descs: Vec<PgFieldDescriptor>,
+    remaining_rows: VecDeque<Row>,
+}
+
+impl QueryCursor {
+    pub async fn new(
+        plan_fragmenter_result: BatchPlanFragmenterResult,
+        session: Arc<SessionImpl>,
+    ) -> Result<Self> {
+        assert_eq!(plan_fragmenter_result.stmt_type, StatementType::SELECT);
+        let (row_stream, pg_descs) = create_stream(session, plan_fragmenter_result, vec![]).await?;
+        Ok(Self {
+            row_stream,
+            pg_descs,
+            remaining_rows: VecDeque::<Row>::new(),
+        })
+    }
+
+    pub async fn next_once(&mut self) -> Result<Option<Row>> {
+        while self.remaining_rows.is_empty() {
+            let rows = self.row_stream.next().await;
+            let rows = match rows {
+                None => return Ok(None),
+                Some(row) => {
+                    row.map_err(|err| RwError::from(ErrorCode::InternalError(format!("{}", err))))?
+                }
+            };
+            self.remaining_rows = rows.into_iter().collect();
+        }
+        let row = self.remaining_rows.pop_front().unwrap();
+        Ok(Some(row))
+    }
+
+    pub async fn next(&mut self, count: i32) -> Result<Vec<CursorRowValue>> {
+        // `FETCH NEXT` is equivalent to `FETCH 1`.
+        if fetch_count <= 0 {
+            Err(crate::error::ErrorCode::InternalError(
+                "FETCH a non-positive count is not supported yet".to_string(),
+            )
+            .into())
+        } else {
+            // min with 100 to avoid allocating too many memory at once.
+            let mut ans = Vec::with_capacity(std::cmp::min(100, fetch_count) as usize);
+            let mut cur = 0;
+            while cur < fetch_count
+                && let Some(row) = self.next_once().await?
+            {
+                cur += 1;
+                ans.push(CursorRowValue::Row(row));
+            }
+            Ok(ans)
+        }
+    }
+
+    pub fn pg_descs(&self) -> Vec<PgFieldDescriptor> {
+        self.pg_descs.clone()
+    }
+}
+
+pub struct SubscriptionCursor {
     cursor_name: String,
     rw_pg_response: RwPgResponse,
     data_chunk_cache: VecDeque<Row>,
@@ -38,7 +119,7 @@ pub struct Cursor {
     pg_desc: Vec<PgFieldDescriptor>,
 }
 
-impl Cursor {
+impl SubscriptionCursor {
     pub async fn new(
         cursor_name: String,
         mut rw_pg_response: RwPgResponse,
@@ -95,17 +176,16 @@ impl Cursor {
         })
     }
 
-    pub async fn next(&mut self) -> Result<CursorRowValue> {
+    pub async fn next_once(&mut self) -> Result<CursorRowValue> {
         loop {
             if let Some(row) = self.data_chunk_cache.pop_front() {
                 // 1. fetch data
                 let new_row = row.take();
                 if self.is_snapshot {
                     // 1a. The rw_timestamp in the table is all the same, so don't need to check.
-                    return Ok(CursorRowValue::Row((
+                    return Ok(CursorRowValue::Row(
                         Row::new(build_row_with_snapshot(new_row)),
-                        self.pg_desc.clone(),
-                    )));
+                        ));
                 }
 
                 let timestamp_row: i64 = new_row
@@ -123,10 +203,9 @@ impl Cursor {
                     ));
                 } else {
                     // 1c. The rw_timestamp of this row is equal to self.rw_timestamp, return row
-                    return Ok(CursorRowValue::Row((
+                    return Ok(CursorRowValue::Row(
                         Row::new(build_row_with_logstore(new_row, timestamp_row)?),
-                        self.pg_desc.clone(),
-                    )));
+                        ));
                 }
             } else {
                 // 2. Cache is empty, need to query data
@@ -147,6 +226,22 @@ impl Cursor {
                 }
             }
         }
+    }
+
+    pub async fn next(&mut self, count: i32) -> Result<Vec<CursorRowValue>> {
+        // `FETCH NEXT` is equivalent to `FETCH 1`.
+        if fetch_count != 1 {
+            Err(crate::error::ErrorCode::InternalError(
+                "FETCH count with subscription is not supported".to_string(),
+            )
+            .into())
+        } else {
+            Ok(vec![self.next_once()?])
+        }
+    }
+
+    pub fn pg_descs(&self) -> Vec<PgFieldDescriptor> {
+        self.pg_descs.clone()
     }
 }
 
@@ -190,13 +285,13 @@ pub fn build_desc(mut descs: Vec<PgFieldDescriptor>, is_snapshot: bool) -> Vec<P
 }
 
 pub enum CursorRowValue {
-    Row((Row, Vec<PgFieldDescriptor>)),
+    Row(Row),
     QueryWithNextRwTimestamp(i64, ObjectName),
     QueryWithStartRwTimestamp(i64, ObjectName),
 }
 #[derive(Default)]
 pub struct CursorManager {
-    cursor_map: HashMap<String, (Cursor, Instant)>,
+    cursor_map: HashMap<String, Cursor>,
 }
 
 impl CursorManager {
@@ -217,7 +312,7 @@ impl CursorManager {
             ))
             .into());
         }
-        let cursor = Cursor::new(
+        let subscription_cursor = SubscriptionCursor::new(
             cursor_name,
             rw_pg_response,
             start_timestamp,
@@ -228,7 +323,7 @@ impl CursorManager {
         .await?;
         let cursor_need_drop_time = Instant::now() + Duration::from_secs(retention_secs);
         self.cursor_map
-            .insert(cursor.cursor_name.clone(), (cursor, cursor_need_drop_time));
+            .insert(cursor.cursor_name.clone(), Cursor::Subscription(subscription_cursor, cursor_need_drop_time));
         Ok(())
     }
 
@@ -242,7 +337,7 @@ impl CursorManager {
         subscription_name: ObjectName,
         retention_secs: u64,
     ) -> Result<()> {
-        let cursor = Cursor::new(
+        let cursor = SubscriptionCursor::new(
             cursor_name.clone(),
             rw_pg_response,
             start_timestamp,
@@ -253,7 +348,7 @@ impl CursorManager {
         .await?;
         let cursor_need_drop_time = Instant::now() + Duration::from_secs(retention_secs);
         self.cursor_map
-            .insert(cursor.cursor_name.clone(), (cursor, cursor_need_drop_time));
+            .insert(cursor.cursor_name.clone(), Cursor::Subscription(subscription_cursor, cursor_need_drop_time));
         Ok(())
     }
 
@@ -261,8 +356,8 @@ impl CursorManager {
         self.cursor_map.remove(&cursor_name);
     }
 
-    pub async fn get_row_with_cursor(&mut self, cursor_name: String) -> Result<CursorRowValue> {
-        if let Some((cursor, cursor_need_drop_time)) = self.cursor_map.get_mut(&cursor_name) {
+    pub async fn get_row_with_cursor(&mut self, cursor_name: String,count: u32) -> Result<(CursorRowValue,Vec<PgFieldDescriptor>)> {
+        if let Some(Cursor::Subscription(cursor,cursor_need_drop_time)) = self.cursor_map.get_mut(&cursor_name) {
             if Instant::now() > *cursor_need_drop_time {
                 self.remove_cursor(cursor_name);
                 return Err(ErrorCode::InternalError(
@@ -270,7 +365,7 @@ impl CursorManager {
                 )
                 .into());
             }
-            cursor.next().await
+            cursor.next(count).await
         } else {
             Err(ErrorCode::ItemNotFound(format!("Cannot find cursor `{}`", cursor_name)).into())
         }

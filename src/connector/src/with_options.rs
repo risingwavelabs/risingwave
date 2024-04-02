@@ -102,7 +102,8 @@ pub trait WithPropertiesExt: Get + Sized {
         connector.contains("-cdc")
     }
 
-    fn is_backfillable_cdc_connector(&self) -> bool {
+    /// It is shared when `CREATE SOURCE`, and not shared when `CREATE TABLE`. So called "shareable".
+    fn is_shareable_cdc_connector(&self) -> bool {
         self.is_cdc_connector() && CdcTableType::from_properties(self).can_backfill()
     }
 

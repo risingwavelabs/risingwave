@@ -13,6 +13,14 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_sqlparser::ast::{ObjectName, Query, Statement};
+
+use super::query::{gen_batch_plan_by_statement, gen_batch_plan_fragmenter};
+use super::RwPgResponse;
+use crate::error::Result;
+use crate::handler::HandlerArgs;
+use crate::session::cursor::QueryCursor;
+use crate::OptimizerContext;
 use pgwire::types::Format;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_sqlparser::ast::{DeclareCursorStatement, Ident, ObjectName, Statement};
@@ -26,7 +34,7 @@ use super::{HandlerArgs, RwPgResponse};
 use crate::error::{ErrorCode, Result};
 use crate::Binder;
 
-pub async fn handle_declare_cursor(
+pub async fn handle_declare_cursor_sub(
     handle_args: HandlerArgs,
     stmt: DeclareCursorStatement,
     formats: Vec<Format>,
@@ -125,4 +133,30 @@ fn check_cursor_unix_millis(unix_millis: u64, retention_seconds: u64) -> Result<
         return Err(ErrorCode::InternalError("rw_timestamp is too small, need to be large than the current unix_millis - subscription's retention time".to_string()).into());
     }
     Ok(())
+}
+
+pub async fn handle_declare_cursor(
+    handler_args: HandlerArgs,
+    cursor_name: ObjectName,
+    query: Query,
+) -> Result<RwPgResponse> {
+    let session = handler_args.session.clone();
+
+    let plan_fragmenter_result = {
+        let context = OptimizerContext::from_handler_args(handler_args);
+        let plan_result = gen_batch_plan_by_statement(
+            &session,
+            context.into(),
+            Statement::Query(Box::new(query.clone())),
+        )?;
+        gen_batch_plan_fragmenter(&session, plan_result)?
+    };
+
+    session
+        .add_cursor(
+            cursor_name,
+            QueryCursor::new(plan_fragmenter_result, session.clone()).await?,
+        )
+        .await?;
+    Ok(PgResponse::empty_result(StatementType::DECLARE_CURSOR))
 }

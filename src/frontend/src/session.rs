@@ -114,6 +114,7 @@ use crate::{FrontendOpts, PgResponseStream};
 
 pub(crate) mod current;
 pub(crate) mod cursor_manager;
+pub(crate) mod cursor;
 pub(crate) mod transaction;
 
 /// The global environment for the frontend server.

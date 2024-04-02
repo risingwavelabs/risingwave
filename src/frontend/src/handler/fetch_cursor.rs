@@ -16,7 +16,12 @@ use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::{Format, Row};
 use risingwave_sqlparser::ast::{FetchCursorStatement, Statement};
+use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_sqlparser::ast::ObjectName;
 
+use super::RwPgResponse;
+use crate::error::Result;
+use crate::handler::HandlerArgs;
 use super::query::handle_query;
 use super::util::gen_query_from_logstore_ge_rw_timestamp;
 use super::{HandlerArgs, RwPgResponse};
@@ -24,7 +29,7 @@ use crate::error::{ErrorCode, Result};
 use crate::session::cursor_manager::CursorRowValue;
 use crate::{Binder, PgResponseStream};
 
-pub async fn handle_fetch_cursor(
+pub async fn handle_fetch_cursor_sub(
     handle_args: HandlerArgs,
     stmt: FetchCursorStatement,
     formats: Vec<Format>,
@@ -95,4 +100,16 @@ fn build_fetch_cursor_response(rows: Vec<Row>, pg_descs: Vec<PgFieldDescriptor>)
         .row_cnt_opt(Some(rows.len() as i32))
         .values(PgResponseStream::from(rows), pg_descs)
         .into()
+}
+
+pub async fn handle_fetch_cursor(
+    handler_args: HandlerArgs,
+    cursor_name: ObjectName,
+    count: Option<i32>,
+) -> Result<RwPgResponse> {
+    let session = handler_args.session;
+    let (rows, pg_descs) = session.cursor_next(&cursor_name, count).await?;
+    Ok(PgResponse::builder(StatementType::FETCH_CURSOR)
+        .values(rows.into(), pg_descs)
+        .into())
 }

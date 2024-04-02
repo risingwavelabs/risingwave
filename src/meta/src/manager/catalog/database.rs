@@ -227,7 +227,7 @@ impl DatabaseManager {
                 && x.name.eq(&relation_key.2)
         }) {
             if t.stream_job_status == StreamJobStatus::Creating as i32 {
-                bail!("table is in creating procedure: {}", t.id);
+                bail!("table is in creating procedure, table id: {}", t.id);
             } else {
                 Err(MetaError::catalog_duplicated("table", &relation_key.2))
             }
@@ -402,12 +402,9 @@ impl DatabaseManager {
             .chain(self.indexes.keys().copied())
             .chain(self.sources.keys().copied())
             .chain(
-                // filter cdc source jobs
                 self.sources
                     .iter()
-                    .filter(|(_, source)| {
-                        source.info.as_ref().is_some_and(|info| info.cdc_source_job)
-                    })
+                    .filter(|(_, source)| source.info.as_ref().is_some_and(|info| info.is_shared()))
                     .map(|(id, _)| id)
                     .copied(),
             )
