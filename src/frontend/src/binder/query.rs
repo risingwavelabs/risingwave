@@ -283,6 +283,7 @@ impl Binder {
     }
 
     fn bind_with(&mut self, with: With) -> Result<()> {
+        println!("bind_with: {:#?}", with);
         for cte_table in with.cte_tables {
             let share_id = self.next_share_id();
             let Cte { alias, query, .. } = cte_table;
@@ -334,9 +335,6 @@ impl Binder {
                     .into());
                 }
 
-                // align the schema
-                let schema = self.bind_set_expr(body)?.schema().clone();
-
                 let entry = self
                     .context
                     .cte_to_relation
@@ -352,6 +350,9 @@ impl Binder {
                 if let Some(with) = with {
                     self.bind_with(with)?;
                 }
+
+                // align the schema after binding the cte's name
+                // let schema = self.bind_set_expr(body)?.schema().clone();
 
                 // todo: to be further reviewed
                 fn gen_query(s: SetExpr) -> Query {
@@ -374,12 +375,18 @@ impl Binder {
                 // reference: <https://www.postgresql.org/docs/16/sql-select.html#:~:text=the%20recursive%20self%2Dreference%20must%20appear%20on%20the%20right%2Dhand%20side%20of%20the%20UNION>
                 let base = self.bind_query(left)?;
 
+                println!("base: {:#?}", base);
+
+                let schema = base.schema().clone();
+
                 entry.borrow_mut().state = BindingCteState::BaseResolved {
                     schema: schema.clone(),
                 };
 
                 // bind the rest of the recursive cte
                 let recursive = self.bind_query(right)?;
+
+                println!("recursive: {:#?}", recursive);
 
                 let recursive_union = RecursiveUnion {
                     all,

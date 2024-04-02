@@ -122,6 +122,75 @@ impl BoundSetExpr {
 }
 
 impl Binder {
+    pub(crate) fn align_schema(
+        mut left: &mut BoundSetExpr,
+        mut right: &mut BoundSetExpr,
+        op: SetOperator,
+    ) -> Result<()> {
+        if left.schema().fields.len() != right.schema().fields.len() {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "each {} query must have the same number of columns",
+                op
+            ))
+            .into());
+        }
+
+        // handle type alignment for select union select
+        // e.g., select 1 UNION ALL select NULL
+        if let (BoundSetExpr::Select(l_select), BoundSetExpr::Select(r_select)) =
+            (&mut left, &mut right)
+        {
+            for (i, (l, r)) in l_select
+                .select_items
+                .iter_mut()
+                .zip_eq_fast(r_select.select_items.iter_mut())
+                .enumerate()
+            {
+                let Ok(column_type) = align_types(vec![l, r].into_iter()) else {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "{} types {} and {} cannot be matched. Columns' name are `{}` and `{}`.",
+                        op,
+                        l_select.schema.fields[i].data_type,
+                        r_select.schema.fields[i].data_type,
+                        l_select.schema.fields[i].name,
+                        r_select.schema.fields[i].name,
+                    ))
+                    .into());
+                };
+                l_select.schema.fields[i].data_type = column_type.clone();
+                r_select.schema.fields[i].data_type = column_type;
+            }
+        }
+
+        Self::validate(left, right, op)
+    }
+
+    pub(crate) fn validate(
+        left: &BoundSetExpr,
+        right: &BoundSetExpr,
+        op: SetOperator,
+    ) -> Result<()> {
+        for (a, b) in left
+            .schema()
+            .fields
+            .iter()
+            .zip_eq_fast(right.schema().fields.iter())
+        {
+            if a.data_type != b.data_type {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "{} types {} and {} cannot be matched. Columns' name are {} and {}.",
+                    op,
+                    a.data_type.prost_type_name().as_str_name(),
+                    b.data_type.prost_type_name().as_str_name(),
+                    a.name,
+                    b.name,
+                ))
+                .into());
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn bind_set_expr(&mut self, set_expr: SetExpr) -> Result<BoundSetExpr> {
         match set_expr {
             SetExpr::Select(s) => Ok(BoundSetExpr::Select(Box::new(self.bind_select(*s)?))),
@@ -133,7 +202,7 @@ impl Binder {
                 left,
                 right,
             } => {
-                match op {
+                match op.clone() {
                     SetOperator::Union | SetOperator::Intersect | SetOperator::Except => {
                         let mut left = self.bind_set_expr(*left)?;
                         // Reset context for right side, but keep `cte_to_relation`.
@@ -151,51 +220,7 @@ impl Binder {
                             .into());
                         }
 
-                        // Handle type alignment for select union select
-                        // E.g. Select 1 UNION ALL Select NULL
-                        if let (BoundSetExpr::Select(l_select), BoundSetExpr::Select(r_select)) =
-                            (&mut left, &mut right)
-                        {
-                            for (i, (l, r)) in l_select
-                                .select_items
-                                .iter_mut()
-                                .zip_eq_fast(r_select.select_items.iter_mut())
-                                .enumerate()
-                            {
-                                let Ok(column_type) = align_types(vec![l, r].into_iter()) else {
-                                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                                        "{} types {} and {} cannot be matched. Columns' name are `{}` and `{}`.",
-                                        op,
-                                        l_select.schema.fields[i].data_type,
-                                        r_select.schema.fields[i].data_type,
-                                        l_select.schema.fields[i].name,
-                                        r_select.schema.fields[i].name,
-                                    ))
-                                        .into());
-                                };
-                                l_select.schema.fields[i].data_type = column_type.clone();
-                                r_select.schema.fields[i].data_type = column_type;
-                            }
-                        }
-
-                        for (a, b) in left
-                            .schema()
-                            .fields
-                            .iter()
-                            .zip_eq_fast(right.schema().fields.iter())
-                        {
-                            if a.data_type != b.data_type {
-                                return Err(ErrorCode::InvalidInputSyntax(format!(
-                                    "{} types {} and {} cannot be matched. Columns' name are {} and {}.",
-                                    op,
-                                    a.data_type.prost_type_name().as_str_name(),
-                                    b.data_type.prost_type_name().as_str_name(),
-                                    a.name,
-                                    b.name,
-                                ))
-                                .into());
-                            }
-                        }
+                        Self::align_schema(&mut left, &mut right, op.clone())?;
 
                         if all {
                             match op {
