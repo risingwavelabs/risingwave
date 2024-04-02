@@ -610,9 +610,22 @@ impl S3ObjectStore {
             }
             Err(_) => {
                 // s3
-
                 let sdk_config = sdk_config_loader.load().await;
-                Client::new(&sdk_config)
+                #[cfg(madsim)]
+                let client = Client::new(&sdk_config);
+                #[cfg(not(madsim))]
+                let client = Client::from_conf(
+                    aws_sdk_s3::config::Builder::from(&sdk_config)
+                        .identity_cache(
+                            aws_sdk_s3::config::IdentityCache::lazy()
+                                .load_timeout(Duration::from_secs(
+                                    config.s3.identity_resolution_timeout_s,
+                                ))
+                                .build(),
+                        )
+                        .build(),
+                );
+                client
             }
         };
 
