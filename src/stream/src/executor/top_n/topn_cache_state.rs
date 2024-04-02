@@ -17,8 +17,8 @@ use std::alloc::Global;
 use std::collections::btree_map::{BTreeMap, ExtractIf, OccupiedEntry, Range};
 use std::ops::RangeBounds;
 
-use risingwave_common::estimate_size::{EstimateSize, KvSize};
 use risingwave_common::row::CompactedRow;
+use risingwave_common_estimate_size::{EstimateSize, KvSize};
 
 /// `CacheKey` is composed of `(order_by, remaining columns of pk)`.
 pub type CacheKey = (Vec<u8>, Vec<u8>);

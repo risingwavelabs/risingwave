@@ -28,6 +28,7 @@ use risingwave_common_service::observer_manager::{NotificationClient, ObserverMa
 use risingwave_hummock_sdk::key::{
     is_empty_key_range, vnode, vnode_range, TableKey, TableKeyRange,
 };
+use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
@@ -123,8 +124,9 @@ pub fn get_committed_read_version_tuple(
     mut key_range: TableKeyRange,
     epoch: HummockEpoch,
 ) -> (TableKeyRange, ReadVersionTuple) {
-    if let Some(index) = version.table_watermark_index().get(&table_id) {
-        index.rewrite_range_with_table_watermark(epoch, &mut key_range)
+    if let Some(table_watermarks) = version.version().table_watermarks.get(&table_id) {
+        TableWatermarksIndex::new_committed(table_watermarks.clone(), version.max_committed_epoch())
+            .rewrite_range_with_table_watermark(epoch, &mut key_range)
     }
     (key_range, (vec![], vec![], version))
 }

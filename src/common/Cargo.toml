@@ -44,7 +44,7 @@ either = "1"
 enum-as-inner = "0.6"
 enumflags2 = { version = "0.7.8" }
 ethnum = { version = "1", features = ["serde"] }
-fixedbitset = { version = "0.5", features = ["std"] }
+fixedbitset = "0.5"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 governor = { version = "0.6", default-features = false, features = ["std"] }
@@ -78,8 +78,9 @@ rand = "0.8"
 regex = "1"
 reqwest = { version = "0.11", features = ["json"] }
 risingwave-fields-derive = { path = "./fields-derive" }
+risingwave_common_estimate_size = { workspace = true }
 risingwave_common_metrics = { path = "./metrics" }
-risingwave_common_proc_macro = { path = "./proc_macro" }
+risingwave_common_proc_macro = { workspace = true }
 risingwave_error = { workspace = true }
 risingwave_pb = { workspace = true }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
@@ -92,7 +93,7 @@ serde_default = "0.1"
 serde_json = "1"
 serde_with = "3"
 smallbitset = "0.7.1"
-speedate = "0.13.0"
+speedate = "0.14.0"
 static_assertions = "1"
 strum = "0.26"
 strum_macros = "0.26"

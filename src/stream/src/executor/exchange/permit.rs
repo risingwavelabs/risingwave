@@ -17,8 +17,8 @@
 use std::sync::{Arc, LazyLock};
 
 use prometheus::{register_int_gauge_vec_with_registry, IntGauge, IntGaugeVec};
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::task_service::permits;
 use tokio::sync::{mpsc, AcquireError, Semaphore, SemaphorePermit};
 

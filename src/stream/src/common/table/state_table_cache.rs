@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use risingwave_common::array::Op;
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DefaultOrdered, ScalarRefImpl};
+use risingwave_common_estimate_size::EstimateSize;
 
 use crate::common::cache::{StateCache, TopNStateCache};
 

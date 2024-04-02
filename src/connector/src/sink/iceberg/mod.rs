@@ -39,7 +39,9 @@ use icelake::transaction::Transaction;
 use icelake::types::{data_file_from_json, data_file_to_json, Any, DataFile};
 use icelake::{Table, TableIdentifier};
 use itertools::Itertools;
-use risingwave_common::array::{to_iceberg_record_batch_with_schema, Op, StreamChunk};
+use risingwave_common::array::{
+    iceberg_to_arrow_type, to_iceberg_record_batch_with_schema, Op, StreamChunk,
+};
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
@@ -942,7 +944,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             .iter()
             .map(|meta| WriteResult::try_from(meta, &self.partition_type))
             .collect::<Result<Vec<WriteResult>>>()?;
-        if write_results.is_empty() || write_results.iter().all(|r| r.data_files.is_empty()) {
+        if write_results.is_empty() {
             tracing::debug!(?epoch, "no data to commit");
             return Ok(());
         }
@@ -998,17 +1000,11 @@ pub fn try_matches_arrow_schema(
             // RisingWave decimal type cannot specify precision and scale, so we use the default value.
             ArrowDataType::Decimal128(38, 0)
         } else {
-            ArrowDataType::try_from(*our_field_type).map_err(|e| anyhow!(e))?
+            iceberg_to_arrow_type(our_field_type).map_err(|e| anyhow!(e))?
         };
 
         let compatible = match (&converted_arrow_data_type, arrow_field.data_type()) {
-            (ArrowDataType::Decimal128(p1, s1), ArrowDataType::Decimal128(p2, s2)) => {
-                if for_source {
-                    true
-                } else {
-                    *p1 >= *p2 && *s1 >= *s2
-                }
-            }
+            (ArrowDataType::Decimal128(_, _), ArrowDataType::Decimal128(_, _)) => true,
             (left, right) => left == right,
         };
         if !compatible {

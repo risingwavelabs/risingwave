@@ -49,6 +49,7 @@ prometheus = { version = "0.13", features = ["process"] }
 prost = { workspace = true }
 rand = "0.8"
 risingwave_common = { workspace = true }
+risingwave_common_estimate_size = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_dml = { workspace = true }
 risingwave_expr = { workspace = true }
@@ -79,9 +80,6 @@ tokio-retry = "0.3"
 tokio-stream = "0.1"
 tonic = { workspace = true }
 tracing = "0.1"
-
-[target.'cfg(enable_task_local_alloc)'.dependencies]
-task_stats_alloc = { path = "../utils/task_stats_alloc" }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

@@ -28,6 +28,7 @@ normal = ["workspace-hack"]
 itertools = "0.12"
 serde = { version = "1.0", features = ["derive"], optional = true }
 tracing = "0.1"
+tracing-subscriber = "0.3"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

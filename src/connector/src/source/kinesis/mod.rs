@@ -23,7 +23,7 @@ use serde_with::{serde_as, DisplayFromStr};
 pub use source::KinesisMeta;
 use with_options::WithOptions;
 
-use crate::common::KinesisCommon;
+use crate::connector_common::KinesisCommon;
 use crate::source::kinesis::enumerator::client::KinesisSplitEnumerator;
 use crate::source::kinesis::source::reader::KinesisSplitReader;
 use crate::source::kinesis::split::KinesisSplit;
