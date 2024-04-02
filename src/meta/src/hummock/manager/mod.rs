@@ -1245,6 +1245,7 @@ impl HummockManager {
         Ok(())
     }
 
+    #[named]
     pub async fn get_compact_task(
         &self,
         compaction_group_id: CompactionGroupId,
