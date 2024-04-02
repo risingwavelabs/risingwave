@@ -585,6 +585,7 @@ pub(crate) async fn reparse_table_for_sink(
         constraints,
         source_watermarks,
         append_only,
+        on_conflict,
         ..
     } = definition
     else {
@@ -603,6 +604,7 @@ pub(crate) async fn reparse_table_for_sink(
         constraints,
         source_watermarks,
         append_only,
+        on_conflict,
     )
     .await?;
 

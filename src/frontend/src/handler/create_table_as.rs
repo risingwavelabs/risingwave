@@ -17,7 +17,7 @@ use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
-use risingwave_sqlparser::ast::{ColumnDef, ObjectName, Query, Statement};
+use risingwave_sqlparser::ast::{ColumnDef, ObjectName, OnConflict, Query, Statement};
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::binder::BoundStatement;
@@ -25,7 +25,6 @@ use crate::error::{ErrorCode, Result};
 use crate::handler::create_table::{gen_create_table_plan_without_bind, ColumnIdGenerator};
 use crate::handler::query::handle_query;
 use crate::{build_graph, Binder, OptimizerContext};
-
 pub async fn handle_create_as(
     handler_args: HandlerArgs,
     table_name: ObjectName,
@@ -33,6 +32,7 @@ pub async fn handle_create_as(
     query: Box<Query>,
     column_defs: Vec<ColumnDef>,
     append_only: bool,
+    on_conflict: Option<OnConflict>,
 ) -> Result<RwPgResponse> {
     if column_defs.iter().any(|column| column.data_type.is_some()) {
         return Err(ErrorCode::InvalidInputSyntax(
@@ -105,6 +105,7 @@ pub async fn handle_create_as(
             "".to_owned(), // TODO: support `SHOW CREATE TABLE` for `CREATE TABLE AS`
             vec![],        // No watermark should be defined in for `CREATE TABLE AS`
             append_only,
+            on_conflict,
             Some(col_id_gen.into_version()),
         )?;
         let mut graph = build_graph(plan)?;

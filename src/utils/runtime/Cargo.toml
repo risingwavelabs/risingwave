@@ -20,7 +20,7 @@ console = "0.15"
 console-subscriber = "0.2.0"
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-hostname = "0.3"
+hostname = "0.4"
 parking_lot = { version = "0.12", features = ["deadlock_detection"] }
 pprof = { version = "0.13", features = ["flamegraph"] }
 risingwave_common = { workspace = true }

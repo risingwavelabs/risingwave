@@ -37,7 +37,7 @@ risingwave_frontend = { workspace = true }
 risingwave_meta_node = { workspace = true }
 risingwave_rt = { workspace = true }
 shell-words = "1.1.0"
-strum = "0.25"
+strum = "0.26"
 strum_macros = "0.26"
 tempfile = "3"
 tikv-jemallocator = { workspace = true, features = [
@@ -66,9 +66,6 @@ vergen = { version = "8", default-features = false, features = [
     "git",
     "gitcl",
 ] }
-
-[target.'cfg(enable_task_local_alloc)'.dependencies]
-task_stats_alloc = { path = "../utils/task_stats_alloc" }
 
 [[bin]]
 name = "risingwave"
