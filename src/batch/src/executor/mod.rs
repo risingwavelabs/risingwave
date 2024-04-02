@@ -35,6 +35,7 @@ mod sort_agg;
 mod sort_over_window;
 mod source;
 mod sys_row_seq_scan;
+mod log_store_row_seq_scan;
 mod table_function;
 pub mod test_utils;
 mod top_n;
@@ -80,6 +81,7 @@ pub use update::*;
 pub use utils::*;
 pub use values::*;
 
+use self::log_store_row_seq_scan::LogStoreRowSeqScanExecutorBuilder;
 use self::test_utils::{BlockExecutorBuilder, BusyLoopExecutorBuilder};
 use crate::error::Result;
 use crate::executor::sys_row_seq_scan::SysRowSeqScanExecutorBuilder;
@@ -239,6 +241,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             // Follow NodeBody only used for test
             NodeBody::BlockExecutor => BlockExecutorBuilder,
             NodeBody::BusyLoopExecutor => BusyLoopExecutorBuilder,
+            NodeBody::LogStoreRowSeqScan => LogStoreRowSeqScanExecutorBuilder,
         }
         .await?;
 
