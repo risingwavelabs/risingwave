@@ -96,7 +96,7 @@ impl From<&PbWorkerNode> for ActiveModel {
             host: Set(host.host),
             port: Set(host.port),
             status: Set(worker.state().into()),
-            ..Default::default()
+            transaction_id: Set(worker.transactional_id.map(|id| id as _)),
         }
     }
 }
