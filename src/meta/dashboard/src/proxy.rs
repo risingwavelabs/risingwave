@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use anyhow::anyhow;
@@ -87,8 +88,17 @@ async fn proxy(
     let content = reqwest::get(url.clone()).await?;
 
     let resp = CachedResponse {
-        code: content.status(),
-        headers: content.headers().clone(),
+        code: hyper::StatusCode::from_u16(content.status().as_u16()).unwrap(),
+        headers: content.headers().iter().fold(
+            hyper::HeaderMap::with_capacity(content.headers().len()),
+            |mut header, it| {
+                header.insert(
+                    hyper::header::HeaderName::from_str(it.0.as_str()).unwrap(),
+                    hyper::header::HeaderValue::from_bytes(it.1.as_bytes()).unwrap(),
+                );
+                header
+            },
+        ),
         body: content.bytes().await?,
         uri: url,
     };
