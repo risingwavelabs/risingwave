@@ -669,7 +669,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
     }
 }
 
-/// Generates a new row with the behavior of "do update if not null" by replacing non-null columns from the old row.
+/// Generates a new row with the behavior of "do update if not null" by replacing columns in the old row with non-empty columns in the new row.
 ///
 /// # Arguments
 ///
@@ -680,11 +680,11 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
 ///
 /// ```no_run
 /// let old_row = vec![Some(1), None, Some(3)];
-/// let mut new_row = vec![Some(10), Some(20), Some(30)];
+/// let mut new_row = vec![Some(10), Some(20), None];
 ///
 /// // let updated_row = execute_do_update_if_not_null_replacement(old_row, new_row);
 ///
-/// // After the function call, updated_row will be [Some(10), None, Some(3)]
+/// // After the function call, updated_row will be [Some(10), Some(20), Some(3)]
 /// ```
 fn execute_do_update_if_not_null_replacement(
     old_row: OwnedRow,
@@ -692,11 +692,11 @@ fn execute_do_update_if_not_null_replacement(
     column_len: usize,
 ) -> OwnedRow {
     let mut res = Vec::with_capacity(column_len);
-    for (old_col, new_col) in old_row.into_inner().iter().zip_eq(new_row.into_iter()) {
-        if old_col.as_ref().is_some() {
+    for (old_col, new_col) in old_row.into_inner().iter().zip_eq_fast(new_row.into_iter()) {
+        if new_col.as_ref().is_some() {
             res.push(new_col);
         } else {
-            res.push(None);
+            res.push(old_col.clone());
         }
     }
 
@@ -1631,7 +1631,7 @@ mod tests {
         ]);
         let column_ids = vec![0.into(), 1.into()];
 
-        // should get (8, 3)
+        // should get (8, 2)
         let chunk1 = StreamChunk::from_pretty(
             " i i
             + 1 4
@@ -1639,7 +1639,7 @@ mod tests {
             + 3 6
             U- 8 .
             U+ 8 2
-            + 8 3",
+            + 8 .",
         );
 
         // should not get (3, x), should not get (5, 0)
@@ -1650,13 +1650,13 @@ mod tests {
             - 5 0",
         );
 
-        // should not get (2, None), (7, None)
+        // should get (2, None), (7, 8)
         let chunk3 = StreamChunk::from_pretty(
             " i i
             + 1 5
             + 7 .
             U- 2 4
-            U+ 2 8
+            U+ 2 .
             U- 9 0
             U+ 9 1",
         );
@@ -1716,7 +1716,7 @@ mod tests {
                     .unwrap();
                 assert_eq!(
                     row,
-                    Some(OwnedRow::new(vec![Some(8_i32.into()), Some(3_i32.into())]))
+                    Some(OwnedRow::new(vec![Some(8_i32.into()), Some(2_i32.into())]))
                 );
 
                 let row = table
@@ -1781,7 +1781,7 @@ mod tests {
                     )
                     .await
                     .unwrap();
-                assert_eq!(row, Some(OwnedRow::new(vec![Some(7_i32.into()), None])));
+                assert_eq!(row, Some(OwnedRow::new(vec![Some(7_i32.into()), Some(8_i32.into())])));
 
                 // check update wrong value
                 let row = table
@@ -1793,7 +1793,7 @@ mod tests {
                     .unwrap();
                 assert_eq!(
                     row,
-                    Some(OwnedRow::new(vec![Some(2_i32.into()), Some(8_i32.into())]))
+                    Some(OwnedRow::new(vec![Some(2_i32.into()), None]))
                 );
 
                 // check update wrong pk, should become insert
