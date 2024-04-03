@@ -2823,7 +2823,7 @@ impl Parser {
             Keyword::NOT,
             Keyword::NULL,
         ]) {
-            return parser_err!("On conflict behavior do update if not null is not supported yet.");
+            Ok(Some(OnConflict::DoUpdateIfNotNull))
         } else {
             Ok(None)
         }
