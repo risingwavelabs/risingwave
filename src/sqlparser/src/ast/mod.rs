@@ -1760,7 +1760,7 @@ impl fmt::Display for Statement {
                     write!(f, " ON CONFLICT {}", on_conflict_behavior)?;
                 }
                 if let Some(version_column) = with_version_column {
-                    write!(f, " WITH VERSION COLUMN ({})", version_column)?;
+                    write!(f, " WITH VERSION COLUMN({})", version_column)?;
                 }
                 if !include_column_options.is_empty() { // (Ident, Option<Ident>)
                     write!(f, "{}", display_comma_separated(

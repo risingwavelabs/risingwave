@@ -3250,7 +3250,7 @@ fn parse_create_table_on_conflict() {
 
 #[test]
 fn parse_create_table_on_conflict_with_version_column() {
-    let sql1 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT OVERWRITE WITH VERSION COLUMN (v2)";
+    let sql1 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT OVERWRITE WITH VERSION COLUMN(v2)";
     match verified_stmt(sql1) {
         Statement::CreateTable {
             name,
@@ -3264,6 +3264,18 @@ fn parse_create_table_on_conflict_with_version_column() {
         }
         _ => unreachable!(),
     }
+
+    let invalid_sql1 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT OVERWRITE WITH VERSION COLUMN(v2";
+    let res = parse_sql_statements(invalid_sql1);
+    assert!(res.is_err());
+
+    let invalid_sql2 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT OVERWRITE WITH VERSION COLUMN";
+    let res = parse_sql_statements(invalid_sql2);
+    assert!(res.is_err());
+
+    let invalid_sql3 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT OVERWRITE WITH COLUMN";
+    let res = parse_sql_statements(invalid_sql3);
+    assert!(res.is_err());
 }
 
 #[test]

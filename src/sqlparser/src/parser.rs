@@ -2549,17 +2549,10 @@ impl Parser {
 
     pub fn parse_with_version_column(&mut self) -> Result<Option<String>, ParserError> {
         if self.parse_keywords(&[Keyword::WITH, Keyword::VERSION, Keyword::COLUMN]) {
-            if self.next_token().token == Token::LParen {
-                let name = self.parse_identifier_non_reserved()?;
-                if self.next_token().token == Token::RParen {
-                    Ok(Some(name.value))
-                } else {
-                    Ok(None)
-                }
-            } else {
-                println!("没有遇到（");
-                Ok(None)
-            }
+            self.expect_token(&Token::LParen)?;
+            let name = self.parse_identifier_non_reserved()?;
+            self.expect_token(&Token::RParen)?;
+            Ok(Some(name.value))
         } else {
             Ok(None)
         }
