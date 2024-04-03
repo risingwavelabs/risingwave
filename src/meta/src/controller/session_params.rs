@@ -129,7 +129,7 @@ mod tests {
 
     #[tokio::test]
     #[cfg(not(madsim))]
-    async fn test_system_params() {
+    async fn test_session_params() {
         use sea_orm::QueryFilter;
 
         let env = MetaSrvEnv::for_test().await;

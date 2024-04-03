@@ -1,0 +1,19 @@
+statement ok
+set RW_IMPLICIT_FLUSH to true;
+
+connection other1
+query T
+show RW_IMPLICIT_FLUSH;
+----
+false
+
+statement ok
+alter system set RW_IMPLICIT_FLUSH to true;
+
+sleep 3s
+
+connection other2
+query T
+show RW_IMPLICIT_FLUSH;
+----
+true

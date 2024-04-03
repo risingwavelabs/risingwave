@@ -260,11 +260,11 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
                 Default::default()
             }
 
-            fn alias_to_entry_name(key_name: &str) -> &str {
+            fn alias_to_entry_name(key_name: &str) -> String {
                 match key_name {
                     #(#alias_to_entry_name_branches)*
                     _ => key_name,
-                }
+                }.to_ascii_lowercase()
             }
 
             #(#struct_impl_get)*
@@ -276,7 +276,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
             /// Set a parameter given it's name and value string.
             pub fn set(&mut self, key_name: &str, value: String, reporter: &mut impl ConfigReporter) -> SessionConfigResult<()> {
                 let key_name = Self::alias_to_entry_name(key_name);
-                match key_name.to_ascii_lowercase().as_ref() {
+                match key_name.as_ref() {
                     #(#set_match_branches)*
                     _ => Err(SessionConfigError::UnrecognizedEntry(key_name.to_string())),
                 }
@@ -285,7 +285,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
             /// Get a parameter by it's name.
             pub fn get(&self, key_name: &str) -> SessionConfigResult<String> {
                 let key_name = Self::alias_to_entry_name(key_name);
-                match key_name.to_ascii_lowercase().as_ref() {
+                match key_name.as_ref() {
                     #(#get_match_branches)*
                     _ => Err(SessionConfigError::UnrecognizedEntry(key_name.to_string())),
                 }
@@ -294,7 +294,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
             /// Reset a parameter by it's name.
             pub fn reset(&mut self, key_name: &str, reporter: &mut impl ConfigReporter) -> SessionConfigResult<()> {
                 let key_name = Self::alias_to_entry_name(key_name);
-                match key_name.to_ascii_lowercase().as_ref() {
+                match key_name.as_ref() {
                     #(#reset_match_branches)*
                     _ => Err(SessionConfigError::UnrecognizedEntry(key_name.to_string())),
                 }
@@ -316,7 +316,8 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
 
             /// Check if `SessionConfig` has a parameter.
             pub fn has_param(key_name: &str) -> bool {
-                PARAM_NAMES.contains(key_name)
+                let key_name = Self::alias_to_entry_name(key_name);
+                PARAM_NAMES.contains(key_name.as_str())
             }
         }
     }

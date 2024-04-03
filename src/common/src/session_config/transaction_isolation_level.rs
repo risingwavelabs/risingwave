@@ -30,7 +30,7 @@ impl FromStr for IsolationLevel {
     type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
+        match s.to_ascii_lowercase().as_str() {
             "read committed" => Ok(Self::ReadCommitted),
             "read uncommitted" => Ok(Self::ReadUncommitted),
             "repeatable read" => Ok(Self::RepeatableRead),

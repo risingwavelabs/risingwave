@@ -21,6 +21,7 @@ use risingwave_pb::meta::{
     SetSessionParamResponse,
 };
 use serde_json;
+use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
 pub enum SessionParamsServiceImpl {
@@ -38,8 +39,9 @@ impl SessionParamService for SessionParamsServiceImpl {
             SessionParamsServiceImpl::Controller(controller) => controller.get_params().await,
             SessionParamsServiceImpl::Manager(manager) => manager.get_params().await,
         };
-        let params_str = serde_json::to_string(&params)
-            .map_err(|e| Status::internal(format!("Failed to parse session config: {}", e)))?;
+        let params_str = serde_json::to_string(&params).map_err(|e| {
+            Status::internal(format!("Failed to parse session config: {}", e.as_report()))
+        })?;
 
         Ok(Response::new(GetSessionParamsResponse {
             params: params_str,
