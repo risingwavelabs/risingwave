@@ -27,9 +27,8 @@ use crate::error::{ErrorCode, Result};
 
 type LiteResult<T> = std::result::Result<T, ErrorCode>;
 
-use crate::binder::{BoundQuery, ShareId, COLUMN_GROUP_PREFIX};
-
 use super::BoundSetExpr;
+use crate::binder::{BoundQuery, ShareId, COLUMN_GROUP_PREFIX};
 
 #[derive(Debug, Clone)]
 pub struct ColumnBinding {
@@ -365,7 +364,9 @@ impl BindContext {
         for (k, (x, y)) in other.range_of {
             match self.range_of.entry(k.clone()) {
                 Entry::Occupied(e) => {
-                    if let BindingCteState::Bound { .. } = self.cte_to_relation.get(&k).unwrap().borrow().state.clone() {
+                    if let BindingCteState::Bound { .. } =
+                        self.cte_to_relation.get(&k).unwrap().borrow().state.clone()
+                    {
                         // do nothing
                     } else {
                         return Err(ErrorCode::InternalError(format!(
