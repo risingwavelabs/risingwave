@@ -271,6 +271,13 @@ pub struct SessionConfig {
     #[parameter(default = false)]
     background_ddl: bool,
 
+    /// Enable shared source. Currently only for Kafka.
+    ///
+    /// When enabled, `CREATE SOURCE` will create a source streaming job, and `CREATE MATERIALIZED VIEWS` from the source
+    /// will forward the data from the same source streaming job, and also backfill prior data from the external source.
+    #[parameter(default = false)]
+    rw_enable_shared_source: bool,
+
     /// Shows the server-side character set encoding. At present, this parameter can be shown but not set, because the encoding is determined at database creation time.
     #[parameter(default = SERVER_ENCODING)]
     server_encoding: String,

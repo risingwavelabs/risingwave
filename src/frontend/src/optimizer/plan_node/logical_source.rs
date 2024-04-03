@@ -35,7 +35,7 @@ use super::utils::{childless_record, Distill};
 use super::{
     generic, BatchProject, BatchSource, ColPrunable, ExprRewritable, Logical, LogicalFilter,
     LogicalProject, PlanBase, PlanRef, PredicatePushdown, StreamProject, StreamRowIdGen,
-    StreamSource, ToBatch, ToStream,
+    StreamSource, StreamSourceScan, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::Result;
@@ -76,6 +76,7 @@ impl LogicalSource {
         as_of: Option<AsOf>,
     ) -> Result<Self> {
         let kafka_timestamp_range = (Bound::Unbounded, Bound::Unbounded);
+
         let core = generic::Source {
             catalog: source_catalog,
             column_catalog,
@@ -517,9 +518,11 @@ impl ToBatch for LogicalSource {
 impl ToStream for LogicalSource {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         let mut plan: PlanRef;
+
         match self.core.kind {
-            SourceNodeKind::CreateTable | SourceNodeKind::CreateSourceWithStreamjob => {
-                // Note: for create table, row_id and generated columns is created in plan_root.gen_table_plan
+            SourceNodeKind::CreateTable | SourceNodeKind::CreateSharedSource => {
+                // Note: for create table, row_id and generated columns is created in plan_root.gen_table_plan.
+                // for shared source, row_id and generated columns is created after SourceBackfill node.
                 if self.core.is_new_fs_connector() {
                     plan = Self::create_fs_list_plan(self.core.clone())?;
                     plan = StreamFsFetch::new(plan, self.core.clone()).into();
@@ -529,11 +532,18 @@ impl ToStream for LogicalSource {
             }
             SourceNodeKind::CreateMViewOrBatch => {
                 // Create MV on source.
-                if self.core.is_new_fs_connector() {
-                    plan = Self::create_fs_list_plan(self.core.clone())?;
-                    plan = StreamFsFetch::new(plan, self.core.clone()).into();
+                let use_shared_source = self.source_catalog().is_some_and(|c| c.info.is_shared())
+                    && self.ctx().session_ctx().config().rw_enable_shared_source();
+                if use_shared_source {
+                    plan = StreamSourceScan::new(self.core.clone()).into();
                 } else {
-                    plan = StreamSource::new(self.core.clone()).into()
+                    // non-shared source
+                    if self.core.is_new_fs_connector() {
+                        plan = Self::create_fs_list_plan(self.core.clone())?;
+                        plan = StreamFsFetch::new(plan, self.core.clone()).into();
+                    } else {
+                        plan = StreamSource::new(self.core.clone()).into()
+                    }
                 }
 
                 if let Some(exprs) = &self.output_exprs {

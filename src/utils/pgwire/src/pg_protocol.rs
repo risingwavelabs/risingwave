@@ -295,6 +295,8 @@ where
             let elapsed = start.elapsed();
 
             // Always log if an error occurs.
+            // Note: all messages will be processed through this code path, making it the
+            //       only necessary place to log errors.
             if let Err(error) = &result {
                 tracing::error!(error = %error.as_report(), "error when process message");
             }
@@ -569,11 +571,8 @@ where
         session: Arc<SM::Session>,
     ) -> PsqlResult<()> {
         // Parse sql.
-        let stmts = Parser::parse_sql(&sql)
-            .inspect_err(
-                |e| tracing::error!(sql = &*sql, error = %e.as_report(), "failed to parse sql"),
-            )
-            .map_err(|err| PsqlError::SimpleQueryError(err.into()))?;
+        let stmts =
+            Parser::parse_sql(&sql).map_err(|err| PsqlError::SimpleQueryError(err.into()))?;
         if stmts.is_empty() {
             self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         }
@@ -692,9 +691,6 @@ where
 
         let stmt = {
             let stmts = Parser::parse_sql(sql)
-                .inspect_err(
-                    |e| tracing::error!(sql, error = %e.as_report(), "failed to parse sql"),
-                )
                 .map_err(|err| PsqlError::ExtendedPrepareError(err.into()))?;
 
             if stmts.len() > 1 {

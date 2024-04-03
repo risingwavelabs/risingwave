@@ -15,6 +15,9 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
+use prometheus::core::Atomic;
+use risingwave_common_metrics::TrAdderAtomic;
+
 use super::MonitoredGlobalAlloc;
 use crate::metrics::{LabelGuardedIntGauge, TrAdderGauge};
 
@@ -26,6 +29,16 @@ pub trait MemCounter: Send + Sync + 'static {
 impl MemCounter for TrAdderGauge {
     fn add(&self, bytes: i64) {
         self.add(bytes)
+    }
+
+    fn get_bytes_used(&self) -> i64 {
+        self.get()
+    }
+}
+
+impl MemCounter for TrAdderAtomic {
+    fn add(&self, bytes: i64) {
+        self.inc_by(bytes)
     }
 
     fn get_bytes_used(&self) -> i64 {

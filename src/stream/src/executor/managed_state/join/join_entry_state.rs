@@ -16,7 +16,7 @@ use risingwave_common_estimate_size::KvSize;
 use thiserror::Error;
 
 use super::*;
-use crate::consistency::enable_strict_consistency;
+use crate::consistency::{consistency_error, enable_strict_consistency};
 
 /// We manages a `HashMap` in memory for all entries belonging to a join key.
 /// When evicted, `cached` does not hold any entries.
@@ -70,7 +70,7 @@ impl JoinEntryState {
             assert!(ret.is_ok(), "we have removed existing entry, if any");
             if removed {
                 // if not silent, we should log the error
-                tracing::error!(?key, "double inserting a join state entry");
+                consistency_error!(?key, "double inserting a join state entry");
             }
         }
 
@@ -85,10 +85,7 @@ impl JoinEntryState {
         } else if enable_strict_consistency() {
             Err(JoinEntryError::RemoveError)
         } else {
-            tracing::error!(
-                ?pk,
-                "removing a join state entry but it is not in the cache"
-            );
+            consistency_error!(?pk, "removing a join state entry but it's not in the cache");
             Ok(())
         }
     }

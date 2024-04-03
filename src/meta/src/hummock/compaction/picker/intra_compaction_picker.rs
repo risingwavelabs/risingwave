@@ -348,10 +348,10 @@ impl WholeLevelCompactionPicker {
             let mut total_file_count = 0;
             let mut wait_enough = false;
             for next_level in l0.sub_levels.iter().skip(idx) {
-                if select_input_size > max_compaction_bytes
+                if (select_input_size > max_compaction_bytes
                     || total_file_count > self.config.level0_max_compact_file_number
-                    || (next_level.vnode_partition_count == partition_count
-                        && select_level_inputs.len() > 1)
+                    || next_level.vnode_partition_count == partition_count)
+                    && select_level_inputs.len() > 1
                 {
                     wait_enough = true;
                     break;
@@ -763,5 +763,33 @@ pub mod tests {
             .unwrap();
         assert!(is_l0_trivial_move(&ret));
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
+    }
+    #[test]
+    fn test_pick_whole_level() {
+        let config = Arc::new(
+            CompactionConfigBuilder::new()
+                .level0_max_compact_file_number(20)
+                .build(),
+        );
+        let mut table_infos = vec![];
+        for epoch in 1..3 {
+            let base = epoch * 100;
+            let mut ssts = vec![];
+            for i in 1..50 {
+                let left = (i as usize) * 100;
+                let right = left + 100;
+                ssts.push(generate_table(base + i, 1, left, right, epoch));
+            }
+            table_infos.push(ssts);
+        }
+
+        let l0 = generate_l0_nonoverlapping_multi_sublevels(table_infos);
+        let compaction_task_validator = Arc::new(CompactionTaskValidator::new(config.clone()));
+        let picker = WholeLevelCompactionPicker::new(config, compaction_task_validator);
+        let level_handler = LevelHandler::new(0);
+        let ret = picker
+            .pick_whole_level(&l0, &level_handler, 4, &mut LocalPickerStatistic::default())
+            .unwrap();
+        assert_eq!(ret.input_levels.len(), 2);
     }
 }

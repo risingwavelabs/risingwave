@@ -1,0 +1,58 @@
+control substitution on
+
+statement ok
+SET rw_enable_shared_source TO true;
+
+statement ok
+create source s0 (v1 int, v2 varchar) with (
+  connector = 'kafka',
+  topic = 'kafka_4_partition_topic',
+  properties.bootstrap.server = '${KAFKA_BOOTSTRAP_SERVER:message_queue:29092}',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+create materialized view mv_1 as select * from s0;
+
+statement ok
+SET rw_enable_shared_source TO false;
+
+statement ok
+create materialized view mv_2 as select * from s0;
+
+statement ok
+flush;
+
+# Wait enough time to ensure SourceExecutor consumes all Kafka data.
+sleep 1s
+
+query IT rowsort
+select v1, v2 from s0;
+----
+1 1
+2 22
+3 333
+4 4444
+
+query IT rowsort
+select v1, v2 from mv_1;
+----
+1 1
+2 22
+3 333
+4 4444
+
+query IT rowsort
+select v1, v2 from mv_2;
+----
+1 1
+2 22
+3 333
+4 4444
+
+# TODO: add more data to the topic and re-check the data. Currently there's no good test infra to do this...
+# To test the correctness of source backfill, we might need to keep producing data during an interval, to let it go
+# through the backfill stage to the forward stage.
+
+statement ok
+drop source s0 cascade;
