@@ -30,4 +30,4 @@ pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
 
-crate::derive_array_from_byte_array!(LevelHandlers, PbLevelHandler, PbLevelHandlerArray);
+crate::derive_array_from_blob!(LevelHandlers, PbLevelHandler, PbLevelHandlerArray);

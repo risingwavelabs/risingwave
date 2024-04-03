@@ -167,7 +167,7 @@ macro_rules! derive_from_json_struct {
 }
 
 /// Defines struct with a byte array that derives `DeriveValueType`, it will helps to map blob stored in database to Pb struct.
-macro_rules! derive_from_byte_array {
+macro_rules! derive_from_blob {
     ($struct_name:ident, $field_type:ty) => {
         #[derive(Clone, PartialEq, Eq, Serialize, Deserialize, DeriveValueType)]
         pub struct $struct_name(#[sea_orm] Vec<u8>);
@@ -209,7 +209,7 @@ macro_rules! derive_from_byte_array {
 }
 
 /// Defines struct with a byte array that derives `DeriveValueType`, it will helps to map blob stored in database to Pb struct array.
-macro_rules! derive_array_from_byte_array {
+macro_rules! derive_array_from_blob {
     ($struct_name:ident, $field_type:ty, $field_array_name:ident) => {
         #[derive(Clone, PartialEq, Eq, DeriveValueType)]
         pub struct $struct_name(#[sea_orm] Vec<u8>);
@@ -254,7 +254,7 @@ macro_rules! derive_array_from_byte_array {
     };
 }
 
-pub(crate) use {derive_array_from_byte_array, derive_from_byte_array, derive_from_json_struct};
+pub(crate) use {derive_array_from_blob, derive_from_blob, derive_from_json_struct};
 
 derive_from_json_struct!(I32Array, Vec<i32>);
 
@@ -282,57 +282,57 @@ impl From<BTreeMap<u32, Vec<u32>>> for ActorUpstreamActors {
     }
 }
 
-derive_from_byte_array!(StreamNode, PbStreamNode);
-derive_from_byte_array!(DataType, risingwave_pb::data::PbDataType);
-derive_array_from_byte_array!(
+derive_from_blob!(StreamNode, PbStreamNode);
+derive_from_blob!(DataType, risingwave_pb::data::PbDataType);
+derive_array_from_blob!(
     DataTypeArray,
     risingwave_pb::data::PbDataType,
     PbDataTypeArray
 );
-derive_array_from_byte_array!(
+derive_array_from_blob!(
     FieldArray,
     risingwave_pb::plan_common::PbField,
     PbFieldArray
 );
 derive_from_json_struct!(Property, HashMap<String, String>);
-derive_from_byte_array!(ColumnCatalog, risingwave_pb::plan_common::PbColumnCatalog);
-derive_array_from_byte_array!(
+derive_from_blob!(ColumnCatalog, risingwave_pb::plan_common::PbColumnCatalog);
+derive_array_from_blob!(
     ColumnCatalogArray,
     risingwave_pb::plan_common::PbColumnCatalog,
     PbColumnCatalogArray
 );
-derive_from_byte_array!(StreamSourceInfo, risingwave_pb::catalog::PbStreamSourceInfo);
-derive_from_byte_array!(WatermarkDesc, risingwave_pb::catalog::PbWatermarkDesc);
-derive_array_from_byte_array!(
+derive_from_blob!(StreamSourceInfo, risingwave_pb::catalog::PbStreamSourceInfo);
+derive_from_blob!(WatermarkDesc, risingwave_pb::catalog::PbWatermarkDesc);
+derive_array_from_blob!(
     WatermarkDescArray,
     risingwave_pb::catalog::PbWatermarkDesc,
     PbWatermarkDescArray
 );
-derive_array_from_byte_array!(
+derive_array_from_blob!(
     ExprNodeArray,
     risingwave_pb::expr::PbExprNode,
     PbExprNodeArray
 );
-derive_array_from_byte_array!(
+derive_array_from_blob!(
     ColumnOrderArray,
     risingwave_pb::common::PbColumnOrder,
     PbColumnOrderArray
 );
-derive_from_byte_array!(SinkFormatDesc, risingwave_pb::catalog::PbSinkFormatDesc);
-derive_from_byte_array!(Cardinality, risingwave_pb::plan_common::PbCardinality);
-derive_from_byte_array!(TableVersion, risingwave_pb::catalog::table::PbTableVersion);
-derive_from_byte_array!(
+derive_from_blob!(SinkFormatDesc, risingwave_pb::catalog::PbSinkFormatDesc);
+derive_from_blob!(Cardinality, risingwave_pb::plan_common::PbCardinality);
+derive_from_blob!(TableVersion, risingwave_pb::catalog::table::PbTableVersion);
+derive_from_blob!(
     PrivateLinkService,
     risingwave_pb::catalog::connection::PbPrivateLinkService
 );
-derive_from_byte_array!(AuthInfo, risingwave_pb::user::PbAuthInfo);
+derive_from_blob!(AuthInfo, risingwave_pb::user::PbAuthInfo);
 
-derive_from_byte_array!(ConnectorSplits, risingwave_pb::source::ConnectorSplits);
-derive_from_byte_array!(VnodeBitmap, risingwave_pb::common::Buffer);
-derive_from_byte_array!(ActorMapping, risingwave_pb::stream_plan::PbActorMapping);
-derive_from_byte_array!(ExprContext, risingwave_pb::plan_common::PbExprContext);
+derive_from_blob!(ConnectorSplits, risingwave_pb::source::ConnectorSplits);
+derive_from_blob!(VnodeBitmap, risingwave_pb::common::Buffer);
+derive_from_blob!(ActorMapping, risingwave_pb::stream_plan::PbActorMapping);
+derive_from_blob!(ExprContext, risingwave_pb::plan_common::PbExprContext);
 
-derive_from_byte_array!(
+derive_from_blob!(
     FragmentVnodeMapping,
     risingwave_pb::common::ParallelUnitMapping
 );

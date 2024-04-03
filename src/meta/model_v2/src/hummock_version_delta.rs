@@ -35,7 +35,7 @@ pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
 
-crate::derive_from_byte_array!(FullVersionDelta, PbHummockVersionDelta);
+crate::derive_from_blob!(FullVersionDelta, PbHummockVersionDelta);
 
 impl From<Model> for PbHummockVersionDelta {
     fn from(value: Model) -> Self {

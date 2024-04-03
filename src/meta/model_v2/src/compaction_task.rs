@@ -32,7 +32,7 @@ pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
 
-crate::derive_from_byte_array!(CompactionTask, PbCompactTask);
+crate::derive_from_blob!(CompactionTask, PbCompactTask);
 
 impl From<Model> for CompactTaskAssignment {
     fn from(value: Model) -> Self {

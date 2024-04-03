@@ -31,4 +31,4 @@ pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
 
-crate::derive_from_byte_array!(CompactionConfig, PbCompactionConfig);
+crate::derive_from_blob!(CompactionConfig, PbCompactionConfig);
