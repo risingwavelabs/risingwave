@@ -26,5 +26,10 @@ pub struct BoundRecursiveUnion {
 }
 
 impl RewriteExprsRecursive for BoundRecursiveUnion {
-    fn rewrite_exprs_recursive(&mut self, _rewriter: &mut impl crate::expr::ExprRewriter) {}
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
+        // rewrite base case
+        self.base.rewrite_exprs_recursive(rewriter);
+        // rewrite recursive case
+        self.recursive.rewrite_exprs_recursive(rewriter);
+    }
 }
