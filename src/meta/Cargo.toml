@@ -47,7 +47,6 @@ prometheus = "0.13"
 prometheus-http-query = "0.8"
 prost = { workspace = true }
 rand = "0.8"
-reqwest = "0.11"
 risingwave_backup = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_heap_profiling = { workspace = true }
@@ -86,8 +85,8 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
-axum = "0.6"
-tower-http = { version = "0.4", features = [
+axum = "=0.7.4"
+tower-http = { version = "0.5", features = [
     "add-extension",
     "cors",
     "fs",
