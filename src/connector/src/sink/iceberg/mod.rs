@@ -948,6 +948,12 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             tracing::debug!(?epoch, "no data to commit");
             return Ok(());
         }
+        let file_names = write_results
+            .iter()
+            .flat_map(|s| s.data_files.iter().chain(s.delete_files.iter()))
+            .map(|f| f.file_path.clone())
+            .collect::<Vec<_>>();
+        tracing::info!("commit data: {file_names:?}");
         let mut txn = Transaction::new(&mut self.table);
         write_results.into_iter().for_each(|s| {
             txn.append_data_file(s.data_files);

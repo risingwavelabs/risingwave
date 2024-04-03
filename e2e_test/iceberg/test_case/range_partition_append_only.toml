@@ -36,6 +36,8 @@ verify_data = """
 """
 
 drop_sqls = [
+ 'SELECT * FROM demo_db.range_partition_append_only_table',
+ 'SELECT * FROM demo_db.range_partition_append_only_table.files',
  'DROP TABLE IF EXISTS demo_db.range_partition_append_only_table',
  'DROP SCHEMA IF EXISTS demo_db'
 ]

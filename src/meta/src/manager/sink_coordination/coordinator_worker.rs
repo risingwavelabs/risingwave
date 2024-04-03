@@ -262,6 +262,9 @@ impl CoordinatorWorker {
                         return Err(anyhow!("expect commit request but get {:?}", req));
                     }
                     Ok(None) => {
+                        if epoch.is_some() {
+                            warn!("reaches the end while has some metadata");
+                        }
                         return Err(anyhow!(
                             "sink writer input reaches the end while collecting metadata"
                         ));
@@ -289,7 +292,7 @@ impl CoordinatorWorker {
             })?;
             loop {
                 let (epoch, metadata_list) = self.collect_all_metadata().await.map_err(|e| {
-                    error!(error = %e.as_report(), "failed to collect all metadata");
+                    error!(error = %e.as_report(), "failed to collect all metadata for epoch");
                 })?;
                 // TODO: measure commit time
                 coordinator.commit(epoch, metadata_list).await.map_err(

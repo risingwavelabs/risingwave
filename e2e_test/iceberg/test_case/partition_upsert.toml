@@ -31,6 +31,8 @@ verify_data = """
 """
 
 drop_sqls = [
+ 'SELECT * FROM demo_db.partition_upsert_table',
+ 'SELECT * FROM demo_db.partition_upsert_table.files',
  'DROP TABLE IF EXISTS demo_db.partition_upsert_table',
  'DROP SCHEMA IF EXISTS demo_db'
 ]

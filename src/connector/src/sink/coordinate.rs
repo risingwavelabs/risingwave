@@ -67,6 +67,7 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> SinkWriter for Coordi
             self.coordinator_stream_handle
                 .commit(self.epoch, metadata)
                 .await?;
+            tracing::info!("pre commit epoch: {}", self.epoch);
             Ok(())
         } else {
             if metadata.is_some() {
