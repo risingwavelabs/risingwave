@@ -350,48 +350,26 @@ impl Binder {
                     self.bind_with(with)?;
                 }
 
-                // align the schema after binding the cte's name
-                // let schema = self.bind_set_expr(body)?.schema().clone();
-
-                // todo: to be further reviewed
-                fn gen_query(s: SetExpr) -> Query {
-                    Query {
-                        body: s,
-                        order_by: vec![],
-                        limit: None,
-                        offset: None,
-                        with: None,
-                        fetch: None,
-                    }
-                }
-
-                // todo: how should we deal with separate order by / limit clause?
-                let left = gen_query(*left);
-                let right = gen_query(*right);
-
                 // We assume `left` is the base term, otherwise the implementation may be very hard.
                 // The behavior is the same as PostgreSQL's.
                 // reference: <https://www.postgresql.org/docs/16/sql-select.html#:~:text=the%20recursive%20self%2Dreference%20must%20appear%20on%20the%20right%2Dhand%20side%20of%20the%20UNION>
-                let mut base = self.bind_query(left)?;
+                let mut base = self.bind_set_expr(*left)?;
 
                 entry.borrow_mut().state = BindingCteState::BaseResolved {
                     schema: base.schema().clone(),
                 };
 
                 // bind the rest of the recursive cte
-                let mut recursive = self.bind_query(right)?;
+                let mut recursive = self.bind_set_expr(*right)?;
 
                 // todo: add validate check here for *bound* `base` and `recursive`
-                let BoundQuery { body: left, .. } = &mut base;
-                let BoundQuery { body: right, .. } = &mut recursive;
-
-                Self::align_schema(left, right, SetOperator::Union)?;
+                Self::align_schema(&mut base, &mut recursive, SetOperator::Union)?;
 
                 // please note that even after aligning, the schema of `left`
                 // may not be the same as `right`; this is because there may
                 // be case(s) where the `base` term is just a value, and the
                 // `recursive` term is a select expression / statement.
-                let schema = right.schema().clone();
+                let schema = recursive.schema().clone();
                 // yet another sanity check
                 assert_eq!(
                     schema,

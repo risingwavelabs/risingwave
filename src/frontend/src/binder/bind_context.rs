@@ -29,6 +29,8 @@ type LiteResult<T> = std::result::Result<T, ErrorCode>;
 
 use crate::binder::{BoundQuery, ShareId, COLUMN_GROUP_PREFIX};
 
+use super::BoundSetExpr;
+
 #[derive(Debug, Clone)]
 pub struct ColumnBinding {
     pub table_name: String,
@@ -107,9 +109,9 @@ pub struct RecursiveUnion {
     /// otherwise binding will fail.
     pub all: bool,
     /// lhs part of the `UNION ALL` operator
-    pub base: Box<BoundQuery>,
+    pub base: Box<BoundSetExpr>,
     /// rhs part of the `UNION ALL` operator
-    pub recursive: Box<BoundQuery>,
+    pub recursive: Box<BoundSetExpr>,
     /// the aligned schema for this union
     /// will be the *same* schema as recursive's
     /// this is just for a better readability
@@ -361,13 +363,17 @@ impl BindContext {
             entry.extend(v.into_iter().map(|x| x + begin));
         }
         for (k, (x, y)) in other.range_of {
-            match self.range_of.entry(k) {
+            match self.range_of.entry(k.clone()) {
                 Entry::Occupied(e) => {
-                    return Err(ErrorCode::InternalError(format!(
-                        "Duplicated table name while merging adjacent contexts: {}",
-                        e.key()
-                    ))
-                    .into());
+                    if let BindingCteState::Bound { .. } = self.cte_to_relation.get(&k).unwrap().borrow().state.clone() {
+                        // do nothing
+                    } else {
+                        return Err(ErrorCode::InternalError(format!(
+                            "Duplicated table name while merging adjacent contexts: {}",
+                            e.key()
+                        ))
+                        .into());
+                    }
                 }
                 Entry::Vacant(entry) => {
                     entry.insert((begin + x, begin + y));

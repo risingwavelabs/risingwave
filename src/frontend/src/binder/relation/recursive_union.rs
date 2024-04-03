@@ -13,16 +13,16 @@
 // limitations under the License.
 
 use crate::binder::statement::RewriteExprsRecursive;
-use crate::binder::BoundQuery;
+use crate::binder::BoundSetExpr;
 
 /// a *bound* recursive union representation.
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct BoundRecursiveUnion {
     /// the *bound* base case
-    pub(crate) base: BoundQuery,
+    pub(crate) base: BoundSetExpr,
     /// the *bound* recursive case
-    pub(crate) recursive: BoundQuery,
+    pub(crate) recursive: BoundSetExpr,
 }
 
 impl RewriteExprsRecursive for BoundRecursiveUnion {
