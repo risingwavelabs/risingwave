@@ -12,14 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::str::FromStr;
 use std::sync::LazyLock;
 
 use chrono::{NaiveDate, Utc};
+use pg_bigdecimal::PgNumeric;
+use risingwave_common::array::ArrayBuilderImpl;
 use risingwave_common::catalog::Schema;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
-    DataType, Date, Decimal, Interval, JsonbVal, ListValue, ScalarImpl, Time, Timestamp,
+    DataType, Date, Decimal, Int256, Interval, JsonbVal, ListValue, ScalarImpl, Time, Timestamp,
     Timestamptz,
 };
 use rust_decimal::Decimal as RustDecimal;
@@ -111,6 +114,58 @@ macro_rules! handle_data_type {
     }};
 }
 
+fn postgres_decimal_to_rw_int256(
+    row: &tokio_postgres::Row,
+    idx: usize,
+    name: &str,
+    builder: Option<&mut ArrayBuilderImpl>,
+) -> Option<ScalarImpl> {
+    let res = row.try_get::<_, Option<PgNumeric>>(idx);
+    match res {
+        Ok(val) => {
+            if let Some(PgNumeric {
+                n: Some(big_decimal),
+            }) = val
+            {
+                match Int256::from_str(big_decimal.to_string().as_str()) {
+                    Ok(num) => {
+                        if builder.is_some() {
+                            builder.unwrap().append(Some(ScalarImpl::from(num.clone())));
+                            None
+                        } else {
+                            Some(ScalarImpl::from(num))
+                        }
+                    }
+                    Err(err) => {
+                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                            tracing::error!(
+                                column = name,
+                                error = %err.as_report(),
+                                suppressed_count,
+                                "parse column failed",
+                            );
+                        }
+                        None
+                    }
+                }
+            } else {
+                None
+            }
+        }
+        Err(err) => {
+            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                tracing::error!(
+                    column = name,
+                    error = %err.as_report(),
+                    suppressed_count,
+                    "parse column failed",
+                );
+            }
+            None
+        }
+    }
+}
+
 pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> OwnedRow {
     let mut datums = vec![];
     for i in 0..schema.fields.len() {
@@ -139,6 +194,7 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                 DataType::Decimal => {
                     handle_data_type!(row, i, name, RustDecimal, Decimal)
                 }
+                DataType::Int256 => postgres_decimal_to_rw_int256(&row, i, name, None),
                 DataType::Varchar => {
                     match row.columns()[i].type_() {
                         // Since we don't support UUID natively, adapt it to a VARCHAR column
@@ -289,10 +345,11 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                 }
                             }
                         }
-                        DataType::Struct(_)
-                        | DataType::List(_)
-                        | DataType::Serial
-                        | DataType::Int256 => {
+                        DataType::Int256 => {
+                            let _ =
+                                postgres_decimal_to_rw_int256(&row, i, name, Some(&mut builder));
+                        }
+                        DataType::Struct(_) | DataType::List(_) | DataType::Serial => {
                             tracing::warn!(
                                 "unsupported List data type {:?}, set the List to empty",
                                 **dtype
@@ -302,8 +359,8 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
 
                     Some(ScalarImpl::from(ListValue::new(builder.finish())))
                 }
-                DataType::Struct(_) | DataType::Int256 | DataType::Serial => {
-                    // Interval, Struct, List, Int256 are not supported
+                DataType::Struct(_) | DataType::Serial => {
+                    // Interval, Struct, List are not supported
                     tracing::warn!(rw_field.name, ?rw_field.data_type, "unsupported data type, set to null");
                     None
                 }

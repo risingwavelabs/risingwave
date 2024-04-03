@@ -86,6 +86,7 @@ opendal = "0.44"
 openssl = "0.10"
 parking_lot = "0.12"
 paste = "1"
+pg_bigdecimal = "0.1.5"
 postgres-openssl = "0.5.0"
 prometheus = { version = "0.13", features = ["process"] }
 prost = { version = "0.12", features = ["no-recursion-limit"] }
