@@ -20,11 +20,11 @@ Table of contents:
 The Hummock Shared Buffer serves 3 purposes:
 
 - Batch writes on worker node level, so as to reduce SST number.
- 
+
   - Currently, a single epoch might produce hundreds of SST, which makes meta service hard to handle.
 
 - Support async checkpoint.
- 
+
   - The shared buffer will generate SST based on epoch, and provide a consistent view of a epoch, by merging the snapshot of the storage SSTs and the immutable in-memory buffers.
 
 - Support read-after-write, so as to make executor logic simpler (so-called async flush).
@@ -106,7 +106,7 @@ We have [established earlier](#part-1-async-checkpoint) that the merge-on-write 
 When executors are using the second way,
 it will always need to “merge data from flush buffer and storage”.
 This “merge iterator” has been implemented in various ways in different executors,
-and make the ManagedState very hard to read. 
+and make the ManagedState very hard to read.
 
 Therefore, to standardize this, we support “async flush” in shared buffer,
 which means that streaming executors can write to the state store at any time,
