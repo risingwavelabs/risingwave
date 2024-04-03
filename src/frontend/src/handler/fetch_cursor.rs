@@ -14,25 +14,20 @@
 
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
-use pgwire::types::{Format, Row};
-use risingwave_sqlparser::ast::{FetchCursorStatement, Statement};
-use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_sqlparser::ast::ObjectName;
+use pgwire::types::Row;
+use risingwave_sqlparser::ast::{FetchCursorStatement, ObjectName, Statement};
 
-use super::RwPgResponse;
-use crate::error::Result;
-use crate::handler::HandlerArgs;
-use super::query::handle_query;
+use super::declare_cursor::create_stream_for_cursor;
 use super::util::gen_query_from_logstore_ge_rw_timestamp;
-use super::{HandlerArgs, RwPgResponse};
+use super::RwPgResponse;
 use crate::error::{ErrorCode, Result};
+use crate::handler::HandlerArgs;
 use crate::session::cursor_manager::CursorRowValue;
 use crate::{Binder, PgResponseStream};
 
-pub async fn handle_fetch_cursor_sub(
+pub async fn handle_fetch_cursor(
     handle_args: HandlerArgs,
     stmt: FetchCursorStatement,
-    formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
     let session = handle_args.session.clone();
     let db_name = session.database();
@@ -40,76 +35,75 @@ pub async fn handle_fetch_cursor_sub(
         Binder::resolve_schema_qualified_name(db_name, stmt.cursor_name.clone())?;
 
     let cursor_manager = session.get_cursor_manager();
-    let mut cursor_manager = cursor_manager.lock().await;
-    // Fetch data from the Cursor. There are three cases
-    let (rw_timestamp, subscription_name, need_check_timestamp) = match cursor_manager
-        .get_row_with_cursor(cursor_name.clone())
-        .await?
-    {
-        CursorRowValue::Row((row, pg_descs)) => {
-            // Normal row
-            return Ok(build_fetch_cursor_response(vec![row], pg_descs));
-        }
-        CursorRowValue::QueryWithNextRwTimestamp(rw_timestamp, subscription_name) => {
-            // Returned the rw_timestamp of the next cursor, query data and update the cursor
-            (rw_timestamp, subscription_name, true)
-        }
-        CursorRowValue::QueryWithStartRwTimestamp(rw_timestamp, subscription_name) => {
-            // The rw_timestamp for the next cursor has not been returned, and +1 query it.
-            (rw_timestamp + 1, subscription_name, false)
-        }
-    };
-    let subscription = session.get_subscription_by_name(
-        schema_name,
-        &subscription_name.0.last().unwrap().real_value().clone(),
-    )?;
-    let query_stmt = Statement::Query(Box::new(gen_query_from_logstore_ge_rw_timestamp(
-        &subscription.get_log_store_name()?,
-        rw_timestamp,
-    )));
-    let res = handle_query(handle_args, query_stmt, formats).await?;
-    cursor_manager
-        .update_cursor(
-            cursor_name.clone(),
-            res,
-            rw_timestamp,
-            false,
-            need_check_timestamp,
-            subscription_name.clone(),
-            subscription.get_retention_seconds()?,
-        )
-        .await?;
 
-    // Try fetch data after update cursor
-    match cursor_manager.get_row_with_cursor(cursor_name).await? {
-        CursorRowValue::Row((row, pg_descs)) => {
-            Ok(build_fetch_cursor_response(vec![row], pg_descs))
+    let (cursors, pg_descs) = cursor_manager
+        .get_row_with_cursor(cursor_name.clone(), stmt.count)
+        .await?;
+    let (rows, next_query_parameter) = covert_cursor_row_values(cursors);
+
+    match next_query_parameter {
+        // Try fetch data after update cursor
+        // todo! support fetch count with subscription cursor
+        Some((rw_timestamp, subscription_name, need_check_timestamp)) => {
+            let subscription = session.get_subscription_by_name(
+                schema_name,
+                &subscription_name.0.last().unwrap().real_value().clone(),
+            )?;
+            let query_stmt = Statement::Query(Box::new(gen_query_from_logstore_ge_rw_timestamp(
+                &subscription.get_log_store_name()?,
+                rw_timestamp,
+            )));
+            let (row_stream, pg_descs) = create_stream_for_cursor(handle_args, query_stmt).await?;
+            cursor_manager
+                .update_subscription_cursor(
+                    cursor_name.clone(),
+                    row_stream,
+                    pg_descs,
+                    rw_timestamp,
+                    false,
+                    need_check_timestamp,
+                    subscription_name.clone(),
+                    subscription.get_retention_seconds()?,
+                )
+                .await?;
+            let (cursors, pg_descs) = cursor_manager
+                .get_row_with_cursor(cursor_name.clone(), stmt.count)
+                .await?;
+            let (rows, next_query_parameter) = covert_cursor_row_values(cursors);
+            if let Some((_, _, true)) = next_query_parameter {
+                Err(ErrorCode::InternalError(
+                    "Fetch cursor, one must get a row or null".to_string(),
+                )
+                .into())
+            } else {
+                Ok(build_fetch_cursor_response(rows, pg_descs))
+            }
         }
-        CursorRowValue::QueryWithStartRwTimestamp(_, _) => {
-            Ok(build_fetch_cursor_response(vec![], vec![]))
-        }
-        CursorRowValue::QueryWithNextRwTimestamp(_, _) => Err(ErrorCode::InternalError(
-            "Fetch cursor, one must get a row or null".to_string(),
-        )
-        .into()),
+        None => Ok(build_fetch_cursor_response(rows, pg_descs)),
     }
 }
 
+fn covert_cursor_row_values(
+    cursors: Vec<CursorRowValue>,
+) -> (Vec<Row>, Option<(i64, ObjectName, bool)>) {
+    let mut rows = Vec::with_capacity(cursors.len());
+    for cursor_row_value in cursors {
+        match cursor_row_value {
+            CursorRowValue::Row(row) => rows.push(row),
+            CursorRowValue::QueryWithNextRwTimestamp(rw_timestamp, subscription_name) => {
+                return (rows, Some((rw_timestamp, subscription_name, true)))
+            }
+            CursorRowValue::QueryWithStartRwTimestamp(rw_timestamp, subscription_name) => {
+                return (rows, Some((rw_timestamp + 1, subscription_name, false)))
+            }
+        }
+    }
+    (rows, None)
+}
+
 fn build_fetch_cursor_response(rows: Vec<Row>, pg_descs: Vec<PgFieldDescriptor>) -> RwPgResponse {
-    PgResponse::builder(StatementType::FETCH)
+    PgResponse::builder(StatementType::FETCH_CURSOR)
         .row_cnt_opt(Some(rows.len() as i32))
         .values(PgResponseStream::from(rows), pg_descs)
         .into()
-}
-
-pub async fn handle_fetch_cursor(
-    handler_args: HandlerArgs,
-    cursor_name: ObjectName,
-    count: Option<i32>,
-) -> Result<RwPgResponse> {
-    let session = handler_args.session;
-    let (rows, pg_descs) = session.cursor_next(&cursor_name, count).await?;
-    Ok(PgResponse::builder(StatementType::FETCH_CURSOR)
-        .values(rows.into(), pg_descs)
-        .into())
 }

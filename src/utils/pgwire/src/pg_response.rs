@@ -102,9 +102,7 @@ pub enum StatementType {
     ROLLBACK,
     SET_TRANSACTION,
     CANCEL_COMMAND,
-    DECLARE_CURSOR,
     FETCH_CURSOR,
-    CLOSE_CURSOR,
     WAIT,
     KILL,
 }

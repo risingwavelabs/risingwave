@@ -13,31 +13,25 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_sqlparser::ast::ObjectName;
+use risingwave_sqlparser::ast::CloseCursorStatement;
 
 use super::RwPgResponse;
 use crate::error::Result;
 use crate::handler::HandlerArgs;
-use risingwave_sqlparser::ast::CloseCursorStatement;
-
-use super::{HandlerArgs, RwPgResponse};
-use crate::error::Result;
 use crate::Binder;
 
 pub async fn handle_close_cursor(
     handle_args: HandlerArgs,
     stmt: CloseCursorStatement,
 ) -> Result<RwPgResponse> {
-    let cursor_manager = handle_args.session.clone().session
-    .get_cursor_manager()
-    .lock()
-    .await;
+    let session = handle_args.session.clone();
+    let cursor_manager = session.get_cursor_manager();
     let db_name = session.database();
     if let Some(cursor_name) = stmt.cursor_name {
         let (_, cursor_name) = Binder::resolve_schema_qualified_name(db_name, cursor_name.clone())?;
-        cursor_manager.remove_cursor(cursor_name);
+        cursor_manager.remove_cursor(cursor_name).await;
     } else {
-        cursor_manager.remove_all_cursors();
+        cursor_manager.remove_all_cursor().await;
     }
     Ok(PgResponse::empty_result(StatementType::CLOSE_CURSOR))
 }

@@ -338,22 +338,16 @@ pub async fn create_stream(
 
     let row_stream = match query_mode {
         QueryMode::Auto => unreachable!(),
-        QueryMode::Local => {
-            let chunk_stream = local_execute(session.clone(), query, can_timeout_cancel).await?;
-
-            PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
-                chunk_stream,
-                column_types,
-                formats,
-                session.clone(),
-            ))
-        }
+        QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
+            local_execute(session.clone(), query, can_timeout_cancel).await?,
+            column_types,
+            formats,
+            session.clone(),
+        )),
         // Local mode do not support cancel tasks.
         QueryMode::Distributed => {
-            let chunk_stream =
-                distribute_execute(session.clone(), query, can_timeout_cancel).await?;
             PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
-                chunk_stream,
+                distribute_execute(session.clone(), query, can_timeout_cancel).await?,
                 column_types,
                 formats,
                 session.clone(),

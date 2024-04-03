@@ -114,7 +114,6 @@ use crate::{FrontendOpts, PgResponseStream};
 
 pub(crate) mod current;
 pub(crate) mod cursor_manager;
-pub(crate) mod cursor;
 pub(crate) mod transaction;
 
 /// The global environment for the frontend server.
@@ -585,7 +584,7 @@ pub struct SessionImpl {
     /// Last idle instant
     last_idle_instant: Arc<Mutex<Option<Instant>>>,
 
-    cursor_manager: Arc<tokio::sync::Mutex<CursorManager>>,
+    cursor_manager: Arc<CursorManager>,
 }
 
 #[derive(Error, Debug)]
@@ -625,7 +624,7 @@ impl SessionImpl {
             notices: Default::default(),
             exec_context: Mutex::new(None),
             last_idle_instant: Default::default(),
-            cursor_manager: Arc::new(tokio::sync::Mutex::new(CursorManager::default())),
+            cursor_manager: Arc::new(CursorManager::default()),
         }
     }
 
@@ -652,7 +651,7 @@ impl SessionImpl {
             ))
             .into(),
             last_idle_instant: Default::default(),
-            cursor_manager: Arc::new(tokio::sync::Mutex::new(CursorManager::default())),
+            cursor_manager: Arc::new(CursorManager::default()),
         }
     }
 
@@ -722,7 +721,7 @@ impl SessionImpl {
             .map(|context| context.running_sql.clone())
     }
 
-    pub fn get_cursor_manager(&self) -> Arc<tokio::sync::Mutex<CursorManager>> {
+    pub fn get_cursor_manager(&self) -> Arc<CursorManager> {
         self.cursor_manager.clone()
     }
 

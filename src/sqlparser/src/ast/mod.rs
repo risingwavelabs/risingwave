@@ -1507,21 +1507,6 @@ pub enum Statement {
         param: Ident,
         value: SetVariableValue,
     },
-    /// DECLARE CURSOR
-    DeclareCursor {
-        cursor_name: ObjectName,
-        query: Box<Query>,
-    },
-    /// FETCH FROM CURSOR
-    FetchCursor {
-        cursor_name: ObjectName,
-        /// Number of rows to fetch. `None` means `FETCH ALL`.
-        count: Option<i32>,
-    },
-    /// CLOSE CURSOR
-    CloseCursor {
-        cursor_name: Option<ObjectName>,
-    },
     /// FLUSH the current barrier.
     ///
     /// Note: RisingWave specific statement.

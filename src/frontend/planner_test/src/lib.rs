@@ -29,8 +29,8 @@ use anyhow::{anyhow, bail, Result};
 pub use resolve_id::*;
 use risingwave_frontend::handler::util::SourceSchemaCompatExt;
 use risingwave_frontend::handler::{
-    close_cursor, create_index, create_mv, create_schema, create_source, create_table, create_view,
-    declare_cursor, drop_table, explain, fetch_cursor, variable, HandlerArgs,
+    create_index, create_mv, create_schema, create_source, create_table, create_view, drop_table,
+    explain, variable, HandlerArgs,
 };
 use risingwave_frontend::session::SessionImpl;
 use risingwave_frontend::test_utils::{create_proto_file, get_explain_output, LocalFrontend};
