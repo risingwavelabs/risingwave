@@ -817,15 +817,11 @@ pub fn create_builder_and_limiter(
     data_types: Vec<DataType>,
 ) -> (DataChunkBuilder, Option<BackfillRateLimiter>) {
     if let Some(rate_limit) = rate_limit {
-        if rate_limit < chunk_size && rate_limit > 0 {
+        if rate_limit > 0 {
+            let actual_chunk_size = rate_limit.min(chunk_size);
             (
-                DataChunkBuilder::new(data_types, rate_limit),
+                DataChunkBuilder::new(data_types, actual_chunk_size),
                 Some(create_limiter(rate_limit)).flatten(),
-            )
-        } else if rate_limit >= chunk_size {
-            (
-                DataChunkBuilder::new(data_types, chunk_size),
-                Some(create_limiter(chunk_size)).flatten(),
             )
         } else {
             // if rate_limit is 0, we rely on check when building the snapshot reader stream.
