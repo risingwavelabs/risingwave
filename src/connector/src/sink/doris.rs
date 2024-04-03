@@ -181,7 +181,7 @@ impl DorisSink {
             risingwave_common::types::DataType::Bytea => {
                 Err(SinkError::Doris("doris can not support Bytea".to_string()))
             }
-            risingwave_common::types::DataType::Jsonb => Ok(doris_data_type.contains("JSONB")),
+            risingwave_common::types::DataType::Jsonb => Ok(doris_data_type.contains("JSON")),
             risingwave_common::types::DataType::Serial => Ok(doris_data_type.contains("BIGINT")),
             risingwave_common::types::DataType::Int256 => {
                 Err(SinkError::Doris("doris can not support Int256".to_string()))
@@ -286,7 +286,7 @@ impl DorisSinkWriter {
             config.common.database.clone(),
             config.common.table.clone(),
             header,
-        );
+        )?;
         Ok(Self {
             config,
             schema: schema.clone(),

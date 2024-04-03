@@ -18,6 +18,7 @@ use risingwave_common_estimate_size::collections::{EstimatedHashSet, EstimatedVe
 
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
+use crate::consistency::consistency_panic;
 use crate::task::AtomicU64Ref;
 
 pub type LookupEntryState = EstimatedHashSet<OwnedRow>;
@@ -48,12 +49,12 @@ impl LookupCache {
                 match op {
                     Op::Insert | Op::UpdateInsert => {
                         if !values.insert(row) {
-                            panic!("inserting a duplicated value");
+                            consistency_panic!("inserting a duplicated value");
                         }
                     }
                     Op::Delete | Op::UpdateDelete => {
                         if !values.remove(&row) {
-                            panic!("row {:?} should be in the cache", row);
+                            consistency_panic!("row {:?} should be in the cache", row);
                         }
                     }
                 }

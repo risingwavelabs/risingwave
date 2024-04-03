@@ -110,7 +110,10 @@ impl TroublemakerExecutor {
                     }
                 }
                 Message::Barrier(barrier) => {
-                    assert!(vars.chunk_builder.take().is_none(), "we don't merge chunks");
+                    assert!(
+                        vars.chunk_builder.take().is_none(),
+                        "we don't merge chunks across barriers"
+                    );
                     yield Message::Barrier(barrier);
                 }
                 _ => yield msg,

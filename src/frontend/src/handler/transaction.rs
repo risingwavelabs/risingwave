@@ -75,7 +75,6 @@ pub async fn handle_begin(
     Ok(builder.into())
 }
 
-#[expect(clippy::unused_async)]
 pub async fn handle_commit(
     handler_args: HandlerArgs,
     stmt_type: StatementType,
@@ -88,11 +87,11 @@ pub async fn handle_commit(
     }
 
     session.txn_commit_explicit();
+    session.drop_all_cursors().await;
 
     Ok(RwPgResponse::empty_result(stmt_type))
 }
 
-#[expect(clippy::unused_async)]
 pub async fn handle_rollback(
     handler_args: HandlerArgs,
     stmt_type: StatementType,
@@ -105,6 +104,7 @@ pub async fn handle_rollback(
     }
 
     session.txn_rollback_explicit();
+    session.drop_all_cursors().await;
 
     Ok(RwPgResponse::empty_result(stmt_type))
 }
