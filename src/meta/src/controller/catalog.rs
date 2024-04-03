@@ -83,6 +83,7 @@ pub struct CatalogController {
 
 #[derive(Clone, Default)]
 pub struct ReleaseContext {
+    pub(crate) streaming_job_ids: Vec<ObjectId>,
     /// Dropped state table list, need to unregister from hummock.
     pub(crate) state_table_ids: Vec<TableId>,
     /// Dropped source list, need to unregister from source manager.
@@ -274,7 +275,7 @@ impl CatalogController {
             .into_tuple()
             .all(&txn)
             .await?;
-        let fragment_mappings = get_fragment_mappings_by_jobs(&txn, streaming_jobs).await?;
+        let fragment_mappings = get_fragment_mappings_by_jobs(&txn, streaming_jobs.clone()).await?;
 
         // The schema and objects in the database will be delete cascade.
         let res = Object::delete_by_id(database_id).exec(&txn).await?;
@@ -299,6 +300,7 @@ impl CatalogController {
             .await;
         Ok((
             ReleaseContext {
+                streaming_job_ids: streaming_jobs,
                 state_table_ids,
                 source_ids,
                 connections,
@@ -1976,7 +1978,7 @@ impl CatalogController {
             .map(|obj| obj.oid)
             .collect_vec();
 
-        // cdc source streaming job.
+        // source streaming job.
         if object_type == ObjectType::Source {
             let source_info: Option<StreamSourceInfo> = Source::find_by_id(object_id)
                 .select_only()
@@ -1986,7 +1988,7 @@ impl CatalogController {
                 .await?
                 .ok_or_else(|| MetaError::catalog_id_not_found("source", object_id))?;
             if let Some(source_info) = source_info
-                && source_info.into_inner().cdc_source_job
+                && source_info.into_inner().is_shared()
             {
                 to_drop_streaming_jobs.push(object_id);
             }
@@ -2051,7 +2053,8 @@ impl CatalogController {
 
         let (source_fragments, removed_actors) =
             resolve_source_register_info_for_jobs(&txn, to_drop_streaming_jobs.clone()).await?;
-        let fragment_mappings = get_fragment_mappings_by_jobs(&txn, to_drop_streaming_jobs).await?;
+        let fragment_mappings =
+            get_fragment_mappings_by_jobs(&txn, to_drop_streaming_jobs.clone()).await?;
 
         // Find affect users with privileges on all this objects.
         let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
@@ -2155,6 +2158,7 @@ impl CatalogController {
 
         Ok((
             ReleaseContext {
+                streaming_job_ids: to_drop_streaming_jobs,
                 state_table_ids: to_drop_state_table_ids,
                 source_ids: to_drop_source_ids,
                 connections: vec![],

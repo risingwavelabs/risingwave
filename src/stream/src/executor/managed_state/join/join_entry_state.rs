@@ -16,6 +16,7 @@ use risingwave_common_estimate_size::KvSize;
 use thiserror::Error;
 
 use super::*;
+use crate::consistency::{consistency_error, enable_strict_consistency};
 
 /// We manages a `HashMap` in memory for all entries belonging to a join key.
 /// When evicted, `cached` does not hold any entries.
@@ -52,10 +53,28 @@ impl JoinEntryState {
         key: PkType,
         value: StateValueType,
     ) -> Result<&mut StateValueType, JoinEntryError> {
+        let mut removed = false;
+        if !enable_strict_consistency() {
+            // strict consistency is off, let's remove existing (if any) first
+            if let Some(old_value) = self.cached.remove(&key) {
+                self.kv_heap_size.sub(&key, &old_value);
+                removed = true;
+            }
+        }
+
         self.kv_heap_size.add(&key, &value);
-        self.cached
-            .try_insert(key, value)
-            .map_err(|_| JoinEntryError::OccupiedError)
+
+        let ret = self.cached.try_insert(key.clone(), value);
+
+        if !enable_strict_consistency() {
+            assert!(ret.is_ok(), "we have removed existing entry, if any");
+            if removed {
+                // if not silent, we should log the error
+                consistency_error!(?key, "double inserting a join state entry");
+            }
+        }
+
+        ret.map_err(|_| JoinEntryError::OccupiedError)
     }
 
     /// Delete from the cache.
@@ -63,8 +82,11 @@ impl JoinEntryState {
         if let Some(value) = self.cached.remove(&pk) {
             self.kv_heap_size.sub(&pk, &value);
             Ok(())
-        } else {
+        } else if enable_strict_consistency() {
             Err(JoinEntryError::RemoveError)
+        } else {
+            consistency_error!(?pk, "removing a join state entry but it's not in the cache");
+            Ok(())
         }
     }
 

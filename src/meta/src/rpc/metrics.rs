@@ -70,6 +70,8 @@ pub struct MetaMetrics {
     pub all_barrier_nums: IntGauge,
     /// The number of in-flight barriers
     pub in_flight_barrier_nums: IntGauge,
+    /// The timestamp (UNIX epoch seconds) of the last committed barrier's epoch time.
+    pub last_committed_barrier_time: IntGauge,
 
     /// ********************************** Recovery ************************************
     pub recovery_failure_cnt: IntCounter,
@@ -150,6 +152,7 @@ pub struct MetaMetrics {
     pub l0_compact_level_count: HistogramVec,
     pub compact_task_size: HistogramVec,
     pub compact_task_file_count: HistogramVec,
+    pub compact_task_batch_count: HistogramVec,
     pub move_state_table_count: IntCounterVec,
     pub state_table_count: IntGaugeVec,
     pub branched_sst_count: IntGaugeVec,
@@ -222,6 +225,12 @@ impl MetaMetrics {
         let in_flight_barrier_nums = register_int_gauge_with_registry!(
             "in_flight_barrier_nums",
             "num of of in_flight_barrier",
+            registry
+        )
+        .unwrap();
+        let last_committed_barrier_time = register_int_gauge_with_registry!(
+            "last_committed_barrier_time",
+            "The timestamp (UNIX epoch seconds) of the last committed barrier's epoch time.",
             registry
         )
         .unwrap();
@@ -571,6 +580,14 @@ impl MetaMetrics {
             registry
         )
         .unwrap();
+        let opts = histogram_opts!(
+            "storage_compact_task_batch_count",
+            "count of compact task batch",
+            exponential_buckets(1.0, 2.0, 8).unwrap()
+        );
+        let compact_task_batch_count =
+            register_histogram_vec_with_registry!(opts, &["type"], registry).unwrap();
+
         let table_write_throughput = register_int_counter_vec_with_registry!(
             "storage_commit_write_throughput",
             "The number of compactions from one level to another level that have been skipped.",
@@ -626,6 +643,7 @@ impl MetaMetrics {
             barrier_send_latency,
             all_barrier_nums,
             in_flight_barrier_nums,
+            last_committed_barrier_time,
             recovery_failure_cnt,
             recovery_latency,
 
@@ -676,6 +694,7 @@ impl MetaMetrics {
             l0_compact_level_count,
             compact_task_size,
             compact_task_file_count,
+            compact_task_batch_count,
             table_write_throughput,
             move_state_table_count,
             state_table_count,

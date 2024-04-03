@@ -36,13 +36,13 @@ use crate::TableCatalog;
 pub enum SourceNodeKind {
     /// `CREATE TABLE` with a connector.
     CreateTable,
-    /// `CREATE SOURCE` with a streaming job (backfill-able source).
-    CreateSourceWithStreamjob,
-    /// `CREATE MATERIALIZED VIEW` which selects from a source.
+    /// `CREATE SOURCE` with a streaming job (shared source).
+    CreateSharedSource,
+    /// `CREATE MATERIALIZED VIEW` or batch scan from a source.
     ///
     /// Note:
-    /// - For non backfill-able source, `CREATE SOURCE` will not create a source node, and `CREATE MATERIALIZE VIEW` will create a `LogicalSource`.
-    /// - For backfill-able source, `CREATE MATERIALIZE VIEW` will create `LogicalSourceBackfill` instead of `LogicalSource`.
+    /// - For non-shared source, `CREATE SOURCE` will not create a source node, and `CREATE MATERIALIZE VIEW` will create a `StreamSource`.
+    /// - For shared source, `CREATE MATERIALIZE VIEW` will create `StreamSourceScan` instead of `StreamSource`.
     CreateMViewOrBatch,
 }
 
@@ -105,6 +105,17 @@ impl Source {
         self.catalog
             .as_ref()
             .is_some_and(|catalog| catalog.with_properties.is_new_fs_connector())
+    }
+
+    pub fn is_iceberg_connector(&self) -> bool {
+        self.catalog
+            .as_ref()
+            .is_some_and(|catalog| catalog.with_properties.is_iceberg_connector())
+    }
+
+    /// Currently, only iceberg source supports time travel.
+    pub fn support_time_travel(&self) -> bool {
+        self.is_iceberg_connector()
     }
 
     /// The columns in stream/batch source node indicate the actual columns it will produce,

@@ -14,6 +14,11 @@
 
 use sea_orm::entity::prelude::*;
 
+pub const COMPACTION_TASK_ID: &str = "compaction_task";
+pub const COMPACTION_GROUP_ID: &str = "compaction_group";
+pub const SSTABLE_OBJECT_ID: &str = "sstable_object";
+pub const META_BACKUP_ID: &str = "meta_backup";
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Default)]
 #[sea_orm(table_name = "hummock_sequence")]
 pub struct Model {

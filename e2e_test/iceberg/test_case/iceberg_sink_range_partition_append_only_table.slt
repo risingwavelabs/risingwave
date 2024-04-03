@@ -12,7 +12,8 @@ v_varchar varchar,
 v_bool boolean,
 v_date date,
 v_timestamp timestamptz,
-v_ts_ntz timestamp
+v_ts_ntz timestamp,
+v_decimal decimal
 );
 
 statement ok
@@ -24,7 +25,7 @@ CREATE SINK s6 AS select * from mv6 WITH (
     type = 'append-only',
     force_append_only = 'true',
     database.name = 'demo_db',
-    table.name = 'demo_table',
+    table.name = 'range_partition_append_only_table',
     catalog.name = 'demo',
     catalog.type = 'storage',
     warehouse.path = 's3://icebergdata/demo',
@@ -36,10 +37,10 @@ CREATE SINK s6 AS select * from mv6 WITH (
 
 statement ok
 INSERT INTO t6 VALUES
-(1, 1, 1000, 1.1, 1.11, '1-1', true, '2022-03-11', '2022-03-11 01:00:00Z'::timestamptz, '2022-03-11 01:00:00'),
-(2, 2, 2000, 2.2, 2.22, '2-2', false, '2022-03-12', '2022-03-12 02:00:00Z'::timestamptz, '2022-03-12 02:00:00'),
-(3, 3, 3000, 3.3, 3.33, '3-3', true, '2022-03-13', '2022-03-13 03:00:00Z'::timestamptz, '2022-03-13 03:00:00'),
-(4, 4, 4000, 4.4, 4.44, '4-4', false, '2022-03-14', '2022-03-14 04:00:00Z'::timestamptz, '2022-03-14 04:00:00');
+(1, 1, 1000, 1.1, 1.11, '1-1', true, '2022-03-11', '2022-03-11 01:00:00Z'::timestamptz, '2022-03-11 01:00:00',1.11),
+(2, 2, 2000, 2.2, 2.22, '2-2', false, '2022-03-12', '2022-03-12 02:00:00Z'::timestamptz, '2022-03-12 02:00:00',2.22),
+(3, 3, 3000, 3.3, 3.33, '3-3', true, '2022-03-13', '2022-03-13 03:00:00Z'::timestamptz, '2022-03-13 03:00:00','inf'),
+(4, 4, 4000, 4.4, 4.44, '4-4', false, '2022-03-14', '2022-03-14 04:00:00Z'::timestamptz, '2022-03-14 04:00:00','-inf');
 
 statement ok
 FLUSH;
@@ -48,7 +49,7 @@ sleep 5s
 
 statement ok
 INSERT INTO t6 VALUES
-(5, 5, 5000, 5.5, 5.55, '5-5', true, '2022-03-15', '2022-03-15 05:00:00Z'::timestamptz, '2022-03-15 05:00:00');
+(5, 5, 5000, 5.5, 5.55, '5-5', true, '2022-03-15', '2022-03-15 05:00:00Z'::timestamptz, '2022-03-15 05:00:00','nan');
 
 statement ok
 FLUSH;

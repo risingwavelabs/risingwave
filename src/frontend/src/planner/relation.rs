@@ -96,7 +96,7 @@ impl Planner {
     }
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
-        if source.is_backfillable_cdc_connector() {
+        if source.is_shareable_cdc_connector() {
             Err(ErrorCode::InternalError(
                 "Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source. HINT: create TABLE from the source instead.".to_string(),
             )
@@ -104,14 +104,14 @@ impl Planner {
         } else {
             let as_of = source.as_of.clone();
             match as_of {
-                None => {}
+                None
+                | Some(AsOf::VersionNum(_))
+                | Some(AsOf::TimestampString(_))
+                | Some(AsOf::TimestampNum(_)) => {}
                 Some(AsOf::ProcessTime) => {
                     bail_not_implemented!("As Of ProcessTime() is not supported yet.")
                 }
-                Some(AsOf::TimestampString(_)) | Some(AsOf::TimestampNum(_)) => {
-                    bail_not_implemented!("As Of Timestamp is not supported yet.")
-                }
-                Some(AsOf::VersionNum(_)) | Some(AsOf::VersionString(_)) => {
+                Some(AsOf::VersionString(_)) => {
                     bail_not_implemented!("As Of Version is not supported yet.")
                 }
             }

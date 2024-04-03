@@ -440,6 +440,7 @@ pub enum ConflictBehavior {
     NoCheck,
     Overwrite,
     IgnoreConflict,
+    DoUpdateIfNotNull,
 }
 
 impl ConflictBehavior {
@@ -447,6 +448,7 @@ impl ConflictBehavior {
         match tb_conflict_behavior {
             PbHandleConflictBehavior::Overwrite => ConflictBehavior::Overwrite,
             PbHandleConflictBehavior::Ignore => ConflictBehavior::IgnoreConflict,
+            PbHandleConflictBehavior::DoUpdateIfNotNull => ConflictBehavior::DoUpdateIfNotNull,
             // This is for backward compatibility, in the previous version
             // `HandleConflictBehavior::Unspecified` represented `NoCheck`, so just treat it as `NoCheck`.
             PbHandleConflictBehavior::NoCheck | PbHandleConflictBehavior::Unspecified => {
@@ -460,6 +462,7 @@ impl ConflictBehavior {
             ConflictBehavior::NoCheck => PbHandleConflictBehavior::NoCheck,
             ConflictBehavior::Overwrite => PbHandleConflictBehavior::Overwrite,
             ConflictBehavior::IgnoreConflict => PbHandleConflictBehavior::Ignore,
+            ConflictBehavior::DoUpdateIfNotNull => PbHandleConflictBehavior::DoUpdateIfNotNull,
         }
     }
 
@@ -468,6 +471,7 @@ impl ConflictBehavior {
             ConflictBehavior::NoCheck => "NoCheck".to_string(),
             ConflictBehavior::Overwrite => "Overwrite".to_string(),
             ConflictBehavior::IgnoreConflict => "IgnoreConflict".to_string(),
+            ConflictBehavior::DoUpdateIfNotNull => "DoUpdateIfNotNull".to_string(),
         }
     }
 }

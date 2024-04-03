@@ -48,7 +48,7 @@ use self::simd_json_parser::DebeziumJsonAccessBuilder;
 use self::unified::AccessImpl;
 use self::upsert_parser::UpsertParser;
 use self::util::get_kafka_topic;
-use crate::common::AwsAuthProps;
+use crate::connector_common::AwsAuthProps;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::maxwell::MaxwellParser;
 use crate::parser::simd_json_parser::DebeziumMongoJsonAccessBuilder;

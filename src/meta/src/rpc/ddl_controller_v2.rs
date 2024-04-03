@@ -104,7 +104,7 @@ impl DdlController {
                 self.env.event_log_manager_ref().add_event_logs(vec![
                     risingwave_pb::meta::event_log::Event::CreateStreamJobFail(event),
                 ]);
-                let aborted = mgr
+                let (aborted, _) = mgr
                     .catalog_controller
                     .try_abort_creating_streaming_job(job_id as _, false)
                     .await?;
@@ -328,7 +328,7 @@ impl DdlController {
                     &streaming_job,
                     &stream_ctx,
                     table.get_version()?,
-                    &fragment_graph.default_parallelism(),
+                    &fragment_graph.specified_parallelism(),
                 )
                 .await? as u32;
 
@@ -389,6 +389,7 @@ impl DdlController {
         }
 
         let ReleaseContext {
+            streaming_job_ids,
             state_table_ids,
             source_ids,
             connections,
@@ -431,7 +432,8 @@ impl DdlController {
         self.stream_manager
             .drop_streaming_jobs_v2(
                 removed_actors.into_iter().map(|id| id as _).collect(),
-                state_table_ids.into_iter().map(|id| id as _).collect(),
+                streaming_job_ids,
+                state_table_ids,
             )
             .await;
 
@@ -467,7 +469,7 @@ impl DdlController {
                 &streaming_job,
                 &ctx,
                 table.get_version()?,
-                &fragment_graph.default_parallelism(),
+                &fragment_graph.specified_parallelism(),
             )
             .await?;
 

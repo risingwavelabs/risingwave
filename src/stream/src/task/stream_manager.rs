@@ -370,10 +370,11 @@ impl LocalBarrierWorker {
             }
         };
         let actor_manager = self.actor_manager.clone();
-        let join_handle = self
-            .actor_manager
-            .runtime
-            .spawn(actor_manager.create_actors(actors, self.current_shared_context.clone()));
+        let create_actors_fut = crate::CONFIG.scope(
+            self.actor_manager.env.config().clone(),
+            actor_manager.create_actors(actors, self.current_shared_context.clone()),
+        );
+        let join_handle = self.actor_manager.runtime.spawn(create_actors_fut);
         self.actor_manager_state
             .creating_actors
             .push(AttachedFuture::new(join_handle, result_sender));
@@ -384,6 +385,7 @@ impl StreamActorManager {
     /// Create dispatchers with downstream information registered before
     fn create_dispatcher(
         &self,
+        env: StreamEnvironment,
         input: Executor,
         dispatchers: &[stream_plan::Dispatcher],
         actor_id: ActorId,
@@ -402,6 +404,7 @@ impl StreamActorManager {
             fragment_id,
             shared_context.clone(),
             self.streaming_metrics.clone(),
+            env.config().developer.chunk_size,
         ))
     }
 
@@ -576,7 +579,7 @@ impl StreamActorManager {
                 &actor,
                 self.env.total_mem_usage(),
                 self.streaming_metrics.clone(),
-                self.env.config().unique_user_stream_errors,
+                actor.dispatcher.len(),
             );
             let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
             let expr_context = actor.expr_context.clone().unwrap();
@@ -596,6 +599,7 @@ impl StreamActorManager {
                 .await?;
 
             let dispatcher = self.create_dispatcher(
+                self.env.clone(),
                 executor,
                 &actor.dispatcher,
                 actor_id,
@@ -647,29 +651,10 @@ impl LocalBarrierWorker {
                     None => actor.right_future(),
                 };
                 let instrumented = monitor.instrument(traced);
-                #[cfg(enable_task_local_alloc)]
-                {
-                    let metrics = streaming_metrics.clone();
-                    let actor_id_str = actor_id.to_string();
-                    let fragment_id_str = actor_context.fragment_id.to_string();
-                    let allocation_stated = task_stats_alloc::allocation_stat(
-                        instrumented,
-                        Duration::from_millis(1000),
-                        move |bytes| {
-                            metrics
-                                .actor_memory_usage
-                                .with_label_values(&[&actor_id_str, &fragment_id_str])
-                                .set(bytes as i64);
+                let with_config =
+                    crate::CONFIG.scope(self.actor_manager.env.config().clone(), instrumented);
 
-                            actor_context.store_mem_usage(bytes);
-                        },
-                    );
-                    self.runtime.spawn(allocation_stated)
-                }
-                #[cfg(not(enable_task_local_alloc))]
-                {
-                    self.actor_manager.runtime.spawn(instrumented)
-                }
+                self.actor_manager.runtime.spawn(with_config)
             };
             self.actor_manager_state.handles.insert(actor_id, handle);
 

@@ -45,6 +45,7 @@ memcomparable = "0.2"
 multimap = "0.10"
 parking_lot = "0.12"
 pin-project = "1"
+prehash = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = { workspace = true }
 rand = "0.8"
@@ -80,9 +81,6 @@ tokio-retry = "0.3"
 tokio-stream = "0.1"
 tonic = { workspace = true }
 tracing = "0.1"
-
-[target.'cfg(enable_task_local_alloc)'.dependencies]
-task_stats_alloc = { path = "../utils/task_stats_alloc" }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
