@@ -29,7 +29,6 @@ aws-sdk-s3 = { version = "1" }
 aws-sigv4 = { version = "1", features = ["http0-compat", "sign-eventstream", "sigv4a"] }
 aws-smithy-runtime = { version = "1", default-features = false, features = ["client", "rt-tokio", "tls-rustls"] }
 aws-smithy-types = { version = "1", default-features = false, features = ["byte-stream-poll-next", "http-body-0-4-x", "hyper-0-14-x", "rt-tokio"] }
-axum = { version = "0.6" }
 base64 = { version = "0.21" }
 bigdecimal = { version = "0.4" }
 bit-vec = { version = "0.6" }
@@ -124,6 +123,7 @@ serde_with = { version = "3", features = ["json"] }
 sha1 = { version = "0.10" }
 sha2 = { version = "0.10", features = ["oid"] }
 smallvec = { version = "1", default-features = false, features = ["const_new", "serde", "union", "write"] }
+socket2 = { version = "0.5", default-features = false, features = ["all"] }
 sqlx = { version = "0.7", default-features = false, features = ["bigdecimal", "chrono", "json", "mysql", "postgres", "runtime-tokio-native-tls", "rust_decimal", "sqlite", "time", "uuid"] }
 sqlx-core = { version = "0.7", features = ["_rt-tokio", "_tls-native-tls", "bigdecimal", "chrono", "json", "migrate", "offline", "rust_decimal", "time", "uuid"] }
 sqlx-mysql = { version = "0.7", default-features = false, features = ["bigdecimal", "chrono", "json", "rust_decimal", "time", "uuid"] }

@@ -359,7 +359,7 @@ impl StarrocksSinkWriter {
             config.common.database.clone(),
             config.common.table.clone(),
             header,
-        );
+        )?;
         Ok(Self {
             config,
             schema: schema.clone(),
