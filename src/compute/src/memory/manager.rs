@@ -96,7 +96,7 @@ impl MemoryManager {
                 }
 
                 _ = tick_interval.tick() => {
-                     let new_watermark_sequence = self.controller.lock().unwrap().tick(interval_ms);
+                     let new_watermark_sequence = self.controller.lock().unwrap().tick();
 
                      self.watermark_sequence.store(new_watermark_sequence, Ordering::Relaxed);
 

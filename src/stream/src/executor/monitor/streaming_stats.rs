@@ -167,12 +167,10 @@ pub struct StreamingMetrics {
     pub iceberg_partition_num: LabelGuardedIntGaugeVec<2>,
 
     // Memory management
-    // FIXME(yuhao): use u64 here
-    pub lru_current_watermark_time_ms: IntGauge,
-    pub lru_physical_now_ms: IntGauge,
     pub lru_runtime_loop_count: IntCounter,
-    pub lru_watermark_step: IntGauge,
-    pub lru_evicted_watermark_time_ms: LabelGuardedIntGaugeVec<3>,
+    pub lru_latest_sequence: IntGauge,
+    pub lru_watermark_sequence: IntGauge,
+    pub lru_eviction_policy: IntGauge,
     pub jemalloc_allocated_bytes: IntGauge,
     pub jemalloc_active_bytes: IntGauge,
     pub jemalloc_resident_bytes: IntGauge,
@@ -896,20 +894,6 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let lru_current_watermark_time_ms = register_int_gauge_with_registry!(
-            "lru_current_watermark_time_ms",
-            "Current LRU manager watermark time(ms)",
-            registry
-        )
-        .unwrap();
-
-        let lru_physical_now_ms = register_int_gauge_with_registry!(
-            "lru_physical_now_ms",
-            "Current physical time in Risingwave(ms)",
-            registry
-        )
-        .unwrap();
-
         let lru_runtime_loop_count = register_int_counter_with_registry!(
             "lru_runtime_loop_count",
             "The counts of the eviction loop in LRU manager per second",
@@ -917,18 +901,24 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let lru_watermark_step = register_int_gauge_with_registry!(
-            "lru_watermark_step",
-            "The steps increase in 1 loop",
-            registry
+        let lru_latest_sequence = register_int_gauge_with_registry!(
+            "lru_latest_sequence",
+            "Current LRU global sequence",
+            registry,
         )
         .unwrap();
 
-        let lru_evicted_watermark_time_ms = register_guarded_int_gauge_vec_with_registry!(
-            "lru_evicted_watermark_time_ms",
-            "The latest evicted watermark time by actors",
-            &["table_id", "actor_id", "desc"],
-            registry
+        let lru_watermark_sequence = register_int_gauge_with_registry!(
+            "lru_watermark_sequence",
+            "Current LRU watermark sequence",
+            registry,
+        )
+        .unwrap();
+
+        let lru_eviction_policy = register_int_gauge_with_registry!(
+            "lru_eviction_policy",
+            "Current LRU eviction policy",
+            registry,
         )
         .unwrap();
 
@@ -1125,11 +1115,10 @@ impl StreamingMetrics {
             iceberg_rolling_unflushed_data_file,
             iceberg_position_delete_cache_num,
             iceberg_partition_num,
-            lru_current_watermark_time_ms,
-            lru_physical_now_ms,
             lru_runtime_loop_count,
-            lru_watermark_step,
-            lru_evicted_watermark_time_ms,
+            lru_latest_sequence,
+            lru_watermark_sequence,
+            lru_eviction_policy,
             jemalloc_allocated_bytes,
             jemalloc_active_bytes,
             jemalloc_resident_bytes,

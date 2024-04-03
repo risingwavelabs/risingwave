@@ -16,26 +16,25 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use risingwave_common::sequence::{Sequence, SEQUENCE_GLOBAL};
-use risingwave_common::util::epoch::Epoch;
 use risingwave_jni_core::jvm_runtime::load_jvm_memory_stats;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 
 use super::manager::MemoryManagerConfig;
 
-/// Internal state of [`LruWatermarkController`] that saves the state in previous tick.
-struct State {
-    pub used_memory_bytes: usize,
-    pub lru_watermark_step: u64,
-    pub lru_watermark_time_ms: u64,
+pub enum LruEvictionPolicy {
+    None,
+    Stable,
+    Graceful,
+    Aggressive,
 }
 
-impl Default for State {
-    fn default() -> Self {
-        let physical_now = Epoch::physical_now();
-        Self {
-            used_memory_bytes: 0,
-            lru_watermark_step: 0,
-            lru_watermark_time_ms: physical_now,
+impl From<LruEvictionPolicy> for u8 {
+    fn from(value: LruEvictionPolicy) -> Self {
+        match value {
+            LruEvictionPolicy::None => 0,
+            LruEvictionPolicy::Stable => 1,
+            LruEvictionPolicy::Graceful => 2,
+            LruEvictionPolicy::Aggressive => 3,
         }
     }
 }
@@ -81,9 +80,6 @@ pub struct LruWatermarkController {
     eviction_factor_graceful: f64,
     eviction_factor_aggressive: f64,
 
-    /// The state from previous tick
-    state: State,
-
     watermark_sequence: Sequence,
 }
 
@@ -102,7 +98,6 @@ impl LruWatermarkController {
             eviction_factor_stable: config.eviction_factor_stable,
             eviction_factor_graceful: config.eviction_factor_graceful,
             eviction_factor_aggressive: config.eviction_factor_aggressive,
-            state: State::default(),
             watermark_sequence: 0,
         }
     }
@@ -143,7 +138,7 @@ fn jemalloc_memory_stats() -> MemoryStats {
 }
 
 impl LruWatermarkController {
-    pub fn tick(&mut self, interval_ms: u32) -> Sequence {
+    pub fn tick(&mut self) -> Sequence {
         // NOTE: Be careful! The meaning of `allocated` and `active` differ in JeMalloc and JVM
         let MemoryStats {
             allocated: jemalloc_allocated_bytes,
@@ -154,9 +149,6 @@ impl LruWatermarkController {
         let (jvm_allocated_bytes, jvm_active_bytes) = load_jvm_memory_stats();
 
         let cur_used_memory_bytes = jemalloc_active_bytes + jvm_allocated_bytes;
-
-        let last_step = self.state.lru_watermark_step;
-        let last_used_memory_bytes = self.state.used_memory_bytes;
 
         // * aggressive ~ inf        : evict factor aggressive
         // *   graceful ~ aggressive : evict factor graceful
@@ -178,67 +170,24 @@ impl LruWatermarkController {
             ((latest_sequence - self.watermark_sequence) as f64 * ratio) as Sequence;
         self.watermark_sequence = latest_sequence.min(self.watermark_sequence + sequence_diff);
 
-        // The watermark calculation works in the following way:
-        //
-        // 1. When the streaming memory usage is below the graceful threshold, we do not evict
-        // any caches, and simply reset the step to 0.
-        //
-        // 2. When the memory usage is between the graceful and aggressive threshold:
-        //   - If the last eviction memory usage decreases after last eviction, we set the eviction step
-        //     to 1.
-        //   - Otherwise, we set the step to last_step + 1.
-        //
-        // 3. When the memory usage exceeds the aggressive threshold:
-        //   - If the memory usage decreases after the last eviction, we set the eviction step to
-        //     last_step.
-        //   - Otherwise, we set the step to last_step * 2.
-        let mut step = if cur_used_memory_bytes < self.threshold_stable {
-            // Do not evict if the memory usage is lower than `threshold_stable`
-            0
-        } else if cur_used_memory_bytes < self.threshold_graceful {
-            // Evict in equal speed of time before `threshold_graceful`
-            1
-        } else if cur_used_memory_bytes < self.threshold_aggressive {
-            // Gracefully evict
-            if last_used_memory_bytes > cur_used_memory_bytes {
-                1
-            } else {
-                last_step + 1
-            }
-        } else if last_used_memory_bytes < cur_used_memory_bytes {
-            // Aggressively evict
-            if last_step == 0 {
-                2
-            } else {
-                last_step * 2
-            }
+        let policy = if cur_used_memory_bytes > self.threshold_aggressive {
+            LruEvictionPolicy::Aggressive
+        } else if cur_used_memory_bytes > self.threshold_graceful {
+            LruEvictionPolicy::Graceful
+        } else if cur_used_memory_bytes > self.threshold_stable {
+            LruEvictionPolicy::Stable
         } else {
-            last_step
+            LruEvictionPolicy::None
         };
 
-        let physical_now = Epoch::physical_now();
-        let watermark_time_ms =
-            if (physical_now - self.state.lru_watermark_time_ms) / (interval_ms as u64) < step {
-                // We do not increase the step and watermark here to prevent a too-advanced watermark. The
-                // original condition is `prev_watermark_time_ms + interval_ms * step > now`.
-                step = last_step;
-                physical_now
-            } else {
-                // Increase by (steps * interval)
-                self.state.lru_watermark_time_ms + (interval_ms as u64 * step)
-            };
-
-        self.state = State {
-            used_memory_bytes: cur_used_memory_bytes,
-            lru_watermark_step: step,
-            lru_watermark_time_ms: watermark_time_ms,
-        };
-
+        self.metrics.lru_latest_sequence.set(latest_sequence as _);
         self.metrics
-            .lru_current_watermark_time_ms
-            .set(watermark_time_ms as i64);
-        self.metrics.lru_physical_now_ms.set(physical_now as i64);
-        self.metrics.lru_watermark_step.set(step as i64);
+            .lru_watermark_sequence
+            .set(self.watermark_sequence as _);
+        self.metrics
+            .lru_eviction_policy
+            .set(Into::<u8>::into(policy) as _);
+
         self.metrics
             .jemalloc_allocated_bytes
             .set(jemalloc_allocated_bytes as i64);
