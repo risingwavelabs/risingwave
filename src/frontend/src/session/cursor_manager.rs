@@ -373,8 +373,15 @@ impl CursorManager {
         Ok(())
     }
 
-    pub async fn remove_cursor(&self, cursor_name: String) {
-        self.cursor_map.lock().await.remove(&cursor_name);
+    pub async fn remove_cursor(&self, cursor_name: String) -> Result<()> {
+        self.cursor_map
+            .lock()
+            .await
+            .remove(&cursor_name)
+            .ok_or_else(|| {
+                ErrorCode::CatalogError(format!("cursor `{}` don't exists", cursor_name).into())
+            })?;
+        Ok(())
     }
 
     pub async fn remove_all_cursor(&self) {

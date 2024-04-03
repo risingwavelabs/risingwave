@@ -29,7 +29,7 @@ pub async fn handle_close_cursor(
     let db_name = session.database();
     if let Some(cursor_name) = stmt.cursor_name {
         let (_, cursor_name) = Binder::resolve_schema_qualified_name(db_name, cursor_name.clone())?;
-        cursor_manager.remove_cursor(cursor_name).await;
+        cursor_manager.remove_cursor(cursor_name).await?;
     } else {
         cursor_manager.remove_all_cursor().await;
     }
