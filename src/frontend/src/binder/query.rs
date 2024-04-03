@@ -27,7 +27,7 @@ use thiserror_ext::AsReport;
 use super::bind_context::BindingCteState;
 use super::statement::RewriteExprsRecursive;
 use super::BoundValues;
-use crate::binder::bind_context::BindingCte;
+use crate::binder::bind_context::{BindingCte, RecursiveUnion};
 use crate::binder::{Binder, BoundSetExpr};
 use crate::error::{ErrorCode, Result};
 use crate::expr::{CorrelatedId, Depth, ExprImpl, ExprRewriter};
@@ -287,6 +287,7 @@ impl Binder {
             let share_id = self.next_share_id();
             let Cte { alias, query, .. } = cte_table;
             let table_name = alias.name.real_value();
+
             if with.recursive {
                 let Query {
                     with,
@@ -296,6 +297,8 @@ impl Binder {
                     offset,
                     fetch,
                 } = query;
+
+                /// the input clause should not be supported.
                 fn should_be_empty<T>(v: Option<T>, clause: &str) -> Result<()> {
                     if v.is_some() {
                         return Err(ErrorCode::BindError(format!(
@@ -305,6 +308,7 @@ impl Binder {
                     }
                     Ok(())
                 }
+
                 should_be_empty(order_by.first(), "ORDER BY")?;
                 should_be_empty(limit, "LIMIT")?;
                 should_be_empty(offset, "OFFSET")?;
@@ -315,7 +319,7 @@ impl Binder {
                     all,
                     left,
                     right,
-                } = body
+                } = body.clone()
                 else {
                     return Err(ErrorCode::BindError(
                         "`UNION` is required in recursive CTE".to_string(),
@@ -346,37 +350,52 @@ impl Binder {
                     self.bind_with(with)?;
                 }
 
-                // We assume `left` is base term, otherwise the implementation may be very hard.
-                // The behavior is same as PostgreSQL.
-                // https://www.postgresql.org/docs/16/sql-select.html#:~:text=the%20recursive%20self%2Dreference%20must%20appear%20on%20the%20right%2Dhand%20side%20of%20the%20UNION
-                let bound_base = self.bind_set_expr(*left)?;
+                // We assume `left` is the base term, otherwise the implementation may be very hard.
+                // The behavior is the same as PostgreSQL's.
+                // reference: <https://www.postgresql.org/docs/16/sql-select.html#:~:text=the%20recursive%20self%2Dreference%20must%20appear%20on%20the%20right%2Dhand%20side%20of%20the%20UNION>
+                let mut base = self.bind_set_expr(*left)?;
 
                 entry.borrow_mut().state = BindingCteState::BaseResolved {
-                    schema: bound_base.schema().clone(),
+                    schema: base.schema().clone(),
                 };
 
-                let bound_recursive = self.bind_set_expr(*right)?;
+                // bind the rest of the recursive cte
+                let mut recursive = self.bind_set_expr(*right)?;
 
-                let bound_query = BoundQuery {
-                    body: BoundSetExpr::RecursiveUnion {
-                        base: Box::new(bound_base),
-                        recursive: Box::new(bound_recursive),
-                    },
-                    order: vec![],
-                    limit: None,
-                    offset: None,
-                    with_ties: false,
-                    extra_order_exprs: vec![],
+                // todo: add validate check here for *bound* `base` and `recursive`
+                Self::align_schema(&mut base, &mut recursive, SetOperator::Union)?;
+
+                // please note that even after aligning, the schema of `left`
+                // may not be the same as `right`; this is because there may
+                // be case(s) where the `base` term is just a value, and the
+                // `recursive` term is a select expression / statement.
+                let schema = recursive.schema().clone();
+                // yet another sanity check
+                assert_eq!(
+                    schema,
+                    recursive.schema().clone(),
+                    "expect `schema` to be the same as recursive's"
+                );
+
+                let recursive_union = RecursiveUnion {
+                    all,
+                    base: Box::new(base),
+                    recursive: Box::new(recursive),
+                    schema,
                 };
 
-                entry.borrow_mut().state = BindingCteState::Bound { query: bound_query };
+                entry.borrow_mut().state = BindingCteState::Bound {
+                    query: either::Either::Right(recursive_union),
+                };
             } else {
                 let bound_query = self.bind_query(query)?;
                 self.context.cte_to_relation.insert(
                     table_name,
                     Rc::new(RefCell::new(BindingCte {
                         share_id,
-                        state: BindingCteState::Bound { query: bound_query },
+                        state: BindingCteState::Bound {
+                            query: either::Either::Left(bound_query),
+                        },
                         alias,
                     })),
                 );

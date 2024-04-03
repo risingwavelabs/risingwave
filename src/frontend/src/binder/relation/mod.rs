@@ -15,6 +15,7 @@
 use std::collections::hash_map::Entry;
 use std::ops::Deref;
 
+use either::Either::{Left, Right};
 use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME};
@@ -26,6 +27,7 @@ use thiserror::Error;
 use thiserror_ext::AsReport;
 
 use self::cte_ref::BoundBackCteRef;
+use self::recursive_union::BoundRecursiveUnion;
 use super::bind_context::ColumnBinding;
 use super::statement::RewriteExprsRecursive;
 use crate::binder::bind_context::{BindingCte, BindingCteState};
@@ -35,6 +37,7 @@ use crate::expr::{ExprImpl, InputRef};
 
 mod cte_ref;
 mod join;
+mod recursive_union;
 mod share;
 mod subquery;
 mod table_function;
@@ -70,6 +73,7 @@ pub enum Relation {
     Watermark(Box<BoundWatermark>),
     Share(Box<BoundShare>),
     BackCteRef(Box<BoundBackCteRef>),
+    RecursiveUnion(Box<BoundRecursiveUnion>),
 }
 
 impl RewriteExprsRecursive for Relation {
@@ -85,6 +89,7 @@ impl RewriteExprsRecursive for Relation {
                 *inner = rewriter.rewrite_expr(inner.take())
             }
             Relation::BackCteRef(inner) => inner.rewrite_exprs_recursive(rewriter),
+            Relation::RecursiveUnion(inner) => inner.rewrite_exprs_recursive(rewriter),
             _ => {}
         }
     }
@@ -342,7 +347,9 @@ impl Binder {
         as_of: Option<AsOf>,
     ) -> Result<Relation> {
         let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
+
         if schema_name.is_none()
+            // the `table_name` here is the name of the currently binding cte.
             && let Some(item) = self.context.cte_to_relation.get(&table_name)
         {
             // Handles CTE
@@ -352,7 +359,9 @@ impl Binder {
                 state: cte_state,
                 alias: mut original_alias,
             } = item.deref().borrow().clone();
-            debug_assert_eq!(original_alias.name.real_value(), table_name); // The original CTE alias ought to be its table name.
+
+            // The original CTE alias ought to be its table name.
+            debug_assert_eq!(original_alias.name.real_value(), table_name);
 
             if let Some(from_alias) = alias {
                 original_alias.name = from_alias.name;
@@ -366,7 +375,7 @@ impl Binder {
 
             match cte_state {
                 BindingCteState::Init => {
-                    Err(ErrorCode::BindError("Base term of recursive CTE not found, consider write it to left side of the `UNION` operator".to_string()).into())
+                    Err(ErrorCode::BindError("Base term of recursive CTE not found, consider writing it to left side of the `UNION ALL` operator".to_string()).into())
                 }
                 BindingCteState::BaseResolved { schema } => {
                     self.bind_table_to_context(
@@ -377,23 +386,40 @@ impl Binder {
                     Ok(Relation::BackCteRef(Box::new(BoundBackCteRef { share_id })))
                 }
                 BindingCteState::Bound { query } => {
+                    let schema = match query.clone() {
+                        Left(normal) => normal.body.schema().clone(),
+                        Right(recursive) => recursive.schema.clone(),
+                    };
                     self.bind_table_to_context(
-                        query
-                            .body
-                            .schema()
+                        schema
                             .fields
                             .iter()
                             .map(|f| (false, f.clone())),
                         table_name.clone(),
                         Some(original_alias),
                     )?;
-                    // Share the CTE.
-                    let input_relation = Relation::Subquery(Box::new(BoundSubquery {
-                        query,
-                        lateral: false,
-                    }));
+                    // todo: to be further reviewed
+                    let input_relation = match query {
+                        // normal cte with union
+                        Left(query) => {
+                            Relation::Subquery(Box::new(BoundSubquery {
+                                query,
+                                lateral: false,
+                            }))
+                        }
+                        // recursive cte
+                        Right(recursive) => {
+                            Relation::RecursiveUnion(Box::new(BoundRecursiveUnion {
+                                base: *recursive.base,
+                                recursive: *recursive.recursive,
+                            }))
+                        }
+                    };
+                    // we could always share the cte,
+                    // no matter it's recursive or not.
                     let share_relation = Relation::Share(Box::new(BoundShare {
                         share_id,
+                        // should either be a *bound* `subquery` or `recursive union`
                         input: input_relation,
                     }));
                     Ok(share_relation)

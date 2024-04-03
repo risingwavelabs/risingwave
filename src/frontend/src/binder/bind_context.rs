@@ -17,6 +17,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
+use either::Either;
 use parse_display::Display;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
@@ -26,6 +27,7 @@ use crate::error::{ErrorCode, Result};
 
 type LiteResult<T> = std::result::Result<T, ErrorCode>;
 
+use super::BoundSetExpr;
 use crate::binder::{BoundQuery, ShareId, COLUMN_GROUP_PREFIX};
 
 #[derive(Debug, Clone)]
@@ -78,12 +80,12 @@ pub struct LateralBindContext {
 /// WITH RECURSIVE t(n) AS (
 /// # -------------^ => Init
 ///     VALUES (1)
+/// # ----------^ => BaseResolved (after binding the base term)
 ///   UNION ALL
 ///     SELECT n+1 FROM t WHERE n < 100
-/// # ------------------^ => BaseResolved
+/// # ------------------^ => Bound (we know exactly what the entire cte looks like)
 /// )
 /// SELECT sum(n) FROM t;
-/// # -----------------^ => Bound
 /// ```
 #[derive(Default, Debug, Clone)]
 pub enum BindingCteState {
@@ -93,7 +95,26 @@ pub enum BindingCteState {
     /// We know the schema form after the base term resolved.
     BaseResolved { schema: Schema },
     /// We get the whole bound result of the (recursive) CTE.
-    Bound { query: BoundQuery },
+    Bound {
+        query: Either<BoundQuery, RecursiveUnion>,
+    },
+}
+
+/// the entire `RecursiveUnion` represents a *bound* recursive cte.
+/// reference: <https://github.com/risingwavelabs/risingwave/pull/15522/files#r1524367781>
+#[derive(Debug, Clone)]
+pub struct RecursiveUnion {
+    /// currently this *must* be true,
+    /// otherwise binding will fail.
+    pub all: bool,
+    /// lhs part of the `UNION ALL` operator
+    pub base: Box<BoundSetExpr>,
+    /// rhs part of the `UNION ALL` operator
+    pub recursive: Box<BoundSetExpr>,
+    /// the aligned schema for this union
+    /// will be the *same* schema as recursive's
+    /// this is just for a better readability
+    pub schema: Schema,
 }
 
 #[derive(Clone, Debug)]
@@ -116,7 +137,7 @@ pub struct BindContext {
     // The `BindContext`'s data on its column groups
     pub column_group_context: ColumnGroupContext,
     /// Map the cte's name to its binding state.
-    /// The `ShareId` of the value is used to help the planner identify the share plan.
+    /// The `ShareId` in `BindingCte` of the value is used to help the planner identify the share plan.
     pub cte_to_relation: HashMap<String, Rc<RefCell<BindingCte>>>,
     /// Current lambda functions's arguments
     pub lambda_args: Option<HashMap<String, (usize, DataType)>>,
@@ -341,13 +362,19 @@ impl BindContext {
             entry.extend(v.into_iter().map(|x| x + begin));
         }
         for (k, (x, y)) in other.range_of {
-            match self.range_of.entry(k) {
+            match self.range_of.entry(k.clone()) {
                 Entry::Occupied(e) => {
-                    return Err(ErrorCode::InternalError(format!(
-                        "Duplicated table name while merging adjacent contexts: {}",
-                        e.key()
-                    ))
-                    .into());
+                    if let BindingCteState::Bound { .. } =
+                        self.cte_to_relation.get(&k).unwrap().borrow().state.clone()
+                    {
+                        // do nothing
+                    } else {
+                        return Err(ErrorCode::InternalError(format!(
+                            "Duplicated table name while merging adjacent contexts: {}",
+                            e.key()
+                        ))
+                        .into());
+                    }
                 }
                 Entry::Vacant(entry) => {
                     entry.insert((begin + x, begin + y));

@@ -36,11 +36,6 @@ pub enum BoundSetExpr {
         left: Box<BoundSetExpr>,
         right: Box<BoundSetExpr>,
     },
-    /// UNION in recursive CTE definition
-    RecursiveUnion {
-        base: Box<BoundSetExpr>,
-        recursive: Box<BoundSetExpr>,
-    },
 }
 
 impl RewriteExprsRecursive for BoundSetExpr {
@@ -52,10 +47,6 @@ impl RewriteExprsRecursive for BoundSetExpr {
             BoundSetExpr::SetOperation { left, right, .. } => {
                 left.rewrite_exprs_recursive(rewriter);
                 right.rewrite_exprs_recursive(rewriter);
-            }
-            BoundSetExpr::RecursiveUnion { base, recursive } => {
-                base.rewrite_exprs_recursive(rewriter);
-                recursive.rewrite_exprs_recursive(rewriter);
             }
         }
     }
@@ -87,7 +78,6 @@ impl BoundSetExpr {
             BoundSetExpr::Values(v) => v.schema(),
             BoundSetExpr::Query(q) => q.schema(),
             BoundSetExpr::SetOperation { left, .. } => left.schema(),
-            BoundSetExpr::RecursiveUnion { base, .. } => base.schema(),
         }
     }
 
@@ -98,9 +88,6 @@ impl BoundSetExpr {
             BoundSetExpr::Query(q) => q.is_correlated(depth),
             BoundSetExpr::SetOperation { left, right, .. } => {
                 left.is_correlated(depth) || right.is_correlated(depth)
-            }
-            BoundSetExpr::RecursiveUnion { base, recursive } => {
-                base.is_correlated(depth) || recursive.is_correlated(depth)
             }
         }
     }
@@ -130,22 +117,83 @@ impl BoundSetExpr {
                 );
                 correlated_indices
             }
-            BoundSetExpr::RecursiveUnion { base, recursive } => {
-                let mut correlated_indices = vec![];
-                correlated_indices.extend(
-                    base.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
-                );
-                correlated_indices.extend(
-                    recursive
-                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
-                );
-                correlated_indices
-            }
         }
     }
 }
 
 impl Binder {
+    /// note: align_schema only works when the `left` and `right`
+    /// are both select expression(s).
+    pub(crate) fn align_schema(
+        mut left: &mut BoundSetExpr,
+        mut right: &mut BoundSetExpr,
+        op: SetOperator,
+    ) -> Result<()> {
+        if left.schema().fields.len() != right.schema().fields.len() {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "each {} query must have the same number of columns",
+                op
+            ))
+            .into());
+        }
+
+        // handle type alignment for select union select
+        // e.g., select 1 UNION ALL select NULL
+        if let (BoundSetExpr::Select(l_select), BoundSetExpr::Select(r_select)) =
+            (&mut left, &mut right)
+        {
+            for (i, (l, r)) in l_select
+                .select_items
+                .iter_mut()
+                .zip_eq_fast(r_select.select_items.iter_mut())
+                .enumerate()
+            {
+                let Ok(column_type) = align_types(vec![l, r].into_iter()) else {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "{} types {} and {} cannot be matched. Columns' name are `{}` and `{}`.",
+                        op,
+                        l_select.schema.fields[i].data_type,
+                        r_select.schema.fields[i].data_type,
+                        l_select.schema.fields[i].name,
+                        r_select.schema.fields[i].name,
+                    ))
+                    .into());
+                };
+                l_select.schema.fields[i].data_type = column_type.clone();
+                r_select.schema.fields[i].data_type = column_type;
+            }
+        }
+
+        Self::validate(left, right, op)
+    }
+
+    /// validate the schema, should be called after aligning.
+    pub(crate) fn validate(
+        left: &BoundSetExpr,
+        right: &BoundSetExpr,
+        op: SetOperator,
+    ) -> Result<()> {
+        for (a, b) in left
+            .schema()
+            .fields
+            .iter()
+            .zip_eq_fast(right.schema().fields.iter())
+        {
+            if a.data_type != b.data_type {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "{} types {} and {} cannot be matched. Columns' name are {} and {}.",
+                    op,
+                    a.data_type.prost_type_name().as_str_name(),
+                    b.data_type.prost_type_name().as_str_name(),
+                    a.name,
+                    b.name,
+                ))
+                .into());
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn bind_set_expr(&mut self, set_expr: SetExpr) -> Result<BoundSetExpr> {
         match set_expr {
             SetExpr::Select(s) => Ok(BoundSetExpr::Select(Box::new(self.bind_select(*s)?))),
@@ -157,7 +205,7 @@ impl Binder {
                 left,
                 right,
             } => {
-                match op {
+                match op.clone() {
                     SetOperator::Union | SetOperator::Intersect | SetOperator::Except => {
                         let mut left = self.bind_set_expr(*left)?;
                         // Reset context for right side, but keep `cte_to_relation`.
@@ -175,51 +223,7 @@ impl Binder {
                             .into());
                         }
 
-                        // Handle type alignment for select union select
-                        // E.g. Select 1 UNION ALL Select NULL
-                        if let (BoundSetExpr::Select(l_select), BoundSetExpr::Select(r_select)) =
-                            (&mut left, &mut right)
-                        {
-                            for (i, (l, r)) in l_select
-                                .select_items
-                                .iter_mut()
-                                .zip_eq_fast(r_select.select_items.iter_mut())
-                                .enumerate()
-                            {
-                                let Ok(column_type) = align_types(vec![l, r].into_iter()) else {
-                                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                                        "{} types {} and {} cannot be matched. Columns' name are `{}` and `{}`.",
-                                        op,
-                                        l_select.schema.fields[i].data_type,
-                                        r_select.schema.fields[i].data_type,
-                                        l_select.schema.fields[i].name,
-                                        r_select.schema.fields[i].name,
-                                    ))
-                                        .into());
-                                };
-                                l_select.schema.fields[i].data_type = column_type.clone();
-                                r_select.schema.fields[i].data_type = column_type;
-                            }
-                        }
-
-                        for (a, b) in left
-                            .schema()
-                            .fields
-                            .iter()
-                            .zip_eq_fast(right.schema().fields.iter())
-                        {
-                            if a.data_type != b.data_type {
-                                return Err(ErrorCode::InvalidInputSyntax(format!(
-                                    "{} types {} and {} cannot be matched. Columns' name are {} and {}.",
-                                    op,
-                                    a.data_type.prost_type_name().as_str_name(),
-                                    b.data_type.prost_type_name().as_str_name(),
-                                    a.name,
-                                    b.name,
-                                ))
-                                .into());
-                            }
-                        }
+                        Self::align_schema(&mut left, &mut right, op.clone())?;
 
                         if all {
                             match op {
