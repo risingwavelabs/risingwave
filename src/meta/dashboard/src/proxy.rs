@@ -16,14 +16,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use anyhow::anyhow;
-use axum::body::Body;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Router;
 use bytes::Bytes;
 use hyper::header::CONTENT_TYPE;
-use hyper::service::service_fn;
-use hyper::{HeaderMap, Request};
+use hyper::{HeaderMap, Uri};
 use thiserror_ext::AsReport as _;
 use url::Url;
 
@@ -63,10 +61,10 @@ impl IntoResponse for CachedResponse {
 }
 
 async fn proxy(
-    req: Request<Body>,
+    uri: Uri,
     cache: Arc<Mutex<HashMap<String, CachedResponse>>>,
 ) -> anyhow::Result<Response> {
-    let mut path = req.uri().path().to_string();
+    let mut path = uri.path().to_string();
     if path.ends_with('/') {
         path += "index.html";
     }
@@ -104,16 +102,15 @@ async fn proxy(
 pub(crate) fn router() -> Router {
     let cache = Arc::new(Mutex::new(HashMap::new()));
 
-    Router::new().fallback_service(service_fn(move |req: Request<Body>| {
-        let cache = cache.clone();
-        async move {
-            proxy(req, cache).await.or_else(|err| {
-                Ok((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    err.context("Unhandled internal error").to_report_string(),
-                )
-                    .into_response())
-            })
-        }
-    }))
+    let handler = |uri| async move {
+        proxy(uri, cache.clone()).await.unwrap_or_else(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                err.context("Unhandled internal error").to_report_string(),
+            )
+                .into_response()
+        })
+    };
+
+    Router::new().fallback(handler)
 }
