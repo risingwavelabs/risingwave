@@ -557,19 +557,18 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                         old_row.row.clone(),
                                         new_row_bytes.clone(),
                                     );
-                                    // update cache
+                                    // Since `DoUpdateIfNotNull` may generate values that differ from both the new row and old row,
+                                    // an update cache needs to be done here.
                                     self.data.push(
                                         key.clone(),
                                         Some(CompactedRow { row: new_row_bytes }),
                                     );
+
+                                    update_cache = false;
                                 }
                                 None => {
                                     fixed_changes().insert(key.clone(), value.clone());
-                                    // update cache
-                                    self.data.push(
-                                        key.clone(),
-                                        Some(CompactedRow { row: value.clone() }),
-                                    );
+                                    update_cache = true;
                                 }
                             };
                         }
@@ -578,13 +577,12 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
 
                     if update_cache {
                         match conflict_behavior {
-                            ConflictBehavior::Overwrite | ConflictBehavior::IgnoreConflict => {
+                            ConflictBehavior::Overwrite
+                            | ConflictBehavior::IgnoreConflict
+                            | ConflictBehavior::DoUpdateIfNotNull => {
                                 self.data.push(key, Some(CompactedRow { row: value }));
                             }
-                            ConflictBehavior::DoUpdateIfNotNull => {
-                                // Since `DoUpdateIfNotNull` may generate values that differ from both the new and old rows,
-                                // its update cache is handled within the match operation.
-                            }
+
                             _ => unreachable!(),
                         }
                     }
