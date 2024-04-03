@@ -541,7 +541,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                         .deserializer
                                         .deserialize(old_row.row.clone())?
                                         .into_inner()
-                                        .to_vec();
+                                        .into_vec();
                                     let new_row_deserialized =
                                         row_serde.deserializer.deserialize(value.clone())?;
 
