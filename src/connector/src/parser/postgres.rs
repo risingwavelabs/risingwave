@@ -12,14 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::str::FromStr;
 use std::sync::LazyLock;
 
 use chrono::{NaiveDate, Utc};
+use pg_bigdecimal::PgNumeric;
+use risingwave_common::array::ArrayBuilderImpl;
 use risingwave_common::catalog::Schema;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
-    DataType, Date, Decimal, Interval, JsonbVal, ListValue, ScalarImpl, Time, Timestamp,
+    DataType, Date, Decimal, Int256, Interval, JsonbVal, ListValue, ScalarImpl, Time, Timestamp,
     Timestamptz,
 };
 use rust_decimal::Decimal as RustDecimal;
@@ -139,6 +142,7 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                 DataType::Decimal => {
                     handle_data_type!(row, i, name, RustDecimal, Decimal)
                 }
+                DataType::Int256 => postgres_decimal_to_rw_int256(&row, i, name, None),
                 DataType::Varchar => {
                     match row.columns()[i].type_() {
                         // Since we don't support UUID natively, adapt it to a VARCHAR column
@@ -159,6 +163,8 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                 }
                             }
                         }
+                        // support converting NUMERIC to VARCHAR implicitly
+                        &Type::NUMERIC => postgres_decimal_to_varchar(&row, i, name, None),
                         _ => {
                             handle_data_type!(row, i, name, String)
                         }
@@ -227,7 +233,37 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                             handle_list_data_type!(row, i, name, NaiveDate, builder, Date);
                         }
                         DataType::Varchar => {
-                            handle_list_data_type!(row, i, name, String, builder);
+                            match row.columns()[i].type_() {
+                                // Since we don't support UUID natively, adapt it to a VARCHAR column
+                                &Type::UUID => {
+                                    let res = row.try_get::<_, Option<uuid::Uuid>>(i);
+                                    match res {
+                                        Ok(val) => {
+                                            if let Some(v) = val {
+                                                builder
+                                                    .append(Some(ScalarImpl::from(v.to_string())));
+                                            }
+                                        }
+                                        Err(err) => {
+                                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                                                tracing::error!(
+                                                    suppressed_count,
+                                                    column = name,
+                                                    error = %err.as_report(),
+                                                    "parse uuid column failed",
+                                                );
+                                            }
+                                        }
+                                    };
+                                }
+                                // support converting NUMERIC to VARCHAR implicitly
+                                &Type::NUMERIC => {
+                                    let _ = postgres_decimal_to_varchar(&row, i, name, None);
+                                }
+                                _ => {
+                                    handle_list_data_type!(row, i, name, String, builder);
+                                }
+                            }
                         }
                         DataType::Time => {
                             handle_list_data_type!(row, i, name, chrono::NaiveTime, builder, Time);
@@ -289,10 +325,11 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                 }
                             }
                         }
-                        DataType::Struct(_)
-                        | DataType::List(_)
-                        | DataType::Serial
-                        | DataType::Int256 => {
+                        DataType::Int256 => {
+                            let _ =
+                                postgres_decimal_to_rw_int256(&row, i, name, Some(&mut builder));
+                        }
+                        DataType::Struct(_) | DataType::List(_) | DataType::Serial => {
                             tracing::warn!(
                                 "unsupported List data type {:?}, set the List to empty",
                                 **dtype
@@ -302,8 +339,8 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
 
                     Some(ScalarImpl::from(ListValue::new(builder.finish())))
                 }
-                DataType::Struct(_) | DataType::Int256 | DataType::Serial => {
-                    // Interval, Struct, List, Int256 are not supported
+                DataType::Struct(_) | DataType::Serial => {
+                    // Interval, Struct, List are not supported
                     tracing::warn!(rw_field.name, ?rw_field.data_type, "unsupported data type, set to null");
                     None
                 }
@@ -312,4 +349,82 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
         datums.push(datum);
     }
     OwnedRow::new(datums)
+}
+
+fn postgres_decimal_to_string(row: &tokio_postgres::Row, idx: usize, name: &str) -> Option<String> {
+    let res = row.try_get::<_, Option<PgNumeric>>(idx);
+    match res {
+        Ok(val) => {
+            if let Some(PgNumeric {
+                n: Some(big_decimal),
+            }) = val
+            {
+                Some(big_decimal.to_string())
+            } else {
+                None
+            }
+        }
+        Err(err) => {
+            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                tracing::error!(
+                    column = name,
+                    error = %err.as_report(),
+                    suppressed_count,
+                    "parse column failed",
+                );
+            }
+            None
+        }
+    }
+}
+
+fn postgres_decimal_to_rw_int256(
+    row: &tokio_postgres::Row,
+    idx: usize,
+    name: &str,
+    builder: Option<&mut ArrayBuilderImpl>,
+) -> Option<ScalarImpl> {
+    // Currently in order to handle the decimal beyond RustDecimal,
+    // we use the PgNumeric type to convert the decimal to a string.
+    // Then we convert the string to Int256.
+    let string = postgres_decimal_to_string(row, idx, name)?;
+    match Int256::from_str(string.as_str()) {
+        Ok(num) => {
+            if builder.is_some() {
+                builder.unwrap().append(Some(ScalarImpl::from(num.clone())));
+                None
+            } else {
+                Some(ScalarImpl::from(num))
+            }
+        }
+        Err(err) => {
+            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                tracing::error!(
+                    column = name,
+                    error = %err.as_report(),
+                    suppressed_count,
+                    "parse column failed",
+                );
+            }
+            None
+        }
+    }
+}
+
+fn postgres_decimal_to_varchar(
+    row: &tokio_postgres::Row,
+    idx: usize,
+    name: &str,
+    builder: Option<&mut ArrayBuilderImpl>,
+) -> Option<ScalarImpl> {
+    // Currently in order to handle the decimal beyond RustDecimal,
+    // we use the PgNumeric type to convert the decimal to a string.
+    let string = postgres_decimal_to_string(row, idx, name)?;
+
+    if builder.is_some() {
+        builder.unwrap().append(Some(ScalarImpl::from(string)));
+        None
+    } else {
+        Some(ScalarImpl::from(string))
+    }
 }

@@ -8388,6 +8388,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "pg_bigdecimal"
+version = "0.1.5"
+source = "git+https://github.com/risingwavelabs/rust-pg_bigdecimal?rev=3ec5e7bb283d9795d3626ffd8f9cb28cf0378608#3ec5e7bb283d9795d3626ffd8f9cb28cf0378608"
+dependencies = [
+ "bigdecimal 0.4.2",
+ "byteorder",
+ "bytes",
+ "num-bigint",
+ "num-integer",
+ "postgres-types",
+]
+
+[[package]]
 name = "pg_interval"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10416,6 +10429,7 @@ dependencies = [
  "openssl",
  "parking_lot 0.12.1",
  "paste",
+ "pg_bigdecimal",
  "postgres-openssl",
  "pretty_assertions",
  "prometheus",
