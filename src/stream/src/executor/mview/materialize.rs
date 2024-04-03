@@ -465,7 +465,6 @@ impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S
 pub struct MaterializeCache<SD> {
     data: ManagedLruCache<Vec<u8>, CacheValue>,
     metrics_info: MetricsInfo,
-    // data_types: Vec<DataType>,
     row_serde: BasicSerde,
     _serde: PhantomData<SD>,
 }
@@ -476,7 +475,6 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
     pub fn new(
         watermark_epoch: AtomicU64Ref,
         metrics_info: MetricsInfo,
-        // data_types: Vec<DataType>,
         row_serde: BasicSerde,
     ) -> Self {
         let cache: ManagedLruCache<Vec<u8>, CacheValue> =
@@ -484,7 +482,6 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         Self {
             data: cache,
             metrics_info,
-            // data_types,
             row_serde,
             _serde: PhantomData,
         }
@@ -685,7 +682,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
 /// let old_row = vec![Some(1), None, Some(3)];
 /// let mut new_row = vec![Some(10), Some(20), Some(30)];
 ///
-/// let updated_row = execute_do_update_if_not_null_replacement(old_row, new_row);
+/// // let updated_row = execute_do_update_if_not_null_replacement(old_row, new_row);
 ///
 /// // After the function call, updated_row will be [Some(10), None, Some(3)]
 /// ```
