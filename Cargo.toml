@@ -123,7 +123,7 @@ hashbrown = { version = "0.14", features = ["ahash", "inline-more", "nightly"] }
 criterion = { version = "0.5", features = ["async_futures"] }
 tonic = { package = "madsim-tonic", version = "0.4.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }
-otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "58c1f003484449d7c6dd693b348bf19dd44889cb" }
+otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "492c244e0be91feb659c0cd48a624bbd96045a33" }
 prost = { version = "0.12" }
 icelake = { git = "https://github.com/icelake-io/icelake", rev = "54fd72fbd1dd8c592f05eeeb79223c8a6a33c297", features = [
   "prometheus",

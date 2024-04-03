@@ -29,7 +29,6 @@ aws-sdk-s3 = { version = "1" }
 aws-sigv4 = { version = "1", features = ["http0-compat", "sign-eventstream", "sigv4a"] }
 aws-smithy-runtime = { version = "1", default-features = false, features = ["client", "rt-tokio", "tls-rustls"] }
 aws-smithy-types = { version = "1", default-features = false, features = ["byte-stream-poll-next", "http-body-0-4-x", "hyper-0-14-x", "rt-tokio"] }
-axum = { version = "0.6" }
 base64 = { version = "0.21" }
 bigdecimal = { version = "0.4" }
 bit-set = { version = "0.5" }
@@ -69,7 +68,8 @@ governor = { version = "0.6", default-features = false, features = ["dashmap", "
 hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14", features = ["nightly", "raw"] }
 hashbrown-594e8ee84c453af0 = { package = "hashbrown", version = "0.13", features = ["raw"] }
 hmac = { version = "0.12", default-features = false, features = ["reset"] }
-hyper = { version = "0.14", features = ["full"] }
+hyper-582f2526e08bb6a0 = { package = "hyper", version = "0.14", features = ["full"] }
+hyper-dff4ba8e3ae991db = { package = "hyper", version = "1", features = ["full"] }
 indexmap-dff4ba8e3ae991db = { package = "indexmap", version = "1", default-features = false, features = ["serde"] }
 indexmap-f595c2ba2a3f28df = { package = "indexmap", version = "2", features = ["serde"] }
 itertools = { version = "0.11" }
@@ -206,7 +206,8 @@ futures-util = { version = "0.3", features = ["channel", "io", "sink"] }
 generic-array = { version = "0.14", default-features = false, features = ["more_lengths", "zeroize"] }
 hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14", features = ["nightly", "raw"] }
 hmac = { version = "0.12", default-features = false, features = ["reset"] }
-hyper = { version = "0.14", features = ["full"] }
+hyper-582f2526e08bb6a0 = { package = "hyper", version = "0.14", features = ["full"] }
+hyper-dff4ba8e3ae991db = { package = "hyper", version = "1", features = ["full"] }
 indexmap-f595c2ba2a3f28df = { package = "indexmap", version = "2", features = ["serde"] }
 itertools = { version = "0.11" }
 lazy_static = { version = "1", default-features = false, features = ["spin_no_std"] }

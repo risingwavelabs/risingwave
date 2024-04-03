@@ -385,6 +385,7 @@ impl StreamActorManager {
     /// Create dispatchers with downstream information registered before
     fn create_dispatcher(
         &self,
+        env: StreamEnvironment,
         input: Executor,
         dispatchers: &[stream_plan::Dispatcher],
         actor_id: ActorId,
@@ -403,6 +404,7 @@ impl StreamActorManager {
             fragment_id,
             shared_context.clone(),
             self.streaming_metrics.clone(),
+            env.config().developer.chunk_size,
         ))
     }
 
@@ -597,6 +599,7 @@ impl StreamActorManager {
                 .await?;
 
             let dispatcher = self.create_dispatcher(
+                self.env.clone(),
                 executor,
                 &actor.dispatcher,
                 actor_id,
