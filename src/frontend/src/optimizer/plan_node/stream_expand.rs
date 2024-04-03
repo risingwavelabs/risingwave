@@ -21,8 +21,8 @@ use super::stream::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::utils::ColIndexMappingRewriteExt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamExpand {
@@ -33,14 +33,9 @@ pub struct StreamExpand {
 impl StreamExpand {
     pub fn new(core: generic::Expand<PlanRef>) -> Self {
         let input = core.input.clone();
-
-        let dist = match input.distribution() {
-            Distribution::Single => Distribution::Single,
-            Distribution::SomeShard
-            | Distribution::HashShard(_)
-            | Distribution::UpstreamHashShard(_, _) => Distribution::SomeShard,
-            Distribution::Broadcast => unreachable!(),
-        };
+        let dist = core
+            .i2o_col_mapping()
+            .rewrite_provided_distribution(input.distribution());
 
         let mut watermark_columns = FixedBitSet::with_capacity(core.output_len());
         watermark_columns.extend(

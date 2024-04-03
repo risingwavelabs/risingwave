@@ -67,8 +67,13 @@ impl Rule for DistinctAggRule {
 
         let (node, flag_values, has_expand) =
             Self::build_expand(input, &mut agg_group_keys, &mut agg_calls);
-        let mid_agg =
-            Self::build_middle_agg(node, agg_group_keys.clone(), agg_calls.clone(), has_expand);
+        let mid_agg = Self::build_middle_agg(
+            node,
+            agg_group_keys.clone(),
+            agg_calls.clone(),
+            has_expand,
+            enable_two_phase,
+        );
 
         // The middle agg will extend some fields for `agg_group_keys`, so we need to find out the
         // original group key for the final agg.
@@ -215,6 +220,7 @@ impl DistinctAggRule {
         mut group_keys: IndexSet,
         agg_calls: Vec<PlanAggCall>,
         has_expand: bool,
+        enable_two_phase: bool,
     ) -> Agg<PlanRef> {
         // The middle `LogicalAgg` groups by (`agg_group_keys` + arguments of distinct aggregates +
         // `flag`).
@@ -239,7 +245,7 @@ impl DistinctAggRule {
             // append `flag`.
             group_keys.insert(project.schema().len() - 1);
         }
-        Agg::new(agg_calls, group_keys, project).with_enable_two_phase(false)
+        Agg::new(agg_calls, group_keys, project).with_enable_two_phase(enable_two_phase)
     }
 
     fn build_final_agg(
