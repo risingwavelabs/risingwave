@@ -301,10 +301,16 @@ where
 
             for ptr in map.drain() {
                 self.detach(ptr);
-                let _ = Box::from_raw_in(ptr.as_ptr(), self.alloc.clone());
+                let mut entry = Box::from_raw_in(ptr.as_ptr(), self.alloc.clone());
+                entry.key.assume_init_drop();
+                entry.value.assume_init_drop();
             }
 
             debug_assert!(self.is_empty());
+            debug_assert_eq!(
+                self.dummy.as_mut() as *mut _,
+                self.dummy.next.unwrap_unchecked().as_ptr()
+            )
         }
     }
 
