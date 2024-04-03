@@ -137,34 +137,3 @@ For all data a, b of the same type, we must ensure that:
 in-memory representation of a < in-memory representation of b,
 iff memcomparable(a) < memcomparable(b)
 ```
-
-### TopN Executor (Merge-On-Read)
-
-TopN executor is a merge-on-read executor. It can be implemented in a very simple way:
-
-```rust
-fn apply_batch(&self, data: ArrayImpl) -> ArrayImpl {
-  for datum in data.iter() {
-      self.keyspace.insert(datum, datum);
-  }
-  self.keyspace.iter().skip(self.offset).take(self.limit).collect()
-}
-
-fn flush(&self) {
-    self.keyspace.seal(epoch);
-}
-```
-
-### HashJoinExecutor
-
-Every operation on managed state can directly write to the memtable. No need to do manual merge.
-
-### ExtremeState
-
-```rust
-fn get_output(&self) -> ScalarImpl {
-  if !self.cache_available() {
-    self.keyspace.iter().next() // no need to write and fetch
-  }
-}
-```
