@@ -538,7 +538,7 @@ impl CatalogController {
         streaming_job: &StreamingJob,
         ctx: &StreamContext,
         version: &PbTableVersion,
-        default_parallelism: &Option<NonZeroUsize>,
+        specified_parallelism: &Option<NonZeroUsize>,
     ) -> MetaResult<ObjectId> {
         let id = streaming_job.id();
         let inner = self.inner.write().await;
@@ -557,7 +557,7 @@ impl CatalogController {
             return Err(MetaError::permission_denied("table version is stale"));
         }
 
-        let parallelism = match default_parallelism {
+        let parallelism = match specified_parallelism {
             None => StreamingParallelism::Adaptive,
             Some(n) => StreamingParallelism::Fixed(n.get() as _),
         };
@@ -827,7 +827,7 @@ impl CatalogController {
             if let Some(table_id) = source.optional_associated_table_id {
                 vec![table_id]
             } else if let Some(source_info) = &source.source_info
-                && source_info.inner_ref().cdc_source_job
+                && source_info.inner_ref().is_shared()
             {
                 vec![source_id]
             } else {
@@ -862,6 +862,7 @@ impl CatalogController {
             .map(|(id, mask, stream_node)| (id, mask, stream_node.to_protobuf()))
             .collect_vec();
 
+        // TODO: limit source backfill?
         fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
             let mut found = false;
             if *fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0 {
@@ -1284,9 +1285,7 @@ impl CatalogController {
             streaming_job.parallelism = Set(match parallelism {
                 TableParallelism::Adaptive => StreamingParallelism::Adaptive,
                 TableParallelism::Fixed(n) => StreamingParallelism::Fixed(n as _),
-                TableParallelism::Custom => {
-                    unreachable!("sql backend doesn't support custom parallelism")
-                }
+                TableParallelism::Custom => StreamingParallelism::Custom,
             });
 
             streaming_job.update(&txn).await?;

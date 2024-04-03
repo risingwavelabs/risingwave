@@ -47,7 +47,6 @@ prometheus = "0.13"
 prometheus-http-query = "0.8"
 prost = { workspace = true }
 rand = "0.8"
-reqwest = "0.11"
 risingwave_backup = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_heap_profiling = { workspace = true }
@@ -65,7 +64,7 @@ scopeguard = "1.2.0"
 sea-orm = { workspace = true }
 serde = { version = "1.0.196", features = ["derive"] }
 serde_json = "1.0.113"
-strum = { version = "0.25", features = ["derive"] }
+strum = { version = "0.26", features = ["derive"] }
 sync-point = { path = "../utils/sync-point" }
 thiserror = "1"
 thiserror-ext = { workspace = true }
@@ -86,8 +85,8 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
-axum = "0.6"
-tower-http = { version = "0.4", features = [
+axum = "=0.7.4" # TODO: 0.7.5+ does not work with current toolchain
+tower-http = { version = "0.5", features = [
     "add-extension",
     "cors",
     "fs",
@@ -97,7 +96,7 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"
-expect-test = "1.4"
+expect-test = "1.5"
 rand = "0.8"
 risingwave_hummock_sdk = { workspace = true }
 risingwave_test_runner = { workspace = true }

@@ -20,6 +20,7 @@
 #![feature(never_type)]
 #![feature(error_generic_member_access)]
 #![feature(used_with_arg)]
+#![feature(ascii_char)]
 
 extern crate self as risingwave_expr;
 

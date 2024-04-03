@@ -57,7 +57,7 @@
 - input: CREATE TABLE T ("FULL" INT) ON CONFLICT IGNORE
   formatted_sql: CREATE TABLE T ("FULL" INT) ON CONFLICT IGNORE
 - input: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE IF NOT NULL
-  error_msg: 'sql parser error: On conflict behavior do update if not null is not supported yet.'
+  formatted_sql: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE IF NOT NULL
 - input: CREATE USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
   formatted_sql: CREATE USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
 - input: CREATE SINK snk

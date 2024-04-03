@@ -34,6 +34,7 @@ impl OpendalObjectStore {
         if let Ok(cred) = cred {
             builder.credential(&cred);
         }
+
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())
