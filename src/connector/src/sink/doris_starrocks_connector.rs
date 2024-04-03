@@ -26,6 +26,7 @@ use hyper::client::HttpConnector;
 use hyper::{body, Client, Request, StatusCode};
 use hyper_tls::HttpsConnector;
 use tokio::task::JoinHandle;
+use url::Url;
 
 use super::{Result, SinkError};
 
@@ -40,6 +41,8 @@ const WAIT_HANDDLE_TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const DORIS: &str = "doris";
 const STARROCKS: &str = "starrocks";
+const LOCALHOST: &str = "localhost";
+const LOCALHOST_IP: &str = "127.0.0.1";
 pub struct HeaderBuilder {
     header: HashMap<String, String>,
 }
@@ -158,16 +161,30 @@ pub struct InserterInnerBuilder {
     url: String,
     header: HashMap<String, String>,
     sender: Option<Sender>,
+    fe_host: String,
 }
 impl InserterInnerBuilder {
-    pub fn new(url: String, db: String, table: String, header: HashMap<String, String>) -> Self {
+    pub fn new(
+        url: String,
+        db: String,
+        table: String,
+        header: HashMap<String, String>,
+    ) -> Result<Self> {
+        let fe_host = Url::parse(&url)
+            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?
+            .host_str()
+            .ok_or_else(|| {
+                SinkError::DorisStarrocksConnect(anyhow::anyhow!("Can't get fe host from url"))
+            })?
+            .to_string();
         let url = format!("{}/api/{}/{}/_stream_load", url, db, table);
 
-        Self {
+        Ok(Self {
             url,
             sender: None,
             header,
-        }
+            fe_host,
+        })
     }
 
     fn build_request_and_client(
@@ -196,7 +213,7 @@ impl InserterInnerBuilder {
             .request(request_get_url)
             .await
             .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
-        let be_url = if resp.status() == StatusCode::TEMPORARY_REDIRECT {
+        let mut be_url = if resp.status() == StatusCode::TEMPORARY_REDIRECT {
             resp.headers()
                 .get("location")
                 .ok_or_else(|| {
@@ -207,13 +224,31 @@ impl InserterInnerBuilder {
                 .to_str()
                 .context("Can't get doris BE url in header")
                 .map_err(SinkError::DorisStarrocksConnect)?
+                .to_string()
         } else {
             return Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!(
                 "Can't get doris BE url",
             )));
         };
 
-        let (builder, client) = self.build_request_and_client(be_url.to_string());
+        if self.fe_host != LOCALHOST && self.fe_host != LOCALHOST_IP {
+            let mut parsed_be_url =
+                Url::parse(&be_url).map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
+            let be_host = parsed_be_url.host_str().ok_or_else(|| {
+                SinkError::DorisStarrocksConnect(anyhow::anyhow!("Can't get be host from url"))
+            })?;
+
+            if be_host == LOCALHOST || be_host == LOCALHOST_IP {
+                // if be host is 127.0.0.1, we may can't connect to it directly,
+                // so replace it with fe host
+                parsed_be_url
+                    .set_host(Some(self.fe_host.as_str()))
+                    .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
+                be_url = parsed_be_url.as_str().into();
+            }
+        }
+
+        let (builder, client) = self.build_request_and_client(be_url);
         let (sender, body) = Body::channel();
         let request = builder
             .body(body)

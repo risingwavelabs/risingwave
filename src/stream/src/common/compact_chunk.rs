@@ -19,16 +19,15 @@ use std::mem;
 
 use itertools::Itertools;
 use prehash::{new_prehashed_map_with_capacity, Passthru, Prehashed};
+use risingwave_common::array::stream_chunk::{OpRowMutRef, StreamChunkMut};
+use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
+use risingwave_common::array::stream_record::Record;
+use risingwave_common::array::{Op, RowRef, StreamChunk};
+use risingwave_common::row::{Project, RowExt};
+use risingwave_common::types::DataType;
+use risingwave_common::util::hash_util::Crc32FastBuilder;
 
-use super::stream_chunk::{OpRowMutRef, StreamChunkMut};
-use super::stream_chunk_builder::StreamChunkBuilder;
-use super::stream_record::Record;
-use super::DataType;
-use crate::array::{Op, RowRef, StreamChunk};
-use crate::row::{Project, RowExt};
-use crate::util::hash_util::Crc32FastBuilder;
-
-/// A helper to compact the stream chunks with just modify the `Ops` and visibility of the chunk.
+/// A helper to compact the stream chunks by modifying the `Ops` and visibility of the chunk.
 pub struct StreamChunkCompactor {
     chunks: Vec<StreamChunk>,
     key: Vec<usize>,
@@ -292,9 +291,10 @@ pub fn merge_chunk_row(stream_chunk: StreamChunk, pk_indices: &[usize]) -> Strea
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::array::StreamChunk;
+    use risingwave_common::test_prelude::StreamChunkTestExt;
+
     use super::*;
-    use crate::array::StreamChunk;
-    use crate::test_prelude::StreamChunkTestExt;
 
     #[test]
     fn test_merge_chunk_row() {
