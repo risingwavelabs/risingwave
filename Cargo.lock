@@ -1460,6 +1460,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "axum-embed"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "077959a7f8cf438676af90b483304528eb7e16eadadb7f44e9ada4f9dceb9e62"
+dependencies = [
+ "axum-core 0.4.3",
+ "chrono",
+ "http 1.0.0",
+ "mime_guess",
+ "rust-embed",
+ "tower-service",
+]
+
+[[package]]
 name = "backon"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10105,6 +10119,7 @@ version = "1.7.0-alpha"
 dependencies = [
  "anyhow",
  "axum 0.7.4",
+ "axum-embed",
  "bytes",
  "cargo-emit",
  "dircpy",
