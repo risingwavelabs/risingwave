@@ -26,7 +26,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Schema, TableId};
 use risingwave_common::row::{CompactedRow, OwnedRow, RowDeserializer};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -493,7 +493,6 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         table: &StateTableInner<S, SD>,
         conflict_behavior: &ConflictBehavior,
     ) -> StreamExecutorResult<MaterializeBuffer> {
-        let column_len = table.get_data_types().len();
         let key_set: HashSet<Box<[u8]>> = row_ops
             .iter()
             .map(|(_, k, _)| k.as_slice().into())
@@ -538,19 +537,21 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                 Some(old_row) => {
                                     // In this section, we compare the new row and old row column by column and perform `DoUpdateIfNotNull` replacement.
                                     // todo(wcy-fdu):find a way to output the resulting new row directly to the downstream chunk, thus avoiding an additional deserialization step.
-                                    let old_row_deserialized =
-                                        row_serde.deserializer.deserialize(old_row.row.clone())?;
+                                    let mut old_row_deserialized_vec = row_serde
+                                        .deserializer
+                                        .deserialize(old_row.row.clone())?
+                                        .into_inner()
+                                        .to_vec();
                                     let new_row_deserialized =
                                         row_serde.deserializer.deserialize(value.clone())?;
-                                    let new_row_after_replacement =
-                                        execute_do_update_if_not_null_replacement(
-                                            old_row_deserialized,
-                                            new_row_deserialized,
-                                            column_len,
-                                        );
-                                    let new_row_bytes = Bytes::from(
-                                        row_serde.serializer.serialize(new_row_after_replacement),
+
+                                    execute_do_update_if_not_null_replacement(
+                                        &mut old_row_deserialized_vec,
+                                        new_row_deserialized,
                                     );
+                                    let new_row = OwnedRow::new(old_row_deserialized_vec);
+                                    let new_row_bytes =
+                                        Bytes::from(row_serde.serializer.serialize(new_row));
                                     fixed_changes().update(
                                         key.clone(),
                                         old_row.row.clone(),
@@ -682,26 +683,20 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
 /// let old_row = vec![Some(1), None, Some(3)];
 /// let mut new_row = vec![Some(10), Some(20), None];
 ///
-/// // let updated_row = execute_do_update_if_not_null_replacement(old_row, new_row);
 ///
-/// // After the function call, updated_row will be [Some(10), Some(20), Some(3)]
+/// // After the execute_do_update_if_not_null_replacement function call, old_row will be [Some(10), Some(20), Some(3)].
 /// ```
 fn execute_do_update_if_not_null_replacement(
-    old_row: OwnedRow,
+    old_row: &mut Vec<Option<ScalarImpl>>,
     new_row: OwnedRow,
-    column_len: usize,
-) -> OwnedRow {
-    let mut res = Vec::with_capacity(column_len);
-    for (old_col, new_col) in old_row.into_inner().iter().zip_eq_fast(new_row.into_iter()) {
-        if new_col.as_ref().is_some() {
-            res.push(new_col);
-        } else {
-            res.push(old_col.clone());
+) {
+    for (old_col, new_col) in old_row.iter_mut().zip_eq_fast(new_row) {
+        if let Some(new_value) = new_col {
+            *old_col = Some(new_value);
         }
     }
-
-    OwnedRow::new(res)
 }
+
 #[cfg(test)]
 mod tests {
 
@@ -1781,7 +1776,10 @@ mod tests {
                     )
                     .await
                     .unwrap();
-                assert_eq!(row, Some(OwnedRow::new(vec![Some(7_i32.into()), Some(8_i32.into())])));
+                assert_eq!(
+                    row,
+                    Some(OwnedRow::new(vec![Some(7_i32.into()), Some(8_i32.into())]))
+                );
 
                 // check update wrong value
                 let row = table
@@ -1791,10 +1789,7 @@ mod tests {
                     )
                     .await
                     .unwrap();
-                assert_eq!(
-                    row,
-                    Some(OwnedRow::new(vec![Some(2_i32.into()), None]))
-                );
+                assert_eq!(row, Some(OwnedRow::new(vec![Some(2_i32.into()), None])));
 
                 // check update wrong pk, should become insert
                 let row = table
