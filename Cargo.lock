@@ -10226,7 +10226,7 @@ dependencies = [
  "madsim-tokio",
  "opendal",
  "prometheus",
- "reqwest",
+ "reqwest 0.11.20",
  "risingwave_common",
  "rustls 0.23.4",
  "spin 0.9.8",
