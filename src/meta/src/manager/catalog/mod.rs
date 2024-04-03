@@ -126,10 +126,10 @@ use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::{Relation, RelationGroup};
 pub(crate) use {commit_meta, commit_meta_with_trx};
 
-use crate::manager::catalog::utils::{
-    alter_relation_rename, alter_relation_rename_refs, refcnt_dec_connection,
-    refcnt_inc_connection, ReplaceTableExprRewriter,
+use crate::controller::rename::{
+    alter_relation_rename, alter_relation_rename_refs, ReplaceTableExprRewriter,
 };
+use crate::manager::catalog::utils::{refcnt_dec_connection, refcnt_inc_connection};
 use crate::rpc::ddl_controller::DropMode;
 use crate::telemetry::MetaTelemetryJobDesc;
 
@@ -1169,7 +1169,7 @@ impl CatalogManager {
         let mut all_subscription_ids: HashSet<SubscriptionId> = HashSet::default();
         let mut all_source_ids: HashSet<SourceId> = HashSet::default();
         let mut all_view_ids: HashSet<ViewId> = HashSet::default();
-        let mut all_cdc_source_ids: HashSet<SourceId> = HashSet::default();
+        let mut all_streaming_job_source_ids: HashSet<SourceId> = HashSet::default();
 
         let relations_depend_on = |relation_id: RelationId| -> Vec<RelationInfo> {
             let tables_depend_on = tables
@@ -1453,11 +1453,10 @@ impl CatalogManager {
                         continue;
                     }
 
-                    // cdc source streaming job
                     if let Some(info) = source.info
-                        && info.cdc_source_job
+                        && info.is_shared()
                     {
-                        all_cdc_source_ids.insert(source.id);
+                        all_streaming_job_source_ids.insert(source.id);
                         let source_table_fragments = fragment_manager
                             .select_table_fragments_by_table_id(&source.id.into())
                             .await?;
@@ -1780,7 +1779,7 @@ impl CatalogManager {
             .map(|id| id.into())
             .chain(all_sink_ids.into_iter().map(|id| id.into()))
             .chain(all_subscription_ids.into_iter().map(|id| id.into()))
-            .chain(all_cdc_source_ids.into_iter().map(|id| id.into()))
+            .chain(all_streaming_job_source_ids.into_iter().map(|id| id.into()))
             .collect_vec();
 
         Ok((version, catalog_deleted_ids))
@@ -1902,7 +1901,7 @@ impl CatalogManager {
         if let Some(source) = &to_update_source {
             sources.insert(source.id, source.clone());
         }
-        commit_meta!(self, tables, views, sinks, sources)?;
+        commit_meta!(self, tables, views, sinks, sources, subscriptions)?;
 
         // 5. notify frontend.
         assert!(

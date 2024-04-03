@@ -395,7 +395,7 @@ impl CatalogController {
         &self,
         job_id: ObjectId,
         is_cancelled: bool,
-    ) -> MetaResult<bool> {
+    ) -> MetaResult<(bool, Vec<TableId>)> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
@@ -405,7 +405,7 @@ impl CatalogController {
                 id = job_id,
                 "streaming job not found when aborting creating, might be cleaned by recovery"
             );
-            return Ok(true);
+            return Ok((true, Vec::new()));
         }
 
         if !is_cancelled {
@@ -420,7 +420,7 @@ impl CatalogController {
                         id = job_id,
                         "streaming job is created in background and still in creating status"
                     );
-                    return Ok(false);
+                    return Ok((false, Vec::new()));
                 }
             }
         }
@@ -431,6 +431,13 @@ impl CatalogController {
             .filter(table::Column::BelongsToJobId.eq(job_id))
             .into_tuple()
             .all(&txn)
+            .await?;
+
+        let mv_table_id: Option<TableId> = Table::find_by_id(job_id)
+            .select_only()
+            .column(table::Column::TableId)
+            .into_tuple()
+            .one(&txn)
             .await?;
 
         let associated_source_id: Option<SourceId> = Table::find_by_id(job_id)
@@ -444,7 +451,7 @@ impl CatalogController {
         Object::delete_by_id(job_id).exec(&txn).await?;
         if !internal_table_ids.is_empty() {
             Object::delete_many()
-                .filter(object::Column::Oid.is_in(internal_table_ids))
+                .filter(object::Column::Oid.is_in(internal_table_ids.iter().cloned()))
                 .exec(&txn)
                 .await?;
         }
@@ -453,7 +460,11 @@ impl CatalogController {
         }
         txn.commit().await?;
 
-        Ok(true)
+        let mut state_table_ids = internal_table_ids;
+
+        state_table_ids.extend(mv_table_id.into_iter());
+
+        Ok((true, state_table_ids))
     }
 
     pub async fn post_collect_table_fragments(
@@ -527,7 +538,7 @@ impl CatalogController {
         streaming_job: &StreamingJob,
         ctx: &StreamContext,
         version: &PbTableVersion,
-        default_parallelism: &Option<NonZeroUsize>,
+        specified_parallelism: &Option<NonZeroUsize>,
     ) -> MetaResult<ObjectId> {
         let id = streaming_job.id();
         let inner = self.inner.write().await;
@@ -546,7 +557,7 @@ impl CatalogController {
             return Err(MetaError::permission_denied("table version is stale"));
         }
 
-        let parallelism = match default_parallelism {
+        let parallelism = match specified_parallelism {
             None => StreamingParallelism::Adaptive,
             Some(n) => StreamingParallelism::Fixed(n.get() as _),
         };
@@ -816,7 +827,7 @@ impl CatalogController {
             if let Some(table_id) = source.optional_associated_table_id {
                 vec![table_id]
             } else if let Some(source_info) = &source.source_info
-                && source_info.inner_ref().cdc_source_job
+                && source_info.inner_ref().is_shared()
             {
                 vec![source_id]
             } else {
@@ -851,6 +862,7 @@ impl CatalogController {
             .map(|(id, mask, stream_node)| (id, mask, stream_node.to_protobuf()))
             .collect_vec();
 
+        // TODO: limit source backfill?
         fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
             let mut found = false;
             if *fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0 {
@@ -1273,9 +1285,7 @@ impl CatalogController {
             streaming_job.parallelism = Set(match parallelism {
                 TableParallelism::Adaptive => StreamingParallelism::Adaptive,
                 TableParallelism::Fixed(n) => StreamingParallelism::Fixed(n as _),
-                TableParallelism::Custom => {
-                    unreachable!("sql backend doesn't support custom parallelism")
-                }
+                TableParallelism::Custom => StreamingParallelism::Custom,
             });
 
             streaming_job.update(&txn).await?;

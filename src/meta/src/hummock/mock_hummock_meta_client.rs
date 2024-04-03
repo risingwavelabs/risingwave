@@ -111,6 +111,7 @@ impl MockHummockMetaClient {
                     sstables.into_iter().map(Into::into).collect(),
                     new_table_watermarks,
                     sst_to_worker,
+                    None,
                 ),
             )
             .await

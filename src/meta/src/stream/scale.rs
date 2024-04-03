@@ -732,7 +732,7 @@ impl ScaleController {
 
             if (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0 {
                 let stream_node = fragment.actor_template.nodes.as_ref().unwrap();
-                if TableFragments::find_stream_source(stream_node).is_some() {
+                if stream_node.find_stream_source().is_some() {
                     stream_source_fragment_ids.insert(*fragment_id);
                 }
             }
@@ -1234,6 +1234,7 @@ impl ScaleController {
                 fragment_stream_source_actor_splits.insert(*fragment_id, actor_splits);
             }
         }
+        // TODO: support migrate splits for SourceBackfill
 
         // Generate fragment reschedule plan
         let mut reschedule_fragment: HashMap<FragmentId, Reschedule> =
@@ -1739,6 +1740,7 @@ impl ScaleController {
             self.source_manager
                 .apply_source_change(
                     None,
+                    None,
                     Some(stream_source_actor_splits),
                     Some(stream_source_dropped_actors),
                 )
@@ -1828,16 +1830,17 @@ impl ScaleController {
             table_fragment_id_map: &mut HashMap<u32, HashSet<FragmentId>>,
             fragment_actor_id_map: &mut HashMap<FragmentId, HashSet<u32>>,
             table_fragments: &BTreeMap<TableId, TableFragments>,
-        ) {
+        ) -> MetaResult<()> {
             // This is only for assertion purposes and will be removed once the dispatcher_id is guaranteed to always correspond to the downstream fragment_id,
             // such as through the foreign key constraints in the SQL backend.
             let mut actor_fragment_id_map_for_check = HashMap::new();
             for table_fragments in table_fragments.values() {
                 for (fragment_id, fragment) in &table_fragments.fragments {
                     for actor in &fragment.actors {
-                        debug_assert!(actor_fragment_id_map_for_check
-                            .insert(actor.actor_id, *fragment_id)
-                            .is_none());
+                        let prev =
+                            actor_fragment_id_map_for_check.insert(actor.actor_id, *fragment_id);
+
+                        debug_assert!(prev.is_none());
                     }
                 }
             }
@@ -1870,9 +1873,10 @@ impl ScaleController {
                                         dispatcher.dispatcher_id as FragmentId
                                     );
                                 } else {
-                                    tracing::warn!(
-                                        "downstream actor id {} not found in fragment_actor_id_map",
-                                        downstream_actor_id
+                                    bail!(
+                                        "downstream actor id {} from actor {} not found in fragment_actor_id_map",
+                                        downstream_actor_id,
+                                        actor.actor_id,
                                     );
                                 }
 
@@ -1892,6 +1896,8 @@ impl ScaleController {
 
                 actor_status.extend(table_fragments.actor_status.clone());
             }
+
+            Ok(())
         }
 
         match &self.metadata_manager {
@@ -1905,7 +1911,7 @@ impl ScaleController {
                     &mut table_fragment_id_map,
                     &mut fragment_actor_id_map,
                     guard.table_fragments(),
-                );
+                )?;
             }
             MetadataManager::V2(_) => {
                 let all_table_fragments = self.list_all_table_fragments().await?;
@@ -1922,7 +1928,7 @@ impl ScaleController {
                     &mut table_fragment_id_map,
                     &mut fragment_actor_id_map,
                     &all_table_fragments,
-                );
+                )?;
             }
         }
 
@@ -2768,10 +2774,10 @@ impl GlobalStreamManager {
                     streaming_parallelisms
                         .into_iter()
                         .map(|(table_id, parallelism)| {
-                            // no custom for sql backend
                             let table_parallelism = match parallelism {
                                 StreamingParallelism::Adaptive => TableParallelism::Adaptive,
                                 StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n),
+                                StreamingParallelism::Custom => TableParallelism::Custom,
                             };
 
                             (table_id as u32, table_parallelism)

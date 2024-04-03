@@ -25,12 +25,12 @@ use ethnum::{i256, u256, AsI256};
 use num_traits::{
     CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Zero,
 };
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::ArrayType;
 use serde::{Deserialize, Serialize};
 use to_text::ToText;
 
 use crate::array::ArrayResult;
-use crate::estimate_size::EstimateSize;
 use crate::types::to_binary::ToBinary;
 use crate::types::{to_text, Buf, DataType, Scalar, ScalarRef, F64};
 

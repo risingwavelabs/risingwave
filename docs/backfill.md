@@ -183,7 +183,39 @@ we use a `Replicated StateTable` to read historical data, and replicate the shar
 
 ### Arrangement Backfill Frontend
 
-TODO: Discuss frontend parts here.
+Arrangement Backfill is constructed in the following phases in the optimizer:
+```text
+(1) LogicalScan -> (2) StreamTableScan -> (3) PbStreamScan (MergeNode, ..)
+```
+
+From 2 to 3, we will compute the `output_indices` (A) from upstream to backfill,
+and the `output_indices` (B) from backfill to downstream.
+
+(B) will always be a subset of (A).
+The full PK is needed for backfilling, but it is not always needed after that.
+
+For example, consider the following queries.
+
+```sql
+create table t1(id bigint primary key, i bigint);
+create materialized view mv1 as select id, i from t1 order by id, i;
+create materialized view mv2 as select id from mv1;
+```
+
+`mv1` has the following plan:
+```text
+ StreamMaterialize { columns: [id, i], stream_key: [id], pk_columns: [id, i], pk_conflict: NoCheck }
+ └─StreamTableScan { table: t1, columns: [id, i] }
+```
+
+`mv2` has the following plan:
+```text
+ StreamMaterialize { columns: [id], stream_key: [id], pk_columns: [id], pk_conflict: NoCheck }
+ └─StreamTableScan { table: mv1, columns: [mv1.id], stream_scan_type: ArrangementBackfill, pk: [mv1.id], dist: UpstreamHashShard(mv1.id) }
+(2 rows)
+```
+
+Notice how `mv2` only needs the `id` column from `mv1`, and not the full `pk` with `i`.
 
 ### Backfill logic
 

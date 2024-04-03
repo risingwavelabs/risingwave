@@ -70,7 +70,7 @@ pub fn gen_sink_subscription_query_from_name(from_name: ObjectName) -> Result<Qu
     let table_factor = TableFactor::Table {
         name: from_name,
         alias: None,
-        for_system_time_as_of_proctime: false,
+        as_of: None,
     };
     let from = vec![TableWithJoins {
         relation: table_factor,
@@ -611,6 +611,7 @@ pub(crate) async fn reparse_table_for_sink(
         constraints,
         source_watermarks,
         append_only,
+        on_conflict,
         ..
     } = definition
     else {
@@ -629,6 +630,7 @@ pub(crate) async fn reparse_table_for_sink(
         constraints,
         source_watermarks,
         append_only,
+        on_conflict,
     )
     .await?;
 

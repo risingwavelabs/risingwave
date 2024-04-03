@@ -140,7 +140,7 @@ pub struct ConfigMap {
     streaming_enable_bushy_join: bool,
 
     /// Enable arrangement backfill for streaming queries. Defaults to false.
-    #[parameter(default = false)]
+    #[parameter(default = true)]
     streaming_use_arrangement_backfill: bool,
 
     /// Allow `jsonb` in stream key
@@ -242,6 +242,13 @@ pub struct ConfigMap {
     /// Run DDL statements in background
     #[parameter(default = false)]
     background_ddl: bool,
+
+    /// Enable shared source. Currently only for Kafka.
+    ///
+    /// When enabled, `CREATE SOURCE` will create a source streaming job, and `CREATE MATERIALIZED VIEWS` from the source
+    /// will forward the data from the same source streaming job, and also backfill prior data from the external source.
+    #[parameter(default = false)]
+    rw_enable_shared_source: bool,
 
     /// Shows the server-side character set encoding. At present, this parameter can be shown but not set, because the encoding is determined at database creation time.
     #[parameter(default = SERVER_ENCODING)]

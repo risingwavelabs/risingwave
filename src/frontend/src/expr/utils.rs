@@ -69,6 +69,85 @@ pub fn fold_boolean_constant(expr: ExprImpl) -> ExprImpl {
     rewriter.rewrite_expr(expr)
 }
 
+/// check `ColumnSelfEqualRewriter`'s comment below.
+pub fn column_self_eq_eliminate(expr: ExprImpl) -> ExprImpl {
+    ColumnSelfEqualRewriter::rewrite(expr)
+}
+
+/// for every `(col) == (col)`,
+/// transform to `IsNotNull(col)`
+/// since in the boolean context, `null = (...)` will always
+/// be treated as false.
+/// note: as always, only for *single column*.
+pub struct ColumnSelfEqualRewriter {}
+
+impl ColumnSelfEqualRewriter {
+    /// the exact copy from `logical_filter_expression_simplify_rule`
+    fn extract_column(expr: ExprImpl, columns: &mut Vec<ExprImpl>) {
+        match expr.clone() {
+            ExprImpl::FunctionCall(func_call) => {
+                // the functions that *never* return null will be ignored
+                if Self::is_not_null(func_call.func_type()) {
+                    return;
+                }
+                for sub_expr in func_call.inputs() {
+                    Self::extract_column(sub_expr.clone(), columns);
+                }
+            }
+            ExprImpl::InputRef(_) => {
+                if !columns.contains(&expr) {
+                    // only add the column if not exists
+                    columns.push(expr);
+                }
+            }
+            _ => (),
+        }
+    }
+
+    /// the exact copy from `logical_filter_expression_simplify_rule`
+    fn is_not_null(func_type: ExprType) -> bool {
+        func_type == ExprType::IsNull
+            || func_type == ExprType::IsNotNull
+            || func_type == ExprType::IsTrue
+            || func_type == ExprType::IsFalse
+            || func_type == ExprType::IsNotTrue
+            || func_type == ExprType::IsNotFalse
+    }
+
+    pub fn rewrite(expr: ExprImpl) -> ExprImpl {
+        let mut columns = vec![];
+        Self::extract_column(expr.clone(), &mut columns);
+        if columns.len() > 1 {
+            // leave it intact
+            return expr;
+        }
+
+        // extract the equal inputs with sanity check
+        let ExprImpl::FunctionCall(func_call) = expr.clone() else {
+            return expr;
+        };
+        if func_call.func_type() != ExprType::Equal || func_call.inputs().len() != 2 {
+            return expr;
+        }
+        assert_eq!(func_call.return_type(), DataType::Boolean);
+        let inputs = func_call.inputs();
+        let e1 = inputs[0].clone();
+        let e2 = inputs[1].clone();
+
+        if e1 == e2 {
+            if columns.is_empty() {
+                return ExprImpl::literal_bool(true);
+            }
+            let Ok(ret) = FunctionCall::new(ExprType::IsNotNull, vec![columns[0].clone()]) else {
+                return expr;
+            };
+            ret.into()
+        } else {
+            expr
+        }
+    }
+}
+
 /// Fold boolean constants in a expr
 struct BooleanConstantFolding {}
 

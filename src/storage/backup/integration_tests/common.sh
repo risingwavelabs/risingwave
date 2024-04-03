@@ -18,6 +18,7 @@ function clean_etcd_data() {
 }
 
 function start_cluster() {
+  stop_cluster
   cargo make d ci-meta-backup-test 1>/dev/null 2>&1
   sleep 5
 }

@@ -35,11 +35,21 @@ fn is_create_table_as(sql: &str) -> bool {
     parts.len() >= 4 && parts[0] == "create" && parts[1] == "table" && parts[3] == "as"
 }
 
+fn is_sink_into_table(sql: &str) -> bool {
+    let parts: Vec<String> = sql.split_whitespace().map(|s| s.to_lowercase()).collect();
+
+    parts.len() >= 4 && parts[0] == "create" && parts[1] == "sink" && parts[3] == "into"
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum SqlCmd {
     /// Other create statements.
     Create {
         is_create_table_as: bool,
+    },
+    /// Create sink.
+    CreateSink {
+        is_sink_into_table: bool,
     },
     /// Create Materialized views
     CreateMaterializedView {
@@ -69,7 +79,11 @@ impl SqlCmd {
                 | SqlCmd::Flush
                 | SqlCmd::Alter
                 | SqlCmd::Create {
-                    is_create_table_as: true
+                    is_create_table_as: true,
+                    ..
+                }
+                | SqlCmd::CreateSink {
+                    is_sink_into_table: true,
                 }
         )
     }
@@ -110,6 +124,9 @@ fn extract_sql_command(sql: &str) -> SqlCmd {
                             SqlCmd::CreateMaterializedView { name }
                         }
                     }
+                    "sink" => SqlCmd::CreateSink {
+                        is_sink_into_table: is_sink_into_table(&sql),
+                    },
                     _ => SqlCmd::Create {
                         is_create_table_as: is_create_table_as(&sql),
                     },
@@ -144,6 +161,8 @@ const KILL_IGNORE_FILES: &[&str] = &[
     "transaction/read_only_multi_conn.slt",
     "transaction/read_only.slt",
     "transaction/tolerance.slt",
+    "transaction/cursor.slt",
+    "transaction/cursor_multi_conn.slt",
 ];
 
 /// Wait for background mv to finish creating
@@ -366,6 +385,9 @@ pub async fn run_slt_task(
                             // allow 'table exists' error when retry CREATE statement
                             SqlCmd::Create {
                                 is_create_table_as: false,
+                            }
+                            | SqlCmd::CreateSink {
+                                is_sink_into_table: false,
                             }
                             | SqlCmd::CreateMaterializedView { .. }
                                 if i != 0

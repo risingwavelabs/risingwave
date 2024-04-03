@@ -43,7 +43,8 @@
 #![feature(negative_impls)]
 #![feature(bound_map)]
 #![feature(array_methods)]
-#![feature(btree_cursors)]
+#![feature(register_tool)]
+#![register_tool(rw)]
 
 #[cfg_attr(not(test), allow(unused_extern_crates))]
 extern crate self as risingwave_common;
@@ -72,7 +73,6 @@ pub mod cast;
 pub mod catalog;
 pub mod config;
 pub mod constants;
-pub mod estimate_size;
 pub mod field_generator;
 pub mod hash;
 pub mod log;

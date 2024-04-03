@@ -135,7 +135,7 @@
         └─StreamSimpleAgg { aggs: [sum0(count), count] }
           └─StreamExchange { dist: Single }
             └─StreamStatelessSimpleAgg { aggs: [count] }
-              └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: Backfill, pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+              └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (a int);
     select count(*) from t order by 1 limit 1;
@@ -152,7 +152,7 @@
         └─StreamSimpleAgg { aggs: [sum0(count), count] }
           └─StreamExchange { dist: Single }
             └─StreamStatelessSimpleAgg { aggs: [count] }
-              └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: Backfill, pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+              └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (a int primary key);
     select * from t limit 1;
@@ -166,6 +166,6 @@
     └─StreamProject { exprs: [t.a] }
       └─StreamTopN { order: [t.a ASC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [t.a ASC], limit: 1, offset: 0, group_key: [$expr1] }
-            └─StreamProject { exprs: [t.a, Vnode(t.a) as $expr1] }
-              └─StreamTableScan { table: t, columns: [t.a], stream_scan_type: Backfill, pk: [t.a], dist: UpstreamHashShard(t.a) }
+          └─StreamGroupTopN { order: [t.a ASC], limit: 1, offset: 0, group_key: [_vnode] }
+            └─StreamProject { exprs: [t.a, Vnode(t.a) as _vnode] }
+              └─StreamTableScan { table: t, columns: [t.a], stream_scan_type: ArrangementBackfill, stream_key: [t.a], pk: [a], dist: UpstreamHashShard(t.a) }

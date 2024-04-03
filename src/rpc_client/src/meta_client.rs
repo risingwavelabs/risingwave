@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::fmt::{Debug, Display};
-use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime};
@@ -1779,7 +1778,7 @@ impl GrpcMetaClient {
         let members = match strategy {
             MetaAddressStrategy::LoadBalance(_) => Either::Left(meta_member_client),
             MetaAddressStrategy::List(addrs) => {
-                let mut members = LruCache::new(NonZeroUsize::new(20).unwrap());
+                let mut members = LruCache::new(20);
                 for addr in addrs {
                     members.put(addr.clone(), None);
                 }

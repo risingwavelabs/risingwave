@@ -90,8 +90,6 @@ restart_cn() {
   127.0.0.1:5688 \
   --async-stack-trace \
   verbose \
-  --connector-rpc-endpoint \
-  127.0.0.1:50051 \
   --parallelism \
   4 \
   --total-memory-bytes \

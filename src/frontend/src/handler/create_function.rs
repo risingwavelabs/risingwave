@@ -325,8 +325,34 @@ fn find_wasm_identifier_v2(
     runtime: &arrow_udf_wasm::Runtime,
     inlined_signature: &str,
 ) -> Result<String> {
+    // Inline types in function signature.
+    //
+    // # Example
+    //
+    // ```text
+    // types = { "KeyValue": "key:varchar,value:varchar" }
+    // input = "keyvalue(varchar, varchar) -> struct KeyValue"
+    // output = "keyvalue(varchar, varchar) -> struct<key:varchar,value:varchar>"
+    // ```
+    let inline_types = |s: &str| -> String {
+        let mut inlined = s.to_string();
+        // iteratively replace `struct Xxx` with `struct<...>` until no replacement is made.
+        loop {
+            let replaced = inlined.clone();
+            for (k, v) in runtime.types() {
+                inlined = inlined.replace(&format!("struct {k}"), &format!("struct<{v}>"));
+            }
+            if replaced == inlined {
+                return inlined;
+            }
+        }
+    };
+    // Function signature in arrow-udf is case sensitive.
+    // However, SQL identifiers are usually case insensitive and stored in lowercase.
+    // So we should convert the signature to lowercase before comparison.
     let identifier = runtime
-        .find_function_by_inlined_signature(inlined_signature)
+        .functions()
+        .find(|f| inline_types(f).to_lowercase() == inlined_signature)
         .ok_or_else(|| {
             ErrorCode::InvalidParameterValue(format!(
                 "function not found in wasm binary: \"{}\"\nHINT: available functions:\n  {}",
