@@ -159,9 +159,9 @@ impl UserDefinedFunction {
             #[cfg(feature = "embedded-python-udf")]
             UdfImpl::Python(runtime) => runtime.call(&self.identifier, &arrow_input),
             #[cfg(feature = "embedded-deno-udf")]
-            UdfImpl::Deno(runtime) => {
-                futures::executor::block_on(runtime.call(&self.identifier, arrow_input))
-            }
+            UdfImpl::Deno(runtime) => tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(runtime.call(&self.identifier, arrow_input))
+            }),
             UdfImpl::External(client) => {
                 let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
                 let result = if self.always_retry_on_network_error {
