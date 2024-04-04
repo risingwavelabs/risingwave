@@ -80,7 +80,8 @@ impl SnowflakeHttpClient {
         header: HashMap<String, String>,
         s3_path: Option<String>,
     ) -> Self {
-        // TODO: ensure if we need user to *explicitly* provide the `request_id`
+        // todo: ensure if we need user to *explicitly* provide the `request_id`
+        // currently it seems that this is not important
         let url = format!(
             "https://{}.{}/v1/data/pipes/{}.{}.{}/insertFiles?requestId={}",
             account.clone(),
@@ -195,7 +196,7 @@ impl SnowflakeHttpClient {
     }
 }
 
-/// TODO(Zihao): refactor this part after s3 sink is available
+/// todo: refactor this part after s3 sink is available
 pub struct SnowflakeS3Client {
     s3_bucket: String,
     s3_path: Option<String>,
