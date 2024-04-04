@@ -15,6 +15,7 @@
 use crate::error::ConnectorError;
 
 pub mod avro;
+mod kafka_connect;
 mod loader;
 pub mod protobuf;
 pub mod schema_registry;
