@@ -10,7 +10,7 @@ repository = { workspace = true }
 
 [dependencies]
 anyhow = "1"
-axum = "=0.7.4" # TODO: 0.7.5+ does not work with current toolchain
+axum = { workspace = true }
 axum-embed = "0.1"
 bytes = "1"
 hyper = "1"
