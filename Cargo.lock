@@ -967,7 +967,7 @@ dependencies = [
  "derive_builder 0.20.0",
  "flexstr",
  "indextree",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "parking_lot 0.12.1",
  "pin-project",
  "tokio",
@@ -3482,7 +3482,7 @@ dependencies = [
  "darling 0.20.8",
  "proc-macro2",
  "quote",
- "syn 2.0.48",
+ "syn 2.0.57",
 ]
 
 [[package]]
@@ -3502,7 +3502,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "206868b8242f27cecce124c19fd88157fbd0dd334df2587f36417bafbc85097b"
 dependencies = [
  "derive_builder_core 0.20.0",
- "syn 2.0.48",
+ "syn 2.0.57",
 ]
 
 [[package]]
