@@ -365,10 +365,8 @@ impl Binder {
                 // todo: add validate check here for *bound* `base` and `recursive`
                 Self::align_schema(&mut base, &mut recursive, SetOperator::Union)?;
 
-                // please note that even after aligning, the schema of `left`
-                // may not be the same as `right`; this is because there may
-                // be case(s) where the `base` term is just a value, and the
-                // `recursive` term is a select expression / statement.
+                // the final schema should be sticked with `recursive`'s
+                // e.g., <value> union all <select stmt>
                 let schema = recursive.schema().clone();
                 // yet another sanity check
                 assert_eq!(

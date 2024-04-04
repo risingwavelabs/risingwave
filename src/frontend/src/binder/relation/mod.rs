@@ -387,7 +387,7 @@ impl Binder {
                 }
                 BindingCteState::Bound { query } => {
                     let schema = match query.clone() {
-                        Left(normal) => normal.body.schema().clone(),
+                        Left(normal) => normal.schema().clone(),
                         Right(recursive) => recursive.schema.clone(),
                     };
                     self.bind_table_to_context(
