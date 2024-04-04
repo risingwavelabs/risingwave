@@ -732,7 +732,7 @@ impl ScaleController {
 
             if (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0 {
                 let stream_node = fragment.actor_template.nodes.as_ref().unwrap();
-                if TableFragments::find_stream_source(stream_node).is_some() {
+                if stream_node.find_stream_source().is_some() {
                     stream_source_fragment_ids.insert(*fragment_id);
                 }
             }
@@ -1234,6 +1234,7 @@ impl ScaleController {
                 fragment_stream_source_actor_splits.insert(*fragment_id, actor_splits);
             }
         }
+        // TODO: support migrate splits for SourceBackfill
 
         // Generate fragment reschedule plan
         let mut reschedule_fragment: HashMap<FragmentId, Reschedule> =
@@ -1738,6 +1739,7 @@ impl ScaleController {
         if !stream_source_actor_splits.is_empty() {
             self.source_manager
                 .apply_source_change(
+                    None,
                     None,
                     Some(stream_source_actor_splits),
                     Some(stream_source_dropped_actors),
@@ -2772,10 +2774,10 @@ impl GlobalStreamManager {
                     streaming_parallelisms
                         .into_iter()
                         .map(|(table_id, parallelism)| {
-                            // no custom for sql backend
                             let table_parallelism = match parallelism {
                                 StreamingParallelism::Adaptive => TableParallelism::Adaptive,
                                 StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n),
+                                StreamingParallelism::Custom => TableParallelism::Custom,
                             };
 
                             (table_id as u32, table_parallelism)

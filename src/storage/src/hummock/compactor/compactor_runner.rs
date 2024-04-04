@@ -27,7 +27,9 @@ use risingwave_hummock_sdk::compact::{
 use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
-use risingwave_hummock_sdk::{can_concat, HummockSstableObjectId, KeyComparator};
+use risingwave_hummock_sdk::{
+    can_concat, compact_task_output_to_string, HummockSstableObjectId, KeyComparator,
+};
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::{BloomFilterType, CompactTask, LevelType, SstableInfo};
 use thiserror_ext::AsReport;
@@ -521,13 +523,10 @@ pub async fn compact(
     ) * compact_task.splits.len() as u64;
 
     tracing::info!(
-        "Ready to handle compaction group {} task: {} compact_task_statistics {:?} target_level {} compression_algorithm {:?} table_ids {:?} parallelism {} task_memory_capacity_with_parallelism {}, enable fast runner: {} input: {:?}",
-            compact_task.compaction_group_id,
+        "Ready to handle task: {} compact_task_statistics {:?} compression_algorithm {:?}  parallelism {} task_memory_capacity_with_parallelism {}, enable fast runner: {}, {}",
             compact_task.task_id,
             compact_task_statistics,
-            compact_task.target_level,
             compact_task.compression_algorithm,
-            compact_task.existing_table_ids,
             parallelism,
             task_memory_capacity_with_parallelism,
             optimize_by_copy_block,
@@ -702,7 +701,7 @@ pub async fn compact(
     tracing::info!(
         "Finished compaction task in {:?}ms: {}",
         cost_time,
-        compact_task_to_string(&compact_task)
+        compact_task_output_to_string(&compact_task)
     );
     ((compact_task, table_stats), memory_detector)
 }

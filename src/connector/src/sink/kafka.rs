@@ -35,7 +35,7 @@ use with_options::WithOptions;
 
 use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam};
-use crate::common::{KafkaCommon, KafkaPrivateLinkCommon, RdKafkaPropertiesCommon};
+use crate::connector_common::{KafkaCommon, KafkaPrivateLinkCommon, RdKafkaPropertiesCommon};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;

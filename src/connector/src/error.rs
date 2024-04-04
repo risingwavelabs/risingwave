@@ -58,7 +58,7 @@ def_anyhow_newtype! {
     redis::RedisError => "Redis error",
     arrow_schema::ArrowError => "Arrow error",
     google_cloud_pubsub::client::google_cloud_auth::error::Error => "Google Cloud error",
-    tokio_rustls::rustls::Error => "TLS error",
+    rumqttc::tokio_rustls::rustls::Error => "TLS error",
     rumqttc::v5::ClientError => "MQTT error",
     rumqttc::v5::OptionError => "MQTT error",
 
