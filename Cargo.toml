@@ -79,7 +79,7 @@ repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
 foyer = "0.6"
-await-tree = "0.1.1"
+await-tree = "0.2.1"
 aws-config = { version = "1", default-features = false, features = [
   "behavior-version-latest",
   "rt-tokio",
@@ -109,7 +109,7 @@ aws-smithy-http = "0.60"
 aws-smithy-runtime-api = "1"
 aws-smithy-runtime = "1"
 aws-smithy-types = { version = "1", default-features = false, features = [
-  "hyper-0-14-x",
+  "hyper-0-14-x", # required by aws sdk
 ] }
 aws-endpoint = "0.60"
 aws-types = "1"

@@ -21,7 +21,6 @@ use arc_swap::ArcSwap;
 use bytes::Bytes;
 use itertools::Itertools;
 use more_asserts::assert_gt;
-use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_common_service::observer_manager::{NotificationClient, ObserverManager};
@@ -453,8 +452,8 @@ impl HummockStorage {
         self.backup_reader.clone()
     }
 
-    pub fn compaction_await_tree_reg(&self) -> Option<&RwLock<await_tree::Registry<String>>> {
-        self.compact_await_tree_reg.as_ref().map(AsRef::as_ref)
+    pub fn compaction_await_tree_reg(&self) -> Option<&await_tree::Registry> {
+        self.compact_await_tree_reg.as_ref()
     }
 }
 
