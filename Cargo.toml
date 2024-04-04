@@ -309,11 +309,13 @@ etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev =
 reqsign = { git = "https://github.com/wcy-fdu/reqsign.git", rev = "e6cb304" }
 # patch to remove preserve_order from serde_json
 deno_core = { git = "https://github.com/bakjos/deno_core", rev = "9b241c6" }
-deno_fetch = { git = "https://github.com/bakjos/deno", rev = "73f8e8e" }
-deno_http = { git = "https://github.com/bakjos/deno", rev = "73f8e8e" }
-deno_tls = { git = "https://github.com/bakjos/deno", rev = "73f8e8e" }
-deno_web = { git = "https://github.com/bakjos/deno", rev = "73f8e8e" }
-deno_websocket = { git = "https://github.com/bakjos/deno", rev = "73f8e8e" }
+# patch to user reqwest 0.12.2
+deno_fetch = { git = "https://github.com/bakjos/deno", rev = "787a232" }
+deno_http = { git = "https://github.com/bakjos/deno", rev = "787a232" }
+deno_net = { git = "https://github.com/bakjos/deno", rev = "787a232" }
+deno_tls = { git = "https://github.com/bakjos/deno", rev = "787a232" }
+deno_web = { git = "https://github.com/bakjos/deno", rev = "787a232" }
+deno_websocket = { git = "https://github.com/bakjos/deno", rev = "787a232" }
 
 [workspace.metadata.dylint]
 libraries = [{ path = "./lints" }]

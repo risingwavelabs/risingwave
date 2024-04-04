@@ -729,7 +729,7 @@ dependencies = [
  "deno_fetch",
  "deno_http",
  "deno_io",
- "deno_net 0.136.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "deno_net",
  "deno_tls",
  "deno_url",
  "deno_web",
@@ -3689,7 +3689,7 @@ dependencies = [
 [[package]]
 name = "deno_fetch"
 version = "0.168.0"
-source = "git+https://github.com/bakjos/deno?rev=73f8e8e#73f8e8e539a77ca181f43922aaab8ff1f32188a5"
+source = "git+https://github.com/bakjos/deno?rev=787a232#787a232c51f1ea390a2aff2b622016217d854328"
 dependencies = [
  "bytes",
  "data-url",
@@ -3708,7 +3708,7 @@ dependencies = [
 [[package]]
 name = "deno_http"
 version = "0.141.0"
-source = "git+https://github.com/bakjos/deno?rev=73f8e8e#73f8e8e539a77ca181f43922aaab8ff1f32188a5"
+source = "git+https://github.com/bakjos/deno?rev=787a232#787a232c51f1ea390a2aff2b622016217d854328"
 dependencies = [
  "async-compression",
  "async-trait",
@@ -3717,7 +3717,7 @@ dependencies = [
  "bytes",
  "cache_control",
  "deno_core",
- "deno_net 0.136.0 (git+https://github.com/bakjos/deno?rev=73f8e8e)",
+ "deno_net",
  "deno_websocket",
  "flate2",
  "http 1.0.0",
@@ -3785,26 +3785,7 @@ dependencies = [
 [[package]]
 name = "deno_net"
 version = "0.136.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c71ae789cc20e60e5c18e2dfb57ebc170ee1b3988006c78ca84a7d21eb2c0d6"
-dependencies = [
- "deno_core",
- "deno_tls",
- "enum-as-inner 0.5.1",
- "log",
- "pin-project",
- "rustls-tokio-stream",
- "serde",
- "socket2 0.5.6",
- "tokio",
- "trust-dns-proto 0.22.0",
- "trust-dns-resolver 0.22.0",
-]
-
-[[package]]
-name = "deno_net"
-version = "0.136.0"
-source = "git+https://github.com/bakjos/deno?rev=73f8e8e#73f8e8e539a77ca181f43922aaab8ff1f32188a5"
+source = "git+https://github.com/bakjos/deno?rev=787a232#787a232c51f1ea390a2aff2b622016217d854328"
 dependencies = [
  "deno_core",
  "deno_tls",
@@ -3836,12 +3817,12 @@ dependencies = [
 [[package]]
 name = "deno_tls"
 version = "0.131.0"
-source = "git+https://github.com/bakjos/deno?rev=73f8e8e#73f8e8e539a77ca181f43922aaab8ff1f32188a5"
+source = "git+https://github.com/bakjos/deno?rev=787a232#787a232c51f1ea390a2aff2b622016217d854328"
 dependencies = [
  "deno_core",
  "deno_native_certs",
  "once_cell",
- "rustls 0.21.10",
+ "rustls 0.22.3",
  "rustls-pemfile 1.0.4",
  "rustls-tokio-stream",
  "rustls-webpki 0.101.7",
@@ -3872,7 +3853,7 @@ dependencies = [
 [[package]]
 name = "deno_web"
 version = "0.175.0"
-source = "git+https://github.com/bakjos/deno?rev=73f8e8e#73f8e8e539a77ca181f43922aaab8ff1f32188a5"
+source = "git+https://github.com/bakjos/deno?rev=787a232#787a232c51f1ea390a2aff2b622016217d854328"
 dependencies = [
  "async-trait",
  "base64-simd 0.8.0",
@@ -3899,11 +3880,11 @@ dependencies = [
 [[package]]
 name = "deno_websocket"
 version = "0.149.0"
-source = "git+https://github.com/bakjos/deno?rev=73f8e8e#73f8e8e539a77ca181f43922aaab8ff1f32188a5"
+source = "git+https://github.com/bakjos/deno?rev=787a232#787a232c51f1ea390a2aff2b622016217d854328"
 dependencies = [
  "bytes",
  "deno_core",
- "deno_net 0.136.0 (git+https://github.com/bakjos/deno?rev=73f8e8e)",
+ "deno_net",
  "deno_tls",
  "fastwebsockets",
  "h2 0.4.3",
@@ -11879,12 +11860,12 @@ checksum = "ecd36cc4259e3e4514335c4a138c6b43171a8d61d8f5c9348f9fc7529416f247"
 
 [[package]]
 name = "rustls-tokio-stream"
-version = "0.2.17"
+version = "0.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ded7a36e8ac05b8ada77a84c5ceec95361942ee9dedb60a82f93f788a791aae8"
+checksum = "696a389edb0b54b9bb888c8318404d9a0c0b9091fb03ca3d9c64731511db03f6"
 dependencies = [
  "futures",
- "rustls 0.21.10",
+ "rustls 0.22.3",
  "socket2 0.5.6",
  "tokio",
 ]
@@ -16269,7 +16250,8 @@ dependencies = [
  "rsa",
  "rust_decimal",
  "rustc-hash",
- "rustls 0.21.10",
+ "rustls 0.22.3",
+ "rustls-webpki 0.102.2",
  "scopeguard",
  "sea-orm",
  "sea-query",

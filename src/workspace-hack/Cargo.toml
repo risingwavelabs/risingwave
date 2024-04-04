@@ -126,7 +126,8 @@ ring-986da7b5efc2b80e = { package = "ring", version = "0.16", features = ["std"]
 rsa = { version = "0.9", features = ["hazmat"] }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 rustc-hash = { version = "1" }
-rustls = { version = "0.21", features = ["dangerous_configuration"] }
+rustls = { version = "0.22" }
+rustls-webpki = { version = "0.102" }
 scopeguard = { version = "1" }
 sea-orm = { version = "0.12", features = ["runtime-tokio-native-tls", "sqlx-mysql", "sqlx-postgres", "sqlx-sqlite"] }
 sea-query = { version = "0.30", default-features = false, features = ["backend-mysql", "backend-postgres", "backend-sqlite", "derive", "hashable-value", "postgres-array", "thread-safe", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
@@ -242,10 +243,10 @@ regex-automata = { version = "0.4", default-features = false, features = ["dfa",
 regex-syntax = { version = "0.8" }
 reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12", features = ["blocking", "brotli", "gzip", "json", "rustls-tls", "socks", "stream"] }
 ring-9067fe90e8c1f593 = { package = "ring", version = "0.17", features = ["std"] }
-ring-986da7b5efc2b80e = { package = "ring", version = "0.16", features = ["std"] }
 rsa = { version = "0.9", features = ["hazmat"] }
 rustc-hash = { version = "1" }
-rustls = { version = "0.21", features = ["dangerous_configuration"] }
+rustls = { version = "0.22" }
+rustls-webpki = { version = "0.102" }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1", features = ["alloc", "raw_value"] }
