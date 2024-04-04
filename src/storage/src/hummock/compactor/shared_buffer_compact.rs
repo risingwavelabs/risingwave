@@ -504,7 +504,7 @@ impl SharedBufferCompactRunner {
     ) -> HummockResult<CompactOutput> {
         use rand::prelude::*;
 
-        if thread_rng().gen::<f64>() < 0.05 {
+        if thread_rng().gen::<f64>() < 0.001 {
             return Err(HummockError::other("Simulate shared_buffer_compact fails"));
         }
 
