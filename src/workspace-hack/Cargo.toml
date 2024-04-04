@@ -119,7 +119,8 @@ redis = { version = "0.25", features = ["async-std-comp", "tokio-comp"] }
 regex = { version = "1" }
 regex-automata = { version = "0.4", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8" }
-reqwest = { version = "0.11", features = ["blocking", "brotli", "gzip", "json", "rustls-tls", "socks", "stream"] }
+reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12", features = ["blocking", "brotli", "gzip", "json", "rustls-tls", "socks", "stream"] }
+reqwest-a6292c17cd707f01 = { package = "reqwest", version = "0.11", default-features = false, features = ["blocking", "default-tls", "json", "rustls-tls"] }
 ring-9067fe90e8c1f593 = { package = "ring", version = "0.17", features = ["std"] }
 ring-986da7b5efc2b80e = { package = "ring", version = "0.16", features = ["std"] }
 rsa = { version = "0.9", features = ["hazmat"] }
@@ -239,7 +240,7 @@ rand_core = { version = "0.6", default-features = false, features = ["std"] }
 regex = { version = "1" }
 regex-automata = { version = "0.4", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8" }
-reqwest = { version = "0.11", features = ["blocking", "brotli", "gzip", "json", "rustls-tls", "socks", "stream"] }
+reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12", features = ["blocking", "brotli", "gzip", "json", "rustls-tls", "socks", "stream"] }
 ring-9067fe90e8c1f593 = { package = "ring", version = "0.17", features = ["std"] }
 ring-986da7b5efc2b80e = { package = "ring", version = "0.16", features = ["std"] }
 rsa = { version = "0.9", features = ["hazmat"] }
