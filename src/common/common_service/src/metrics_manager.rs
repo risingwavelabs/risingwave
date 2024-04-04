@@ -44,6 +44,7 @@ impl MetricsManager {
                         GLOBAL_METRICS_REGISTRY.deref().clone(),
                     ))
                     .service_fn(Self::metrics_service);
+                // TODO: use axum server
                 let serve_future =
                     hyper::Server::bind(&listen_socket_addr).serve(Shared::new(service));
                 if let Err(err) = serve_future.await {

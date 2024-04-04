@@ -109,7 +109,7 @@ aws-smithy-http = "0.60"
 aws-smithy-runtime-api = "1"
 aws-smithy-runtime = "1"
 aws-smithy-types = { version = "1", default-features = false, features = [
-  "hyper-0-14-x",
+  "hyper-0-14-x", # required by aws sdk
 ] }
 aws-endpoint = "0.60"
 aws-types = "1"

@@ -34,7 +34,7 @@ fail = "0.5"
 function_name = "0.3.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
-hyper = "0.14"
+hyper = "0.14" # required by tonic
 itertools = "0.12"
 maplit = "1.0.2"
 memcomparable = { version = "0.2" }
