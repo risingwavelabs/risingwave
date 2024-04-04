@@ -60,13 +60,6 @@ gcp-bigquery-client = "0.18.0"
 glob = "0.3"
 google-cloud-pubsub = "0.23"
 http = "0.2"
-hyper = { version = "0.14", features = [
-    "client",
-    "tcp",
-    "http1",
-    "http2",
-] } # required by clickhouse client
-hyper-tls = "0.5"
 icelake = { workspace = true }
 indexmap = { version = "1.9.3", features = ["serde"] }
 itertools = "0.12"
