@@ -10146,7 +10146,6 @@ dependencies = [
  "bytes",
  "cargo-emit",
  "dircpy",
- "hyper 1.2.0",
  "mime_guess",
  "npm_rs",
  "reqwest 0.12.2",

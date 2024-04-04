@@ -13,7 +13,6 @@ anyhow = "1"
 axum = { workspace = true }
 axum-embed = "0.1"
 bytes = "1"
-hyper = "1"
 mime_guess = "2"
 reqwest = "0.12.2"
 rust-embed = { version = "8", features = ["interpolate-folder-path", "mime-guess"] }
