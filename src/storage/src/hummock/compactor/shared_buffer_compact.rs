@@ -502,6 +502,12 @@ impl SharedBufferCompactRunner {
         iter: impl HummockIterator<Direction = Forward>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
     ) -> HummockResult<CompactOutput> {
+        use rand::prelude::*;
+
+        if thread_rng().gen::<f64>() < 0.05 {
+            return Err(HummockError::other("Simulate shared_buffer_compact fails"));
+        }
+
         let dummy_compaction_filter = DummyCompactionFilter {};
         let (ssts, table_stats_map) = self
             .compactor
