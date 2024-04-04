@@ -10208,6 +10208,7 @@ dependencies = [
  "async-trait",
  "await-tree",
  "aws-config",
+ "aws-credential-types",
  "aws-smithy-http",
  "aws-smithy-runtime",
  "aws-smithy-runtime-api",
