@@ -1180,7 +1180,8 @@ scripts/check/check-trailing-spaces.sh --fix
 category = "RiseDev - Check"
 dependencies = [
   "warn-on-missing-tools",
-  "check-hakari",
+  # Disable hakari until we make sure it's useful
+  # "check-hakari",
   "check-dep-sort",
   "check-fmt",
   "check-trailing-spaces",
