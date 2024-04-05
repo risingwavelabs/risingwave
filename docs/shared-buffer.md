@@ -24,7 +24,7 @@ The Hummock Shared Buffer serves 3 purposes:
 
   - The shared buffer will generate SST based on epoch, and provide a consistent view of a epoch, by merging the snapshot of the storage SSTs and the immutable in-memory buffers.
 
-- Support read-after-write, so as to make executor logic simpler (so-called async flush).
+- Support read-after-write (so-called async flush), so as to make executor logic simpler.
 
   Currently, if executors need to compute the “maximum” value, there are only two ways:
   1. Produce a write batch (i.e. write directly to object store), and read from the storage (like ExtremeState i.e. the state of `MAX()/MIN()`).
