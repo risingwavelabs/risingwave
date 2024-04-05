@@ -30,7 +30,7 @@ The Hummock Shared Buffer serves 3 purposes:
 - Support read-after-write, so as to make executor logic simpler (so-called async flush).
 
   Currently, if executors need to compute the “maximum” value, there are only two ways:
-  1. Produce a write batch (i.e. write directly to object store), and read from the storage (like ExtremeState).
+  1. Produce a write batch (i.e. write directly to object store), and read from the storage (like ExtremeState i.e. the state of `MAX()/MIN()`).
   2. Write to in-memory flush buffer, and merge data from flush buffer and storage (like TopN, HashJoin).
 
 ## Part 1: Async Checkpoint
@@ -38,8 +38,8 @@ The Hummock Shared Buffer serves 3 purposes:
 Previously, when an executor is processing a barrier,
 it will flush its content to Hummock using the write_batch interface.
 But it turns out that we have so many executors,
-that a single epoch might produce 200~300 write batches,
-which yields 200~300 SSTs. The SST number is tremendous for an LSM engine.
+that a single epoch might produce 200∼300 write batches,
+which yields 200∼300 SSTs. The SST number is tremendous for an LSM engine.
 
 The first idea is to batch writes.
 For example, we can collect all write batches from a single epoch,
