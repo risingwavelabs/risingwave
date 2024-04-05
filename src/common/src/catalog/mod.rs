@@ -484,7 +484,6 @@ pub enum CreateType {
     Background,
 }
 
-#[cfg(test)]
 impl Default for CreateType {
     fn default() -> Self {
         Self::Foreground
