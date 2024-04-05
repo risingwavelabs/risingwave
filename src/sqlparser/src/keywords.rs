@@ -402,6 +402,7 @@ define_keywords!(
     READ,
     READS,
     REAL,
+    RECOVER,
     RECURSIVE,
     REF,
     REFERENCES,
