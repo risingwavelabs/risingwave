@@ -82,6 +82,8 @@ impl SnowflakeHttpClient {
     ) -> Self {
         // todo: ensure if we need user to *explicitly* provide the `request_id`
         // currently it seems that this is not important
+        // reference to the snowpipe rest api is as below, i.e.,
+        // <https://docs.snowflake.com/en/user-guide/data-load-snowpipe-rest-apis>
         let url = format!(
             "https://{}.{}/v1/data/pipes/{}.{}.{}/insertFiles?requestId={}",
             account.clone(),
