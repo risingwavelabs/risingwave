@@ -411,4 +411,12 @@ impl StreamManagerService for StreamServiceImpl {
             dependencies,
         }))
     }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn recover(
+        &self,
+        _request: Request<RecoverRequest>,
+    ) -> Result<Response<RecoverResponse>, Status> {
+        todo!()
+    }
 }
