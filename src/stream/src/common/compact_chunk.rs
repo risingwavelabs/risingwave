@@ -19,37 +19,53 @@ use std::mem;
 
 use itertools::Itertools;
 use prehash::{new_prehashed_map_with_capacity, Passthru, Prehashed};
+use risingwave_common::array::stream_chunk::{OpRowMutRef, StreamChunkMut};
+use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
+use risingwave_common::array::stream_record::Record;
+use risingwave_common::array::{Op, RowRef, StreamChunk};
+use risingwave_common::row::{Project, RowExt};
+use risingwave_common::types::DataType;
+use risingwave_common::util::hash_util::Crc32FastBuilder;
 
-use super::stream_chunk::{OpRowMutRef, StreamChunkMut};
-use super::stream_chunk_builder::StreamChunkBuilder;
-use super::stream_record::Record;
-use super::DataType;
-use crate::array::{Op, RowRef, StreamChunk};
-use crate::row::{Project, RowExt};
-use crate::util::hash_util::Crc32FastBuilder;
+use crate::consistency::consistency_panic;
 
-/// A helper to compact the stream chunks with just modify the `Ops` and visibility of the chunk.
+/// A helper to compact the stream chunks by modifying the `Ops` and visibility of the chunk.
 pub struct StreamChunkCompactor {
     chunks: Vec<StreamChunk>,
     key: Vec<usize>,
 }
 
 struct OpRowMutRefTuple<'a> {
-    previous: Option<OpRowMutRef<'a>>,
-    latest: OpRowMutRef<'a>,
+    before_prev: Option<OpRowMutRef<'a>>,
+    prev: OpRowMutRef<'a>,
 }
 
 impl<'a> OpRowMutRefTuple<'a> {
     /// return true if no row left
-    fn push(&mut self, mut op_row: OpRowMutRef<'a>) -> bool {
-        debug_assert!(self.latest.vis());
-        match (self.latest.op(), op_row.op()) {
-            (Op::Insert, Op::Insert) => panic!("receive duplicated insert on the stream"),
-            (Op::Delete, Op::Delete) => panic!("receive duplicated delete on the stream"),
+    fn push(&mut self, mut curr: OpRowMutRef<'a>) -> bool {
+        debug_assert!(self.prev.vis());
+        match (self.prev.op(), curr.op()) {
+            (Op::Insert, Op::Insert) => {
+                consistency_panic!("receive duplicated insert on the stream");
+                // If need to tolerate inconsistency, override the previous insert.
+                // Note that because the primary key constraint has been violated, we
+                // don't mind losing some data here.
+                self.prev.set_vis(false);
+                self.prev = curr;
+            }
+            (Op::Delete, Op::Delete) => {
+                consistency_panic!("receive duplicated delete on the stream");
+                // If need to tolerate inconsistency, override the previous delete.
+                // Note that because the primary key constraint has been violated, we
+                // don't mind losing some data here.
+                self.prev.set_vis(false);
+                self.prev = curr;
+            }
             (Op::Insert, Op::Delete) => {
-                self.latest.set_vis(false);
-                op_row.set_vis(false);
-                self.latest = if let Some(prev) = self.previous.take() {
+                // Delete a row that has been inserted, just hide the two ops.
+                self.prev.set_vis(false);
+                curr.set_vis(false);
+                self.prev = if let Some(prev) = self.before_prev.take() {
                     prev
                 } else {
                     return true;
@@ -58,8 +74,11 @@ impl<'a> OpRowMutRefTuple<'a> {
             (Op::Delete, Op::Insert) => {
                 // The operation for the key must be (+, -, +) or (-, +). And the (+, -) must has
                 // been filtered.
-                debug_assert!(self.previous.is_none());
-                self.previous = Some(mem::replace(&mut self.latest, op_row));
+                debug_assert!(
+                    self.before_prev.is_none(),
+                    "should have been taken in the above match arm"
+                );
+                self.before_prev = Some(mem::replace(&mut self.prev, curr));
             }
             // `all the updateDelete` and `updateInsert` should be normalized to `delete`
             // and`insert`
@@ -69,10 +88,10 @@ impl<'a> OpRowMutRefTuple<'a> {
     }
 
     fn as_update_op(&mut self) -> Option<(&mut OpRowMutRef<'a>, &mut OpRowMutRef<'a>)> {
-        self.previous.as_mut().map(|prev| {
+        self.before_prev.as_mut().map(|prev| {
             debug_assert_eq!(prev.op(), Op::Delete);
-            debug_assert_eq!(self.latest.op(), Op::Insert);
-            (prev, &mut self.latest)
+            debug_assert_eq!(self.prev.op(), Op::Insert);
+            (prev, &mut self.prev)
         })
     }
 }
@@ -220,8 +239,8 @@ impl StreamChunkCompactor {
                 match op_row_map.entry(Prehashed::new(key, hash)) {
                     Entry::Vacant(v) => {
                         v.insert(OpRowMutRefTuple {
-                            previous: None,
-                            latest: op_row,
+                            before_prev: None,
+                            prev: op_row,
                         });
                     }
                     Entry::Occupied(mut o) => {
@@ -292,9 +311,10 @@ pub fn merge_chunk_row(stream_chunk: StreamChunk, pk_indices: &[usize]) -> Strea
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::array::StreamChunk;
+    use risingwave_common::test_prelude::StreamChunkTestExt;
+
     use super::*;
-    use crate::array::StreamChunk;
-    use crate::test_prelude::StreamChunkTestExt;
 
     #[test]
     fn test_merge_chunk_row() {

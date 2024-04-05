@@ -23,6 +23,7 @@ use risingwave_pb::monitor_service::{
     ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, StackTraceRequest,
     StackTraceResponse,
 };
+use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
 use risingwave_storage::hummock::compactor::CompactionAwaitTreeRegRef;
 use tokio::sync::mpsc;
 use tonic::{Request, Response, Status};
@@ -85,9 +86,9 @@ impl MonitorService for MonitorServiceImpl {
         let compaction_task_traces = match &self.await_tree_reg {
             None => Default::default(),
             Some(await_tree_reg) => await_tree_reg
-                .read()
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect::<Compaction>()
+                .into_iter()
+                .map(|(k, v)| (format!("{k:?}"), v.to_string()))
                 .collect(),
         };
         Ok(Response::new(StackTraceResponse {

@@ -47,6 +47,7 @@ use risingwave_common::catalog::{
 use risingwave_common::config::{
     load_config, BatchConfig, MetaConfig, MetricLevel, StreamingConfig,
 };
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::session_config::{ConfigMap, ConfigReporter, VisibilityMode};
 use risingwave_common::system_param::local_manager::{
     LocalSystemParamsManager, LocalSystemParamsManagerRef,
@@ -71,7 +72,6 @@ use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient}
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror::Error;
-use thiserror_ext::AsReport;
 use tokio::runtime::Builder;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
@@ -112,6 +112,7 @@ use crate::user::UserId;
 use crate::{FrontendOpts, PgResponseStream};
 
 pub(crate) mod current;
+pub(crate) mod cursor;
 pub(crate) mod transaction;
 
 /// The global environment for the frontend server.
@@ -152,6 +153,9 @@ pub struct FrontendEnv {
     /// Runtime for compute intensive tasks in frontend, e.g. executors in local mode,
     /// root stage in mpp mode.
     compute_runtime: Arc<BackgroundShutdownRuntime>,
+
+    /// Memory context used for batch executors in frontend.
+    mem_context: MemoryContext,
 }
 
 /// Session map identified by `(process_id, secret_key)`
@@ -215,6 +219,7 @@ impl FrontendEnv {
             source_metrics: Arc::new(SourceMetrics::default()),
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
             compute_runtime,
+            mem_context: MemoryContext::none(),
         }
     }
 
@@ -324,6 +329,10 @@ impl FrontendEnv {
             MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
         }
 
+        let mem_context = risingwave_common::memory::MemoryContext::root(
+            frontend_metrics.batch_total_mem.clone(),
+        );
+
         let health_srv = HealthServiceImpl::new();
         let host = opts.health_check_listener_addr.clone();
 
@@ -411,6 +420,7 @@ impl FrontendEnv {
                 source_metrics,
                 creating_streaming_job_tracker,
                 compute_runtime,
+                mem_context,
             },
             join_handles,
             shutdown_senders,
@@ -532,6 +542,10 @@ impl FrontendEnv {
             false
         }
     }
+
+    pub fn mem_context(&self) -> MemoryContext {
+        self.mem_context.clone()
+    }
 }
 
 pub struct AuthContext {
@@ -581,6 +595,9 @@ pub struct SessionImpl {
 
     /// Last idle instant
     last_idle_instant: Arc<Mutex<Option<Instant>>>,
+
+    /// The cursors declared in the transaction.
+    cursors: tokio::sync::Mutex<HashMap<ObjectName, cursor::Cursor>>,
 }
 
 #[derive(Error, Debug)]
@@ -620,6 +637,7 @@ impl SessionImpl {
             notices: Default::default(),
             exec_context: Mutex::new(None),
             last_idle_instant: Default::default(),
+            cursors: Default::default(),
         }
     }
 
@@ -646,6 +664,7 @@ impl SessionImpl {
             ))
             .into(),
             last_idle_instant: Default::default(),
+            cursors: Default::default(),
         }
     }
 
@@ -885,9 +904,7 @@ impl SessionImpl {
         formats: Vec<Format>,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
         // Parse sql.
-        let mut stmts = Parser::parse_sql(&sql).inspect_err(
-            |e| tracing::error!(error = %e.as_report(), %sql, "failed to parse sql"),
-        )?;
+        let mut stmts = Parser::parse_sql(&sql)?;
         if stmts.is_empty() {
             return Ok(PgResponse::empty_result(
                 pgwire::pg_response::StatementType::EMPTY,
@@ -901,9 +918,7 @@ impl SessionImpl {
             );
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = handle(self, stmt, sql.clone(), formats).await.inspect_err(
-            |e| tracing::error!(error = %e.as_report(), %sql, "failed to handle sql"),
-        )?;
+        let rsp = handle(self, stmt, sql.clone(), formats).await?;
         Ok(rsp)
     }
 
@@ -1093,11 +1108,7 @@ impl Session for SessionImpl {
         let string = stmt.to_string();
         let sql_str = string.as_str();
         let sql: Arc<str> = Arc::from(sql_str);
-        let rsp = handle(self, stmt, sql.clone(), vec![format])
-            .await
-            .inspect_err(
-                |e| tracing::error!(error = %e.as_report(), %sql, "failed to handle sql"),
-            )?;
+        let rsp = handle(self, stmt, sql.clone(), vec![format]).await?;
         Ok(rsp)
     }
 
@@ -1140,9 +1151,7 @@ impl Session for SessionImpl {
         self: Arc<Self>,
         portal: Portal,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
-        let rsp = handle_execute(self, portal)
-            .await
-            .inspect_err(|e| tracing::error!(error=%e.as_report(), "failed to handle execute"))?;
+        let rsp = handle_execute(self, portal).await?;
         Ok(rsp)
     }
 

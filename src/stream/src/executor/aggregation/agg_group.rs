@@ -30,7 +30,7 @@ use risingwave_storage::StateStore;
 
 use super::agg_state::{AggState, AggStateStorage};
 use crate::common::table::state_table::StateTable;
-use crate::consistency::inconsistency_panic;
+use crate::consistency::consistency_panic;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkIndices;
 
@@ -317,7 +317,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             .expect("row count state should not be NULL")
             .as_int64();
         if row_count < 0 {
-            inconsistency_panic!(group = ?self.group_key_row(), row_count, "row count should be non-negative");
+            consistency_panic!(group = ?self.group_key_row(), row_count, "row count should be non-negative");
 
             // NOTE: Here is the case that an inconsistent `DELETE` arrives at HashAgg executor, and there's no
             // corresponding group existing before (or has been deleted). In this case, `prev_row_count()` will

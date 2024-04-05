@@ -20,7 +20,7 @@ use anyhow::{bail, Result};
 use itertools::Itertools;
 use rand::{thread_rng, Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
-use sqllogictest::{ParallelTestError, Record};
+use sqllogictest::{ParallelTestError, QueryExpect, Record, StatementExpect};
 
 use crate::client::RisingWave;
 use crate::cluster::{Cluster, KillOpts};
@@ -161,6 +161,8 @@ const KILL_IGNORE_FILES: &[&str] = &[
     "transaction/read_only_multi_conn.slt",
     "transaction/read_only.slt",
     "transaction/tolerance.slt",
+    "transaction/cursor.slt",
+    "transaction/cursor_multi_conn.slt",
 ];
 
 /// Wait for background mv to finish creating
@@ -273,9 +275,8 @@ pub async fn run_slt_task(
                     loc: loc.clone(),
                     conditions: conditions.clone(),
                     connection: connection.clone(),
-                    expected_error: None,
+                    expected: StatementExpect::Ok,
                     sql: format!("SET BACKGROUND_DDL={background_ddl_setting};"),
-                    expected_count: None,
                 };
                 tester.run_async(set_background_ddl).await.unwrap();
                 background_ddl_enabled = background_ddl_setting;
@@ -342,13 +343,13 @@ pub async fn run_slt_task(
                         // For background ddl
                         if let SqlCmd::CreateMaterializedView { ref name } = cmd
                             && background_ddl_enabled
-                            && matches!(
+                            && !matches!(
                                 record,
                                 Record::Statement {
-                                    expected_error: None,
+                                    expected: StatementExpect::Error(_),
                                     ..
                                 } | Record::Query {
-                                    expected_error: None,
+                                    expected: QueryExpect::Error(_),
                                     ..
                                 }
                             )
