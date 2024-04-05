@@ -64,3 +64,12 @@ RUN cargo binstall -y --no-symlinks cargo-llvm-cov cargo-nextest cargo-hakari ca
     && rm -rf "/root/.cargo/git/db"
 RUN cargo install cargo-dylint@2.6.0 dylint-link@2.6.0
 RUN cargo uninstall cargo-binstall cargo-cache
+
+# install risedev
+COPY <<EOF /root/.cargo/bin/risedev
+#!/usr/bin/env bash
+set -e
+cd "/risingwave"
+./risedev "$@"
+EOF
+RUN chmod +x /root/.cargo/bin/risedev
