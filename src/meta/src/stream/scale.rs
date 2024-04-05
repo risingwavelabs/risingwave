@@ -219,7 +219,7 @@ pub struct RescheduleContextV2 {
     /// Meta information for all Actors
     actor_map: HashMap<ActorId, CustomActorInfo>,
     /// Status of all Actors, used to find the location of the `Actor`
-    actor_status: BTreeMap<ActorId, ActorStatus>,
+    actor_status: BTreeMap<ActorId, WorkerId>,
     /// Meta information of all `Fragment`, used to find the `Fragment`'s `Actor`
     fragment_map: HashMap<FragmentId, CustomFragmentInfo>,
     /// Indexes for all `Worker`s
@@ -265,26 +265,9 @@ impl RescheduleContextV2 {
     fn actor_id_to_worker_id(&self, actor_id: &ActorId) -> MetaResult<WorkerId> {
         self.actor_status
             .get(actor_id)
-            .and_then(|actor_status| actor_status.get_parallel_unit().ok())
-            .map(|x| x.get_worker_node_id())
+            .cloned()
             .ok_or_else(|| anyhow!("could not find worker for actor {}", actor_id).into())
     }
-
-    // fn parallel_unit_id_to_worker(
-    //     &self,
-    //     parallel_unit_id: &ParallelUnitId,
-    // ) -> MetaResult<&WorkerNode> {
-    //     self.parallel_unit_id_to_worker_id
-    //         .get(parallel_unit_id)
-    //         .and_then(|worker_id| self.worker_nodes.get(worker_id))
-    //         .ok_or_else(|| {
-    //             anyhow!(
-    //                 "could not found Worker for ParallelUint {}",
-    //                 parallel_unit_id
-    //             )
-    //             .into()
-    //         })
-    // }
 }
 
 /// This function provides an simple balancing method
@@ -589,7 +572,7 @@ impl ScaleController {
         fn fulfill_index_by_table_fragments_ref(
             actor_map: &mut HashMap<u32, CustomActorInfo>,
             fragment_map: &mut HashMap<FragmentId, CustomFragmentInfo>,
-            actor_status: &mut BTreeMap<ActorId, ActorStatus>,
+            actor_status: &mut BTreeMap<ActorId, WorkerId>,
             fragment_state: &mut HashMap<FragmentId, State>,
             fragment_to_table: &mut HashMap<FragmentId, TableId>,
             table_fragments: &TableFragments,
@@ -608,7 +591,12 @@ impl ScaleController {
                 fragment_map.insert(*fragment_id, CustomFragmentInfo::from(fragment));
             }
 
-            actor_status.extend(table_fragments.actor_status.clone());
+            for (actor_id, status) in &table_fragments.actor_status {
+                actor_status.insert(
+                    *actor_id,
+                    status.get_parallel_unit().unwrap().get_worker_node_id(),
+                );
+            }
 
             fragment_to_table.extend(
                 table_fragments
@@ -783,14 +771,7 @@ impl ScaleController {
             let current_worker_ids = fragment
                 .actors
                 .iter()
-                .map(|a| {
-                    actor_status
-                        .get(&a.actor_id)
-                        .unwrap()
-                        .get_parallel_unit()
-                        .unwrap()
-                        .get_worker_node_id()
-                })
+                .map(|a| actor_status.get(&a.actor_id).cloned().unwrap())
                 .collect::<HashSet<_>>();
 
             for (removed, _) in removed_actors {
