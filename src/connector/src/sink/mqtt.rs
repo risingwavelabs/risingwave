@@ -406,12 +406,16 @@ fn get_topic_from_index_path<'s>(
     }
 }
 
+// This function returns the index path to the topic field in the schema, validating that the field exists and is of type string
+// the returnent path can be used to extract the topic field from a row. The path is a list of indexes to be used to navigate the row
+// to the topic field.
 fn get_topic_field_index_path(schema: &Schema, topic_field: &str) -> Result<Vec<usize>> {
     let mut iter = topic_field.split('.');
     let mut path = vec![];
     let dt =
         iter.next()
             .and_then(|field| {
+                // Extract the field from the schema
                 schema
                     .fields()
                     .iter()
@@ -423,6 +427,7 @@ fn get_topic_field_index_path(schema: &Schema, topic_field: &str) -> Result<Vec<
                     })
             })
             .and_then(|dt| {
+                // Iterate over the next fields to extract the fields from the nested structs
                 iter.try_fold(dt, |dt, field| match dt {
                     DataType::Struct(st) => {
                         st.iter().enumerate().find(|(_, (s, _))| *s == field).map(
