@@ -9,9 +9,6 @@ Table of contents:
 - [Part 2: Write Anytime / Async Flush](#part-2-write-anytime--async-flush)
   - [A New Merge Iterator](#a-new-merge-iterator)
     - [Considerations](#considerations)
-  - [TopN Executor (Merge-On-Read)](#example-topn-executor-merge-on-read)
-  - [HashJoinExecutor](#the-new-hashjoinexecutor)
-  - [The New ExtremeState](#the-new-extremestate)
 
 ## Introduction
 
