@@ -484,6 +484,13 @@ pub enum CreateType {
     Background,
 }
 
+#[cfg(test)]
+impl Default for CreateType {
+    fn default() -> Self {
+        Self::Foreground
+    }
+}
+
 impl CreateType {
     pub fn from_proto(pb_create_type: PbCreateType) -> Self {
         match pb_create_type {

@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ConflictBehavior, Field, Schema, TableDesc, TableId, TableVersionId,
+    ColumnCatalog, ConflictBehavior, CreateType, Field, Schema, TableDesc, TableId, TableVersionId,
 };
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -161,38 +161,6 @@ pub struct TableCatalog {
     pub created_at_cluster_version: Option<String>,
 
     pub initialized_at_cluster_version: Option<String>,
-}
-
-// How the stream job was created will determine
-// whether they are persisted.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub enum CreateType {
-    Background,
-    Foreground,
-}
-
-#[cfg(test)]
-impl Default for CreateType {
-    fn default() -> Self {
-        Self::Foreground
-    }
-}
-
-impl CreateType {
-    fn from_prost(prost: PbCreateType) -> Self {
-        match prost {
-            PbCreateType::Background => Self::Background,
-            PbCreateType::Foreground => Self::Foreground,
-            PbCreateType::Unspecified => unreachable!(),
-        }
-    }
-
-    pub(crate) fn to_prost(self) -> PbCreateType {
-        match self {
-            Self::Background => PbCreateType::Background,
-            Self::Foreground => PbCreateType::Foreground,
-        }
-    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -443,7 +411,7 @@ impl TableCatalog {
             created_at_epoch: self.created_at_epoch.map(|epoch| epoch.0),
             cleaned_by_watermark: self.cleaned_by_watermark,
             stream_job_status: PbStreamJobStatus::Creating.into(),
-            create_type: self.create_type.to_prost().into(),
+            create_type: self.create_type.to_proto().into(),
             description: self.description.clone(),
             incoming_sinks: self.incoming_sinks.clone(),
             created_at_cluster_version: self.created_at_cluster_version.clone(),
@@ -569,7 +537,7 @@ impl From<PbTable> for TableCatalog {
             created_at_epoch: tb.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: tb.initialized_at_epoch.map(Epoch::from),
             cleaned_by_watermark: tb.cleaned_by_watermark,
-            create_type: CreateType::from_prost(create_type),
+            create_type: CreateType::from_proto(create_type),
             description: tb.description,
             incoming_sinks: tb.incoming_sinks.clone(),
             created_at_cluster_version: tb.created_at_cluster_version.clone(),
