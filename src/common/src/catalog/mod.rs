@@ -27,7 +27,9 @@ pub use external_table::*;
 pub use internal_table::*;
 use parse_display::Display;
 pub use physical_table::*;
-use risingwave_pb::catalog::HandleConflictBehavior as PbHandleConflictBehavior;
+use risingwave_pb::catalog::{
+    CreateType as PbCreateType, HandleConflictBehavior as PbHandleConflictBehavior,
+};
 use risingwave_pb::plan_common::ColumnDescVersion;
 pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
 
@@ -472,6 +474,28 @@ impl ConflictBehavior {
             ConflictBehavior::Overwrite => "Overwrite".to_string(),
             ConflictBehavior::IgnoreConflict => "IgnoreConflict".to_string(),
             ConflictBehavior::DoUpdateIfNotNull => "DoUpdateIfNotNull".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Display, Hash, PartialOrd, PartialEq, Eq, Ord)]
+pub enum CreateType {
+    Foreground,
+    Background,
+}
+
+impl CreateType {
+    pub fn from_proto(pb_create_type: PbCreateType) -> Self {
+        match pb_create_type {
+            PbCreateType::Foreground | PbCreateType::Unspecified => CreateType::Foreground,
+            PbCreateType::Background => CreateType::Background,
+        }
+    }
+
+    pub fn to_proto(self) -> PbCreateType {
+        match self {
+            CreateType::Foreground => PbCreateType::Foreground,
+            CreateType::Background => PbCreateType::Background,
         }
     }
 }
