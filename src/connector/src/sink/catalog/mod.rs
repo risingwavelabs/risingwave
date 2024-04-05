@@ -24,7 +24,9 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::{PbSink, PbSinkFormatDesc, PbSinkType, PbStreamJobStatus};
+use risingwave_pb::catalog::{
+    PbCreateType, PbSink, PbSinkFormatDesc, PbSinkType, PbStreamJobStatus,
+};
 
 use super::{
     SinkError, CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
@@ -347,6 +349,7 @@ impl SinkCatalog {
             target_table: self.target_table.map(|table_id| table_id.table_id()),
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
+            create_type: PbCreateType::Foreground as _,
         }
     }
 
