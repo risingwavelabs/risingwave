@@ -70,6 +70,9 @@ pub struct SinkDesc {
 
     /// See the same name field in `SinkWriterParam`.
     pub extra_partition_col_idx: Option<usize>,
+
+    /// Whether the sink job should run in foreground or background.
+    pub create_type: CreateType,
 }
 
 impl SinkDesc {
