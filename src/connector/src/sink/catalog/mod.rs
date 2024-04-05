@@ -19,7 +19,7 @@ use std::collections::{BTreeMap, HashMap};
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ConnectionId, DatabaseId, Field, Schema, SchemaId, TableId, UserId,
+    ColumnCatalog, ConnectionId, CreateType, DatabaseId, Field, Schema, SchemaId, TableId, UserId,
     OBJECT_ID_PLACEHOLDER,
 };
 use risingwave_common::util::epoch::Epoch;
@@ -309,6 +309,7 @@ pub struct SinkCatalog {
 
     pub created_at_cluster_version: Option<String>,
     pub initialized_at_cluster_version: Option<String>,
+    pub create_type: CreateType,
 }
 
 impl SinkCatalog {
@@ -349,7 +350,7 @@ impl SinkCatalog {
             target_table: self.target_table.map(|table_id| table_id.table_id()),
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
-            create_type: PbCreateType::Foreground as _,
+            create_type: self.create_type.to_proto() as i32,
         }
     }
 
@@ -391,6 +392,7 @@ impl SinkCatalog {
 impl From<PbSink> for SinkCatalog {
     fn from(pb: PbSink) -> Self {
         let sink_type = pb.get_sink_type().unwrap();
+        let create_type = pb.get_create_type().unwrap_or(PbCreateType::Foreground);
         let format_desc = match pb.format_desc {
             Some(f) => f.try_into().ok(),
             None => {
@@ -441,6 +443,7 @@ impl From<PbSink> for SinkCatalog {
             target_table: pb.target_table.map(TableId::new),
             initialized_at_cluster_version: pb.initialized_at_cluster_version,
             created_at_cluster_version: pb.created_at_cluster_version,
+            create_type: CreateType::from_proto(create_type),
         }
     }
 }

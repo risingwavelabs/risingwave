@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ConnectionId, DatabaseId, SchemaId, TableId, UserId,
+    ColumnCatalog, ConnectionId, CreateType, DatabaseId, SchemaId, TableId, UserId,
 };
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::stream_plan::PbSinkDesc;
@@ -104,6 +104,7 @@ impl SinkDesc {
             target_table: self.target_table,
             created_at_cluster_version: None,
             initialized_at_cluster_version: None,
+            create_type: CreateType::Foreground,
         }
     }
 
