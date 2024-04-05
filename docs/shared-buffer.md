@@ -68,7 +68,11 @@ Assume there is a new barrier flowing across our system.
 
 When each executor consumes a barrier, it will produce a write batch (which should complete immediately) and forward the barrier.
 
-After all executors have completed processing barrier, a checkpoint will be initiated, and new SST of the previous epoch will be produced. As our system only have one barrier flowing, we can simply checkpoint epoch 3 after stream manager collects barrier 4. In the future, we will need to record the dependencies of barriers (e.g., barrier 3 is immediately followed by barrier 4), and decide which epoch to checkpoint when new barriers have been collected.
+After all executors have completed processing barrier,
+a checkpoint will be initiated,
+and new SST of the previous epoch will be produced.
+As our system only have one barrier flowing,
+we can simply checkpoint epoch 3 after stream manager collects barrier 4.
 
 ### Read Path
 
