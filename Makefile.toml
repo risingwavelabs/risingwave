@@ -15,7 +15,6 @@ extend = [
   { path = "src/storage/backup/integration_tests/Makefile.toml" },
   { path = "src/java_binding/make-java-binding.toml" },
   { path = "src/stream/tests/integration_tests/integration_test.toml" },
-  { path = "e2e_test/source_new/commands.toml"}
 ]
 
 env_files = ["./risedev-components.user.env"]
