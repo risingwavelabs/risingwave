@@ -70,6 +70,6 @@ COPY <<EOF /root/.cargo/bin/risedev
 #!/usr/bin/env bash
 set -e
 cd "/risingwave"
-./risedev "$@"
+./risedev "\$@"
 EOF
 RUN chmod +x /root/.cargo/bin/risedev
