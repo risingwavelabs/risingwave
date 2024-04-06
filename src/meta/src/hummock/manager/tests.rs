@@ -1748,7 +1748,7 @@ async fn test_split_compaction_group_trivial_expired() {
         .report_compact_task(task.task_id, TaskStatus::Success, vec![], None)
         .await
         .unwrap();
-    // the task has been canceld
+    // the task has been cancelled
     assert!(!ret);
 }
 

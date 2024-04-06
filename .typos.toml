@@ -26,4 +26,7 @@ extend-exclude = [
     "**/Cargo.toml",
     "**/go.mod",
     "**/go.sum",
+    # TODO: fix me
+    "src/expr/impl/src/scalar/to_char.rs",
+    "src/common/src/types/interval.rs",
 ]
