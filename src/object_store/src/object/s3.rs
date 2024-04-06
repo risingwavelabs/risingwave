@@ -683,7 +683,8 @@ impl S3ObjectStore {
                 .build(),
         )
         .http_client(Self::new_http_client(&s3_object_store_config))
-        .behavior_version_latest();
+        .behavior_version_latest()
+        .stalled_stream_protection(StalledStreamProtectionConfig::disabled());
         let config = builder
             .region(Region::new("custom"))
             .endpoint_url(format!("{}{}", endpoint_prefix, address))
