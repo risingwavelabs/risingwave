@@ -3576,7 +3576,7 @@ impl ScaleController {
                                     all_available_slots,
                                 );
 
-                                n = all_available_slots;
+                                //n = all_available_slots;
                             }
 
                             let target_worker_slots =
@@ -4723,7 +4723,7 @@ pub fn schedule_units_for_slots_v2(
     total_unit_size: usize,
     salt: u32,
 ) -> MetaResult<BTreeMap<WorkerId, usize>> {
-    let mut ch = ConsistentHashRing::new(salt);
+    let mut ch = ConsistentHashRingV2::new(salt);
 
     for (worker_id, parallelism) in slots {
         ch.add_worker(*worker_id, *parallelism as u32);
@@ -4808,6 +4808,98 @@ impl ConsistentHashRing {
                 let worker_soft_limit = soft_limits.get(&worker_id).unwrap();
 
                 let task_limit = min(*worker_capacity, *worker_soft_limit);
+
+                let worker_task_count = task_distribution.entry(worker_id).or_insert(0);
+
+                if *worker_task_count < task_limit {
+                    *worker_task_count += 1;
+                    assigned = true;
+                    break;
+                }
+            }
+
+            if !assigned {
+                bail!("Could not distribute tasks due to capacity constraints.");
+            }
+        }
+
+        Ok(task_distribution)
+    }
+}
+
+
+pub struct ConsistentHashRingV2 {
+    ring: BTreeMap<u64, u32>,
+    weights: BTreeMap<u32, u32>,
+    virtual_nodes: u32,
+    salt: u32,
+}
+
+impl ConsistentHashRingV2 {
+    fn new(salt: u32) -> Self {
+        ConsistentHashRingV2 {
+            ring: BTreeMap::new(),
+            weights: BTreeMap::new(),
+            virtual_nodes: 1024,
+            salt,
+        }
+    }
+
+    fn hash<T: Hash, S: Hash>(key: T, salt: S) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        salt.hash(&mut hasher);
+        key.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    fn add_worker(&mut self, id: u32, weight: u32) {
+        let virtual_nodes_count = self.virtual_nodes;
+
+        for i in 0..virtual_nodes_count {
+            let virtual_node_key = (id, i);
+            let hash = Self::hash(virtual_node_key, self.salt);
+            self.ring.insert(hash, id);
+        }
+
+        self.weights.insert(id, weight);
+    }
+
+    fn distribute_tasks(&self, total_tasks: u32) -> MetaResult<BTreeMap<u32, u32>> {
+        let total_weight = self.weights.values().sum::<u32>();
+
+        // if total_weight < total_tasks {
+        //     bail!("Total tasks exceed the total weight of all workers.");
+        // }
+
+        let mut soft_limits = HashMap::new();
+        for (worker_id, worker_capacity) in &self.weights {
+            soft_limits.insert(
+                *worker_id,
+                (total_tasks as f64 * (*worker_capacity as f64 / total_weight as f64)).ceil()
+                    as u32,
+            );
+        }
+
+        let mut task_distribution: BTreeMap<u32, u32> = BTreeMap::new();
+        let mut task_hashes = (0..total_tasks)
+            .map(|task_idx| Self::hash(task_idx, self.salt))
+            .collect_vec();
+
+        // Sort task hashes to disperse them around the hash ring
+        task_hashes.sort();
+
+        for task_hash in task_hashes {
+            let mut assigned = false;
+
+            // Iterator that starts from the current task_hash or the next node in the ring
+            let ring_range = self.ring.range(task_hash..).chain(self.ring.iter());
+
+            for (_, &worker_id) in ring_range {
+                // let worker_capacity = self.weights.get(&worker_id).unwrap();
+                let worker_soft_limit = soft_limits.get(&worker_id).unwrap();
+
+                // let task_limit = min(*worker_capacity, *worker_soft_limit);
+                let task_limit = *worker_soft_limit;
 
                 let worker_task_count = task_distribution.entry(worker_id).or_insert(0);
 
