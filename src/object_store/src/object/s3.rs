@@ -624,6 +624,7 @@ impl S3ObjectStore {
                                 ))
                                 .build(),
                         )
+                        .stalled_stream_protection(StalledStreamProtectionConfig::disabled())
                         .build(),
                 );
                 client
