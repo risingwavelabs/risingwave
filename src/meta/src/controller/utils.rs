@@ -16,6 +16,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use anyhow::anyhow;
 use itertools::Itertools;
+use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::fragment::DistributionType;
@@ -28,7 +29,7 @@ use risingwave_meta_model_v2::{
     SchemaId, SourceId, StreamNode, UserId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction};
-use risingwave_pb::meta::PbFragmentParallelUnitMapping;
+use risingwave_pb::meta::{PbFragmentParallelUnitMapping, PbFragmentWorkerMapping};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode, StreamSource};
 use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
@@ -42,6 +43,7 @@ use sea_orm::{
     Order, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, Statement,
 };
 
+use crate::controller::catalog::CatalogController;
 use crate::{MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
@@ -789,10 +791,12 @@ where
 pub async fn get_fragment_mappings<C>(
     db: &C,
     job_id: ObjectId,
-) -> MetaResult<Vec<PbFragmentParallelUnitMapping>>
+) -> MetaResult<Vec<PbFragmentWorkerMapping>>
 where
     C: ConnectionTrait,
 {
+    let parallel_unit_to_worker = CatalogController::get_parallel_unit_to_worker_map(db).await?;
+
     let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
         .select_only()
         .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
@@ -803,9 +807,13 @@ where
 
     Ok(fragment_mappings
         .into_iter()
-        .map(|(fragment_id, mapping)| PbFragmentParallelUnitMapping {
+        .map(|(fragment_id, mapping)| PbFragmentWorkerMapping {
             fragment_id: fragment_id as _,
-            mapping: Some(mapping.to_protobuf()),
+            mapping: Some(
+                ParallelUnitMapping::from_protobuf(&mapping.into_inner())
+                    .to_worker(&parallel_unit_to_worker)
+                    .to_protobuf(),
+            ),
         })
         .collect())
 }
