@@ -122,7 +122,7 @@ impl BoundSetExpr {
 }
 
 impl Binder {
-    /// note: align_schema only works when the `left` and `right`
+    /// note: `align_schema` only works when the `left` and `right`
     /// are both select expression(s).
     pub(crate) fn align_schema(
         mut left: &mut BoundSetExpr,
