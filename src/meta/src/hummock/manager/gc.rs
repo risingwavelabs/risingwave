@@ -98,7 +98,7 @@ impl HummockManager {
             hummock_version_deltas.remove(*delta_id);
         }
         commit_multi_var!(
-            self.env.meta_store(),
+            self.env.kv_meta_store(),
             self.sql_meta_store(),
             hummock_version_deltas
         )?;

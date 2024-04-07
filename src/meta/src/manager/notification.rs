@@ -28,12 +28,12 @@ use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::sync::Mutex;
 use tonic::Status;
 
-use crate::controller::SqlMetaStore;
+
 use crate::manager::cluster::WorkerKey;
 use crate::manager::notification_version::NotificationVersionGenerator;
 use crate::manager::MetaStoreImpl;
 use crate::model::FragmentId;
-use crate::storage::MetaStoreRef;
+
 
 pub type MessageStatus = Status;
 pub type Notification = Result<SubscribeResponse, Status>;

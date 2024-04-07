@@ -66,7 +66,7 @@ impl HummockManager {
             pinned_snapshots.remove(*context_id);
         }
         commit_multi_var!(
-            self.env.meta_store(),
+            self.env.kv_meta_store(),
             self.sql_meta_store(),
             pinned_versions,
             pinned_snapshots

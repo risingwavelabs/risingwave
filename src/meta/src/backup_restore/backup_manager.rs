@@ -338,7 +338,7 @@ impl BackupWorker {
         let backup_manager_clone = self.backup_manager.clone();
         let job = async move {
             let mut snapshot_builder = meta_snapshot_builder::MetaSnapshotV1Builder::new(
-                backup_manager_clone.env.kv_meta_store_ref(),
+                backup_manager_clone.env.kv_meta_store_ref_checked(),
             );
             // Reuse job id as snapshot id.
             let hummock_manager = backup_manager_clone.hummock_manager.clone();

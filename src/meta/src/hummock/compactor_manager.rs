@@ -131,7 +131,7 @@ impl CompactorManagerInner {
         use risingwave_meta_model_v2::compaction_task;
         use sea_orm::EntityTrait;
         // Retrieve the existing task assignments from metastore.
-        let task_assignment: Vec<CompactTaskAssignment> = match env.meta_store_impl() {
+        let task_assignment: Vec<CompactTaskAssignment> = match env.meta_store() {
             MetaStoreImpl::Kv(meta_store) => CompactTaskAssignment::list(meta_store).await?,
             MetaStoreImpl::Sql(sql_meta_store) => compaction_task::Entity::find()
                 .all(&sql_meta_store.conn)

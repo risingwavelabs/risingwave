@@ -108,9 +108,7 @@ impl From<WorkerInfo> for PbWorkerNode {
 
 impl ClusterController {
     pub async fn new(env: MetaSrvEnv, max_heartbeat_interval: Duration) -> MetaResult<Self> {
-        let meta_store = env
-            .sql_meta_store()
-            .expect("sql meta store is not initialized");
+        let meta_store = env.sql_meta_store_ref_checked();
         let inner = ClusterControllerInner::new(
             meta_store.conn,
             env.opts.disable_automatic_parallelism_control,

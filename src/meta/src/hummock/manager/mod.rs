@@ -445,7 +445,7 @@ impl HummockManager {
     }
 
     fn sql_meta_store(&self) -> Option<SqlMetaStore> {
-        self.env.sql_meta_store()
+        self.env.meta_store().sql_meta_store().cloned()
     }
 
     /// Load state from meta store.
@@ -657,7 +657,7 @@ impl HummockManager {
         {
             context_pinned_version.min_pinned_id = version_id;
             commit_multi_var!(
-                self.env.meta_store(),
+                self.env.kv_meta_store(),
                 self.sql_meta_store(),
                 context_pinned_version
             )?;
@@ -706,7 +706,7 @@ impl HummockManager {
         );
         context_pinned_version.min_pinned_id = unpin_before;
         commit_multi_var!(
-            self.env.meta_store(),
+            self.env.kv_meta_store(),
             self.sql_meta_store(),
             context_pinned_version
         )?;
@@ -746,7 +746,7 @@ impl HummockManager {
         if context_pinned_snapshot.minimal_pinned_snapshot == INVALID_EPOCH {
             context_pinned_snapshot.minimal_pinned_snapshot = epoch_to_pin;
             commit_multi_var!(
-                self.env.meta_store(),
+                self.env.kv_meta_store(),
                 self.sql_meta_store(),
                 context_pinned_snapshot
             )?;
@@ -776,7 +776,7 @@ impl HummockManager {
         if context_pinned_snapshot.minimal_pinned_snapshot == INVALID_EPOCH {
             context_pinned_snapshot.minimal_pinned_snapshot = snapshot.committed_epoch;
             commit_multi_var!(
-                self.env.meta_store(),
+                self.env.kv_meta_store(),
                 self.sql_meta_store(),
                 context_pinned_snapshot
             )?;
@@ -803,7 +803,7 @@ impl HummockManager {
         let release_snapshot = pinned_snapshots.remove(context_id);
         if release_snapshot.is_some() {
             commit_multi_var!(
-                self.env.meta_store(),
+                self.env.kv_meta_store(),
                 self.sql_meta_store(),
                 pinned_snapshots
             )?;
@@ -860,7 +860,7 @@ impl HummockManager {
         {
             context_pinned_snapshot.minimal_pinned_snapshot = last_read_epoch;
             commit_multi_var!(
-                self.env.meta_store(),
+                self.env.kv_meta_store(),
                 self.sql_meta_store(),
                 context_pinned_snapshot
             )?;
@@ -1162,7 +1162,7 @@ impl HummockManager {
 
         if !trivial_tasks.is_empty() {
             commit_multi_var!(
-                self.env.meta_store(),
+                self.env.kv_meta_store(),
                 self.sql_meta_store(),
                 compaction_statuses,
                 compact_task_assignment,
@@ -1185,7 +1185,7 @@ impl HummockManager {
             // created.
             drop(versioning_guard);
             commit_multi_var!(
-                self.env.meta_store(),
+                self.env.kv_meta_store(),
                 self.sql_meta_store(),
                 compaction_statuses,
                 compact_task_assignment
@@ -1547,7 +1547,7 @@ impl HummockManager {
         }
         if success_count > 0 {
             commit_multi_var!(
-                self.env.meta_store(),
+                self.env.kv_meta_store(),
                 self.sql_meta_store(),
                 compact_statuses,
                 compact_task_assignment,
@@ -1572,7 +1572,7 @@ impl HummockManager {
         } else {
             // The compaction task is cancelled or failed.
             commit_multi_var!(
-                self.env.meta_store(),
+                self.env.kv_meta_store(),
                 self.sql_meta_store(),
                 compact_statuses,
                 compact_task_assignment
@@ -1914,7 +1914,7 @@ impl HummockManager {
             table_metrics.inc_write_throughput(stats_value as u64);
         }
         commit_multi_var!(
-            self.env.meta_store(),
+            self.env.kv_meta_store(),
             self.sql_meta_store(),
             new_version_delta,
             version_stats
@@ -2130,7 +2130,7 @@ impl HummockManager {
             self.compaction_group_manager
                 .write()
                 .await
-                .init_compaction_config_for_replay(group.id, group_config, self.env.meta_store())
+                .init_compaction_config_for_replay(group.id, group_config, self.env.kv_meta_store())
                 .await
                 .unwrap();
             self.register_table_ids(&pairs).await?;
@@ -3273,7 +3273,7 @@ impl HummockManager {
             .await
             .get_or_insert_compaction_group_configs(
                 &all_group_ids.collect_vec(),
-                self.env.meta_store(),
+                self.env.kv_meta_store(),
             )
             .await?;
 
@@ -3324,7 +3324,7 @@ impl HummockManager {
                             compaction_config::level0_stop_write_threshold_sub_level_number(),
                         ),
                     ],
-                    self.env.meta_store(),
+                    self.env.kv_meta_store(),
                 )
                 .await?;
 

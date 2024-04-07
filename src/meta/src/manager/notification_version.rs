@@ -18,7 +18,7 @@ use risingwave_meta_model_v2::prelude::CatalogVersion;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, TransactionTrait};
 
-use crate::controller::SqlMetaStore;
+
 use crate::manager::MetaStoreImpl;
 use crate::model::NotificationVersion as NotificationModelV1;
 use crate::storage::MetaStoreRef;

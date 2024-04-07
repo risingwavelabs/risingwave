@@ -401,7 +401,7 @@ pub async fn start_service_as_election_leader(
         )));
     }
 
-    let metadata_manager = match env.meta_store_impl() {
+    let metadata_manager = match env.meta_store() {
         MetaStoreImpl::Kv(_) => MetadataManager::new_v1(
             Arc::new(
                 ClusterManager::new(env.clone(), max_cluster_heartbeat_interval)
@@ -620,7 +620,7 @@ pub async fn start_service_as_election_leader(
     );
     let health_srv = HealthServiceImpl::new();
     let backup_srv = BackupServiceImpl::new(backup_manager);
-    let telemetry_srv = TelemetryInfoServiceImpl::new(env.meta_store_impl_ref());
+    let telemetry_srv = TelemetryInfoServiceImpl::new(env.meta_store_ref());
     let system_params_srv = SystemParamsServiceImpl::new(env.system_params_manager_impl_ref());
     let serving_srv =
         ServingServiceImpl::new(serving_vnode_mapping.clone(), metadata_manager.clone());
@@ -709,7 +709,7 @@ pub async fn start_service_as_election_leader(
         Arc::new(MetaTelemetryInfoFetcher::new(env.cluster_id().clone())),
         Arc::new(MetaReportCreator::new(
             metadata_manager.clone(),
-            env.meta_store_impl().backend(),
+            env.meta_store().backend(),
         )),
     );
 

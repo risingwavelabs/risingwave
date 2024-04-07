@@ -35,8 +35,6 @@ use crate::manager::{
     NotificationManagerRef,
 };
 use crate::model::ClusterId;
-#[cfg(any(test, feature = "test"))]
-use crate::storage::{MemStore, MetaStoreBoxExt};
 use crate::storage::{MetaStore, MetaStoreRef};
 use crate::MetaResult;
 
@@ -44,22 +42,6 @@ use crate::MetaResult;
 pub enum IdGenManagerImpl {
     Kv(IdGeneratorManagerRef),
     Sql(SqlIdGeneratorManagerRef),
-}
-
-impl IdGenManagerImpl {
-    fn assert_kv_ref(&self) -> &IdGeneratorManagerRef {
-        match self {
-            IdGenManagerImpl::Kv(mgr) => mgr,
-            _ => panic!("expect kv id generator manager"),
-        }
-    }
-
-    fn assert_sql_ref(&self) -> &SqlIdGeneratorManagerRef {
-        match self {
-            IdGenManagerImpl::Sql(mgr) => mgr,
-            _ => panic!("expect sql id generator manager"),
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -83,6 +65,20 @@ impl MetaStoreImpl {
         }
     }
 
+    pub fn kv_meta_store(&self) -> Option<&MetaStoreRef> {
+        match self {
+            MetaStoreImpl::Kv(meta_store) => Some(meta_store),
+            MetaStoreImpl::Sql(_) => None,
+        }
+    }
+
+    pub fn sql_meta_store(&self) -> Option<&SqlMetaStore> {
+        match self {
+            MetaStoreImpl::Kv(_) => None,
+            MetaStoreImpl::Sql(sql_meta_store) => Some(sql_meta_store),
+        }
+    }
+
     pub fn backend(&self) -> MetaBackend {
         match self {
             MetaStoreImpl::Kv(meta_store) => meta_store.meta_store_type(),
@@ -95,22 +91,6 @@ impl MetaStoreImpl {
 pub enum SystemParamsManagerImpl {
     Kv(SystemParamsManagerRef),
     Sql(SystemParamsControllerRef),
-}
-
-impl SystemParamsManagerImpl {
-    fn assert_kv_ref(&self) -> &SystemParamsManagerRef {
-        match self {
-            SystemParamsManagerImpl::Kv(mgr) => mgr,
-            _ => panic!("expect kv system params manager"),
-        }
-    }
-
-    fn assert_sql_ref(&self) -> &SystemParamsControllerRef {
-        match self {
-            SystemParamsManagerImpl::Sql(mgr) => mgr,
-            _ => panic!("expect sql system params manager"),
-        }
-    }
 }
 
 /// [`MetaSrvEnv`] is the global environment in Meta service. The instance will be shared by all
@@ -425,7 +405,7 @@ impl MetaSrvEnv {
         Ok(env)
     }
 
-    pub fn kv_meta_store_ref(&self) -> MetaStoreRef {
+    pub fn kv_meta_store_ref_checked(&self) -> MetaStoreRef {
         self.meta_store_impl.assert_kv_ref().clone()
     }
 
@@ -433,25 +413,19 @@ impl MetaSrvEnv {
         self.meta_store_impl.assert_kv_ref()
     }
 
-    pub fn meta_store(&self) -> Option<&MetaStoreRef> {
-        match &self.meta_store_impl {
-            MetaStoreImpl::Kv(meta_store) => Some(meta_store),
-            MetaStoreImpl::Sql(_) => None,
-        }
+    pub fn kv_meta_store(&self) -> Option<&MetaStoreRef> {
+        self.meta_store_impl.kv_meta_store()
     }
 
-    pub fn sql_meta_store(&self) -> Option<SqlMetaStore> {
-        match &self.meta_store_impl {
-            MetaStoreImpl::Kv(_) => None,
-            MetaStoreImpl::Sql(sql_meta_store) => Some(sql_meta_store.clone()),
-        }
+    pub fn sql_meta_store_ref_checked(&self) -> SqlMetaStore {
+        self.meta_store_impl.assert_sql_ref().clone()
     }
 
-    pub fn meta_store_impl_ref(&self) -> MetaStoreImpl {
+    pub fn meta_store_ref(&self) -> MetaStoreImpl {
         self.meta_store_impl.clone()
     }
 
-    pub fn meta_store_impl(&self) -> &MetaStoreImpl {
+    pub fn meta_store(&self) -> &MetaStoreImpl {
         &self.meta_store_impl
     }
 

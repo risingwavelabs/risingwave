@@ -39,7 +39,7 @@ use thiserror_ext::AsReport;
 use tokio::sync::{OnceCell, RwLock};
 
 use super::write_lock;
-use crate::controller::SqlMetaStore;
+
 use crate::hummock::compaction::compaction_config::{
     validate_compaction_config, CompactionConfigBuilder,
 };
@@ -75,7 +75,7 @@ impl HummockManager {
         let compaction_group_manager = RwLock::new(CompactionGroupManager {
             compaction_groups: BTreeMap::new(),
             default_config,
-            meta_store_impl: env.meta_store_impl_ref(),
+            meta_store_impl: env.meta_store_ref(),
         });
         compaction_group_manager.write().await.init().await?;
         Ok(compaction_group_manager)
@@ -216,7 +216,7 @@ impl HummockManager {
                         .compaction_group_manager
                         .write()
                         .await
-                        .get_or_insert_compaction_group_config(group_id, self.env.meta_store())
+                        .get_or_insert_compaction_group_config(group_id, self.env.kv_meta_store())
                         .await?
                         .compaction_config
                         .as_ref()
@@ -246,7 +246,7 @@ impl HummockManager {
         let sst_split_info = current_version.apply_version_delta(&new_version_delta);
         assert!(sst_split_info.is_empty());
         commit_multi_var!(
-            self.env.meta_store(),
+            self.env.kv_meta_store(),
             self.sql_meta_store(),
             new_version_delta
         )?;
@@ -347,7 +347,7 @@ impl HummockManager {
         let sst_split_info = current_version.apply_version_delta(&new_version_delta);
         assert!(sst_split_info.is_empty());
         commit_multi_var!(
-            self.env.meta_store(),
+            self.env.kv_meta_store(),
             self.sql_meta_store(),
             new_version_delta
         )?;
@@ -372,7 +372,7 @@ impl HummockManager {
             .await
             .purge(
                 HashSet::from_iter(get_compaction_group_ids(&versioning.current_version)),
-                self.env.meta_store(),
+                self.env.kv_meta_store(),
             )
             .await?;
         Ok(())
@@ -399,7 +399,7 @@ impl HummockManager {
             .update_compaction_config(
                 compaction_group_ids,
                 config_to_update,
-                self.env.meta_store(),
+                self.env.kv_meta_store(),
             )
             .await?;
         if config_to_update
@@ -634,7 +634,7 @@ impl HummockManager {
                 )
             );
             commit_multi_var!(
-                self.env.meta_store(),
+                self.env.kv_meta_store(),
                 self.sql_meta_store(),
                 new_version_delta,
                 insert
@@ -645,7 +645,7 @@ impl HummockManager {
             }
         } else {
             commit_multi_var!(
-                self.env.meta_store(),
+                self.env.kv_meta_store(),
                 self.sql_meta_store(),
                 new_version_delta
             )?;
@@ -807,7 +807,7 @@ impl CompactionGroupManager {
         meta_store: Option<&S>,
     ) -> Result<HashMap<CompactionGroupId, CompactionGroup>> {
         let mut compaction_groups = create_trx_wrapper!(
-            self.meta_store_impl,
+            self.meta_store_impl.sql_meta_store().cloned(),
             BTreeMapTransactionWrapper,
             BTreeMapTransaction::new(&mut self.compaction_groups,)
         );
@@ -818,7 +818,11 @@ impl CompactionGroupManager {
             let new_entry = CompactionGroup::new(*id, self.default_config.clone());
             compaction_groups.insert(*id, new_entry);
         }
-        commit_multi_var!(meta_store, self.sql_meta_store, compaction_groups)?;
+        commit_multi_var!(
+            meta_store,
+            self.meta_store_impl.sql_meta_store().cloned(),
+            compaction_groups
+        )?;
 
         let r = compaction_group_ids
             .iter()
@@ -846,7 +850,7 @@ impl CompactionGroupManager {
         meta_store: Option<&S>,
     ) -> Result<Vec<CompactionGroup>> {
         let mut compaction_groups = create_trx_wrapper!(
-            self.sql_meta_store,
+            self.meta_store_impl.sql_meta_store().cloned(),
             BTreeMapTransactionWrapper,
             BTreeMapTransaction::new(&mut self.compaction_groups,)
         );
@@ -865,7 +869,11 @@ impl CompactionGroupManager {
             compaction_groups.insert(*compaction_group_id, new_group.clone());
             result.push(new_group);
         }
-        commit_multi_var!(meta_store, self.sql_meta_store, compaction_groups)?;
+        commit_multi_var!(
+            meta_store,
+            self.meta_store_impl.sql_meta_store().cloned(),
+            compaction_groups
+        )?;
         Ok(result)
     }
 
@@ -878,7 +886,7 @@ impl CompactionGroupManager {
         meta_store: Option<&S>,
     ) -> Result<()> {
         let insert = create_trx_wrapper!(
-            self.sql_meta_store,
+            self.meta_store_impl.sql_meta_store().cloned(),
             BTreeMapEntryTransactionWrapper,
             BTreeMapEntryTransaction::new_insert(
                 &mut self.compaction_groups,
@@ -889,7 +897,11 @@ impl CompactionGroupManager {
                 },
             )
         );
-        commit_multi_var!(meta_store, self.sql_meta_store, insert)?;
+        commit_multi_var!(
+            meta_store,
+            self.meta_store_impl.sql_meta_store().cloned(),
+            insert
+        )?;
         Ok(())
     }
 
@@ -900,7 +912,7 @@ impl CompactionGroupManager {
         meta_store: Option<&S>,
     ) -> Result<()> {
         let mut compaction_groups = create_trx_wrapper!(
-            self.sql_meta_store,
+            self.meta_store_impl.sql_meta_store().cloned(),
             BTreeMapTransactionWrapper,
             BTreeMapTransaction::new(&mut self.compaction_groups,)
         );
@@ -916,7 +928,11 @@ impl CompactionGroupManager {
         for group in stale_group {
             compaction_groups.remove(group);
         }
-        commit_multi_var!(meta_store, self.sql_meta_store, compaction_groups)?;
+        commit_multi_var!(
+            meta_store,
+            self.meta_store_impl.sql_meta_store().cloned(),
+            compaction_groups
+        )?;
         Ok(())
     }
 }
@@ -996,13 +1012,13 @@ mod tests {
         inner
             .write()
             .await
-            .update_compaction_config(&[100, 200], &[], env.meta_store())
+            .update_compaction_config(&[100, 200], &[], env.kv_meta_store())
             .await
             .unwrap_err();
         inner
             .write()
             .await
-            .get_or_insert_compaction_group_configs(&[100, 200], env.meta_store())
+            .get_or_insert_compaction_group_configs(&[100, 200], env.kv_meta_store())
             .await
             .unwrap();
         assert_eq!(inner.read().await.compaction_groups.len(), 4);
@@ -1016,7 +1032,7 @@ mod tests {
             .update_compaction_config(
                 &[100, 200],
                 &[MutableConfig::MaxSubCompaction(123)],
-                env.meta_store(),
+                env.kv_meta_store(),
             )
             .await
             .unwrap();

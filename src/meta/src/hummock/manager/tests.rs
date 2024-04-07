@@ -100,7 +100,7 @@ fn get_compaction_group_object_ids(
 }
 
 async fn list_pinned_snapshot_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPinnedSnapshot> {
-    match env.meta_store_impl() {
+    match env.meta_store() {
         MetaStoreImpl::Kv(meta_store) => HummockPinnedSnapshot::list(meta_store).await.unwrap(),
         MetaStoreImpl::Sql(sql_meta_store) => {
             use risingwave_meta_model_v2::hummock_pinned_snapshot;
@@ -117,7 +117,7 @@ async fn list_pinned_snapshot_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPi
 }
 
 async fn list_pinned_version_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPinnedVersion> {
-    match env.meta_store_impl() {
+    match env.meta_store() {
         MetaStoreImpl::Kv(meta_store) => HummockPinnedVersion::list(meta_store).await.unwrap(),
         MetaStoreImpl::Sql(sql_meta_store) => {
             use risingwave_meta_model_v2::hummock_pinned_version;
