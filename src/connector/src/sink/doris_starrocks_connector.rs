@@ -187,6 +187,7 @@ impl InserterInnerBuilder {
         })
     }
 
+    // TODO: use hyper 1 or reqwest 0.12.2
     fn build_request_and_client(
         &self,
         uri: String,

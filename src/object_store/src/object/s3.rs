@@ -602,6 +602,9 @@ impl S3ObjectStore {
                                 ))
                                 .build(),
                         )
+                        .stalled_stream_protection(
+                            aws_sdk_s3::config::StalledStreamProtectionConfig::disabled(),
+                        )
                         .build(),
                 );
                 client
@@ -620,6 +623,9 @@ impl S3ObjectStore {
                                     config.s3.identity_resolution_timeout_s,
                                 ))
                                 .build(),
+                        )
+                        .stalled_stream_protection(
+                            aws_sdk_s3::config::StalledStreamProtectionConfig::disabled(),
                         )
                         .build(),
                 );
@@ -681,7 +687,8 @@ impl S3ObjectStore {
                 .build(),
         )
         .http_client(Self::new_http_client(&s3_object_store_config))
-        .behavior_version_latest();
+        .behavior_version_latest()
+        .stalled_stream_protection(aws_sdk_s3::config::StalledStreamProtectionConfig::disabled());
         let config = builder
             .region(Region::new("custom"))
             .endpoint_url(format!("{}{}", endpoint_prefix, address))
