@@ -75,12 +75,14 @@ where
 
         let reporter = HeapSizeReporter::new(memory_usage_metrics, 0, 0);
 
-        Self {
+        let _ = Self {
             inner,
             watermark_sequence,
             _metrics_info: metrics_info,
             reporter,
-        }
+        };
+
+        panic!()
     }
 
     /// Evict epochs lower than the watermark
