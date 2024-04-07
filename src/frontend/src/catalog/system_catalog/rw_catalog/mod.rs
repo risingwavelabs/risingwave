@@ -33,6 +33,7 @@ mod rw_hummock_pinned_snapshots;
 mod rw_hummock_pinned_versions;
 mod rw_hummock_version;
 mod rw_hummock_version_deltas;
+mod rw_iceberg_files;
 mod rw_indexes;
 mod rw_internal_tables;
 mod rw_materialized_views;
