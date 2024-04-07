@@ -111,6 +111,16 @@ message FragmentParallelUnitMappings {
   repeated FragmentParallelUnitMapping mappings = 1;
 }
 
+/// Worker mapping with fragment id, used for notification.
+message FragmentWorkerMapping {
+  uint32 fragment_id = 1;
+  common.WorkerMapping mapping = 2;
+}
+
+message FragmentWorkerMappings {
+  repeated FragmentWorkerMapping mappings = 1;
+}
+
 // TODO: remove this when dashboard refactored.
 message ActorLocation {
   common.WorkerNode node = 1;
@@ -377,8 +387,9 @@ message SubscribeRequest {
 message MetaSnapshot {
   message SnapshotVersion {
     uint64 catalog_version = 1;
-    uint64 parallel_unit_mapping_version = 2;
+    reserved 2; // for old parallel_unit_mapping_version
     uint64 worker_node_version = 3;
+    uint64 streaming_worker_mapping_version = 4;
   }
   repeated catalog.Database databases = 1;
   repeated catalog.Schema schemas = 2;
@@ -392,15 +403,17 @@ message MetaSnapshot {
   repeated catalog.Subscription subscriptions = 19;
   repeated user.UserInfo users = 8;
   GetSessionParamsResponse session_params = 20;
-  // for streaming
-  repeated FragmentParallelUnitMapping parallel_unit_mappings = 9;
+  reserved 9; // for old parallel_unit_mapping
   repeated common.WorkerNode nodes = 10;
   hummock.HummockSnapshot hummock_snapshot = 11;
   hummock.HummockVersion hummock_version = 12;
   backup_service.MetaBackupManifestId meta_backup_manifest_id = 14;
   hummock.WriteLimits hummock_write_limits = 16;
-  // for serving
-  repeated FragmentParallelUnitMapping serving_parallel_unit_mappings = 18;
+  reserved 18; // for old serving_parallel_unit_mappings
+
+  // for streaming
+  repeated FragmentWorkerMapping streaming_worker_mappings = 20;
+  repeated FragmentWorkerMapping serving_worker_mappings = 21;
 
   SnapshotVersion version = 13;
 }
@@ -439,8 +452,6 @@ message SubscribeResponse {
     catalog.Function function = 6;
     user.UserInfo user = 11;
     SetSessionParamRequest session_param = 26;
-    // for streaming
-    FragmentParallelUnitMapping parallel_unit_mapping = 12;
     common.WorkerNode node = 13;
     hummock.HummockSnapshot hummock_snapshot = 14;
     hummock.HummockVersionDeltas hummock_version_deltas = 15;
@@ -450,9 +461,10 @@ message SubscribeResponse {
     hummock.WriteLimits hummock_write_limits = 20;
     RelationGroup relation_group = 21;
     catalog.Connection connection = 22;
-    FragmentParallelUnitMappings serving_parallel_unit_mappings = 23;
     hummock.HummockVersionStats hummock_stats = 24;
     Recovery recovery = 25;
+    FragmentWorkerMapping streaming_worker_mapping = 27;
+    FragmentWorkerMappings serving_worker_mappings = 28;
   }
 }
 
@@ -628,8 +640,8 @@ service SessionParamService {
 message GetServingVnodeMappingsRequest {}
 
 message GetServingVnodeMappingsResponse {
-  repeated FragmentParallelUnitMapping mappings = 1;
   map<uint32, uint32> fragment_to_table = 2;
+  repeated FragmentWorkerMapping worker_mappings = 3;
 }
 
 service ServingService {
