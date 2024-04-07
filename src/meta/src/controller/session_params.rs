@@ -29,6 +29,8 @@ use crate::{MetaError, MetaResult};
 
 pub type SessionParamsControllerRef = Arc<SessionParamsController>;
 
+/// Manages the global default session params on meta.
+/// Note that the session params in each session will be initialized from the default value here.
 pub struct SessionParamsController {
     db: DatabaseConnection,
     // Cached parameters.
