@@ -364,17 +364,19 @@ impl BindContext {
         for (k, (x, y)) in other.range_of {
             match self.range_of.entry(k.clone()) {
                 Entry::Occupied(e) => {
-                    if let BindingCteState::Bound { .. } =
-                        self.cte_to_relation.get(&k).unwrap().borrow().state.clone()
-                    {
-                        // do nothing
-                    } else {
-                        return Err(ErrorCode::InternalError(format!(
-                            "Duplicated table name while merging adjacent contexts: {}",
-                            e.key()
-                        ))
-                        .into());
+                    // check if this is a merge with recursive cte
+                    if let Some(r) = self.cte_to_relation.get(&k) {
+                        if let BindingCteState::Bound { .. } = r.borrow().state.clone() {
+                            // no-op
+                            continue;
+                        }
                     }
+                    // otherwise this merge in invalid
+                    return Err(ErrorCode::InternalError(format!(
+                        "Duplicated table name while merging adjacent contexts: {}",
+                        e.key()
+                    ))
+                    .into());
                 }
                 Entry::Vacant(entry) => {
                     entry.insert((begin + x, begin + y));
