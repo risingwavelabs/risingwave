@@ -99,10 +99,7 @@ use crate::rpc::metrics::{
     start_fragment_info_monitor, start_worker_info_monitor, GLOBAL_META_METRICS,
 };
 use crate::serving::ServingVnodeMapping;
-use crate::storage::{
-    EtcdMetaStore, MemStore, MetaStore, MetaStoreBoxExt, MetaStoreRef,
-    WrappedEtcdClient as EtcdClient,
-};
+use crate::storage::{EtcdMetaStore, MemStore, MetaStoreBoxExt, WrappedEtcdClient as EtcdClient};
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
 use crate::{hummock, serving, MetaError, MetaResult};

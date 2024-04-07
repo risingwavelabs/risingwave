@@ -52,12 +52,12 @@ impl HummockManager {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let versioning = versioning_guard.deref_mut();
         let mut pinned_versions = create_trx_wrapper!(
-            self.sql_meta_store(),
+            self.meta_store_ref(),
             BTreeMapTransactionWrapper,
             BTreeMapTransaction::new(&mut versioning.pinned_versions,)
         );
         let mut pinned_snapshots = create_trx_wrapper!(
-            self.sql_meta_store(),
+            self.meta_store_ref(),
             BTreeMapTransactionWrapper,
             BTreeMapTransaction::new(&mut versioning.pinned_snapshots,)
         );
@@ -65,12 +65,7 @@ impl HummockManager {
             pinned_versions.remove(*context_id);
             pinned_snapshots.remove(*context_id);
         }
-        commit_multi_var!(
-            self.env.kv_meta_store(),
-            self.sql_meta_store(),
-            pinned_versions,
-            pinned_snapshots
-        )?;
+        commit_multi_var!(self.meta_store_ref(), pinned_versions, pinned_snapshots)?;
 
         #[cfg(test)]
         {

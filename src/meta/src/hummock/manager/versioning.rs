@@ -294,17 +294,13 @@ impl HummockManager {
         let mut versioning = write_lock!(self, versioning).await;
         let new_stats = rebuild_table_stats(&versioning.current_version);
         let mut version_stats = create_trx_wrapper!(
-            self.sql_meta_store(),
+            self.meta_store_ref(),
             VarTransactionWrapper,
             VarTransaction::new(&mut versioning.version_stats)
         );
         // version_stats.hummock_version_id is always 0 in meta store.
         version_stats.table_stats = new_stats.table_stats;
-        commit_multi_var!(
-            self.env.kv_meta_store(),
-            self.sql_meta_store(),
-            version_stats
-        )?;
+        commit_multi_var!(self.meta_store_ref(), version_stats)?;
         Ok(())
     }
 }

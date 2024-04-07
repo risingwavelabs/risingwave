@@ -20,9 +20,6 @@ use risingwave_pb::meta::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::controller::system_param::SystemParamsControllerRef;
-use crate::manager::SystemParamsManagerRef;
-
 pub struct SystemParamsServiceImpl {
     system_params_manager: SystemParamsManagerImpl,
 }

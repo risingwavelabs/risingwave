@@ -19,9 +19,7 @@ use risingwave_pb::meta::{GetTelemetryInfoRequest, TelemetryInfoResponse};
 use sea_orm::EntityTrait;
 use tonic::{Request, Response, Status};
 
-use crate::controller::SqlMetaStore;
 use crate::model::ClusterId;
-use crate::storage::MetaStoreRef;
 use crate::MetaResult;
 
 pub struct TelemetryInfoServiceImpl {

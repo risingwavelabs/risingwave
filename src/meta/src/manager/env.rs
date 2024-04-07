@@ -44,6 +44,15 @@ pub enum IdGenManagerImpl {
     Sql(SqlIdGeneratorManagerRef),
 }
 
+impl IdGenManagerImpl {
+    fn assert_kv_ref(&self) -> &IdGeneratorManagerRef {
+        match self {
+            IdGenManagerImpl::Kv(mgr) => mgr,
+            _ => panic!("expect kv id generator manager"),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub enum MetaStoreImpl {
     Kv(MetaStoreRef),
@@ -62,20 +71,6 @@ impl MetaStoreImpl {
         match self {
             MetaStoreImpl::Sql(mgr) => mgr,
             _ => panic!("expect sql meta store"),
-        }
-    }
-
-    pub fn kv_meta_store(&self) -> Option<&MetaStoreRef> {
-        match self {
-            MetaStoreImpl::Kv(meta_store) => Some(meta_store),
-            MetaStoreImpl::Sql(_) => None,
-        }
-    }
-
-    pub fn sql_meta_store(&self) -> Option<&SqlMetaStore> {
-        match self {
-            MetaStoreImpl::Kv(_) => None,
-            MetaStoreImpl::Sql(sql_meta_store) => Some(sql_meta_store),
         }
     }
 
@@ -411,10 +406,6 @@ impl MetaSrvEnv {
 
     pub fn kv_meta_store_checked(&self) -> &MetaStoreRef {
         self.meta_store_impl.assert_kv_ref()
-    }
-
-    pub fn kv_meta_store(&self) -> Option<&MetaStoreRef> {
-        self.meta_store_impl.kv_meta_store()
     }
 
     pub fn sql_meta_store_ref_checked(&self) -> SqlMetaStore {
