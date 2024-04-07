@@ -25,7 +25,7 @@ jsonwebtoken = "9"
 openssl = "0.10.60"
 panic-message = "0.3"
 parking_lot = "0.12"
-reqwest = { version = "0.11" }
+reqwest = "0.12.2"
 risingwave_common = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 serde = { version = "1", features = ["derive"] }

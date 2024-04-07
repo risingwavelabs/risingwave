@@ -47,6 +47,7 @@ use risingwave_common::catalog::{
 use risingwave_common::config::{
     load_config, BatchConfig, MetaConfig, MetricLevel, StreamingConfig,
 };
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::session_config::{ConfigMap, ConfigReporter, VisibilityMode};
 use risingwave_common::system_param::local_manager::{
     LocalSystemParamsManager, LocalSystemParamsManagerRef,
@@ -111,6 +112,7 @@ use crate::user::UserId;
 use crate::{FrontendOpts, PgResponseStream};
 
 pub(crate) mod current;
+pub(crate) mod cursor;
 pub(crate) mod transaction;
 
 /// The global environment for the frontend server.
@@ -151,6 +153,9 @@ pub struct FrontendEnv {
     /// Runtime for compute intensive tasks in frontend, e.g. executors in local mode,
     /// root stage in mpp mode.
     compute_runtime: Arc<BackgroundShutdownRuntime>,
+
+    /// Memory context used for batch executors in frontend.
+    mem_context: MemoryContext,
 }
 
 /// Session map identified by `(process_id, secret_key)`
@@ -214,6 +219,7 @@ impl FrontendEnv {
             source_metrics: Arc::new(SourceMetrics::default()),
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
             compute_runtime,
+            mem_context: MemoryContext::none(),
         }
     }
 
@@ -322,6 +328,10 @@ impl FrontendEnv {
         if config.server.metrics_level > MetricLevel::Disabled {
             MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
         }
+
+        let mem_context = risingwave_common::memory::MemoryContext::root(
+            frontend_metrics.batch_total_mem.clone(),
+        );
 
         let health_srv = HealthServiceImpl::new();
         let host = opts.health_check_listener_addr.clone();
@@ -444,6 +454,7 @@ impl FrontendEnv {
                 source_metrics,
                 creating_streaming_job_tracker,
                 compute_runtime,
+                mem_context,
             },
             join_handles,
             shutdown_senders,
@@ -565,6 +576,10 @@ impl FrontendEnv {
             false
         }
     }
+
+    pub fn mem_context(&self) -> MemoryContext {
+        self.mem_context.clone()
+    }
 }
 
 pub struct AuthContext {
@@ -614,6 +629,9 @@ pub struct SessionImpl {
 
     /// Last idle instant
     last_idle_instant: Arc<Mutex<Option<Instant>>>,
+
+    /// The cursors declared in the transaction.
+    cursors: tokio::sync::Mutex<HashMap<ObjectName, cursor::Cursor>>,
 }
 
 #[derive(Error, Debug)]
@@ -653,6 +671,7 @@ impl SessionImpl {
             notices: Default::default(),
             exec_context: Mutex::new(None),
             last_idle_instant: Default::default(),
+            cursors: Default::default(),
         }
     }
 
@@ -679,6 +698,7 @@ impl SessionImpl {
             ))
             .into(),
             last_idle_instant: Default::default(),
+            cursors: Default::default(),
         }
     }
 
