@@ -147,3 +147,18 @@ select series(3);
 
 statement ok
 drop function series;
+
+
+statement ok
+create function panic() returns int language rust as $$
+    fn panic() -> i32 {
+        panic!("gg")
+    }
+$$;
+
+# panic message should be included in the error message
+query error gg
+select panic();
+
+statement ok
+drop function panic;
