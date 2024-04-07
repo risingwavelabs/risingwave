@@ -1841,14 +1841,11 @@ impl ScaleController {
         let ctx = self
             .build_reschedule_context_v2(&mut reschedules, options, table_parallelisms)
             .await?;
-        // Index of actors to create/remove
-        // Fragment Id => ( Actor Id => Parallel Unit Id )
 
+        // Index of actors to create/remove
+        // Fragment Id => ( Actor Id => Worker Id )
         let (fragment_actors_to_remove, fragment_actors_to_create) =
             self.arrange_reschedules_v2(&reschedules, &ctx).await?;
-
-        println!("to remove {:?}", fragment_actors_to_remove);
-        println!("to create {:?}", fragment_actors_to_create);
 
         let mut fragment_actor_bitmap = HashMap::new();
         for fragment_id in reschedules.keys() {
@@ -2138,6 +2135,8 @@ impl ScaleController {
                 }
             }
         }
+
+        println!("actor group map {:?}", actor_group_map);
 
         let mut new_created_actors = HashMap::new();
         for fragment_id in reschedules.keys() {
@@ -2601,21 +2600,15 @@ impl ScaleController {
                     .push(actor.actor_id);
             }
 
-            println!("removed actors {:?}", decreased_actor_count);
-
             for (removed, n) in decreased_actor_count {
                 if let Some(actor_ids) = worker_to_actors.get(removed) {
                     assert!(actor_ids.len() >= *n);
-
-                    println!("worker {:?} actors {:?} {:?}", removed, actor_ids, n);
 
                     let removed_actors: Vec<_> = actor_ids
                         .iter()
                         .skip(actor_ids.len().saturating_sub(*n))
                         .cloned()
                         .collect();
-
-                    println!("after {:?}", removed_actors);
 
                     for actor in removed_actors {
                         actors_to_remove.insert(actor, *removed);
@@ -3386,7 +3379,7 @@ impl ScaleController {
             no_shuffle_source_fragment_ids: &mut HashSet<FragmentId>,
             no_shuffle_target_fragment_ids: &mut HashSet<FragmentId>,
             fragment_distribution_map: &mut HashMap<FragmentId, FragmentDistributionType>,
-            actor_status: &mut HashMap<ActorId, ActorStatus>,
+            actor_status: &mut HashMap<ActorId, WorkerId>,
             table_fragment_id_map: &mut HashMap<u32, HashSet<FragmentId>>,
             fragment_actor_id_map: &mut HashMap<FragmentId, HashSet<u32>>,
             table_fragments: &BTreeMap<TableId, TableFragments>,
@@ -3454,7 +3447,12 @@ impl ScaleController {
                         .insert(*fragment_id);
                 }
 
-                actor_status.extend(table_fragments.actor_status.clone());
+                for (actor_id, status) in &table_fragments.actor_status {
+                    actor_status.insert(
+                        *actor_id,
+                        status.get_parallel_unit().unwrap().get_worker_node_id(),
+                    );
+                }
             }
 
             Ok(())
@@ -3506,13 +3504,9 @@ impl ScaleController {
                 let mut fragment_slots: BTreeMap<WorkerId, usize> = BTreeMap::new();
 
                 for actor_id in fragment_actor_id_map.get(&fragment_id).unwrap() {
-                    let worker = actor_status
-                        .get(actor_id)
-                        .and_then(|status| status.get_parallel_unit().ok())
-                        .and_then(|unit| workers.get(&unit.get_worker_node_id()))
-                        .unwrap();
+                    let worker_id = actor_status.get(actor_id).unwrap();
 
-                    *fragment_slots.entry(worker.id).or_default() += 1;
+                    *fragment_slots.entry(*worker_id).or_default() += 1;
                 }
 
                 let all_available_slots: usize = worker_slots.values().cloned().sum();
@@ -3569,32 +3563,17 @@ impl ScaleController {
                                 Self::diff_parallel_unit_change_v2(&fragment_slots, &worker_slots),
                             );
                         }
-                        TableParallelism::Fixed(mut n) => {
-                            if n > all_available_slots {
-                                warn!(
-                                    "not enough parallel units available for job {} fragment {}, required {}, resetting to {}",
-                                    table_id,
-                                    fragment_id,
-                                    n,
-                                    all_available_slots,
-                                );
-
-                                // n = all_available_slots;
-                            }
-
+                        TableParallelism::Fixed(n) => {
                             let target_worker_slots =
                                 schedule_units_for_slots_v2(&worker_slots, n, table_id)?;
 
-                            println!("fragment {:?}", fragment_slots);
-                            println!("target {:?}", target_worker_slots);
-
-                            let reschedule = Self::diff_parallel_unit_change_v2(
-                                &fragment_slots,
-                                &target_worker_slots,
+                            target_plan.insert(
+                                fragment_id,
+                                Self::diff_parallel_unit_change_v2(
+                                    &fragment_slots,
+                                    &target_worker_slots,
+                                ),
                             );
-
-                            println!("res {:?}", reschedule);
-                            target_plan.insert(fragment_id, reschedule);
                         }
                         TableParallelism::Custom => {
                             // skipping for custom
@@ -4525,7 +4504,7 @@ impl GlobalStreamManager {
 
             let plan = self
                 .scale_controller
-                .generate_table_resize_plan(TableResizePolicy {
+                .generate_table_resize_plan_v2(TableResizePolicy {
                     worker_ids: schedulable_worker_ids.clone(),
                     table_parallelisms: parallelisms.clone(),
                 })
@@ -4546,7 +4525,7 @@ impl GlobalStreamManager {
             return Ok(false);
         };
 
-        self.reschedule_actors(
+        self.reschedule_actors_v2(
             reschedules,
             RescheduleOptions {
                 resolve_no_shuffle_upstream: false,
