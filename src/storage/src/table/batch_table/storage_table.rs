@@ -1002,6 +1002,7 @@ struct ColumnarStoreStorageTableInnerIterInner<S: StateStore> {
     non_pk_position_in_output_indices: Vec<usize>,
     data_types: Vec<DataType>,
     pk_serializer: OrderedRowSerde,
+    vnode: VirtualNode,
 }
 
 impl<S: StateStore> ColumnarStoreStorageTableInnerIterInner<S> {
@@ -1093,12 +1094,15 @@ impl<S: StateStore> ColumnarStoreStorageTableInnerIterInner<S> {
             output_pk_position_in_pk_indices,
             data_types,
             pk_serializer,
+            vnode,
         };
         Ok(iter)
     }
 
     #[try_stream(ok = KeyedRow<Bytes>, error = StorageError)]
     async fn into_stream(mut self) {
+        use std::time::Instant;
+        let vnode = self.vnode.to_index();
         fn strip_vnode_and_column_id_from_table_key<T: AsRef<[u8]>>(
             table_key: &TableKey<T>,
         ) -> &[u8] {
@@ -1118,7 +1122,14 @@ impl<S: StateStore> ColumnarStoreStorageTableInnerIterInner<S> {
             .unwrap();
         let mut pk_iter = self.iters.pop_front().unwrap();
         let (pk_tx, mut pk_rx) = tokio::sync::mpsc::channel(buffer_size);
+        let mut pk_counter = 0;
+        let print_freq: usize = std::env::var("RW_DEBUG_PRINT_FREQ")
+            .unwrap_or("1000000".into())
+            .parse()
+            .unwrap();
         let _pk_task = tokio::spawn(async move {
+            tracing::debug!(vnode, "!!!pk iter start");
+            let pk_instant = Instant::now();
             let pk_tx_ = pk_tx.clone();
             let loop_fn = async move {
                 while let Some((k, _)) = pk_iter.try_next().await? {
@@ -1140,12 +1151,21 @@ impl<S: StateStore> ColumnarStoreStorageTableInnerIterInner<S> {
                         }
                     }
                     let _ = pk_tx_.send(Ok((vnode_prefixed_key, iter_output))).await;
+                    pk_counter += 1;
+                    if pk_counter % print_freq == 0 {
+                        tracing::debug!(vnode, counter = pk_counter, "!!!pk iter counter");
+                    }
                 }
                 Ok::<(), StorageError>(())
             };
             if let Err(err) = loop_fn.await {
                 let _ = pk_tx.send(Err(err)).await;
             }
+            tracing::debug!(
+                elapsed = pk_instant.elapsed().as_secs(),
+                vnode,
+                "!!!pk iter stop"
+            );
         });
 
         let mut col_rxs = vec![];
@@ -1157,7 +1177,10 @@ impl<S: StateStore> ColumnarStoreStorageTableInnerIterInner<S> {
             let (col_tx, col_rx) = tokio::sync::mpsc::channel(buffer_size);
             col_rxs.push(col_rx);
             let data_type = self.data_types[*pos].clone();
+            let pos_ = *pos;
             let _col_task = tokio::spawn(async move {
+                tracing::debug!(pos = pos_, vnode, "!!!col iter start");
+                let col_instant = Instant::now();
                 let col_tx_ = col_tx.clone();
                 let loop_fn = async move {
                     while let Some((_, v)) = col_iter.try_next().await? {
@@ -1169,9 +1192,18 @@ impl<S: StateStore> ColumnarStoreStorageTableInnerIterInner<S> {
                 if let Err(err) = loop_fn.await {
                     let _ = col_tx.send(Err(err)).await;
                 }
+                tracing::debug!(
+                    elapsed = col_instant.elapsed().as_secs(),
+                    pos = pos_,
+                    vnode,
+                    "!!!col iter stop"
+                );
             });
         }
 
+        tracing::debug!(vnode, "!!!range iter start");
+        let instant = Instant::now();
+        let mut row_count = 0;
         loop {
             let (vnode_prefixed_key, mut iter_output) = match pk_rx.recv().await {
                 Some(r) => r?,
@@ -1192,10 +1224,23 @@ impl<S: StateStore> ColumnarStoreStorageTableInnerIterInner<S> {
                 .mapping
                 .project(OwnedRow::new(iter_output))
                 .into_owned_row();
+            if row_count == 0 {
+                tracing::debug!(vnode, "!!!range iter counter first");
+            }
+            row_count += 1;
+            if row_count % print_freq == 0 {
+                tracing::debug!(vnode, counter = row_count, "!!!range iter counter");
+            }
             yield KeyedRow {
                 vnode_prefixed_key,
                 row,
             }
         }
+        tracing::debug!(
+            elapsed = instant.elapsed().as_secs(),
+            row_count,
+            vnode,
+            "!!!range iter stop"
+        );
     }
 }
