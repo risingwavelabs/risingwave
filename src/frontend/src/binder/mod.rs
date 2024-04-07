@@ -535,3 +535,196 @@ pub mod test_utils {
         Binder::new_with_param_types(&SessionImpl::mock(), param_types)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use expect_test::expect;
+
+    use super::test_utils::*;
+
+    #[tokio::test]
+    async fn test_rcte() {
+        let stmt = risingwave_sqlparser::parser::Parser::parse_sql(
+            "WITH RECURSIVE t1 AS (SELECT 1 AS a UNION ALL SELECT a + 1 FROM t1 WHERE a < 10) SELECT * FROM t1",
+        ).unwrap().into_iter().next().unwrap();
+        let mut binder = mock_binder();
+        let bound = binder.bind(stmt).unwrap();
+
+        let expected = expect![[r#"
+            Query(
+                BoundQuery {
+                    body: Select(
+                        BoundSelect {
+                            distinct: All,
+                            select_items: [
+                                InputRef(
+                                    InputRef {
+                                        index: 0,
+                                        data_type: Int32,
+                                    },
+                                ),
+                                InputRef(
+                                    InputRef {
+                                        index: 1,
+                                        data_type: Int32,
+                                    },
+                                ),
+                            ],
+                            aliases: [
+                                Some(
+                                    "a",
+                                ),
+                                Some(
+                                    "?column?",
+                                ),
+                            ],
+                            from: Some(
+                                Share(
+                                    BoundShare {
+                                        share_id: 0,
+                                        input: RecursiveUnion(
+                                            BoundRecursiveUnion {
+                                                base: Select(
+                                                    BoundSelect {
+                                                        distinct: All,
+                                                        select_items: [
+                                                            Literal(
+                                                                Literal {
+                                                                    data: Some(
+                                                                        Int32(
+                                                                            1,
+                                                                        ),
+                                                                    ),
+                                                                    data_type: Some(
+                                                                        Int32,
+                                                                    ),
+                                                                },
+                                                            ),
+                                                        ],
+                                                        aliases: [
+                                                            Some(
+                                                                "a",
+                                                            ),
+                                                        ],
+                                                        from: None,
+                                                        where_clause: None,
+                                                        group_by: GroupKey(
+                                                            [],
+                                                        ),
+                                                        having: None,
+                                                        schema: Schema {
+                                                            fields: [
+                                                                a:Int32,
+                                                            ],
+                                                        },
+                                                    },
+                                                ),
+                                                recursive: Select(
+                                                    BoundSelect {
+                                                        distinct: All,
+                                                        select_items: [
+                                                            FunctionCall(
+                                                                FunctionCall {
+                                                                    func_type: Add,
+                                                                    return_type: Int32,
+                                                                    inputs: [
+                                                                        InputRef(
+                                                                            InputRef {
+                                                                                index: 0,
+                                                                                data_type: Int32,
+                                                                            },
+                                                                        ),
+                                                                        Literal(
+                                                                            Literal {
+                                                                                data: Some(
+                                                                                    Int32(
+                                                                                        1,
+                                                                                    ),
+                                                                                ),
+                                                                                data_type: Some(
+                                                                                    Int32,
+                                                                                ),
+                                                                            },
+                                                                        ),
+                                                                    ],
+                                                                },
+                                                            ),
+                                                        ],
+                                                        aliases: [
+                                                            None,
+                                                        ],
+                                                        from: Some(
+                                                            BackCteRef(
+                                                                BoundBackCteRef {
+                                                                    share_id: 0,
+                                                                },
+                                                            ),
+                                                        ),
+                                                        where_clause: Some(
+                                                            FunctionCall(
+                                                                FunctionCall {
+                                                                    func_type: LessThan,
+                                                                    return_type: Boolean,
+                                                                    inputs: [
+                                                                        InputRef(
+                                                                            InputRef {
+                                                                                index: 0,
+                                                                                data_type: Int32,
+                                                                            },
+                                                                        ),
+                                                                        Literal(
+                                                                            Literal {
+                                                                                data: Some(
+                                                                                    Int32(
+                                                                                        10,
+                                                                                    ),
+                                                                                ),
+                                                                                data_type: Some(
+                                                                                    Int32,
+                                                                                ),
+                                                                            },
+                                                                        ),
+                                                                    ],
+                                                                },
+                                                            ),
+                                                        ),
+                                                        group_by: GroupKey(
+                                                            [],
+                                                        ),
+                                                        having: None,
+                                                        schema: Schema {
+                                                            fields: [
+                                                                ?column?:Int32,
+                                                            ],
+                                                        },
+                                                    },
+                                                ),
+                                            },
+                                        ),
+                                    },
+                                ),
+                            ),
+                            where_clause: None,
+                            group_by: GroupKey(
+                                [],
+                            ),
+                            having: None,
+                            schema: Schema {
+                                fields: [
+                                    a:Int32,
+                                    ?column?:Int32,
+                                ],
+                            },
+                        },
+                    ),
+                    order: [],
+                    limit: None,
+                    offset: None,
+                    with_ties: false,
+                    extra_order_exprs: [],
+                },
+            )"#]];
+
+        expected.assert_eq(&format!("{:#?}", bound));
+    }
+}
