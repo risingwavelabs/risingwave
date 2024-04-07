@@ -383,7 +383,7 @@ impl FrontendEnv {
         });
         join_handles.push(join_handle);
 
-        // Heartbeat
+        // Heartbeat between compute nodes (worker nodes) and frontend
         let heartbeat_worker_node_manager = worker_node_manager.clone();
         let join_handle = tokio::spawn(async move {
             let duration = Duration::from_secs(std::cmp::max(
