@@ -36,6 +36,8 @@ pub async fn handle_alter_system(
     let meta_client = handler_args.session.env().meta_client();
     let mut builder = RwPgResponse::builder(StatementType::ALTER_SYSTEM);
 
+    // Currently session params are separated from system params. If the param exist in session params, we set it. Otherwise
+    // we try to set it as a system param.
     if SessionConfig::has_param(&param_name) {
         meta_client.set_session_param(param_name, value).await?;
     } else {
