@@ -147,6 +147,7 @@ services:
   # Adapted from https://github.com/confluentinc/demo-scene/blob/master/connect-jdbc/docker-compose.yml
   zookeeper:
     image: confluentinc/cp-zookeeper:5.5.1
+    platform: linux/amd64
     container_name: zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
@@ -154,6 +155,7 @@ services:
 
   kafka:
     image: confluentinc/cp-enterprise-kafka:5.5.1
+    platform: linux/amd64
     container_name: kafka
     depends_on:
       - "zookeeper"
