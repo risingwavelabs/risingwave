@@ -512,16 +512,15 @@ impl<S: StateStore> SourceExecutor<S> {
                         }
                     }
 
-                    let epoch_to_wait = epoch.prev;
-                    let updated_offsets = self.persist_state_and_clear_cache(epoch).await?;
+                    let updated_offsets = self.persist_state_and_clear_cache(epoch.clone()).await?;
 
                     // when handle a checkpoint barrier, spawn a task to wait for epoch commit notification
                     if barrier.kind.is_checkpoint()
                         && !updated_offsets.is_empty()
                         && let Some(ref tx) = wait_epoch_tx
                     {
-                        tracing::debug!("epoch to wait {}", epoch_to_wait);
-                        tx.send((Epoch(epoch_to_wait), updated_offsets))
+                        tracing::debug!("epoch to wait {:?}", epoch);
+                        tx.send((Epoch(epoch.curr), updated_offsets))
                             .expect("wait_epoch_tx send success");
                     }
 
@@ -667,6 +666,7 @@ impl<S: StateStore> WaitEpochWoker<S> {
             match self.wait_epoch_rx.recv().await {
                 Some((epoch, updated_offsets)) => {
                     let state_store_guard = self.state_table_handler.lock().await;
+                    tracing::debug!("start to wait epoch {}", epoch.0);
                     let ret = state_store_guard.state_store.wait_epoch(epoch.0).await;
                     drop(state_store_guard);
 

@@ -456,7 +456,7 @@ impl LocalStateStore for LocalHummockStorage {
 
     async fn wait_epoch(&self, epoch: HummockEpoch) -> StorageResult<()> {
         assert!(!is_max_epoch(epoch), "epoch should not be MAX EPOCH");
-        wait_for_epoch(&self.version_update_notifier_tx, epoch).await
+        self.wait_for_epoch(epoch).await
     }
 }
 
