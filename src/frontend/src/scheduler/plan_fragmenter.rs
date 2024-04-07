@@ -30,7 +30,7 @@ use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableDesc;
 use risingwave_common::hash::table_distribution::TableDistribution;
-use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode};
+use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode, WorkerId, WorkerMapping};
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use risingwave_connector::source::filesystem::opendal_source::{OpendalGcs, OpendalS3};
@@ -390,12 +390,12 @@ pub struct TableScanInfo {
     /// full vnode bitmap, since we need to know where to schedule the singleton scan task.
     ///
     /// `None` iff the table is a system table.
-    partitions: Option<HashMap<ParallelUnitId, TablePartitionInfo>>,
+    partitions: Option<HashMap<WorkerId, TablePartitionInfo>>,
 }
 
 impl TableScanInfo {
     /// For normal tables, `partitions` should always be `Some`.
-    pub fn new(name: String, partitions: HashMap<ParallelUnitId, TablePartitionInfo>) -> Self {
+    pub fn new(name: String, partitions: HashMap<WorkerId, TablePartitionInfo>) -> Self {
         Self {
             name,
             partitions: Some(partitions),
@@ -1118,7 +1118,7 @@ impl BatchPlanFragmenter {
 fn derive_partitions(
     scan_ranges: &[ScanRange],
     table_desc: &TableDesc,
-    vnode_mapping: &ParallelUnitMapping,
+    vnode_mapping: &WorkerMapping,
 ) -> SchedulerResult<HashMap<ParallelUnitId, TablePartitionInfo>> {
     let num_vnodes = vnode_mapping.len();
     let mut partitions: HashMap<ParallelUnitId, (BitmapBuilder, Vec<_>)> = HashMap::new();

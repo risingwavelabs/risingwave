@@ -161,6 +161,15 @@ where
             Info::Snapshot(_) | Info::HummockWriteLimits(_) => unreachable!(),
             Info::HummockStats(_) => true,
             Info::Recovery(_) => true,
+            Info::StreamingWorkerMapping(_) => {
+                notification.version
+                    > info
+                        .version
+                        .as_ref()
+                        .unwrap()
+                        .streaming_worker_mapping_version
+            }
+            Info::ServingWorkerMappings(_) => true,
         });
 
         self.observer_states

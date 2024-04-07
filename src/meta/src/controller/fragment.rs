@@ -18,14 +18,18 @@ use std::mem::swap;
 use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::bail;
+use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::fragment::StreamNode;
-use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
+use risingwave_meta_model_v2::prelude::{
+    Actor, ActorDispatcher, Fragment, Sink, StreamingJob, WorkerProperty,
+};
 use risingwave_meta_model_v2::{
-    actor, actor_dispatcher, fragment, object, sink, streaming_job, ActorId, ActorUpstreamActors,
-    ConnectorSplits, ExprContext, FragmentId, FragmentVnodeMapping, I32Array, JobStatus, ObjectId,
-    SinkId, SourceId, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
+    actor, actor_dispatcher, fragment, object, sink, streaming_job, worker, worker_property,
+    ActorId, ActorUpstreamActors, ConnectorSplits, ExprContext, FragmentId, FragmentVnodeMapping,
+    I32Array, JobStatus, ObjectId, SinkId, SourceId, StreamingParallelism, TableId, VnodeBitmap,
+    WorkerId,
 };
 use risingwave_pb::common::PbParallelUnit;
 use risingwave_pb::meta::subscribe_response::{
@@ -35,7 +39,8 @@ use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{PbActorStatus, PbFragment, PbState};
 use risingwave_pb::meta::{
-    FragmentParallelUnitMapping, PbFragmentParallelUnitMapping, PbTableFragments,
+    FragmentParallelUnitMapping, FragmentWorkerMapping, PbFragmentParallelUnitMapping,
+    PbTableFragments,
 };
 use risingwave_pb::source::PbConnectorSplits;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -62,7 +67,9 @@ impl CatalogControllerInner {
     /// List all fragment vnode mapping info for all CREATED streaming jobs.
     pub async fn all_running_fragment_mappings(
         &self,
-    ) -> MetaResult<impl Iterator<Item = FragmentParallelUnitMapping> + '_> {
+    ) -> MetaResult<impl Iterator<Item = FragmentWorkerMapping> + '_> {
+        let txn = self.db.begin().await?;
+
         let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
             .join(JoinType::InnerJoin, fragment::Relation::Object.def())
             .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
@@ -70,12 +77,37 @@ impl CatalogControllerInner {
             .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
             .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
             .into_tuple()
-            .all(&self.db)
+            .all(&txn)
             .await?;
-        Ok(fragment_mappings.into_iter().map(|(fragment_id, mapping)| {
-            FragmentParallelUnitMapping {
+
+        let worker_parallel_units = WorkerProperty::find()
+            .select_only()
+            .columns([
+                worker_property::Column::WorkerId,
+                worker_property::Column::ParallelUnitIds,
+            ])
+            .into_tuple::<(WorkerId, I32Array)>()
+            .all(&txn)
+            .await?;
+
+        let parallel_unit_to_worker = worker_parallel_units
+            .into_iter()
+            .flat_map(|(worker_id, parallel_unit_ids)| {
+                parallel_unit_ids
+                    .into_inner()
+                    .into_iter()
+                    .map(move |parallel_unit_id| (parallel_unit_id as u32, worker_id as u32))
+            })
+            .collect::<HashMap<_, _>>();
+
+        Ok(fragment_mappings.into_iter().map(move |(fragment_id, mapping)| {
+            let worker_mapping = ParallelUnitMapping::from_protobuf(mapping.inner_ref())
+                .to_worker(&parallel_unit_to_worker)
+                .to_protobuf();
+
+            FragmentWorkerMapping {
                 fragment_id: fragment_id as _,
-                mapping: Some(mapping.into_inner()),
+                mapping: Some(worker_mapping),
             }
         }))
     }

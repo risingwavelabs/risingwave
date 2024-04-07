@@ -16,7 +16,8 @@ use itertools::Itertools;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::meta::serving_service_server::ServingService;
 use risingwave_pb::meta::{
-    FragmentParallelUnitMapping, GetServingVnodeMappingsRequest, GetServingVnodeMappingsResponse,
+    FragmentParallelUnitMapping, FragmentWorkerMapping, GetServingVnodeMappingsRequest,
+    GetServingVnodeMappingsResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -49,7 +50,7 @@ impl ServingService for ServingServiceImpl {
             .serving_vnode_mapping
             .all()
             .into_iter()
-            .map(|(fragment_id, mapping)| FragmentParallelUnitMapping {
+            .map(|(fragment_id, mapping)| FragmentWorkerMapping {
                 fragment_id,
                 mapping: Some(mapping.to_protobuf()),
             })
@@ -78,8 +79,9 @@ impl ServingService for ServingServiceImpl {
             }
         };
         Ok(Response::new(GetServingVnodeMappingsResponse {
-            mappings,
+            mappings: vec![],
             fragment_to_table,
+            worker_mappings: mappings,
         }))
     }
 }

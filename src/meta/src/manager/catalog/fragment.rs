@@ -27,7 +27,7 @@ use risingwave_meta_model_v2::SourceId;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
-use risingwave_pb::meta::FragmentParallelUnitMapping;
+use risingwave_pb::meta::{FragmentParallelUnitMapping, FragmentWorkerMapping};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
@@ -55,16 +55,29 @@ impl FragmentManagerCore {
     /// List all fragment vnode mapping info that not in `State::Initial`.
     pub fn all_running_fragment_mappings(
         &self,
-    ) -> impl Iterator<Item = FragmentParallelUnitMapping> + '_ {
+    ) -> impl Iterator<Item = FragmentWorkerMapping> + '_ {
         self.table_fragments
             .values()
             .filter(|tf| tf.state() != State::Initial)
             .flat_map(|table_fragments| {
-                table_fragments.fragments.values().map(|fragment| {
-                    let parallel_unit_mapping = fragment.vnode_mapping.clone().unwrap();
-                    FragmentParallelUnitMapping {
+                let parallel_unit_to_worker: HashMap<_, _> = table_fragments
+                    .actor_status
+                    .values()
+                    .into_iter()
+                    .map(|status| status.get_parallel_unit().unwrap())
+                    .map(|parallel_unit| (parallel_unit.id, parallel_unit.worker_node_id))
+                    .collect();
+
+                table_fragments.fragments.values().map(move |fragment| {
+                    let parallel_unit_mapping = ParallelUnitMapping::from_protobuf(
+                        fragment.vnode_mapping.as_ref().unwrap(),
+                    );
+
+                    let worker_mapping = parallel_unit_mapping.to_worker(&parallel_unit_to_worker);
+
+                    FragmentWorkerMapping {
                         fragment_id: fragment.fragment_id,
-                        mapping: Some(parallel_unit_mapping),
+                        mapping: Some(worker_mapping.to_protobuf()),
                     }
                 })
             })

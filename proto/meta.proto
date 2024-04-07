@@ -111,6 +111,16 @@ message FragmentParallelUnitMappings {
   repeated FragmentParallelUnitMapping mappings = 1;
 }
 
+/// Worker mapping with fragment id, used for notification.
+message FragmentWorkerMapping {
+  uint32 fragment_id = 1;
+  common.WorkerMapping mapping = 2;
+}
+
+message FragmentWorkerMappings {
+  repeated FragmentWorkerMapping mappings = 1;
+}
+
 // TODO: remove this when dashboard refactored.
 message ActorLocation {
   common.WorkerNode node = 1;
@@ -374,6 +384,7 @@ message MetaSnapshot {
     uint64 catalog_version = 1;
     uint64 parallel_unit_mapping_version = 2;
     uint64 worker_node_version = 3;
+    uint64 streaming_worker_mapping_version = 4;
   }
   repeated catalog.Database databases = 1;
   repeated catalog.Schema schemas = 2;
@@ -395,6 +406,10 @@ message MetaSnapshot {
   hummock.WriteLimits hummock_write_limits = 16;
   // for serving
   repeated FragmentParallelUnitMapping serving_parallel_unit_mappings = 18;
+
+  // for streaming
+  repeated FragmentWorkerMapping streaming_worker_mappings = 20;
+  repeated FragmentWorkerMapping serving_worker_mappings = 21;
 
   SnapshotVersion version = 13;
 }
@@ -446,6 +461,8 @@ message SubscribeResponse {
     FragmentParallelUnitMappings serving_parallel_unit_mappings = 23;
     hummock.HummockVersionStats hummock_stats = 24;
     Recovery recovery = 25;
+    FragmentWorkerMapping streaming_worker_mapping = 26;
+    FragmentWorkerMappings serving_worker_mappings = 27;
   }
 }
 
@@ -601,6 +618,7 @@ message GetServingVnodeMappingsRequest {}
 message GetServingVnodeMappingsResponse {
   repeated FragmentParallelUnitMapping mappings = 1;
   map<uint32, uint32> fragment_to_table = 2;
+  repeated FragmentWorkerMapping worker_mappings = 3;
 }
 
 service ServingService {
