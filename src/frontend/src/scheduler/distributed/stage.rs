@@ -32,7 +32,7 @@ use risingwave_batch::executor::ExecutorBuilder;
 use risingwave_batch::task::{ShutdownMsg, ShutdownSender, ShutdownToken, TaskId as TaskIdBatch};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
-use risingwave_common::hash::ParallelUnitMapping;
+use risingwave_common::hash::WorkerMapping;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::source::SplitMetaData;
@@ -352,12 +352,13 @@ impl StageRunner {
             // We let each task read one partition by setting the `vnode_ranges` of the scan node in
             // the task.
             // We schedule the task to the worker node that owns the data partition.
-            let parallel_unit_ids = vnode_bitmaps.keys().cloned().collect_vec();
+            let worker_ids = vnode_bitmaps.keys().cloned().collect_vec();
             let workers = self
                 .worker_node_manager
                 .manager
-                .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
-            for (i, (parallel_unit_id, worker)) in parallel_unit_ids
+                .get_workers_by_worker_ids(&worker_ids)?;
+
+            for (i, (worker_id, worker)) in worker_ids
                 .into_iter()
                 .zip_eq_fast(workers.into_iter())
                 .enumerate()
@@ -367,7 +368,7 @@ impl StageRunner {
                     stage_id: self.stage.id,
                     task_id: i as u32,
                 };
-                let vnode_ranges = vnode_bitmaps[&parallel_unit_id].clone();
+                let vnode_ranges = vnode_bitmaps[&worker_id].clone();
                 let plan_fragment =
                     self.create_plan_fragment(i as u32, Some(PartitionInfo::Table(vnode_ranges)));
                 futures.push(self.schedule_task(
@@ -678,10 +679,7 @@ impl StageRunner {
     }
 
     #[inline(always)]
-    fn get_table_dml_vnode_mapping(
-        &self,
-        table_id: &TableId,
-    ) -> SchedulerResult<ParallelUnitMapping> {
+    fn get_table_dml_vnode_mapping(&self, table_id: &TableId) -> SchedulerResult<WorkerMapping> {
         let guard = self.catalog_reader.read_guard();
 
         let table = guard
@@ -710,11 +708,11 @@ impl StageRunner {
 
         if let Some(table_id) = dml_table_id {
             let vnode_mapping = self.get_table_dml_vnode_mapping(&table_id)?;
-            let parallel_unit_ids = vnode_mapping.iter_unique().collect_vec();
+            let worker_ids = vnode_mapping.iter_unique().collect_vec();
             let candidates = self
                 .worker_node_manager
                 .manager
-                .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
+                .get_workers_by_worker_ids(&worker_ids)?;
             if candidates.is_empty() {
                 return Err(BatchError::EmptyWorkerNodes.into());
             }
@@ -740,17 +738,17 @@ impl StageRunner {
                     .table_id
                     .into(),
             )?;
-            let id2pu_vec = self
+            let id_to_workers = self
                 .worker_node_manager
                 .fragment_mapping(fragment_id)?
                 .iter_unique()
                 .collect_vec();
 
-            let pu = id2pu_vec[task_id as usize];
+            let worker_id = id_to_workers[task_id as usize];
             let candidates = self
                 .worker_node_manager
                 .manager
-                .get_workers_by_parallel_unit_ids(&[pu])?;
+                .get_workers_by_worker_ids(&[worker_id])?;
             if candidates.is_empty() {
                 return Err(BatchError::EmptyWorkerNodes.into());
             }

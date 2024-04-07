@@ -18,6 +18,7 @@ use std::mem::swap;
 use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::bail;
+use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::fragment::StreamNode;
@@ -34,9 +35,7 @@ use risingwave_pb::meta::subscribe_response::{
 use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{PbActorStatus, PbFragment, PbState};
-use risingwave_pb::meta::{
-    FragmentParallelUnitMapping, PbFragmentParallelUnitMapping, PbTableFragments,
-};
+use risingwave_pb::meta::{FragmentWorkerMapping, PbFragmentWorkerMapping, PbTableFragments};
 use risingwave_pb::source::PbConnectorSplits;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
@@ -62,7 +61,9 @@ impl CatalogControllerInner {
     /// List all fragment vnode mapping info for all CREATED streaming jobs.
     pub async fn all_running_fragment_mappings(
         &self,
-    ) -> MetaResult<impl Iterator<Item = FragmentParallelUnitMapping> + '_> {
+    ) -> MetaResult<impl Iterator<Item = FragmentWorkerMapping> + '_> {
+        let txn = self.db.begin().await?;
+
         let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
             .join(JoinType::InnerJoin, fragment::Relation::Object.def())
             .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
@@ -70,14 +71,24 @@ impl CatalogControllerInner {
             .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
             .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
             .into_tuple()
-            .all(&self.db)
+            .all(&txn)
             .await?;
-        Ok(fragment_mappings.into_iter().map(|(fragment_id, mapping)| {
-            FragmentParallelUnitMapping {
-                fragment_id: fragment_id as _,
-                mapping: Some(mapping.into_inner()),
-            }
-        }))
+
+        let parallel_unit_to_worker =
+            CatalogController::get_parallel_unit_to_worker_map(&txn).await?;
+
+        Ok(fragment_mappings
+            .into_iter()
+            .map(move |(fragment_id, mapping)| {
+                let worker_mapping = ParallelUnitMapping::from_protobuf(mapping.inner_ref())
+                    .to_worker(&parallel_unit_to_worker)
+                    .to_protobuf();
+
+                FragmentWorkerMapping {
+                    fragment_id: fragment_id as _,
+                    mapping: Some(worker_mapping),
+                }
+            }))
     }
 }
 
@@ -85,7 +96,7 @@ impl CatalogController {
     pub(crate) async fn notify_fragment_mapping(
         &self,
         operation: NotificationOperation,
-        fragment_mappings: Vec<PbFragmentParallelUnitMapping>,
+        fragment_mappings: Vec<PbFragmentWorkerMapping>,
     ) {
         let fragment_ids = fragment_mappings
             .iter()
@@ -97,7 +108,7 @@ impl CatalogController {
                 .notification_manager()
                 .notify_frontend(
                     operation,
-                    NotificationInfo::ParallelUnitMapping(fragment_mapping),
+                    NotificationInfo::StreamingWorkerMapping(fragment_mapping),
                 )
                 .await;
         }
@@ -932,15 +943,21 @@ impl CatalogController {
             .await?;
         }
 
+        let parallel_unit_to_worker = Self::get_parallel_unit_to_worker_map(&txn).await?;
+
         txn.commit().await?;
 
         self.notify_fragment_mapping(
             NotificationOperation::Update,
             fragment_mapping
                 .into_iter()
-                .map(|(fragment_id, mapping)| PbFragmentParallelUnitMapping {
+                .map(|(fragment_id, mapping)| PbFragmentWorkerMapping {
                     fragment_id: fragment_id as _,
-                    mapping: Some(mapping.into_inner()),
+                    mapping: Some(
+                        ParallelUnitMapping::from_protobuf(mapping.inner_ref())
+                            .to_worker(&parallel_unit_to_worker)
+                            .to_protobuf(),
+                    ),
                 })
                 .collect(),
         )
