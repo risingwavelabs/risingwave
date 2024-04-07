@@ -95,7 +95,7 @@ impl SequenceGenerator {
 pub async fn next_compaction_task_id(env: &MetaSrvEnv) -> Result<u64> {
     match env.hummock_seq.clone() {
         None => env
-            .id_gen_manager()
+            .kv_id_gen_manager()
             .generate::<{ IdCategory::HummockCompactionTask }>()
             .await
             .map_err(Into::into),
@@ -106,7 +106,7 @@ pub async fn next_compaction_task_id(env: &MetaSrvEnv) -> Result<u64> {
 pub async fn next_meta_backup_id(env: &MetaSrvEnv) -> Result<u64> {
     match env.hummock_seq.clone() {
         None => env
-            .id_gen_manager()
+            .kv_id_gen_manager()
             .generate::<{ IdCategory::Backup }>()
             .await
             .map_err(Into::into),
@@ -117,7 +117,7 @@ pub async fn next_meta_backup_id(env: &MetaSrvEnv) -> Result<u64> {
 pub async fn next_compaction_group_id(env: &MetaSrvEnv) -> Result<u64> {
     match env.hummock_seq.clone() {
         None => env
-            .id_gen_manager()
+            .kv_id_gen_manager()
             .generate::<{ IdCategory::CompactionGroup }>()
             .await
             .map_err(Into::into),
@@ -134,7 +134,7 @@ pub async fn next_sstable_object_id(
         .unwrap_or_else(|_| panic!("fail to convert {num} into u32"));
     match env.hummock_seq.clone() {
         None => env
-            .id_gen_manager()
+            .kv_id_gen_manager()
             .generate_interval::<{ IdCategory::HummockSstableId }>(num as u64)
             .await
             .map_err(Into::into),

@@ -470,7 +470,7 @@ impl HummockManager {
         let sql_meta_store = self.sql_meta_store();
         let compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus> = match &sql_meta_store
         {
-            None => CompactStatus::list(self.env.meta_store_checked())
+            None => CompactStatus::list(self.env.kv_meta_store_checked())
                 .await?
                 .into_iter()
                 .map(|cg| (cg.compaction_group_id(), cg))
@@ -488,7 +488,7 @@ impl HummockManager {
         }
 
         compaction_guard.compact_task_assignment = match &sql_meta_store {
-            None => CompactTaskAssignment::list(self.env.meta_store_checked())
+            None => CompactTaskAssignment::list(self.env.kv_meta_store_checked())
                 .await?
                 .into_iter()
                 .map(|assigned| (assigned.key().unwrap(), assigned))
@@ -504,7 +504,7 @@ impl HummockManager {
 
         let hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta> =
             match &sql_meta_store {
-                None => HummockVersionDelta::list(self.env.meta_store_checked())
+                None => HummockVersionDelta::list(self.env.kv_meta_store_checked())
                     .await?
                     .into_iter()
                     .map(|version_delta| (version_delta.id, version_delta))
@@ -553,7 +553,7 @@ impl HummockManager {
             }
         }
         versioning_guard.version_stats = match &sql_meta_store {
-            None => HummockVersionStats::list(self.env.meta_store_checked())
+            None => HummockVersionStats::list(self.env.kv_meta_store_checked())
                 .await?
                 .into_iter()
                 .next(),
@@ -581,7 +581,7 @@ impl HummockManager {
         versioning_guard.hummock_version_deltas = hummock_version_deltas;
 
         versioning_guard.pinned_versions = match &sql_meta_store {
-            None => HummockPinnedVersion::list(self.env.meta_store_checked())
+            None => HummockPinnedVersion::list(self.env.kv_meta_store_checked())
                 .await?
                 .into_iter()
                 .map(|p| (p.context_id, p))
@@ -596,7 +596,7 @@ impl HummockManager {
         };
 
         versioning_guard.pinned_snapshots = match &sql_meta_store {
-            None => HummockPinnedSnapshot::list(self.env.meta_store_checked())
+            None => HummockPinnedSnapshot::list(self.env.kv_meta_store_checked())
                 .await?
                 .into_iter()
                 .map(|p| (p.context_id, p))
@@ -2110,7 +2110,7 @@ impl HummockManager {
         compaction_groups: Vec<PbCompactionGroupInfo>,
     ) -> Result<()> {
         for table in &table_catalogs {
-            table.insert(self.env.meta_store_checked()).await?;
+            table.insert(self.env.kv_meta_store_checked()).await?;
         }
         for group in &compaction_groups {
             assert!(

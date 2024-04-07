@@ -685,7 +685,9 @@ impl GlobalBarrierManagerContext {
             .migrate_fragment_actors(&migration_plan)
             .await?;
         // 3. remove the migration plan.
-        migration_plan.delete(self.env.meta_store_checked()).await?;
+        migration_plan
+            .delete(self.env.kv_meta_store_checked())
+            .await?;
         debug!("migrate actors succeed.");
 
         self.resolve_actor_info(active_nodes).await
@@ -989,7 +991,7 @@ impl GlobalBarrierManagerContext {
     ) -> MetaResult<MigrationPlan> {
         let mgr = self.metadata_manager.as_v1_ref();
 
-        let mut cached_plan = MigrationPlan::get(self.env.meta_store_checked()).await?;
+        let mut cached_plan = MigrationPlan::get(self.env.kv_meta_store_checked()).await?;
 
         let all_worker_parallel_units = mgr.fragment_manager.all_worker_parallel_units().await;
 
@@ -1102,7 +1104,7 @@ impl GlobalBarrierManagerContext {
             new_plan.parallel_unit_plan
         );
 
-        new_plan.insert(self.env.meta_store_checked()).await?;
+        new_plan.insert(self.env.kv_meta_store_checked()).await?;
         Ok(new_plan)
     }
 

@@ -89,7 +89,7 @@ macro_rules! commit_meta_with_trx {
                     $val_txn.apply_to_txn(&mut $trx).await?;
                 )*
                 // Commit to meta store
-                $manager.env.meta_store_checked().txn($trx).await?;
+                $manager.env.kv_meta_store_checked().txn($trx).await?;
                 // Upon successful commit, commit the change to in-mem meta
                 $(
                     $val_txn.commit();
@@ -242,7 +242,7 @@ impl CatalogManager {
         {
             database.id = self
                 .env
-                .id_gen_manager()
+                .kv_id_gen_manager()
                 .generate::<{ IdCategory::Database }>()
                 .await? as u32;
             self.create_database(&database).await?;
@@ -266,7 +266,7 @@ impl CatalogManager {
             let schema = Schema {
                 id: self
                     .env
-                    .id_gen_manager()
+                    .kv_id_gen_manager()
                     .generate::<{ IdCategory::Schema }>()
                     .await? as u32,
                 database_id: database.id,
@@ -3858,7 +3858,9 @@ impl CatalogManager {
                     ..Default::default()
                 };
 
-                default_user.insert(self.env.meta_store_checked()).await?;
+                default_user
+                    .insert(self.env.kv_meta_store_checked())
+                    .await?;
                 core.user_info.insert(default_user.id, default_user);
             }
         }

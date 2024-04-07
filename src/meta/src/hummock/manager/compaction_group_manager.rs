@@ -50,7 +50,7 @@ use crate::hummock::manager::{
 use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
-use crate::manager::MetaSrvEnv;
+use crate::manager::{MetaSrvEnv, MetaStoreImpl};
 use crate::model::{
     BTreeMapEntryTransaction, BTreeMapEntryTransactionWrapper, BTreeMapTransaction,
     BTreeMapTransactionWrapper, MetadataModel, MetadataModelError, ValTransaction,
@@ -75,13 +75,9 @@ impl HummockManager {
         let compaction_group_manager = RwLock::new(CompactionGroupManager {
             compaction_groups: BTreeMap::new(),
             default_config,
-            sql_meta_store: env.sql_meta_store(),
+            meta_store_impl: env.meta_store_impl_ref(),
         });
-        compaction_group_manager
-            .write()
-            .await
-            .init(env.meta_store())
-            .await?;
+        compaction_group_manager.write().await.init().await?;
         Ok(compaction_group_manager)
     }
 
@@ -763,19 +759,19 @@ impl HummockManager {
 pub(super) struct CompactionGroupManager {
     compaction_groups: BTreeMap<CompactionGroupId, CompactionGroup>,
     default_config: CompactionConfig,
-    sql_meta_store: Option<SqlMetaStore>,
+    meta_store_impl: MetaStoreImpl,
 }
 
 impl CompactionGroupManager {
-    async fn init<S: MetaStore>(&mut self, meta_store: Option<&S>) -> Result<()> {
+    async fn init(&mut self) -> Result<()> {
         let loaded_compaction_groups: BTreeMap<CompactionGroupId, CompactionGroup> =
-            match &self.sql_meta_store {
-                None => CompactionGroup::list(meta_store.unwrap())
+            match &self.meta_store_impl {
+                MetaStoreImpl::Kv(meta_store) => CompactionGroup::list(meta_store)
                     .await?
                     .into_iter()
                     .map(|cg| (cg.group_id(), cg))
                     .collect(),
-                Some(sql_meta_store) => {
+                MetaStoreImpl::Sql(sql_meta_store) => {
                     use sea_orm::EntityTrait;
                     compaction_config::Entity::find()
                         .all(&sql_meta_store.conn)
@@ -811,7 +807,7 @@ impl CompactionGroupManager {
         meta_store: Option<&S>,
     ) -> Result<HashMap<CompactionGroupId, CompactionGroup>> {
         let mut compaction_groups = create_trx_wrapper!(
-            self.sql_meta_store,
+            self.meta_store_impl,
             BTreeMapTransactionWrapper,
             BTreeMapTransaction::new(&mut self.compaction_groups,)
         );
