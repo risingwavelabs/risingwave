@@ -51,6 +51,7 @@ use tokio::sync::oneshot::Receiver;
 use tokio::sync::{oneshot, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
+use tracing::warn;
 
 use crate::barrier::{Command, Reschedule, StreamRpcManager};
 use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv, MetadataManager, WorkerId};
@@ -2007,12 +2008,19 @@ impl ScaleController {
                                 ),
                             );
                         }
-                        TableParallelism::Fixed(n) => {
-                            if n > all_available_parallel_unit_ids.len() {
-                                bail!(
-                                    "Not enough ParallelUnits available for fragment {}",
-                                    fragment_id
+                        TableParallelism::Fixed(mut n) => {
+                            let available_parallelism = all_available_parallel_unit_ids.len();
+
+                            if n > available_parallelism {
+                                warn!(
+                                    "not enough parallel units available for job {} fragment {}, required {}, resetting to {}",
+                                    table_id,
+                                    fragment_id,
+                                    n,
+                                    available_parallelism,
                                 );
+
+                                n = available_parallelism;
                             }
 
                             let rebalance_result =

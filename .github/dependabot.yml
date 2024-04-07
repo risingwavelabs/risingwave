@@ -36,3 +36,10 @@ updates:
     google-cloud:
       patterns:
         - "google-cloud*"
+# Don't update these directories
+- package-ecosystem: cargo
+  directory: /integration_tests/feature-store
+  schedule:
+    interval: "daily"
+  ignore:
+    - dependency-name: "*"

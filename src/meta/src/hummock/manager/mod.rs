@@ -60,10 +60,9 @@ use risingwave_pb::hummock::subscribe_compaction_event_request::{
 };
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta, GroupMetaChange,
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersionStats,
-    IntraLevelDelta, PbCompactionGroupInfo, SstableInfo, SubscribeCompactionEventRequest,
-    TableOption, TableSchema,
+    CompactTask, CompactTaskAssignment, GroupDelta, GroupMetaChange, HummockPinnedSnapshot,
+    HummockPinnedVersion, HummockSnapshot, HummockVersionStats, IntraLevelDelta,
+    PbCompactionGroupInfo, SstableInfo, SubscribeCompactionEventRequest, TableOption, TableSchema,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use rw_futures_util::{pending_on_none, select_all};
@@ -325,7 +324,7 @@ impl HummockManager {
         fragment_manager: FragmentManagerRef,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
-        config: CompactionConfig,
+        config: risingwave_pb::hummock::CompactionConfig,
         compactor_streams_change_tx: UnboundedSender<(
             u32,
             Streaming<SubscribeCompactionEventRequest>,

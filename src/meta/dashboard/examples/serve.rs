@@ -13,13 +13,13 @@
 // limitations under the License.
 
 use risingwave_meta_dashboard::router;
+use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    axum::Server::bind(&"0.0.0.0:10188".parse().unwrap())
-        .serve(router().into_make_service())
+    axum::serve(TcpListener::bind("0.0.0.0:10188").await.unwrap(), router())
         .await
         .unwrap();
 }
