@@ -226,7 +226,7 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
 
     // TODO: add trace span
     async fn wait_epoch(&self, epoch: HummockEpoch) -> StorageResult<()> {
-        self.inner.wait_epoch(epoch)
+        self.inner.wait_epoch(epoch).await
     }
 }
 
