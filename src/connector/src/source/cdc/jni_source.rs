@@ -23,7 +23,7 @@ pub fn commit_cdc_offset(source_id: u64, encoded_offset: String) -> anyhow::Resu
         let handler = call_static_method!(
             env,
             {com.risingwave.connector.source.core.JniDbzSourceRegistry},
-            {com.risingwave.connector.source.core.JniDbzSourceHandler getHandler(long sourceId)},
+            {com.risingwave.connector.source.core.JniDbzSourceHandler getSourceHandler(long sourceId)},
             source_id
         )?;
 

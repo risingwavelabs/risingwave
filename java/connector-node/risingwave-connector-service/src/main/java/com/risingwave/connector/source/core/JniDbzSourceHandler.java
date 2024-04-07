@@ -111,6 +111,8 @@ public class JniDbzSourceHandler {
                 LOG.error(
                         "Failed to send handshake message to channel. sourceId={}",
                         config.getSourceId());
+                // remove the handler from registry
+                JniDbzSourceRegistry.unregister(config.getSourceId());
                 return;
             }
 

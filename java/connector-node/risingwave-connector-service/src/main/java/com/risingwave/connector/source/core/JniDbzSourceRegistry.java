@@ -25,7 +25,7 @@ public class JniDbzSourceRegistry {
         sourceHandlers.put(sourceId, handler);
     }
 
-    public static JniDbzSourceHandler getHandler(long sourceId) {
+    public static JniDbzSourceHandler getSourceHandler(long sourceId) {
         return sourceHandlers.get(sourceId);
     }
 
