@@ -3367,8 +3367,8 @@ impl ScaleController {
 
         // index for fragment_id -> distribution_type
         let mut fragment_distribution_map = HashMap::new();
-        // index for actor -> parallel_unit
-        let mut actor_status = HashMap::new();
+        // index for actor -> worker id
+        let mut actor_location = HashMap::new();
         // index for table_id -> [fragment_id]
         let mut table_fragment_id_map = HashMap::new();
         // index for fragment_id -> [actor_id]
@@ -3379,7 +3379,7 @@ impl ScaleController {
             no_shuffle_source_fragment_ids: &mut HashSet<FragmentId>,
             no_shuffle_target_fragment_ids: &mut HashSet<FragmentId>,
             fragment_distribution_map: &mut HashMap<FragmentId, FragmentDistributionType>,
-            actor_status: &mut HashMap<ActorId, WorkerId>,
+            actor_location: &mut HashMap<ActorId, WorkerId>,
             table_fragment_id_map: &mut HashMap<u32, HashSet<FragmentId>>,
             fragment_actor_id_map: &mut HashMap<FragmentId, HashSet<u32>>,
             table_fragments: &BTreeMap<TableId, TableFragments>,
@@ -3448,7 +3448,7 @@ impl ScaleController {
                 }
 
                 for (actor_id, status) in &table_fragments.actor_status {
-                    actor_status.insert(
+                    actor_location.insert(
                         *actor_id,
                         status.get_parallel_unit().unwrap().get_worker_node_id(),
                     );
@@ -3465,7 +3465,7 @@ impl ScaleController {
                     &mut no_shuffle_source_fragment_ids,
                     &mut no_shuffle_target_fragment_ids,
                     &mut fragment_distribution_map,
-                    &mut actor_status,
+                    &mut actor_location,
                     &mut table_fragment_id_map,
                     &mut fragment_actor_id_map,
                     guard.table_fragments(),
@@ -3482,7 +3482,7 @@ impl ScaleController {
                     &mut no_shuffle_source_fragment_ids,
                     &mut no_shuffle_target_fragment_ids,
                     &mut fragment_distribution_map,
-                    &mut actor_status,
+                    &mut actor_location,
                     &mut table_fragment_id_map,
                     &mut fragment_actor_id_map,
                     &all_table_fragments,
@@ -3504,7 +3504,7 @@ impl ScaleController {
                 let mut fragment_slots: BTreeMap<WorkerId, usize> = BTreeMap::new();
 
                 for actor_id in fragment_actor_id_map.get(&fragment_id).unwrap() {
-                    let worker_id = actor_status.get(actor_id).unwrap();
+                    let worker_id = actor_location.get(actor_id).unwrap();
 
                     *fragment_slots.entry(*worker_id).or_default() += 1;
                 }
