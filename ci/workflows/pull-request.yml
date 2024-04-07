@@ -263,6 +263,21 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
+  - label: "end-to-end mqtt sink test"
+    if: build.pull_request.labels includes "ci/run-e2e-mqtt-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-mqtt-sink-tests?(,|$$)/
+    command: "ci/scripts/e2e-mqtt-sink-test.sh -p ci-dev"
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.1.0:
+          run: sink-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
   - label: "end-to-end clickhouse sink test"
     if: build.pull_request.labels includes "ci/run-e2e-clickhouse-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-clickhouse-sink-tests?(,|$$)/
     command: "ci/scripts/e2e-clickhouse-sink-test.sh -p ci-dev"
