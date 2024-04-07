@@ -64,5 +64,5 @@ CREATE TABLE citus_all_types(
     database.name = 'mydb',
     schema.name = 'public',
     table.name = 'citus_all_types',
-    slot.name = 'citus_all_types'
+    slot.name = 'citus_all_types_dbz_slot',
 );
