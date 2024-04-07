@@ -512,7 +512,7 @@ impl<S: StateStore> SourceExecutor<S> {
                         }
                     }
 
-                    let updated_offsets = self.persist_state_and_clear_cache(epoch.clone()).await?;
+                    let updated_offsets = self.persist_state_and_clear_cache(epoch).await?;
 
                     // when handle a checkpoint barrier, spawn a task to wait for epoch commit notification
                     if barrier.kind.is_checkpoint()
@@ -754,11 +754,13 @@ mod tests {
         ));
         let source_desc_builder =
             create_source_desc_builder(&schema, row_id_index, source_info, properties, vec![]);
-        let split_state_store = Arc::new(Mutex::new(SourceStateTableHandler::from_table_catalog(
-            &default_source_internal_table(0x2333),
-            MemoryStateStore::new(),
-        )))
-        .await;
+        let split_state_store = Arc::new(Mutex::new(
+            SourceStateTableHandler::from_table_catalog(
+                &default_source_internal_table(0x2333),
+                MemoryStateStore::new(),
+            )
+            .await,
+        ));
         let core = StreamSourceCore::<MemoryStateStore> {
             source_id: table_id,
             column_ids,
@@ -841,11 +843,13 @@ mod tests {
 
         let column_ids = vec![ColumnId::from(0)];
         let (barrier_tx, barrier_rx) = unbounded_channel::<Barrier>();
-        let split_state_store = SourceStateTableHandler::from_table_catalog(
-            &default_source_internal_table(0x2333),
-            mem_state_store.clone(),
-        )
-        .await;
+        let split_state_store = Arc::new(Mutex::new(
+            SourceStateTableHandler::from_table_catalog(
+                &default_source_internal_table(0x2333),
+                mem_state_store.clone(),
+            )
+            .await,
+        ));
 
         let core = StreamSourceCore::<MemoryStateStore> {
             source_id: table_id,
