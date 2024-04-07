@@ -26,6 +26,7 @@ use risingwave_common::config::{
     load_config, AsyncStackTraceOption, MetricLevel, StorageMemoryConfig,
     MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE,
 };
+use risingwave_common::lru::init_global_sequencer_args;
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -100,6 +101,18 @@ pub async fn compute_node_serve(
     // Initialize all the configs
     let stream_config = Arc::new(config.streaming.clone());
     let batch_config = Arc::new(config.batch.clone());
+
+    // Initialize operator lru cache global sequencer args.
+    init_global_sequencer_args(
+        config
+            .streaming
+            .developer
+            .memory_controller_sequence_tls_step,
+        config
+            .streaming
+            .developer
+            .memory_controller_sequence_tls_lag,
+    );
 
     // Register to the cluster. We're not ready to serve until activate is called.
     let (meta_client, system_params) = MetaClient::register_new(

@@ -931,6 +931,12 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::memory_controller_eviction_factor_stable")]
     pub memory_controller_eviction_factor_stable: f64,
 
+    #[serde(default = "default::developer::memory_controller_sequence_tls_step")]
+    pub memory_controller_sequence_tls_step: u64,
+
+    #[serde(default = "default::developer::memory_controller_sequence_tls_lag")]
+    pub memory_controller_sequence_tls_lag: u64,
+
     #[serde(default = "default::developer::stream_enable_arrangement_backfill")]
     /// Enable arrangement backfill
     /// If true, the arrangement backfill will be disabled,
@@ -1594,6 +1600,14 @@ pub mod default {
 
         pub fn memory_controller_eviction_factor_stable() -> f64 {
             1.0
+        }
+
+        pub fn memory_controller_sequence_tls_step() -> u64 {
+            128
+        }
+
+        pub fn memory_controller_sequence_tls_lag() -> u64 {
+            32
         }
 
         pub fn stream_enable_arrangement_backfill() -> bool {

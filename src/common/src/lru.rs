@@ -18,15 +18,24 @@ use std::cell::RefCell;
 use std::hash::{BuildHasher, Hash};
 use std::mem::MaybeUninit;
 use std::ptr::NonNull;
+use std::sync::atomic::Ordering;
 
 pub use ahash::RandomState;
 use hashbrown::hash_table::Entry;
 use hashbrown::HashTable;
 
-use crate::sequence::{Sequence, Sequencer};
+use crate::sequence::{AtomicSequence, Sequence, Sequencer};
 
 thread_local! {
     pub static SEQUENCER: RefCell<Sequencer> = RefCell::new(Sequencer::new(Sequencer::DEFAULT_STEP, Sequencer::DEFAULT_LAG));
+}
+
+static SEQUENCER_DEFAULT_STEP: AtomicSequence = AtomicSequence::new(Sequencer::DEFAULT_STEP);
+static SEQUENCER_DEFAULT_LAG: AtomicSequence = AtomicSequence::new(Sequencer::DEFAULT_LAG);
+
+pub fn init_global_sequencer_args(step: Sequence, lag: Sequence) {
+    SEQUENCER_DEFAULT_STEP.store(step, Ordering::Relaxed);
+    SEQUENCER_DEFAULT_LAG.store(lag, Ordering::Relaxed);
 }
 
 struct LruEntry<K, V>

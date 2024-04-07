@@ -22,7 +22,6 @@ use std::sync::Arc;
 use risingwave_common::lru::{LruCache, RandomState};
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::sequence::AtomicSequence;
-// use risingwave_common::util::epoch::Epoch;
 use risingwave_common_estimate_size::EstimateSize;
 
 use crate::common::metrics::MetricsInfo;
