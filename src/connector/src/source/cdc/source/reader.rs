@@ -12,27 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::marker::PhantomData;
 use std::str::FromStr;
-use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
-use futures::Stream;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use jni::objects::GlobalRef;
-use jni::JavaVM;
 use prost::Message;
 use risingwave_common::bail;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_jni_core::jvm_runtime::{execute_with_jni_env, JVM};
+use risingwave_jni_core::jvm_runtime::JVM;
 use risingwave_jni_core::{call_static_method, JniReceiverType, JniSenderType};
 use risingwave_pb::connector_service::{GetEventStreamRequest, GetEventStreamResponse};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::ParserConfig;

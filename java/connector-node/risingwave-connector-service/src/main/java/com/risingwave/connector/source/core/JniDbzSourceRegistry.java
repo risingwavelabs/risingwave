@@ -16,6 +16,7 @@ package com.risingwave.connector.source.core;
 
 import java.util.concurrent.ConcurrentHashMap;
 
+/** Global registry for all JNI Debezium source handlers. */
 public class JniDbzSourceRegistry {
     private static final ConcurrentHashMap<Long, JniDbzSourceHandler> sourceHandlers =
             new ConcurrentHashMap<>();

@@ -227,10 +227,10 @@ public class DbzChangeEventConsumer
      * Commit the offset to the Debezium engine. NOTES: The input offset is passed from the source
      * executor to here
      *
-     * @param persistedOffset persisted offset in the Source state table
+     * @param offset persisted offset in the Source state table
      */
     @SuppressWarnings("unchecked")
-    public void commitOffset(DebeziumOffset persistedOffset) throws InterruptedException {
+    public void commitOffset(DebeziumOffset offset) throws InterruptedException {
         // Although the committer is read/write by multi-thread, the committer will be not changed
         // frequently.
         if (currentRecordCommitter == null) {
@@ -242,8 +242,8 @@ public class DbzChangeEventConsumer
         // only the offset is used
         SourceRecord recordWrapper =
                 new SourceRecord(
-                        persistedOffset.sourcePartition,
-                        adjustSourceOffset((Map<String, Object>) persistedOffset.sourceOffset),
+                        offset.sourcePartition,
+                        adjustSourceOffset((Map<String, Object>) offset.sourceOffset),
                         "DUMMY",
                         Schema.BOOLEAN_SCHEMA,
                         true);

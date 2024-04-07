@@ -31,7 +31,6 @@ use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::source::ConnectorSplit;
 use serde::de::DeserializeOwned;
-use tokio::sync::mpsc::UnboundedSender;
 
 use super::cdc::DebeziumCdcMeta;
 use super::datagen::DatagenMeta;

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt::Formatter;
+use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -22,7 +23,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_connector::jvm_runtime::execute_with_jni_env;
+use risingwave_connector::source::cdc::jni_source;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
     BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitMetaData,
@@ -59,8 +60,6 @@ pub struct SourceExecutor<S: StateStore> {
 
     // control options for connector level
     source_ctrl_opts: SourceCtrlOpts,
-
-    wait_epoch_tx: UnboundedSender<(Epoch, HashMap<SplitId, String>)>,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -72,16 +71,6 @@ impl<S: StateStore> SourceExecutor<S> {
         system_params: SystemParamsReaderRef,
         source_ctrl_opts: SourceCtrlOpts,
     ) -> Self {
-        let (wait_epoch_tx, wait_epoch_rx) = mpsc::unbounded_channel();
-        if let Some(core) = stream_source_core.as_ref() {
-            let state_store_handler = core.split_state_store.clone();
-            let wait_epoch_worker = WaitEpochWoker {
-                wait_epoch_rx,
-                state_table_handler: state_store_handler,
-            };
-            tokio::spawn(wait_epoch_worker.run());
-        }
-
         Self {
             actor_ctx,
             stream_source_core,
@@ -89,8 +78,20 @@ impl<S: StateStore> SourceExecutor<S> {
             barrier_receiver: Some(barrier_receiver),
             system_params,
             source_ctrl_opts,
-            wait_epoch_tx,
         }
+    }
+
+    pub fn spawn_wait_epoch_worker(
+        core: &StreamSourceCore<S>,
+    ) -> UnboundedSender<(Epoch, HashMap<SplitId, String>)> {
+        let (wait_epoch_tx, wait_epoch_rx) = mpsc::unbounded_channel();
+        let state_store_handler = core.split_state_store.clone();
+        let wait_epoch_worker = WaitEpochWoker {
+            wait_epoch_rx,
+            state_table_handler: state_store_handler,
+        };
+        tokio::spawn(wait_epoch_worker.run());
+        wait_epoch_tx
     }
 
     pub async fn build_stream_source_reader(
@@ -379,6 +380,12 @@ impl<S: StateStore> SourceExecutor<S> {
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
+        let wait_epoch_tx = if source_desc.source.need_commit_offset_to_upstream() {
+            Some(Self::spawn_wait_epoch_worker(&core))
+        } else {
+            None
+        };
+
         let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
         else {
             unreachable!("Partition and offset columns must be set.");
@@ -505,17 +512,18 @@ impl<S: StateStore> SourceExecutor<S> {
                         }
                     }
 
-                    let is_checkpoint = barrier.kind.is_checkpoint();
                     let epoch_to_wait = epoch.prev;
                     let updated_offsets = self.persist_state_and_clear_cache(epoch).await?;
 
-                    yield Message::Barrier(barrier);
                     // when handle a checkpoint barrier, spawn a task to wait for epoch commit notification
-                    if is_checkpoint {
-                        self.wait_epoch_tx
-                            .send((Epoch(epoch_to_wait), updated_offsets))
+                    if barrier.kind.is_checkpoint()
+                        && let Some(ref tx) = wait_epoch_tx
+                    {
+                        tx.send((Epoch(epoch_to_wait), updated_offsets))
                             .expect("wait_epoch_tx send success");
                     }
+
+                    yield Message::Barrier(barrier);
                 }
                 Either::Left(_) => {
                     // For the source executor, the message we receive from this arm
@@ -662,20 +670,20 @@ impl<S: StateStore> WaitEpochWoker<S> {
                     match ret {
                         Ok(()) => {
                             tracing::debug!(epoch = epoch.0, "wait epoch success");
-
-                            // currently only support cdc source, which has only one split
+                            // cdc source only has one split
                             assert_eq!(1, updated_offsets.len());
+                            let (split_id, offset) = updated_offsets.into_iter().next().unwrap();
+                            let source_id: u64 = u64::from_str(split_id.as_ref()).unwrap();
                             // notify cdc connector to commit offset
-                            let jvm = risingwave_connector::jvm_runtime::JVM
-                                .get_or_init()
-                                .expect("jvm should init success");
-
-                            let ret = execute_with_jni_env(&jvm, |env| {
-                                // TODO: get source handler from JniDbzSourceRegistry and commit offset
-                                Ok(())
-                            });
-
-                            ret.unwrap();
+                            match jni_source::commit_cdc_offset(source_id, offset.clone()) {
+                                Ok(_) => {}
+                                Err(e) => {
+                                    tracing::error!(
+                                        error = ?e.as_report(),
+                                        "source#{source_id}: failed to commit cdc offset: {offset}.",
+                                    )
+                                }
+                            }
                         }
                         Err(e) => {
                             tracing::error!(
@@ -743,10 +751,10 @@ mod tests {
         ));
         let source_desc_builder =
             create_source_desc_builder(&schema, row_id_index, source_info, properties, vec![]);
-        let split_state_store = SourceStateTableHandler::from_table_catalog(
+        let split_state_store = Arc::new(Mutex::new(SourceStateTableHandler::from_table_catalog(
             &default_source_internal_table(0x2333),
             MemoryStateStore::new(),
-        )
+        )))
         .await;
         let core = StreamSourceCore::<MemoryStateStore> {
             source_id: table_id,

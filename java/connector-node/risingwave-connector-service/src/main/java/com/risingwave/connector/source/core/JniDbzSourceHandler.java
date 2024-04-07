@@ -18,6 +18,7 @@ import static com.risingwave.proto.ConnectorServiceProto.SourceType.POSTGRES;
 
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.DebeziumOffset;
+import com.risingwave.connector.cdc.debezium.internal.DebeziumOffsetSerializer;
 import com.risingwave.connector.source.common.CdcConnectorException;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
 import com.risingwave.connector.source.common.DbzSourceUtils;
@@ -25,19 +26,17 @@ import com.risingwave.java.binding.Binding;
 import com.risingwave.metrics.ConnectorNodeMetrics;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/**
- * handler for starting a debezium source connectors for jni
- */
+/** handler for starting a debezium source connectors for jni */
 
-/**
- * handler for starting a debezium source connectors for jni
- */
+/** handler for starting a debezium source connectors for jni */
 public class JniDbzSourceHandler {
     static final Logger LOG = LoggerFactory.getLogger(JniDbzSourceHandler.class);
 
@@ -85,12 +84,20 @@ public class JniDbzSourceHandler {
         handler.start(channelPtr);
     }
 
-    public void commitOffset(DebeziumOffset offset) throws InterruptedException {
-        var changeEventConsumer = runner.getChangeEventConsumer();
-        if (changeEventConsumer != null) {
-            changeEventConsumer.commitOffset(offset);
-        } else {
-            LOG.warn("Engine#{}: changeEventConsumer is null", config.getSourceId());
+    public void commitOffset(String encodedOffset) throws InterruptedException {
+        try {
+            DebeziumOffset offset =
+                    DebeziumOffsetSerializer.INSTANCE.deserialize(
+                            encodedOffset.getBytes(StandardCharsets.UTF_8));
+            var changeEventConsumer = runner.getChangeEventConsumer();
+            if (changeEventConsumer != null) {
+                changeEventConsumer.commitOffset(offset);
+            } else {
+                LOG.warn("Engine#{}: changeEventConsumer is null", config.getSourceId());
+            }
+        } catch (IOException err) {
+            LOG.error("Engine#{}: fail to commit offset.", config.getSourceId(), err);
+            throw new CdcConnectorException(err.getMessage());
         }
     }
 

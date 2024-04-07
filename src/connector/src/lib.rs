@@ -54,7 +54,7 @@ pub mod source;
 pub mod connector_common;
 
 pub use paste::paste;
-pub use risingwave_jni_core::jvm_runtime;
+pub use risingwave_jni_core::{call_method, call_static_method, jvm_runtime};
 
 mod with_options;
 pub use with_options::WithPropertiesExt;
