@@ -92,6 +92,7 @@ public class JniDbzSourceHandler {
             var changeEventConsumer = runner.getChangeEventConsumer();
             if (changeEventConsumer != null) {
                 changeEventConsumer.commitOffset(offset);
+                LOG.info("Engine#{}: committed offset {}", config.getSourceId(), offset);
             } else {
                 LOG.warn("Engine#{}: changeEventConsumer is null", config.getSourceId());
             }

@@ -19,12 +19,11 @@ import com.risingwave.connector.cdc.debezium.internal.DebeziumOffsetSerializer;
 import com.risingwave.proto.ConnectorServiceProto.CdcMessage;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
 import io.debezium.connector.postgresql.PostgresOffsetContext;
-import io.debezium.embedded.EmbeddedEngineChangeEvent;
+import io.debezium.embedded.EmbeddedEngineChangeEventProxy;
 import io.debezium.engine.ChangeEvent;
 import io.debezium.engine.DebeziumEngine;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -248,8 +247,7 @@ public class DbzChangeEventConsumer
                         Schema.BOOLEAN_SCHEMA,
                         true);
         ChangeEvent<SourceRecord, SourceRecord> changeEvent =
-                new EmbeddedEngineChangeEvent<>(
-                        null, recordWrapper, Collections.emptyList(), recordWrapper);
+                EmbeddedEngineChangeEventProxy.create(null, recordWrapper, recordWrapper);
         currentRecordCommitter.markProcessed(changeEvent);
         currentRecordCommitter.markBatchFinished();
     }

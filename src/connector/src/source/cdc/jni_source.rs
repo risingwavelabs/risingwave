@@ -35,7 +35,6 @@ pub fn commit_cdc_offset(source_id: u64, encoded_offset: String) -> anyhow::Resu
         call_method!(env, handler, {void commitOffset(String)}, &offset_str).with_context(
             || format!("Failed to commit offset to upstream for source: {source_id}."),
         )?;
-
         Ok(())
     })
 }

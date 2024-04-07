@@ -517,8 +517,10 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     // when handle a checkpoint barrier, spawn a task to wait for epoch commit notification
                     if barrier.kind.is_checkpoint()
+                        && !updated_offsets.is_empty()
                         && let Some(ref tx) = wait_epoch_tx
                     {
+                        tracing::debug!("epoch to wait {}", epoch_to_wait);
                         tx.send((Epoch(epoch_to_wait), updated_offsets))
                             .expect("wait_epoch_tx send success");
                     }
@@ -659,6 +661,7 @@ struct WaitEpochWoker<S: StateStore> {
 
 impl<S: StateStore> WaitEpochWoker<S> {
     pub async fn run(mut self) {
+        tracing::debug!("wait epoch worker start success");
         loop {
             // poll the rx and wait for the epoch commit
             match self.wait_epoch_rx.recv().await {
