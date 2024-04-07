@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod alter_parallelism;
 mod auto_parallelism;
 mod cascade_materialized_view;
 mod dynamic_filter;
