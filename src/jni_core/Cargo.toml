@@ -17,7 +17,7 @@ chrono = { version = "0.4", default-features = false }
 fs-err = "2"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.12"
-jni = "0.21.1"
+jni = { version = "0.21.1", features = ["invocation"] }
 paste = "1"
 prost = { workspace = true }
 risingwave_common = { workspace = true }

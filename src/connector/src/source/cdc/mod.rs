@@ -150,7 +150,7 @@ where
         };
         self.table_schema = table_schema;
         if let Some(info) = source.info.as_ref() {
-            self.is_cdc_source_job = info.cdc_source_job;
+            self.is_cdc_source_job = info.is_shared();
         }
     }
 

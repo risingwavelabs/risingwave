@@ -36,13 +36,13 @@ use crate::TableCatalog;
 pub enum SourceNodeKind {
     /// `CREATE TABLE` with a connector.
     CreateTable,
-    /// `CREATE SOURCE` with a streaming job (backfill-able source).
-    CreateSourceWithStreamjob,
-    /// `CREATE MATERIALIZED VIEW` which selects from a source.
+    /// `CREATE SOURCE` with a streaming job (shared source).
+    CreateSharedSource,
+    /// `CREATE MATERIALIZED VIEW` or batch scan from a source.
     ///
     /// Note:
-    /// - For non backfill-able source, `CREATE SOURCE` will not create a source node, and `CREATE MATERIALIZE VIEW` will create a `LogicalSource`.
-    /// - For backfill-able source, `CREATE MATERIALIZE VIEW` will create `LogicalSourceBackfill` instead of `LogicalSource`.
+    /// - For non-shared source, `CREATE SOURCE` will not create a source node, and `CREATE MATERIALIZE VIEW` will create a `StreamSource`.
+    /// - For shared source, `CREATE MATERIALIZE VIEW` will create `StreamSourceScan` instead of `StreamSource`.
     CreateMViewOrBatch,
 }
 

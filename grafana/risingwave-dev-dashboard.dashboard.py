@@ -1734,7 +1734,11 @@ def section_batch(outer_panels):
                     "All memory usage of batch executors in bytes",
                     [
                         panels.target(
-                            f"{metric('batch_total_mem')}",
+                            f"{metric('compute_batch_total_mem')}",
+                            "",
+                        ),
+                        panels.target(
+                            f"{metric('frontend_batch_total_mem')}",
                             "",
                         ),
                     ],
