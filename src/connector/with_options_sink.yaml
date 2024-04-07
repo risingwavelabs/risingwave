@@ -87,6 +87,9 @@ DeltaLakeConfig:
   - name: s3.endpoint
     field_type: String
     required: false
+  - name: gcs.service.account
+    field_type: String
+    required: false
   - name: r#type
     field_type: String
     required: true
