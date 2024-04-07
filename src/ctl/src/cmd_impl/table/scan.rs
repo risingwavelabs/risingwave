@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{anyhow, Result};
 use futures::{pin_mut, StreamExt};
+use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::ColumnId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_rpc_client::MetaClient;
@@ -76,6 +79,7 @@ pub fn make_storage_table<S: StateStore>(
     hummock: S,
     table: &TableCatalog,
     output_columns_ids: Option<Vec<i32>>,
+    vnodes: Option<Vec<i32>>,
 ) -> Result<StorageTable<S>> {
     let output_columns_ids = match output_columns_ids {
         None => table
@@ -85,10 +89,20 @@ pub fn make_storage_table<S: StateStore>(
             .collect(),
         Some(output_columns_ids) => output_columns_ids.into_iter().map(ColumnId::new).collect(),
     };
+    let vnodes = match vnodes {
+        None => TableDistribution::all_vnodes(),
+        Some(vnodes) => {
+            let mut bitmap = BitmapBuilder::zeroed(VirtualNode::COUNT);
+            for v in vnodes {
+                bitmap.set(v as usize, true);
+            }
+            Arc::new(bitmap.finish())
+        }
+    };
     Ok(StorageTable::new_partial(
         hummock,
         output_columns_ids,
-        Some(TableDistribution::all_vnodes()),
+        Some(vnodes),
         &table.table_desc().try_to_protobuf()?,
     ))
 }
@@ -98,6 +112,7 @@ pub async fn scan(
     mv_name: String,
     data_dir: Option<String>,
     output_columns_ids: Option<Vec<i32>>,
+    vnodes: Option<Vec<i32>>,
     silent: bool,
 ) -> Result<()> {
     let meta_client = context.meta_client().await?;
@@ -105,7 +120,7 @@ pub async fn scan(
         .hummock_store(HummockServiceOpts::from_env(data_dir)?)
         .await?;
     let table = get_table_catalog(meta_client, mv_name).await?;
-    do_scan(table, hummock, output_columns_ids, silent).await
+    do_scan(table, hummock, output_columns_ids, vnodes, silent).await
 }
 
 pub async fn scan_id(
@@ -113,6 +128,7 @@ pub async fn scan_id(
     table_id: u32,
     data_dir: Option<String>,
     output_columns_ids: Option<Vec<i32>>,
+    vnodes: Option<Vec<i32>>,
     silent: bool,
 ) -> Result<()> {
     let meta_client = context.meta_client().await?;
@@ -120,13 +136,14 @@ pub async fn scan_id(
         .hummock_store(HummockServiceOpts::from_env(data_dir)?)
         .await?;
     let table = get_table_catalog_by_id(meta_client, table_id).await?;
-    do_scan(table, hummock, output_columns_ids, silent).await
+    do_scan(table, hummock, output_columns_ids, vnodes, silent).await
 }
 
 async fn do_scan(
     table: TableCatalog,
     hummock: MonitoredStateStore<HummockStorage>,
     output_columns_ids: Option<Vec<i32>>,
+    vnodes: Option<Vec<i32>>,
     silent: bool,
 ) -> Result<()> {
     print_table_catalog(&table);
@@ -146,7 +163,7 @@ async fn do_scan(
         println!("Rows:");
     }
     let read_epoch = hummock.inner().get_pinned_version().max_committed_epoch();
-    let storage_table = make_storage_table(hummock, &table, output_columns_ids)?;
+    let storage_table = make_storage_table(hummock, &table, output_columns_ids, vnodes)?;
     let instant = Instant::now();
     let stream = storage_table
         .batch_iter(
