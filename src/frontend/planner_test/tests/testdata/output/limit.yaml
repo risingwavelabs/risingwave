@@ -130,7 +130,7 @@
           └─BatchScan { table: t, columns: [], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [count], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamTopN { order: [sum0(count) ASC], limit: 1, offset: 0 }
+    └─StreamTopN { order: [], limit: 1, offset: 0 }
       └─StreamProject { exprs: [sum0(count)] }
         └─StreamSimpleAgg { aggs: [sum0(count), count] }
           └─StreamExchange { dist: Single }
@@ -140,14 +140,15 @@
     create table t (a int);
     select count(*) from t order by 1 limit 1;
   batch_plan: |-
-    BatchTopN { order: [sum0(count) ASC], limit: 1, offset: 0 }
-    └─BatchSimpleAgg { aggs: [sum0(count)] }
-      └─BatchExchange { order: [], dist: Single }
-        └─BatchSimpleAgg { aggs: [count] }
-          └─BatchScan { table: t, columns: [], distribution: SomeShard }
+    BatchSort { order: [sum0(count) ASC] }
+    └─BatchLimit { limit: 1, offset: 0 }
+      └─BatchSimpleAgg { aggs: [sum0(count)] }
+        └─BatchExchange { order: [], dist: Single }
+          └─BatchSimpleAgg { aggs: [count] }
+            └─BatchScan { table: t, columns: [], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [count], stream_key: [], pk_columns: [count], pk_conflict: NoCheck }
-    └─StreamTopN { order: [sum0(count) ASC], limit: 1, offset: 0 }
+    StreamMaterialize { columns: [count], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    └─StreamTopN { order: [], limit: 1, offset: 0 }
       └─StreamProject { exprs: [sum0(count)] }
         └─StreamSimpleAgg { aggs: [sum0(count), count] }
           └─StreamExchange { dist: Single }

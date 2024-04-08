@@ -1,0 +1,8 @@
+- name: test functional dependency for order key pruning
+  sql: |
+    create table t1 (id int primary key, i int);
+    select id, i from t1 order by id, i limit 2;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan

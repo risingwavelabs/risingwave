@@ -2665,7 +2665,7 @@
       c_count desc
     LIMIT 1;
   logical_plan: |-
-    LogicalTopN { order: [count DESC, count(orders.o_orderkey) DESC], limit: 1, offset: 0 }
+    LogicalTopN { order: [count(orders.o_orderkey) DESC], limit: 1, offset: 0 }
     └─LogicalProject { exprs: [count(orders.o_orderkey), count] }
       └─LogicalAgg { group_key: [count(orders.o_orderkey)], aggs: [count] }
         └─LogicalProject { exprs: [count(orders.o_orderkey)] }
@@ -2676,32 +2676,33 @@
                   ├─LogicalScan { table: customer, columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_mktsegment, customer.c_comment] }
                   └─LogicalScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment] }
   optimized_logical_plan_for_batch: |-
-    LogicalTopN { order: [count DESC, count(orders.o_orderkey) DESC], limit: 1, offset: 0 }
+    LogicalTopN { order: [count(orders.o_orderkey) DESC], limit: 1, offset: 0 }
     └─LogicalAgg { group_key: [count(orders.o_orderkey)], aggs: [count] }
       └─LogicalAgg { group_key: [customer.c_custkey], aggs: [count(orders.o_orderkey)] }
         └─LogicalJoin { type: LeftOuter, on: (customer.c_custkey = orders.o_custkey), output: [customer.c_custkey, orders.o_orderkey] }
           ├─LogicalScan { table: customer, columns: [customer.c_custkey] }
           └─LogicalScan { table: orders, output_columns: [orders.o_orderkey, orders.o_custkey], required_columns: [orders.o_orderkey, orders.o_custkey, orders.o_comment], predicate: Not(Like(orders.o_comment, '%:1%:2%':Varchar)) }
   batch_plan: |-
-    BatchTopN { order: [count DESC, count(orders.o_orderkey) DESC], limit: 1, offset: 0 }
-    └─BatchExchange { order: [], dist: Single }
-      └─BatchTopN { order: [count DESC, count(orders.o_orderkey) DESC], limit: 1, offset: 0 }
-        └─BatchHashAgg { group_key: [count(orders.o_orderkey)], aggs: [count] }
-          └─BatchExchange { order: [], dist: HashShard(count(orders.o_orderkey)) }
-            └─BatchHashAgg { group_key: [customer.c_custkey], aggs: [count(orders.o_orderkey)] }
-              └─BatchHashJoin { type: LeftOuter, predicate: customer.c_custkey = orders.o_custkey, output: [customer.c_custkey, orders.o_orderkey] }
-                ├─BatchExchange { order: [], dist: HashShard(customer.c_custkey) }
-                │ └─BatchScan { table: customer, columns: [customer.c_custkey], distribution: UpstreamHashShard(customer.c_custkey) }
-                └─BatchExchange { order: [], dist: HashShard(orders.o_custkey) }
-                  └─BatchProject { exprs: [orders.o_orderkey, orders.o_custkey] }
-                    └─BatchFilter { predicate: Not(Like(orders.o_comment, '%:1%:2%':Varchar)) }
-                      └─BatchScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_comment], distribution: UpstreamHashShard(orders.o_orderkey) }
+    BatchSort { order: [count DESC, count(orders.o_orderkey) DESC] }
+    └─BatchTopN { order: [count(orders.o_orderkey) DESC], limit: 1, offset: 0 }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchTopN { order: [count(orders.o_orderkey) DESC], limit: 1, offset: 0 }
+          └─BatchHashAgg { group_key: [count(orders.o_orderkey)], aggs: [count] }
+            └─BatchExchange { order: [], dist: HashShard(count(orders.o_orderkey)) }
+              └─BatchHashAgg { group_key: [customer.c_custkey], aggs: [count(orders.o_orderkey)] }
+                └─BatchHashJoin { type: LeftOuter, predicate: customer.c_custkey = orders.o_custkey, output: [customer.c_custkey, orders.o_orderkey] }
+                  ├─BatchExchange { order: [], dist: HashShard(customer.c_custkey) }
+                  │ └─BatchScan { table: customer, columns: [customer.c_custkey], distribution: UpstreamHashShard(customer.c_custkey) }
+                  └─BatchExchange { order: [], dist: HashShard(orders.o_custkey) }
+                    └─BatchProject { exprs: [orders.o_orderkey, orders.o_custkey] }
+                      └─BatchFilter { predicate: Not(Like(orders.o_comment, '%:1%:2%':Varchar)) }
+                        └─BatchScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_comment], distribution: UpstreamHashShard(orders.o_orderkey) }
   stream_plan: |-
-    StreamMaterialize { columns: [c_count, custdist], stream_key: [], pk_columns: [custdist, c_count], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [c_count, custdist], stream_key: [], pk_columns: [c_count], pk_conflict: NoCheck }
     └─StreamProject { exprs: [count(orders.o_orderkey), count] }
-      └─StreamTopN { order: [count DESC, count(orders.o_orderkey) DESC], limit: 1, offset: 0 }
+      └─StreamTopN { order: [count(orders.o_orderkey) DESC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [count DESC, count(orders.o_orderkey) DESC], limit: 1, offset: 0, group_key: [_vnode] }
+          └─StreamGroupTopN { order: [count(orders.o_orderkey) DESC], limit: 1, offset: 0, group_key: [_vnode] }
             └─StreamProject { exprs: [count(orders.o_orderkey), count, Vnode(count(orders.o_orderkey)) as _vnode] }
               └─StreamHashAgg { group_key: [count(orders.o_orderkey)], aggs: [count] }
                 └─StreamExchange { dist: HashShard(count(orders.o_orderkey)) }
@@ -2716,14 +2717,14 @@
                               └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_comment], stream_scan_type: ArrangementBackfill, stream_key: [orders.o_orderkey], pk: [o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [c_count, custdist], stream_key: [], pk_columns: [custdist, c_count], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [c_count, custdist], stream_key: [], pk_columns: [c_count], pk_conflict: NoCheck }
     ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [count(orders.o_orderkey), count] }
-        └── StreamTopN { order: [count DESC, count(orders.o_orderkey) DESC], limit: 1, offset: 0 } { tables: [ TopN: 0 ] }
+        └── StreamTopN { order: [count(orders.o_orderkey) DESC], limit: 1, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [count DESC, count(orders.o_orderkey) DESC], limit: 1, offset: 0, group_key: [_vnode] }
+    StreamGroupTopN { order: [count(orders.o_orderkey) DESC], limit: 1, offset: 0, group_key: [_vnode] }
     ├── tables: [ GroupTopN: 1 ]
     └── StreamProject { exprs: [count(orders.o_orderkey), count, Vnode(count(orders.o_orderkey)) as _vnode] }
         └── StreamHashAgg { group_key: [count(orders.o_orderkey)], aggs: [count] } { tables: [ HashAggState: 2 ] }
@@ -2751,9 +2752,9 @@
             ├── Upstream
             └── BatchPlanNode
 
-    Table 0 { columns: [ count(orders_o_orderkey), count, _vnode ], primary key: [ $1 DESC, $0 DESC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ count(orders_o_orderkey), count, _vnode ], primary key: [ $0 DESC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 1 { columns: [ count(orders_o_orderkey), count, _vnode ], primary key: [ $2 ASC, $1 DESC, $0 DESC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 2 }
+    Table 1 { columns: [ count(orders_o_orderkey), count, _vnode ], primary key: [ $2 ASC, $0 DESC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 2 }
 
     Table 2 { columns: [ count(orders_o_orderkey), count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -2771,7 +2772,7 @@
 
     Table 9 { columns: [ vnode, o_orderkey, backfill_finished, row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ c_count, custdist ], primary key: [ $1 DESC, $0 DESC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 2 }
+    Table 4294967294 { columns: [ c_count, custdist ], primary key: [ $0 DESC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
 - id: tpch_q14
   before:
@@ -3101,7 +3102,7 @@
       p_size
     LIMIT 1;
   logical_plan: |-
-    LogicalTopN { order: [count(distinct partsupp.ps_suppkey) DESC, part.p_brand ASC, part.p_type ASC, part.p_size ASC], limit: 1, offset: 0 }
+    LogicalTopN { order: [part.p_brand ASC, part.p_type ASC, part.p_size ASC], limit: 1, offset: 0 }
     └─LogicalProject { exprs: [part.p_brand, part.p_type, part.p_size, count(distinct partsupp.ps_suppkey)] }
       └─LogicalAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [count(distinct partsupp.ps_suppkey)] }
         └─LogicalProject { exprs: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey] }
@@ -3114,7 +3115,7 @@
                 └─LogicalFilter { predicate: Like(supplier.s_comment, '%Customer%Complaints%':Varchar) }
                   └─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment] }
   optimized_logical_plan_for_batch: |-
-    LogicalTopN { order: [count(partsupp.ps_suppkey) DESC, part.p_brand ASC, part.p_type ASC, part.p_size ASC], limit: 1, offset: 0 }
+    LogicalTopN { order: [part.p_brand ASC, part.p_type ASC, part.p_size ASC], limit: 1, offset: 0 }
     └─LogicalAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [count(partsupp.ps_suppkey)] }
       └─LogicalAgg { group_key: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey], aggs: [] }
         └─LogicalJoin { type: LeftAnti, on: (partsupp.ps_suppkey = supplier.s_suppkey), output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey] }
@@ -3123,23 +3124,24 @@
           │ └─LogicalScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_type, part.p_size], predicate: (part.p_brand <> 'Brand#45':Varchar) AND (Not((part.p_type >= 'SMALL PLATED':Varchar)) OR Not((part.p_type < 'SMALL PLATEE':Varchar))) AND In(part.p_size, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32) }
           └─LogicalScan { table: supplier, output_columns: [supplier.s_suppkey], required_columns: [supplier.s_suppkey, supplier.s_comment], predicate: Like(supplier.s_comment, '%Customer%Complaints%':Varchar) }
   batch_plan: |-
-    BatchTopN { order: [count(partsupp.ps_suppkey) DESC, part.p_brand ASC, part.p_type ASC, part.p_size ASC], limit: 1, offset: 0 }
-    └─BatchExchange { order: [], dist: Single }
-      └─BatchTopN { order: [count(partsupp.ps_suppkey) DESC, part.p_brand ASC, part.p_type ASC, part.p_size ASC], limit: 1, offset: 0 }
-        └─BatchHashAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [count(partsupp.ps_suppkey)] }
-          └─BatchExchange { order: [], dist: HashShard(part.p_brand, part.p_type, part.p_size) }
-            └─BatchHashAgg { group_key: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey], aggs: [] }
-              └─BatchLookupJoin { type: LeftAnti, predicate: partsupp.ps_suppkey = supplier.s_suppkey AND Like(supplier.s_comment, '%Customer%Complaints%':Varchar), output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey], lookup table: supplier }
-                └─BatchExchange { order: [], dist: UpstreamHashShard(partsupp.ps_suppkey) }
-                  └─BatchLookupJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey AND (part.p_brand <> 'Brand#45':Varchar) AND (Not((part.p_type >= 'SMALL PLATED':Varchar)) OR Not((part.p_type < 'SMALL PLATEE':Varchar))) AND In(part.p_size, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32), output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size], lookup table: part }
-                    └─BatchExchange { order: [], dist: UpstreamHashShard(partsupp.ps_partkey) }
-                      └─BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+    BatchSort { order: [count(partsupp.ps_suppkey) DESC, part.p_brand ASC, part.p_type ASC, part.p_size ASC] }
+    └─BatchTopN { order: [part.p_brand ASC, part.p_type ASC, part.p_size ASC], limit: 1, offset: 0 }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchTopN { order: [part.p_brand ASC, part.p_type ASC, part.p_size ASC], limit: 1, offset: 0 }
+          └─BatchHashAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [count(partsupp.ps_suppkey)] }
+            └─BatchExchange { order: [], dist: HashShard(part.p_brand, part.p_type, part.p_size) }
+              └─BatchHashAgg { group_key: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey], aggs: [] }
+                └─BatchLookupJoin { type: LeftAnti, predicate: partsupp.ps_suppkey = supplier.s_suppkey AND Like(supplier.s_comment, '%Customer%Complaints%':Varchar), output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey], lookup table: supplier }
+                  └─BatchExchange { order: [], dist: UpstreamHashShard(partsupp.ps_suppkey) }
+                    └─BatchLookupJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey AND (part.p_brand <> 'Brand#45':Varchar) AND (Not((part.p_type >= 'SMALL PLATED':Varchar)) OR Not((part.p_type < 'SMALL PLATEE':Varchar))) AND In(part.p_size, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32), output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size], lookup table: part }
+                      └─BatchExchange { order: [], dist: UpstreamHashShard(partsupp.ps_partkey) }
+                        └─BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
   stream_plan: |-
-    StreamMaterialize { columns: [p_brand, p_type, p_size, supplier_cnt], stream_key: [], pk_columns: [supplier_cnt, p_brand, p_type, p_size], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [p_brand, p_type, p_size, supplier_cnt], stream_key: [], pk_columns: [p_brand, p_type, p_size], pk_conflict: NoCheck }
     └─StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, count(distinct partsupp.ps_suppkey)] }
-      └─StreamTopN { order: [count(distinct partsupp.ps_suppkey) DESC, part.p_brand ASC, part.p_type ASC, part.p_size ASC], limit: 1, offset: 0 }
+      └─StreamTopN { order: [part.p_brand ASC, part.p_type ASC, part.p_size ASC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [count(distinct partsupp.ps_suppkey) DESC, part.p_brand ASC, part.p_type ASC, part.p_size ASC], limit: 1, offset: 0, group_key: [$expr1] }
+          └─StreamGroupTopN { order: [part.p_brand ASC, part.p_type ASC, part.p_size ASC], limit: 1, offset: 0, group_key: [$expr1] }
             └─StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, count(distinct partsupp.ps_suppkey), Vnode(part.p_brand, part.p_type, part.p_size) as $expr1] }
               └─StreamHashAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [count(distinct partsupp.ps_suppkey), count] }
                 └─StreamExchange { dist: HashShard(part.p_brand, part.p_type, part.p_size) }
@@ -3157,16 +3159,14 @@
                           └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_comment], stream_scan_type: ArrangementBackfill, stream_key: [supplier.s_suppkey], pk: [s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [p_brand, p_type, p_size, supplier_cnt], stream_key: [], pk_columns: [supplier_cnt, p_brand, p_type, p_size], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [p_brand, p_type, p_size, supplier_cnt], stream_key: [], pk_columns: [p_brand, p_type, p_size], pk_conflict: NoCheck }
     ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, count(distinct partsupp.ps_suppkey)] }
-        └── StreamTopN { order: [count(distinct partsupp.ps_suppkey) DESC, part.p_brand ASC, part.p_type ASC, part.p_size ASC], limit: 1, offset: 0 }
-            ├── tables: [ TopN: 0 ]
+        └── StreamTopN { order: [part.p_brand ASC, part.p_type ASC, part.p_size ASC], limit: 1, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [count(distinct partsupp.ps_suppkey) DESC, part.p_brand ASC, part.p_type ASC, part.p_size ASC], limit: 1, offset: 0, group_key: [$expr1] }
-    ├── tables: [ GroupTopN: 1 ]
+    StreamGroupTopN { order: [part.p_brand ASC, part.p_type ASC, part.p_size ASC], limit: 1, offset: 0, group_key: [$expr1] } { tables: [ GroupTopN: 1 ] }
     └── StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, count(distinct partsupp.ps_suppkey), Vnode(part.p_brand, part.p_type, part.p_size) as $expr1] }
         └── StreamHashAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [count(distinct partsupp.ps_suppkey), count] }
             ├── tables: [ HashAggState: 2, HashAggDedupForCol0: 3 ]
@@ -3203,9 +3203,9 @@
             ├── Upstream
             └── BatchPlanNode
 
-    Table 0 { columns: [ part_p_brand, part_p_type, part_p_size, count(distinct partsupp_ps_suppkey), $expr1 ], primary key: [ $3 DESC, $0 ASC, $1 ASC, $2 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ part_p_brand, part_p_type, part_p_size, count(distinct partsupp_ps_suppkey), $expr1 ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 1 { columns: [ part_p_brand, part_p_type, part_p_size, count(distinct partsupp_ps_suppkey), $expr1 ], primary key: [ $4 ASC, $3 DESC, $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 1, vnode column idx: 4 }
+    Table 1 { columns: [ part_p_brand, part_p_type, part_p_size, count(distinct partsupp_ps_suppkey), $expr1 ], primary key: [ $4 ASC, $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 1, vnode column idx: 4 }
 
     Table 2 { columns: [ part_p_brand, part_p_type, part_p_size, count(distinct partsupp_ps_suppkey), count ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3, 4 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
@@ -3233,7 +3233,7 @@
 
     Table 14 { columns: [ vnode, s_suppkey, backfill_finished, row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ p_brand, p_type, p_size, supplier_cnt ], primary key: [ $3 DESC, $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 4 }
+    Table 4294967294 { columns: [ p_brand, p_type, p_size, supplier_cnt ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 3 }
 
 - id: tpch_q17
   before:
@@ -3993,7 +3993,7 @@
       s_name
     LIMIT 100;
   logical_plan: |-
-    LogicalTopN { order: [count DESC, supplier.s_name ASC], limit: 100, offset: 0 }
+    LogicalTopN { order: [supplier.s_name ASC], limit: 100, offset: 0 }
     └─LogicalProject { exprs: [supplier.s_name, count] }
       └─LogicalAgg { group_key: [supplier.s_name], aggs: [count] }
         └─LogicalProject { exprs: [supplier.s_name] }
@@ -4014,7 +4014,7 @@
                 └─LogicalFilter { predicate: (lineitem.l_orderkey = CorrelatedInputRef { index: 7, correlated_id: 2 }) AND (lineitem.l_suppkey <> CorrelatedInputRef { index: 9, correlated_id: 2 }) AND (lineitem.l_receiptdate > lineitem.l_commitdate) }
                   └─LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
   optimized_logical_plan_for_batch: |-
-    LogicalTopN { order: [count DESC, supplier.s_name ASC], limit: 100, offset: 0 }
+    LogicalTopN { order: [supplier.s_name ASC], limit: 100, offset: 0 }
     └─LogicalAgg { group_key: [supplier.s_name], aggs: [count] }
       └─LogicalJoin { type: LeftAnti, on: (lineitem.l_orderkey = lineitem.l_orderkey) AND (lineitem.l_suppkey <> lineitem.l_suppkey), output: [supplier.s_name] }
         ├─LogicalJoin { type: LeftSemi, on: (lineitem.l_orderkey = lineitem.l_orderkey) AND (lineitem.l_suppkey <> lineitem.l_suppkey), output: all }
@@ -4028,37 +4028,38 @@
         │ └─LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey] }
         └─LogicalScan { table: lineitem, output_columns: [lineitem.l_orderkey, lineitem.l_suppkey], required_columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_commitdate, lineitem.l_receiptdate], predicate: (lineitem.l_receiptdate > lineitem.l_commitdate) }
   batch_plan: |-
-    BatchTopN { order: [count DESC, supplier.s_name ASC], limit: 100, offset: 0 }
-    └─BatchExchange { order: [], dist: Single }
-      └─BatchTopN { order: [count DESC, supplier.s_name ASC], limit: 100, offset: 0 }
-        └─BatchHashAgg { group_key: [supplier.s_name], aggs: [count] }
-          └─BatchExchange { order: [], dist: HashShard(supplier.s_name) }
-            └─BatchHashJoin { type: LeftAnti, predicate: lineitem.l_orderkey = lineitem.l_orderkey AND (lineitem.l_suppkey <> lineitem.l_suppkey), output: [supplier.s_name] }
-              ├─BatchHashJoin { type: LeftSemi, predicate: lineitem.l_orderkey = lineitem.l_orderkey AND (lineitem.l_suppkey <> lineitem.l_suppkey), output: all }
-              │ ├─BatchExchange { order: [], dist: HashShard(lineitem.l_orderkey) }
-              │ │ └─BatchLookupJoin { type: Inner, predicate: lineitem.l_orderkey = orders.o_orderkey AND (orders.o_orderstatus = 'F':Varchar), output: [supplier.s_name, lineitem.l_orderkey, lineitem.l_suppkey], lookup table: orders }
-              │ │   └─BatchExchange { order: [], dist: UpstreamHashShard(lineitem.l_orderkey) }
-              │ │     └─BatchLookupJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey AND (nation.n_name = 'GERMANY':Varchar), output: [supplier.s_name, lineitem.l_orderkey, lineitem.l_suppkey], lookup table: nation }
-              │ │       └─BatchExchange { order: [], dist: UpstreamHashShard(supplier.s_nationkey) }
-              │ │         └─BatchHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_name, supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_suppkey] }
-              │ │           ├─BatchExchange { order: [], dist: HashShard(supplier.s_suppkey) }
-              │ │           │ └─BatchScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_nationkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
-              │ │           └─BatchExchange { order: [], dist: HashShard(lineitem.l_suppkey) }
-              │ │             └─BatchProject { exprs: [lineitem.l_orderkey, lineitem.l_suppkey] }
-              │ │               └─BatchFilter { predicate: (lineitem.l_receiptdate > lineitem.l_commitdate) }
-              │ │                 └─BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_commitdate, lineitem.l_receiptdate], distribution: SomeShard }
-              │ └─BatchExchange { order: [], dist: HashShard(lineitem.l_orderkey) }
-              │   └─BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey], distribution: SomeShard }
-              └─BatchExchange { order: [], dist: HashShard(lineitem.l_orderkey) }
-                └─BatchProject { exprs: [lineitem.l_orderkey, lineitem.l_suppkey] }
-                  └─BatchFilter { predicate: (lineitem.l_receiptdate > lineitem.l_commitdate) }
-                    └─BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_commitdate, lineitem.l_receiptdate], distribution: SomeShard }
+    BatchSort { order: [count DESC, supplier.s_name ASC] }
+    └─BatchTopN { order: [supplier.s_name ASC], limit: 100, offset: 0 }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchTopN { order: [supplier.s_name ASC], limit: 100, offset: 0 }
+          └─BatchHashAgg { group_key: [supplier.s_name], aggs: [count] }
+            └─BatchExchange { order: [], dist: HashShard(supplier.s_name) }
+              └─BatchHashJoin { type: LeftAnti, predicate: lineitem.l_orderkey = lineitem.l_orderkey AND (lineitem.l_suppkey <> lineitem.l_suppkey), output: [supplier.s_name] }
+                ├─BatchHashJoin { type: LeftSemi, predicate: lineitem.l_orderkey = lineitem.l_orderkey AND (lineitem.l_suppkey <> lineitem.l_suppkey), output: all }
+                │ ├─BatchExchange { order: [], dist: HashShard(lineitem.l_orderkey) }
+                │ │ └─BatchLookupJoin { type: Inner, predicate: lineitem.l_orderkey = orders.o_orderkey AND (orders.o_orderstatus = 'F':Varchar), output: [supplier.s_name, lineitem.l_orderkey, lineitem.l_suppkey], lookup table: orders }
+                │ │   └─BatchExchange { order: [], dist: UpstreamHashShard(lineitem.l_orderkey) }
+                │ │     └─BatchLookupJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey AND (nation.n_name = 'GERMANY':Varchar), output: [supplier.s_name, lineitem.l_orderkey, lineitem.l_suppkey], lookup table: nation }
+                │ │       └─BatchExchange { order: [], dist: UpstreamHashShard(supplier.s_nationkey) }
+                │ │         └─BatchHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_name, supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_suppkey] }
+                │ │           ├─BatchExchange { order: [], dist: HashShard(supplier.s_suppkey) }
+                │ │           │ └─BatchScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_nationkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
+                │ │           └─BatchExchange { order: [], dist: HashShard(lineitem.l_suppkey) }
+                │ │             └─BatchProject { exprs: [lineitem.l_orderkey, lineitem.l_suppkey] }
+                │ │               └─BatchFilter { predicate: (lineitem.l_receiptdate > lineitem.l_commitdate) }
+                │ │                 └─BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_commitdate, lineitem.l_receiptdate], distribution: SomeShard }
+                │ └─BatchExchange { order: [], dist: HashShard(lineitem.l_orderkey) }
+                │   └─BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey], distribution: SomeShard }
+                └─BatchExchange { order: [], dist: HashShard(lineitem.l_orderkey) }
+                  └─BatchProject { exprs: [lineitem.l_orderkey, lineitem.l_suppkey] }
+                    └─BatchFilter { predicate: (lineitem.l_receiptdate > lineitem.l_commitdate) }
+                      └─BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_commitdate, lineitem.l_receiptdate], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [s_name, numwait], stream_key: [s_name], pk_columns: [numwait, s_name], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [s_name, numwait], stream_key: [s_name], pk_columns: [s_name], pk_conflict: NoCheck }
     └─StreamProject { exprs: [supplier.s_name, count] }
-      └─StreamTopN { order: [count DESC, supplier.s_name ASC], limit: 100, offset: 0 }
+      └─StreamTopN { order: [supplier.s_name ASC], limit: 100, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [count DESC, supplier.s_name ASC], limit: 100, offset: 0, group_key: [_vnode] }
+          └─StreamGroupTopN { order: [supplier.s_name ASC], limit: 100, offset: 0, group_key: [_vnode] }
             └─StreamProject { exprs: [supplier.s_name, count, Vnode(supplier.s_name) as _vnode] }
               └─StreamHashAgg { group_key: [supplier.s_name], aggs: [count] }
                 └─StreamExchange { dist: HashShard(supplier.s_name) }
@@ -4092,14 +4093,14 @@
                           └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_commitdate, lineitem.l_receiptdate], stream_scan_type: ArrangementBackfill, stream_key: [lineitem.l_orderkey, lineitem.l_linenumber], pk: [l_orderkey, l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [s_name, numwait], stream_key: [s_name], pk_columns: [numwait, s_name], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [s_name, numwait], stream_key: [s_name], pk_columns: [s_name], pk_conflict: NoCheck }
     ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [supplier.s_name, count] }
-        └── StreamTopN { order: [count DESC, supplier.s_name ASC], limit: 100, offset: 0 } { tables: [ TopN: 0 ] }
+        └── StreamTopN { order: [supplier.s_name ASC], limit: 100, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [count DESC, supplier.s_name ASC], limit: 100, offset: 0, group_key: [_vnode] }
+    StreamGroupTopN { order: [supplier.s_name ASC], limit: 100, offset: 0, group_key: [_vnode] }
     ├── tables: [ GroupTopN: 1 ]
     └── StreamProject { exprs: [supplier.s_name, count, Vnode(supplier.s_name) as _vnode] }
         └── StreamHashAgg { group_key: [supplier.s_name], aggs: [count] } { tables: [ HashAggState: 2 ] }
@@ -4171,9 +4172,9 @@
             ├── Upstream
             └── BatchPlanNode
 
-    Table 0 { columns: [ supplier_s_name, count, _vnode ], primary key: [ $1 DESC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ supplier_s_name, count, _vnode ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 1 { columns: [ supplier_s_name, count, _vnode ], primary key: [ $2 ASC, $1 DESC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 2 }
+    Table 1 { columns: [ supplier_s_name, count, _vnode ], primary key: [ $2 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 2 }
 
     Table 2 { columns: [ supplier_s_name, count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -4229,7 +4230,7 @@
 
     Table 28 { columns: [ vnode, l_orderkey, l_linenumber, backfill_finished, row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ s_name, numwait ], primary key: [ $1 DESC, $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 2 }
+    Table 4294967294 { columns: [ s_name, numwait ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
 - id: tpch_q22
   before:
