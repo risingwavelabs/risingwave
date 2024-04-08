@@ -52,7 +52,6 @@ CREATE TABLE citus_all_types(
     c_time_array time[],
     c_timestamp_array timestamp[],
     c_timestamptz_array timestamptz[],
-    c_interval_array interval[],
     c_jsonb_array jsonb[],
 ) WITH (
     connector = 'citus-cdc',

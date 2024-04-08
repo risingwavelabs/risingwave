@@ -68,6 +68,10 @@ def data_check(data_check_file: str):
 
 
 def sink_check(demo_dir: str, sink_check_file: str):
+    print("sink created. Wait for half min time for ingestion")
+
+    # wait for half min ingestion
+    time.sleep(30)
     subprocess.run(["python3", sink_check_file], cwd=demo_dir, check=True)
 
 
@@ -83,10 +87,6 @@ def test_check(demo: str, upstream: str, need_data_check=True, need_sink_check=F
     file_dir = dirname(abspath(__file__))
     project_dir = dirname(file_dir)
     demo_dir = os.path.join(project_dir, demo)
-    print("Wait for half min time for ingestion")
-
-    # wait for half min ingestion
-    time.sleep(30)
 
     data_check_file = os.path.join(demo_dir, 'data_check')
     if need_data_check or os.path.exists(data_check_file):
