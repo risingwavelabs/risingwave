@@ -33,7 +33,6 @@ use rand::prelude::SliceRandom;
 use rand::thread_rng;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::default::compaction_config;
-use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
@@ -365,7 +364,7 @@ impl HummockManager {
         let state_store_url = sys_params.state_store();
         let state_store_dir: &str = sys_params.data_directory();
         let deterministic_mode = env.opts.compaction_deterministic_test;
-        let mut object_store_config = ObjectStoreConfig::default();
+        let mut object_store_config = env.opts.object_store_config.clone();
         // For fs and hdfs object store, operations are not always atomic.
         // We should manually enable atomicity guarantee by setting the atomic_write_dir config when building services.
         object_store_config.set_atomic_write_dir();
