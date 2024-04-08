@@ -129,6 +129,11 @@ where
             .unwrap()
             .clone())
     }
+
+    /// Invalidates the clients for the given addr.
+    pub async fn invalidate(&self, addr: &HostAddr) {
+        self.clients.invalidate(addr).await;
+    }
 }
 
 /// `ExtraInfoSource` is used by heartbeat worker to pull extra info that needs to be piggybacked.

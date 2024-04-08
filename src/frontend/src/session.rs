@@ -406,6 +406,7 @@ impl FrontendEnv {
             check_heartbeat_interval
                 .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             check_heartbeat_interval.reset();
+            let heartbeat_fail_retry_num = 3;
             loop {
                 check_heartbeat_interval.tick().await;
                 for worker in heartbeat_worker_node_manager
@@ -413,14 +414,25 @@ impl FrontendEnv {
                     .into_iter()
                     .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
                 {
-                    if let Ok(client) = compute_client_pool.get(&worker).await {
-                        if client.heartbeat().await.is_err() {
-                            info!("Worker node {} is not reachable, mask it", worker.id);
-                            heartbeat_worker_node_manager.mask_worker_node(worker.id, duration);
+                    let addr: HostAddr = worker.get_host().unwrap().into();
+                    for i in 0..heartbeat_fail_retry_num {
+                        let success = if let Ok(client) =
+                            compute_client_pool.get_by_addr(addr.clone()).await
+                        {
+                            client.heartbeat().await.is_ok()
+                        } else {
+                            false
+                        };
+
+                        if success {
+                            break;
+                        } else {
+                            compute_client_pool.invalidate(&addr).await;
+                            if i == heartbeat_fail_retry_num - 1 {
+                                info!("Worker node {} is not reachable, mask it", worker.id);
+                                heartbeat_worker_node_manager.mask_worker_node(worker.id, duration);
+                            }
                         }
-                    } else {
-                        info!("Worker node {} is not reachable, mask it", worker.id);
-                        heartbeat_worker_node_manager.mask_worker_node(worker.id, duration);
                     }
                 }
             }
