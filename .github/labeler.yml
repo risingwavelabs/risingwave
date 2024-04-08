@@ -38,4 +38,4 @@ labels:
 # Match File changes
 - label: "ci/run-e2e-single-node-tests"
   files:
-  - "src\/meta\/**\/*.rs"
+  - "src\\/meta\\/.*.rs"
