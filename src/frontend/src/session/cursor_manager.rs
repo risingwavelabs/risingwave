@@ -23,20 +23,24 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::types::Row;
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::ObjectName;
+use risingwave_sqlparser::ast::{ObjectName, Statement};
 
 use crate::error::{ErrorCode, Result, RwError};
-use crate::handler::util::convert_logstore_i64_to_unix_millis;
-use crate::PgResponseStream;
+use crate::handler::declare_cursor::create_stream_for_cursor;
+use crate::handler::util::{
+    convert_logstore_i64_to_unix_millis, gen_query_from_logstore_ge_rw_timestamp,
+};
+use crate::handler::HandlerArgs;
+use crate::{Binder, PgResponseStream};
 
 pub enum Cursor {
     Subscription(SubscriptionCursor),
     Query(QueryCursor),
 }
 impl Cursor {
-    pub async fn next(&mut self, count: u32) -> Result<Vec<CursorRowValue>> {
+    pub async fn next(&mut self, count: u32, handle_args: HandlerArgs) -> Result<Vec<Row>> {
         match self {
-            Cursor::Subscription(cursor) => cursor.next(count).await,
+            Cursor::Subscription(cursor) => cursor.next(count, handle_args).await,
             Cursor::Query(cursor) => cursor.next(count).await,
         }
     }
@@ -79,7 +83,7 @@ impl QueryCursor {
         Ok(Some(row))
     }
 
-    pub async fn next(&mut self, count: u32) -> Result<Vec<CursorRowValue>> {
+    pub async fn next(&mut self, count: u32) -> Result<Vec<Row>> {
         // `FETCH NEXT` is equivalent to `FETCH 1`.
         // min with 100 to avoid allocating too many memory at once.
         let mut ans = Vec::with_capacity(std::cmp::min(100, count) as usize);
@@ -88,7 +92,7 @@ impl QueryCursor {
             && let Some(row) = self.next_once().await?
         {
             cur += 1;
-            ans.push(CursorRowValue::Row(row));
+            ans.push(row);
         }
         Ok(ans)
     }
@@ -98,27 +102,28 @@ impl QueryCursor {
     }
 }
 
-pub struct SubscriptionCursor {
-    cursor_name: String,
+struct SubscriptionCursorInner {
     row_stream: PgResponseStream,
     pg_descs: Vec<PgFieldDescriptor>,
     data_chunk_cache: VecDeque<Row>,
     rw_timestamp: i64,
     is_snapshot: bool,
+}
+
+pub struct SubscriptionCursor {
+    cursor_name: String,
+    cursor_inner: SubscriptionCursorInner,
     subscription_name: ObjectName,
     cursor_need_drop_time: Instant,
 }
 
-impl SubscriptionCursor {
+impl SubscriptionCursorInner {
     pub async fn new(
-        cursor_name: String,
         mut row_stream: PgResponseStream,
         pg_descs: Vec<PgFieldDescriptor>,
         start_timestamp: i64,
-        is_snapshot: bool,
         need_check_timestamp: bool,
-        subscription_name: ObjectName,
-        cursor_need_drop_time: Instant,
+        is_snapshot: bool,
     ) -> Result<Self> {
         let (rw_timestamp, data_chunk_cache) = if is_snapshot {
             // Cursor created based on table, no need to update start_timestamp
@@ -150,21 +155,18 @@ impl SubscriptionCursor {
                 // If the previous cursor returns next_rw_timestamp, then this check is triggered,
                 // and query_timestamp and start_timestamp must be equal to each other to prevent data errors caused by two long cursor times
                 return Err(ErrorCode::CatalogError(format!(
-                    " No data found for rw_timestamp {:?}, data may have been recycled, please recreate cursor"
-                ,convert_logstore_i64_to_unix_millis(start_timestamp)).into()).into());
+                        " No data found for rw_timestamp {:?}, data may have been recycled, please recreate cursor"
+                    ,convert_logstore_i64_to_unix_millis(start_timestamp)).into()).into());
             }
             (query_timestamp, data_chunk_cache)
         };
         let pg_descs = build_desc(pg_descs, is_snapshot);
         Ok(Self {
-            cursor_name,
             row_stream,
             pg_descs,
             data_chunk_cache: VecDeque::from(data_chunk_cache),
             rw_timestamp,
             is_snapshot,
-            subscription_name,
-            cursor_need_drop_time,
         })
     }
 
@@ -189,10 +191,7 @@ impl SubscriptionCursor {
 
                 if timestamp_row != self.rw_timestamp {
                     // 1b. Find next_rw_timestamp, need update cursor with next_rw_timestamp.
-                    return Ok(CursorRowValue::QueryWithNextRwTimestamp(
-                        timestamp_row,
-                        self.subscription_name.clone(),
-                    ));
+                    return Ok(CursorRowValue::QueryWithNextRwTimestamp(timestamp_row));
                 } else {
                     // 1c. The rw_timestamp of this row is equal to self.rw_timestamp, return row
                     return Ok(CursorRowValue::Row(Row::new(build_row_with_logstore(
@@ -212,16 +211,41 @@ impl SubscriptionCursor {
                     })?);
                 } else {
                     // 2b. No data was fetched and next_rw_timestamp was not found, so need to query using the rw_timestamp+1.
-                    return Ok(CursorRowValue::QueryWithStartRwTimestamp(
-                        self.rw_timestamp,
-                        self.subscription_name.clone(),
-                    ));
+                    return Ok(CursorRowValue::QueryWithStartRwTimestamp(self.rw_timestamp));
                 }
             }
         }
     }
+}
 
-    pub async fn next(&mut self, count: u32) -> Result<Vec<CursorRowValue>> {
+impl SubscriptionCursor {
+    pub async fn new(
+        cursor_name: String,
+        row_stream: PgResponseStream,
+        pg_descs: Vec<PgFieldDescriptor>,
+        start_timestamp: i64,
+        is_snapshot: bool,
+        need_check_timestamp: bool,
+        subscription_name: ObjectName,
+        cursor_need_drop_time: Instant,
+    ) -> Result<Self> {
+        let cursor_inner = SubscriptionCursorInner::new(
+            row_stream,
+            pg_descs,
+            start_timestamp,
+            need_check_timestamp,
+            is_snapshot,
+        )
+        .await?;
+        Ok(Self {
+            cursor_name,
+            cursor_inner,
+            subscription_name,
+            cursor_need_drop_time,
+        })
+    }
+
+    pub async fn next(&mut self, count: u32, handle_args: HandlerArgs) -> Result<Vec<Row>> {
         if Instant::now() > self.cursor_need_drop_time {
             return Err(ErrorCode::InternalError(
                 "The cursor has exceeded its maximum lifetime, please recreate it (close then declare cursor).".to_string(),
@@ -235,12 +259,61 @@ impl SubscriptionCursor {
             )
             .into())
         } else {
-            Ok(vec![self.next_once().await?])
+            let session = handle_args.session.clone();
+            let db_name = session.database();
+            let (schema_name, subscription_name) =
+                Binder::resolve_schema_qualified_name(db_name, self.subscription_name.clone())?;
+            let subscription = session.get_subscription_by_name(schema_name, &subscription_name)?;
+            match self.cursor_inner.next_once().await? {
+                CursorRowValue::Row(row) => return Ok(vec![row]),
+                CursorRowValue::QueryWithNextRwTimestamp(rw_timestamp) => {
+                    let query_stmt =
+                        Statement::Query(Box::new(gen_query_from_logstore_ge_rw_timestamp(
+                            &subscription.get_log_store_name()?,
+                            rw_timestamp,
+                        )));
+                    let (row_stream, pg_descs) =
+                        create_stream_for_cursor(handle_args, query_stmt).await?;
+                    self.cursor_inner = SubscriptionCursorInner::new(
+                        row_stream,
+                        pg_descs,
+                        rw_timestamp,
+                        true,
+                        false,
+                    )
+                    .await?;
+                }
+                CursorRowValue::QueryWithStartRwTimestamp(rw_timestamp) => {
+                    let query_stmt =
+                        Statement::Query(Box::new(gen_query_from_logstore_ge_rw_timestamp(
+                            &subscription.get_log_store_name()?,
+                            rw_timestamp + 1,
+                        )));
+                    let (row_stream, pg_descs) =
+                        create_stream_for_cursor(handle_args, query_stmt).await?;
+                    self.cursor_inner = SubscriptionCursorInner::new(
+                        row_stream,
+                        pg_descs,
+                        rw_timestamp,
+                        false,
+                        false,
+                    )
+                    .await?;
+                }
+            }
+            match self.cursor_inner.next_once().await? {
+                CursorRowValue::Row(row) => Ok(vec![row]),
+                CursorRowValue::QueryWithNextRwTimestamp(_) => Err(ErrorCode::InternalError(
+                    "Fetch cursor, one must get a row or null".to_string(),
+                )
+                .into()),
+                CursorRowValue::QueryWithStartRwTimestamp(_) => Ok(vec![]),
+            }
         }
     }
 
     pub fn pg_descs(&self) -> Vec<PgFieldDescriptor> {
-        self.pg_descs.clone()
+        self.cursor_inner.pg_descs.clone()
     }
 }
 
@@ -285,8 +358,8 @@ pub fn build_desc(mut descs: Vec<PgFieldDescriptor>, is_snapshot: bool) -> Vec<P
 
 pub enum CursorRowValue {
     Row(Row),
-    QueryWithNextRwTimestamp(i64, ObjectName),
-    QueryWithStartRwTimestamp(i64, ObjectName),
+    QueryWithNextRwTimestamp(i64),
+    QueryWithStartRwTimestamp(i64),
 }
 #[derive(Default)]
 pub struct CursorManager {
@@ -399,9 +472,10 @@ impl CursorManager {
         &self,
         cursor_name: String,
         count: u32,
-    ) -> Result<(Vec<CursorRowValue>, Vec<PgFieldDescriptor>)> {
+        handle_args: HandlerArgs,
+    ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
         if let Some(cursor) = self.cursor_map.lock().await.get_mut(&cursor_name) {
-            Ok((cursor.next(count).await?, cursor.pg_descs()))
+            Ok((cursor.next(count, handle_args).await?, cursor.pg_descs()))
         } else {
             Err(ErrorCode::ItemNotFound(format!("Cannot find cursor `{}`", cursor_name)).into())
         }

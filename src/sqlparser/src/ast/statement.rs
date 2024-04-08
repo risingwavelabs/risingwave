@@ -636,19 +636,19 @@ impl fmt::Display for CreateSubscriptionStatement {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum CursorFrom {
+pub enum DeclareCursor {
     Query(Box<Query>),
-    Subscription(ObjectName, Since),
+    Subscription(ObjectName, Option<Since>),
 }
 
-impl fmt::Display for CursorFrom {
+impl fmt::Display for DeclareCursor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut v: Vec<String> = vec![];
         match self {
-            CursorFrom::Query(query) => v.push(format!("{}", query.as_ref())),
-            CursorFrom::Subscription(name, since) => {
+            DeclareCursor::Query(query) => v.push(format!("{}", query.as_ref())),
+            DeclareCursor::Subscription(name, since) => {
                 v.push(format!("{}", name));
-                v.push(format!("{}", since));
+                v.push(format!("{:?}", since));
             }
         }
         v.iter().join(" ").fmt(f)
@@ -666,22 +666,23 @@ impl fmt::Display for CursorFrom {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DeclareCursorStatement {
     pub cursor_name: ObjectName,
-    pub cursor_from: CursorFrom,
+    pub cursor_from: DeclareCursor,
 }
 
 impl ParseTo for DeclareCursorStatement {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
         impl_parse_to!(cursor_name: ObjectName, p);
 
-        p.expect_keyword(Keyword::CURSOR)?;
-        p.expect_keyword(Keyword::FOR)?;
-
-        let cursor_from = if let Ok(query) = p.parse_query() {
-            CursorFrom::Query(Box::new(query))
+        let cursor_from = if !p.parse_keyword(Keyword::SUBSCRIPTION) {
+            p.expect_keyword(Keyword::CURSOR)?;
+            p.expect_keyword(Keyword::FOR)?;
+            DeclareCursor::Query(Box::new(p.parse_query()?))
         } else {
+            p.expect_keyword(Keyword::CURSOR)?;
+            p.expect_keyword(Keyword::FOR)?;
             let cursor_from_name = p.parse_object_name()?;
-            impl_parse_to!(rw_timestamp: Since, p);
-            CursorFrom::Subscription(cursor_from_name, rw_timestamp)
+            let rw_timestamp = p.parse_since()?;
+            DeclareCursor::Subscription(cursor_from_name, rw_timestamp)
         };
 
         Ok(Self {
@@ -853,7 +854,6 @@ pub enum Since {
     TimestampMsNum(u64),
     ProcessTime,
     Begin,
-    WithSnapshot,
 }
 
 impl fmt::Display for Since {
@@ -863,14 +863,7 @@ impl fmt::Display for Since {
             TimestampMsNum(ts) => write!(f, " SINCE {}", ts),
             ProcessTime => write!(f, " SINCE PROCTIME()"),
             Begin => write!(f, " SINCE BEGIN()"),
-            WithSnapshot => write!(f, ""),
         }
-    }
-}
-
-impl ParseTo for Since {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
-        p.parse_since()
     }
 }
 

@@ -35,19 +35,25 @@ pub async fn handle_declare_cursor(
     stmt: DeclareCursorStatement,
 ) -> Result<RwPgResponse> {
     match stmt.cursor_from {
-        risingwave_sqlparser::ast::CursorFrom::Query(query) => {
+        risingwave_sqlparser::ast::DeclareCursor::Query(query) => {
             handle_declare_query_cursor(handle_args, stmt.cursor_name, query).await
         }
-        risingwave_sqlparser::ast::CursorFrom::Subscription(sub_name, rw_timestamp) => {
-            handle_declare_sub_cursor(handle_args, sub_name, stmt.cursor_name, rw_timestamp).await
+        risingwave_sqlparser::ast::DeclareCursor::Subscription(sub_name, rw_timestamp) => {
+            handle_declare_subscription_cursor(
+                handle_args,
+                sub_name,
+                stmt.cursor_name,
+                rw_timestamp,
+            )
+            .await
         }
     }
 }
-async fn handle_declare_sub_cursor(
+async fn handle_declare_subscription_cursor(
     handle_args: HandlerArgs,
     sub_name: ObjectName,
     cursor_name: ObjectName,
-    rw_timestamp: Since,
+    rw_timestamp: Option<Since>,
 ) -> Result<RwPgResponse> {
     let session = handle_args.session.clone();
     let db_name = session.database();
@@ -59,7 +65,7 @@ async fn handle_declare_sub_cursor(
         session.get_subscription_by_name(schema_name, &cursor_from_subscription_name)?;
     // Start the first query of cursor, which includes querying the table and querying the subscription's logstore
     let (start_rw_timestamp, row_stream, pg_descs, is_snapshot) = match rw_timestamp {
-        risingwave_sqlparser::ast::Since::TimestampMsNum(start_rw_timestamp) => {
+        Some(risingwave_sqlparser::ast::Since::TimestampMsNum(start_rw_timestamp)) => {
             check_cursor_unix_millis(start_rw_timestamp, subscription.get_retention_seconds()?)?;
             let start_rw_timestamp = convert_unix_millis_to_logstore_i64(start_rw_timestamp);
             let query_stmt = Statement::Query(Box::new(gen_query_from_logstore_ge_rw_timestamp(
@@ -69,7 +75,7 @@ async fn handle_declare_sub_cursor(
             let (row_stream, pg_descs) = create_stream_for_cursor(handle_args, query_stmt).await?;
             (start_rw_timestamp, row_stream, pg_descs, false)
         }
-        risingwave_sqlparser::ast::Since::ProcessTime => {
+        Some(risingwave_sqlparser::ast::Since::ProcessTime) => {
             let start_rw_timestamp = convert_epoch_to_logstore_i64(Epoch::now().0);
             let query_stmt = Statement::Query(Box::new(gen_query_from_logstore_ge_rw_timestamp(
                 &subscription.get_log_store_name()?,
@@ -78,7 +84,7 @@ async fn handle_declare_sub_cursor(
             let (row_stream, pg_descs) = create_stream_for_cursor(handle_args, query_stmt).await?;
             (start_rw_timestamp, row_stream, pg_descs, false)
         }
-        risingwave_sqlparser::ast::Since::Begin => {
+        Some(risingwave_sqlparser::ast::Since::Begin) => {
             let min_unix_millis =
                 Epoch::now().as_unix_millis() - subscription.get_retention_seconds()? * 1000;
             let start_rw_timestamp = convert_unix_millis_to_logstore_i64(min_unix_millis);
@@ -89,7 +95,7 @@ async fn handle_declare_sub_cursor(
             let (row_stream, pg_descs) = create_stream_for_cursor(handle_args, query_stmt).await?;
             (start_rw_timestamp, row_stream, pg_descs, false)
         }
-        risingwave_sqlparser::ast::Since::WithSnapshot => {
+        None => {
             let subscription_from_table_name = ObjectName(vec![Ident::from(
                 subscription.subscription_from_name.as_ref(),
             )]);

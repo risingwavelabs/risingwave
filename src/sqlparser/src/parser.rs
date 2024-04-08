@@ -2992,7 +2992,7 @@ impl Parser {
         Ok(SqlOption { name, value })
     }
 
-    pub fn parse_since(&mut self) -> Result<Since, ParserError> {
+    pub fn parse_since(&mut self) -> Result<Option<Since>, ParserError> {
         if self.parse_keyword(Keyword::SINCE) {
             let token = self.next_token();
             match token.token {
@@ -3002,14 +3002,14 @@ impl Parser {
                     if ident.real_value() == "proctime" || ident.real_value() == "now" {
                         self.expect_token(&Token::LParen)?;
                         self.expect_token(&Token::RParen)?;
-                        Ok(Since::ProcessTime)
+                        Ok(Some(Since::ProcessTime))
                     } else if ident.real_value() == "begin" {
                         self.expect_token(&Token::LParen)?;
                         self.expect_token(&Token::RParen)?;
-                        Ok(Since::Begin)
+                        Ok(Some(Since::Begin))
                     } else {
                         parser_err!(format!(
-                            "Expected proctime() or snapshot(), found: {}",
+                            "Expected proctime(), begin() or now(), found: {}",
                             ident.real_value()
                         ))
                     }
@@ -3018,15 +3018,15 @@ impl Parser {
                     let num = s.parse::<u64>().map_err(|e| {
                         ParserError::ParserError(format!("Could not parse '{}' as u64: {}", s, e))
                     });
-                    Ok(Since::TimestampMsNum(num?))
+                    Ok(Some(Since::TimestampMsNum(num?)))
                 }
                 unexpected => self.expected(
-                    "Proctime(), Number",
+                    "proctime(), begin() , now(), Number",
                     unexpected.with_location(token.location),
                 ),
             }
         } else {
-            Ok(Since::WithSnapshot)
+            Ok(None)
         }
     }
 

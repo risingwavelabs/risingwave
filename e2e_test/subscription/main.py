@@ -53,7 +53,7 @@ def test_cursor_snapshot():
         database="dev"
     )
 
-    execute_insert("declare cur cursor for sub",conn)
+    execute_insert("declare cur subscription cursor for sub",conn)
     row = execute_query("fetch next from cur",conn)
     check_rows_data([1,2],row,1)
     row = execute_query("fetch next from cur",conn)
@@ -72,7 +72,7 @@ def test_cursor_snapshot_log_store():
         database="dev"
     )
 
-    execute_insert("declare cur cursor for sub",conn)
+    execute_insert("declare cur subscription cursor for sub",conn)
     row = execute_query("fetch next from cur",conn)
     check_rows_data([1,2],row,1)
     row = execute_query("fetch next from cur",conn)
@@ -104,7 +104,7 @@ def test_cursor_since_begin():
     execute_insert("flush",conn)
     execute_insert("insert into t1 values(5,5)",conn)
     execute_insert("flush",conn)
-    execute_insert("declare cur cursor for sub since begin()",conn)
+    execute_insert("declare cur subscription cursor for sub since begin()",conn)
     execute_insert("insert into t1 values(6,6)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
@@ -132,7 +132,7 @@ def test_cursor_since_now():
     execute_insert("flush",conn)
     execute_insert("insert into t1 values(5,5)",conn)
     execute_insert("flush",conn)
-    execute_insert("declare cur cursor for sub since now()",conn)
+    execute_insert("declare cur subscription cursor for sub since now()",conn)
     time.sleep(2)
     execute_insert("insert into t1 values(6,6)",conn)
     execute_insert("flush",conn)
@@ -157,7 +157,7 @@ def test_cursor_since_rw_timestamp():
     execute_insert("flush",conn)
     execute_insert("insert into t1 values(5,5)",conn)
     execute_insert("flush",conn)
-    execute_insert("declare cur cursor for sub since begin()",conn)
+    execute_insert("declare cur subscription cursor for sub since begin()",conn)
     execute_insert("insert into t1 values(6,6)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
@@ -173,17 +173,17 @@ def test_cursor_since_rw_timestamp():
     assert row == []
     execute_insert("close cur",conn)
 
-    execute_insert(f"declare cur cursor for sub since {rw_timestamp_1}",conn)
+    execute_insert(f"declare cur subscription cursor for sub since {rw_timestamp_1}",conn)
     row = execute_query("fetch next from cur",conn)
     check_rows_data([4,4],row,1)
     execute_insert("close cur",conn)
 
-    execute_insert(f"declare cur cursor for sub since {rw_timestamp_2}",conn)
+    execute_insert(f"declare cur subscription cursor for sub since {rw_timestamp_2}",conn)
     row = execute_query("fetch next from cur",conn)
     check_rows_data([5,5],row,1)
     execute_insert("close cur",conn)
 
-    execute_insert(f"declare cur cursor for sub since {rw_timestamp_3}",conn)
+    execute_insert(f"declare cur subscription cursor for sub since {rw_timestamp_3}",conn)
     row = execute_query("fetch next from cur",conn)
     assert row == []
     execute_insert("close cur",conn)
@@ -200,7 +200,7 @@ def test_cursor_op():
         database="dev"
     )
 
-    execute_insert("declare cur cursor for sub",conn)
+    execute_insert("declare cur subscription cursor for sub",conn)
     row = execute_query("fetch next from cur",conn)
     check_rows_data([1,2],row,1)
     row = execute_query("fetch next from cur",conn)
