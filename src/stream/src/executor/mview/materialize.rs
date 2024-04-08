@@ -27,10 +27,10 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Schema, TableId};
 use risingwave_common::row::{CompactedRow, OwnedRow, RowDeserializer};
-use risingwave_common::types::{DataType, DefaultOrd, DefaultPartialOrd, ScalarImpl};
+use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
-use risingwave_common::util::sort_util::{cmp_datum, ColumnOrder};
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerializer};
 use risingwave_pb::catalog::Table;
 use risingwave_storage::mem_table::KeyOp;
@@ -157,12 +157,13 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         .mview_input_row_count
                         .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                         .inc_by(chunk.cardinality() as u64);
-
+                    let do_not_handle_conflict =
+                        !self.state_table.is_consistent_op() && self.version_column_index.is_none();
                     match self.conflict_behavior {
                         ConflictBehavior::Overwrite
                         | ConflictBehavior::IgnoreConflict
                         | ConflictBehavior::DoUpdateIfNotNull
-                            if self.state_table.is_consistent_op() =>
+                            if !do_not_handle_conflict =>
                         {
                             if chunk.cardinality() == 0 {
                                 // empty chunk
@@ -515,7 +516,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
             .await?;
         let mut fixed_changes = MaterializeBuffer::new();
         let row_serde = self.row_serde.clone();
-        let version_column_index = self.version_column_index.clone();
+        let version_column_index = self.version_column_index;
         for (op, key, value) in row_ops {
             let mut update_cache = false;
             let fixed_changes = &mut fixed_changes;
@@ -539,7 +540,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                             row_serde.deserializer.deserialize(value.clone())?;
 
                                         handle_conflict = should_handle_conflict(
-                                            &old_row_deserialized.index(idx as usize),
+                                            old_row_deserialized.index(idx as usize),
                                             new_row_deserialized.index(idx as usize),
                                         );
                                     }
@@ -743,13 +744,10 @@ fn should_handle_conflict(
         (None, None) => true,
         (None, Some(_)) => true,
         (Some(_), None) => false,
-        (Some(old_version_col), Some(new_version_col)) => {
-            if let Ordering::Greater = old_version_col.default_cmp(new_version_col) {
-                false
-            } else {
-                true
-            }
-        }
+        (Some(old_version_col), Some(new_version_col)) => !matches!(
+            old_version_col.default_cmp(new_version_col),
+            Ordering::Greater
+        ),
     }
 }
 
