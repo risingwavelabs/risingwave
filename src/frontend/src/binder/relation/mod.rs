@@ -395,7 +395,6 @@ impl Binder {
                         table_name.clone(),
                         Some(original_alias),
                     )?;
-                    // todo: to be further reviewed
                     let input = match query {
                         // normal cte with union
                         Left(query) => Either::Left(query),
@@ -406,7 +405,7 @@ impl Binder {
                     // no matter it's recursive or not.
                     let share_relation = Relation::Share(Box::new(BoundShare {
                         share_id,
-                        // should either be a *bound* `subquery` or `recursive union`
+                        // should either be a `BoundQuery` or `RecursiveUnion`
                         input,
                     }));
                     Ok(share_relation)
