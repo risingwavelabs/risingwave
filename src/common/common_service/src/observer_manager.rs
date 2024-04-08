@@ -145,9 +145,9 @@ where
             | Info::Function(_) => {
                 notification.version > info.version.as_ref().unwrap().catalog_version
             }
-            Info::ParallelUnitMapping(_) => {
-                notification.version > info.version.as_ref().unwrap().parallel_unit_mapping_version
-            }
+            // Info::ParallelUnitMapping(_) => {
+            //     notification.version > info.version.as_ref().unwrap().parallel_unit_mapping_version
+            // }
             Info::Node(_) => {
                 notification.version > info.version.as_ref().unwrap().worker_node_version
             }
@@ -157,7 +157,7 @@ where
             Info::HummockSnapshot(_) => true,
             Info::MetaBackupManifestId(_) => true,
             Info::SystemParams(_) => true,
-            Info::ServingParallelUnitMappings(_) => true,
+            // Info::ServingParallelUnitMappings(_) => true,
             Info::Snapshot(_) | Info::HummockWriteLimits(_) => unreachable!(),
             Info::HummockStats(_) => true,
             Info::Recovery(_) => true,

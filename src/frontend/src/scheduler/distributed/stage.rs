@@ -680,7 +680,6 @@ impl StageRunner {
 
     #[inline(always)]
     fn get_table_dml_vnode_mapping(&self, table_id: &TableId) -> SchedulerResult<WorkerMapping> {
-        //) -> SchedulerResult<ParallelUnitMapping> {
         let guard = self.catalog_reader.read_guard();
 
         let table = guard

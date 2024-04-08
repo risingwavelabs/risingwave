@@ -27,13 +27,13 @@ use risingwave_meta_model_v2::fragment::StreamNode;
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::{
     Actor, ActorDispatcher, Fragment, Index, Object, ObjectDependency, Sink, Source,
-    StreamingJob as StreamingJobModel, Table,
+    StreamingJob as StreamingJobModel, Table, WorkerProperty,
 };
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, fragment, index, object, object_dependency, sink, source,
-    streaming_job, subscription, table, ActorId, ActorUpstreamActors, CreateType, DatabaseId,
-    ExprNodeArray, FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SourceId,
-    StreamingParallelism, TableId, TableVersion, UserId,
+    streaming_job, subscription, table, worker_property, ActorId, ActorUpstreamActors, CreateType,
+    DatabaseId, ExprNodeArray, FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId,
+    SourceId, StreamingParallelism, TableId, TableVersion, UserId, WorkerId,
 };
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableVersion};
@@ -43,9 +43,7 @@ use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation, Operation,
 };
 use risingwave_pb::meta::table_fragments::PbActorStatus;
-use risingwave_pb::meta::{
-    FragmentParallelUnitMapping, PbRelation, PbRelationGroup, PbTableFragments,
-};
+use risingwave_pb::meta::{FragmentParallelUnitMapping, FragmentWorkerMapping, PbRelation, PbRelationGroup, PbTableFragments};
 use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -1025,6 +1023,26 @@ impl CatalogController {
 
         let txn = inner.db.begin().await?;
 
+        let worker_parallel_unit_ids: Vec<(WorkerId, I32Array)> = WorkerProperty::find()
+            .select_only()
+            .columns([
+                worker_property::Column::WorkerId,
+                worker_property::Column::ParallelUnitIds,
+            ])
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        let parallel_unit_to_worker = worker_parallel_unit_ids
+            .into_iter()
+            .flat_map(|(worker_id, parallel_unit_ids)| {
+                parallel_unit_ids
+                    .0
+                    .into_iter()
+                    .map(move |parallel_unit_id| (parallel_unit_id as u32, worker_id as u32))
+            })
+            .collect::<HashMap<_, _>>();
+
         let mut fragment_mapping_to_notify = vec![];
 
         // for assert only
@@ -1206,9 +1224,13 @@ impl CatalogController {
             fragment.vnode_mapping = Set(vnode_mapping.clone().into());
             fragment.update(&txn).await?;
 
-            fragment_mapping_to_notify.push(FragmentParallelUnitMapping {
+            let worker_mapping = ParallelUnitMapping::from_protobuf(&vnode_mapping)
+                .to_worker(&parallel_unit_to_worker)
+                .to_protobuf();
+
+            fragment_mapping_to_notify.push(FragmentWorkerMapping {
                 fragment_id: fragment_id as u32,
-                mapping: Some(vnode_mapping),
+                mapping: Some(worker_mapping),
             });
 
             // for downstream and upstream

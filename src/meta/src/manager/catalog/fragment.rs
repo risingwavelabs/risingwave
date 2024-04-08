@@ -202,20 +202,34 @@ impl FragmentManager {
     }
 
     async fn notify_fragment_mapping(&self, table_fragment: &TableFragments, operation: Operation) {
+        let parallel_unit_to_worker = table_fragment
+            .actor_status
+            .values()
+            .map(|actor_status| {
+                let parallel_unit = actor_status.get_parallel_unit().unwrap();
+                (parallel_unit.id, parallel_unit.worker_node_id as u32)
+            })
+            .collect();
+
         // Notify all fragment mapping to frontend nodes
         for fragment in table_fragment.fragments.values() {
             let mapping = fragment
                 .vnode_mapping
                 .clone()
                 .expect("no data distribution found");
-            let fragment_mapping = FragmentParallelUnitMapping {
+
+            let worker_mapping = ParallelUnitMapping::from_protobuf(&mapping)
+                .to_worker(&parallel_unit_to_worker)
+                .to_protobuf();
+
+            let fragment_mapping = FragmentWorkerMapping {
                 fragment_id: fragment.fragment_id,
-                mapping: Some(mapping),
+                mapping: Some(worker_mapping),
             };
 
             self.env
                 .notification_manager()
-                .notify_frontend(operation, Info::ParallelUnitMapping(fragment_mapping))
+                .notify_frontend(operation, Info::StreamingWorkerMapping(fragment_mapping))
                 .await;
         }
 
@@ -1274,11 +1288,24 @@ impl FragmentManager {
 
                 *fragment.vnode_mapping.as_mut().unwrap() = vnode_mapping.clone();
 
+                let parallel_unit_to_worker = actor_status
+                    .values()
+                    .map(|actor_status| {
+                        let parallel_unit = actor_status.get_parallel_unit().unwrap();
+                        (parallel_unit.id, parallel_unit.worker_node_id)
+                    })
+                    .collect();
+
+                let worker_mapping = ParallelUnitMapping::from_protobuf(&vnode_mapping)
+                    .to_worker(&parallel_unit_to_worker)
+                    .to_protobuf();
+
                 // Notify fragment mapping to frontend nodes.
-                let fragment_mapping = FragmentParallelUnitMapping {
+                let fragment_mapping = FragmentWorkerMapping {
                     fragment_id: *fragment_id as FragmentId,
-                    mapping: Some(vnode_mapping),
+                    mapping: Some(worker_mapping),
                 };
+
                 fragment_mapping_to_notify.push(fragment_mapping);
             }
 
@@ -1398,7 +1425,7 @@ impl FragmentManager {
         for mapping in fragment_mapping_to_notify {
             self.env
                 .notification_manager()
-                .notify_frontend(Operation::Update, Info::ParallelUnitMapping(mapping))
+                .notify_frontend(Operation::Update, Info::StreamingWorkerMapping(mapping))
                 .await;
         }
 

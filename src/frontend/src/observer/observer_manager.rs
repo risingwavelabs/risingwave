@@ -30,6 +30,8 @@ use risingwave_pb::meta::{
     FragmentParallelUnitMapping, FragmentWorkerMapping, MetaSnapshot, SubscribeResponse,
 };
 use risingwave_rpc_client::ComputeClientPoolRef;
+
+
 use tokio::sync::watch::Sender;
 
 use crate::catalog::root_catalog::Catalog;
@@ -97,11 +99,11 @@ impl ObserverState for FrontendObserverNode {
                 self.handle_table_stats_notification(stats);
             }
 
-            Info::ParallelUnitMapping(_) => self.handle_fragment_mapping_notification(resp),
-
-            Info::ServingParallelUnitMappings(m) => {
-                // self.handle_fragment_serving_mapping_notification(m.mappings, resp.operation());
-            }
+            // Info::ParallelUnitMapping(_) => self.handle_fragment_mapping_notification(resp),
+            //
+            // Info::ServingParallelUnitMappings(m) => {
+            //     // self.handle_fragment_serving_mapping_notification(m.mappings, resp.operation());
+            // }
             Info::StreamingWorkerMapping(_) => self.handle_fragment_mapping_notification(resp),
             Info::ServingWorkerMappings(m) => {
                 self.handle_fragment_serving_mapping_notification(m.mappings, resp.operation())
@@ -178,11 +180,6 @@ impl ObserverState for FrontendObserverNode {
         for user in users {
             user_guard.create_user(user)
         }
-        // self.worker_node_manager.refresh(
-        //     nodes,
-        //     convert_pu_mapping(&parallel_unit_mappings),
-        //     convert_pu_mapping(&serving_parallel_unit_mappings),
-        // );
 
         self.worker_node_manager.refresh(
             nodes,

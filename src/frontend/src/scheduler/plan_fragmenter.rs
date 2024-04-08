@@ -30,7 +30,9 @@ use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableDesc;
 use risingwave_common::hash::table_distribution::TableDistribution;
-use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode, WorkerId, WorkerMapping};
+use risingwave_common::hash::{
+    ParallelUnitId, ParallelUnitMapping, VirtualNode, WorkerId, WorkerMapping,
+};
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use risingwave_connector::source::filesystem::opendal_source::{OpendalGcs, OpendalS3};
@@ -1119,9 +1121,9 @@ fn derive_partitions(
     scan_ranges: &[ScanRange],
     table_desc: &TableDesc,
     vnode_mapping: &WorkerMapping,
-) -> SchedulerResult<HashMap<ParallelUnitId, TablePartitionInfo>> {
+) -> SchedulerResult<HashMap<WorkerId, TablePartitionInfo>> {
     let num_vnodes = vnode_mapping.len();
-    let mut partitions: HashMap<ParallelUnitId, (BitmapBuilder, Vec<_>)> = HashMap::new();
+    let mut partitions: HashMap<WorkerId, (BitmapBuilder, Vec<_>)> = HashMap::new();
 
     if scan_ranges.is_empty() {
         return Ok(vnode_mapping

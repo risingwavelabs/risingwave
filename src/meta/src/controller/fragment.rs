@@ -40,7 +40,7 @@ use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{PbActorStatus, PbFragment, PbState};
 use risingwave_pb::meta::{
     FragmentParallelUnitMapping, FragmentWorkerMapping, PbFragmentParallelUnitMapping,
-    PbTableFragments,
+    PbFragmentWorkerMapping, PbTableFragments,
 };
 use risingwave_pb::source::PbConnectorSplits;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -100,16 +100,18 @@ impl CatalogControllerInner {
             })
             .collect::<HashMap<_, _>>();
 
-        Ok(fragment_mappings.into_iter().map(move |(fragment_id, mapping)| {
-            let worker_mapping = ParallelUnitMapping::from_protobuf(mapping.inner_ref())
-                .to_worker(&parallel_unit_to_worker)
-                .to_protobuf();
+        Ok(fragment_mappings
+            .into_iter()
+            .map(move |(fragment_id, mapping)| {
+                let worker_mapping = ParallelUnitMapping::from_protobuf(mapping.inner_ref())
+                    .to_worker(&parallel_unit_to_worker)
+                    .to_protobuf();
 
-            FragmentWorkerMapping {
-                fragment_id: fragment_id as _,
-                mapping: Some(worker_mapping),
-            }
-        }))
+                FragmentWorkerMapping {
+                    fragment_id: fragment_id as _,
+                    mapping: Some(worker_mapping),
+                }
+            }))
     }
 }
 
@@ -117,7 +119,7 @@ impl CatalogController {
     pub(crate) async fn notify_fragment_mapping(
         &self,
         operation: NotificationOperation,
-        fragment_mappings: Vec<PbFragmentParallelUnitMapping>,
+        fragment_mappings: Vec<PbFragmentWorkerMapping>,
     ) {
         let fragment_ids = fragment_mappings
             .iter()
@@ -129,7 +131,7 @@ impl CatalogController {
                 .notification_manager()
                 .notify_frontend(
                     operation,
-                    NotificationInfo::ParallelUnitMapping(fragment_mapping),
+                    NotificationInfo::StreamingWorkerMapping(fragment_mapping),
                 )
                 .await;
         }
@@ -970,7 +972,7 @@ impl CatalogController {
             NotificationOperation::Update,
             fragment_mapping
                 .into_iter()
-                .map(|(fragment_id, mapping)| PbFragmentParallelUnitMapping {
+                .map(|(fragment_id, mapping)| PbFragmentWorkerMapping {
                     fragment_id: fragment_id as _,
                     mapping: Some(mapping.into_inner()),
                 })

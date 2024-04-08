@@ -2051,6 +2051,7 @@ impl CatalogController {
 
         let (source_fragments, removed_actors) =
             resolve_source_register_info_for_jobs(&txn, to_drop_streaming_jobs.clone()).await?;
+
         let fragment_mappings =
             get_fragment_mappings_by_jobs(&txn, to_drop_streaming_jobs.clone()).await?;
 
