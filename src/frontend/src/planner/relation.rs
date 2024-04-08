@@ -14,6 +14,7 @@
 
 use std::rc::Rc;
 
+use either::Either;
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{Field, Schema};
@@ -55,7 +56,12 @@ impl Planner {
             } => self.plan_table_function(tf, with_ordinality),
             Relation::Watermark(tf) => self.plan_watermark(*tf),
             // note that rcte (i.e., RecursiveUnion) is included *implicitly* in share.
-            Relation::Share(share) => self.plan_share(*share),
+            Relation::Share(share) => {
+                if let Either::Right(_) = share.input.clone() {
+                    bail_not_implemented!(issue = 15135, "recursive CTE is not supported");
+                }
+                self.plan_share(*share)
+            }
             Relation::BackCteRef(..) => {
                 bail_not_implemented!(issue = 15135, "recursive CTE is not supported")
             }
