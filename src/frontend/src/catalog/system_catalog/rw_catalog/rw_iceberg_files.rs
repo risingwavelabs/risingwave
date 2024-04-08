@@ -17,8 +17,7 @@ use std::ops::Deref;
 
 use anyhow::anyhow;
 use icelake::Table;
-use jsonbb::{Value, ValueRef};
-use risingwave_common::types::{Fields, JsonbVal, Timestamptz};
+use risingwave_common::types::Fields;
 use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::WithPropertiesExt;
