@@ -25,7 +25,6 @@ use risingwave_common::catalog::Schema;
 use serde_derive::Deserialize;
 use serde_json::Value;
 use serde_with::serde_as;
-use simd_json::prelude::ArrayTrait;
 use with_options::WithOptions;
 
 use super::catalog::SinkFormatDesc;
@@ -48,7 +47,7 @@ pub const VALUE_FORMAT: &str = "value_format";
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct RedisCommon {
     #[serde(rename = "redis.url")]
-    pub url: Vec<String>,
+    pub url: String,
 }
 pub enum RedisConn {
     Cluster(ClusterConnection),
@@ -88,16 +87,34 @@ impl ConnectionLike for RedisConn {
 
 impl RedisCommon {
     pub async fn build_conn(&self) -> ConnectorResult<RedisConn> {
-        if self.url.is_empty() {
-            Err(SinkError::Redis("Missing redis.url".to_string()).into())
-        } else if self.url.len() == 1 {
-            let client = RedisClient::open(self.url.get(0).unwrap().clone())?;
-            Ok(RedisConn::Single(
-                client.get_multiplexed_async_connection().await?,
-            ))
-        } else {
-            let client = ClusterClient::new(self.url.clone())?;
-            Ok(RedisConn::Cluster(client.get_async_connection().await?))
+        let url: Value =
+            serde_json::from_str(&self.url).map_err(|e| SinkError::Config(anyhow!(e)))?;
+        match url {
+            Value::String(s) => {
+                let client = RedisClient::open(s)?;
+                Ok(RedisConn::Single(
+                    client.get_multiplexed_async_connection().await?,
+                ))
+            }
+            Value::Array(list) => {
+                let list = list
+                    .into_iter()
+                    .map(|s| {
+                        if let Value::String(s) = s {
+                            Ok(s)
+                        } else {
+                            Err(
+                                SinkError::Redis("redis.url must be array of string".to_string())
+                                    .into(),
+                            )
+                        }
+                    })
+                    .collect::<ConnectorResult<Vec<String>>>()?;
+
+                let client = ClusterClient::new(list)?;
+                Ok(RedisConn::Cluster(client.get_async_connection().await?))
+            }
+            _ => Err(SinkError::Redis("redis.url must be array or string".to_string()).into()),
         }
     }
 }
@@ -110,13 +127,9 @@ pub struct RedisConfig {
 
 impl RedisConfig {
     pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
-        let mut json_map = serde_json::Map::new();
-        for (key, value) in properties {
-            let json_value = serde_json::from_str(&value).unwrap_or(Value::Null);
-            json_map.insert(key, json_value);
-        }
-        let config = serde_json::from_value::<RedisConfig>(Value::Object(json_map))
-            .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        let config =
+            serde_json::from_value::<RedisConfig>(serde_json::to_value(properties).unwrap())
+                .map_err(|e| SinkError::Config(anyhow!(e)))?;
         Ok(config)
     }
 }

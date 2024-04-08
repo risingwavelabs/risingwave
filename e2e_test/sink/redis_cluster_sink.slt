@@ -10,7 +10,7 @@ FROM
     mv6 WITH (
     primary_key = 'v1',
     connector = 'redis',
-    redis.url= '["redis://redis-server:7000/","redis://redis-server:7001/","redis://redis-server:7002/"]',
+    redis.url= '["redis://127.0.0.1:7000/","redis://127.0.0.1:7001/","redis://127.0.0.1:7002/"]',
 )FORMAT PLAIN ENCODE JSON(force_append_only='true');
 
 statement ok

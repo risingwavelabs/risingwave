@@ -10,7 +10,7 @@ FROM
     mv6 WITH (
     primary_key = 'v1',
     connector = 'redis',
-    redis.url= '["redis://redis-server:6379/"]',
+    redis.url= 'redis://redis-server:6379/',
 )FORMAT PLAIN ENCODE JSON(force_append_only='true');
 
 statement ok
@@ -19,7 +19,7 @@ FROM
     mv6 WITH (
     primary_key = 'v1',
     connector = 'redis',
-    redis.url= '["redis://redis-server:6379/"]',
+    redis.url= 'redis://redis-server:6379/',
 )FORMAT PLAIN ENCODE TEMPLATE(force_append_only='true', key_format = 'V1:{v1}', value_format = 'V2:{v2},V3:{v3}');
 
 statement ok
