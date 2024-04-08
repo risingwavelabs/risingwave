@@ -45,6 +45,7 @@ memcomparable = "0.2"
 multimap = "0.10"
 parking_lot = "0.12"
 pin-project = "1"
+prehash = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = { workspace = true }
 rand = "0.8"

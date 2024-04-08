@@ -199,9 +199,19 @@ impl Distill for StreamTableScan {
 
         if verbose {
             vec.push(("stream_scan_type", Pretty::debug(&self.stream_scan_type)));
-            let pk = IndicesDisplay {
+            let stream_key = IndicesDisplay {
                 indices: self.stream_key().unwrap_or_default(),
                 schema: self.base.schema(),
+            };
+            vec.push(("stream_key", stream_key.distill()));
+            let pk = IndicesDisplay {
+                indices: &self
+                    .core
+                    .primary_key()
+                    .iter()
+                    .map(|x| x.column_index)
+                    .collect_vec(),
+                schema: &self.core.table_catalog.column_schema(),
             };
             vec.push(("pk", pk.distill()));
             let dist = Pretty::display(&DistributionDisplay {
