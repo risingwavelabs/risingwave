@@ -52,6 +52,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId, UserId,
 };
+use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::sink::catalog::SinkFormatDesc;
@@ -171,7 +172,7 @@ impl PlanRoot {
     pub fn into_array_agg(self) -> Result<PlanRef> {
         use generic::Agg;
         use plan_node::PlanAggCall;
-        use risingwave_common::types::{DataType, ListValue};
+        use risingwave_common::types::ListValue;
         use risingwave_expr::aggregate::AggKind;
 
         use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
@@ -616,7 +617,7 @@ impl PlanRoot {
             .collect();
 
         let version_column_index = if let Some(version_column) = with_version_column {
-            find_version_column_index(&columns, version_column)
+            find_version_column_index(&columns, version_column)?
         } else {
             None
         };
@@ -901,13 +902,25 @@ impl PlanRoot {
 fn find_version_column_index(
     column_catalog: &Vec<ColumnCatalog>,
     version_column_name: String,
-) -> Option<usize> {
+) -> Result<Option<usize>> {
     for (index, column) in column_catalog.iter().enumerate() {
         if column.column_desc.name == version_column_name {
-            return Some(index);
+            if let &DataType::Jsonb
+            | &DataType::List(_)
+            | &DataType::Struct(_)
+            | &DataType::Bytea
+            | &DataType::Boolean = column.data_type()
+            {
+                Err(ErrorCode::InvalidParameterValue(
+                    "The specified version column data type is invalid.".to_string(),
+                ))?
+            }
+            return Ok(Some(index));
         }
     }
-    None
+    Err(ErrorCode::InvalidParameterValue(
+        "The specified version column name is not in the current columns.".to_string(),
+    ))?
 }
 
 fn const_eval_exprs(plan: PlanRef) -> Result<PlanRef> {
