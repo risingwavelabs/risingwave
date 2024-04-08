@@ -3122,27 +3122,29 @@ impl HummockManager {
 
         let mut normal_groups = vec![];
         for cg_id in compaction_group_ids {
-            if versioning.write_limit.contains_key(&cg_id) {
-                let enable_emergency_picker = match self
-                    .compaction_group_manager
-                    .read()
-                    .await
-                    .try_get_compaction_group_config(cg_id)
-                {
-                    Some(config) => config.compaction_config.enable_emergency_picker,
-                    None => {
-                        unreachable!("compaction-group {} not exist", cg_id)
-                    }
-                };
+            let write_stop = versioning.write_limit.contains_key(&cg_id);
+            let enable_emergency_picker = match self
+                .compaction_group_manager
+                .read()
+                .await
+                .try_get_compaction_group_config(cg_id)
+            {
+                Some(config) => config.compaction_config.enable_emergency_picker,
+                None => {
+                    unreachable!("compaction-group {} not exist", cg_id)
+                }
+            };
 
-                if enable_emergency_picker {
-                    if normal_groups.is_empty() {
-                        return (vec![cg_id], TaskType::Emergency);
-                    } else {
-                        break;
-                    }
+            // If the group is blocked by write_limit, we will return the group directly.
+            if write_stop && enable_emergency_picker {
+                if normal_groups.is_empty() {
+                    // we
+                    return (vec![cg_id], TaskType::Emergency);
+                } else {
+                    break;
                 }
             }
+
             if let Some(pick_type) = self.compaction_state.auto_pick_type(cg_id) {
                 if pick_type == TaskType::Dynamic {
                     normal_groups.push(cg_id);
@@ -3349,147 +3351,6 @@ impl HummockManager {
         }
 
         Ok(())
-    }
-
-    /// dedicated event runtime for CPU/IO bound event
-    #[named]
-    async fn compact_task_dedicated_event_handler(
-        hummock_manager: Arc<HummockManager>,
-        mut rx: UnboundedReceiver<(u32, subscribe_compaction_event_request::Event)>,
-        shutdown_rx_shared: Shared<OneShotReceiver<()>>,
-    ) {
-        use crate::hummock::Compactor;
-        let mut compaction_selectors = init_selectors();
-
-        tokio::select! {
-            _ = shutdown_rx_shared => {}
-
-            _ = async {
-                while let Some((context_id, event)) = rx.recv().await {
-                    match event {
-                        RequestEvent::PullTask(PullTask { pull_task_count }) => {
-                            assert_ne!(0, pull_task_count);
-
-                            // pull task handler
-                            // 1. pull task from hummock_manager
-                            // 2. send task to compactor
-                            async fn pull_task_handler(hummock_manager: Arc<HummockManager>, pull_task_count: u32, group: u64, selector: &mut Box<dyn CompactionSelector>, task_type: TaskType, compactor: Arc<Compactor>) -> usize {
-                                let mut pick_task_count = 0;
-                                for _ in 0..pull_task_count {
-                                    let compact_task =
-                                        hummock_manager.get_compact_task(group, &mut *selector).await;
-
-                                    match compact_task {
-                                        Ok(Some(compact_task)) => {
-                                            let task_id = compact_task.task_id;
-                                            if let Err(e) = compactor.send_event(
-                                                ResponseEvent::CompactTask(compact_task),
-                                            ) {
-                                                tracing::warn!(
-                                                    error = %e.as_report(),
-                                                    "Failed to send task {} to {}",
-                                                    task_id,
-                                                    compactor.context_id(),
-                                                );
-
-                                                hummock_manager.compactor_manager.remove_compactor(compactor.context_id());
-                                                break;
-                                            }
-
-                                            pick_task_count += 1;
-                                        }
-                                        Ok(None) => {
-                                            // no compact_task to be picked
-                                            hummock_manager
-                                                .compaction_state
-                                                .unschedule(group, task_type);
-                                            break;
-                                        }
-                                        Err(err) => {
-                                            tracing::warn!(error = %err.as_report(), "Failed to get compaction task");
-                                            break;
-                                        }
-                                    };
-                                }
-
-                                pick_task_count
-                            }
-
-                            if let Some(compactor) =
-                                hummock_manager.compactor_manager.get_compactor(context_id)
-                            {
-                                if let Some((group, task_type)) =
-                                    hummock_manager.auto_pick_compaction_group_and_type().await
-                                    {
-                                        let mut selector = compaction_selectors.get_mut(&task_type).unwrap();
-
-                                        let pick_task_count = pull_task_handler(hummock_manager.clone(), pull_task_count, group, selector, task_type, compactor.clone()).await;
-                                        // if the pick_task_count is less than `EXPECTED_PULL_TASK_RATIO`, try to pull the left tasks from emergency selector when write-stop
-                                        const EXPECTED_PULL_TASK_RATIO: f32 = 0.75;
-                                        if pick_task_count < (pull_task_count * EXPECTED_PULL_TASK_RATIO as u32).try_into().unwrap() {
-                                            let versioning_guard = read_lock!(hummock_manager, versioning).await;
-                                            let versioning = versioning_guard.deref();
-                                            let write_stop = versioning.write_limit.contains_key(&group);
-                                            let enable_emergency_picker = match hummock_manager
-                                                .compaction_group_manager
-                                                .read()
-                                                .await
-                                                .try_get_compaction_group_config(group)
-                                            {
-                                                Some(config) => {
-                                                    config.compaction_config.enable_emergency_picker
-                                                }
-                                                None => {
-                                                    unreachable!("compaction-group {} not exist", group)
-                                                }
-                                            };
-
-                                            if write_stop && enable_emergency_picker {
-                                                // try to pull the left tasks from emergency selector
-                                                selector = compaction_selectors.get_mut(&TaskType::Emergency).unwrap();
-                                                pull_task_handler(hummock_manager.clone(), pull_task_count - pick_task_count as u32, group, selector, task_type, compactor.clone()).await;
-                                            }
-                                        }
-                                    }
-
-                                // ack to compactor
-                                if let Err(e) =
-                                    compactor.send_event(ResponseEvent::PullTaskAck(PullTaskAck {}))
-                                {
-                                    tracing::warn!(
-                                        error = %e.as_report(),
-                                        "Failed to send ask to {}",
-                                        context_id,
-                                    );
-                                    hummock_manager.compactor_manager.remove_compactor(context_id);
-                                }
-                            }
-                        }
-
-                        RequestEvent::ReportTask(ReportTask {
-                            task_id,
-                            task_status,
-                            sorted_output_ssts,
-                            table_stats_change,
-                        }) => {
-                            if let Err(e) = hummock_manager
-                                .report_compact_task(
-                                    task_id,
-                                    TaskStatus::try_from(task_status).unwrap(),
-                                    sorted_output_ssts,
-                                    Some(table_stats_change),
-                                )
-                                .await
-                            {
-                                tracing::error!(error = %e.as_report(), "report compact_tack fail")
-                            }
-                        }
-
-                        _ => unreachable!(),
-                    }
-                }
-            } => {}
-        }
     }
 }
 

@@ -26,7 +26,9 @@ use risingwave_pb::hummock::subscribe_compaction_event_request::{
 use risingwave_pb::hummock::subscribe_compaction_event_response::{
     Event as ResponseEvent, PullTaskAck,
 };
-use risingwave_pb::hummock::{CompactStatus as PbCompactStatus, CompactTaskAssignment};
+use risingwave_pb::hummock::{
+    CompactStatus as PbCompactStatus, CompactTask, CompactTaskAssignment,
+};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::oneshot::Receiver as OneShotReceiver;
@@ -34,8 +36,9 @@ use tokio::sync::oneshot::Receiver as OneShotReceiver;
 use crate::hummock::compaction::selector::level_selector::PickerInfo;
 use crate::hummock::compaction::selector::DynamicLevelSelectorCore;
 use crate::hummock::compaction::{CompactStatus, CompactionDeveloperConfig, CompactionSelector};
+use crate::hummock::error::Result;
 use crate::hummock::manager::{init_selectors, read_lock};
-use crate::hummock::HummockManager;
+use crate::hummock::{Compactor, HummockManager};
 
 const MAX_SKIP_TIMES: usize = 8;
 const MAX_REPORT_COUNT: usize = 16;
@@ -124,67 +127,170 @@ impl HummockManager {
         compaction_selectors: &mut HashMap<TaskType, Box<dyn CompactionSelector>>,
     ) {
         assert_ne!(0, pull_task_count);
+
+        fn tasks_result_handler(
+            tasks: Result<(Vec<CompactTask>, Vec<CompactionGroupId>)>,
+            compactor: Arc<Compactor>,
+            no_task_groups: &mut HashSet<CompactionGroupId>,
+            existed_groups: &mut Vec<CompactionGroupId>,
+        ) -> (Vec<u64>, usize) {
+            let mut generated_task_count = 0;
+            let mut failed_tasks = vec![];
+            match tasks {
+                Ok((compact_tasks, unschedule_groups)) => {
+                    if compact_tasks.is_empty() {
+                        return (failed_tasks, generated_task_count);
+                    }
+                    generated_task_count += compact_tasks.len();
+                    no_task_groups.extend(unschedule_groups);
+
+                    let mut send_fail = false;
+                    for task in &compact_tasks {
+                        let task_id = task.task_id;
+                        if let Err(e) =
+                            compactor.send_event(ResponseEvent::CompactTask(task.clone()))
+                        {
+                            tracing::warn!(
+                                error = %e.as_report(),
+                                "Failed to send task {} to {}",
+                                task_id,
+                                compactor.context_id(),
+                            );
+                            // failed_tasks.push(task_id);
+                            send_fail = true;
+                            break;
+                        }
+                    }
+
+                    existed_groups.retain(|group_id| !no_task_groups.contains(group_id));
+
+                    // cancel all tasks
+                    if send_fail {
+                        failed_tasks.extend(compact_tasks.iter().map(|t| t.task_id));
+                    }
+
+                    (failed_tasks, generated_task_count)
+                }
+                Err(err) => {
+                    tracing::warn!(error = %err.as_report(), "Failed to get compaction task");
+                    (failed_tasks, generated_task_count)
+                }
+            }
+        }
+
+        async fn handle_pick_tasks(
+            hummock_manager: &HummockManager,
+            pull_task_count: usize,
+            groups: Vec<u64>,
+            compactor: Arc<Compactor>,
+            selector: &mut Box<dyn CompactionSelector>,
+            generated_task_count: &mut usize,
+            no_task_groups: &mut HashSet<CompactionGroupId>,
+            existed_groups: &mut Vec<CompactionGroupId>,
+        ) {
+            while *generated_task_count < pull_task_count {
+                // todo use batch get compact_task inside single cg
+                let compact_ret = hummock_manager
+                    .get_compact_tasks(
+                        groups.clone(),
+                        pull_task_count - *generated_task_count,
+                        selector,
+                    )
+                    .await;
+                let (failed_tasks, picked_tasks_count) = tasks_result_handler(
+                    compact_ret,
+                    compactor.clone(),
+                    no_task_groups,
+                    existed_groups,
+                );
+
+                // if no task or failed task, break
+                if picked_tasks_count == 0 || !failed_tasks.is_empty() {
+                    break;
+                }
+
+                *generated_task_count += picked_tasks_count;
+            }
+        }
+
         if let Some(compactor) = self.compactor_manager.get_compactor(context_id) {
-            let (groups, task_type) = self.auto_pick_compaction_groups_and_type().await;
-            if !groups.is_empty() {
+            let (groups, mut task_type) = self.auto_pick_compaction_groups_and_type().await;
+
+            let mut generated_task_count = 0;
+            let mut existed_groups = groups.clone();
+            let mut no_task_groups: HashSet<CompactionGroupId> = HashSet::default();
+            let failed_tasks = vec![];
+
+            if groups.len() == 1 && matches!(task_type, TaskType::Emergency) {
+                // tips: Emergency is a special state of Dynamic, so you need to use Dynamic to unschedule CG after pick tasks
+                task_type = TaskType::Dynamic;
+
+                // When cg encounters a write-stop, we will place it in a separate vec and perform separate processing
+                // 1. Try to select dynamic task
+                let mut selector: &mut Box<dyn CompactionSelector> =
+                    compaction_selectors.get_mut(&task_type).unwrap();
+                handle_pick_tasks(
+                    self,
+                    pull_task_count,
+                    groups.clone(),
+                    compactor.clone(),
+                    selector,
+                    &mut generated_task_count,
+                    &mut no_task_groups,
+                    &mut existed_groups,
+                )
+                .await;
+
+                // 2. if no task and not enough task, try to pull from emergency selector
+                const EXPECTED_PULL_TASK_RATIO: f32 = 0.75;
+                if failed_tasks.is_empty()
+                    && (generated_task_count
+                        < (((pull_task_count as f32) * EXPECTED_PULL_TASK_RATIO) as u32)
+                            .try_into()
+                            .unwrap())
+                {
+                    selector = compaction_selectors.get_mut(&TaskType::Emergency).unwrap();
+                    handle_pick_tasks(
+                        self,
+                        pull_task_count,
+                        groups.clone(),
+                        compactor.clone(),
+                        selector,
+                        &mut generated_task_count,
+                        &mut no_task_groups,
+                        &mut existed_groups,
+                    )
+                    .await;
+                }
+            } else if !groups.is_empty() {
+                // batch get multi groups
                 let selector: &mut Box<dyn CompactionSelector> =
                     compaction_selectors.get_mut(&task_type).unwrap();
 
-                let mut generated_task_count = 0;
-                let mut existed_groups = groups.clone();
-                let mut no_task_groups: HashSet<CompactionGroupId> = HashSet::default();
-                let mut failed_tasks = vec![];
+                handle_pick_tasks(
+                    self,
+                    pull_task_count,
+                    groups.clone(),
+                    compactor.clone(),
+                    selector,
+                    &mut generated_task_count,
+                    &mut no_task_groups,
+                    &mut existed_groups,
+                )
+                .await;
+            }
 
-                while generated_task_count < pull_task_count && failed_tasks.is_empty() {
-                    let compact_ret = self
-                        .get_compact_tasks(
-                            existed_groups.clone(),
-                            pull_task_count - generated_task_count,
-                            selector,
-                        )
-                        .await;
+            // unschedule cg
+            for group in no_task_groups {
+                self.compaction_state.unschedule(group, task_type);
+            }
 
-                    match compact_ret {
-                        Ok((compact_tasks, unschedule_groups)) => {
-                            if compact_tasks.is_empty() {
-                                break;
-                            }
-                            generated_task_count += compact_tasks.len();
-                            no_task_groups.extend(unschedule_groups);
-                            for task in compact_tasks {
-                                let task_id = task.task_id;
-                                if let Err(e) =
-                                    compactor.send_event(ResponseEvent::CompactTask(task))
-                                {
-                                    tracing::warn!(
-                                        error = %e.as_report(),
-                                        "Failed to send task {} to {}",
-                                        task_id,
-                                        compactor.context_id(),
-                                    );
-                                    failed_tasks.push(task_id);
-                                }
-                            }
-                            if !failed_tasks.is_empty() {
-                                self.compactor_manager.remove_compactor(context_id);
-                            }
-                            existed_groups.retain(|group_id| !no_task_groups.contains(group_id));
-                        }
-                        Err(err) => {
-                            tracing::warn!(error = %err.as_report(), "Failed to get compaction task");
-                            break;
-                        }
-                    };
-                }
-                for group in no_task_groups {
-                    self.compaction_state.unschedule(group, task_type);
-                }
-                if let Err(err) = self
-                    .cancel_compact_tasks(failed_tasks, TaskStatus::SendFailCanceled)
-                    .await
-                {
-                    tracing::warn!(error = %err.as_report(), "Failed to cancel compaction task");
-                }
+            // cancel failed tasks
+            if let Err(err) = self
+                .cancel_compact_tasks(failed_tasks, TaskStatus::SendFailCanceled)
+                .await
+            {
+                tracing::warn!(error = %err.as_report(), "Failed to cancel compaction task");
             }
 
             // ack to compactor
