@@ -157,6 +157,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         .mview_input_row_count
                         .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                         .inc_by(chunk.cardinality() as u64);
+
+                    // This is an optimization that handles conflicts only when a particular materialized view downstream has no MV dependencies.
+                    // This optimization is applied only when there is no specified version column and the is_consistent_op flag of the state table is false.
                     let do_not_handle_conflict =
                         !self.state_table.is_consistent_op() && self.version_column_index.is_none();
                     match self.conflict_behavior {
@@ -735,7 +738,20 @@ fn execute_do_update_if_not_null_replacement(
         }
     }
 }
-
+/// Determines whether pk conflict should be handled based on the version column of the new and old rows.
+///
+/// # Arguments
+///
+/// * `old_version_column`: The version column value of the old row.
+/// * `new_version_column`: The version column value of the new row.
+///
+/// # Returns
+///
+/// A boolean value indicating whether a conflict should be handled.
+///
+/// If both the new row's version column and the old row's version column are Some, the function will return true if the new row's version is greater than or equal to the old row's version.
+/// If the new row's version column is None and the old row's version column is Some, do not handle pk conflict.
+/// If both the new row's version column and the old row's version column are None, should handle pk conflict.
 fn should_handle_conflict(
     old_version_column: &Option<ScalarImpl>,
     new_version_column: &Option<ScalarImpl>,
