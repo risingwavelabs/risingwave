@@ -35,7 +35,7 @@ use crate::manager::{
     NotificationManagerRef,
 };
 use crate::model::ClusterId;
-use crate::storage::{MetaStore, MetaStoreRef};
+use crate::storage::{MemStore, MetaStore, MetaStoreBoxExt, MetaStoreRef};
 use crate::MetaResult;
 
 #[derive(Clone)]
@@ -477,6 +477,16 @@ impl MetaSrvEnv {
     // Instance for test.
     pub async fn for_test() -> Self {
         Self::for_test_opts(MetaOpts::test(false)).await
+    }
+
+    pub async fn for_test_with_kv_meta_store() -> Self {
+        Self::new(
+            MetaOpts::test(false),
+            risingwave_common::system_param::system_params_for_test(),
+            MetaStoreImpl::Kv(MemStore::default().into_ref()),
+        )
+        .await
+        .unwrap()
     }
 
     pub async fn for_test_opts(opts: MetaOpts) -> Self {

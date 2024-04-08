@@ -309,7 +309,7 @@ pub async fn setup_compute_env_with_metric(
     config: CompactionConfig,
     meta_metric: Option<MetaMetrics>,
 ) -> (MetaSrvEnv, HummockManagerRef, ClusterManagerRef, WorkerNode) {
-    let env = MetaSrvEnv::for_test().await;
+    let env = MetaSrvEnv::for_test_with_kv_meta_store().await;
     let cluster_manager = Arc::new(
         ClusterManager::new(env.clone(), Duration::from_secs(1))
             .await
