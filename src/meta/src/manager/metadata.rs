@@ -653,7 +653,11 @@ impl MetadataManager {
                     .map(|(id, actors)| {
                         (
                             id as ActorId,
-                            actors.into_iter().map(|id| id as ActorId).collect(),
+                            actors
+                                .into_inner()
+                                .into_iter()
+                                .flat_map(|(_, ids)| ids.into_iter().map(|id| id as ActorId))
+                                .collect(),
                         )
                     })
                     .collect())
