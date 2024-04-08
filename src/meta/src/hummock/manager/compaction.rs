@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::ops::Deref;
 use std::sync::Arc;
 
 use function_name::named;
@@ -120,6 +121,7 @@ impl HummockManager {
         ctx.score_levels
     }
 
+    #[named]
     pub async fn handle_pull_task_event(
         &self,
         context_id: u32,
@@ -187,7 +189,8 @@ impl HummockManager {
             generated_task_count: &mut usize,
             no_task_groups: &mut HashSet<CompactionGroupId>,
             existed_groups: &mut Vec<CompactionGroupId>,
-        ) {
+        ) -> Vec<u64> {
+            let failed_tasks = vec![];
             while *generated_task_count < pull_task_count {
                 // todo use batch get compact_task inside single cg
                 let compact_ret = hummock_manager
@@ -211,45 +214,23 @@ impl HummockManager {
 
                 *generated_task_count += picked_tasks_count;
             }
+
+            failed_tasks
         }
 
         if let Some(compactor) = self.compactor_manager.get_compactor(context_id) {
-            let (groups, mut task_type) = self.auto_pick_compaction_groups_and_type().await;
+            let (groups, task_type) = self.auto_pick_compaction_groups_and_type().await;
 
             let mut generated_task_count = 0;
             let mut existed_groups = groups.clone();
             let mut no_task_groups: HashSet<CompactionGroupId> = HashSet::default();
-            let failed_tasks = vec![];
-
-            if groups.len() == 1 && matches!(task_type, TaskType::Emergency) {
-                // tips: Emergency is a special state of Dynamic, so you need to use Dynamic to unschedule CG after pick tasks
-                task_type = TaskType::Dynamic;
-
-                // When cg encounters a write-stop, we will place it in a separate vec and perform separate processing
-                // 1. Try to select dynamic task
-                let mut selector: &mut Box<dyn CompactionSelector> =
+            let mut failed_tasks = vec![];
+            if !groups.is_empty() {
+                // batch get multi groups
+                let selector: &mut Box<dyn CompactionSelector> =
                     compaction_selectors.get_mut(&task_type).unwrap();
-                handle_pick_tasks(
-                    self,
-                    pull_task_count,
-                    groups.clone(),
-                    compactor.clone(),
-                    selector,
-                    &mut generated_task_count,
-                    &mut no_task_groups,
-                    &mut existed_groups,
-                )
-                .await;
 
-                // 2. if no task and not enough task, try to pull from emergency selector
-                const EXPECTED_PULL_TASK_RATIO: f32 = 0.75;
-                if failed_tasks.is_empty()
-                    && (generated_task_count
-                        < (((pull_task_count as f32) * EXPECTED_PULL_TASK_RATIO) as u32)
-                            .try_into()
-                            .unwrap())
-                {
-                    selector = compaction_selectors.get_mut(&TaskType::Emergency).unwrap();
+                failed_tasks.extend(
                     handle_pick_tasks(
                         self,
                         pull_task_count,
@@ -260,29 +241,56 @@ impl HummockManager {
                         &mut no_task_groups,
                         &mut existed_groups,
                     )
-                    .await;
-                }
-            } else if !groups.is_empty() {
-                // batch get multi groups
-                let selector: &mut Box<dyn CompactionSelector> =
-                    compaction_selectors.get_mut(&task_type).unwrap();
-
-                handle_pick_tasks(
-                    self,
-                    pull_task_count,
-                    groups.clone(),
-                    compactor.clone(),
-                    selector,
-                    &mut generated_task_count,
-                    &mut no_task_groups,
-                    &mut existed_groups,
-                )
-                .await;
+                    .await,
+                );
             }
 
             // unschedule cg
-            for group in no_task_groups {
-                self.compaction_state.unschedule(group, task_type);
+            for cg_id in no_task_groups {
+                if failed_tasks.is_empty() && generated_task_count < pull_task_count {
+                    let versioning_guard = read_lock!(self, versioning).await;
+                    let versioning = versioning_guard.deref();
+
+                    let write_stop = versioning.write_limit.contains_key(&cg_id);
+                    let enable_emergency_picker = match self
+                        .compaction_group_manager
+                        .read()
+                        .await
+                        .try_get_compaction_group_config(cg_id)
+                    {
+                        Some(config) => config.compaction_config.enable_emergency_picker,
+                        None => {
+                            unreachable!("compaction-group {} not exist", cg_id)
+                        }
+                    };
+
+                    // if write_stop and enable_emergency_picker, try to pick emergency task
+                    if write_stop && enable_emergency_picker {
+                        let selector = compaction_selectors.get_mut(&TaskType::Emergency).unwrap();
+                        let old_generated_task_count = generated_task_count;
+                        failed_tasks.extend(
+                            handle_pick_tasks(
+                                self,
+                                pull_task_count - generated_task_count, // remaining task count
+                                vec![cg_id],
+                                compactor.clone(),
+                                selector,
+                                &mut generated_task_count,
+                                &mut HashSet::default(), // unused
+                                &mut vec![],             // unused
+                            )
+                            .await,
+                        );
+
+                        if generated_task_count - old_generated_task_count == 0 {
+                            self.compaction_state.unschedule(cg_id, TaskType::Emergency);
+                        }
+                    } else {
+                        self.compaction_state.unschedule(cg_id, task_type);
+                    }
+                } else {
+                    self.compaction_state.unschedule(cg_id, task_type);
+                }
             }
 
             // cancel failed tasks

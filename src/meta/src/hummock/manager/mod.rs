@@ -3122,29 +3122,6 @@ impl HummockManager {
 
         let mut normal_groups = vec![];
         for cg_id in compaction_group_ids {
-            let write_stop = versioning.write_limit.contains_key(&cg_id);
-            let enable_emergency_picker = match self
-                .compaction_group_manager
-                .read()
-                .await
-                .try_get_compaction_group_config(cg_id)
-            {
-                Some(config) => config.compaction_config.enable_emergency_picker,
-                None => {
-                    unreachable!("compaction-group {} not exist", cg_id)
-                }
-            };
-
-            // If the group is blocked by write_limit, we will return the group directly.
-            if write_stop && enable_emergency_picker {
-                if normal_groups.is_empty() {
-                    // we
-                    return (vec![cg_id], TaskType::Emergency);
-                } else {
-                    break;
-                }
-            }
-
             if let Some(pick_type) = self.compaction_state.auto_pick_type(cg_id) {
                 if pick_type == TaskType::Dynamic {
                     normal_groups.push(cg_id);
