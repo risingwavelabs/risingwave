@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
-use aws_sdk_kinesis::error::SdkError;
+use aws_sdk_kinesis::error::{ProvideErrorMetadata, SdkError};
 use aws_sdk_kinesis::operation::get_records::{GetRecordsError, GetRecordsOutput};
 use aws_sdk_kinesis::primitives::DateTime;
 use aws_sdk_kinesis::types::ShardIteratorType;
@@ -187,6 +187,16 @@ impl CommonSplitReader for KinesisSplitReader {
                     self.new_shard_iter().await?;
                     continue;
                 }
+                Err(e) if e.code() == Some("InternalFailure") => {
+                    tracing::warn!(
+                        "stream {:?} shard {:?} met internal failure, retrying",
+                        self.stream_name,
+                        self.shard_id
+                    );
+                    self.new_shard_iter().await?;
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    continue;
+                }
                 Err(e) => {
                     let error = anyhow!(e).context(format!(
                         "Kinesis got a unhandled error on stream {:?}, shard {:?}",
@@ -295,7 +305,7 @@ mod tests {
     use futures::{pin_mut, StreamExt};
 
     use super::*;
-    use crate::common::KinesisCommon;
+    use crate::connector_common::KinesisCommon;
     use crate::source::kinesis::split::KinesisSplit;
 
     #[tokio::test]

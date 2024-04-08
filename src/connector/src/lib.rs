@@ -40,7 +40,6 @@ use std::time::Duration;
 
 use duration_str::parse_std;
 use risingwave_pb::connector_service::SinkPayloadFormat;
-use risingwave_rpc_client::ConnectorClient;
 use serde::de;
 
 pub mod aws_utils;
@@ -52,8 +51,7 @@ pub mod schema;
 pub mod sink;
 pub mod source;
 
-pub mod common;
-pub mod mqtt_common;
+pub mod connector_common;
 
 pub use paste::paste;
 
@@ -65,17 +63,12 @@ mod with_options_test;
 
 #[derive(Clone, Debug, Default)]
 pub struct ConnectorParams {
-    pub connector_client: Option<ConnectorClient>,
     pub sink_payload_format: SinkPayloadFormat,
 }
 
 impl ConnectorParams {
-    pub fn new(
-        connector_client: Option<ConnectorClient>,
-        sink_payload_format: SinkPayloadFormat,
-    ) -> Self {
+    pub fn new(sink_payload_format: SinkPayloadFormat) -> Self {
         Self {
-            connector_client,
             sink_payload_format,
         }
     }
@@ -92,6 +85,43 @@ where
             &"integer greater than or equal to 0",
         )
     })
+}
+
+pub(crate) fn deserialize_optional_u64_from_string<'de, D>(
+    deserializer: D,
+) -> Result<Option<u64>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let s: String = de::Deserialize::deserialize(deserializer)?;
+    if s.is_empty() {
+        Ok(None)
+    } else {
+        s.parse()
+            .map_err(|_| {
+                de::Error::invalid_value(
+                    de::Unexpected::Str(&s),
+                    &"integer greater than or equal to 0",
+                )
+            })
+            .map(Some)
+    }
+}
+
+pub(crate) fn deserialize_optional_string_seq_from_string<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<Vec<String>>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let s: Option<String> = de::Deserialize::deserialize(deserializer)?;
+    if let Some(s) = s {
+        let s = s.to_ascii_lowercase();
+        let s = s.split(',').map(|s| s.trim().to_owned()).collect();
+        Ok(Some(s))
+    } else {
+        Ok(None)
+    }
 }
 
 pub(crate) fn deserialize_bool_from_string<'de, D>(deserializer: D) -> Result<bool, D::Error>

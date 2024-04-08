@@ -49,7 +49,7 @@ use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
-use risingwave_rpc_client::{ComputeClientPool, ConnectorClient, ExtraInfoSourceRef, MetaClient};
+use risingwave_rpc_client::{ComputeClientPool, ExtraInfoSourceRef, MetaClient};
 use risingwave_storage::hummock::compactor::{
     new_compaction_await_tree_reg_ref, start_compactor, CompactionExecutor, CompactorContext,
 };
@@ -75,9 +75,7 @@ use crate::rpc::service::config_service::ConfigServiceImpl;
 use crate::rpc::service::exchange_metrics::GLOBAL_EXCHANGE_SERVICE_METRICS;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
 use crate::rpc::service::health_service::HealthServiceImpl;
-use crate::rpc::service::monitor_service::{
-    AwaitTreeMiddlewareLayer, AwaitTreeRegistryRef, MonitorServiceImpl,
-};
+use crate::rpc::service::monitor_service::{AwaitTreeMiddlewareLayer, MonitorServiceImpl};
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::telemetry::ComputeTelemetryCreator;
 use crate::ComputeNodeOpts;
@@ -331,17 +329,15 @@ pub async fn compute_node_serve(
         client_pool,
         dml_mgr.clone(),
         source_metrics.clone(),
+        config.server.metrics_level,
     );
 
     info!(
-        "connector param: {:?} {:?}",
-        opts.connector_rpc_endpoint, opts.connector_rpc_sink_payload_format
+        "connector param: payload_format={:?}",
+        opts.connector_rpc_sink_payload_format
     );
 
-    let connector_client = ConnectorClient::try_new(opts.connector_rpc_endpoint.as_ref()).await;
-
     let connector_params = risingwave_connector::ConnectorParams {
-        connector_client,
         sink_payload_format: match opts.connector_rpc_sink_payload_format.as_deref() {
             None | Some("stream_chunk") => SinkPayloadFormat::StreamChunk,
             Some("json") => SinkPayloadFormat::Json,
@@ -374,28 +370,12 @@ pub async fn compute_node_serve(
         memory_mgr.get_watermark_epoch(),
     );
 
-    let grpc_await_tree_reg = await_tree_config
-        .map(|config| AwaitTreeRegistryRef::new(await_tree::Registry::new(config).into()));
-
-    // Generally, one may use `risedev ctl trace` to manually get the trace reports. However, if
-    // this is not the case, we can use the following command to get it printed into the logs
-    // periodically.
-    //
-    // Comment out the following line to enable.
-    // TODO: may optionally enable based on the features
-    #[cfg(any())]
-    stream_mgr.clone().spawn_print_trace();
-
     // Boot the runtime gRPC services.
     let batch_srv = BatchServiceImpl::new(batch_mgr.clone(), batch_env);
     let exchange_srv =
         ExchangeServiceImpl::new(batch_mgr.clone(), stream_mgr.clone(), exchange_srv_metrics);
     let stream_srv = StreamServiceImpl::new(stream_mgr.clone(), stream_env.clone());
-    let monitor_srv = MonitorServiceImpl::new(
-        stream_mgr.clone(),
-        grpc_await_tree_reg.clone(),
-        config.server.clone(),
-    );
+    let monitor_srv = MonitorServiceImpl::new(stream_mgr.clone(), config.server.clone());
     let config_srv = ConfigServiceImpl::new(batch_mgr, stream_mgr);
     let health_srv = HealthServiceImpl::new();
 
@@ -427,6 +407,7 @@ pub async fn compute_node_serve(
                 ExchangeServiceServer::new(exchange_srv).max_decoding_message_size(usize::MAX),
             )
             .add_service({
+                let await_tree_reg = stream_srv.mgr.await_tree_reg().cloned();
                 let srv =
                     StreamServiceServer::new(stream_srv).max_decoding_message_size(usize::MAX);
                 #[cfg(madsim)]
@@ -435,7 +416,7 @@ pub async fn compute_node_serve(
                 }
                 #[cfg(not(madsim))]
                 {
-                    AwaitTreeMiddlewareLayer::new_optional(grpc_await_tree_reg).layer(srv)
+                    AwaitTreeMiddlewareLayer::new_optional(await_tree_reg).layer(srv)
                 }
             })
             .add_service(MonitorServiceServer::new(monitor_srv))

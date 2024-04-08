@@ -25,7 +25,8 @@ arrow-array = { workspace = true }
 arrow-row = { workspace = true }
 arrow-schema = { workspace = true }
 arrow-select = { workspace = true }
-async-nats = "0.33"
+assert_matches = "1"
+async-nats = "0.34"
 async-trait = "0.1"
 auto_enums = { version = "0.8", features = ["futures03"] }
 auto_impl = "1"
@@ -65,7 +66,7 @@ hyper = { version = "0.14", features = [
     "http1",
     "http2",
     "stream",
-] }
+] } # required by clickhouse client
 hyper-tls = "0.5"
 icelake = { workspace = true }
 indexmap = { version = "1.9.3", features = ["serde"] }
@@ -83,8 +84,10 @@ mysql_common = { version = "0.32", default-features = false, features = [
 nexmark = { version = "0.2", features = ["serde"] }
 num-bigint = "0.4"
 opendal = "0.45"
+openssl = "0.10"
 parking_lot = "0.12"
 paste = "1"
+postgres-openssl = "0.5.0"
 prometheus = { version = "0.13", features = ["process"] }
 prost = { version = "0.12", features = ["no-recursion-limit"] }
 prost-reflect = "0.13"
@@ -108,16 +111,17 @@ rdkafka = { workspace = true, features = [
 ] }
 redis = { version = "0.25", features = ["aio", "tokio-comp", "async-std-comp","cluster-async"] }
 regex = "1.4"
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.12.2", features = ["json"] }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_jni_core = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
-rumqttc = { version = "0.22.0", features = ["url"] }
+rumqttc = { version = "0.24.0", features = ["url"] }
 rust_decimal = "1"
-rustls-native-certs = "0.6"
+rustls-native-certs = "0.7"
 rustls-pemfile = "2"
+rustls-pki-types = "1"
 rw_futures_util = { workspace = true }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"
@@ -141,7 +145,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-postgres = { version = "0.7", features = ["with-uuid-1"] }
 tokio-retry = "0.3"
-tokio-rustls = "0.24"
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 tonic = { workspace = true }

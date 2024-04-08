@@ -37,7 +37,7 @@ use super::row::{DegreeType, EncodedJoinRow};
 use crate::cache::{new_with_hasher_in, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
-use crate::consistency::enable_strict_consistency;
+use crate::consistency::{consistency_error, enable_strict_consistency};
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::join::row::JoinRow;
 use crate::executor::monitor::StreamingMetrics;
@@ -685,7 +685,7 @@ impl JoinEntryState {
             assert!(ret.is_ok(), "we have removed existing entry, if any");
             if removed {
                 // if not silent, we should log the error
-                tracing::error!(?key, "double inserting a join state entry");
+                consistency_error!(?key, "double inserting a join state entry");
             }
         }
 
@@ -700,10 +700,7 @@ impl JoinEntryState {
         } else if enable_strict_consistency() {
             Err(JoinEntryError::RemoveError)
         } else {
-            tracing::error!(
-                ?pk,
-                "removing a join state entry but it is not in the cache"
-            );
+            consistency_error!(?pk, "removing a join state entry but it's not in the cache");
             Ok(())
         }
     }

@@ -20,7 +20,7 @@ clap = { version = "4", features = ["derive"] }
 easy-ext = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 http = "0.2"
-hyper = { version = "0.14", features = ["client"] }
+hyper = { version = "0.14", features = ["client"] } # used by tonic
 hytra = { workspace = true }
 itertools = "0.12"
 parking_lot = "0.12"

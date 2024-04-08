@@ -42,7 +42,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
 
 use crate::hummock::compactor::{
-    merge_imms_in_memory, CompactionAwaitTreeRegRef, CompactionExecutor,
+    await_tree_key, merge_imms_in_memory, CompactionAwaitTreeRegRef, CompactionExecutor,
 };
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::LocalInstanceId;
@@ -89,8 +89,10 @@ pub(crate) fn default_spawn_merging_task(
                 LazyLock::new(|| AtomicUsize::new(0));
             let tree_root = await_tree_reg.as_ref().map(|reg| {
                 let merging_task_id = NEXT_MERGING_TASK_ID.fetch_add(1, Relaxed);
-                reg.write().register(
-                    format!("merging_task/{}", merging_task_id),
+                reg.register(
+                    await_tree_key::MergingTask {
+                        id: merging_task_id,
+                    },
                     format!(
                         "Merging Imm {:?} {:?} {:?}",
                         table_id,
@@ -550,9 +552,11 @@ impl SealedData {
         for (table_id, (direction, watermarks, _)) in unseal_epoch_data.table_watermarks {
             match self.table_watermarks.entry(table_id) {
                 Entry::Occupied(mut entry) => {
-                    entry
-                        .get_mut()
-                        .add_new_epoch_watermarks(epoch, watermarks, direction);
+                    entry.get_mut().add_new_epoch_watermarks(
+                        epoch,
+                        Arc::from(watermarks),
+                        direction,
+                    );
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(TableWatermarks::single_epoch(epoch, watermarks, direction));

@@ -233,9 +233,15 @@ impl HummockReadVersion {
         Self {
             table_id,
             table_watermarks: committed_version
-                .table_watermark_index()
+                .version()
+                .table_watermarks
                 .get(&table_id)
-                .cloned(),
+                .map(|table_watermarks| {
+                    TableWatermarksIndex::new_committed(
+                        table_watermarks.clone(),
+                        committed_version.max_committed_epoch(),
+                    )
+                }),
             staging: StagingVersion {
                 imm: VecDeque::default(),
                 sst: VecDeque::default(),
@@ -380,13 +386,22 @@ impl HummockReadVersion {
                     }));
                 }
 
-                if let Some(committed_watermarks) =
-                    self.committed.table_watermark_index().get(&self.table_id)
+                if let Some(committed_watermarks) = self
+                    .committed
+                    .version()
+                    .table_watermarks
+                    .get(&self.table_id)
                 {
                     if let Some(watermark_index) = &mut self.table_watermarks {
-                        watermark_index.apply_committed_watermarks(committed_watermarks);
+                        watermark_index.apply_committed_watermarks(
+                            committed_watermarks.clone(),
+                            self.committed.max_committed_epoch(),
+                        );
                     } else {
-                        self.table_watermarks = Some(committed_watermarks.clone());
+                        self.table_watermarks = Some(TableWatermarksIndex::new_committed(
+                            committed_watermarks.clone(),
+                            self.committed.max_committed_epoch(),
+                        ));
                     }
                 }
             }
@@ -399,7 +414,7 @@ impl HummockReadVersion {
                 .get_or_insert_with(|| {
                     TableWatermarksIndex::new(direction, self.committed.max_committed_epoch())
                 })
-                .add_epoch_watermark(epoch, &vnode_watermarks, direction),
+                .add_epoch_watermark(epoch, Arc::from(vnode_watermarks), direction),
         }
     }
 

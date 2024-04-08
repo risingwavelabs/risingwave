@@ -30,7 +30,6 @@ use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::source::ConnectorSplit;
-use risingwave_rpc_client::ConnectorClient;
 use serde::de::DeserializeOwned;
 
 use super::cdc::DebeziumCdcMeta;
@@ -73,8 +72,10 @@ pub trait SourceProperties: TryFromHashmap + Clone + WithOptions {
     type SplitEnumerator: SplitEnumerator<Properties = Self, Split = Self::Split>;
     type SplitReader: SplitReader<Split = Self::Split, Properties = Self>;
 
+    /// Load additional info from `PbSource`. Currently only used by CDC.
     fn init_from_pb_source(&mut self, _source: &PbSource) {}
 
+    /// Load additional info from `ExternalTableDesc`. Currently only used by CDC.
     fn init_from_pb_cdc_table_desc(&mut self, _table_desc: &ExternalTableDesc) {}
 }
 
@@ -150,7 +151,6 @@ impl Default for SourceCtrlOpts {
 pub struct SourceEnumeratorContext {
     pub info: SourceEnumeratorInfo,
     pub metrics: Arc<EnumeratorMetrics>,
-    pub connector_client: Option<ConnectorClient>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -160,7 +160,6 @@ pub struct SourceEnumeratorInfo {
 
 #[derive(Debug, Default)]
 pub struct SourceContext {
-    pub connector_client: Option<ConnectorClient>,
     pub actor_id: u32,
     pub source_id: TableId,
     // There should be a 1-1 mapping between `source_id` & `fragment_id`
@@ -178,12 +177,10 @@ impl SourceContext {
         fragment_id: u32,
         metrics: Arc<SourceMetrics>,
         source_ctrl_opts: SourceCtrlOpts,
-        connector_client: Option<ConnectorClient>,
         connector_props: ConnectorProperties,
         source_name: String,
     ) -> Self {
         Self {
-            connector_client,
             actor_id,
             source_id,
             fragment_id,
@@ -371,10 +368,12 @@ impl ConnectorProperties {
         matches!(self, ConnectorProperties::Kinesis(_))
     }
 
+    /// Load additional info from `PbSource`. Currently only used by CDC.
     pub fn init_from_pb_source(&mut self, source: &PbSource) {
         dispatch_source_prop!(self, prop, prop.init_from_pb_source(source))
     }
 
+    /// Load additional info from `ExternalTableDesc`. Currently only used by CDC.
     pub fn init_from_pb_cdc_table_desc(&mut self, cdc_table_desc: &ExternalTableDesc) {
         dispatch_source_prop!(self, prop, prop.init_from_pb_cdc_table_desc(cdc_table_desc))
     }
@@ -673,7 +672,6 @@ mod tests {
     #[test]
     fn test_extract_cdc_properties() {
         let user_props_mysql: HashMap<String, String> = convert_args!(hashmap!(
-            "connector_node_addr" => "localhost",
             "connector" => "mysql-cdc",
             "database.hostname" => "127.0.0.1",
             "database.port" => "3306",
@@ -684,7 +682,6 @@ mod tests {
         ));
 
         let user_props_postgres: HashMap<String, String> = convert_args!(hashmap!(
-            "connector_node_addr" => "localhost",
             "connector" => "postgres-cdc",
             "database.hostname" => "127.0.0.1",
             "database.port" => "5432",
@@ -697,10 +694,6 @@ mod tests {
 
         let conn_props = ConnectorProperties::extract(user_props_mysql, true).unwrap();
         if let ConnectorProperties::MysqlCdc(c) = conn_props {
-            assert_eq!(
-                c.properties.get("connector_node_addr").unwrap(),
-                "localhost"
-            );
             assert_eq!(c.properties.get("database.hostname").unwrap(), "127.0.0.1");
             assert_eq!(c.properties.get("database.port").unwrap(), "3306");
             assert_eq!(c.properties.get("database.user").unwrap(), "root");
@@ -713,10 +706,6 @@ mod tests {
 
         let conn_props = ConnectorProperties::extract(user_props_postgres, true).unwrap();
         if let ConnectorProperties::PostgresCdc(c) = conn_props {
-            assert_eq!(
-                c.properties.get("connector_node_addr").unwrap(),
-                "localhost"
-            );
             assert_eq!(c.properties.get("database.hostname").unwrap(), "127.0.0.1");
             assert_eq!(c.properties.get("database.port").unwrap(), "5432");
             assert_eq!(c.properties.get("database.user").unwrap(), "root");

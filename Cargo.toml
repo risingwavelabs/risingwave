@@ -79,7 +79,7 @@ repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
 foyer = "0.6"
-await-tree = "0.1.1"
+await-tree = "0.2.1"
 aws-config = { version = "1", default-features = false, features = [
   "behavior-version-latest",
   "rt-tokio",
@@ -109,21 +109,21 @@ aws-smithy-http = "0.60"
 aws-smithy-runtime-api = "1"
 aws-smithy-runtime = "1"
 aws-smithy-types = { version = "1", default-features = false, features = [
-  "hyper-0-14-x",
+  "hyper-0-14-x", # required by aws sdk
 ] }
 aws-endpoint = "0.60"
 aws-types = "1"
 etcd-client = { package = "madsim-etcd-client", version = "0.4" }
 futures-async-stream = "0.2.9"
 hytra = "0.1"
-rdkafka = { package = "madsim-rdkafka", version = "0.3.1", features = [
+rdkafka = { package = "madsim-rdkafka", version = "0.3.4", features = [
   "cmake-build",
 ] }
 hashbrown = { version = "0.14", features = ["ahash", "inline-more", "nightly"] }
 criterion = { version = "0.5", features = ["async_futures"] }
 tonic = { package = "madsim-tonic", version = "0.4.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }
-otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "58c1f003484449d7c6dd693b348bf19dd44889cb" }
+otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "492c244e0be91feb659c0cd48a624bbd96045a33" }
 prost = { version = "0.12" }
 icelake = { git = "https://github.com/icelake-io/icelake", rev = "54fd72fbd1dd8c592f05eeeb79223c8a6a33c297", features = [
   "prometheus",
@@ -304,6 +304,8 @@ tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev =
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
 # patch: unlimit 4MB message size for grpc client
 etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "4e84d40" }
+# todo(wcy-fdu): remove this patch fork after opendal release a new version to apply azure workload identity change.
+reqsign = { git = "https://github.com/wcy-fdu/reqsign.git", rev = "e6cb304" }
 
 [workspace.metadata.dylint]
 libraries = [{ path = "./lints" }]
