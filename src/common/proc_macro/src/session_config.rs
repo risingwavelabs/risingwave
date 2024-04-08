@@ -151,7 +151,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
                 &mut self,
                 val: &str,
                 reporter: &mut impl ConfigReporter
-            ) -> SessionConfigResult<()> {
+            ) -> SessionConfigResult<String> {
                 let val_t = #parse(val).map_err(|e| {
                     SessionConfigError::InvalidValue {
                         entry: #entry_name,
@@ -160,8 +160,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
                     }
                 })?;
 
-                self.#set_t_func_name(val_t, reporter)?;
-                Ok(())
+                self.#set_t_func_name(val_t, reporter).map(|val| val.to_string())
             }
 
             #[doc = #set_t_func_doc]
@@ -169,12 +168,12 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
                 &mut self,
                 val: #ty,
                 reporter: &mut impl ConfigReporter
-            ) -> SessionConfigResult<()> {
+            ) -> SessionConfigResult<#ty> {
                 #check_hook
                 #report_hook
 
-                self.#field_ident = val;
-                Ok(())
+                self.#field_ident = val.clone();
+                Ok(val)
             }
 
         });
@@ -183,10 +182,11 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
         struct_impl_reset.push(quote! {
 
         #[allow(clippy::useless_conversion)]
-        pub fn #reset_func_name(&mut self, reporter: &mut impl ConfigReporter) {
+        pub fn #reset_func_name(&mut self, reporter: &mut impl ConfigReporter) -> String {
                 let val = #default;
                 #report_hook
                 self.#field_ident = val.into();
+                self.#field_ident.to_string()
             }
         });
 
@@ -274,7 +274,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
             #(#struct_impl_reset)*
 
             /// Set a parameter given it's name and value string.
-            pub fn set(&mut self, key_name: &str, value: String, reporter: &mut impl ConfigReporter) -> SessionConfigResult<()> {
+            pub fn set(&mut self, key_name: &str, value: String, reporter: &mut impl ConfigReporter) -> SessionConfigResult<String> {
                 let key_name = Self::alias_to_entry_name(key_name);
                 match key_name.as_ref() {
                     #(#set_match_branches)*
@@ -292,7 +292,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
             }
 
             /// Reset a parameter by it's name.
-            pub fn reset(&mut self, key_name: &str, reporter: &mut impl ConfigReporter) -> SessionConfigResult<()> {
+            pub fn reset(&mut self, key_name: &str, reporter: &mut impl ConfigReporter) -> SessionConfigResult<String> {
                 let key_name = Self::alias_to_entry_name(key_name);
                 match key_name.as_ref() {
                     #(#reset_match_branches)*

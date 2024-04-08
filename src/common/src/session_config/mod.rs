@@ -315,12 +315,12 @@ impl SessionConfig {
         &mut self,
         val: bool,
         reporter: &mut impl ConfigReporter,
-    ) -> SessionConfigResult<()> {
-        self.set_force_two_phase_agg_inner(val, reporter)?;
+    ) -> SessionConfigResult<bool> {
+        let set_val = self.set_force_two_phase_agg_inner(val, reporter)?;
         if self.force_two_phase_agg {
             self.set_enable_two_phase_agg(true, reporter)
         } else {
-            Ok(())
+            Ok(set_val)
         }
     }
 
@@ -328,12 +328,12 @@ impl SessionConfig {
         &mut self,
         val: bool,
         reporter: &mut impl ConfigReporter,
-    ) -> SessionConfigResult<()> {
-        self.set_enable_two_phase_agg_inner(val, reporter)?;
+    ) -> SessionConfigResult<bool> {
+        let set_val = self.set_enable_two_phase_agg_inner(val, reporter)?;
         if !self.force_two_phase_agg {
             self.set_force_two_phase_agg(false, reporter)
         } else {
-            Ok(())
+            Ok(set_val)
         }
     }
 }

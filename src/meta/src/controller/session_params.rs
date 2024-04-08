@@ -18,6 +18,8 @@ use itertools::Itertools;
 use risingwave_common::session_config::{SessionConfig, SessionConfigError};
 use risingwave_meta_model_v2::prelude::SessionParameter;
 use risingwave_meta_model_v2::session_parameter;
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_pb::meta::SetSessionParamRequest;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, TransactionTrait};
 use thiserror_ext::AsReport;
@@ -25,6 +27,7 @@ use tokio::sync::RwLock;
 use tracing::info;
 
 use crate::controller::SqlMetaStore;
+use crate::manager::NotificationManagerRef;
 use crate::{MetaError, MetaResult};
 
 pub type SessionParamsControllerRef = Arc<SessionParamsController>;
@@ -35,11 +38,13 @@ pub struct SessionParamsController {
     db: DatabaseConnection,
     // Cached parameters.
     params: RwLock<SessionConfig>,
+    notification_manager: NotificationManagerRef,
 }
 
 impl SessionParamsController {
     pub async fn new(
         sql_meta_store: SqlMetaStore,
+        notification_manager: NotificationManagerRef,
         mut init_params: SessionConfig,
     ) -> MetaResult<Self> {
         let db = sql_meta_store.conn;
@@ -62,6 +67,7 @@ impl SessionParamsController {
         let ctl = Self {
             db,
             params: RwLock::new(init_params.clone()),
+            notification_manager,
         };
         // flush to db.
         ctl.flush_params().await?;
@@ -107,18 +113,29 @@ impl SessionParamsController {
         };
         // FIXME: use a real reporter
         let reporter = &mut ();
-        if let Some(value) = value {
+        let new_param = if let Some(value) = value {
             params_guard.set(name, value, reporter)?
         } else {
             params_guard.reset(name, reporter)?
-        }
-        let new_param = params_guard.get(name)?;
+        };
 
         let mut param: session_parameter::ActiveModel = param.into();
         param.value = Set(new_param.clone());
         param.update(&self.db).await?;
 
+        self.notify_workers(name.to_string(), new_param.clone());
+
         Ok(new_param)
+    }
+
+    pub fn notify_workers(&self, name: String, value: String) {
+        self.notification_manager.notify_frontend_without_version(
+            Operation::Update,
+            Info::SessionParam(SetSessionParamRequest {
+                param: name,
+                value: Some(value),
+            }),
+        );
     }
 }
 
@@ -139,10 +156,13 @@ mod tests {
         let init_params = SessionConfig::default();
 
         // init system parameter controller as first launch.
-        let session_param_ctl =
-            SessionParamsController::new(meta_store.clone(), init_params.clone())
-                .await
-                .unwrap();
+        let session_param_ctl = SessionParamsController::new(
+            meta_store.clone(),
+            env.notification_manager_ref(),
+            init_params.clone(),
+        )
+        .await
+        .unwrap();
         let params = session_param_ctl.get_params().await;
         assert_eq!(params, init_params);
 
@@ -165,9 +185,13 @@ mod tests {
             .unwrap();
 
         // init system parameter controller as not first launch.
-        let session_param_ctl = SessionParamsController::new(meta_store, init_params.clone())
-            .await
-            .unwrap();
+        let session_param_ctl = SessionParamsController::new(
+            meta_store,
+            env.notification_manager_ref(),
+            init_params.clone(),
+        )
+        .await
+        .unwrap();
         // check deprecated params are cleaned up.
         assert!(SessionParameter::find_by_id("deprecated_param".to_string())
             .one(&session_param_ctl.db)

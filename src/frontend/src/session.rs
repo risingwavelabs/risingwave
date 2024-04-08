@@ -129,6 +129,7 @@ pub struct FrontendEnv {
     query_manager: QueryManager,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     system_params_manager: LocalSystemParamsManagerRef,
+    session_params: Arc<RwLock<SessionConfig>>,
 
     server_addr: HostAddr,
     client_pool: ComputeClientPoolRef,
@@ -209,6 +210,7 @@ impl FrontendEnv {
             query_manager,
             hummock_snapshot_manager,
             system_params_manager,
+            session_params: Default::default(),
             server_addr,
             client_pool,
             sessions_map: Arc::new(RwLock::new(HashMap::new())),
@@ -303,6 +305,9 @@ impl FrontendEnv {
 
         let system_params_manager =
             Arc::new(LocalSystemParamsManager::new(system_params_reader.clone()));
+        let session_params = Arc::new(RwLock::new(
+            frontend_meta_client.get_session_params().await?,
+        ));
         let frontend_observer_node = FrontendObserverNode::new(
             worker_node_manager.clone(),
             catalog,
@@ -311,6 +316,7 @@ impl FrontendEnv {
             user_info_updated_tx,
             hummock_snapshot_manager.clone(),
             system_params_manager.clone(),
+            session_params.clone(),
         );
         let observer_manager =
             ObserverManager::new_with_meta_client(meta_client.clone(), frontend_observer_node)
@@ -410,6 +416,7 @@ impl FrontendEnv {
                 query_manager,
                 hummock_snapshot_manager,
                 system_params_manager,
+                session_params,
                 server_addr: frontend_address,
                 client_pool,
                 frontend_metrics,
@@ -479,6 +486,10 @@ impl FrontendEnv {
 
     pub fn system_params_manager(&self) -> &LocalSystemParamsManagerRef {
         &self.system_params_manager
+    }
+
+    pub fn session_params_snapshot(&self) -> SessionConfig {
+        self.session_params.read_recursive().clone()
     }
 
     pub fn server_address(&self) -> &HostAddr {
@@ -697,7 +708,7 @@ impl SessionImpl {
         self.config_map.read()
     }
 
-    pub fn set_config(&self, key: &str, value: String) -> Result<()> {
+    pub fn set_config(&self, key: &str, value: String) -> Result<String> {
         self.config_map
             .write()
             .set(key, value, &mut ())
@@ -709,7 +720,7 @@ impl SessionImpl {
         key: &str,
         value: Option<String>,
         mut reporter: impl ConfigReporter,
-    ) -> Result<()> {
+    ) -> Result<String> {
         if let Some(value) = value {
             self.config_map
                 .write()
@@ -953,103 +964,99 @@ pub struct SessionManagerImpl {
     number: AtomicI32,
 }
 
-#[async_trait::async_trait]
 impl SessionManager for SessionManagerImpl {
     type Session = SessionImpl;
 
-    async fn connect(
+    fn connect(
         &self,
         database: &str,
         user_name: &str,
         peer_addr: AddressRef,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
-        let (auth_ctx, user_authenticator) = {
-            let catalog_reader = self.env.catalog_reader();
-            let reader = catalog_reader.read_guard();
-            let database_id = reader
-                .get_database_by_name(database)
-                .map_err(|_| {
-                    Box::new(Error::new(
-                        ErrorKind::InvalidInput,
-                        format!("database \"{}\" does not exist", database),
-                    ))
-                })?
-                .id();
-            let user_reader = self.env.user_info_reader();
-            let reader = user_reader.read_guard();
-            if let Some(user) = reader.get_user_by_name(user_name) {
-                if !user.can_login {
-                    return Err(Box::new(Error::new(
-                        ErrorKind::InvalidInput,
-                        format!("User {} is not allowed to login", user_name),
-                    )));
-                }
-                let has_privilege =
-                    user.check_privilege(&Object::DatabaseId(database_id), AclMode::Connect);
-                if !user.is_super && !has_privilege {
-                    return Err(Box::new(Error::new(
-                        ErrorKind::PermissionDenied,
-                        "User does not have CONNECT privilege.",
-                    )));
-                }
-                let user_authenticator = match &user.auth_info {
-                    None => UserAuthenticator::None,
-                    Some(auth_info) => {
-                        if auth_info.encryption_type == EncryptionType::Plaintext as i32 {
-                            UserAuthenticator::ClearText(auth_info.encrypted_value.clone())
-                        } else if auth_info.encryption_type == EncryptionType::Md5 as i32 {
-                            let mut salt = [0; 4];
-                            let mut rng = rand::thread_rng();
-                            rng.fill_bytes(&mut salt);
-                            UserAuthenticator::Md5WithSalt {
-                                encrypted_password: md5_hash_with_salt(
-                                    &auth_info.encrypted_value,
-                                    &salt,
-                                ),
-                                salt,
-                            }
-                        } else if auth_info.encryption_type == EncryptionType::Oauth as i32 {
-                            UserAuthenticator::OAuth(auth_info.metadata.clone())
-                        } else {
-                            return Err(Box::new(Error::new(
-                                ErrorKind::Unsupported,
-                                format!("Unsupported auth type: {}", auth_info.encryption_type),
-                            )));
+        let catalog_reader = self.env.catalog_reader();
+        let reader = catalog_reader.read_guard();
+        let database_id = reader
+            .get_database_by_name(database)
+            .map_err(|_| {
+                Box::new(Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("database \"{}\" does not exist", database),
+                ))
+            })?
+            .id();
+        let user_reader = self.env.user_info_reader();
+        let reader = user_reader.read_guard();
+        if let Some(user) = reader.get_user_by_name(user_name) {
+            if !user.can_login {
+                return Err(Box::new(Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("User {} is not allowed to login", user_name),
+                )));
+            }
+            let has_privilege =
+                user.check_privilege(&Object::DatabaseId(database_id), AclMode::Connect);
+            if !user.is_super && !has_privilege {
+                return Err(Box::new(Error::new(
+                    ErrorKind::PermissionDenied,
+                    "User does not have CONNECT privilege.",
+                )));
+            }
+            let user_authenticator = match &user.auth_info {
+                None => UserAuthenticator::None,
+                Some(auth_info) => {
+                    if auth_info.encryption_type == EncryptionType::Plaintext as i32 {
+                        UserAuthenticator::ClearText(auth_info.encrypted_value.clone())
+                    } else if auth_info.encryption_type == EncryptionType::Md5 as i32 {
+                        let mut salt = [0; 4];
+                        let mut rng = rand::thread_rng();
+                        rng.fill_bytes(&mut salt);
+                        UserAuthenticator::Md5WithSalt {
+                            encrypted_password: md5_hash_with_salt(
+                                &auth_info.encrypted_value,
+                                &salt,
+                            ),
+                            salt,
                         }
+                    } else if auth_info.encryption_type == EncryptionType::Oauth as i32 {
+                        UserAuthenticator::OAuth(auth_info.metadata.clone())
+                    } else {
+                        return Err(Box::new(Error::new(
+                            ErrorKind::Unsupported,
+                            format!("Unsupported auth type: {}", auth_info.encryption_type),
+                        )));
                     }
-                };
+                }
+            };
 
-                let auth_ctx = Arc::new(AuthContext::new(
+            // Assign a session id and insert into sessions map (for cancel request).
+            let secret_key = self.number.fetch_add(1, Ordering::Relaxed);
+            // Use a trivial strategy: process_id and secret_key are equal.
+            let id = (secret_key, secret_key);
+            // Read session params snapshot from frontend env.
+            let session_config = self.env.session_params_snapshot();
+
+            let session_impl: Arc<SessionImpl> = SessionImpl::new(
+                self.env.clone(),
+                Arc::new(AuthContext::new(
                     database.to_string(),
                     user_name.to_string(),
                     user.id,
-                ));
-                (auth_ctx, user_authenticator)
-            } else {
-                return Err(Box::new(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!("Role {} does not exist", user_name),
-                )));
-            }
-        };
-        let session_config = self.env.meta_client().get_session_params().await?;
-        // Assign a session id and insert into sessions map (for cancel request).
-        let secret_key = self.number.fetch_add(1, Ordering::Relaxed);
-        // Use a trivial strategy: process_id and secret_key are equal.
-        let id = (secret_key, secret_key);
+                )),
+                user_authenticator,
+                id,
+                peer_addr,
+                session_config,
+            )
+            .into();
+            self.insert_session(session_impl.clone());
 
-        let session_impl: Arc<SessionImpl> = SessionImpl::new(
-            self.env.clone(),
-            auth_ctx,
-            user_authenticator,
-            id,
-            peer_addr,
-            session_config,
-        )
-        .into();
-        self.insert_session(session_impl.clone());
-
-        Ok(session_impl)
+            Ok(session_impl)
+        } else {
+            Err(Box::new(Error::new(
+                ErrorKind::InvalidInput,
+                format!("Role {} does not exist", user_name),
+            )))
+        }
     }
 
     /// Used when cancel request happened.
@@ -1201,7 +1208,7 @@ impl Session for SessionImpl {
         }
     }
 
-    fn set_config(&self, key: &str, value: String) -> std::result::Result<(), BoxedError> {
+    fn set_config(&self, key: &str, value: String) -> std::result::Result<String, BoxedError> {
         Self::set_config(self, key, value).map_err(Into::into)
     }
 

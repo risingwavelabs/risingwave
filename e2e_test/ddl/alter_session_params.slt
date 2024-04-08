@@ -10,7 +10,7 @@ false
 statement ok
 alter system set RW_IMPLICIT_FLUSH to true;
 
-sleep 3s
+sleep 1s
 
 connection other2
 query T

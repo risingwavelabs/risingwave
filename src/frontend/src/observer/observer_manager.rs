@@ -20,6 +20,7 @@ use parking_lot::RwLock;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::hash::ParallelUnitMapping;
+use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeFrontend};
 use risingwave_pb::common::WorkerNode;
@@ -27,6 +28,7 @@ use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{FragmentParallelUnitMapping, MetaSnapshot, SubscribeResponse};
+use thiserror_ext::AsReport;
 use tokio::sync::watch::Sender;
 
 use crate::catalog::root_catalog::Catalog;
@@ -43,6 +45,7 @@ pub struct FrontendObserverNode {
     user_info_updated_tx: Sender<UserInfoVersion>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     system_params_manager: LocalSystemParamsManagerRef,
+    session_params: Arc<RwLock<SessionConfig>>,
 }
 
 impl ObserverState for FrontendObserverNode {
@@ -89,6 +92,15 @@ impl ObserverState for FrontendObserverNode {
             }
             Info::SystemParams(p) => {
                 self.system_params_manager.try_set_params(p);
+            }
+            Info::SessionParam(p) => {
+                if let Err(e) =
+                    self.session_params
+                        .write()
+                        .set(&p.param, p.value().to_string(), &mut ())
+                {
+                    tracing::error!(error = %e.as_report(), "failed to set session param notified by meta");
+                }
             }
             Info::HummockStats(stats) => {
                 self.handle_table_stats_notification(stats);
@@ -192,6 +204,7 @@ impl FrontendObserverNode {
         user_info_updated_tx: Sender<UserInfoVersion>,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
         system_params_manager: LocalSystemParamsManagerRef,
+        session_params: Arc<RwLock<SessionConfig>>,
     ) -> Self {
         Self {
             worker_node_manager,
@@ -201,6 +214,7 @@ impl FrontendObserverNode {
             user_info_updated_tx,
             hummock_snapshot_manager,
             system_params_manager,
+            session_params,
         }
     }
 

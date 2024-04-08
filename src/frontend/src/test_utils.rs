@@ -80,11 +80,10 @@ pub struct LocalFrontend {
     env: FrontendEnv,
 }
 
-#[async_trait::async_trait]
 impl SessionManager for LocalFrontend {
     type Session = SessionImpl;
 
-    async fn connect(
+    fn connect(
         &self,
         _database: &str,
         _user_name: &str,

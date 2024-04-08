@@ -16,6 +16,8 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use risingwave_common::session_config::{SessionConfig, SessionConfigError};
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_pb::meta::SetSessionParamRequest;
 use thiserror_ext::AsReport;
 use tokio::sync::RwLock;
 use tracing::info;
@@ -32,6 +34,7 @@ pub struct SessionParamsManager {
     meta_store: MetaStoreRef,
     // Cached parameters.
     params: RwLock<SessionConfig>,
+    notification_manager: NotificationManagerRef,
 }
 
 impl SessionParamsManager {
@@ -39,6 +42,7 @@ impl SessionParamsManager {
     pub async fn new(
         meta_store: MetaStoreRef,
         init_params: SessionConfig,
+        notification_manager: NotificationManagerRef,
         cluster_first_launch: bool,
     ) -> MetaResult<Self> {
         let params = if cluster_first_launch {
@@ -58,6 +62,7 @@ impl SessionParamsManager {
         Ok(Self {
             meta_store,
             params: RwLock::new(params.clone()),
+            notification_manager,
         })
     }
 
@@ -72,28 +77,40 @@ impl SessionParamsManager {
 
         // FIXME: use a real reporter
         let reporter = &mut ();
-        if let Some(value) = value {
-            mem_txn.set(name, value, reporter)?;
+        let new_param = if let Some(value) = value {
+            mem_txn.set(name, value, reporter)?
         } else {
-            mem_txn.reset(name, reporter)?;
-        }
+            mem_txn.reset(name, reporter)?
+        };
         let mut store_txn = Transaction::default();
         mem_txn.apply_to_txn(&mut store_txn).await?;
         self.meta_store.txn(store_txn).await?;
 
         mem_txn.commit();
+        self.notify_workers(name.to_string(), new_param.clone());
 
-        Ok(params.get(name)?)
+        Ok(new_param)
     }
 
     /// Flush the cached params to meta store.
     pub async fn flush_params(&self) -> MetaResult<()> {
         Ok(SessionConfig::insert(self.params.read().await.deref(), &self.meta_store).await?)
     }
+
+    pub fn notify_workers(&self, name: String, value: String) {
+        self.notification_manager.notify_frontend_without_version(
+            Operation::Update,
+            Info::SessionParam(SetSessionParamRequest {
+                param: name,
+                value: Some(value),
+            }),
+        );
+    }
 }
 
 use async_trait::async_trait;
 
+use super::NotificationManagerRef;
 use crate::model::{MetadataModelResult, Transactional};
 
 const SESSION_PARAMS_CF_NAME: &str = "cf/session_params";

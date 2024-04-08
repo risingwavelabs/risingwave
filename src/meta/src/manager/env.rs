@@ -319,6 +319,7 @@ impl MetaSrvEnv {
                         SessionParamsManager::new(
                             meta_store.clone(),
                             init_session_config.clone(),
+                            notification_manager.clone(),
                             cluster_first_launch,
                         )
                         .await?,
@@ -354,7 +355,12 @@ impl MetaSrvEnv {
         };
         let session_params_controller = if let Some(store) = &meta_store_sql {
             Some(Arc::new(
-                SessionParamsController::new(store.clone(), init_session_config).await?,
+                SessionParamsController::new(
+                    store.clone(),
+                    notification_manager.clone(),
+                    init_session_config,
+                )
+                .await?,
             ))
         } else {
             None
