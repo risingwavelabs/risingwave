@@ -31,7 +31,7 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableDesc;
 use risingwave_common::hash::table_distribution::TableDistribution;
 use risingwave_common::hash::{
-    ParallelUnitId, ParallelUnitMapping, VirtualNode, WorkerId, WorkerMapping,
+    VirtualNode, WorkerId, WorkerMapping,
 };
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;

@@ -27,7 +27,7 @@ use risingwave_meta_model_v2::SourceId;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
-use risingwave_pb::meta::{FragmentParallelUnitMapping, FragmentWorkerMapping};
+use risingwave_pb::meta::{FragmentWorkerMapping};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
@@ -63,7 +63,6 @@ impl FragmentManagerCore {
                 let parallel_unit_to_worker: HashMap<_, _> = table_fragments
                     .actor_status
                     .values()
-                    .into_iter()
                     .map(|status| status.get_parallel_unit().unwrap())
                     .map(|parallel_unit| (parallel_unit.id, parallel_unit.worker_node_id))
                     .collect();
@@ -207,7 +206,7 @@ impl FragmentManager {
             .values()
             .map(|actor_status| {
                 let parallel_unit = actor_status.get_parallel_unit().unwrap();
-                (parallel_unit.id, parallel_unit.worker_node_id as u32)
+                (parallel_unit.id, parallel_unit.worker_node_id)
             })
             .collect();
 

@@ -18,8 +18,8 @@ use std::time::Duration;
 
 use rand::seq::SliceRandom;
 use risingwave_common::bail;
-use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping, WorkerId, WorkerMapping};
-use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
+use risingwave_common::hash::{WorkerId, WorkerMapping};
+
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 

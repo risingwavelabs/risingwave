@@ -26,7 +26,7 @@ use risingwave_meta_model_v2::prelude::{
     Actor, ActorDispatcher, Fragment, Sink, StreamingJob, WorkerProperty,
 };
 use risingwave_meta_model_v2::{
-    actor, actor_dispatcher, fragment, object, sink, streaming_job, worker, worker_property,
+    actor, actor_dispatcher, fragment, object, sink, streaming_job, worker_property,
     ActorId, ActorUpstreamActors, ConnectorSplits, ExprContext, FragmentId, FragmentVnodeMapping,
     I32Array, JobStatus, ObjectId, SinkId, SourceId, StreamingParallelism, TableId, VnodeBitmap,
     WorkerId,
@@ -39,7 +39,7 @@ use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{PbActorStatus, PbFragment, PbState};
 use risingwave_pb::meta::{
-    FragmentParallelUnitMapping, FragmentWorkerMapping, PbFragmentParallelUnitMapping,
+    FragmentWorkerMapping,
     PbFragmentWorkerMapping, PbTableFragments,
 };
 use risingwave_pb::source::PbConnectorSplits;
@@ -966,6 +966,8 @@ impl CatalogController {
             .await?;
         }
 
+        let parallel_unit_to_worker = Self::get_parallel_unit_to_worker_map(&txn).await?;
+
         txn.commit().await?;
 
         self.notify_fragment_mapping(
@@ -974,7 +976,11 @@ impl CatalogController {
                 .into_iter()
                 .map(|(fragment_id, mapping)| PbFragmentWorkerMapping {
                     fragment_id: fragment_id as _,
-                    mapping: Some(mapping.into_inner()),
+                    mapping: Some(
+                        ParallelUnitMapping::from_protobuf(mapping.inner_ref())
+                            .to_worker(&parallel_unit_to_worker)
+                            .to_protobuf(),
+                    ),
                 })
                 .collect(),
         )

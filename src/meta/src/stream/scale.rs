@@ -41,7 +41,7 @@ use risingwave_pb::meta::table_fragments::fragment::{
     FragmentDistributionType, PbFragmentDistributionType,
 };
 use risingwave_pb::meta::table_fragments::{self, ActorStatus, PbFragment, State};
-use risingwave_pb::meta::{FragmentParallelUnitMappings, FragmentWorkerMappings};
+use risingwave_pb::meta::{FragmentWorkerMappings};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, PbStreamActor, StreamNode,

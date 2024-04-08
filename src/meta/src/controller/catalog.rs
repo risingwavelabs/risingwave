@@ -19,6 +19,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{TableOption, DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
+use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
@@ -28,10 +29,10 @@ use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::table::TableType;
 use risingwave_meta_model_v2::{
     actor, connection, database, fragment, function, index, object, object_dependency, schema,
-    sink, source, streaming_job, subscription, table, user_privilege, view, ActorId,
-    ActorUpstreamActors, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId,
-    FunctionId, I32Array, IndexId, JobStatus, ObjectId, PrivateLinkService, Property, SchemaId,
-    SinkId, SourceId, StreamSourceInfo, StreamingParallelism, TableId, UserId,
+    sink, source, streaming_job, subscription, table, user_privilege, view, worker_property,
+    ActorId, ActorUpstreamActors, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId,
+    FragmentId, FunctionId, I32Array, IndexId, JobStatus, ObjectId, PrivateLinkService, Property,
+    SchemaId, SinkId, SourceId, StreamSourceInfo, StreamingParallelism, TableId, UserId, WorkerId,
 };
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
@@ -44,7 +45,9 @@ use risingwave_pb::meta::relation::PbRelationInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
-use risingwave_pb::meta::{PbRelation, PbRelationGroup};
+use risingwave_pb::meta::{
+    FragmentParallelUnitMapping, PbFragmentWorkerMapping, PbRelation, PbRelationGroup,
+};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
 use risingwave_pb::user::PbUserInfo;
@@ -273,7 +276,29 @@ impl CatalogController {
             .into_tuple()
             .all(&txn)
             .await?;
+
+        let parallel_unit_to_worker = Self::get_parallel_unit_to_worker_map(&txn).await?;
+
         let fragment_mappings = get_fragment_mappings_by_jobs(&txn, streaming_jobs.clone()).await?;
+
+        let fragment_mappings = fragment_mappings
+            .into_iter()
+            .map(
+                |FragmentParallelUnitMapping {
+                     fragment_id,
+                     mapping,
+                 }| {
+                    PbFragmentWorkerMapping {
+                        fragment_id,
+                        mapping: Some(
+                            ParallelUnitMapping::from_protobuf(&mapping.unwrap())
+                                .to_worker(&parallel_unit_to_worker)
+                                .to_protobuf(),
+                        ),
+                    }
+                },
+            )
+            .collect();
 
         // The schema and objects in the database will be delete cascade.
         let res = Object::delete_by_id(database_id).exec(&txn).await?;
@@ -294,6 +319,7 @@ impl CatalogController {
                 }),
             )
             .await;
+
         self.notify_fragment_mapping(NotificationOperation::Delete, fragment_mappings)
             .await;
         Ok((
@@ -307,6 +333,32 @@ impl CatalogController {
             },
             version,
         ))
+    }
+
+    pub(crate) async fn get_parallel_unit_to_worker_map(
+        txn: &DatabaseTransaction,
+    ) -> MetaResult<HashMap<u32, u32>> {
+        let worker_parallel_units = WorkerProperty::find()
+            .select_only()
+            .columns([
+                worker_property::Column::WorkerId,
+                worker_property::Column::ParallelUnitIds,
+            ])
+            .into_tuple::<(WorkerId, I32Array)>()
+            .all(txn)
+            .await?;
+
+        let parallel_unit_to_worker = worker_parallel_units
+            .into_iter()
+            .flat_map(|(worker_id, parallel_unit_ids)| {
+                parallel_unit_ids
+                    .into_inner()
+                    .into_iter()
+                    .map(move |parallel_unit_id| (parallel_unit_id as u32, worker_id as u32))
+            })
+            .collect::<HashMap<_, _>>();
+
+        Ok(parallel_unit_to_worker)
     }
 
     pub async fn create_schema(&self, schema: PbSchema) -> MetaResult<NotificationVersion> {
@@ -2078,6 +2130,8 @@ impl CatalogController {
         }
         let user_infos = list_user_info_by_ids(to_update_user_ids, &txn).await?;
 
+        let parallel_unit_to_worker = Self::get_parallel_unit_to_worker_map(&txn).await?;
+
         txn.commit().await?;
 
         // notify about them.
@@ -2152,6 +2206,26 @@ impl CatalogController {
                 NotificationInfo::RelationGroup(PbRelationGroup { relations }),
             )
             .await;
+
+        let fragment_mappings = fragment_mappings
+            .into_iter()
+            .map(
+                |FragmentParallelUnitMapping {
+                     fragment_id,
+                     mapping,
+                 }| {
+                    PbFragmentWorkerMapping {
+                        fragment_id,
+                        mapping: Some(
+                            ParallelUnitMapping::from_protobuf(&mapping.unwrap())
+                                .to_worker(&parallel_unit_to_worker)
+                                .to_protobuf(),
+                        ),
+                    }
+                },
+            )
+            .collect();
+
         self.notify_fragment_mapping(NotificationOperation::Delete, fragment_mappings)
             .await;
 

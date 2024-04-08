@@ -16,12 +16,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
-use risingwave_common::hash::{ParallelUnitMapping, WorkerMapping};
+use risingwave_common::hash::{WorkerMapping};
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{
-    FragmentParallelUnitMapping, FragmentParallelUnitMappings, FragmentWorkerMapping,
+    FragmentWorkerMapping,
     FragmentWorkerMappings,
 };
 use tokio::sync::oneshot::Sender;

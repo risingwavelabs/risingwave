@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::meta::serving_service_server::ServingService;
 use risingwave_pb::meta::{
-    FragmentParallelUnitMapping, FragmentWorkerMapping, GetServingVnodeMappingsRequest,
+    FragmentWorkerMapping, GetServingVnodeMappingsRequest,
     GetServingVnodeMappingsResponse,
 };
 use tonic::{Request, Response, Status};

@@ -23,7 +23,7 @@ use risingwave_pb::hummock::WriteLimits;
 use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::{
-    FragmentParallelUnitMapping, FragmentWorkerMapping, MetaSnapshot, SubscribeRequest,
+    FragmentWorkerMapping, MetaSnapshot, SubscribeRequest,
     SubscribeType,
 };
 use risingwave_pb::user::UserInfo;
