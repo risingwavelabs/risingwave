@@ -27,7 +27,7 @@ AggState is the state we use to compute to the result (output) of the aggregatio
 Within each aggregation group, it will have an AggState for each AggCall.
 
 AggGroups are created per aggregation group.
-For instance with `GROUP BY v1, v2`, there will be a group for each unique combination of `v1` and `v2`.
+For instance with `GROUP BY x1, x2`, there will be a group for each unique combination of `x1` and `x2`.
 
 Whenever stream chunks come in, the executor will update the aggregation state for each group, per agg call.
 
@@ -42,7 +42,7 @@ For each of these aggregations, they have 1 state table (`AggStateStorage::Mater
 
 ![init-agg-group](./images/aggregation/init-agg-group.png)
 
-AggGroups are initialized when the `AggGroupCache` is empty.
+AggGroups are initialized when corresponding aggregation groups are not found in `AggGroupCache`.
 This could be either because the `AggGroupCache` got evicted,
 or its a new group key.
 
