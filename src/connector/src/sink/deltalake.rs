@@ -105,7 +105,9 @@ impl DeltaLakeCommon {
                 let mut storage_options = HashMap::new();
                 storage_options.insert(
                     GCS_SERVICE_ACCOUNT.to_string(),
-                    self.gcs_service_account.clone().unwrap(),
+                    self.gcs_service_account.clone().ok_or_else(|| {
+                        SinkError::Config(anyhow!("gcs.service.account is required with aws gcs"))
+                    })?,
                 );
                 deltalake::open_table_with_storage_options(gcs_path.clone(), storage_options)
                     .await?
