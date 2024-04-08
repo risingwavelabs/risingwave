@@ -13,10 +13,19 @@ impl MigrationTrait for Migration {
                 MigrationTable::alter()
                     .table(Function::Table)
                     .add_column(ColumnDef::new(Function::Runtime).string())
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                MigrationTable::alter()
+                    .table(Function::Table)
                     .add_column(ColumnDef::new(Function::FunctionType).string())
                     .to_owned(),
             )
             .await?;
+
         Ok(())
     }
 
@@ -28,6 +37,14 @@ impl MigrationTrait for Migration {
                 MigrationTable::alter()
                     .table(Function::Table)
                     .drop_column(Alias::new(Function::Runtime.to_string()))
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                MigrationTable::alter()
+                    .table(Function::Table)
                     .drop_column(Alias::new(Function::FunctionType.to_string()))
                     .to_owned(),
             )
