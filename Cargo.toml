@@ -148,6 +148,7 @@ arrow-schema-deltalake = { package = "arrow-schema", version = "48.0.1" }
 # compile time and binary size.
 deltalake = { git = "https://github.com/risingwavelabs/delta-rs", rev = "5c2dccd4640490202ffe98adbd13b09cef8e007b", features = [
   "s3-no-concurrent-write",
+  "gcs",
 ] }
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "2682b85" }
 parquet = "50"
