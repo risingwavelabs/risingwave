@@ -106,6 +106,9 @@ pub(crate) fn derive_pk(
     let mut in_order = FixedBitSet::with_capacity(schema.len());
     let mut pk = vec![];
 
+    let func_dep = input.functional_dependency();
+    let user_order_by = func_dep.minimize_order_key(user_order_by);
+
     for order in &user_order_by.column_orders {
         let idx = order.column_index;
         pk.push(order.clone());

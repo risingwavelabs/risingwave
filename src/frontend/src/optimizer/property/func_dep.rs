@@ -17,6 +17,8 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 
+use crate::optimizer::property::Order;
+
 /// [`FunctionalDependency`] represent a dependency of from --> to.
 ///
 /// For columns ABCD, the FD AC --> B is represented as {0, 2} --> {1} using `FixedBitset`.
@@ -272,6 +274,32 @@ impl FunctionalDependencySet {
         self.is_key_inner(&key_bitset)
     }
 
+    /// This is just a wrapper around `Self::minimize_key_bitset` to minimize `key_indices`.
+    pub fn minimize_key(&self, key_indices: &[usize]) -> Vec<usize> {
+        let mut key_bitset = FixedBitSet::from_iter(key_indices.iter().copied());
+        key_bitset.grow(self.column_count);
+        let res = self.minimize_key_bitset(key_bitset);
+        res.ones().collect_vec()
+    }
+
+    /// This is just a wrapper around `Self::minimize_key_bitset` to minimize `order_key`.
+    pub fn minimize_order_key(&self, order_key: Order) -> Order {
+        let mut order_bitset =
+            FixedBitSet::from_iter(order_key.column_orders.iter().map(|o| o.column_index));
+        order_bitset.grow(self.column_count);
+        let min_bitset = self.minimize_key_bitset(order_bitset);
+        let order = order_key
+            .column_orders
+            .iter()
+            .filter(|o| min_bitset.contains(o.column_index))
+            .cloned()
+            .collect_vec();
+        Order::new(order)
+    }
+
+    /// -------
+    /// Overview
+    /// -------
     /// Remove redundant columns from the given set.
     ///
     /// Redundant columns can be functionally determined by other columns so there is no need to
@@ -283,17 +311,14 @@ impl FunctionalDependencySet {
     ///
     /// This algorithm may not necessarily find the key with the least number of columns.
     /// But it will ensure that no redundant columns will be preserved.
-    pub fn minimize_key(&self, key_indices: &[usize]) -> Vec<usize> {
-        let mut key_bitset = FixedBitSet::from_iter(key_indices.iter().copied());
-        key_bitset.grow(self.column_count);
-        let res = self.minimize_key_inner(key_bitset);
-        res.ones().collect_vec()
-    }
-
+    ///
+    /// ---------
+    /// Algorithm
+    /// ---------
     /// This algorithm removes columns one by one and check
     /// whether the remaining columns can form a key or not. If the remaining columns can form a
     /// key, then this column can be removed.
-    fn minimize_key_inner(&self, key: FixedBitSet) -> FixedBitSet {
+    fn minimize_key_bitset(&self, key: FixedBitSet) -> FixedBitSet {
         assert!(
             self.is_key_inner(&key),
             "{:?} is not a key!",
