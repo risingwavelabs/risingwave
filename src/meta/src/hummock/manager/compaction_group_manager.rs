@@ -32,12 +32,12 @@ use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
+use risingwave_pb::hummock::subscribe_compaction_event_request::ReportTask;
 use risingwave_pb::hummock::{
     compact_task, CompactionConfig, CompactionGroupInfo, CompatibilityVersion, GroupConstruct,
     GroupDelta, GroupDestroy, GroupMetaChange, GroupTableChange,
 };
 use tokio::sync::{OnceCell, RwLock};
-use tracing::warn;
 
 use super::write_lock;
 use crate::controller::SqlMetaStore;
@@ -510,7 +510,12 @@ impl HummockManager {
         table_ids: &[StateTableId],
     ) -> Result<CompactionGroupId> {
         let result = self
-            .move_state_table_to_compaction_group(parent_group_id, table_ids, None, 0)
+            .move_state_table_to_compaction_group(
+                parent_group_id,
+                table_ids,
+                None,
+                self.env.opts.partition_vnode_count,
+            )
             .await?;
         self.group_to_table_vnode_partition
             .write()
@@ -535,7 +540,7 @@ impl HummockManager {
             return Ok((parent_group_id, table_to_partition));
         }
         let table_ids = table_ids.iter().cloned().unique().collect_vec();
-        let mut compaction_guard = write_lock!(self, compaction).await;
+        let compaction_guard = write_lock!(self, compaction).await;
         let mut versioning_guard = write_lock!(self, versioning).await;
         let versioning = versioning_guard.deref_mut();
         let current_version = &versioning.current_version;
@@ -741,27 +746,19 @@ impl HummockManager {
                     }
                 }
                 if need_cancel {
-                    canceled_tasks.push(task.clone());
+                    canceled_tasks.push(ReportTask {
+                        task_id: task.task_id,
+                        task_status: TaskStatus::ManualCanceled as i32,
+                        table_stats_change: HashMap::default(),
+                        sorted_output_ssts: vec![],
+                    });
                 }
             }
         }
 
-        for task in canceled_tasks {
-            if !self
-                .report_compact_task_impl(
-                    task.task_id,
-                    None,
-                    TaskStatus::ManualCanceled,
-                    vec![],
-                    &mut compaction_guard,
-                    None,
-                )
-                .await
-                .unwrap_or(false)
-            {
-                warn!("failed to cancel task-{}", task.task_id);
-            }
-        }
+        drop(compaction_guard);
+        self.report_compact_tasks(canceled_tasks).await?;
+
         // Don't trigger compactions if we enable deterministic compaction
         if !self.env.opts.compaction_deterministic_test {
             // commit_epoch may contains SSTs from any compaction group

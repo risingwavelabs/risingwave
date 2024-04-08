@@ -119,7 +119,7 @@ pub async fn add_test_tables(
         assert_eq!(compactor.context_id(), context_id);
     }
 
-    let ret = hummock_manager
+    hummock_manager
         .report_compact_task_for_test(
             compact_task.task_id,
             Some(compact_task),
@@ -129,7 +129,6 @@ pub async fn add_test_tables(
         )
         .await
         .unwrap();
-    assert!(ret);
     if temp_compactor {
         hummock_manager
             .compactor_manager_ref_for_test()

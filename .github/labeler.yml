@@ -24,6 +24,10 @@ labels:
   title: "^doc.*"
 - label: "type/deprecate"
   title: "^deprecate.*"
+- label: "cherry-pick"
+  title: "^cherry-pick.*"
+- label: "cherry-pick"
+  title: "^cherry pick.*"
 
 - label: "breaking-change"
   body: '- \[x\] My PR contains breaking changes'

@@ -274,7 +274,10 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                 .compact()
                 .with_filter(FilterFn::new(|metadata| metadata.is_event())) // filter-out all span-related info
                 .boxed(),
-            Deployment::Cloud => fmt_layer.json().boxed(),
+            Deployment::Cloud => fmt_layer
+                .json()
+                .map_event_format(|e| e.with_current_span(false)) // avoid duplication as there's a span list field
+                .boxed(),
             Deployment::Other => fmt_layer.boxed(),
         };
 

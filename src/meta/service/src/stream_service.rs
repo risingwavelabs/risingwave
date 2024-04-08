@@ -284,6 +284,7 @@ impl StreamManagerService for StreamServiceImpl {
                     .map(|(table_id, state, parallelism)| {
                         let parallelism = match parallelism {
                             StreamingParallelism::Adaptive => model::TableParallelism::Adaptive,
+                            StreamingParallelism::Custom => model::TableParallelism::Custom,
                             StreamingParallelism::Fixed(n) => {
                                 model::TableParallelism::Fixed(n as _)
                             }

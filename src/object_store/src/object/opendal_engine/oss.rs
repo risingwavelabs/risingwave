@@ -40,6 +40,7 @@ impl OpendalObjectStore {
         builder.endpoint(&endpoint);
         builder.access_key_id(&access_key_id);
         builder.access_key_secret(&access_key_secret);
+
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())

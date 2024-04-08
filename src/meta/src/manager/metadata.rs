@@ -447,7 +447,7 @@ impl MetadataManager {
     /// In other words, it's the `MView` fragment if it exists, otherwise it's the `Source` fragment.
     ///
     /// ## What do we expect to get for different creating streaming job
-    /// - MV/Sink/Index should have MV upstream fragments for upstream MV/Tables, and Source upstream fragments for upstream backfill-able sources.
+    /// - MV/Sink/Index should have MV upstream fragments for upstream MV/Tables, and Source upstream fragments for upstream shared sources.
     /// - CDC Table has a Source upstream fragment.
     /// - Sources and other Tables shouldn't have an upstream fragment.
     pub async fn get_upstream_root_fragments(
@@ -667,6 +667,38 @@ impl MetadataManager {
                     .get_running_actors_of_fragment(id as _)
                     .await?;
                 Ok(actor_ids.into_iter().map(|id| id as ActorId).collect())
+            }
+        }
+    }
+
+    pub async fn get_running_actors_and_upstream_actors_of_fragment(
+        &self,
+        id: FragmentId,
+    ) -> MetaResult<HashSet<(ActorId, Vec<ActorId>)>> {
+        match self {
+            MetadataManager::V1(mgr) => {
+                mgr.fragment_manager
+                    .get_running_actors_and_upstream_of_fragment(id)
+                    .await
+            }
+            MetadataManager::V2(mgr) => {
+                let actor_ids = mgr
+                    .catalog_controller
+                    .get_running_actors_and_upstream_of_fragment(id as _)
+                    .await?;
+                Ok(actor_ids
+                    .into_iter()
+                    .map(|(id, actors)| {
+                        (
+                            id as ActorId,
+                            actors
+                                .into_inner()
+                                .into_iter()
+                                .flat_map(|(_, ids)| ids.into_iter().map(|id| id as ActorId))
+                                .collect(),
+                        )
+                    })
+                    .collect())
             }
         }
     }
