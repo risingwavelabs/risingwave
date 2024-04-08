@@ -111,7 +111,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
         let metrics_info =
             MetricsInfo::new(metrics, table_catalog.id, actor_context.id, "Materialize");
-        println!("这里version_column_index = {:?}", version_column_index);
         Self {
             input,
             schema,
@@ -512,7 +511,6 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
             .iter()
             .map(|(_, k, _)| k.as_slice().into())
             .collect();
-        println!("这里1 conflict_behavior = {:?}", conflict_behavior);
         self.fetch_keys(key_set.iter().map(|v| v.deref()), table, conflict_behavior)
             .await?;
         let mut fixed_changes = MaterializeBuffer::new();
@@ -532,10 +530,8 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                         ConflictBehavior::Overwrite => {
                             match self.force_get(&key) {
                                 Some(old_row) => {
-                                    println!("这里");
                                     let mut handle_conflict = true;
                                     if let Some(idx) = version_column_index {
-                                        println!("有version column");
                                         let old_row_deserialized = row_serde
                                             .deserializer
                                             .deserialize(old_row.row.clone())?;
@@ -546,7 +542,6 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                             &old_row_deserialized.index(idx as usize),
                                             new_row_deserialized.index(idx as usize),
                                         );
-                                        println!("handle_conflict = {}", handle_conflict);
                                     }
                                     if handle_conflict {
                                         fixed_changes().update(
