@@ -476,7 +476,7 @@ impl SourceStreamChunkRowWriter<'_> {
                             static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
                                 LazyLock::new(LogSuppresser::default);
                             if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                tracing::warn!(
+                                tracing::info!(
                                     error = %error.as_report(),
                                     split_id = self.row_meta.as_ref().map(|m| m.split_id),
                                     offset = self.row_meta.as_ref().map(|m| m.offset),
