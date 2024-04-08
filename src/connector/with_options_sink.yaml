@@ -523,7 +523,7 @@ PulsarConfig:
 RedisConfig:
   fields:
   - name: redis.url
-    field_type: Vec<String>
+    field_type: String
     required: true
 StarrocksConfig:
   fields:

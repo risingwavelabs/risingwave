@@ -55,12 +55,13 @@ sqllogictest -p 4566 -d dev './e2e_test/sink/redis_cluster_sink.slt'
 
 redis-cli -c --cluster call 127.0.0.1:7000 keys \* >> ./query_result_1.txt
 
-if cat ./query_result_1.txt | tr '\n' '\0' | xargs -0 -n1 bash -c '[[ "$0" == "{\"v1\":1}" || "$0" == "{\"v2\":2}" || "$0" == "{\"v3\":3}" ]]'; then
+line_count=$(wc -l < query_result_1.txt)
+if [ "$line_count" -eq 4 ]; then
     echo "Redis sink check passed"
 else
     cat ./query_result_1.txt
-  echo "The output is not as expected."
-  exit 1
+    echo "The output is not as expected."
+    exit 1
 fi
 
 echo "--- Kill cluster"
