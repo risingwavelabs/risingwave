@@ -479,26 +479,23 @@ impl MetaSrvEnv {
         Self::for_test_opts(MetaOpts::test(false)).await
     }
 
-    pub async fn for_test_with_kv_meta_store() -> Self {
+    // Instance for test with sql meta store.
+    #[cfg(not(madsim))]
+    pub async fn for_test_with_sql_meta_store() -> Self {
         Self::new(
             MetaOpts::test(false),
             risingwave_common::system_param::system_params_for_test(),
-            MetaStoreImpl::Kv(MemStore::default().into_ref()),
+            MetaStoreImpl::Sql(SqlMetaStore::for_test().await),
         )
         .await
         .unwrap()
     }
 
     pub async fn for_test_opts(opts: MetaOpts) -> Self {
-        #[cfg(madsim)]
-        let meta_store_impl = MetaStoreImpl::Kv(MemStore::default().into_ref());
-        #[cfg(not(madsim))]
-        let meta_store_impl = MetaStoreImpl::Sql(SqlMetaStore::for_test().await);
-
         Self::new(
             opts,
             risingwave_common::system_param::system_params_for_test(),
-            meta_store_impl,
+            MetaStoreImpl::Kv(MemStore::default().into_ref()),
         )
         .await
         .unwrap()
