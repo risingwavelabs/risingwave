@@ -1207,46 +1207,64 @@ impl<S: StateStore> ColumnarStoreStorageTableInnerIterInner<S> {
             });
         }
 
-        tracing::debug!(vnode, "!!!range iter start");
-        let instant = Instant::now();
-        let mut row_count = 0;
-        loop {
-            let (vnode_prefixed_key, mut iter_output) = match pk_rx.recv().await {
-                Some(r) => r?,
-                None => {
-                    break;
+        let (row_tx, mut row_rx) = tokio::sync::mpsc::channel(buffer_size);
+        tokio::spawn(async move {
+            tracing::debug!(vnode, "!!!range iter start");
+            let instant = Instant::now();
+            let mut row_count = 0;
+            let row_tx_ = row_tx.clone();
+            let loop_fn = async move {
+                loop {
+                    let (vnode_prefixed_key, mut iter_output) = match pk_rx.recv().await {
+                        Some(r) => r?,
+                        None => {
+                            break;
+                        }
+                    };
+                    iter_output.reserve(self.non_pk_position_in_output_indices.len());
+                    let fut_iter = col_rxs.iter_mut().map(|rx| rx.recv());
+                    let kvs = join_all(fut_iter).await;
+                    for col_val in kvs
+                        .into_iter()
+                        .map(|kv| kv.unwrap_or_else(|| panic!("col expected")))
+                    {
+                        iter_output.push(col_val?);
+                    }
+                    let row = self
+                        .mapping
+                        .project(OwnedRow::new(iter_output))
+                        .into_owned_row();
+                    if row_count == 0 {
+                        tracing::debug!(vnode, "!!!range iter counter first");
+                    }
+                    row_count += 1;
+                    if row_count % print_freq == 0 {
+                        tracing::debug!(vnode, counter = row_count, "!!!range iter counter");
+                    }
+                    let row = KeyedRow {
+                        vnode_prefixed_key,
+                        row,
+                    };
+                    let _ = row_tx_.send(Ok(row)).await;
                 }
+                Ok::<(), StorageError>(())
             };
-            iter_output.reserve(self.non_pk_position_in_output_indices.len());
-            let fut_iter = col_rxs.iter_mut().map(|rx| rx.recv());
-            let kvs = join_all(fut_iter).await;
-            for col_val in kvs
-                .into_iter()
-                .map(|kv| kv.unwrap_or_else(|| panic!("col expected")))
-            {
-                iter_output.push(col_val?);
+            if let Err(err) = loop_fn.await {
+                let _ = row_tx.send(Err(err)).await;
             }
-            let row = self
-                .mapping
-                .project(OwnedRow::new(iter_output))
-                .into_owned_row();
-            if row_count == 0 {
-                tracing::debug!(vnode, "!!!range iter counter first");
-            }
-            row_count += 1;
-            if row_count % print_freq == 0 {
-                tracing::debug!(vnode, counter = row_count, "!!!range iter counter");
-            }
-            yield KeyedRow {
-                vnode_prefixed_key,
-                row,
-            }
+            tracing::debug!(
+                elapsed = instant.elapsed().as_secs(),
+                row_count,
+                vnode,
+                "!!!range iter stop"
+            );
+        });
+        loop {
+            let row = match row_rx.recv().await {
+                Some(r) => r?,
+                None => break,
+            };
+            yield row;
         }
-        tracing::debug!(
-            elapsed = instant.elapsed().as_secs(),
-            row_count,
-            vnode,
-            "!!!range iter stop"
-        );
     }
 }
