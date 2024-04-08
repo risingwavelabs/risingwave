@@ -151,6 +151,7 @@ impl HummockStorage {
         let backup_reader = BackupReader::new(
             &options.backup_storage_url,
             &options.backup_storage_directory,
+            &options.object_store_config,
         )
         .await
         .map_err(HummockError::read_backup_error)?;
