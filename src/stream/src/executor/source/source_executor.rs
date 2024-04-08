@@ -520,7 +520,7 @@ impl<S: StateStore> SourceExecutor<S> {
                         && let Some(ref tx) = wait_epoch_tx
                     {
                         tracing::debug!("epoch to wait {:?}", epoch);
-                        tx.send((Epoch(epoch.curr), updated_offsets))
+                        tx.send((Epoch(epoch.prev), updated_offsets))
                             .expect("wait_epoch_tx send success");
                     }
 
