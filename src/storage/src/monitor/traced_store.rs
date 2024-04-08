@@ -223,11 +223,6 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
     fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
         self.inner.update_vnode_bitmap(vnodes)
     }
-
-    // TODO: add trace span
-    async fn wait_epoch(&self, epoch: HummockEpoch) -> StorageResult<()> {
-        self.inner.wait_epoch(epoch).await
-    }
 }
 
 impl<S: StateStore> StateStore for TracedStateStore<S> {

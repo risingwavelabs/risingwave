@@ -19,7 +19,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use risingwave_common::buffer::Bitmap;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
-use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
+use risingwave_hummock_sdk::{HummockReadEpoch};
 
 use crate::error::StorageResult;
 use crate::storage_value::StorageValue;
@@ -146,10 +146,6 @@ impl LocalStateStore for PanicStateStore {
     }
 
     fn update_vnode_bitmap(&mut self, _vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
-        panic!("should not operate on the panic state store!");
-    }
-
-    async fn wait_epoch(&self, _epoch: HummockEpoch) -> StorageResult<()> {
         panic!("should not operate on the panic state store!");
     }
 }

@@ -86,7 +86,7 @@ impl<S: StateStore> SourceExecutor<S> {
     ) -> UnboundedSender<(Epoch, HashMap<SplitId, String>)> {
         let (wait_epoch_tx, wait_epoch_rx) = mpsc::unbounded_channel();
         let state_store_handler = core.split_state_store.clone();
-        let wait_epoch_worker = WaitEpochWoker {
+        let wait_epoch_worker = WaitEpochWorker {
             wait_epoch_rx,
             state_table_handler: state_store_handler,
         };
@@ -653,12 +653,12 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
     }
 }
 
-struct WaitEpochWoker<S: StateStore> {
+struct WaitEpochWorker<S: StateStore> {
     wait_epoch_rx: UnboundedReceiver<(Epoch, HashMap<SplitId, String>)>,
     state_table_handler: Arc<Mutex<SourceStateTableHandler<S>>>,
 }
 
-impl<S: StateStore> WaitEpochWoker<S> {
+impl<S: StateStore> WaitEpochWorker<S> {
     pub async fn run(mut self) {
         tracing::debug!("wait epoch worker start success");
         loop {
