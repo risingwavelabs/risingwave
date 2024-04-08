@@ -190,20 +190,20 @@ impl LruWatermarkController {
 
         self.metrics
             .jemalloc_allocated_bytes
-            .set(jemalloc_allocated_bytes as i64);
+            .set(jemalloc_allocated_bytes as _);
         self.metrics
             .jemalloc_active_bytes
-            .set(jemalloc_active_bytes as i64);
+            .set(jemalloc_active_bytes as _);
         self.metrics
             .jemalloc_resident_bytes
-            .set(jemalloc_resident_bytes as i64);
+            .set(jemalloc_resident_bytes as _);
         self.metrics
             .jemalloc_metadata_bytes
-            .set(jemalloc_metadata_bytes as i64);
+            .set(jemalloc_metadata_bytes as _);
         self.metrics
             .jvm_allocated_bytes
-            .set(jvm_allocated_bytes as i64);
-        self.metrics.jvm_active_bytes.set(jvm_active_bytes as i64);
+            .set(jvm_allocated_bytes as _);
+        self.metrics.jvm_active_bytes.set(jvm_active_bytes as _);
 
         self.watermark_sequence
     }
