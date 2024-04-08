@@ -883,19 +883,17 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::stream_chunk_size")]
     pub chunk_size: usize,
 
-    /// The initial permits that a channel holds, i.e., the maximum row count can be buffered in
-    /// the channel.
-    #[serde(default = "default::developer::stream_exchange_initial_permits")]
-    pub exchange_initial_permits: usize,
+    /// The maximum number of rows can be buffered in an exchange channel.
+    #[serde(default = "default::developer::stream_exchange_max_records")]
+    pub exchange_max_records: usize,
 
-    /// The permits that are batched to add back, for reducing the backward `AddPermits` messages
-    /// in remote exchange.
-    #[serde(default = "default::developer::stream_exchange_batched_permits")]
-    pub exchange_batched_permits: usize,
+    /// The maximum number of bytes can be buffered in an exchange channel.
+    #[serde(default = "default::developer::stream_exchange_max_bytes")]
+    pub exchange_max_bytes: usize,
 
-    /// The maximum number of concurrent barriers in an exchange channel.
-    #[serde(default = "default::developer::stream_exchange_concurrent_barriers")]
-    pub exchange_concurrent_barriers: usize,
+    /// The maximum number of barriers in an exchange channel.
+    #[serde(default = "default::developer::stream_exchange_max_barriers")]
+    pub exchange_max_barriers: usize,
 
     /// The concurrency for dispatching messages to different downstream jobs.
     ///
@@ -1531,15 +1529,15 @@ pub mod default {
             256
         }
 
-        pub fn stream_exchange_initial_permits() -> usize {
+        pub fn stream_exchange_max_records() -> usize {
             2048
         }
 
-        pub fn stream_exchange_batched_permits() -> usize {
-            256
+        pub fn stream_exchange_max_bytes() -> usize {
+            1024 * 1024 // 1MB
         }
 
-        pub fn stream_exchange_concurrent_barriers() -> usize {
+        pub fn stream_exchange_max_barriers() -> usize {
             1
         }
 

@@ -16,11 +16,11 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use anyhow::Context as _;
-use futures::{pin_mut, Stream};
+use futures::Stream;
 use futures_async_stream::try_stream;
 use pin_project::pin_project;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
-use risingwave_pb::task_service::{permits, GetStreamResponse};
+use risingwave_pb::task_service::{GetStreamResponse, PbPermits};
 use risingwave_rpc_client::error::TonicStatusWrapper;
 use risingwave_rpc_client::ComputeClientPool;
 use thiserror_ext::AsReport;
@@ -120,7 +120,6 @@ impl RemoteInput {
         up_down_ids: UpDownActorIds,
         up_down_frag: UpDownFragmentIds,
         metrics: Arc<StreamingMetrics>,
-        batched_permits: usize,
     ) -> Self {
         let actor_id = up_down_ids.0;
 
@@ -133,7 +132,6 @@ impl RemoteInput {
                 up_down_ids,
                 up_down_frag,
                 metrics,
-                batched_permits,
             ),
         }
     }
@@ -146,7 +144,6 @@ impl RemoteInput {
         up_down_ids: UpDownActorIds,
         up_down_frag: UpDownFragmentIds,
         metrics: Arc<StreamingMetrics>,
-        batched_permits_limit: usize,
     ) {
         let client = client_pool.get_by_addr(upstream_addr).await?;
         let (stream, permits_tx) = client
@@ -159,67 +156,55 @@ impl RemoteInput {
 
         let span: await_tree::Span = format!("RemoteInput (actor {up_actor_id})").into();
 
-        let mut batched_permits_accumulated = 0;
+        // process messages and ack permits in batch
+        let mut stream = stream.ready_chunks(8);
+        while let Some(inputs) = stream.next().verbose_instrument_await(span.clone()).await {
+            let mut ack_permits = PbPermits::default();
+            let mut messages = Vec::with_capacity(8);
 
-        pin_mut!(stream);
-        while let Some(data_res) = stream.next().verbose_instrument_await(span.clone()).await {
-            match data_res {
-                Ok(GetStreamResponse { message, permits }) => {
-                    let msg = message.unwrap();
-                    let bytes = Message::get_encoded_len(&msg);
-
-                    metrics
-                        .exchange_frag_recv_size
-                        .with_label_values(&[&up_fragment_id, &down_fragment_id])
-                        .inc_by(bytes as u64);
-
-                    let msg_res = Message::from_protobuf(&msg);
-                    if let Some(add_back_permits) = match permits.unwrap().value {
-                        // For records, batch the permits we received to reduce the backward
-                        // `AddPermits` messages.
-                        Some(permits::Value::Record(p)) => {
-                            batched_permits_accumulated += p;
-                            if batched_permits_accumulated >= batched_permits_limit as u32 {
-                                let permits = std::mem::take(&mut batched_permits_accumulated);
-                                Some(permits::Value::Record(permits))
-                            } else {
-                                None
-                            }
-                        }
-                        // For barriers, always send it back immediately.
-                        Some(permits::Value::Barrier(p)) => Some(permits::Value::Barrier(p)),
-                        None => None,
-                    } {
-                        permits_tx
-                            .send(add_back_permits)
-                            .context("RemoteInput backward permits channel closed.")?;
-                    }
-
-                    let mut msg = msg_res.context("RemoteInput decode message error")?;
-
-                    // Read barrier mutation from local barrier manager and attach it to the barrier message.
-                    if cfg!(not(test)) {
-                        if let Message::Barrier(barrier) = &mut msg {
-                            assert!(
-                                barrier.mutation.is_none(),
-                                "Mutation should be erased in remote side"
-                            );
-                            let mutation = local_barrier_manager
-                                .read_barrier_mutation(barrier)
-                                .await
-                                .context("Read barrier mutation error")?;
-                            barrier.mutation = mutation;
-                        }
-                    }
-                    yield msg;
-                }
-                Err(e) => {
+            for result in inputs {
+                let GetStreamResponse { message, permits } = result.map_err(|e| {
                     // TODO(error-handling): maintain the source chain
-                    return Err(StreamExecutorError::channel_closed(format!(
+                    StreamExecutorError::channel_closed(format!(
                         "RemoteInput tonic error: {}",
                         TonicStatusWrapper::from(e).as_report()
-                    )));
+                    ))
+                })?;
+                let msg = Message::from_protobuf(&message.unwrap())
+                    .context("RemoteInput decode message error")?;
+                messages.push(msg);
+
+                let permits = permits.unwrap();
+                ack_permits.records += permits.records;
+                ack_permits.bytes += permits.bytes;
+                ack_permits.barriers += permits.barriers;
+            }
+
+            metrics
+                .exchange_frag_recv_size
+                .with_label_values(&[&up_fragment_id, &down_fragment_id])
+                .inc_by(ack_permits.bytes);
+
+            permits_tx
+                .send(ack_permits)
+                .context("RemoteInput backward permits channel closed.")?;
+
+            for mut msg in messages {
+                // Read barrier mutation from local barrier manager and attach it to the barrier message.
+                if cfg!(not(test)) {
+                    if let Message::Barrier(barrier) = &mut msg {
+                        assert!(
+                            barrier.mutation.is_none(),
+                            "Mutation should be erased in remote side"
+                        );
+                        let mutation = local_barrier_manager
+                            .read_barrier_mutation(barrier)
+                            .await
+                            .context("Read barrier mutation error")?;
+                        barrier.mutation = mutation;
+                    }
                 }
+                yield msg;
             }
         }
     }
@@ -271,7 +256,6 @@ pub(crate) fn new_input(
             (upstream_actor_id, actor_id),
             (upstream_fragment_id, fragment_id),
             metrics,
-            context.config.developer.exchange_batched_permits,
         )
         .boxed_input()
     };

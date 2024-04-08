@@ -21,7 +21,7 @@ use futures_async_stream::try_stream;
 use risingwave_batch::task::BatchManager;
 use risingwave_pb::task_service::exchange_service_server::ExchangeService;
 use risingwave_pb::task_service::{
-    permits, GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse, PbPermits,
+    GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse, PbPermits,
 };
 use risingwave_stream::executor::exchange::permit::{MessageWithPermits, Receiver};
 use risingwave_stream::executor::Message;
@@ -115,7 +115,7 @@ impl ExchangeService for ExchangeServiceImpl {
         // Map the remaining stream to add-permits.
         let add_permits_stream = request_stream.map_ok(|req| match req.value.unwrap() {
             Value::Get(_) => unreachable!("the following messages must be `AddPermits`"),
-            Value::AddPermits(add_permits) => add_permits.value.unwrap(),
+            Value::AddPermits(add_permits) => add_permits,
         });
 
         Ok(Response::new(Self::get_stream_impl(
@@ -146,7 +146,7 @@ impl ExchangeServiceImpl {
         metrics: Arc<ExchangeServiceMetrics>,
         peer_addr: SocketAddr,
         mut receiver: Receiver,
-        add_permits_stream: impl Stream<Item = std::result::Result<permits::Value, tonic::Status>>,
+        add_permits_stream: impl Stream<Item = std::result::Result<PbPermits, tonic::Status>>,
         up_down_fragment_ids: (u32, u32),
     ) {
         tracing::debug!(target: "events::compute::exchange", peer_addr = %peer_addr, "serve stream exchange RPC");
@@ -184,7 +184,7 @@ impl ExchangeServiceImpl {
                     // forward the acquired permit to the downstream
                     let response = GetStreamResponse {
                         message: Some(proto),
-                        permits: Some(PbPermits { value: permits }),
+                        permits,
                     };
                     let bytes = Message::get_encoded_len(&response);
 

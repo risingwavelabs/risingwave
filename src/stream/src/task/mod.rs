@@ -19,6 +19,7 @@ use parking_lot::{MappedMutexGuard, Mutex, MutexGuard, RwLock};
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::ActorInfo;
+use risingwave_pb::task_service::PbPermits;
 use risingwave_rpc_client::ComputeClientPool;
 
 use crate::error::StreamResult;
@@ -120,9 +121,9 @@ impl SharedContext {
             compute_client_pool: ComputeClientPool::default(),
             config: StreamingConfig {
                 developer: StreamingDeveloperConfig {
-                    exchange_initial_permits: permit::for_test::INITIAL_PERMITS,
-                    exchange_batched_permits: permit::for_test::BATCHED_PERMITS,
-                    exchange_concurrent_barriers: permit::for_test::CONCURRENT_BARRIERS,
+                    exchange_max_records: permit::for_test::INITIAL_PERMITS.records as _,
+                    exchange_max_bytes: permit::for_test::INITIAL_PERMITS.bytes as _,
+                    exchange_max_barriers: permit::for_test::INITIAL_PERMITS.barriers as _,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -141,9 +142,11 @@ impl SharedContext {
         MutexGuard::map(self.channel_map.lock(), |map| {
             map.entry(actor_ids).or_insert_with(|| {
                 let (tx, rx) = permit::channel(
-                    self.config.developer.exchange_initial_permits,
-                    self.config.developer.exchange_batched_permits,
-                    self.config.developer.exchange_concurrent_barriers,
+                    PbPermits {
+                        records: self.config.developer.exchange_max_records as _,
+                        bytes: self.config.developer.exchange_max_bytes as _,
+                        barriers: self.config.developer.exchange_max_barriers as _,
+                    },
                     fragment_ids,
                 );
                 (Some(tx), Some(rx))

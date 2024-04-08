@@ -36,9 +36,8 @@ use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
-    permits, CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest,
-    GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse, PbPermits,
-    TaskInfoResponse,
+    CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest, GetDataRequest,
+    GetDataResponse, GetStreamRequest, GetStreamResponse, PbPermits, TaskInfoResponse,
 };
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -110,7 +109,7 @@ impl ComputeClient {
         down_fragment_id: u32,
     ) -> Result<(
         Streaming<GetStreamResponse>,
-        mpsc::UnboundedSender<permits::Value>,
+        mpsc::UnboundedSender<PbPermits>,
     )> {
         use risingwave_pb::task_service::get_stream_request::*;
 
@@ -131,9 +130,7 @@ impl ComputeClient {
         .chain(
             // `AddPermits` as the followings.
             UnboundedReceiverStream::new(permits_rx).map(|permits| GetStreamRequest {
-                value: Some(Value::AddPermits(PbPermits {
-                    value: Some(permits),
-                })),
+                value: Some(Value::AddPermits(permits)),
             }),
         );
 
