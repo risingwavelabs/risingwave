@@ -27,6 +27,7 @@ use crate::error::{ErrorCode, Result};
 
 type LiteResult<T> = std::result::Result<T, ErrorCode>;
 
+use super::statement::RewriteExprsRecursive;
 use super::BoundSetExpr;
 use crate::binder::{BoundQuery, ShareId, COLUMN_GROUP_PREFIX};
 
@@ -115,6 +116,14 @@ pub struct RecursiveUnion {
     /// will be the *same* schema as recursive's
     /// this is just for a better readability
     pub schema: Schema,
+}
+
+impl RewriteExprsRecursive for RecursiveUnion {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
+        // rewrite `base` and `recursive` separately
+        self.base.rewrite_exprs_recursive(rewriter);
+        self.recursive.rewrite_exprs_recursive(rewriter);
+    }
 }
 
 #[derive(Clone, Debug)]

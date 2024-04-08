@@ -15,7 +15,7 @@
 use std::collections::hash_map::Entry;
 use std::ops::Deref;
 
-use either::Either::{Left, Right};
+use either::Either::{self, Left, Right};
 use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME};
@@ -27,7 +27,6 @@ use thiserror::Error;
 use thiserror_ext::AsReport;
 
 use self::cte_ref::BoundBackCteRef;
-use self::recursive_union::BoundRecursiveUnion;
 use super::bind_context::ColumnBinding;
 use super::statement::RewriteExprsRecursive;
 use crate::binder::bind_context::{BindingCte, BindingCteState};
@@ -37,7 +36,6 @@ use crate::expr::{ExprImpl, InputRef};
 
 mod cte_ref;
 mod join;
-mod recursive_union;
 mod share;
 mod subquery;
 mod table_function;
@@ -71,9 +69,9 @@ pub enum Relation {
         with_ordinality: bool,
     },
     Watermark(Box<BoundWatermark>),
+    /// rcte is implicitly included in share
     Share(Box<BoundShare>),
     BackCteRef(Box<BoundBackCteRef>),
-    RecursiveUnion(Box<BoundRecursiveUnion>),
 }
 
 impl RewriteExprsRecursive for Relation {
@@ -89,7 +87,6 @@ impl RewriteExprsRecursive for Relation {
                 *inner = rewriter.rewrite_expr(inner.take())
             }
             Relation::BackCteRef(inner) => inner.rewrite_exprs_recursive(rewriter),
-            Relation::RecursiveUnion(inner) => inner.rewrite_exprs_recursive(rewriter),
             _ => {}
         }
     }
@@ -399,28 +396,18 @@ impl Binder {
                         Some(original_alias),
                     )?;
                     // todo: to be further reviewed
-                    let input_relation = match query {
+                    let input = match query {
                         // normal cte with union
-                        Left(query) => {
-                            Relation::Subquery(Box::new(BoundSubquery {
-                                query,
-                                lateral: false,
-                            }))
-                        }
+                        Left(query) => Either::Left(query),
                         // recursive cte
-                        Right(recursive) => {
-                            Relation::RecursiveUnion(Box::new(BoundRecursiveUnion {
-                                base: *recursive.base,
-                                recursive: *recursive.recursive,
-                            }))
-                        }
+                        Right(recursive) => Either::Right(recursive),
                     };
                     // we could always share the cte,
                     // no matter it's recursive or not.
                     let share_relation = Relation::Share(Box::new(BoundShare {
                         share_id,
                         // should either be a *bound* `subquery` or `recursive union`
-                        input: input_relation,
+                        input,
                     }));
                     Ok(share_relation)
                 }

@@ -54,13 +54,9 @@ impl Planner {
                 with_ordinality,
             } => self.plan_table_function(tf, with_ordinality),
             Relation::Watermark(tf) => self.plan_watermark(*tf),
+            // note that rcte (i.e., RecursiveUnion) is included *implicitly* in share.
             Relation::Share(share) => self.plan_share(*share),
             Relation::BackCteRef(..) => {
-                bail_not_implemented!(issue = 15135, "recursive CTE is not supported")
-            }
-            // todo: ensure this will always be wrapped in a `Relation::Share`
-            // so that it will not be explicitly planned here
-            Relation::RecursiveUnion(..) => {
                 bail_not_implemented!(issue = 15135, "recursive CTE is not supported")
             }
         }
@@ -221,12 +217,13 @@ impl Planner {
     }
 
     pub(super) fn plan_share(&mut self, share: BoundShare) -> Result<PlanRef> {
-        match self.share_cache.get(&share.share_id) {
+        let id = share.share_id;
+        match self.share_cache.get(&id) {
             None => {
-                let result = self.plan_relation(share.input)?;
+                let result = self.plan_relation(share.into())?;
                 let logical_share = LogicalShare::create(result);
                 self.share_cache
-                    .insert(share.share_id, logical_share.clone());
+                    .insert(id, logical_share.clone());
                 Ok(logical_share)
             }
             Some(result) => Ok(result.clone()),
@@ -258,7 +255,10 @@ impl Planner {
                 .iter()
                 .map(|f| f.data_type())
                 .collect(),
-            Relation::Share(share) => Self::collect_col_data_types_for_tumble_window(&share.input)?,
+            Relation::Share(share) => {
+                let s = share.clone();
+                Self::collect_col_data_types_for_tumble_window(&((*s).into()))?
+            }
             r => {
                 return Err(ErrorCode::BindError(format!(
                     "Invalid input relation to tumble: {r:?}"

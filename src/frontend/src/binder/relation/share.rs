@@ -12,19 +12,48 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use either::Either;
+
+use crate::binder::bind_context::RecursiveUnion;
 use crate::binder::statement::RewriteExprsRecursive;
-use crate::binder::{Relation, ShareId};
+use crate::binder::{BoundQuery, ShareId};
+
+use super::{BoundSubquery, Relation};
 
 /// Share a relation during binding and planning.
-/// It could be used to share a CTE, a source, a view and so on.
+/// It could be used to share a (recursive) CTE, a source, a view and so on.
 #[derive(Debug, Clone)]
 pub struct BoundShare {
     pub(crate) share_id: ShareId,
-    pub(crate) input: Relation,
+    pub(crate) input: Either<BoundQuery, RecursiveUnion>,
 }
 
 impl RewriteExprsRecursive for BoundShare {
     fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
-        self.input.rewrite_exprs_recursive(rewriter);
+        let rewrite = match self.input.clone() {
+            Either::Left(mut q) => {
+                q.rewrite_exprs_recursive(rewriter);
+                Either::Left(q)
+            }
+            Either::Right(mut r) => {
+                r.rewrite_exprs_recursive(rewriter);
+                Either::Right(r)
+            }
+        };
+        self.input = rewrite;
+    }
+}
+
+/// from inner `BoundQuery` to `Relation::Subquery`
+impl From<BoundShare> for Relation {
+    fn from(value: BoundShare) -> Self {
+        let Either::Left(q) = value.input else {
+            // leave it intact
+            return Self::Share(Box::new(value));
+        };
+        Self::Subquery(Box::new(BoundSubquery {
+            query: q,
+            lateral: false,
+        }))
     }
 }
