@@ -1154,6 +1154,7 @@ impl<S: StateStore> ColumnarStoreStorageTableInnerIterInner<S> {
                     pk_counter += 1;
                     if pk_counter % print_freq == 0 {
                         tracing::debug!(vnode, counter = pk_counter, "!!!pk iter counter");
+                        tokio::task::yield_now().await;
                     }
                 }
                 Ok::<(), StorageError>(())
@@ -1180,12 +1181,17 @@ impl<S: StateStore> ColumnarStoreStorageTableInnerIterInner<S> {
             let pos_ = *pos;
             let _col_task = tokio::spawn(async move {
                 tracing::debug!(pos = pos_, vnode, "!!!col iter start");
+                let mut col_counter = 0;
                 let col_instant = Instant::now();
                 let col_tx_ = col_tx.clone();
                 let loop_fn = async move {
                     while let Some((_, v)) = col_iter.try_next().await? {
                         let col_val = deserialize_datum(v, &data_type)?;
                         let _ = col_tx_.send(Ok(col_val)).await;
+                        col_counter += 1;
+                        if col_counter % print_freq == 0 {
+                            tokio::task::yield_now().await;
+                        }
                     }
                     Ok::<(), StorageError>(())
                 };
