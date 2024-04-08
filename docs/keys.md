@@ -4,7 +4,7 @@ Document the different Keys in RisingWave.
 
 ## Stream Key
 
-The key which can uniquely identify records in the RisingWave stream.
+The key which can identify records in the RisingWave stream.
 
 For example, given the following stream chunk, where stream key is `k1, k2`:
 ```text
@@ -19,6 +19,9 @@ We can tell that the record corresponding to the key `(1, 2)`
 has been updated from `(1, 2, 1, 1)` to `(1, 2, 3, 4)`.
 
 The record corresponding to key `(0, 1)` has been inserted with `(0, 1, 2, 3)`.
+
+It may not be the minimal set of columns required to identify a record,
+for instance `group key` could be part of the stream key, to specify the distribution of records.
 
 ## Primary Key (Storage)
 
