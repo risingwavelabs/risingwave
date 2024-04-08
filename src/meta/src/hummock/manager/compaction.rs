@@ -186,17 +186,16 @@ impl HummockManager {
             groups: Vec<u64>,
             compactor: Arc<Compactor>,
             selector: &mut Box<dyn CompactionSelector>,
-            generated_task_count: &mut usize,
             no_task_groups: &mut HashSet<CompactionGroupId>,
             existed_groups: &mut Vec<CompactionGroupId>,
-        ) -> Vec<u64> {
+        ) -> (Vec<u64>, usize) {
             let failed_tasks = vec![];
-            while *generated_task_count < pull_task_count {
-                // todo use batch get compact_task inside single cg
+            let mut generated_task_count = 0;
+            while generated_task_count < pull_task_count {
                 let compact_ret = hummock_manager
                     .get_compact_tasks(
                         groups.clone(),
-                        pull_task_count - *generated_task_count,
+                        pull_task_count - generated_task_count,
                         selector,
                     )
                     .await;
@@ -212,10 +211,10 @@ impl HummockManager {
                     break;
                 }
 
-                *generated_task_count += picked_tasks_count;
+                generated_task_count += picked_tasks_count;
             }
 
-            failed_tasks
+            (failed_tasks, generated_task_count)
         }
 
         if let Some(compactor) = self.compactor_manager.get_compactor(context_id) {
@@ -229,20 +228,19 @@ impl HummockManager {
                 // batch get multi groups
                 let selector: &mut Box<dyn CompactionSelector> =
                     compaction_selectors.get_mut(&task_type).unwrap();
+                let (tmp_failed_tasks, picked_tasks_count) = handle_pick_tasks(
+                    self,
+                    pull_task_count,
+                    groups.clone(),
+                    compactor.clone(),
+                    selector,
+                    &mut no_task_groups,
+                    &mut existed_groups,
+                )
+                .await;
 
-                failed_tasks.extend(
-                    handle_pick_tasks(
-                        self,
-                        pull_task_count,
-                        groups.clone(),
-                        compactor.clone(),
-                        selector,
-                        &mut generated_task_count,
-                        &mut no_task_groups,
-                        &mut existed_groups,
-                    )
-                    .await,
-                );
+                failed_tasks.extend(tmp_failed_tasks);
+                generated_task_count += picked_tasks_count;
             }
 
             // unschedule cg
@@ -267,24 +265,26 @@ impl HummockManager {
                     // if write_stop and enable_emergency_picker, try to pick emergency task
                     if write_stop && enable_emergency_picker {
                         let selector = compaction_selectors.get_mut(&TaskType::Emergency).unwrap();
-                        let old_generated_task_count = generated_task_count;
-                        failed_tasks.extend(
-                            handle_pick_tasks(
-                                self,
-                                pull_task_count - generated_task_count, // remaining task count
-                                vec![cg_id],
-                                compactor.clone(),
-                                selector,
-                                &mut generated_task_count,
-                                &mut HashSet::default(), // unused
-                                &mut vec![],             // unused
-                            )
-                            .await,
-                        );
+                        let (tmp_failed_tasks, picked_tasks_count) = handle_pick_tasks(
+                            self,
+                            pull_task_count - generated_task_count,
+                            vec![cg_id],
+                            compactor.clone(),
+                            selector,
+                            &mut HashSet::default(), // unused
+                            &mut vec![],             // unused
+                        )
+                        .await;
 
-                        if generated_task_count - old_generated_task_count == 0 {
+                        if !tmp_failed_tasks.is_empty() {
+                            failed_tasks.extend(tmp_failed_tasks);
+                        }
+
+                        if picked_tasks_count == 0 {
                             self.compaction_state.unschedule(cg_id, TaskType::Emergency);
                         }
+
+                        generated_task_count += picked_tasks_count;
                     } else {
                         self.compaction_state.unschedule(cg_id, task_type);
                     }
