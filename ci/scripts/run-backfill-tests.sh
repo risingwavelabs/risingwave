@@ -127,7 +127,7 @@ test_snapshot_and_upstream_read() {
 test_backfill_tombstone() {
   echo "--- e2e, test_backfill_tombstone"
   risedev ci-start $CLUSTER_PROFILE
-  ./risedev psql -c "
+  risedev psql -c "
   CREATE TABLE tomb (v1 int)
   WITH (
     connector = 'datagen',
@@ -145,12 +145,12 @@ test_backfill_tombstone() {
 
     for i in $(seq 1 1000)
     do
-      ./risedev psql -c "DELETE FROM tomb; FLUSH;"
+      risedev psql -c "DELETE FROM tomb; FLUSH;"
       sleep 1
     done
   ' 1>deletes.log 2>&1 &
 
-  ./risedev psql -c "CREATE MATERIALIZED VIEW m1 as select * from tomb;"
+  risedev psql -c "CREATE MATERIALIZED VIEW m1 as select * from tomb;"
   echo "--- Kill cluster"
   kill_cluster
   wait
