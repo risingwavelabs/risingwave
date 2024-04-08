@@ -933,64 +933,88 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
     /// Yield a row with its primary key.
     #[try_stream(ok = KeyedRow<Bytes>, error = StorageError)]
     async fn into_stream(mut self) {
-        while let Some((k, v)) = self
-            .iter
-            .try_next()
-            .verbose_instrument_await("storage_table_iter_next")
-            .await?
-        {
-            let (table_key, value) = (k.user_key.table_key, v);
-            let full_row = self.row_deserializer.deserialize(value)?;
-            let result_row_in_value = self
-                .mapping
-                .project(OwnedRow::new(full_row))
-                .into_owned_row();
-            match &self.key_output_indices {
-                Some(key_output_indices) => {
-                    let result_row_in_key = match self.pk_serializer.clone() {
-                        Some(pk_serializer) => {
-                            let pk = pk_serializer.deserialize(table_key.key_part().as_ref())?;
+        let buffer_size = std::env::var("RW_COLUMN_STORE_BUFFER_SIZE")
+            .unwrap_or("1024".into())
+            .parse()
+            .unwrap();
+        let (row_tx, mut row_rx) = tokio::sync::mpsc::channel(buffer_size);
+        tokio::spawn(async move {
+            let row_tx_ = row_tx.clone();
+            let loop_fn = async move {
+                while let Some((k, v)) = self
+                    .iter
+                    .try_next()
+                    .verbose_instrument_await("storage_table_iter_next")
+                    .await?
+                {
+                    let (table_key, value) = (k.user_key.table_key, v);
+                    let full_row = self.row_deserializer.deserialize(value)?;
+                    let result_row_in_value = self
+                        .mapping
+                        .project(OwnedRow::new(full_row))
+                        .into_owned_row();
+                    let row = match &self.key_output_indices {
+                        Some(key_output_indices) => {
+                            let result_row_in_key = match self.pk_serializer.clone() {
+                                Some(pk_serializer) => {
+                                    let pk =
+                                        pk_serializer.deserialize(table_key.key_part().as_ref())?;
 
-                            pk.project(&self.output_row_in_key_indices).into_owned_row()
+                                    pk.project(&self.output_row_in_key_indices).into_owned_row()
+                                }
+                                None => OwnedRow::empty(),
+                            };
+
+                            let mut result_row_vec = vec![];
+                            for idx in &self.output_indices {
+                                if self.value_output_indices.contains(idx) {
+                                    let item_position_in_value_indices = &self
+                                        .value_output_indices
+                                        .iter()
+                                        .position(|p| idx == p)
+                                        .unwrap();
+                                    result_row_vec.push(
+                                        result_row_in_value
+                                            .index(*item_position_in_value_indices)
+                                            .clone(),
+                                    );
+                                } else {
+                                    let item_position_in_pk_indices =
+                                        key_output_indices.iter().position(|p| idx == p).unwrap();
+                                    result_row_vec.push(
+                                        result_row_in_key
+                                            .index(item_position_in_pk_indices)
+                                            .clone(),
+                                    );
+                                }
+                            }
+                            let row = OwnedRow::new(result_row_vec);
+
+                            // TODO: may optimize the key clone
+                            KeyedRow {
+                                vnode_prefixed_key: table_key.copy_into(),
+                                row,
+                            }
                         }
-                        None => OwnedRow::empty(),
+                        None => KeyedRow {
+                            vnode_prefixed_key: table_key.copy_into(),
+                            row: result_row_in_value,
+                        },
                     };
-
-                    let mut result_row_vec = vec![];
-                    for idx in &self.output_indices {
-                        if self.value_output_indices.contains(idx) {
-                            let item_position_in_value_indices = &self
-                                .value_output_indices
-                                .iter()
-                                .position(|p| idx == p)
-                                .unwrap();
-                            result_row_vec.push(
-                                result_row_in_value
-                                    .index(*item_position_in_value_indices)
-                                    .clone(),
-                            );
-                        } else {
-                            let item_position_in_pk_indices =
-                                key_output_indices.iter().position(|p| idx == p).unwrap();
-                            result_row_vec
-                                .push(result_row_in_key.index(item_position_in_pk_indices).clone());
-                        }
-                    }
-                    let row = OwnedRow::new(result_row_vec);
-
-                    // TODO: may optimize the key clone
-                    yield KeyedRow {
-                        vnode_prefixed_key: table_key.copy_into(),
-                        row,
-                    }
+                    let _ = row_tx_.send(Ok(row)).await;
                 }
-                None => {
-                    yield KeyedRow {
-                        vnode_prefixed_key: table_key.copy_into(),
-                        row: result_row_in_value,
-                    }
-                }
+                Ok::<(), StorageError>(())
+            };
+            if let Err(err) = loop_fn.await {
+                let _ = row_tx.send(Err(err)).await;
             }
+        });
+        loop {
+            let row = match row_rx.recv().await {
+                Some(r) => r?,
+                None => break,
+            };
+            yield row;
         }
     }
 }
