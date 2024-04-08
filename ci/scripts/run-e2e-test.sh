@@ -33,19 +33,19 @@ fi
 cluster_start() {
   if [[ $mode == "standalone" ]]; then
     mkdir -p "$PREFIX_LOG"
-    cargo make clean-data
-    cargo make pre-start-dev
+    risedev clean-data
+    risedev pre-start-dev
     start_standalone "$PREFIX_LOG"/standalone.log &
-    cargo make dev standalone-minio-etcd
+    risedev dev standalone-minio-etcd
   elif [[ $mode == "single-node" ]]; then
     mkdir -p "$PREFIX_LOG"
-    cargo make clean-data
-    cargo make pre-start-dev
+    risedev clean-data
+    risedev pre-start-dev
     start_single_node "$PREFIX_LOG"/single-node.log &
     # Give it a while to make sure the single-node is ready.
     sleep 10
   else
-    cargo make ci-start "$mode"
+    risedev ci-start "$mode"
   fi
 }
 
@@ -54,12 +54,12 @@ cluster_stop() {
   then
     stop_standalone
     # Don't check standalone logs, they will exceed the limit.
-    cargo make kill
+    risedev kill
   elif [[ $mode == "single-node" ]]
   then
     stop_single_node
   else
-    cargo make ci-kill
+    risedev ci-kill
   fi
 }
 
@@ -157,7 +157,7 @@ cluster_stop
 if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     echo "--- e2e, ci-compaction-test, nexmark_q7"
     RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-    cargo make ci-start ci-compaction-test
+    risedev ci-start ci-compaction-test
     # Please make sure the regression is expected before increasing the timeout.
     sqllogictest -p 4566 -d dev './e2e_test/compaction/ingest_rows.slt'
 
@@ -241,10 +241,10 @@ if [[ "$mode" == "standalone" ]]; then
 
   echo "test standalone without compactor"
   mkdir -p "$PREFIX_LOG"
-  cargo make clean-data
-  cargo make pre-start-dev
+  risedev clean-data
+  risedev pre-start-dev
   start_standalone_without_compactor "$PREFIX_LOG"/standalone.log &
-  cargo make dev standalone-minio-etcd-compactor
+  risedev dev standalone-minio-etcd-compactor
   wait_standalone
   if compactor_is_online
   then
@@ -258,10 +258,10 @@ if [[ "$mode" == "standalone" ]]; then
 
   echo "test standalone with compactor"
   mkdir -p "$PREFIX_LOG"
-  cargo make clean-data
-  cargo make pre-start-dev
+  risedev clean-data
+  risedev pre-start-dev
   start_standalone "$PREFIX_LOG"/standalone.log &
-  cargo make dev standalone-minio-etcd
+  risedev dev standalone-minio-etcd
   wait_standalone
   if ! compactor_is_online
   then
