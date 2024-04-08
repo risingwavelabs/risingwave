@@ -952,7 +952,9 @@ impl CatalogController {
 
         fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
             let mut found = false;
-            if *fragment_type_mask & PbFragmentTypeFlag::StreamScan as i32 != 0 {
+            if (*fragment_type_mask & PbFragmentTypeFlag::StreamScan as i32 != 0)
+                || (*fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0)
+            {
                 visit_stream_node(stream_node, |node| {
                     if let PbNodeBody::StreamScan(node) = node {
                         node.rate_limit = rate_limit;
