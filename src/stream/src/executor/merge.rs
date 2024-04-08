@@ -703,7 +703,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_stream_exchange_client() {
-        const BATCHED_PERMITS: usize = 1024;
         let rpc_called = Arc::new(AtomicBool::new(false));
         let server_run = Arc::new(AtomicBool::new(false));
         let addr = "127.0.0.1:12348".parse().unwrap();
@@ -737,7 +736,6 @@ mod tests {
                 (0, 0),
                 (0, 0),
                 Arc::new(StreamingMetrics::unused()),
-                BATCHED_PERMITS,
             )
         };
 

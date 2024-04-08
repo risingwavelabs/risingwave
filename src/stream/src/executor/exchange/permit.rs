@@ -96,7 +96,7 @@ pub mod for_test {
     pub const INITIAL_PERMITS: PbPermits = PbPermits {
         records: u32::MAX / 2,
         bytes: u64::MAX / 2,
-        barriers: u32::MAX / 2,
+        barriers: 1,
     };
 }
 
@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn test_channel_close() {
-        let (tx, mut rx) = channel(0, 0, 1, (0, 0));
+        let (tx, mut rx) = channel_for_test();
 
         let send = || {
             tx.send(Message::Barrier(Barrier::with_prev_epoch_for_test(
