@@ -46,9 +46,6 @@ else
   set_env RISEDEV_BUILD_TARGET_DIR ""
 end
 
-set_env RISEDEV_CARGO_BUILD_CRATE "risingwave_cmd_all"
-set_env RISEDEV_CTL_RUN_CMD "-- risectl"
-
 if ${is_hdfs_backend}
   set_env BUILD_HDFS_BACKEND_CMD "-p risingwave_object_store --features hdfs-backend"
 else
@@ -109,7 +106,7 @@ skip_core_tasks = true
 skip_git_env_info = true
 skip_rust_env_info = false
 skip_crate_env_info = true
-min_version = "0.36.10"
+min_version = "0.37.1"
 
 [tasks.clean-full]
 category = "Misc"
@@ -373,7 +370,8 @@ echo "$(tput setaf 4)$(tput bold)[Reminder]$(tput sgr0) risedev will only build 
 [[ -z "${RISEDEV_RUSTFLAGS}" ]] || export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
 echo + RUSTFLAGS="${RUSTFLAGS:-<not set>}"
 set -xe
-cargo build -p ${RISEDEV_CARGO_BUILD_CRATE} -p risedev ${BUILD_HDFS_BACKEND_CMD}\
+cargo build -p risedev
+cargo build -p risingwave_cmd_all ${BUILD_HDFS_BACKEND_CMD}\
 ${BUILD_HUMMOCK_TRACE_CMD}\
             --profile "${RISINGWAVE_BUILD_PROFILE}" \
             ${RISINGWAVE_FEATURE_FLAGS} \
@@ -594,7 +592,7 @@ dependencies = ["check-risedev-env-file"]
 env_files = ["${PREFIX_CONFIG}/risedev-env"]
 script = '''
 #!/usr/bin/env bash
-cargo run -p ${RISEDEV_CARGO_BUILD_CRATE} --profile "${RISINGWAVE_BUILD_PROFILE}" ${RISEDEV_CTL_RUN_CMD} "$@"
+cargo run -p risingwave_cmd_all --profile "${RISINGWAVE_BUILD_PROFILE}" -- ctl "$@"
 test $? -eq 0 || exit 1
 '''
 
@@ -1140,7 +1138,7 @@ fi
 private = true
 category = "RiseDev - Check"
 description = "Run cargo typos-cli check"
-install_crate = { min_version = "1.15.0", crate_name = "typos-cli", binary = "typos", test_arg = [
+install_crate = { min_version = "1.20.4", crate_name = "typos-cli", binary = "typos", test_arg = [
   "--help",
 ], install_command = "binstall" }
 script = """

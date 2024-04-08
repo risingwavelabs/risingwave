@@ -283,18 +283,24 @@ impl CoordinatorWorker {
     }
 
     async fn start_coordination(&mut self, mut coordinator: impl SinkCommitCoordinator) {
-        let result: Result<(), ()> = try {
+        let result: Result<(), String> = try {
             coordinator.init().await.map_err(|e| {
                 error!(error = %e.as_report(), "failed to initialize coordinator");
+                format!("failed to initialize coordinator: {:?}", e.as_report())
             })?;
             loop {
                 let (epoch, metadata_list) = self.collect_all_metadata().await.map_err(|e| {
                     error!(error = %e.as_report(), "failed to collect all metadata");
+                    format!("failed to collect all metadata: {:?}", e.as_report())
                 })?;
                 // TODO: measure commit time
-                coordinator.commit(epoch, metadata_list).await.map_err(
-                    |e| error!(epoch, error = %e.as_report(), "failed to commit metadata of epoch"),
-                )?;
+                coordinator
+                    .commit(epoch, metadata_list)
+                    .await
+                    .map_err(|e| {
+                        error!(epoch, error = %e.as_report(), "failed to commit metadata of epoch");
+                        format!("failed to commit: {:?}", e.as_report())
+                    })?;
 
                 self.send_to_all_sink_writers(|| {
                     Ok(CoordinateResponse {
@@ -307,9 +313,14 @@ impl CoordinatorWorker {
             }
         };
 
-        if result.is_err() {
-            self.send_to_all_sink_writers(|| Err(Status::aborted("failed to run coordination")))
-                .await;
+        if let Err(err_str) = result {
+            self.send_to_all_sink_writers(|| {
+                Err(Status::aborted(format!(
+                    "failed to run coordination: {}",
+                    err_str
+                )))
+            })
+            .await;
         }
     }
 }

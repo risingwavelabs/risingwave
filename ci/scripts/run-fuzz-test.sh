@@ -48,7 +48,7 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
     chmod +x ./target/debug/sqlsmith
 
     echo "--- e2e, ci-3cn-1fe, build"
-    cargo make ci-start ci-3cn-1fe
+    risedev ci-start ci-3cn-1fe
 
     echo "--- e2e, ci-3cn-1fe, run fuzzing"
     ./target/debug/sqlsmith test \
@@ -69,7 +69,7 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
     # If there's errors, the failing query will be printed to stderr.
     # Use that to reproduce logs on local machine.
     echo "--- Kill cluster"
-    cargo make kill
+    risedev kill
 
     # NOTE(Noel): This is disabled because once it fails, it keeps failing.
     # That blocks PRs from getting through.

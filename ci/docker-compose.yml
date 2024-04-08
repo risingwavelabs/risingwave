@@ -71,7 +71,7 @@ services:
       retries: 5
 
   source-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240313
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240405_1
     depends_on:
       - mysql
       - db
@@ -84,7 +84,7 @@ services:
       - ..:/risingwave
 
   sink-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240313
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240405_1
     depends_on:
       - mysql
       - db
@@ -93,6 +93,7 @@ services:
       - clickhouse-server
       - redis-server
       - pulsar-server
+      - mqtt-server
       - cassandra-server
       - doris-server
       - starrocks-fe-server
@@ -102,12 +103,12 @@ services:
 
 
   rw-build-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240313
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240405_1
     volumes:
       - ..:/risingwave
 
   ci-flamegraph-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240313
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240405_1
     # NOTE(kwannoel): This is used in order to permit
     # syscalls for `nperf` (perf_event_open),
     # so it can do CPU profiling.
@@ -118,7 +119,7 @@ services:
       - ..:/risingwave
 
   regress-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240313
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240405_1
     depends_on:
       db:
         condition: service_healthy
@@ -329,3 +330,16 @@ services:
         MONGO_HOST: mongodb
         MONGO_PORT: 27017
         MONGO_DB_NAME: random_data
+  mqtt-server:
+    image: eclipse-mosquitto
+    command:
+    - sh
+    - -c
+    - echo "running command"; printf 'allow_anonymous true\nlistener 1883 0.0.0.0' > /mosquitto/config/mosquitto.conf; echo "starting service..."; cat /mosquitto/config/mosquitto.conf;/docker-entrypoint.sh;/usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf
+    ports:
+      - 1883:1883
+    healthcheck:
+      test: ["CMD-SHELL", "(mosquitto_sub -h localhost -p 1883 -t 'topic' -E -i probe 2>&1 | grep Error) && exit 1 || exit 0"]
+      interval: 10s
+      timeout: 10s
+      retries: 6
