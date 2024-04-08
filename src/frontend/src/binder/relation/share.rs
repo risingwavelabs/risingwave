@@ -14,11 +14,10 @@
 
 use either::Either;
 
+use super::{BoundSubquery, Relation};
 use crate::binder::bind_context::RecursiveUnion;
 use crate::binder::statement::RewriteExprsRecursive;
 use crate::binder::{BoundQuery, ShareId};
-
-use super::{BoundSubquery, Relation};
 
 /// Share a relation during binding and planning.
 /// It could be used to share a (recursive) CTE, a source, a view and so on.

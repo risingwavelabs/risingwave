@@ -222,8 +222,7 @@ impl Planner {
             None => {
                 let result = self.plan_relation(share.into())?;
                 let logical_share = LogicalShare::create(result);
-                self.share_cache
-                    .insert(id, logical_share.clone());
+                self.share_cache.insert(id, logical_share.clone());
                 Ok(logical_share)
             }
             Some(result) => Ok(result.clone()),
