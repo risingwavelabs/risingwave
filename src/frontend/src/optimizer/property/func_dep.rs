@@ -319,11 +319,9 @@ impl FunctionalDependencySet {
     /// whether the remaining columns can form a key or not. If the remaining columns can form a
     /// key, then this column can be removed.
     fn minimize_key_bitset(&self, key: FixedBitSet) -> FixedBitSet {
-        assert!(
-            self.is_key_inner(&key),
-            "{:?} is not a key!",
-            key.ones().collect_vec()
-        );
+        if !self.is_key_inner(&key) {
+            return key;
+        }
         let mut new_key = key.clone();
         for i in key.ones() {
             new_key.set(i, false);
