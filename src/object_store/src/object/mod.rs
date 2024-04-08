@@ -790,6 +790,7 @@ pub async fn build_remote_object_store(
     ident: &str,
     config: ObjectStoreConfig,
 ) -> ObjectStoreImpl {
+    tracing::debug!(config=?config, "object store {ident}");
     match url {
         s3 if s3.starts_with("s3://") => {
             if std::env::var("RW_USE_OPENDAL_FOR_S3").is_ok() {

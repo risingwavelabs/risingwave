@@ -30,7 +30,6 @@ use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::config::default::compaction_config;
-use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
@@ -344,12 +343,13 @@ impl HummockManager {
         let state_store_url = sys_params.state_store();
         let state_store_dir: &str = sys_params.data_directory();
         let deterministic_mode = env.opts.compaction_deterministic_test;
+        let object_store_config = env.opts.object_store_config.clone();
         let object_store = Arc::new(
             build_remote_object_store(
                 state_store_url.strip_prefix("hummock+").unwrap_or("memory"),
                 metrics.object_store_metric.clone(),
                 "Version Checkpoint",
-                ObjectStoreConfig::default(),
+                object_store_config,
             )
             .await,
         );
