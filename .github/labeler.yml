@@ -1,4 +1,6 @@
 version: 1
+
+# Match title
 labels:
 - label: "type/feature"
   title: "^feat.*"
@@ -29,5 +31,11 @@ labels:
 - label: "cherry-pick"
   title: "^cherry pick.*"
 
+# Match body
 - label: "breaking-change"
   body: '- \[x\] My PR contains breaking changes'
+
+# Match File changes
+- label: "ci/run-e2e-single-node-tests"
+  files:
+  - "src\\/meta\\/**\\/*.rs"
