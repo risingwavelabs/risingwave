@@ -89,7 +89,7 @@ RisingWave specializes in providing **incrementally updated, consistent material
 * Transparent dynamic scaling
 * Speedy bootstrapping and backfilling
 
-RisingWave's extensive CDC support further enables users to seamlessly offload materialized views and triggers to RisingWave.
+RisingWave's extensive CDC support further enables users to seamlessly offload event-driven workloads such as materialized views and triggers from operational databases (e.g., [PostgreSQL](https://docs.risingwave.com/docs/current/ingest-from-postgres-cdc/)) to RisingWave.
 
 
 ## Why RisingWave for stream processing?

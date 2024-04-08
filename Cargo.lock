@@ -959,19 +959,20 @@ dependencies = [
 
 [[package]]
 name = "await-tree"
-version = "0.1.1"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "325bcfc4b87d4aa36f1319b806bacc40fcefcaf43a12bd85a5a2f44fc14ce9de"
+checksum = "0c2d7aec54383fa38ac2f9c28435a02f7312f7174e470c7d5566d2b7e17f9a8d"
 dependencies = [
  "coarsetime",
- "derive_builder",
+ "derive_builder 0.20.0",
  "flexstr",
  "indextree",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "parking_lot 0.12.1",
  "pin-project",
  "tokio",
  "tracing",
+ "weak-table",
 ]
 
 [[package]]
@@ -1457,6 +1458,20 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+]
+
+[[package]]
+name = "axum-embed"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "077959a7f8cf438676af90b483304528eb7e16eadadb7f44e9ada4f9dceb9e62"
+dependencies = [
+ "axum-core 0.4.3",
+ "chrono",
+ "http 1.0.0",
+ "mime_guess",
+ "rust-embed",
+ "tower-service",
 ]
 
 [[package]]
@@ -3448,7 +3463,16 @@ version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d67778784b508018359cbc8696edb3db78160bab2c2a28ba7f56ef6932997f8"
 dependencies = [
- "derive_builder_macro",
+ "derive_builder_macro 0.12.0",
+]
+
+[[package]]
+name = "derive_builder"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0350b5cb0331628a5916d6c5c0b72e97393b8b6b03b47a9284f4e7f5a405ffd7"
+dependencies = [
+ "derive_builder_macro 0.20.0",
 ]
 
 [[package]]
@@ -3464,13 +3488,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "derive_builder_core"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d48cda787f839151732d396ac69e3473923d54312c070ee21e9effcaa8ca0b1d"
+dependencies = [
+ "darling 0.20.8",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.57",
+]
+
+[[package]]
 name = "derive_builder_macro"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebcda35c7a396850a55ffeac740804b40ffec779b98fffbb1738f4033f0ee79e"
 dependencies = [
- "derive_builder_core",
+ "derive_builder_core 0.12.0",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "derive_builder_macro"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "206868b8242f27cecce124c19fd88157fbd0dd334df2587f36417bafbc85097b"
+dependencies = [
+ "derive_builder_core 0.20.0",
+ "syn 2.0.57",
 ]
 
 [[package]]
@@ -4918,9 +4964,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.3.24"
+version = "0.3.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb2c4422095b67ee78da96fbb51a4cc413b3b25883c7717ff7ca1ab31022c9c9"
+checksum = "81fe527a889e1532da5c525686d96d4c2e74cdd345badf8dfef9f6b39dd5f5e8"
 dependencies = [
  "bytes",
  "fnv",
@@ -5207,7 +5253,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "futures-util",
- "h2 0.3.24",
+ "h2 0.3.26",
  "http 0.2.9",
  "http-body 0.4.5",
  "httparse",
@@ -5376,7 +5422,7 @@ dependencies = [
  "bytes",
  "chrono",
  "csv",
- "derive_builder",
+ "derive_builder 0.12.0",
  "enum-display",
  "faster-hex",
  "futures",
@@ -7168,9 +7214,9 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry_sdk"
-version = "0.21.1"
+version = "0.21.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "968ba3f2ca03e90e5187f5e4f46c791ef7f2c163ae87789c8ce5f5ca3b7b7de5"
+checksum = "2f16aec8a98a457a52664d69e0091bac3a0abd18ead9b641cb00202ba4e0efe4"
 dependencies = [
  "async-trait",
  "crossbeam-channel",
@@ -7623,7 +7669,7 @@ dependencies = [
  "openssl",
  "panic-message",
  "parking_lot 0.12.1",
- "reqwest 0.11.20",
+ "reqwest 0.12.2",
  "risingwave_common",
  "risingwave_sqlparser",
  "serde",
@@ -8406,7 +8452,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.12.1",
+ "parking_lot 0.11.2",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
@@ -8815,7 +8861,7 @@ dependencies = [
  "encoding_rs",
  "futures-core",
  "futures-util",
- "h2 0.3.24",
+ "h2 0.3.26",
  "http 0.2.9",
  "http-body 0.4.5",
  "hyper 0.14.27",
@@ -8858,6 +8904,7 @@ dependencies = [
  "base64 0.21.7",
  "bytes",
  "encoding_rs",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "h2 0.4.3",
@@ -8983,7 +9030,7 @@ dependencies = [
  "madsim-tokio",
  "redis",
  "regex",
- "reqwest 0.11.20",
+ "reqwest 0.12.2",
  "serde",
  "serde_json",
  "serde_with",
@@ -9257,7 +9304,7 @@ dependencies = [
  "prost 0.12.1",
  "rand",
  "regex",
- "reqwest 0.11.20",
+ "reqwest 0.12.2",
  "risingwave-fields-derive",
  "risingwave_common_estimate_size",
  "risingwave_common_metrics",
@@ -9565,7 +9612,7 @@ dependencies = [
  "rand",
  "redis",
  "regex",
- "reqwest 0.11.20",
+ "reqwest 0.12.2",
  "risingwave_common",
  "risingwave_common_estimate_size",
  "risingwave_jni_core",
@@ -10105,6 +10152,7 @@ version = "1.7.0-alpha"
 dependencies = [
  "anyhow",
  "axum 0.7.4",
+ "axum-embed",
  "bytes",
  "cargo-emit",
  "dircpy",
@@ -10208,6 +10256,7 @@ dependencies = [
  "async-trait",
  "await-tree",
  "aws-config",
+ "aws-credential-types",
  "aws-smithy-http",
  "aws-smithy-runtime",
  "aws-smithy-runtime-api",
@@ -12024,9 +12073,9 @@ dependencies = [
 
 [[package]]
 name = "sqllogictest"
-version = "0.18.0"
+version = "0.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e67e8d8e7f43fc5d4c35be73549ea22ed1d712dcf39656a243144677297da5ec"
+checksum = "004809e4710d743a13eb2975fb6a1498da76157e19ad059d595d032e6a50e30b"
 dependencies = [
  "async-trait",
  "educe 0.4.23",
@@ -13018,7 +13067,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-util",
- "h2 0.3.24",
+ "h2 0.3.26",
  "http 0.2.9",
  "http-body 0.4.5",
  "hyper 0.14.27",
@@ -13046,7 +13095,7 @@ dependencies = [
  "base64 0.21.7",
  "bytes",
  "flate2",
- "h2 0.3.24",
+ "h2 0.3.26",
  "http 0.2.9",
  "http-body 0.4.5",
  "hyper 0.14.27",
@@ -14121,6 +14170,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "weak-table"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "323f4da9523e9a669e1eaf9c6e763892769b1d38c623913647bfdc1532fe4549"
+
+[[package]]
 name = "web-sys"
 version = "0.3.64"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14592,146 +14647,6 @@ dependencies = [
 [[package]]
 name = "workspace-hack"
 version = "1.7.0-alpha"
-dependencies = [
- "ahash 0.8.6",
- "aho-corasick",
- "allocator-api2",
- "anyhow",
- "async-std",
- "auto_enums",
- "aws-credential-types",
- "aws-runtime",
- "aws-sdk-s3",
- "aws-sigv4",
- "aws-smithy-runtime",
- "aws-smithy-types",
- "base64 0.21.7",
- "bigdecimal 0.4.2",
- "bit-vec",
- "bitflags 2.5.0",
- "byteorder",
- "bytes",
- "cc",
- "chrono",
- "clap",
- "clap_builder",
- "combine",
- "crossbeam-epoch",
- "crossbeam-queue",
- "crossbeam-utils",
- "crypto-bigint 0.5.5",
- "deranged",
- "digest",
- "either",
- "fail",
- "flate2",
- "frunk_core",
- "futures",
- "futures-channel",
- "futures-core",
- "futures-executor",
- "futures-io",
- "futures-sink",
- "futures-task",
- "futures-util",
- "generic-array",
- "governor",
- "hashbrown 0.13.2",
- "hashbrown 0.14.3",
- "hmac",
- "hyper 0.14.27",
- "indexmap 1.9.3",
- "indexmap 2.0.0",
- "itertools 0.11.0",
- "jni",
- "lazy_static",
- "lexical-core",
- "lexical-parse-float",
- "lexical-parse-integer",
- "lexical-util",
- "lexical-write-float",
- "lexical-write-integer",
- "libc",
- "lock_api",
- "log",
- "madsim-rdkafka",
- "madsim-tokio",
- "md-5",
- "memchr",
- "mio",
- "moka",
- "nom",
- "num-bigint",
- "num-integer",
- "num-iter",
- "num-traits",
- "openssl",
- "openssl-sys",
- "ordered-float 3.9.1",
- "parking_lot 0.12.1",
- "parking_lot_core 0.9.8",
- "petgraph",
- "phf",
- "phf_shared",
- "postgres-types",
- "proc-macro2",
- "prometheus",
- "prost 0.12.1",
- "prost-types 0.12.1",
- "quote",
- "rand",
- "rand_chacha",
- "rand_core",
- "redis",
- "regex",
- "regex-automata 0.4.5",
- "regex-syntax 0.8.2",
- "reqwest 0.11.20",
- "ring 0.16.20",
- "rust_decimal",
- "rustc-hash",
- "scopeguard",
- "sea-orm",
- "sea-query",
- "sea-query-binder",
- "serde",
- "serde_json",
- "serde_with",
- "sha1",
- "sha2",
- "smallvec",
- "socket2 0.5.6",
- "sqlx",
- "sqlx-core",
- "sqlx-mysql",
- "sqlx-postgres",
- "sqlx-sqlite",
- "strum 0.25.0",
- "strum 0.26.1",
- "subtle",
- "syn 1.0.109",
- "syn 2.0.57",
- "target-lexicon",
- "time",
- "time-macros",
- "tinyvec",
- "tokio",
- "tokio-postgres",
- "tokio-stream",
- "tokio-util",
- "toml_datetime",
- "tonic 0.10.2",
- "tower",
- "tracing",
- "tracing-core",
- "tracing-subscriber",
- "unicode-bidi",
- "unicode-normalization",
- "url",
- "uuid",
- "whoami",
- "zeroize",
-]
 
 [[package]]
 name = "wyz"

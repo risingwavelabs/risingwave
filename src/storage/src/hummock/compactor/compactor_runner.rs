@@ -45,7 +45,8 @@ use crate::hummock::compactor::compaction_utils::{
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
 use crate::hummock::compactor::{
-    fast_compactor_runner, CompactOutput, CompactionFilter, Compactor, CompactorContext,
+    await_tree_key, fast_compactor_runner, CompactOutput, CompactionFilter, Compactor,
+    CompactorContext,
 };
 use crate::hummock::iterator::{
     Forward, HummockIterator, MergeIterator, SkipWatermarkIterator, ValueMeta,
@@ -627,9 +628,11 @@ pub async fn compact(
         let traced = match context.await_tree_reg.as_ref() {
             None => runner.right_future(),
             Some(await_tree_reg) => await_tree_reg
-                .write()
                 .register(
-                    format!("compact_runner/{}-{}", compact_task.task_id, split_index),
+                    await_tree_key::CompactRunner {
+                        task_id: compact_task.task_id,
+                        split_index,
+                    },
                     format!(
                         "Compaction Task {} Split {} ",
                         compact_task.task_id, split_index

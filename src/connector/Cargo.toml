@@ -66,7 +66,7 @@ hyper = { version = "0.14", features = [
     "http1",
     "http2",
     "stream",
-] }
+] } # required by clickhouse client
 hyper-tls = "0.5"
 icelake = { workspace = true }
 indexmap = { version = "1.9.3", features = ["serde"] }
@@ -111,7 +111,7 @@ rdkafka = { workspace = true, features = [
 ] }
 redis = { version = "0.25", features = ["aio", "tokio-comp", "async-std-comp"] }
 regex = "1.4"
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.12.2", features = ["json"] }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_jni_core = { workspace = true }
