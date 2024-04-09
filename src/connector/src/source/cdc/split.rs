@@ -269,7 +269,7 @@ impl<T: CdcSourceTypeTrait> SplitMetaData for DebeziumCdcSplit<T> {
     }
 
     fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
-        self.update_offset(last_seen_offset)
+        self.update_offset_inner(last_seen_offset)
     }
 }
 
@@ -318,7 +318,7 @@ impl<T: CdcSourceTypeTrait> DebeziumCdcSplit<T> {
         dispatch_cdc_split!(self, ref, is_snapshot_done())
     }
 
-    pub fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
+    pub fn update_offset_inner(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
         dispatch_cdc_split!(self, mut, update_offset(last_seen_offset)?);
         Ok(())
     }
