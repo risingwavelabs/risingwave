@@ -1304,7 +1304,7 @@ pub mod default {
         }
 
         pub fn compactor_max_task_multiplier() -> f32 {
-            4.0000
+            3.5000
         }
 
         pub fn compactor_memory_available_proportion() -> f64 {
