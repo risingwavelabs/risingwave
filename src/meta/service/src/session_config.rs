@@ -24,9 +24,8 @@ use serde_json;
 use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
-pub enum SessionParamsServiceImpl {
-    Controller(SessionParamsControllerRef),
-    Manager(SessionParamsManagerRef),
+pub struct SessionParamsServiceImpl {
+    system_params_manager: SessionParamsManagerImpl,
 }
 
 #[async_trait]
@@ -35,9 +34,9 @@ impl SessionParamService for SessionParamsServiceImpl {
         &self,
         _request: Request<GetSessionParamsRequest>,
     ) -> Result<Response<GetSessionParamsResponse>, Status> {
-        let params = match self {
-            SessionParamsServiceImpl::Controller(controller) => controller.get_params().await,
-            SessionParamsServiceImpl::Manager(manager) => manager.get_params().await,
+        let params = match self.system_params_manager {
+            SessionParamsManagerImpl::Kv(controller) => controller.get_params().await,
+            SessionParamsManagerImpl::Sql(manager) => manager.get_params().await,
         };
         let params_str = serde_json::to_string(&params).map_err(|e| {
             Status::internal(format!("Failed to parse session config: {}", e.as_report()))
@@ -55,11 +54,11 @@ impl SessionParamService for SessionParamsServiceImpl {
         let req = request.into_inner();
         let req_param = req.get_param();
 
-        let param_value = match self {
-            SessionParamsServiceImpl::Controller(controller) => {
+        let param_value = match self.system_params_manager {
+            SessionParamsManagerImpl::Kv(controller) => {
                 controller.set_param(req_param, req.value.clone()).await
             }
-            SessionParamsServiceImpl::Manager(manager) => {
+            SessionParamsManagerImpl::Sql(manager) => {
                 manager.set_param(req_param, req.value.clone()).await
             }
         };

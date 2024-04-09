@@ -34,7 +34,6 @@ use serde::de::DeserializeOwned;
 
 use super::cdc::DebeziumCdcMeta;
 use super::datagen::DatagenMeta;
-use super::filesystem::FsSplit;
 use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
 use super::kinesis::KinesisMeta;
@@ -413,24 +412,6 @@ impl TryFrom<&ConnectorSplit> for SplitImpl {
             },
             |other| bail!("connector '{}' is not supported", other)
         )
-    }
-}
-
-// for the `FsSourceExecutor`
-impl SplitImpl {
-    #[allow(clippy::result_unit_err)]
-    pub fn into_fs(self) -> Result<FsSplit, ()> {
-        match self {
-            Self::S3(split) => Ok(split),
-            _ => Err(()),
-        }
-    }
-
-    pub fn as_fs(&self) -> Option<&FsSplit> {
-        match self {
-            Self::S3(split) => Some(split),
-            _ => None,
-        }
     }
 }
 

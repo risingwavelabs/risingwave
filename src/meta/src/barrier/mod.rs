@@ -61,7 +61,7 @@ use crate::hummock::{CommitEpochInfo, HummockManagerRef, NewTableFragmentInfo};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv,
-    MetadataManager, WorkerId,
+    MetadataManager, SystemParamsManagerImpl, WorkerId,
 };
 use crate::model::{ActorId, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
@@ -508,17 +508,16 @@ impl GlobalBarrierManager {
                  To resume the data sources, either restart the cluster again or use `risectl meta resume`.",
                 PAUSE_ON_NEXT_BOOTSTRAP_KEY
             );
-            if let Some(system_ctl) = self.env.system_params_controller() {
-                system_ctl
-                    .set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
-                    .await?;
-            } else {
-                self.env
-                    .system_params_manager()
-                    .unwrap()
-                    .set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
-                    .await?;
-            }
+            match self.env.system_params_manager_impl_ref() {
+                SystemParamsManagerImpl::Kv(mgr) => {
+                    mgr.set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
+                        .await?;
+                }
+                SystemParamsManagerImpl::Sql(mgr) => {
+                    mgr.set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
+                        .await?;
+                }
+            };
         }
         Ok(paused)
     }

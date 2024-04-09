@@ -160,6 +160,7 @@ where
             Info::ServingParallelUnitMappings(_) => true,
             Info::Snapshot(_) | Info::HummockWriteLimits(_) => unreachable!(),
             Info::HummockStats(_) => true,
+            Info::Recovery(_) => true,
         });
 
         self.observer_states

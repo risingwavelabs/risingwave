@@ -54,7 +54,9 @@ use tokio::time::{Instant, MissedTickBehavior};
 use tracing::warn;
 
 use crate::barrier::{Command, Reschedule, StreamRpcManager};
-use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv, MetadataManager, WorkerId};
+use crate::manager::{
+    IdCategory, IdGenManagerImpl, LocalNotification, MetaSrvEnv, MetadataManager, WorkerId,
+};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::serving::{
     to_deleted_fragment_parallel_unit_mapping, to_fragment_parallel_unit_mapping,
@@ -1496,16 +1498,12 @@ impl ScaleController {
             }
 
             for created_parallel_unit_id in added_parallel_units {
-                let id = match self.env.sql_id_gen_manager_ref() {
-                    None => {
-                        self.env
-                            .id_gen_manager()
-                            .generate::<{ IdCategory::Actor }>()
-                            .await? as ActorId
+                let id = match self.env.id_gen_manager() {
+                    IdGenManagerImpl::Kv(mgr) => {
+                        mgr.generate::<{ IdCategory::Actor }>().await? as ActorId
                     }
-                    Some(id_gen) => {
-                        let id = id_gen.generate_interval::<{ IdCategory::Actor }>(1);
-
+                    IdGenManagerImpl::Sql(mgr) => {
+                        let id = mgr.generate_interval::<{ IdCategory::Actor }>(1);
                         id as ActorId
                     }
                 };
