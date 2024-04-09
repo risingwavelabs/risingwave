@@ -77,3 +77,26 @@ CREATE TABLE tidb_sink_datatypes (
   c_double_precision_array LONGTEXT,
   c_varchar_array LONGTEXT
 );
+
+CREATE TABLE tidb_cdc_types (
+  id integer PRIMARY KEY,
+  c_boolean boolean,
+  c_bit bit,
+  c_tinyint tinyint,
+  c_smallint smallint,
+  c_mediumint mediumint,
+  c_integer integer,
+  c_bigint bigint,
+  c_decimal decimal,
+  c_float float,
+  c_double double,
+  c_char_255 char(255),
+  c_varchar_10000 varchar(10000),
+  c_binary_255 binary(255),
+  c_varbinary_10000 varbinary(10000),
+  c_date date,
+  c_time time(6),
+  c_datetime datetime(6),
+  c_timestamp timestamp(6),
+  c_json JSON
+);

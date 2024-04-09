@@ -85,7 +85,7 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
-axum = "=0.7.4" # TODO: 0.7.5+ does not work with current toolchain
+axum = { workspace = true }
 tower-http = { version = "0.5", features = [
     "add-extension",
     "cors",

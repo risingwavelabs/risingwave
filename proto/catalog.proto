@@ -170,6 +170,9 @@ message Sink {
   // Cluster version (tracked by git commit) when initialized/created
   optional string initialized_at_cluster_version = 22;
   optional string created_at_cluster_version = 23;
+
+  // Whether it should use background ddl or block until backfill finishes.
+  CreateType create_type = 24;
 }
 
 message Subscription {
