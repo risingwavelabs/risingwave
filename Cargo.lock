@@ -2231,7 +2231,7 @@ checksum = "98cc8fbded0c607b7ba9dd60cd98df59af97e84d24e49c8557331cfc26d301ce"
 [[package]]
 name = "clickhouse"
 version = "0.11.5"
-source = "git+https://github.com/risingwavelabs/clickhouse.rs?rev=622501c1c98c80baaf578c716d6903dde947804e#622501c1c98c80baaf578c716d6903dde947804e"
+source = "git+https://github.com/risingwavelabs/clickhouse.rs?rev=d38c8b6391af098b724c114e5a4746aedab6ab8e#d38c8b6391af098b724c114e5a4746aedab6ab8e"
 dependencies = [
  "bstr",
  "bytes",
@@ -2253,7 +2253,7 @@ dependencies = [
 [[package]]
 name = "clickhouse-derive"
 version = "0.1.1"
-source = "git+https://github.com/risingwavelabs/clickhouse.rs?rev=622501c1c98c80baaf578c716d6903dde947804e#622501c1c98c80baaf578c716d6903dde947804e"
+source = "git+https://github.com/risingwavelabs/clickhouse.rs?rev=d38c8b6391af098b724c114e5a4746aedab6ab8e#d38c8b6391af098b724c114e5a4746aedab6ab8e"
 dependencies = [
  "proc-macro2",
  "quote",
