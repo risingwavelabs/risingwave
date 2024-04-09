@@ -2718,9 +2718,9 @@ def section_hummock_manager(outer_panels):
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('hummock_manager_lock_time_bucket')}[$__rate_interval])) by (le, lock_name, lock_type))",
+                                f"histogram_quantile({quantile}, sum(rate({metric('hummock_manager_lock_time_bucket')}[$__rate_interval])) by (le, method, lock_name, lock_type))",
                                 f"Lock Time p{legend}"
-                                + " - {{lock_type}} @ {{lock_name}}",
+                                + " - {{method}} @ {{lock_type}} @ {{lock_name}}",
                             ),
                             [50, 99, "max"],
                         ),

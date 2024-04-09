@@ -872,6 +872,8 @@ impl HummockManager {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let versioning = versioning_guard.deref_mut();
 
+        let _timer = start_measure_real_process_timer!(self);
+
         let mut current_version = versioning.current_version.clone();
         let start_time = Instant::now();
         let max_committed_epoch = current_version.max_committed_epoch;
@@ -1402,6 +1404,8 @@ impl HummockManager {
         // The compaction task is finished.
         let mut versioning_guard = write_lock!(self, versioning).await;
         let versioning = versioning_guard.deref_mut();
+        let _timer = start_measure_real_process_timer!(self);
+
         let mut current_version = versioning.current_version.clone();
         // purge stale compact_status
         for group_id in original_keys {
