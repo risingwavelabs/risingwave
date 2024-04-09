@@ -2,13 +2,13 @@
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
-statement error 
+statement error
 create table t0 (v1 int, v2 int, v3 int, v4 int, primary key(v1)) on conflict do update if not null with version column(v5);
 
-statement error 
+statement error
 create table t0 (v1 int, v2 int, v3 int, v4 bool, primary key(v1)) on conflict do update if not null with version column(v4);
 
-statement error 
+statement error
 create table t0 (v1 int, v2 int, v3 int, v4 bool, primary key(v1)) on conflict do update if not null with version column v4;
 
 statement ok
