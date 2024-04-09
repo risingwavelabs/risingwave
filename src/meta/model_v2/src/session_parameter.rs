@@ -20,7 +20,6 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub name: String,
     pub value: String,
-    pub is_mutable: bool,
     pub description: Option<String>,
 }
 

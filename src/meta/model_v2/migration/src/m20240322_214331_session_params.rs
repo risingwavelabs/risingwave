@@ -20,11 +20,6 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(ColumnDef::new(SessionParameter::Value).string().not_null())
-                    .col(
-                        ColumnDef::new(SessionParameter::IsMutable)
-                            .boolean()
-                            .not_null(),
-                    )
                     .col(ColumnDef::new(SessionParameter::Description).string())
                     .to_owned(),
             )
@@ -44,6 +39,5 @@ enum SessionParameter {
     Table,
     Name,
     Value,
-    IsMutable,
     Description,
 }

@@ -791,6 +791,7 @@ pub async fn start_service_as_election_leader(
     // to crash will not be persisted.
     if meta_store_sql.is_none() {
         env.system_params_manager().unwrap().flush_params().await?;
+        env.session_params_manager().unwrap().flush_params().await?;
         env.cluster_id()
             .put_at_meta_store(meta_store.as_ref().unwrap())
             .await?;

@@ -86,7 +86,6 @@ impl SessionParamsController {
             .map(|param| session_parameter::ActiveModel {
                 name: Set(param.name),
                 value: Set(param.setting),
-                is_mutable: Set(true),
                 description: Set(Some(param.description)),
             })
             .collect_vec();
@@ -176,7 +175,6 @@ mod tests {
         let deprecated_param = session_parameter::ActiveModel {
             name: Set("deprecated_param".into()),
             value: Set("foo".into()),
-            is_mutable: Set(true),
             description: Set(None),
         };
         deprecated_param
