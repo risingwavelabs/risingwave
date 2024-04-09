@@ -80,6 +80,7 @@ pub(crate) fn derive_pk(
     input: PlanRef,
     user_order_by: Order,
     columns: &[ColumnCatalog],
+    prune_order_by: bool,
 ) -> (Vec<ColumnOrder>, Vec<usize>) {
     // Note(congyi): avoid pk duplication
     let stream_key = input
@@ -106,8 +107,12 @@ pub(crate) fn derive_pk(
     let mut in_order = FixedBitSet::with_capacity(schema.len());
     let mut pk = vec![];
 
-    let func_dep = input.functional_dependency();
-    let user_order_by = func_dep.minimize_order_key(user_order_by);
+    let user_order_by = if prune_order_by {
+        let func_dep = input.functional_dependency();
+        func_dep.minimize_order_key(user_order_by)
+    } else {
+        user_order_by
+    };
 
     for order in &user_order_by.column_orders {
         let idx = order.column_index;

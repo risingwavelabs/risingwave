@@ -1,4 +1,4 @@
-- name: test functional dependency for order key pruning
+- name: test functional dependency for order key pruning (order by)
   sql: |
     create table t1 (id int primary key, i int);
     select id, i from t1 order by id, i limit 2;
@@ -6,3 +6,10 @@
     - logical_plan
     - stream_plan
     - batch_plan
+- name: test functional dependency for order key pruning (index)
+  sql: |
+    create table t1 (v1 int, v2 int);
+    create materialized view v as select count(*) cnt from t1;
+    explain (verbose) create index mv_idx on v(cnt);
+  expected_outputs:
+    - explain_output
