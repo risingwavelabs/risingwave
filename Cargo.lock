@@ -1650,7 +1650,7 @@ dependencies = [
  "bitflags 2.5.0",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "lazy_static",
  "lazycell",
  "log",
@@ -4345,9 +4345,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.1.2"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5c17111344df2de260140472855e2d84e0e8e3bffd4faed840f12f6de6f23da"
+checksum = "f59727e86709e4eab603f8a5086f3b2c7d3ddddf7c8b31d8dea2b00364b7fb95"
 dependencies = [
  "ahash 0.8.6",
  "bitflags 2.5.0",
@@ -4365,9 +4365,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fe0d0d6090461ad435dc2316e9800f336faa6b858d6c85dfb54091cb4cf127e"
+checksum = "a5e0749c569ef5f8d9f877a6a81da24e7d1b6f8ea87ec6c3933e12dac0c7632f"
 dependencies = [
  "anyhow",
  "bitflags 2.5.0",
