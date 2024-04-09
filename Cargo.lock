@@ -9875,6 +9875,7 @@ dependencies = [
  "iana-time-zone",
  "icelake",
  "itertools 0.12.1",
+ "jsonbb",
  "linkme",
  "madsim-tokio",
  "madsim-tonic",
