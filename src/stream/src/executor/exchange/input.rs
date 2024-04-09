@@ -179,10 +179,11 @@ impl RemoteInput {
                     .context("RemoteInput decode message error")?;
                 messages.push(msg);
 
-                let permits = permits.unwrap();
-                ack_permits.records += permits.records;
-                ack_permits.bytes += permits.bytes;
-                ack_permits.barriers += permits.barriers;
+                if let Some(permits) = permits {
+                    ack_permits.records += permits.records;
+                    ack_permits.bytes += permits.bytes;
+                    ack_permits.barriers += permits.barriers;
+                }
             }
             exchange_frag_recv_size.inc_by(ack_permits.bytes);
 
