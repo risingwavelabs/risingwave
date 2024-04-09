@@ -792,6 +792,7 @@ pub async fn build_remote_object_store(
     ident: &str,
     config: ObjectStoreConfig,
 ) -> ObjectStoreImpl {
+    tracing::debug!(config=?config, "object store {ident}");
     match url {
         s3 if s3.starts_with("s3://") => {
             if config.s3.developer.use_opendal {

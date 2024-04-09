@@ -88,8 +88,12 @@ impl BackupManager {
         store_dir: &str,
     ) -> MetaResult<Arc<Self>> {
         let store_config = (store_url.to_string(), store_dir.to_string());
-        let store =
-            create_snapshot_store(&store_config, metrics.object_store_metric.clone()).await?;
+        let store = create_snapshot_store(
+            &store_config,
+            metrics.object_store_metric.clone(),
+            &env.opts.object_store_config,
+        )
+        .await?;
         tracing::info!(
             "backup manager initialized: url={}, dir={}",
             store_config.0,
@@ -161,8 +165,12 @@ impl BackupManager {
     }
 
     pub async fn set_store(&self, config: StoreConfig) -> MetaResult<()> {
-        let new_store =
-            create_snapshot_store(&config, self.meta_metrics.object_store_metric.clone()).await?;
+        let new_store = create_snapshot_store(
+            &config,
+            self.meta_metrics.object_store_metric.clone(),
+            &self.env.opts.object_store_config,
+        )
+        .await?;
         tracing::info!(
             "new backup config is applied: url={}, dir={}",
             config.0,
@@ -368,13 +376,14 @@ impl BackupWorker {
 async fn create_snapshot_store(
     config: &StoreConfig,
     metric: Arc<ObjectStoreMetrics>,
+    object_store_config: &ObjectStoreConfig,
 ) -> MetaResult<ObjectStoreMetaSnapshotStorage> {
     let object_store = Arc::new(
         build_remote_object_store(
             &config.0,
             metric,
             "Meta Backup",
-            ObjectStoreConfig::default(),
+            object_store_config.clone(),
         )
         .await,
     );

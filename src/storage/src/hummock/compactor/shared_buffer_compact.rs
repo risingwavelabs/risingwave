@@ -36,7 +36,7 @@ use tracing::{error, warn};
 
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
-use crate::hummock::compactor::context::CompactorContext;
+use crate::hummock::compactor::context::{await_tree_key, CompactorContext};
 use crate::hummock::compactor::{check_flush_result, CompactOutput, Compactor};
 use crate::hummock::event_handler::uploader::UploadTaskPayload;
 use crate::hummock::event_handler::LocalInstanceId;
@@ -186,8 +186,8 @@ async fn compact_shared_buffer(
                 LazyLock::new(|| AtomicUsize::new(0));
             let tree_root = context.await_tree_reg.as_ref().map(|reg| {
                 let id = NEXT_SHARED_BUFFER_COMPACT_ID.fetch_add(1, Relaxed);
-                reg.write().register(
-                    format!("compact_shared_buffer/{}", id),
+                reg.register(
+                    await_tree_key::CompactSharedBuffer { id },
                     format!(
                         "Compact Shared Buffer: {:?}",
                         payload

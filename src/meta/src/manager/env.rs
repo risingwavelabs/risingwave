@@ -15,7 +15,7 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
-use risingwave_common::config::{CompactionConfig, DefaultParallelism};
+use risingwave_common::config::{CompactionConfig, DefaultParallelism, ObjectStoreConfig};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_meta_model_v2::prelude::Cluster;
@@ -222,6 +222,7 @@ pub struct MetaOpts {
     /// l0 multi level picker whether to check the overlap accuracy between sub levels
     pub enable_check_task_level_overlap: bool,
     pub enable_dropped_column_reclaim: bool,
+    pub object_store_config: ObjectStoreConfig,
 }
 
 impl MetaOpts {
@@ -277,6 +278,7 @@ impl MetaOpts {
             enable_trivial_move: true,
             enable_check_task_level_overlap: true,
             enable_dropped_column_reclaim: false,
+            object_store_config: ObjectStoreConfig::default(),
         }
     }
 }

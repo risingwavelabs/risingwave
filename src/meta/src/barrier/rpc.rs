@@ -23,7 +23,6 @@ use futures::future::try_join_all;
 use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{pin_mut, FutureExt, StreamExt};
 use itertools::Itertools;
-use risingwave_common::bail;
 use risingwave_common::hash::ActorId;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
@@ -213,7 +212,9 @@ impl ControlStreamManager {
         &mut self,
         command_context: Arc<CommandContext>,
     ) -> MetaResult<HashSet<WorkerId>> {
-        fail_point!("inject_barrier_err", |_| bail!("inject_barrier_err"));
+        fail_point!("inject_barrier_err", |_| risingwave_common::bail!(
+            "inject_barrier_err"
+        ));
         let mutation = command_context.to_mutation();
         let info = command_context.info.clone();
         let mut node_need_collect = HashSet::new();

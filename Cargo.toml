@@ -79,7 +79,7 @@ repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
 foyer = "0.6"
-await-tree = "0.1.1"
+await-tree = "0.2.1"
 aws-config = { version = "1", default-features = false, features = [
   "behavior-version-latest",
   "rt-tokio",
@@ -109,7 +109,7 @@ aws-smithy-http = "0.60"
 aws-smithy-runtime-api = "1"
 aws-smithy-runtime = "1"
 aws-smithy-types = { version = "1", default-features = false, features = [
-  "hyper-0-14-x",
+  "hyper-0-14-x", # required by aws sdk
 ] }
 aws-endpoint = "0.60"
 aws-types = "1"
@@ -148,6 +148,7 @@ arrow-schema-deltalake = { package = "arrow-schema", version = "48.0.1" }
 # compile time and binary size.
 deltalake = { git = "https://github.com/risingwavelabs/delta-rs", rev = "5c2dccd4640490202ffe98adbd13b09cef8e007b", features = [
   "s3-no-concurrent-write",
+  "gcs",
 ] }
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "2682b85" }
 parquet = "50"

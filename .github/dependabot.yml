@@ -38,12 +38,6 @@ updates:
         - "google-cloud*"
 # Don't update these directories
 - package-ecosystem: cargo
-  directory: /src/workspace-hack
-  schedule:
-    interval: "daily"
-  ignore:
-    - dependency-name: "*"
-- package-ecosystem: cargo
   directory: /integration_tests/feature-store
   schedule:
     interval: "daily"
