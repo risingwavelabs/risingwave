@@ -330,12 +330,12 @@ impl StreamFragmentGraph {
     ) -> MetaResult<Self> {
         let (fragment_id_gen, table_id_gen) = match env.id_gen_manager() {
             IdGenManagerImpl::Kv(mgr) => (
-                GlobalFragmentIdGen::new(&mgr, proto.fragments.len() as u64).await?,
-                GlobalTableIdGen::new(&mgr, proto.table_ids_cnt as u64).await?,
+                GlobalFragmentIdGen::new(mgr, proto.fragments.len() as u64).await?,
+                GlobalTableIdGen::new(mgr, proto.table_ids_cnt as u64).await?,
             ),
             IdGenManagerImpl::Sql(mgr) => (
-                GlobalFragmentIdGen::new_v2(&mgr, proto.fragments.len() as u64),
-                GlobalTableIdGen::new_v2(&mgr, proto.table_ids_cnt as u64),
+                GlobalFragmentIdGen::new_v2(mgr, proto.fragments.len() as u64),
+                GlobalTableIdGen::new_v2(mgr, proto.table_ids_cnt as u64),
             ),
         };
 

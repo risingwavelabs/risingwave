@@ -150,7 +150,8 @@ impl UserService for UserServiceImpl {
             MetadataManager::V1(mgr) => {
                 let id = self
                     .env
-                    .kv_id_gen_manager()
+                    .id_gen_manager()
+                    .as_kv()
                     .generate::<{ IdCategory::User }>()
                     .await? as u32;
                 let mut user = req.get_user()?.clone();

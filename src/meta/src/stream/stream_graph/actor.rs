@@ -730,8 +730,8 @@ impl ActorGraphBuilder {
             .map(|d| d.parallelism())
             .sum::<usize>() as u64;
         let id_gen = match env.id_gen_manager() {
-            IdGenManagerImpl::Kv(mgr) => GlobalActorIdGen::new(&mgr, actor_len).await?,
-            IdGenManagerImpl::Sql(mgr) => GlobalActorIdGen::new_v2(&mgr, actor_len),
+            IdGenManagerImpl::Kv(mgr) => GlobalActorIdGen::new(mgr, actor_len).await?,
+            IdGenManagerImpl::Sql(mgr) => GlobalActorIdGen::new_v2(mgr, actor_len),
         };
 
         // Build the actor graph and get the final state.

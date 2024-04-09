@@ -268,12 +268,11 @@ mod tests {
     #[cfg(not(madsim))]
     async fn test_system_params() {
         let env = MetaSrvEnv::for_test_with_sql_meta_store().await;
-        let meta_store = env.sql_meta_store_ref_checked();
         let init_params = system_params_for_test();
 
         // init system parameter controller as first launch.
         let system_param_ctl = SystemParamsController::new(
-            meta_store.clone(),
+            env.meta_store().as_sql().clone(),
             env.notification_manager_ref(),
             init_params.clone(),
         )

@@ -2075,7 +2075,7 @@ impl HummockManager {
         compaction_groups: Vec<PbCompactionGroupInfo>,
     ) -> Result<()> {
         for table in &table_catalogs {
-            table.insert(self.env.kv_meta_store_checked()).await?;
+            table.insert(self.env.meta_store().as_kv()).await?;
         }
         for group in &compaction_groups {
             assert!(

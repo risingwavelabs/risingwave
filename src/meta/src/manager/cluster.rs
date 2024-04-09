@@ -188,7 +188,7 @@ impl ClusterManager {
             }
 
             new_worker.update_expire_at(self.max_heartbeat_interval);
-            new_worker.insert(self.env.kv_meta_store_checked()).await?;
+            new_worker.insert(self.env.meta_store().as_kv()).await?;
             *worker = new_worker;
             return Ok(worker.to_protobuf());
         }
@@ -196,7 +196,8 @@ impl ClusterManager {
         // Generate worker id.
         let worker_id = self
             .env
-            .kv_id_gen_manager()
+            .id_gen_manager()
+            .as_kv()
             .generate::<{ IdCategory::Worker }>()
             .await? as WorkerId;
 
@@ -232,7 +233,7 @@ impl ClusterManager {
         worker.update_started_at(timestamp_now_sec());
         worker.update_resource(Some(resource));
         // Persist worker node.
-        worker.insert(self.env.kv_meta_store_checked()).await?;
+        worker.insert(self.env.meta_store().as_kv()).await?;
         // Update core.
         core.add_worker_node(worker);
 
@@ -256,7 +257,7 @@ impl ClusterManager {
 
         if worker.worker_node.state != State::Running as i32 {
             worker.worker_node.state = State::Running as i32;
-            worker.insert(self.env.kv_meta_store_checked()).await?;
+            worker.insert(self.env.meta_store().as_kv()).await?;
             core.update_worker_node(worker.clone());
         }
 
@@ -309,7 +310,7 @@ impl ClusterManager {
             }
         }
 
-        self.env.kv_meta_store_checked().txn(txn).await?;
+        self.env.meta_store().as_kv().txn(txn).await?;
 
         for var_txn in var_txns {
             var_txn.commit();
@@ -325,7 +326,7 @@ impl ClusterManager {
         let worker_node = worker.to_protobuf();
 
         // Persist deletion.
-        Worker::delete(self.env.kv_meta_store_checked(), &host_address).await?;
+        Worker::delete(self.env.meta_store().as_kv(), &host_address).await?;
 
         // Update core.
         core.delete_worker_node(worker);
@@ -519,7 +520,8 @@ impl ClusterManager {
     ) -> MetaResult<Vec<ParallelUnit>> {
         let start_id = self
             .env
-            .kv_id_gen_manager()
+            .id_gen_manager()
+            .as_kv()
             .generate_interval::<{ IdCategory::ParallelUnit }>(parallel_degree as u64)
             .await? as ParallelUnitId;
         let parallel_units = (start_id..start_id + parallel_degree as ParallelUnitId)
@@ -564,7 +566,7 @@ impl ClusterManagerCore {
     pub const MAX_WORKER_REUSABLE_ID_COUNT: usize = 1 << Self::MAX_WORKER_REUSABLE_ID_BITS;
 
     async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let meta_store = env.kv_meta_store_checked();
+        let meta_store = env.meta_store().as_kv();
         let mut workers = Worker::list(meta_store).await?;
 
         let used_transactional_ids: HashSet<_> = workers
