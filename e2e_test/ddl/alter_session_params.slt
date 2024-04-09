@@ -20,3 +20,6 @@ query T
 show RW_IMPLICIT_FLUSH;
 ----
 true
+
+statement ok
+alter system set RW_IMPLICIT_FLUSH to false;
