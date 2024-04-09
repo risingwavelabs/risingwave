@@ -34,7 +34,7 @@ pub async fn handle_fetch_cursor(
     let cursor_manager = session.get_cursor_manager();
 
     let (rows, pg_descs) = cursor_manager
-        .get_row_with_cursor(cursor_name, stmt.count, handle_args)
+        .get_rows_with_cursor(cursor_name, stmt.count, handle_args)
         .await?;
     Ok(build_fetch_cursor_response(rows, pg_descs))
 }

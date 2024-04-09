@@ -399,35 +399,6 @@ impl CursorManager {
         Ok(())
     }
 
-    pub async fn update_subscription_cursor(
-        &self,
-        cursor_name: String,
-        row_stream: PgResponseStream,
-        pg_descs: Vec<PgFieldDescriptor>,
-        start_timestamp: i64,
-        is_snapshot: bool,
-        need_check_timestamp: bool,
-        subscription_name: ObjectName,
-        retention_secs: u64,
-    ) -> Result<()> {
-        let cursor = SubscriptionCursor::new(
-            cursor_name.clone(),
-            row_stream,
-            pg_descs,
-            start_timestamp,
-            is_snapshot,
-            need_check_timestamp,
-            subscription_name.clone(),
-            Instant::now() + Duration::from_secs(retention_secs),
-        )
-        .await?;
-        self.cursor_map
-            .lock()
-            .await
-            .insert(cursor.cursor_name.clone(), Cursor::Subscription(cursor));
-        Ok(())
-    }
-
     pub async fn add_query_cursor(
         &self,
         cursor_name: ObjectName,
@@ -468,7 +439,7 @@ impl CursorManager {
             .retain(|_, v| matches!(v, Cursor::Subscription(_)));
     }
 
-    pub async fn get_row_with_cursor(
+    pub async fn get_rows_with_cursor(
         &self,
         cursor_name: String,
         count: u32,
