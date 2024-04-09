@@ -157,10 +157,11 @@ impl RemoteInput {
         let span: await_tree::Span = format!("RemoteInput (actor {up_actor_id})").into();
 
         // process messages and ack permits in batch
-        let mut stream = stream.ready_chunks(8);
+        const BATCH_SIZE: usize = 8; // arbitrary number
+        let mut stream = stream.ready_chunks(BATCH_SIZE);
         while let Some(inputs) = stream.next().verbose_instrument_await(span.clone()).await {
             let mut ack_permits = PbPermits::default();
-            let mut messages = Vec::with_capacity(8);
+            let mut messages = Vec::with_capacity(BATCH_SIZE);
 
             for result in inputs {
                 let GetStreamResponse { message, permits } = result.map_err(|e| {
