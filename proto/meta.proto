@@ -447,8 +447,6 @@ message SubscribeResponse {
     catalog.Schema schema = 5;
     catalog.Function function = 6;
     user.UserInfo user = 11;
-    // for streaming
-    // FragmentParallelUnitMapping parallel_unit_mapping = 12;
     common.WorkerNode node = 13;
     hummock.HummockSnapshot hummock_snapshot = 14;
     hummock.HummockVersionDeltas hummock_version_deltas = 15;
@@ -458,7 +456,6 @@ message SubscribeResponse {
     hummock.WriteLimits hummock_write_limits = 20;
     RelationGroup relation_group = 21;
     catalog.Connection connection = 22;
-    // FragmentParallelUnitMappings serving_parallel_unit_mappings = 23;
     hummock.HummockVersionStats hummock_stats = 24;
     Recovery recovery = 25;
     FragmentWorkerMapping streaming_worker_mapping = 26;
@@ -616,7 +613,6 @@ service SystemParamsService {
 message GetServingVnodeMappingsRequest {}
 
 message GetServingVnodeMappingsResponse {
-  // repeated FragmentParallelUnitMapping mappings = 1;
   map<uint32, uint32> fragment_to_table = 2;
   repeated FragmentWorkerMapping worker_mappings = 3;
 }

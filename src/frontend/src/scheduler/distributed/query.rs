@@ -476,7 +476,7 @@ pub(crate) mod tests {
     use risingwave_common::catalog::{
         ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, DEFAULT_SUPER_USER_ID,
     };
-    use risingwave_common::hash::{ParallelUnitMapping, WorkerMapping};
+    use risingwave_common::hash::WorkerMapping;
     use risingwave_common::types::DataType;
     use risingwave_pb::common::worker_node::Property;
     use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};

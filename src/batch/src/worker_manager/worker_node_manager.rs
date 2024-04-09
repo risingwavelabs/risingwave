@@ -19,7 +19,6 @@ use std::time::Duration;
 use rand::seq::SliceRandom;
 use risingwave_common::bail;
 use risingwave_common::hash::{WorkerId, WorkerMapping};
-
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 

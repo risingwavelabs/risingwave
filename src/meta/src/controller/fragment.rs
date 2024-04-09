@@ -26,10 +26,9 @@ use risingwave_meta_model_v2::prelude::{
     Actor, ActorDispatcher, Fragment, Sink, StreamingJob, WorkerProperty,
 };
 use risingwave_meta_model_v2::{
-    actor, actor_dispatcher, fragment, object, sink, streaming_job, worker_property,
-    ActorId, ActorUpstreamActors, ConnectorSplits, ExprContext, FragmentId, FragmentVnodeMapping,
-    I32Array, JobStatus, ObjectId, SinkId, SourceId, StreamingParallelism, TableId, VnodeBitmap,
-    WorkerId,
+    actor, actor_dispatcher, fragment, object, sink, streaming_job, worker_property, ActorId,
+    ActorUpstreamActors, ConnectorSplits, ExprContext, FragmentId, FragmentVnodeMapping, I32Array,
+    JobStatus, ObjectId, SinkId, SourceId, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
 };
 use risingwave_pb::common::PbParallelUnit;
 use risingwave_pb::meta::subscribe_response::{
@@ -38,10 +37,7 @@ use risingwave_pb::meta::subscribe_response::{
 use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{PbActorStatus, PbFragment, PbState};
-use risingwave_pb::meta::{
-    FragmentWorkerMapping,
-    PbFragmentWorkerMapping, PbTableFragments,
-};
+use risingwave_pb::meta::{FragmentWorkerMapping, PbFragmentWorkerMapping, PbTableFragments};
 use risingwave_pb::source::PbConnectorSplits;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
