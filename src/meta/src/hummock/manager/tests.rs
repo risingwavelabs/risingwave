@@ -47,7 +47,7 @@ use crate::hummock::compaction::selector::{
 use crate::hummock::error::Error;
 use crate::hummock::test_utils::*;
 use crate::hummock::{CommitEpochInfo, HummockManager, HummockManagerRef};
-use crate::manager::{MetaSrvEnv, WorkerId};
+use crate::manager::{MetaSrvEnv, MetaStoreImpl, WorkerId};
 use crate::model::MetadataModel;
 use crate::rpc::metrics::MetaMetrics;
 
@@ -100,11 +100,9 @@ fn get_compaction_group_object_ids(
 }
 
 async fn list_pinned_snapshot_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPinnedSnapshot> {
-    match env.sql_meta_store() {
-        None => HummockPinnedSnapshot::list(env.meta_store_checked())
-            .await
-            .unwrap(),
-        Some(sql_meta_store) => {
+    match env.meta_store() {
+        MetaStoreImpl::Kv(meta_store) => HummockPinnedSnapshot::list(meta_store).await.unwrap(),
+        MetaStoreImpl::Sql(sql_meta_store) => {
             use risingwave_meta_model_v2::hummock_pinned_snapshot;
             use sea_orm::EntityTrait;
             hummock_pinned_snapshot::Entity::find()
@@ -119,11 +117,9 @@ async fn list_pinned_snapshot_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPi
 }
 
 async fn list_pinned_version_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPinnedVersion> {
-    match env.sql_meta_store() {
-        None => HummockPinnedVersion::list(env.meta_store_checked())
-            .await
-            .unwrap(),
-        Some(sql_meta_store) => {
+    match env.meta_store() {
+        MetaStoreImpl::Kv(meta_store) => HummockPinnedVersion::list(meta_store).await.unwrap(),
+        MetaStoreImpl::Sql(sql_meta_store) => {
             use risingwave_meta_model_v2::hummock_pinned_version;
             use sea_orm::EntityTrait;
             hummock_pinned_version::Entity::find()
