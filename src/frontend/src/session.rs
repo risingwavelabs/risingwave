@@ -305,9 +305,9 @@ impl FrontendEnv {
 
         let system_params_manager =
             Arc::new(LocalSystemParamsManager::new(system_params_reader.clone()));
-        let session_params = Arc::new(RwLock::new(
-            frontend_meta_client.get_session_params().await?,
-        ));
+
+        // This `sessioni_params` should be initialized during the initial notification in `observer_manager`
+        let session_params = Arc::new(RwLock::new(SessionConfig::default()));
         let frontend_observer_node = FrontendObserverNode::new(
             worker_node_manager.clone(),
             catalog,

@@ -201,7 +201,7 @@ impl ObserverState for FrontendObserverNode {
         match serde_json::from_str(&session_params.unwrap().params) {
             Ok(params) => *self.session_params.write() = params,
             Err(e) => {
-                tracing::error!(error = %e.as_report(), "failed to parse session params from notification")
+                tracing::error!(error = %e.as_report(), "failed to parse session params from initial notification")
             }
         }
     }
