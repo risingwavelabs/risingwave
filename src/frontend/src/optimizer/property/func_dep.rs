@@ -235,6 +235,9 @@ impl FunctionalDependencySet {
         ))
     }
 
+    /// O(d), where `d` is the number of functional dependencies.
+    /// The call to `is_subset` is technically O(n),
+    /// but we can consider it O(1) since the constant factor is 1/usize.
     fn get_closure(&self, columns: &FixedBitSet) -> FixedBitSet {
         let mut closure = columns.clone();
         let mut no_updates;
@@ -254,6 +257,7 @@ impl FunctionalDependencySet {
     }
 
     /// Return `true` if the dependency determinant -> dependant exists.
+    /// O(d), where the dominant cost is from `Self::get_closure`, which has O(d) complexity.
     pub fn is_determined_by(&self, determinant: &FixedBitSet, dependant: &FixedBitSet) -> bool {
         self.get_closure(determinant).is_superset(dependant)
     }
@@ -343,6 +347,10 @@ impl FunctionalDependencySet {
     /// 2. If some continuous subset of columns and the next
     ///    column of the order key form a functional dependency,
     ///    we can prune that column.
+    /// 3. This function has O(dn) complexity, where:
+    ///    i.  `d` is the number of functional dependencies,
+    ///        because each iteration in the loop calls `Self::is_determined_by`.
+    ///    ii. `n` is the number of columns.
     fn minimize_order_key_bitset(&self, order_key: Vec<usize>) -> FixedBitSet {
         if order_key.is_empty() {
             return FixedBitSet::new();
