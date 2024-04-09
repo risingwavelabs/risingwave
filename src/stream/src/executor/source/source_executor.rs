@@ -680,7 +680,7 @@ impl<S: StateStore> WaitEpochWorker<S> {
                                 Ok(_) => {}
                                 Err(e) => {
                                     tracing::error!(
-                                        error = ?e.as_report(),
+                                        error = %e.as_report(),
                                         "source#{source_id}: failed to commit cdc offset: {offset}.",
                                     )
                                 }
@@ -688,7 +688,7 @@ impl<S: StateStore> WaitEpochWorker<S> {
                         }
                         Err(e) => {
                             tracing::error!(
-                            error = ?e.as_report(),
+                            error = %e.as_report(),
                             "wait epoch {} failed", epoch.0
                             );
                         }
