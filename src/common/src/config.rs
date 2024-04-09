@@ -800,9 +800,6 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::insert_rate_limit_mb")]
     pub insert_rate_limit_mb: usize,
 
-    #[serde(default = "default::file_cache::ring_buffer_capacity_mb")]
-    pub ring_buffer_capacity_mb: usize,
-
     #[serde(default = "default::file_cache::catalog_bits")]
     pub catalog_bits: usize,
 
@@ -1451,10 +1448,6 @@ pub mod default {
             0
         }
 
-        pub fn ring_buffer_capacity_mb() -> usize {
-            256
-        }
-
         pub fn catalog_bits() -> usize {
             6
         }
@@ -1783,8 +1776,6 @@ pub struct StorageMemoryConfig {
     pub meta_cache_capacity_mb: usize,
     pub meta_cache_shard_num: usize,
     pub shared_buffer_capacity_mb: usize,
-    pub data_file_cache_ring_buffer_capacity_mb: usize,
-    pub meta_file_cache_ring_buffer_capacity_mb: usize,
     pub compactor_memory_limit_mb: usize,
     pub prefetch_buffer_capacity_mb: usize,
     pub block_cache_eviction_config: EvictionConfig,
@@ -1827,8 +1818,6 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         }
         shard_bits
     });
-    let data_file_cache_ring_buffer_capacity_mb = s.storage.data_file_cache.ring_buffer_capacity_mb;
-    let meta_file_cache_ring_buffer_capacity_mb = s.storage.meta_file_cache.ring_buffer_capacity_mb;
     let compactor_memory_limit_mb = s
         .storage
         .compactor_memory_limit_mb
@@ -1900,8 +1889,6 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         meta_cache_capacity_mb,
         meta_cache_shard_num,
         shared_buffer_capacity_mb,
-        data_file_cache_ring_buffer_capacity_mb,
-        meta_file_cache_ring_buffer_capacity_mb,
         compactor_memory_limit_mb,
         prefetch_buffer_capacity_mb,
         block_cache_eviction_config,
