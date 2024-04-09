@@ -5210,12 +5210,6 @@ dependencies = [
 
 [[package]]
 name = "http-range-header"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "add0ab9360ddbd88cfeb3bd9574a1d85cfdfa14db10b3e21d3700dbc4328758f"
-
-[[package]]
-name = "http-range-header"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ce4ef31cda248bbdb6e6820603b82dfcd9e833db65a43e997a0ccec777d11fe"
@@ -9420,6 +9414,7 @@ name = "risingwave_common_service"
 version = "1.7.0-alpha"
 dependencies = [
  "async-trait",
+ "axum 0.7.4",
  "futures",
  "hyper 0.14.27",
  "madsim-tokio",
@@ -9431,7 +9426,7 @@ dependencies = [
  "thiserror",
  "thiserror-ext",
  "tower",
- "tower-http 0.4.4",
+ "tower-http",
  "tracing",
  "workspace-hack",
 ]
@@ -10137,7 +10132,7 @@ dependencies = [
  "tokio-retry",
  "tokio-stream",
  "tower",
- "tower-http 0.5.2",
+ "tower-http",
  "tracing",
  "url",
  "uuid",
@@ -10154,7 +10149,6 @@ dependencies = [
  "bytes",
  "cargo-emit",
  "dircpy",
- "hyper 1.2.0",
  "mime_guess",
  "npm_rs",
  "reqwest 0.12.2",
@@ -13150,24 +13144,6 @@ dependencies = [
 
 [[package]]
 name = "tower-http"
-version = "0.4.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61c5bb1d698276a2443e5ecfabc1008bf15a36c12e6a7176e7bf089ea9131140"
-dependencies = [
- "bitflags 2.5.0",
- "bytes",
- "futures-core",
- "futures-util",
- "http 0.2.9",
- "http-body 0.4.5",
- "http-range-header 0.3.1",
- "pin-project-lite",
- "tower-layer",
- "tower-service",
-]
-
-[[package]]
-name = "tower-http"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e9cd434a998747dd2c4276bc96ee2e0c7a2eadf3cae88e52be55a05fa9053f5"
@@ -13180,7 +13156,7 @@ dependencies = [
  "http 1.0.0",
  "http-body 1.0.0",
  "http-body-util",
- "http-range-header 0.4.0",
+ "http-range-header",
  "httpdate",
  "mime",
  "mime_guess",
