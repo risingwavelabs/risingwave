@@ -455,6 +455,8 @@ mod tests {
         assert!(fd.is_determined_by(&from, &to)); // (1, 2) --> (4) holds
     }
 
+    // (1, 2) -> (0)
+    // [1, 2, 0] -> [1, 2] (prune, since 0 is after continuous (1, 2))
     #[test]
     fn test_minimize_order_by_prefix() {
         let mut fd = FunctionalDependencySet::new(5);
@@ -469,6 +471,8 @@ mod tests {
         assert_eq!(actual_key, expected_key);
     }
 
+    // (1, 2) -> (0)
+    // [3, 1, 2, 0] -> [3, 1, 2] (prune, since 0 is after continuous (1, 2))
     #[test]
     fn test_minimize_order_by_tail_subset_prefix() {
         let mut fd = FunctionalDependencySet::new(5);
@@ -484,6 +488,8 @@ mod tests {
         assert_eq!(actual_key, expected_key);
     }
 
+    // (1, 2) -> (0)
+    // [3, 1, 2, 4, 0] -> [3, 1, 2, 4] (prune, since continuous (1, 2) is before 0)
     #[test]
     fn test_minimize_order_by_middle_subset_prefix() {
         let mut fd = FunctionalDependencySet::new(5);
@@ -500,6 +506,8 @@ mod tests {
         assert_eq!(actual_key, expected_key);
     }
 
+    // (1, 2) -> (0)
+    // [0, 1, 2] -> [0, 1, 2] (no pruning)
     #[test]
     fn test_minimize_order_by_suffix_cant_prune_prefix() {
         let mut fd = FunctionalDependencySet::new(5);
