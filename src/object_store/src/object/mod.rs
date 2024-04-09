@@ -411,8 +411,6 @@ pub struct MonitoredStreamingReader {
     streaming_read_timeout: Option<Duration>,
 }
 
-unsafe impl Sync for MonitoredStreamingReader {}
-
 impl MonitoredStreamingReader {
     pub fn new(
         media_type: &'static str,

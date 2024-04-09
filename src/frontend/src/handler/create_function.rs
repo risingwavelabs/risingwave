@@ -414,9 +414,10 @@ fn find_wasm_identifier_v2(
         .find(|f| inline_types(f).to_lowercase() == inlined_signature)
         .ok_or_else(|| {
             ErrorCode::InvalidParameterValue(format!(
-                "function not found in wasm binary: \"{}\"\nHINT: available functions:\n  {}",
+                "function not found in wasm binary: \"{}\"\nHINT: available functions:\n  {}\navailable types:\n  {}",
                 inlined_signature,
-                runtime.functions().join("\n  ")
+                runtime.functions().join("\n  "),
+                runtime.types().map(|(k, v)| format!("{k}: {v}")).join("\n  "),
             ))
         })?;
     Ok(identifier.into())

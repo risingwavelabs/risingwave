@@ -24,7 +24,7 @@ use bytes::Bytes;
 use fail::fail_point;
 use foyer::memory::{
     Cache, CacheContext, CacheEntry, CacheEventListener, EntryState, Key, LfuCacheConfig,
-    LruCacheConfig, LruConfig, Value,
+    LruCacheConfig, LruConfig, S3FifoCacheConfig, Value,
 };
 use futures::{future, StreamExt};
 use itertools::Itertools;
@@ -254,6 +254,14 @@ impl SstableStore {
                     event_listener,
                 }),
                 EvictionConfig::Lfu(eviction_config) => Cache::lfu(LfuCacheConfig {
+                    capacity,
+                    shards,
+                    eviction_config,
+                    object_pool_capacity,
+                    hash_builder,
+                    event_listener,
+                }),
+                EvictionConfig::S3Fifo(eviction_config) => Cache::s3fifo(S3FifoCacheConfig {
                     capacity,
                     shards,
                     eviction_config,

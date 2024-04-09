@@ -27,6 +27,7 @@ use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{FragmentParallelUnitMapping, MetaSnapshot, SubscribeResponse};
+use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::watch::Sender;
 
 use crate::catalog::root_catalog::Catalog;
@@ -43,6 +44,7 @@ pub struct FrontendObserverNode {
     user_info_updated_tx: Sender<UserInfoVersion>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     system_params_manager: LocalSystemParamsManagerRef,
+    compute_client_pool: ComputeClientPoolRef,
 }
 
 impl ObserverState for FrontendObserverNode {
@@ -95,6 +97,9 @@ impl ObserverState for FrontendObserverNode {
             }
             Info::ServingParallelUnitMappings(m) => {
                 self.handle_fragment_serving_mapping_notification(m.mappings, resp.operation());
+            }
+            Info::Recovery(_) => {
+                self.compute_client_pool.invalidate_all();
             }
         }
     }
@@ -192,6 +197,7 @@ impl FrontendObserverNode {
         user_info_updated_tx: Sender<UserInfoVersion>,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
         system_params_manager: LocalSystemParamsManagerRef,
+        compute_client_pool: ComputeClientPoolRef,
     ) -> Self {
         Self {
             worker_node_manager,
@@ -201,6 +207,7 @@ impl FrontendObserverNode {
             user_info_updated_tx,
             hummock_snapshot_manager,
             system_params_manager,
+            compute_client_pool,
         }
     }
 
