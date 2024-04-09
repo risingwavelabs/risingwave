@@ -59,7 +59,7 @@ impl SplitMetaData for KinesisSplit {
     }
 
     fn get_encoded_offset(&self) -> String {
-        todo!()
+        serde_json::to_string(&self.start_position).unwrap()
     }
 }
 

@@ -138,6 +138,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
     async fn get_diff(&mut self, rhs: Vec<SplitImpl>) -> StreamExecutorResult<ConnectorState> {
         let core = &mut self.stream_source_core;
         let all_completed: HashSet<SplitId> = core.split_state_store.get_all_completed().await?;
+
         tracing::debug!(actor = self.actor_ctx.id, all_completed = ?all_completed , "get diff");
 
         let mut target_state: Vec<SplitImpl> = Vec::new();

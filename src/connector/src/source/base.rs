@@ -561,10 +561,13 @@ pub trait SplitMetaData: Sized {
         Self::restore_from_json(JsonbVal::value_deserialize(bytes).unwrap())
     }
 
+    /// Encode the whole split metadata to a JSON object
     fn encode_to_json(&self) -> JsonbVal;
     fn restore_from_json(value: JsonbVal) -> Result<Self>;
     fn update_with_offset(&mut self, start_offset: String) -> crate::error::ConnectorResult<()>;
 
+    /// Get the current offset of the split in `String` format.
+    /// How to encode the offset into a `String` is up to the implementation.
     fn get_encoded_offset(&self) -> String;
 }
 

@@ -19,7 +19,7 @@ use risingwave_jni_core::{call_method, call_static_method};
 pub fn commit_cdc_offset(source_id: u64, encoded_offset: String) -> anyhow::Result<()> {
     let jvm = JVM.get_or_init()?;
     execute_with_jni_env(jvm, |env| {
-        // get source handler from JniDbzSourceRegistry and commit offset
+        // get source handler by source id
         let handler = call_static_method!(
             env,
             {com.risingwave.connector.source.core.JniDbzSourceRegistry},
@@ -27,11 +27,10 @@ pub fn commit_cdc_offset(source_id: u64, encoded_offset: String) -> anyhow::Resu
             source_id
         )?;
 
-        // commit offset
         let offset_str = env.new_string(&encoded_offset).with_context(|| {
             format!("Failed to create jni string from source offset: {encoded_offset}.")
         })?;
-
+        // commit offset to upstream
         call_method!(env, handler, {void commitOffset(String)}, &offset_str).with_context(
             || format!("Failed to commit offset to upstream for source: {source_id}."),
         )?;

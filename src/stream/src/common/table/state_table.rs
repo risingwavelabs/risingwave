@@ -44,7 +44,6 @@ use risingwave_hummock_sdk::key::{
     start_bound_of_excluded_prefix, TableKey, TableKeyRange,
 };
 use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
-use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::error::{ErrorKind, StorageError, StorageResult};
 use risingwave_storage::hummock::CachePolicy;
@@ -216,13 +215,6 @@ where
 
     pub fn state_store(&self) -> &S {
         &self.store
-    }
-
-    /// Wait until the epoch is committed and its data is ready to read.
-    pub async fn wait_epoch(&self, epoch: u64) -> StorageResult<()> {
-        self.store
-            .try_wait_epoch(HummockReadEpoch::Committed(epoch))
-            .await
     }
 }
 
