@@ -91,7 +91,6 @@ pub struct StorageOpts {
     pub data_file_cache_lfu_window_to_cache_size_ratio: usize,
     pub data_file_cache_lfu_tiny_lru_capacity_ratio: f64,
     pub data_file_cache_insert_rate_limit_mb: usize,
-    pub data_file_cache_ring_buffer_capacity_mb: usize,
     pub data_file_cache_catalog_bits: usize,
     pub data_file_cache_compression: String,
 
@@ -114,7 +113,6 @@ pub struct StorageOpts {
     pub meta_file_cache_lfu_window_to_cache_size_ratio: usize,
     pub meta_file_cache_lfu_tiny_lru_capacity_ratio: f64,
     pub meta_file_cache_insert_rate_limit_mb: usize,
-    pub meta_file_cache_ring_buffer_capacity_mb: usize,
     pub meta_file_cache_catalog_bits: usize,
     pub meta_file_cache_compression: String,
 
@@ -206,10 +204,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .data_file_cache
                 .lfu_tiny_lru_capacity_ratio,
             data_file_cache_insert_rate_limit_mb: c.storage.data_file_cache.insert_rate_limit_mb,
-            data_file_cache_ring_buffer_capacity_mb: c
-                .storage
-                .data_file_cache
-                .ring_buffer_capacity_mb,
             data_file_cache_catalog_bits: c.storage.data_file_cache.catalog_bits,
             data_file_cache_compression: c.storage.data_file_cache.compression.clone(),
             meta_file_cache_dir: c.storage.meta_file_cache.dir.clone(),
@@ -229,10 +223,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .meta_file_cache
                 .lfu_tiny_lru_capacity_ratio,
             meta_file_cache_insert_rate_limit_mb: c.storage.meta_file_cache.insert_rate_limit_mb,
-            meta_file_cache_ring_buffer_capacity_mb: c
-                .storage
-                .meta_file_cache
-                .ring_buffer_capacity_mb,
             meta_file_cache_catalog_bits: c.storage.meta_file_cache.catalog_bits,
             meta_file_cache_compression: c.storage.meta_file_cache.compression.clone(),
             cache_refill_data_refill_levels: c.storage.cache_refill.data_refill_levels.clone(),
