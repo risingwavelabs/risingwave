@@ -23,7 +23,7 @@ use risingwave_common::array::ListValue;
 use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{data_types, DataType, ScalarImpl, Timestamptz};
-use risingwave_common::{bail_not_implemented, current_cluster_version, no_function};
+use risingwave_common::{bail, bail_not_implemented, current_cluster_version, no_function};
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use risingwave_expr::window_function::{
     Frame, FrameBound, FrameBounds, FrameExclusion, RangeFrameBounds, RangeFrameOffset,
@@ -1554,8 +1554,14 @@ impl Binder {
     ) -> Result<Vec<ExprImpl>> {
         match arg_expr {
             FunctionArgExpr::Expr(expr) => Ok(vec![self.bind_expr_inner(expr)?]),
-            FunctionArgExpr::QualifiedWildcard(_, _) => todo!(),
-            FunctionArgExpr::ExprQualifiedWildcard(_, _) => todo!(),
+            FunctionArgExpr::QualifiedWildcard(_, _)
+            | FunctionArgExpr::ExprQualifiedWildcard(_, _) => {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "unexpected wildcard {}",
+                    arg_expr
+                ))
+                .into());
+            }
             FunctionArgExpr::Wildcard(None) => Ok(vec![]),
             FunctionArgExpr::Wildcard(Some(_)) => unreachable!(),
         }
