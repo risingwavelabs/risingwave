@@ -137,8 +137,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
     // rhs can not be None because we do not support split number reduction
     async fn get_diff(&mut self, rhs: Vec<SplitImpl>) -> StreamExecutorResult<ConnectorState> {
         let core = &mut self.stream_source_core;
-        let mut state_store_guard = core.split_state_store.lock().await;
-        let all_completed: HashSet<SplitId> = state_store_guard.get_all_completed().await?;
+        let all_completed: HashSet<SplitId> = core.split_state_store.get_all_completed().await?;
         tracing::debug!(actor = self.actor_ctx.id, all_completed = ?all_completed , "get diff");
 
         let mut target_state: Vec<SplitImpl> = Vec::new();
@@ -158,8 +157,10 @@ impl<S: StateStore> FsSourceExecutor<S> {
             } else {
                 no_change_flag = false;
                 // write new assigned split to state cache. snapshot is base on cache.
-                let state = if let Some(recover_state) =
-                    state_store_guard.try_recover_from_state_store(&sc).await?
+                let state = if let Some(recover_state) = core
+                    .split_state_store
+                    .try_recover_from_state_store(&sc)
+                    .await?
                 {
                     recover_state
                 } else {
@@ -231,18 +232,17 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .cloned()
             .collect_vec();
 
-        let mut state_store_guard = core.split_state_store.lock().await;
         if !incompleted.is_empty() {
             tracing::debug!(incompleted = ?incompleted, "take snapshot");
-            state_store_guard.set_states(incompleted).await?
+            core.split_state_store.set_states(incompleted).await?
         }
 
         if !completed.is_empty() {
             tracing::debug!(completed = ?completed, "take snapshot");
-            state_store_guard.set_all_complete(completed).await?
+            core.split_state_store.set_all_complete(completed).await?
         }
         // commit anyway, even if no message saved
-        state_store_guard.state_store.commit(epoch).await?;
+        core.split_state_store.state_store.commit(epoch).await?;
 
         core.updated_splits_in_epoch.clear();
         Ok(())
@@ -251,8 +251,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
         let core = &mut self.stream_source_core;
 
-        let mut state_store_guard = core.split_state_store.lock().await;
-        state_store_guard.state_store.try_flush().await?;
+        core.split_state_store.state_store.try_flush().await?;
 
         Ok(())
     }
@@ -303,10 +302,15 @@ impl<S: StateStore> FsSourceExecutor<S> {
             }
         }
 
-        let mut state_store_guard = self.stream_source_core.split_state_store.lock().await;
-        state_store_guard.init_epoch(barrier.epoch);
+        self.stream_source_core
+            .split_state_store
+            .init_epoch(barrier.epoch);
 
-        let all_completed: HashSet<SplitId> = state_store_guard.get_all_completed().await?;
+        let all_completed: HashSet<SplitId> = self
+            .stream_source_core
+            .split_state_store
+            .get_all_completed()
+            .await?;
         tracing::debug!(actor = self.actor_ctx.id, all_completed = ?all_completed , "get diff");
 
         let mut boot_state = boot_state
@@ -316,16 +320,18 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
         // restore the newest split info
         for ele in &mut boot_state {
-            if let Some(recover_state) = state_store_guard.try_recover_from_state_store(ele).await?
+            if let Some(recover_state) = self
+                .stream_source_core
+                .split_state_store
+                .try_recover_from_state_store(ele)
+                .await?
             {
                 *ele = recover_state;
             }
         }
-        drop(state_store_guard);
 
         // init in-memory split states with persisted state if any
         self.stream_source_core.init_split_state(boot_state.clone());
-
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
         tracing::debug!(state = ?recover_state, "start with state");
 

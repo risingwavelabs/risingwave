@@ -214,6 +214,10 @@ where
             .expect("non-replicated state store should not wait_for_epoch, and fail because of it.")
     }
 
+    pub fn state_store(&self) -> &S {
+        &self.store
+    }
+
     /// Wait until the epoch is committed and its data is ready to read.
     pub async fn wait_epoch(&self, epoch: u64) -> StorageResult<()> {
         self.store

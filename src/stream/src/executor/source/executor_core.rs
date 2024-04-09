@@ -41,7 +41,7 @@ pub struct StreamSourceCore<S: StateStore> {
     pub(crate) latest_split_info: HashMap<SplitId, SplitImpl>,
 
     /// Stores information of the splits.
-    pub(crate) split_state_store: Arc<Mutex<SourceStateTableHandler<S>>>,
+    pub(crate) split_state_store: SourceStateTableHandler<S>,
 
     /// Contains the latests offsets for the splits that are updated *in the current epoch*.
     /// It is cleared after each barrier.
@@ -68,7 +68,7 @@ where
             column_ids,
             source_desc_builder: Some(source_desc_builder),
             latest_split_info: HashMap::new(),
-            split_state_store: Arc::new(Mutex::new(split_state_store)),
+            split_state_store,
             updated_splits_in_epoch: HashMap::new(),
         }
     }
@@ -78,16 +78,5 @@ where
             .into_iter()
             .map(|split| (split.id(), split))
             .collect();
-    }
-
-    // pub async fn state_store_guard(
-    //     &mut self,
-    // ) -> tokio::sync::MutexGuard<SourceStateTableHandler<S>> {
-    //     self.split_state_store.lock().await
-    // }
-
-    pub async fn init_epoch(&mut self, epoch: EpochPair) {
-        let mut guard = self.split_state_store.lock().await;
-        guard.init_epoch(epoch)
     }
 }

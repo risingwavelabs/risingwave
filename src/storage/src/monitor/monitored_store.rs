@@ -20,7 +20,7 @@ use futures::{Future, TryFutureExt};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
-use risingwave_hummock_sdk::{HummockReadEpoch};
+use risingwave_hummock_sdk::HummockReadEpoch;
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
 use tracing::{error, Instrument};

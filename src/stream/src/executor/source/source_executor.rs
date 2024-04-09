@@ -28,6 +28,7 @@ use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
     BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitMetaData,
 };
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -35,6 +36,7 @@ use tokio::sync::{mpsc, Mutex};
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
+use crate::common::table::state_table::StateTable;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::*;
@@ -85,10 +87,9 @@ impl<S: StateStore> SourceExecutor<S> {
         core: &StreamSourceCore<S>,
     ) -> UnboundedSender<(Epoch, HashMap<SplitId, String>)> {
         let (wait_epoch_tx, wait_epoch_rx) = mpsc::unbounded_channel();
-        let state_store_handler = core.split_state_store.clone();
         let wait_epoch_worker = WaitEpochWorker {
             wait_epoch_rx,
-            state_table_handler: state_store_handler,
+            state_store: core.split_state_store.state_store.state_store().clone(),
         };
         tokio::spawn(wait_epoch_worker.run());
         wait_epoch_tx
@@ -208,8 +209,8 @@ impl<S: StateStore> SourceExecutor<S> {
                 split_changed = true;
                 // write new assigned split to state cache. snapshot is base on cache.
 
-                let mut state_store_guard = core.split_state_store.lock().await;
-                let initial_state = if let Some(recover_state) = state_store_guard
+                let initial_state = if let Some(recover_state) = core
+                    .split_state_store
                     .try_recover_from_state_store(&split)
                     .await?
                 {
@@ -252,8 +253,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
             if should_trim_state && !dropped_splits.is_empty() {
                 // trim dropped splits' state
-                let mut state_store_guard = core.split_state_store.lock().await;
-                state_store_guard.trim_state(&dropped_splits).await?;
+                core.split_state_store.trim_state(&dropped_splits).await?;
             }
 
             core.latest_split_info = target_state;
@@ -323,14 +323,13 @@ impl<S: StateStore> SourceExecutor<S> {
             .map(|split_impl| split_impl.to_owned())
             .collect_vec();
 
-        let mut state_store_guard = core.split_state_store.lock().await;
         if !cache.is_empty() {
             tracing::debug!(state = ?cache, "take snapshot");
-            state_store_guard.set_states(cache).await?;
+            core.split_state_store.set_states(cache).await?;
         }
 
         // commit anyway, even if no message saved
-        state_store_guard.state_store.commit(epoch).await?;
+        core.split_state_store.state_store.commit(epoch).await?;
 
         let mut updated_offsets = HashMap::new();
 
@@ -347,8 +346,7 @@ impl<S: StateStore> SourceExecutor<S> {
     /// try mem table spill
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
         let core = self.stream_source_core.as_mut().unwrap();
-        let mut state_store_guard = core.split_state_store.lock().await;
-        state_store_guard.state_store.try_flush().await?;
+        core.split_state_store.state_store.try_flush().await?;
 
         Ok(())
     }
@@ -412,15 +410,15 @@ impl<S: StateStore> SourceExecutor<S> {
             }
         }
 
-        {
-            let mut state_store_guard = core.split_state_store.lock().await;
-            state_store_guard.init_epoch(barrier.epoch);
-            for ele in &mut boot_state {
-                if let Some(recover_state) =
-                    state_store_guard.try_recover_from_state_store(ele).await?
-                {
-                    *ele = recover_state;
-                }
+        core.split_state_store.init_epoch(barrier.epoch);
+
+        for ele in &mut boot_state {
+            if let Some(recover_state) = core
+                .split_state_store
+                .try_recover_from_state_store(ele)
+                .await?
+            {
+                *ele = recover_state;
             }
         }
 
@@ -655,7 +653,7 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
 
 struct WaitEpochWorker<S: StateStore> {
     wait_epoch_rx: UnboundedReceiver<(Epoch, HashMap<SplitId, String>)>,
-    state_table_handler: Arc<Mutex<SourceStateTableHandler<S>>>,
+    state_store: S,
 }
 
 impl<S: StateStore> WaitEpochWorker<S> {
@@ -665,10 +663,11 @@ impl<S: StateStore> WaitEpochWorker<S> {
             // poll the rx and wait for the epoch commit
             match self.wait_epoch_rx.recv().await {
                 Some((epoch, updated_offsets)) => {
-                    let state_store_guard = self.state_table_handler.lock().await;
                     tracing::debug!("start to wait epoch {}", epoch.0);
-                    let ret = state_store_guard.state_store.wait_epoch(epoch.0).await;
-                    drop(state_store_guard);
+                    let ret = self
+                        .state_store
+                        .try_wait_epoch(HummockReadEpoch::Committed(epoch.0))
+                        .await;
 
                     match ret {
                         Ok(()) => {

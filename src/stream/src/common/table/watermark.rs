@@ -13,7 +13,7 @@
 // limitations under the License.
 
 /// Strategy to decide how to buffer the watermarks, used for state cleaning.
-pub trait WatermarkBufferStrategy: Default {
+pub trait WatermarkBufferStrategy: Default + Clone {
     /// Trigger when a epoch is committed.
     fn tick(&mut self);
 
@@ -36,6 +36,12 @@ impl WatermarkBufferStrategy for WatermarkNoBuffer {
     }
 }
 
+impl Clone for WatermarkNoBuffer {
+    fn clone(&self) -> Self {
+        Self
+    }
+}
+
 /// Buffer the watermark by a epoch period.
 /// The strategy reduced the delete-range calls to storage.
 #[derive(Default, Debug)]
@@ -55,6 +61,14 @@ impl<const PERIOD: usize> WatermarkBufferStrategy for WatermarkBufferByEpoch<PER
             true
         } else {
             false
+        }
+    }
+}
+
+impl<const PERIOD: usize> Clone for WatermarkBufferByEpoch<PERIOD> {
+    fn clone(&self) -> Self {
+        Self {
+            buffered_epochs_cnt: self.buffered_epochs_cnt,
         }
     }
 }
