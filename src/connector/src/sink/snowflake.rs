@@ -95,7 +95,7 @@ pub struct SnowflakeCommon {
     pub aws_region: String,
 
     /// The configurable max row(s) to batch,
-    /// which should be explicitly specified by user(s)
+    /// which should be *explicitly* specified by user(s)
     #[serde(rename = "snowflake.max_batch_row_num")]
     pub max_batch_row_num: String,
 }
@@ -144,7 +144,7 @@ impl Sink for SnowflakeSink {
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {
             return Err(SinkError::Config(
-                anyhow!("SnowflakeSink only supports append-only mode at present, please change the configuration accordingly to enable sinking.")
+                anyhow!("SnowflakeSink only supports append-only mode at present, please change the query to append-only, or use `force_append_only = 'true'`")
             ));
         }
         Ok(())

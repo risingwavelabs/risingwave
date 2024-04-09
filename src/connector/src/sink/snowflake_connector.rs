@@ -81,7 +81,7 @@ impl SnowflakeHttpClient {
         s3_path: Option<String>,
     ) -> Self {
         // todo: ensure if we need user to *explicitly* provide the `request_id`
-        // currently it seems that this is not important
+        // currently it seems that this is not important.
         // reference to the snowpipe rest api is as below, i.e.,
         // <https://docs.snowflake.com/en/user-guide/data-load-snowpipe-rest-apis>
         let url = format!(
@@ -109,7 +109,7 @@ impl SnowflakeHttpClient {
     /// And please note that we will NOT strictly counting the time interval
     /// of `jwt_token` expiration.
     /// Which essentially means that this method should be called *every time* we want
-    /// to send `insertFiles` request to snowflake server
+    /// to send `insertFiles` request to snowflake server.
     fn generate_jwt_token(&self) -> Result<String> {
         let header = Header::new(Algorithm::RS256);
         let now = SystemTime::now()
