@@ -154,6 +154,10 @@ impl RemoteInput {
         let up_fragment_id = up_down_frag.0.to_string();
         let down_fragment_id = up_down_frag.1.to_string();
 
+        let exchange_frag_recv_size = metrics
+            .exchange_frag_recv_size
+            .with_guarded_label_values(&[&up_fragment_id, &down_fragment_id]);
+
         let span: await_tree::Span = format!("RemoteInput (actor {up_actor_id})").into();
 
         // process messages and ack permits in batch
@@ -180,11 +184,7 @@ impl RemoteInput {
                 ack_permits.bytes += permits.bytes;
                 ack_permits.barriers += permits.barriers;
             }
-
-            metrics
-                .exchange_frag_recv_size
-                .with_label_values(&[&up_fragment_id, &down_fragment_id])
-                .inc_by(ack_permits.bytes);
+            exchange_frag_recv_size.inc_by(ack_permits.bytes);
 
             permits_tx
                 .send(ack_permits)
