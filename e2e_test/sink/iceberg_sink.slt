@@ -48,7 +48,7 @@ select sum(record_count) from rw_iceberg_files where source_name = 'iceberg_demo
 7
 
 query I
-select count(*) from rw_iceberg_snapshots where = 'iceberg_demo_source';
+select count(*) from rw_iceberg_snapshots where source_name = 'iceberg_demo_source';
 ----
 1
 
