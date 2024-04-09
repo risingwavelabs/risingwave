@@ -3111,14 +3111,10 @@ impl HummockManager {
 
     /// This method will return all compaction group id in a random order and task type. If there are any group block by `write_limit`, it will return a single array with `TaskType::Emergency`.
     /// If these groups get different task-type, it will return all group id with `TaskType::Dynamic` if the first group get `TaskType::Dynamic`, otherwise it will return the single group with other task type.
-    #[named]
     pub async fn auto_pick_compaction_groups_and_type(
         &self,
     ) -> (Vec<CompactionGroupId>, compact_task::TaskType) {
-        let versioning_guard = read_lock!(self, versioning).await;
-        let versioning = versioning_guard.deref();
-        let mut compaction_group_ids =
-            get_compaction_group_ids(&versioning.current_version).collect_vec();
+        let mut compaction_group_ids = self.compaction_group_ids().await;
         compaction_group_ids.shuffle(&mut thread_rng());
 
         let mut normal_groups = vec![];
