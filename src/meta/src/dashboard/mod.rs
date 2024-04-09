@@ -206,8 +206,6 @@ pub(super) mod handlers {
                 .map_err(err)?,
         };
 
-        println!("heiheihei: {:?}", object_dependencies);
-
         Ok(Json(object_dependencies))
     }
 
