@@ -1,6 +1,9 @@
 statement ok
 set RW_IMPLICIT_FLUSH to true;
 
+statement error session param query_mode cannot be altered system wide
+alter system set query_mode to auto;
+
 connection other1
 query T
 show RW_IMPLICIT_FLUSH;

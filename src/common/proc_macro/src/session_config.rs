@@ -42,7 +42,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
     let mut show_all_list = vec![];
     let mut list_all_list = vec![];
     let mut alias_to_entry_name_branches = vec![];
-    let mut entry_name_list = vec![];
+    let mut entry_name_flags = vec![];
 
     for field in fields {
         let field_ident = field.ident.expect_or_abort("Field need to be named");
@@ -234,17 +234,33 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
             },
         };
         list_all_list.push(var_info.clone());
-        if !flags.contains(&"NO_SHOW_ALL") {
+
+        let no_show_all = flags.contains(&"NO_SHOW_ALL");
+        let no_show_all_flag: TokenStream = no_show_all.to_string().parse().unwrap();
+        if !no_show_all {
             show_all_list.push(var_info);
         }
-        entry_name_list.push(entry_name);
+
+        let no_alter_sys_flag: TokenStream =
+            flags.contains(&"NO_ALTER_SYS").to_string().parse().unwrap();
+
+        entry_name_flags.push(
+            quote! {
+                (#entry_name, ParamFlags {no_show_all: #no_show_all_flag, no_alter_sys: #no_alter_sys_flag})
+            }
+        );
     }
 
     let struct_ident = input.ident;
     quote! {
-        use std::collections::HashSet;
+        use std::collections::HashMap;
         use std::sync::LazyLock;
-        static PARAM_NAMES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| HashSet::from([#(#entry_name_list, )*]));
+        static PARAM_NAME_FLAGS: LazyLock<HashMap<&'static str, ParamFlags>> = LazyLock::new(|| HashMap::from([#(#entry_name_flags, )*]));
+
+        struct ParamFlags {
+            no_show_all: bool,
+            no_alter_sys: bool,
+        }
 
         impl Default for #struct_ident {
             #[allow(clippy::useless_conversion)]
@@ -315,9 +331,16 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
             }
 
             /// Check if `SessionConfig` has a parameter.
-            pub fn has_param(key_name: &str) -> bool {
+            pub fn contains_param(key_name: &str) -> bool {
                 let key_name = Self::alias_to_entry_name(key_name);
-                PARAM_NAMES.contains(key_name.as_str())
+                PARAM_NAME_FLAGS.contains_key(key_name.as_str())
+            }
+
+            /// Check if `SessionConfig` has a parameter.
+            pub fn check_no_alter_sys(key_name: &str) -> SessionConfigResult<bool> {
+                let key_name = Self::alias_to_entry_name(key_name);
+                let flags = PARAM_NAME_FLAGS.get(key_name.as_str()).ok_or_else(|| SessionConfigError::UnrecognizedEntry(key_name.to_string()))?;
+                Ok(flags.no_alter_sys)
             }
         }
     }

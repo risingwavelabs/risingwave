@@ -72,7 +72,7 @@ pub struct SessionConfig {
     /// The default value is auto which means let the system decide to run batch queries in local
     /// or distributed mode automatically.
     #[serde_as(as = "DisplayFromStr")]
-    #[parameter(default = QueryMode::default())]
+    #[parameter(default = QueryMode::default(), flags = "NO_ALTER_SYS")]
     query_mode: QueryMode,
 
     /// Sets the number of digits displayed for floating-point values.
@@ -360,7 +360,7 @@ mod test {
 
     #[derive(SessionConfig)]
     struct TestConfig {
-        #[parameter(default = 1, alias = "test_param_alias" | "alias_param_test")]
+        #[parameter(default = 1, flags = "NO_ALTER_SYS", alias = "test_param_alias" | "alias_param_test")]
         test_param: i32,
     }
 
@@ -373,5 +373,6 @@ mod test {
             .set("alias_param_test", "3".to_string(), &mut ())
             .unwrap();
         assert_eq!(config.get("test_param_alias").unwrap(), "3");
+        assert!(TestConfig::check_no_alter_sys("test_param").unwrap());
     }
 }
