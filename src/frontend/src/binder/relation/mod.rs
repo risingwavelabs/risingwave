@@ -15,7 +15,7 @@
 use std::collections::hash_map::Entry;
 use std::ops::Deref;
 
-use either::Either::{self, Left, Right};
+use either::Either;
 use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME};
@@ -383,32 +383,19 @@ impl Binder {
                     Ok(Relation::BackCteRef(Box::new(BoundBackCteRef { share_id })))
                 }
                 BindingCteState::Bound { query } => {
-                    let schema = match query.clone() {
-                        Left(normal) => normal.schema().clone(),
-                        Right(recursive) => recursive.schema.clone(),
+                    let schema = match &query {
+                        Either::Left(normal) => normal.schema(),
+                        Either::Right(recursive) => &recursive.schema,
                     };
                     self.bind_table_to_context(
-                        schema
-                            .fields
-                            .iter()
-                            .map(|f| (false, f.clone())),
+                        schema.fields.iter().map(|f| (false, f.clone())),
                         table_name.clone(),
                         Some(original_alias),
                     )?;
-                    let input = match query {
-                        // normal cte with union
-                        Left(query) => Either::Left(query),
-                        // recursive cte
-                        Right(recursive) => Either::Right(recursive),
-                    };
                     // we could always share the cte,
                     // no matter it's recursive or not.
-                    let share_relation = Relation::Share(Box::new(BoundShare {
-                        share_id,
-                        // should either be a `BoundQuery` or `RecursiveUnion`
-                        input,
-                    }));
-                    Ok(share_relation)
+                    let input = query;
+                    Ok(Relation::Share(Box::new(BoundShare { share_id, input })))
                 }
             }
         } else {

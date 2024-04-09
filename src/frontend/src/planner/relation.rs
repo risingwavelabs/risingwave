@@ -56,12 +56,7 @@ impl Planner {
             } => self.plan_table_function(tf, with_ordinality),
             Relation::Watermark(tf) => self.plan_watermark(*tf),
             // note that rcte (i.e., RecursiveUnion) is included *implicitly* in share.
-            Relation::Share(share) => {
-                if let Either::Right(_) = share.input.clone() {
-                    bail_not_implemented!(issue = 15135, "recursive CTE is not supported");
-                }
-                self.plan_share(*share)
-            }
+            Relation::Share(share) => self.plan_share(*share),
             Relation::BackCteRef(..) => {
                 bail_not_implemented!(issue = 15135, "recursive CTE is not supported")
             }
@@ -223,10 +218,15 @@ impl Planner {
     }
 
     pub(super) fn plan_share(&mut self, share: BoundShare) -> Result<PlanRef> {
+        let Either::Left(nonrecursive_query) = share.input else {
+            bail_not_implemented!(issue = 15135, "recursive CTE is not supported");
+        };
         let id = share.share_id;
         match self.share_cache.get(&id) {
             None => {
-                let result = self.plan_relation(share.into())?;
+                let result = self
+                    .plan_query(nonrecursive_query)?
+                    .into_unordered_subplan();
                 let logical_share = LogicalShare::create(result);
                 self.share_cache.insert(id, logical_share.clone());
                 Ok(logical_share)
@@ -253,17 +253,11 @@ impl Planner {
                 .iter()
                 .map(|col| col.data_type().clone())
                 .collect(),
-            Relation::Subquery(q) => q
-                .query
-                .schema()
-                .fields
-                .iter()
-                .map(|f| f.data_type())
-                .collect(),
-            Relation::Share(share) => {
-                let s = share.clone();
-                Self::collect_col_data_types_for_tumble_window(&((*s).into()))?
-            }
+            Relation::Subquery(q) => q.query.schema().data_types(),
+            Relation::Share(share) => match &share.input {
+                Either::Left(nonrecursive) => nonrecursive.schema().data_types(),
+                Either::Right(recursive) => recursive.schema.data_types(),
+            },
             r => {
                 return Err(ErrorCode::BindError(format!(
                     "Invalid input relation to tumble: {r:?}"

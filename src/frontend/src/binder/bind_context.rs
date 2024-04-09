@@ -375,7 +375,7 @@ impl BindContext {
                 Entry::Occupied(e) => {
                     // check if this is a merge with recursive cte
                     if let Some(r) = self.cte_to_relation.get(&k) {
-                        if let BindingCteState::Bound { .. } = r.borrow().state.clone() {
+                        if let BindingCteState::Bound { .. } = r.borrow().state {
                             // no-op
                             continue;
                         }
