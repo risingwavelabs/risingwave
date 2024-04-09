@@ -100,8 +100,8 @@ impl SessionParamsController {
 
     pub async fn set_param(&self, name: &str, value: Option<String>) -> MetaResult<String> {
         let mut params_guard = self.params.write().await;
-
-        let Some(param) = SessionParameter::find_by_id(name.to_string())
+        let name = SessionConfig::alias_to_entry_name(name);
+        let Some(param) = SessionParameter::find_by_id(name.clone())
             .one(&self.db)
             .await?
         else {
@@ -113,9 +113,9 @@ impl SessionParamsController {
         // FIXME: use a real reporter
         let reporter = &mut ();
         let new_param = if let Some(value) = value {
-            params_guard.set(name, value, reporter)?
+            params_guard.set(&name, value, reporter)?
         } else {
-            params_guard.reset(name, reporter)?
+            params_guard.reset(&name, reporter)?
         };
 
         let mut param: session_parameter::ActiveModel = param.into();

@@ -1,25 +1,25 @@
 statement ok
-set RW_IMPLICIT_FLUSH to true;
+set RW_STREAMING_ENABLE_DELTA_JOIN to true;
 
 statement error session param query_mode cannot be altered system wide
 alter system set query_mode to auto;
 
 connection other1
 query T
-show RW_IMPLICIT_FLUSH;
+show RW_STREAMING_ENABLE_DELTA_JOIN;
 ----
 false
 
 statement ok
-alter system set RW_IMPLICIT_FLUSH to true;
+alter system set rw_streaming_enable_delta_join to true;
 
 sleep 1s
 
 connection other2
 query T
-show RW_IMPLICIT_FLUSH;
+show RW_STREAMING_ENABLE_DELTA_JOIN;
 ----
 true
 
 statement ok
-alter system set RW_IMPLICIT_FLUSH to default;
+alter system set RW_STREAMING_ENABLE_DELTA_JOIN to default;

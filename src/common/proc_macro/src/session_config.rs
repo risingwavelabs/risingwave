@@ -276,7 +276,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
                 Default::default()
             }
 
-            fn alias_to_entry_name(key_name: &str) -> String {
+            pub fn alias_to_entry_name(key_name: &str) -> String {
                 match key_name {
                     #(#alias_to_entry_name_branches)*
                     _ => key_name,
