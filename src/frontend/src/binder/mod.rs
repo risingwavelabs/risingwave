@@ -575,7 +575,7 @@ mod tests {
                                     "a",
                                 ),
                                 Some(
-                                    "?column?",
+                                    "a",
                                 ),
                             ],
                             from: Some(
@@ -702,7 +702,7 @@ mod tests {
                                                 ),
                                                 schema: Schema {
                                                     fields: [
-                                                        ?column?:Int32,
+                                                        a:Int32,
                                                     ],
                                                 },
                                             },
@@ -718,7 +718,7 @@ mod tests {
                             schema: Schema {
                                 fields: [
                                     a:Int32,
-                                    ?column?:Int32,
+                                    a:Int32,
                                 ],
                             },
                         },

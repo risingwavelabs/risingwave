@@ -14,7 +14,6 @@
 
 use either::Either;
 
-use super::{BoundSubquery, Relation};
 use crate::binder::bind_context::RecursiveUnion;
 use crate::binder::statement::RewriteExprsRecursive;
 use crate::binder::{BoundQuery, ShareId};
@@ -29,30 +28,9 @@ pub struct BoundShare {
 
 impl RewriteExprsRecursive for BoundShare {
     fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
-        let rewrite = match self.input.clone() {
-            Either::Left(mut q) => {
-                q.rewrite_exprs_recursive(rewriter);
-                Either::Left(q)
-            }
-            Either::Right(mut r) => {
-                r.rewrite_exprs_recursive(rewriter);
-                Either::Right(r)
-            }
+        match &mut self.input {
+            Either::Left(q) => q.rewrite_exprs_recursive(rewriter),
+            Either::Right(r) => r.rewrite_exprs_recursive(rewriter),
         };
-        self.input = rewrite;
-    }
-}
-
-/// from inner `BoundQuery` to `Relation::Subquery`
-impl From<BoundShare> for Relation {
-    fn from(value: BoundShare) -> Self {
-        let Either::Left(q) = value.input else {
-            // leave it intact
-            return Self::Share(Box::new(value));
-        };
-        Self::Subquery(Box::new(BoundSubquery {
-            query: q,
-            lateral: false,
-        }))
     }
 }

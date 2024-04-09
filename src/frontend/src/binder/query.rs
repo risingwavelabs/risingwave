@@ -319,7 +319,7 @@ impl Binder {
                     all,
                     left,
                     right,
-                } = body.clone()
+                } = body
                 else {
                     return Err(ErrorCode::BindError(
                         "`UNION` is required in recursive CTE".to_string(),
@@ -362,18 +362,8 @@ impl Binder {
                 // bind the rest of the recursive cte
                 let mut recursive = self.bind_set_expr(*right)?;
 
-                // todo: add validate check here for *bound* `base` and `recursive`
                 Self::align_schema(&mut base, &mut recursive, SetOperator::Union)?;
-
-                // the final schema should be sticked with `recursive`'s
-                // e.g., <value> union all <select stmt>
-                let schema = recursive.schema().clone();
-                // yet another sanity check
-                assert_eq!(
-                    schema,
-                    recursive.schema().clone(),
-                    "expect `schema` to be the same as recursive's"
-                );
+                let schema = base.schema().clone();
 
                 let recursive_union = RecursiveUnion {
                     all,
