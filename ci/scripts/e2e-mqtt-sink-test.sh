@@ -1,16 +1,11 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
-
 source ci/scripts/common.sh
 
-while getopts 'p:s:' opt; do
+while getopts 'p:' opt; do
     case ${opt} in
         p )
             profile=$OPTARG
-            ;;
-        s )
-            script=$OPTARG
             ;;
         \? )
             echo "Invalid Option: -$OPTARG" 1>&2
@@ -23,15 +18,18 @@ while getopts 'p:s:' opt; do
 done
 shift $((OPTIND -1))
 
-download_and_prepare_rw "$profile" common
+download_and_prepare_rw "$profile" source
 
-echo "--- starting risingwave cluster with connector node"
-risedev ci-start ci-3cn-3fe-opendal-fs-backend
+echo "--- starting risingwave cluster"
+cargo make ci-start ci-sink-test
+sleep 1
 
-echo "--- Run test"
-python3 -m pip install minio psycopg2-binary
-python3 e2e_test/s3/$script
+set -euo pipefail
+
+echo "--- testing mqtt sink"
+sqllogictest -p 4566 -d dev './e2e_test/sink/mqtt_sink.slt'
+
+sleep 1
 
 echo "--- Kill cluster"
-rm -rf /tmp/rw_ci
-risedev ci-kill
+cargo make ci-kill
