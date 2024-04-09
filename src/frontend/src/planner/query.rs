@@ -41,6 +41,10 @@ impl Planner {
         let order = Order {
             column_orders: order,
         };
+        // Optimize order key before using it for TopN.
+        let func_dep = plan.functional_dependency();
+        let order = func_dep.minimize_order_key(order);
+
         if limit.is_some() || offset.is_some() {
             let limit = limit.unwrap_or(LIMIT_ALL_COUNT);
             let offset = offset.unwrap_or_default();

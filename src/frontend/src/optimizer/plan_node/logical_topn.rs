@@ -57,10 +57,6 @@ impl LogicalTopN {
         order: Order,
         group_key: Vec<usize>,
     ) -> Self {
-        // Optimize order key before using it for TopN.
-        let func_dep = input.functional_dependency();
-        let order = func_dep.minimize_order_key(order);
-
         let limit_attr = TopNLimit::new(limit, with_ties);
         let core = generic::TopN::with_group(input, limit_attr, offset, order, group_key);
         core.into()

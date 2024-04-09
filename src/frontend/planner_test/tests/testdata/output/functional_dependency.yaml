@@ -8,11 +8,10 @@
     └─LogicalProject { exprs: [t1.id, t1.i] }
       └─LogicalScan { table: t1, columns: [t1.id, t1.i] }
   batch_plan: |-
-    BatchSort { order: [t1.id ASC, t1.i ASC] }
-    └─BatchTopN { order: [t1.id ASC], limit: 2, offset: 0 }
-      └─BatchExchange { order: [], dist: Single }
-        └─BatchLimit { limit: 2, offset: 0 }
-          └─BatchScan { table: t1, columns: [t1.id, t1.i], limit: 2, distribution: UpstreamHashShard(t1.id) }
+    BatchTopN { order: [t1.id ASC], limit: 2, offset: 0 }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchLimit { limit: 2, offset: 0 }
+        └─BatchScan { table: t1, columns: [t1.id, t1.i], limit: 2, distribution: UpstreamHashShard(t1.id) }
   stream_plan: |-
     StreamMaterialize { columns: [id, i], stream_key: [id], pk_columns: [id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t1.id, t1.i] }
@@ -51,9 +50,8 @@
     LogicalProject { exprs: [v.cnt] }
     └─LogicalScan { table: v, columns: [v.cnt], cardinality: 0..=1 }
   batch_plan: |-
-    BatchExchange { order: [v.cnt ASC], dist: Single }
-    └─BatchSort { order: [v.cnt ASC] }
-      └─BatchScan { table: v, columns: [v.cnt], distribution: Single }
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: v, columns: [v.cnt], distribution: Single }
   stream_plan: |-
     StreamMaterialize { columns: [cnt], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamTableScan { table: v, columns: [v.cnt], stream_scan_type: ArrangementBackfill, stream_key: [], pk: [], dist: Single }
