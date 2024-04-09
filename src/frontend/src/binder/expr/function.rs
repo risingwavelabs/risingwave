@@ -1554,8 +1554,11 @@ impl Binder {
     ) -> Result<Vec<ExprImpl>> {
         match arg_expr {
             FunctionArgExpr::Expr(expr) => Ok(vec![self.bind_expr_inner(expr)?]),
-            FunctionArgExpr::QualifiedWildcard(_, _) => todo!(),
-            FunctionArgExpr::ExprQualifiedWildcard(_, _) => todo!(),
+            FunctionArgExpr::QualifiedWildcard(_, _)
+            | FunctionArgExpr::ExprQualifiedWildcard(_, _) => Err(ErrorCode::InvalidInputSyntax(
+                format!("unexpected wildcard {}", arg_expr),
+            )
+            .into()),
             FunctionArgExpr::Wildcard(None) => Ok(vec![]),
             FunctionArgExpr::Wildcard(Some(_)) => unreachable!(),
         }

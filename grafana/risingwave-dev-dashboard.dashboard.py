@@ -1734,7 +1734,11 @@ def section_batch(outer_panels):
                     "All memory usage of batch executors in bytes",
                     [
                         panels.target(
-                            f"{metric('batch_total_mem')}",
+                            f"{metric('compute_batch_total_mem')}",
+                            "",
+                        ),
+                        panels.target(
+                            f"{metric('frontend_batch_total_mem')}",
                             "",
                         ),
                     ],
@@ -1929,17 +1933,17 @@ def section_hummock_read(outer_panels):
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Cache Miss Rate",
+                    "Cache Miss Ratio",
                     "",
                     [
                         panels.target(
                             f"(sum(rate({table_metric('state_store_sst_store_block_request_counts', meta_miss_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)) / (sum(rate({table_metric('state_store_sst_store_block_request_counts', meta_total_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id))",
-                            "meta cache miss rate - {{table_id}} @ {{%s}} @ {{%s}}"
+                            "meta cache miss ratio - {{table_id}} @ {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                         panels.target(
                             f"(sum(rate({table_metric('state_store_sst_store_block_request_counts', data_miss_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)) / (sum(rate({table_metric('state_store_sst_store_block_request_counts', data_total_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id))",
-                            "block cache miss rate - {{table_id}} @ {{%s}} @ {{%s}}"
+                            "block cache miss ratio - {{table_id}} @ {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],

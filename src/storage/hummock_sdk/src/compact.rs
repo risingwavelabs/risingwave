@@ -14,6 +14,15 @@
 
 use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo};
 
+pub fn compact_task_output_to_string(compact_task: &CompactTask) -> String {
+    let mut s = String::default();
+    s.push_str("Compaction task output: \n");
+    for sst in &compact_task.sorted_output_ssts {
+        append_sstable_info_to_string(&mut s, sst);
+    }
+    s
+}
+
 pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     use std::fmt::Write;
 
@@ -80,10 +89,7 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
             .collect();
         writeln!(s, "Level {:?} {:?} ", level_entry.level_idx, tables).unwrap();
     }
-    s.push_str("Compaction task output: \n");
-    for sst in &compact_task.sorted_output_ssts {
-        append_sstable_info_to_string(&mut s, sst);
-    }
+    s.push_str(&compact_task_output_to_string(compact_task));
     s
 }
 

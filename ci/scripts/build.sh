@@ -30,9 +30,10 @@ fi
 echo "--- Rust cargo-sort check"
 cargo sort --check --workspace --grouped
 
-echo "--- Rust cargo-hakari check"
-cargo hakari generate --diff
-cargo hakari verify
+# Disable hakari until we make sure it's useful
+# echo "--- Rust cargo-hakari check"
+# cargo hakari generate --diff
+# cargo hakari verify
 
 echo "--- Rust format check"
 cargo fmt --all -- --check

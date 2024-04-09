@@ -210,7 +210,15 @@ impl IcebergSplitEnumerator {
             },
         };
         let mut files = vec![];
-        for file in table.current_data_files().await? {
+        for file in table
+            .data_files_of_snapshot(
+                table
+                    .current_table_metadata()
+                    .snapshot(snapshot_id)
+                    .expect("snapshot must exists"),
+            )
+            .await?
+        {
             if file.content != DataContentType::Data {
                 bail!("Reading iceberg table with delete files is unsupported. Please try to compact the table first.");
             }

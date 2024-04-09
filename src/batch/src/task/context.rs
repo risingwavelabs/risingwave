@@ -14,9 +14,11 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use prometheus::core::Atomic;
 use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::config::{BatchConfig, MetricLevel};
 use risingwave_common::memory::MemoryContext;
+use risingwave_common::metrics::TrAdderAtomic;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_dml::dml_manager::DmlManagerRef;
@@ -149,7 +151,8 @@ impl BatchTaskContext for ComputeNodeContext {
                 .with_guarded_label_values(&metrics.executor_labels(executor_id));
             MemoryContext::new(Some(self.mem_context.clone()), executor_mem_usage)
         } else {
-            MemoryContext::none()
+            let counter = TrAdderAtomic::new(0);
+            MemoryContext::new(Some(self.mem_context.clone()), counter)
         }
     }
 
@@ -191,23 +194,25 @@ impl ComputeNodeContext {
                 mem_context,
             }
         } else {
+            let batch_mem_context = env.task_manager().memory_context_ref();
             Self {
                 env,
                 batch_metrics: None,
                 cur_mem_val: Arc::new(0.into()),
                 last_mem_val: Arc::new(0.into()),
-                mem_context: MemoryContext::none(),
+                mem_context: batch_mem_context,
             }
         }
     }
 
     pub fn new_for_local(env: BatchEnvironment) -> Self {
+        let batch_mem_context = env.task_manager().memory_context_ref();
         Self {
             env,
             batch_metrics: None,
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
-            mem_context: MemoryContext::none(),
+            mem_context: batch_mem_context,
         }
     }
 

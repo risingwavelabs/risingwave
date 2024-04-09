@@ -15,6 +15,7 @@
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 use itertools::Itertools;
 use prometheus::Registry;
@@ -43,11 +44,10 @@ use crate::hummock::compaction::selector::{
     default_compaction_selector, CompactionSelector, ManualCompactionOption,
     SpaceReclaimCompactionSelector,
 };
-use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Error;
 use crate::hummock::test_utils::*;
 use crate::hummock::{CommitEpochInfo, HummockManager, HummockManagerRef};
-use crate::manager::{MetaSrvEnv, WorkerId};
+use crate::manager::{MetaSrvEnv, MetaStoreImpl, WorkerId};
 use crate::model::MetadataModel;
 use crate::rpc::metrics::MetaMetrics;
 
@@ -100,11 +100,9 @@ fn get_compaction_group_object_ids(
 }
 
 async fn list_pinned_snapshot_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPinnedSnapshot> {
-    match env.sql_meta_store() {
-        None => HummockPinnedSnapshot::list(env.meta_store_checked())
-            .await
-            .unwrap(),
-        Some(sql_meta_store) => {
+    match env.meta_store() {
+        MetaStoreImpl::Kv(meta_store) => HummockPinnedSnapshot::list(meta_store).await.unwrap(),
+        MetaStoreImpl::Sql(sql_meta_store) => {
             use risingwave_meta_model_v2::hummock_pinned_snapshot;
             use sea_orm::EntityTrait;
             hummock_pinned_snapshot::Entity::find()
@@ -119,11 +117,9 @@ async fn list_pinned_snapshot_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPi
 }
 
 async fn list_pinned_version_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPinnedVersion> {
-    match env.sql_meta_store() {
-        None => HummockPinnedVersion::list(env.meta_store_checked())
-            .await
-            .unwrap(),
-        Some(sql_meta_store) => {
+    match env.meta_store() {
+        MetaStoreImpl::Kv(meta_store) => HummockPinnedVersion::list(meta_store).await.unwrap(),
+        MetaStoreImpl::Sql(sql_meta_store) => {
             use risingwave_meta_model_v2::hummock_pinned_version;
             use sea_orm::EntityTrait;
             hummock_pinned_version::Entity::find()
@@ -1695,11 +1691,12 @@ async fn test_split_compaction_group_trivial_expired() {
         .unwrap();
     let mut selector: Box<dyn CompactionSelector> =
         Box::<SpaceReclaimCompactionSelector>::default();
-    let reclaim_task = hummock_manager
-        .get_compact_task_impl(2, &mut selector)
+    let (mut normal_tasks, _unscheduled) = hummock_manager
+        .get_compact_tasks_impl(vec![2], 1, &mut selector)
         .await
-        .unwrap()
         .unwrap();
+    use crate::hummock::manager::CompactStatus;
+    let reclaim_task = normal_tasks.pop().unwrap();
     assert!(CompactStatus::is_trivial_reclaim(&reclaim_task));
 
     let current_version = hummock_manager.get_current_version().await;
@@ -1747,7 +1744,7 @@ async fn test_split_compaction_group_trivial_expired() {
         .report_compact_task(task.task_id, TaskStatus::Success, vec![], None)
         .await
         .unwrap();
-    // the task has been canceld
+    // the task has been canceled
     assert!(!ret);
 }
 
@@ -2187,4 +2184,116 @@ async fn test_gc_stats() {
         0
     );
     assert_eq_gc_stats(6, 3, 0, 0, 2, 4);
+}
+
+#[tokio::test]
+async fn test_partition_level() {
+    let config = CompactionConfigBuilder::new()
+        .level0_tier_compact_file_number(3)
+        .level0_sub_level_compact_level_count(3)
+        .level0_overlapping_sub_level_compact_level_count(3)
+        .build();
+    let registry = Registry::new();
+    let (_env, hummock_manager, _, worker_node) =
+        setup_compute_env_with_metric(80, config.clone(), Some(MetaMetrics::for_test(&registry)))
+            .await;
+    let config = Arc::new(config);
+
+    let context_id = worker_node.id;
+
+    hummock_manager
+        .register_table_ids(&[(100, 2)])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids(&[(101, 2)])
+        .await
+        .unwrap();
+    let sst_1 = gen_extend_sstable_info(10, 2, 1, vec![100, 101]);
+    hummock_manager
+        .commit_epoch(
+            30,
+            CommitEpochInfo::for_test(vec![sst_1.clone()], HashMap::from([(10, context_id)])),
+        )
+        .await
+        .unwrap();
+    // Construct data via manual compaction
+    let compaction_task = get_manual_compact_task(&hummock_manager, context_id).await;
+    let base_level: usize = 6;
+    assert_eq!(compaction_task.input_ssts[0].table_infos.len(), 1);
+    assert_eq!(compaction_task.target_level, base_level as u32);
+    assert!(hummock_manager
+        .report_compact_task(
+            compaction_task.task_id,
+            TaskStatus::Success,
+            vec![
+                gen_sstable_info(11, 1, vec![100]),
+                gen_sstable_info(12, 2, vec![101]),
+            ],
+            None,
+        )
+        .await
+        .unwrap());
+
+    hummock_manager
+        .split_compaction_group(2, &[100])
+        .await
+        .unwrap();
+    let current_version = hummock_manager.get_current_version().await;
+    let new_group_id = current_version.levels.keys().max().cloned().unwrap();
+    assert_eq!(
+        current_version
+            .get_compaction_group_levels(new_group_id)
+            .levels[base_level - 1]
+            .table_infos
+            .len(),
+        1
+    );
+    let mut global_sst_id = 13;
+    const MB: u64 = 1024 * 1024;
+    let mut selector = default_compaction_selector();
+    for epoch in 31..100 {
+        let mut sst = gen_extend_sstable_info(global_sst_id, new_group_id, 10, vec![100]);
+        sst.sst_info.file_size = 10 * MB;
+        sst.sst_info.uncompressed_file_size = 10 * MB;
+        hummock_manager
+            .commit_epoch(
+                epoch,
+                CommitEpochInfo::for_test(vec![sst], HashMap::from([(global_sst_id, context_id)])),
+            )
+            .await
+            .unwrap();
+        global_sst_id += 1;
+        if let Some(task) = hummock_manager
+            .get_compact_task(new_group_id, &mut selector)
+            .await
+            .unwrap()
+        {
+            let mut sst = gen_sstable_info(global_sst_id, 10, vec![100]);
+            sst.file_size = task
+                .input_ssts
+                .iter()
+                .map(|level| {
+                    level
+                        .table_infos
+                        .iter()
+                        .map(|sst| sst.file_size)
+                        .sum::<u64>()
+                })
+                .sum::<u64>();
+            global_sst_id += 1;
+            let ret = hummock_manager
+                .report_compact_task(task.task_id, TaskStatus::Success, vec![sst], None)
+                .await
+                .unwrap();
+            assert!(ret);
+        }
+    }
+    let current_version = hummock_manager.get_current_version().await;
+    let group = current_version.get_compaction_group_levels(new_group_id);
+    for sub_level in &group.l0.as_ref().unwrap().sub_levels {
+        if sub_level.total_file_size > config.sub_level_max_compaction_bytes {
+            assert!(sub_level.vnode_partition_count > 0);
+        }
+    }
 }

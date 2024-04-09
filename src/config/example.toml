@@ -155,7 +155,6 @@ recover_concurrency = 8
 lfu_window_to_cache_size_ratio = 1
 lfu_tiny_lru_capacity_ratio = 0.01
 insert_rate_limit_mb = 0
-ring_buffer_capacity_mb = 256
 catalog_bits = 6
 compression = "none"
 
@@ -171,7 +170,6 @@ recover_concurrency = 8
 lfu_window_to_cache_size_ratio = 1
 lfu_tiny_lru_capacity_ratio = 0.01
 insert_rate_limit_mb = 0
-ring_buffer_capacity_mb = 256
 catalog_bits = 6
 compression = "none"
 
