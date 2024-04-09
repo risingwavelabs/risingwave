@@ -55,8 +55,8 @@ impl SplitMetaData for FsSplit {
         serde_json::to_value(self.clone()).unwrap().into()
     }
 
-    fn update_with_last_read_offset(&mut self, last_read_offset: String) -> ConnectorResult<()> {
-        let offset = last_read_offset.parse().unwrap();
+    fn update_offset(&mut self, last_recorded_offset: String) -> ConnectorResult<()> {
+        let offset = last_recorded_offset.parse().unwrap();
         self.offset = offset;
         Ok(())
     }
@@ -106,8 +106,8 @@ impl<Src: OpendalSource> SplitMetaData for OpendalFsSplit<Src> {
         serde_json::to_value(self.clone()).unwrap().into()
     }
 
-    fn update_with_last_read_offset(&mut self, last_read_offset: String) -> ConnectorResult<()> {
-        let offset = last_read_offset.parse().unwrap();
+    fn update_offset(&mut self, last_recorded_offset: String) -> ConnectorResult<()> {
+        let offset = last_recorded_offset.parse().unwrap();
         self.offset = offset;
         Ok(())
     }

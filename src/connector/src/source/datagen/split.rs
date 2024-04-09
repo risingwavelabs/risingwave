@@ -40,8 +40,8 @@ impl SplitMetaData for DatagenSplit {
         serde_json::to_value(self.clone()).unwrap().into()
     }
 
-    fn update_with_last_read_offset(&mut self, last_read_offset: String) -> ConnectorResult<()> {
-        self.start_offset = Some(last_read_offset.as_str().parse::<u64>().unwrap());
+    fn update_offset(&mut self, last_recorded_offset: String) -> ConnectorResult<()> {
+        self.start_offset = Some(last_recorded_offset.as_str().parse::<u64>().unwrap());
         Ok(())
     }
 }

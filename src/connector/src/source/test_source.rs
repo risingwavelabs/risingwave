@@ -154,8 +154,8 @@ impl SplitMetaData for TestSourceSplit {
         serde_json::from_value(value.take()).map_err(Into::into)
     }
 
-    fn update_with_last_read_offset(&mut self, last_read_offset: String) -> ConnectorResult<()> {
-        self.offset = last_read_offset;
+    fn update_offset(&mut self, last_recorded_offset: String) -> ConnectorResult<()> {
+        self.offset = last_recorded_offset;
         Ok(())
     }
 }

@@ -51,11 +51,11 @@ impl SplitMetaData for NatsSplit {
         serde_json::to_value(self.clone()).unwrap().into()
     }
 
-    fn update_with_last_read_offset(&mut self, start_sequence: String) -> ConnectorResult<()> {
-        let start_sequence = if start_sequence.is_empty() {
+    fn update_offset(&mut self, last_recorded_offset: String) -> ConnectorResult<()> {
+        let start_sequence = if last_recorded_offset.is_empty() {
             NatsOffset::Earliest
         } else {
-            NatsOffset::SequenceNumber(start_sequence)
+            NatsOffset::SequenceNumber(last_recorded_offset)
         };
         self.start_sequence = start_sequence;
         Ok(())

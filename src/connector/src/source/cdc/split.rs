@@ -46,7 +46,7 @@ trait CdcSplitTrait: Send + Sync {
     fn split_id(&self) -> u32;
     fn start_offset(&self) -> &Option<String>;
     fn is_snapshot_done(&self) -> bool;
-    fn update_with_last_read_offset(&mut self, last_read_offset: String) -> ConnectorResult<()>;
+    fn update_offset(&mut self, last_recorded_offset: String) -> ConnectorResult<()>;
 
     // MySQL and MongoDB shares the same logic to extract the snapshot flag
     fn extract_snapshot_flag(&self, start_offset: &str) -> ConnectorResult<bool> {
@@ -116,10 +116,10 @@ impl CdcSplitTrait for MySqlCdcSplit {
         self.inner.snapshot_done
     }
 
-    fn update_with_last_read_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
+    fn update_offset(&mut self, last_recorded_offset: String) -> ConnectorResult<()> {
         // if snapshot_done is already true, it won't be updated
-        self.inner.snapshot_done = self.extract_snapshot_flag(start_offset.as_str())?;
-        self.inner.start_offset = Some(start_offset);
+        self.inner.snapshot_done = self.extract_snapshot_flag(last_recorded_offset.as_str())?;
+        self.inner.start_offset = Some(last_recorded_offset);
         Ok(())
     }
 }
@@ -151,9 +151,9 @@ impl CdcSplitTrait for PostgresCdcSplit {
         self.inner.snapshot_done
     }
 
-    fn update_with_last_read_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
-        self.inner.snapshot_done = self.extract_snapshot_flag(start_offset.as_str())?;
-        self.inner.start_offset = Some(start_offset);
+    fn update_offset(&mut self, last_recorded_offset: String) -> ConnectorResult<()> {
+        self.inner.snapshot_done = self.extract_snapshot_flag(last_recorded_offset.as_str())?;
+        self.inner.start_offset = Some(last_recorded_offset);
         Ok(())
     }
 
@@ -206,10 +206,10 @@ impl CdcSplitTrait for MongoDbCdcSplit {
         self.inner.snapshot_done
     }
 
-    fn update_with_last_read_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
+    fn update_offset(&mut self, last_recorded_offset: String) -> ConnectorResult<()> {
         // if snapshot_done is already true, it will remain true
-        self.inner.snapshot_done = self.extract_snapshot_flag(start_offset.as_str())?;
-        self.inner.start_offset = Some(start_offset);
+        self.inner.snapshot_done = self.extract_snapshot_flag(last_recorded_offset.as_str())?;
+        self.inner.start_offset = Some(last_recorded_offset);
         Ok(())
     }
 }
@@ -268,8 +268,8 @@ impl<T: CdcSourceTypeTrait> SplitMetaData for DebeziumCdcSplit<T> {
         serde_json::from_value(value.take()).map_err(Into::into)
     }
 
-    fn update_with_last_read_offset(&mut self, last_read_offset: String) -> ConnectorResult<()> {
-        self.update_with_last_read_offset(last_read_offset)
+    fn update_offset(&mut self, last_recorded_offset: String) -> ConnectorResult<()> {
+        self.update_offset(last_recorded_offset)
     }
 }
 
@@ -318,11 +318,8 @@ impl<T: CdcSourceTypeTrait> DebeziumCdcSplit<T> {
         dispatch_cdc_split!(self, ref, is_snapshot_done())
     }
 
-    pub fn update_with_last_read_offset(
-        &mut self,
-        last_read_offset: String,
-    ) -> ConnectorResult<()> {
-        dispatch_cdc_split!(self, mut, update_with_last_read_offset(last_read_offset)?);
+    pub fn update_offset(&mut self, last_recorded_offset: String) -> ConnectorResult<()> {
+        dispatch_cdc_split!(self, mut, update_offset(last_recorded_offset)?);
         Ok(())
     }
 }
