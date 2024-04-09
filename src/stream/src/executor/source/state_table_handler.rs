@@ -82,7 +82,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
             .map_err(StreamExecutorError::from)
     }
 
-    // this method should only be used by `FsSourceExecutor
+    /// this method should only be used by [`FsSourceExecutor`](super::FsSourceExecutor)
     pub(crate) async fn get_all_completed(&self) -> StreamExecutorResult<HashSet<SplitId>> {
         let start = Bound::Excluded(row::once(Some(Self::string_to_scalar(
             COMPLETE_SPLIT_PREFIX,
@@ -105,7 +105,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
             if let Some(ScalarRefImpl::Jsonb(jsonb_ref)) = row.datum_at(1) {
                 let split = SplitImpl::restore_from_json(jsonb_ref.to_owned_scalar())?;
                 let fs = split
-                    .as_fs()
+                    .as_s3()
                     .unwrap_or_else(|| panic!("split {:?} is not fs", split));
                 if fs.offset == fs.size {
                     let split_id = split.id();
@@ -133,7 +133,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
     }
 
     /// set all complete
-    /// can only used by `FsSourceExecutor`
+    /// can only used by [`FsSourceExecutor`](super::FsSourceExecutor)
     pub(crate) async fn set_all_complete(
         &mut self,
         states: Vec<SplitImpl>,
