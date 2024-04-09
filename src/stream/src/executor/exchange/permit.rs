@@ -95,7 +95,7 @@ pub mod for_test {
 
     pub const INITIAL_PERMITS: PbPermits = PbPermits {
         records: u32::MAX / 2,
-        bytes: u64::MAX / 2,
+        bytes: tokio::sync::Semaphore::MAX_PERMITS as u64 / 2,
         barriers: 1,
     };
 }
