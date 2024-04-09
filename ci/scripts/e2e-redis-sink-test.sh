@@ -24,7 +24,7 @@ shift $((OPTIND -1))
 download_and_prepare_rw "$profile" source
 
 echo "--- starting risingwave cluster"
-cargo make ci-start ci-sink-test
+risedev ci-start ci-sink-test
 apt-get update -y && apt-get install -y redis-server
 sleep 1
 
@@ -45,4 +45,4 @@ else
 fi
 
 echo "--- Kill cluster"
-cargo make ci-kill
+risedev ci-kill
