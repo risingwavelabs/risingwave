@@ -476,7 +476,7 @@ pub(crate) mod tests {
     use risingwave_common::catalog::{
         ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, DEFAULT_SUPER_USER_ID,
     };
-    use risingwave_common::hash::ParallelUnitMapping;
+    use risingwave_common::hash::{ParallelUnitMapping, WorkerMapping};
     use risingwave_common::types::DataType;
     use risingwave_pb::common::worker_node::Property;
     use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
@@ -720,10 +720,9 @@ pub(crate) mod tests {
         let workers = vec![worker1, worker2, worker3];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
         let worker_node_selector = WorkerNodeSelector::new(worker_node_manager.clone(), false);
-        worker_node_manager
-            .insert_streaming_fragment_mapping(0, ParallelUnitMapping::new_single(0));
+        worker_node_manager.insert_streaming_fragment_mapping(0, WorkerMapping::new_single(0));
         worker_node_manager.set_serving_fragment_mapping(
-            vec![(0, ParallelUnitMapping::new_single(0))]
+            vec![(0, WorkerMapping::new_single(0))]
                 .into_iter()
                 .collect(),
         );

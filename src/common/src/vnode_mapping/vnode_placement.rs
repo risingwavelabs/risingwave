@@ -117,7 +117,6 @@ pub fn place_vnode(
     match hint_worker_mapping {
         Some(hint_worker_mapping) => {
             for (vnode, worker_id) in hint_worker_mapping.iter_with_vnode() {
-                println!("vnode {} -> worker {}", vnode, worker_id);
                 let worker_slot = WorkerSlot(worker_id, 0);
 
                 let b = if selected_slots_set.contains(&worker_slot) {
@@ -154,8 +153,6 @@ pub fn place_vnode(
         .sorted_by_key(|b| b.balance)
         .rev()
         .collect();
-
-    println!("balances {:#?}", balances);
 
     let mut results: HashMap<WorkerSlot, Bitmap> = HashMap::default();
 
@@ -198,8 +195,6 @@ pub fn place_vnode(
         }
     }
 
-    println!("result {:?}", results);
-
     let mut worker_result = HashMap::new();
 
     for (worker_slot, bitmap) in results {
@@ -210,20 +205,12 @@ pub fn place_vnode(
             .bitor_assign(&bitmap);
     }
 
-    println!("worker_result {:?}", worker_result);
-
     Some(WorkerMapping::from_bitmaps(&worker_result))
 }
 
 #[cfg(test)]
 mod tests {
-    
 
-    
-    
-
-    
-    
     // #[test]
     // fn test_place_vnode() {
     //     assert_eq!(VirtualNode::COUNT, 256);
