@@ -2170,7 +2170,7 @@
                     └─BatchFilter { predicate: (orders.o_carrier_id > 8:Int32) }
                       └─BatchScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_carrier_id], distribution: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) }
   stream_plan: |-
-    StreamMaterialize { columns: [c_count, custdist], stream_key: [c_count], pk_columns: [c_count], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [c_count, custdist], stream_key: [c_count], pk_columns: [custdist, c_count], pk_conflict: NoCheck }
     └─StreamHashAgg { group_key: [count(orders.o_id)], aggs: [count] }
       └─StreamExchange { dist: HashShard(count(orders.o_id)) }
         └─StreamProject { exprs: [customer.c_id, count(orders.o_id)] }
@@ -2185,7 +2185,7 @@
                       └─StreamTableScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_carrier_id], stream_scan_type: ArrangementBackfill, stream_key: [orders.o_w_id, orders.o_d_id, orders.o_id], pk: [o_w_id, o_d_id, o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [c_count, custdist], stream_key: [c_count], pk_columns: [c_count], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [c_count, custdist], stream_key: [c_count], pk_columns: [custdist, c_count], pk_conflict: NoCheck }
     ├── tables: [ Materialize: 4294967294 ]
     └── StreamHashAgg { group_key: [count(orders.o_id)], aggs: [count] } { tables: [ HashAggState: 0 ] }
         └── StreamExchange Hash([1]) from 1
@@ -2231,7 +2231,7 @@
 
     Table 7 { columns: [ vnode, o_w_id, o_d_id, o_id, backfill_finished, row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ c_count, custdist ], primary key: [ $0 DESC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ c_count, custdist ], primary key: [ $1 DESC, $0 DESC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
 - id: ch_q14
   before:
@@ -3177,7 +3177,7 @@
               └─BatchProject { exprs: [order_line.ol_o_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_delivery_d] }
                 └─BatchScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_delivery_d], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [s_name, numwait], stream_key: [s_name], pk_columns: [s_name], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [s_name, numwait], stream_key: [s_name], pk_columns: [numwait, s_name], pk_conflict: NoCheck }
     └─StreamHashAgg { group_key: [supplier.s_name], aggs: [count] }
       └─StreamExchange { dist: HashShard(supplier.s_name) }
         └─StreamHashJoin { type: LeftAnti, predicate: order_line.ol_o_id = order_line.ol_o_id AND order_line.ol_w_id = order_line.ol_w_id AND order_line.ol_d_id = order_line.ol_d_id AND (order_line.ol_delivery_d > order_line.ol_delivery_d), output: [supplier.s_name, stock.s_w_id, stock.s_i_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, supplier.s_nationkey, $expr1, order_line.ol_w_id] }
@@ -3210,7 +3210,7 @@
               └─StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_delivery_d, order_line.ol_number], stream_scan_type: ArrangementBackfill, stream_key: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], pk: [ol_w_id, ol_d_id, ol_o_id, ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [s_name, numwait], stream_key: [s_name], pk_columns: [s_name], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [s_name, numwait], stream_key: [s_name], pk_columns: [numwait, s_name], pk_conflict: NoCheck }
     ├── tables: [ Materialize: 4294967294 ]
     └── StreamHashAgg { group_key: [supplier.s_name], aggs: [count] } { tables: [ HashAggState: 0 ] }
         └── StreamExchange Hash([0]) from 1
@@ -3334,7 +3334,7 @@
 
     Table 26 { columns: [ vnode, ol_w_id, ol_d_id, ol_o_id, ol_number, backfill_finished, row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4, 5, 6 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ s_name, numwait ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ s_name, numwait ], primary key: [ $1 DESC, $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
 - id: ch_q22
   before:

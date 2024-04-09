@@ -1896,7 +1896,7 @@
                 └─BatchFilter { predicate: (l_receiptdate > l_commitdate) }
                   └─BatchSource { source: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id], filter: (None, None) }
   stream_plan: |-
-    StreamMaterialize { columns: [s_name, numwait], stream_key: [s_name], pk_columns: [s_name], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [s_name, numwait], stream_key: [s_name], pk_columns: [numwait, s_name], pk_conflict: NoCheck }
     └─StreamHashAgg { group_key: [s_name], aggs: [count] }
       └─StreamExchange { dist: HashShard(s_name) }
         └─StreamHashJoin { type: LeftAnti, predicate: l_orderkey = l_orderkey AND (l_suppkey <> l_suppkey), output: [s_name, _row_id, _row_id, n_nationkey, _row_id, _row_id, o_orderkey, s_suppkey, l_orderkey] }
@@ -1937,7 +1937,7 @@
                       └─StreamSource { source: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [s_name, numwait], stream_key: [s_name], pk_columns: [s_name], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [s_name, numwait], stream_key: [s_name], pk_columns: [numwait, s_name], pk_conflict: NoCheck }
     ├── tables: [ Materialize: 4294967294 ]
     └── StreamHashAgg { group_key: [s_name], aggs: [count] } { tables: [ HashAggState: 0 ] }
         └── StreamExchange Hash([0]) from 1
@@ -2075,5 +2075,5 @@
 
     Table 24 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 4294967294 { columns: [ s_name, numwait ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ s_name, numwait ], primary key: [ $1 DESC, $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
