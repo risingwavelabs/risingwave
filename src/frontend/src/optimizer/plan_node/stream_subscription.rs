@@ -110,7 +110,7 @@ impl StreamSubscription {
         properties: WithOptions,
         user_id: UserId,
     ) -> Result<(PlanRef, SubscriptionCatalog)> {
-        let (pk, _) = derive_pk(input.clone(), user_order_by, &columns, true);
+        let (pk, _) = derive_pk(input.clone(), user_order_by, &columns);
         let required_dist = match input.distribution() {
             Distribution::Single => RequiredDist::single(),
             _ => {

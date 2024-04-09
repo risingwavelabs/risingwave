@@ -312,7 +312,7 @@ impl StreamSink {
     ) -> Result<(PlanRef, SinkDesc)> {
         let sink_type =
             Self::derive_sink_type(input.append_only(), &properties, format_desc.as_ref())?;
-        let (pk, _) = derive_pk(input.clone(), user_order_by, &columns, true);
+        let (pk, _) = derive_pk(input.clone(), user_order_by, &columns);
         let mut downstream_pk =
             Self::parse_downstream_pk(&columns, properties.get(DOWNSTREAM_PK_KEY))?;
         let mut extra_partition_col_idx = None;

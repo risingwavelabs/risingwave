@@ -222,14 +222,7 @@ impl StreamMaterialize {
             // No order by for create table, so stream key is identical to table pk.
             (table_pk, pk_column_indices)
         } else {
-            derive_pk(
-                input,
-                user_order_by,
-                &columns,
-                // For index, we can't prune the ORDER KEY,
-                // since it's also the distribution key.
-                table_type != TableType::Index,
-            )
+            derive_pk(input, user_order_by, &columns)
         };
         // assert: `stream_key` is a subset of `table_pk`
 

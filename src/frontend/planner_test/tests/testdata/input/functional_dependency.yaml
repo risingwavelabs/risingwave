@@ -25,3 +25,15 @@
     explain (verbose) create index mv_idx on v(cnt);
   expected_outputs:
     - explain_output
+- name: test functional dependency for order key pruning (index 2)
+  sql: |
+    create table t1 (v1 int primary key, v2 int);
+    explain (verbose) create index mv_idx on t1(v1, v2);
+  expected_outputs:
+    - explain_output
+- name: test functional dependency for order key pruning (index 3)
+  sql: |
+    create table t1 (v1 int primary key, v2 int);
+    explain (verbose) create index mv_idx on t1(v2, v1);
+  expected_outputs:
+    - explain_output
