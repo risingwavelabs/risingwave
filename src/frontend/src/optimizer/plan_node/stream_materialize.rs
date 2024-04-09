@@ -226,6 +226,8 @@ impl StreamMaterialize {
                 input,
                 user_order_by,
                 &columns,
+                // For index, we can't prune the ORDER KEY,
+                // since it's also the distribution key.
                 table_type != TableType::Index,
             )
         };
