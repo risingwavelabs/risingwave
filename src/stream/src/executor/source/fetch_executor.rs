@@ -90,9 +90,9 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
     ) -> StreamExecutorResult<()> {
         let mut batch = Vec::with_capacity(SPLIT_BATCH_SIZE);
-        'vnodes: for vnode in state_store_handler.state_store.vnodes().iter_vnodes() {
+        'vnodes: for vnode in state_store_handler.state_table.vnodes().iter_vnodes() {
             let table_iter = state_store_handler
-                .state_store
+                .state_table
                 .iter_with_vnode(
                     vnode,
                     &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
@@ -243,7 +243,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     }
 
                                     state_store_handler
-                                        .state_store
+                                        .state_table
                                         .commit(barrier.epoch)
                                         .await?;
 
@@ -253,7 +253,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         // if _cache_may_stale, we must rebuild the stream to adjust vnode mappings
                                         let (_prev_vnode_bitmap, cache_may_stale) =
                                             state_store_handler
-                                                .state_store
+                                                .state_table
                                                 .update_vnode_bitmap(vnode_bitmap);
 
                                         if cache_may_stale {
@@ -297,7 +297,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         })
                                         .collect();
                                     state_store_handler.set_states(file_assignment).await?;
-                                    state_store_handler.state_store.try_flush().await?;
+                                    state_store_handler.state_table.try_flush().await?;
                                 }
                                 _ => unreachable!(),
                             }

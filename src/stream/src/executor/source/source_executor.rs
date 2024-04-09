@@ -89,7 +89,7 @@ impl<S: StateStore> SourceExecutor<S> {
         let (wait_epoch_tx, wait_epoch_rx) = mpsc::unbounded_channel();
         let wait_epoch_worker = WaitEpochWorker {
             wait_epoch_rx,
-            state_store: core.split_state_store.state_store.state_store().clone(),
+            state_store: core.split_state_store.state_table.state_store().clone(),
         };
         tokio::spawn(wait_epoch_worker.run());
         wait_epoch_tx
@@ -329,7 +329,7 @@ impl<S: StateStore> SourceExecutor<S> {
         }
 
         // commit anyway, even if no message saved
-        core.split_state_store.state_store.commit(epoch).await?;
+        core.split_state_store.state_table.commit(epoch).await?;
 
         let mut updated_offsets = HashMap::new();
 
@@ -346,7 +346,7 @@ impl<S: StateStore> SourceExecutor<S> {
     /// try mem table spill
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
         let core = self.stream_source_core.as_mut().unwrap();
-        core.split_state_store.state_store.try_flush().await?;
+        core.split_state_store.state_table.try_flush().await?;
 
         Ok(())
     }
