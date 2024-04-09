@@ -256,11 +256,6 @@ fn datum_to_json_object(
             }
             TimestamptzHandlingMode::Micro => json!(v.timestamp_micros()),
             TimestamptzHandlingMode::Milli => json!(v.timestamp_millis()),
-            TimestamptzHandlingMode::PbMessage => {
-                return Err(ArrayError::internal(
-                    "TimestamptzHandlingMode::PbMessage only support for proto format".to_string(),
-                ))
-            }
         },
         (DataType::Time, ScalarRefImpl::Time(v)) => match time_handling_mode {
             TimeHandlingMode::Milli => {

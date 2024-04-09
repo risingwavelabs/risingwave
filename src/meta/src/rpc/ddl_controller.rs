@@ -475,6 +475,7 @@ impl DdlController {
                 .await;
         };
         // 1. Drop source in catalog.
+        // If the source has a streaming job, it's also dropped here.
         let (version, streaming_job_ids) = mgr
             .catalog_manager
             .drop_relation(
@@ -1299,9 +1300,11 @@ impl DdlController {
 
     fn resolve_stream_parallelism(
         &self,
-        default_parallelism: Option<NonZeroUsize>,
+        specified_parallelism: Option<NonZeroUsize>,
         cluster_info: &StreamingClusterInfo,
     ) -> MetaResult<NonZeroUsize> {
+        const MAX_PARALLELISM: NonZeroUsize = NonZeroUsize::new(VirtualNode::COUNT).unwrap();
+
         if cluster_info.parallel_units.is_empty() {
             return Err(MetaError::unavailable(
                 "No available parallel units to schedule",
@@ -1310,21 +1313,13 @@ impl DdlController {
 
         let available_parallel_units =
             NonZeroUsize::new(cluster_info.parallel_units.len()).unwrap();
+
         // Use configured parallel units if no default parallelism is specified.
-        let parallelism = default_parallelism.unwrap_or(match &self.env.opts.default_parallelism {
-            DefaultParallelism::Full => {
-                if available_parallel_units.get() > VirtualNode::COUNT {
-                    tracing::warn!(
-                        "Too many parallel units, use {} instead",
-                        VirtualNode::COUNT
-                    );
-                    NonZeroUsize::new(VirtualNode::COUNT).unwrap()
-                } else {
-                    available_parallel_units
-                }
-            }
-            DefaultParallelism::Default(num) => *num,
-        });
+        let parallelism =
+            specified_parallelism.unwrap_or_else(|| match &self.env.opts.default_parallelism {
+                DefaultParallelism::Full => available_parallel_units,
+                DefaultParallelism::Default(num) => *num,
+            });
 
         if parallelism > available_parallel_units {
             return Err(MetaError::unavailable(format!(
@@ -1333,7 +1328,12 @@ impl DdlController {
             )));
         }
 
-        Ok(parallelism)
+        if available_parallel_units > MAX_PARALLELISM {
+            tracing::warn!("Too many parallel units, use {} instead", MAX_PARALLELISM);
+            Ok(MAX_PARALLELISM)
+        } else {
+            Ok(parallelism)
+        }
     }
 
     /// Builds the actor graph:
@@ -1348,7 +1348,7 @@ impl DdlController {
         affected_table_replace_info: Option<(StreamingJob, StreamFragmentGraph)>,
     ) -> MetaResult<(CreateStreamingJobContext, TableFragments)> {
         let id = stream_job.id();
-        let default_parallelism = fragment_graph.default_parallelism();
+        let specified_parallelism = fragment_graph.specified_parallelism();
         let internal_tables = fragment_graph.internal_tables();
         let expr_context = stream_ctx.to_expr_context();
 
@@ -1360,7 +1360,7 @@ impl DdlController {
             .get_upstream_root_fragments(fragment_graph.dependent_table_ids())
             .await?;
 
-        let upstream_actors: HashMap<_, _> = upstream_root_fragments
+        let upstream_root_actors: HashMap<_, _> = upstream_root_fragments
             .iter()
             .map(|(&table_id, fragment)| {
                 (
@@ -1379,7 +1379,7 @@ impl DdlController {
         // 2. Build the actor graph.
         let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
 
-        let parallelism = self.resolve_stream_parallelism(default_parallelism, &cluster_info)?;
+        let parallelism = self.resolve_stream_parallelism(specified_parallelism, &cluster_info)?;
 
         let actor_graph_builder =
             ActorGraphBuilder::new(id, complete_graph, cluster_info, parallelism)?;
@@ -1401,7 +1401,7 @@ impl DdlController {
 
         // If the frontend does not specify the degree of parallelism and the default_parallelism is set to full, then set it to ADAPTIVE.
         // Otherwise, it defaults to FIXED based on deduction.
-        let table_parallelism = match (default_parallelism, &self.env.opts.default_parallelism) {
+        let table_parallelism = match (specified_parallelism, &self.env.opts.default_parallelism) {
             (None, DefaultParallelism::Full) => TableParallelism::Adaptive,
             _ => TableParallelism::Fixed(parallelism.get()),
         };
@@ -1434,7 +1434,7 @@ impl DdlController {
                                 &streaming_job,
                                 &stream_ctx,
                                 table.get_version()?,
-                                &fragment_graph.default_parallelism(),
+                                &fragment_graph.specified_parallelism(),
                             )
                             .await? as u32
                     }
@@ -1460,7 +1460,7 @@ impl DdlController {
 
         let ctx = CreateStreamingJobContext {
             dispatchers,
-            upstream_mview_actors: upstream_actors,
+            upstream_root_actors,
             internal_tables,
             building_locations,
             existing_locations,

@@ -15,7 +15,7 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = "1"
-apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "d0846a16ce813a225af04ade35b3b8117b137a29", features = [
+apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "f33bf6a9d1734d1e23edeb374dc48d26db4b18a5", features = [
     "snappy",
     "zstandard",
     "bzip",
@@ -25,6 +25,7 @@ arrow-array = { workspace = true }
 arrow-row = { workspace = true }
 arrow-schema = { workspace = true }
 arrow-select = { workspace = true }
+assert_matches = "1"
 async-nats = "0.34"
 async-trait = "0.1"
 auto_enums = { version = "0.8", features = ["futures03"] }
@@ -68,7 +69,7 @@ hyper = { version = "0.14", features = [
     "http1",
     "http2",
     "stream",
-] }
+] } # required by clickhouse client
 hyper-tls = "0.5"
 icelake = { workspace = true }
 indexmap = { version = "1.9.3", features = ["serde"] }
@@ -113,7 +114,7 @@ rdkafka = { workspace = true, features = [
 ] }
 redis = { version = "0.25", features = ["aio", "tokio-comp", "async-std-comp"] }
 regex = "1.4"
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.12.2", features = ["json"] }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_jni_core = { workspace = true }

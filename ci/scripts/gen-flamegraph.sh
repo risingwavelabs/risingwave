@@ -250,8 +250,8 @@ monitor() {
 stop_processes() {
   # stop rw
   pushd risingwave
-  ./risedev k
-  ./risedev clean-data
+  risedev k
+  risedev clean-data
   popd
 }
 
@@ -280,7 +280,7 @@ run_heap_flamegraph() {
   # No need for an extra profiling step.
   echo "--- Starting up RW"
   pushd risingwave
-  RISEDEV_ENABLE_HEAP_PROFILE=1 ./risedev d ci-gen-cpu-flamegraph
+  RISEDEV_ENABLE_HEAP_PROFILE=1 risedev d ci-gen-cpu-flamegraph
   popd
 
   echo "--- Machine Debug Info After RW Start"
@@ -338,7 +338,7 @@ run_cpu_flamegraph() {
 
   echo "--- Starting up RW"
   pushd risingwave
-  ./risedev d ci-gen-cpu-flamegraph
+  risedev d ci-gen-cpu-flamegraph
   popd
 
   echo "--- Machine Debug Info After RW Start"

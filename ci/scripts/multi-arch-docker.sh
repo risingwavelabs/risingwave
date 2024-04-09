@@ -74,8 +74,8 @@ if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
   pushGchr ${TAG}
 fi
 
-if [ "${BUILDKITE_SOURCE}" == "ui" ] && [[ -n "${IMAGE_TAG+x}" ]]; then
-  # If this is a ui build, tag the image with the $imagetag.
+if [[ -n "${IMAGE_TAG+x}" ]]; then
+  # Tag the image with the $IMAGE_TAG.
   TAG="${IMAGE_TAG}"
   pushGchr ${TAG}
 fi

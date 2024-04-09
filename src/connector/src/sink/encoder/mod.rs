@@ -110,37 +110,6 @@ pub enum TimestamptzHandlingMode {
     UtcWithoutSuffix,
     Micro,
     Milli,
-    PbMessage,
-}
-
-#[derive(Clone, Copy)]
-pub enum JsonbHandlingMode {
-    Jsonb,
-    String,
-}
-
-#[derive(Clone, Copy)]
-pub enum Int16HandlingMode {
-    Int16,
-    Int64,
-}
-
-#[derive(Clone, Copy)]
-pub enum DecimalHandlingMode {
-    Decimal,
-    String,
-}
-
-#[derive(Clone, Copy)]
-pub enum IntervalHandlingMode {
-    Interval,
-    String,
-}
-
-#[derive(Clone, Copy)]
-pub enum SerialHandlingMode {
-    Serial,
-    Int64,
 }
 
 impl TimestamptzHandlingMode {

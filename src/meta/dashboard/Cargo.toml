@@ -10,11 +10,12 @@ repository = { workspace = true }
 
 [dependencies]
 anyhow = "1"
-axum = "0.6"
+axum = "=0.7.4" # TODO: 0.7.5+ does not work with current toolchain
+axum-embed = "0.1"
 bytes = "1"
-hyper = "0.14"
+hyper = "1"
 mime_guess = "2"
-reqwest = "0.11"
+reqwest = "0.12.2"
 rust-embed = { version = "8", features = ["interpolate-folder-path", "mime-guess"] }
 thiserror-ext = { workspace = true }
 tracing = "0.1"

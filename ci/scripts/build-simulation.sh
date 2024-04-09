@@ -9,14 +9,14 @@ echo "--- Generate RiseDev CI config"
 cp ci/risedev-components.ci.env risedev-components.user.env
 
 echo "--- Build deterministic simulation e2e test runner"
-cargo make sslt-build-all --profile ci-sim
+risedev sslt-build-all --profile ci-sim
 
 echo "--- Show sccache stats"
 sccache --show-stats
 sccache --zero-stats
 
 echo "--- Build and archive deterministic simulation integration tests"
-NEXTEST_PROFILE=ci-sim cargo make sarchive-it-test --cargo-profile ci-sim
+NEXTEST_PROFILE=ci-sim risedev sarchive-it-test --cargo-profile ci-sim
 
 echo "--- Show sccache stats"
 sccache --show-stats
