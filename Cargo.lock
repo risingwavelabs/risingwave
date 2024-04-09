@@ -9868,6 +9868,7 @@ dependencies = [
  "educe 0.5.7",
  "either",
  "enum-as-inner",
+ "expect-test",
  "fancy-regex",
  "fixedbitset 0.5.0",
  "futures",
