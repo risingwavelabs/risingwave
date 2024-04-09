@@ -340,25 +340,30 @@ impl FunctionalDependencySet {
     }
 
     /// 1. Iterate over the prefixes of the order key.
-    /// 2. If some continuous subset of columns and the next element form a functional dependency,
-    ///    we can prune the next element.
+    /// 2. If some continuous subset of columns and the next
+    ///    column of the order key form a functional dependency,
+    ///    we can prune that column.
     fn minimize_order_key_bitset(&self, order_key: Vec<usize>) -> FixedBitSet {
         if order_key.is_empty() {
             return FixedBitSet::new();
         }
 
+        // Initialize current_prefix.
         let x = order_key[0];
-        let mut ks = FixedBitSet::with_capacity(self.column_count);
-        ks.set(x, true);
+        let mut prefix = FixedBitSet::with_capacity(self.column_count);
+        prefix.set(x, true);
 
+        // Grow current_prefix.
         for i in order_key.into_iter().skip(1) {
-            let mut y = FixedBitSet::with_capacity(self.column_count);
-            y.set(i, true);
-            if !self.is_determined_by(&ks, &y) {
-                ks.set(i, true);
+            let mut next = FixedBitSet::with_capacity(self.column_count);
+            next.set(i, true);
+
+            // Check if prefix -> next_column
+            if !self.is_determined_by(&prefix, &next) {
+                prefix.set(i, true);
             }
         }
-        ks
+        prefix
     }
 }
 
@@ -494,7 +499,6 @@ mod tests {
         println!("{:b}", expected_key);
         assert_eq!(actual_key, expected_key);
     }
-
 
     #[test]
     fn test_minimize_order_by_suffix_cant_prune_prefix() {
