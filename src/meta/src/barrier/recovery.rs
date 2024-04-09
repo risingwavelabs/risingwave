@@ -23,8 +23,9 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_meta_model_v2::StreamingParallelism;
 use risingwave_pb::common::ActorInfo;
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::State;
-use risingwave_pb::meta::PausedReason;
+use risingwave_pb::meta::{PausedReason, Recovery};
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
@@ -543,6 +544,10 @@ impl GlobalBarrierManager {
             paused = ?self.state.paused_reason(),
             "recovery success"
         );
+
+        self.env
+            .notification_manager()
+            .notify_frontend_without_version(Operation::Update, Info::Recovery(Recovery {}));
     }
 }
 
