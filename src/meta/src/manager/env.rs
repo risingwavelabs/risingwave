@@ -15,10 +15,10 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
-use risingwave_common::session_config::SessionConfig;
 use risingwave_common::config::{
     CompactionConfig, DefaultParallelism, MetaBackend, ObjectStoreConfig,
 };
+use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_meta_model_v2::prelude::Cluster;
 use risingwave_pb::meta::SystemParams;
@@ -380,7 +380,9 @@ impl MetaSrvEnv {
                 Self {
                     id_gen_manager_impl: IdGenManagerImpl::Kv(id_gen_manager),
                     system_param_manager_impl: SystemParamsManagerImpl::Kv(system_params_manager),
-                    session_param_manager_impl: SessionParamsManagerImpl::Kv(session_params_manager),
+                    session_param_manager_impl: SessionParamsManagerImpl::Kv(
+                        session_params_manager,
+                    ),
                     meta_store_impl: meta_store_impl.clone(),
                     notification_manager,
                     stream_client_pool,
@@ -405,7 +407,14 @@ impl MetaSrvEnv {
                     )
                     .await?,
                 );
-
+                let session_param_controller = Arc::new(
+                    SessionParamsController::new(
+                        sql_meta_store.clone(),
+                        notification_manager.clone(),
+                        init_session_config,
+                    )
+                    .await?,
+                );
                 Self {
                     id_gen_manager_impl: IdGenManagerImpl::Sql(Arc::new(
                         SqlIdGeneratorManager::new(&sql_meta_store.conn).await?,

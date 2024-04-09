@@ -150,8 +150,8 @@ mod tests {
     async fn test_session_params() {
         use sea_orm::QueryFilter;
 
-        let env = MetaSrvEnv::for_test().await;
-        let meta_store = env.sql_meta_store().unwrap();
+        let env = MetaSrvEnv::for_test_with_sql_meta_store().await;
+        let meta_store = env.meta_store().as_sql();
         let init_params = SessionConfig::default();
 
         // init system parameter controller as first launch.
@@ -184,7 +184,7 @@ mod tests {
 
         // init system parameter controller as not first launch.
         let session_param_ctl = SessionParamsController::new(
-            meta_store,
+            meta_store.clone(),
             env.notification_manager_ref(),
             init_params.clone(),
         )

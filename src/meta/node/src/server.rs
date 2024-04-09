@@ -394,7 +394,13 @@ pub async fn start_service_as_election_leader(
             .expect("Failed to upgrade models in meta store");
     }
 
-    let env = MetaSrvEnv::new(opts.clone(), init_system_params, init_session_config, meta_store_impl).await?;
+    let env = MetaSrvEnv::new(
+        opts.clone(),
+        init_system_params,
+        init_session_config,
+        meta_store_impl,
+    )
+    .await?;
     let system_params_reader = env.system_params_reader().await;
 
     let data_directory = system_params_reader.data_directory();
@@ -630,11 +636,6 @@ pub async fn start_service_as_election_leader(
     let telemetry_srv = TelemetryInfoServiceImpl::new(env.meta_store_ref());
     let system_params_srv = SystemParamsServiceImpl::new(env.system_params_manager_impl_ref());
     let session_params_srv = SessionParamsServiceImpl::new(env.session_params_manager_impl_ref());
-    let session_params_srv = if let Some(controller) = env.session_params_controller_ref() {
-        SessionParamsServiceImpl::Controller(controller)
-    } else {
-        SessionParamsServiceImpl::Manager(env.session_params_manager_ref().unwrap())
-    };
     let serving_srv =
         ServingServiceImpl::new(serving_vnode_mapping.clone(), metadata_manager.clone());
     let cloud_srv = CloudServiceImpl::new(metadata_manager.clone(), aws_cli);

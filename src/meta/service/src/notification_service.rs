@@ -14,7 +14,7 @@
 
 use anyhow::Context;
 use itertools::Itertools;
-use risingwave_meta::manager::MetadataManager;
+use risingwave_meta::manager::{MetadataManager, SessionParamsManagerImpl};
 use risingwave_meta::MetaResult;
 use risingwave_pb::backup_service::MetaBackupManifestId;
 use risingwave_pb::catalog::Table;
@@ -248,15 +248,11 @@ impl NotificationServiceImpl {
 
         let hummock_snapshot = Some(self.hummock_manager.latest_snapshot());
 
-        let session_params = if let Some(controller) = self.env.session_params_controller_ref() {
-            controller.get_params().await
-        } else {
-            self.env
-                .session_params_manager_ref()
-                .unwrap()
-                .get_params()
-                .await
+        let session_params = match self.env.session_params_manager_impl_ref() {
+            SessionParamsManagerImpl::Kv(manager) => manager.get_params().await,
+            SessionParamsManagerImpl::Sql(controller) => controller.get_params().await,
         };
+
         let session_params = Some(GetSessionParamsResponse {
             params: serde_json::to_string(&session_params)
                 .context("failed to encode session params")?,
