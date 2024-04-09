@@ -16,6 +16,16 @@
     - logical_plan
     - stream_plan
     - batch_plan
+# Order key should not be pruned for suffix functional dependency.
+- name: test functional dependency for order key pruning on singleton
+  sql: |
+    create table t1 (id int primary key, i int);
+    create materialized view v as select count(*) cnt from t1;
+    select cnt from v order by cnt;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
 # Order key should not be pruned for index,
 # since it uses it as distribution key as well.
 - name: test functional dependency for order key pruning (index)

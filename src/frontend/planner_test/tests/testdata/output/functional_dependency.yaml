@@ -42,13 +42,28 @@
           └─StreamGroupTopN { order: [t1.i ASC, t1.id ASC], limit: 2, offset: 0, group_key: [_vnode] }
             └─StreamProject { exprs: [t1.id, t1.i, Vnode(t1.id) as _vnode] }
               └─StreamTableScan { table: t1, columns: [t1.id, t1.i], stream_scan_type: ArrangementBackfill, stream_key: [t1.id], pk: [id], dist: UpstreamHashShard(t1.id) }
+- name: test functional dependency for order key pruning on singleton
+  sql: |
+    create table t1 (id int primary key, i int);
+    create materialized view v as select count(*) cnt from t1;
+    select cnt from v order by cnt;
+  logical_plan: |-
+    LogicalProject { exprs: [v.cnt] }
+    └─LogicalScan { table: v, columns: [v.cnt], cardinality: 0..=1 }
+  batch_plan: |-
+    BatchExchange { order: [v.cnt ASC], dist: Single }
+    └─BatchSort { order: [v.cnt ASC] }
+      └─BatchScan { table: v, columns: [v.cnt], distribution: Single }
+  stream_plan: |-
+    StreamMaterialize { columns: [cnt], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    └─StreamTableScan { table: v, columns: [v.cnt], stream_scan_type: ArrangementBackfill, stream_key: [], pk: [], dist: Single }
 - name: test functional dependency for order key pruning (index)
   sql: |
     create table t1 (v1 int, v2 int);
     create materialized view v as select count(*) cnt from t1;
     explain (verbose) create index mv_idx on v(cnt);
   explain_output: |
-    StreamMaterialize { columns: [cnt], stream_key: [], pk_columns: [cnt], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [cnt], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(v.cnt) }
       └─StreamTableScan { table: v, columns: [v.cnt], stream_scan_type: ArrangementBackfill, stream_key: [], pk: [], dist: Single }
 - name: test functional dependency for order key pruning (index 2)

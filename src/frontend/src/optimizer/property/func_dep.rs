@@ -357,12 +357,10 @@ impl FunctionalDependencySet {
         }
 
         // Initialize current_prefix.
-        let x = order_key[0];
         let mut prefix = FixedBitSet::with_capacity(self.column_count);
-        prefix.set(x, true);
 
         // Grow current_prefix.
-        for i in order_key.into_iter().skip(1) {
+        for i in order_key {
             let mut next = FixedBitSet::with_capacity(self.column_count);
             next.set(i, true);
 
@@ -526,6 +524,18 @@ mod tests {
         expected_key.set(0, true);
         expected_key.set(1, true);
         expected_key.set(2, true);
+        println!("{:b}", actual_key);
+        println!("{:b}", expected_key);
+        assert_eq!(actual_key, expected_key);
+    }
+
+    #[test]
+    fn test_minimize_order_by_with_empty_key() {
+        let mut fd = FunctionalDependencySet::new(5);
+        fd.add_functional_dependency_by_column_indices(&[], &[0]); // () --> (0)
+        let order_key = vec![0];
+        let actual_key = fd.minimize_order_key_bitset(order_key);
+        let expected_key = FixedBitSet::with_capacity(5);
         println!("{:b}", actual_key);
         println!("{:b}", expected_key);
         assert_eq!(actual_key, expected_key);
