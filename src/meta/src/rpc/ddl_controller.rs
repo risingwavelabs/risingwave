@@ -262,7 +262,7 @@ impl DdlController {
     }
 
     async fn gen_unique_id<const C: IdCategoryType>(&self) -> MetaResult<u32> {
-        let id = self.env.id_gen_manager().generate::<C>().await? as u32;
+        let id = self.env.id_gen_manager().as_kv().generate::<C>().await? as u32;
         Ok(id)
     }
 
@@ -358,6 +358,16 @@ impl DdlController {
         parallelism: PbTableParallelism,
         deferred: bool,
     ) -> MetaResult<()> {
+        if !deferred
+            && !self
+                .metadata_manager
+                .list_background_creating_jobs()
+                .await?
+                .is_empty()
+        {
+            bail!("There are background creating jobs, please try again later")
+        }
+
         self.stream_manager
             .alter_table_parallelism(table_id, parallelism.into(), deferred)
             .await
@@ -465,6 +475,7 @@ impl DdlController {
                 .await;
         };
         // 1. Drop source in catalog.
+        // If the source has a streaming job, it's also dropped here.
         let (version, streaming_job_ids) = mgr
             .catalog_manager
             .drop_relation(
@@ -1138,7 +1149,7 @@ impl DdlController {
                     StreamingJobId::Sink(id) => (id as _, ObjectType::Sink),
                     StreamingJobId::Table(_, id) => (id as _, ObjectType::Table),
                     StreamingJobId::Index(idx) => (idx as _, ObjectType::Index),
-                    StreamingJobId::Subscription(id) => (id as _, ObjectType::Sink),
+                    StreamingJobId::Subscription(id) => (id as _, ObjectType::Subscription),
                 };
 
                 let version = self
@@ -1234,6 +1245,7 @@ impl DdlController {
                 let dummy_id = self
                     .env
                     .id_gen_manager()
+                    .as_kv()
                     .generate::<{ IdCategory::Table }>()
                     .await? as u32;
 
@@ -1289,9 +1301,11 @@ impl DdlController {
 
     fn resolve_stream_parallelism(
         &self,
-        default_parallelism: Option<NonZeroUsize>,
+        specified_parallelism: Option<NonZeroUsize>,
         cluster_info: &StreamingClusterInfo,
     ) -> MetaResult<NonZeroUsize> {
+        const MAX_PARALLELISM: NonZeroUsize = NonZeroUsize::new(VirtualNode::COUNT).unwrap();
+
         if cluster_info.parallel_units.is_empty() {
             return Err(MetaError::unavailable(
                 "No available parallel units to schedule",
@@ -1300,21 +1314,13 @@ impl DdlController {
 
         let available_parallel_units =
             NonZeroUsize::new(cluster_info.parallel_units.len()).unwrap();
+
         // Use configured parallel units if no default parallelism is specified.
-        let parallelism = default_parallelism.unwrap_or(match &self.env.opts.default_parallelism {
-            DefaultParallelism::Full => {
-                if available_parallel_units.get() > VirtualNode::COUNT {
-                    tracing::warn!(
-                        "Too many parallel units, use {} instead",
-                        VirtualNode::COUNT
-                    );
-                    NonZeroUsize::new(VirtualNode::COUNT).unwrap()
-                } else {
-                    available_parallel_units
-                }
-            }
-            DefaultParallelism::Default(num) => *num,
-        });
+        let parallelism =
+            specified_parallelism.unwrap_or_else(|| match &self.env.opts.default_parallelism {
+                DefaultParallelism::Full => available_parallel_units,
+                DefaultParallelism::Default(num) => *num,
+            });
 
         if parallelism > available_parallel_units {
             return Err(MetaError::unavailable(format!(
@@ -1323,7 +1329,12 @@ impl DdlController {
             )));
         }
 
-        Ok(parallelism)
+        if available_parallel_units > MAX_PARALLELISM {
+            tracing::warn!("Too many parallel units, use {} instead", MAX_PARALLELISM);
+            Ok(MAX_PARALLELISM)
+        } else {
+            Ok(parallelism)
+        }
     }
 
     /// Builds the actor graph:
@@ -1338,7 +1349,7 @@ impl DdlController {
         affected_table_replace_info: Option<(StreamingJob, StreamFragmentGraph)>,
     ) -> MetaResult<(CreateStreamingJobContext, TableFragments)> {
         let id = stream_job.id();
-        let default_parallelism = fragment_graph.default_parallelism();
+        let specified_parallelism = fragment_graph.specified_parallelism();
         let internal_tables = fragment_graph.internal_tables();
         let expr_context = stream_ctx.to_expr_context();
 
@@ -1350,7 +1361,7 @@ impl DdlController {
             .get_upstream_root_fragments(fragment_graph.dependent_table_ids())
             .await?;
 
-        let upstream_actors: HashMap<_, _> = upstream_root_fragments
+        let upstream_root_actors: HashMap<_, _> = upstream_root_fragments
             .iter()
             .map(|(&table_id, fragment)| {
                 (
@@ -1369,7 +1380,7 @@ impl DdlController {
         // 2. Build the actor graph.
         let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
 
-        let parallelism = self.resolve_stream_parallelism(default_parallelism, &cluster_info)?;
+        let parallelism = self.resolve_stream_parallelism(specified_parallelism, &cluster_info)?;
 
         let actor_graph_builder =
             ActorGraphBuilder::new(id, complete_graph, cluster_info, parallelism)?;
@@ -1389,9 +1400,11 @@ impl DdlController {
         // and the context that contains all information needed for building the
         // actors on the compute nodes.
 
-        let table_parallelism = match default_parallelism {
-            None => TableParallelism::Adaptive,
-            Some(parallelism) => TableParallelism::Fixed(parallelism.get()),
+        // If the frontend does not specify the degree of parallelism and the default_parallelism is set to full, then set it to ADAPTIVE.
+        // Otherwise, it defaults to FIXED based on deduction.
+        let table_parallelism = match (specified_parallelism, &self.env.opts.default_parallelism) {
+            (None, DefaultParallelism::Full) => TableParallelism::Adaptive,
+            _ => TableParallelism::Fixed(parallelism.get()),
         };
 
         let table_fragments = TableFragments::new(
@@ -1412,6 +1425,7 @@ impl DdlController {
                     MetadataManager::V1(_) => {
                         self.env
                             .id_gen_manager()
+                            .as_kv()
                             .generate::<{ IdCategory::Table }>()
                             .await? as u32
                     }
@@ -1422,7 +1436,7 @@ impl DdlController {
                                 &streaming_job,
                                 &stream_ctx,
                                 table.get_version()?,
-                                &fragment_graph.default_parallelism(),
+                                &fragment_graph.specified_parallelism(),
                             )
                             .await? as u32
                     }
@@ -1448,7 +1462,7 @@ impl DdlController {
 
         let ctx = CreateStreamingJobContext {
             dispatchers,
-            upstream_mview_actors: upstream_actors,
+            upstream_root_actors,
             internal_tables,
             building_locations,
             existing_locations,
@@ -1457,10 +1471,7 @@ impl DdlController {
             create_type: stream_job.create_type(),
             ddl_type: stream_job.into(),
             replace_table_job_info,
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/14793
-            option: CreateStreamingJobOption {
-                new_independent_compaction_group: false,
-            },
+            option: CreateStreamingJobOption {},
         };
 
         // 4. Mark tables as creating, including internal tables and the table of the stream job.
@@ -1704,6 +1715,7 @@ impl DdlController {
         let dummy_id = self
             .env
             .id_gen_manager()
+            .as_kv()
             .generate::<{ IdCategory::Table }>()
             .await? as u32;
 
@@ -1788,7 +1800,6 @@ impl DdlController {
         dummy_table_id: TableId,
     ) -> MetaResult<(ReplaceTableContext, TableFragments)> {
         let id = stream_job.id();
-        let default_parallelism = fragment_graph.default_parallelism();
         let expr_context = stream_ctx.to_expr_context();
 
         let old_table_fragments = self
@@ -1836,7 +1847,9 @@ impl DdlController {
         // 2. Build the actor graph.
         let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
 
-        let parallelism = self.resolve_stream_parallelism(default_parallelism, &cluster_info)?;
+        let parallelism = NonZeroUsize::new(original_table_fragment.get_actors().len())
+            .expect("The number of actors in the original table fragment should be greater than 0");
+
         let actor_graph_builder =
             ActorGraphBuilder::new(id, complete_graph, cluster_info, parallelism)?;
 
@@ -1851,11 +1864,6 @@ impl DdlController {
             .await?;
         assert!(dispatchers.is_empty());
 
-        let table_parallelism = match default_parallelism {
-            None => TableParallelism::Adaptive,
-            Some(parallelism) => TableParallelism::Fixed(parallelism.get()),
-        };
-
         // 3. Build the table fragments structure that will be persisted in the stream manager, and
         // the context that contains all information needed for building the actors on the compute
         // nodes.
@@ -1864,8 +1872,7 @@ impl DdlController {
             graph,
             &building_locations.actor_locations,
             stream_ctx,
-            // todo: shall we use the old table fragments' parallelism
-            table_parallelism,
+            old_table_fragments.assigned_parallelism,
         );
 
         let ctx = ReplaceTableContext {
@@ -1950,9 +1957,9 @@ impl DdlController {
                         .alter_database_name(database_id, new_name)
                         .await
                 }
-                alter_name_request::Object::SubscriptionId(sink_id) => {
+                alter_name_request::Object::SubscriptionId(subscription_id) => {
                     mgr.catalog_manager
-                        .alter_subscription_name(sink_id, new_name)
+                        .alter_subscription_name(subscription_id, new_name)
                         .await
                 }
             },
@@ -2053,8 +2060,8 @@ impl DdlController {
     }
 
     pub async fn wait(&self) -> MetaResult<()> {
-        let timeout_secs = 30 * 60;
-        for _ in 0..timeout_secs {
+        let timeout_ms = 30 * 60 * 1000;
+        for _ in 0..timeout_ms {
             match &self.metadata_manager {
                 MetadataManager::V1(mgr) => {
                     if mgr
@@ -2078,10 +2085,10 @@ impl DdlController {
                 }
             }
 
-            sleep(Duration::from_secs(1)).await;
+            sleep(Duration::from_millis(1)).await;
         }
         Err(MetaError::cancelled(format!(
-            "timeout after {timeout_secs}s"
+            "timeout after {timeout_ms}ms"
         )))
     }
 

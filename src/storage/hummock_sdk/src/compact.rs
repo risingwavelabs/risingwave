@@ -14,6 +14,15 @@
 
 use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo};
 
+pub fn compact_task_output_to_string(compact_task: &CompactTask) -> String {
+    let mut s = String::default();
+    s.push_str("Compaction task output: \n");
+    for sst in &compact_task.sorted_output_ssts {
+        append_sstable_info_to_string(&mut s, sst);
+    }
+    s
+}
+
 pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     use std::fmt::Write;
 
@@ -48,6 +57,12 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
         compact_task.existing_table_ids,
     )
     .unwrap();
+    writeln!(
+        s,
+        "Compaction task partition info: {:?} ",
+        compact_task.table_vnode_partition,
+    )
+    .unwrap();
     s.push_str("Compaction Sstables structure: \n");
     for level_entry in &compact_task.input_ssts {
         let tables: Vec<String> = level_entry
@@ -56,12 +71,11 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
             .map(|table| {
                 if table.total_key_count != 0 {
                     format!(
-                        "[id: {}, obj_id: {} {}KB stale_ratio {} delete_range_ratio {}]",
+                        "[id: {}, obj_id: {} {}KB stale_ratio {}]",
                         table.get_sst_id(),
                         table.object_id,
                         table.file_size / 1024,
                         (table.stale_key_count * 100 / table.total_key_count),
-                        (table.range_tombstone_count * 100 / table.total_key_count),
                     )
                 } else {
                     format!(
@@ -75,10 +89,7 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
             .collect();
         writeln!(s, "Level {:?} {:?} ", level_entry.level_idx, tables).unwrap();
     }
-    s.push_str("Compaction task output: \n");
-    for sst in &compact_task.sorted_output_ssts {
-        append_sstable_info_to_string(&mut s, sst);
-    }
+    s.push_str(&compact_task_output_to_string(compact_task));
     s
 }
 
@@ -100,12 +111,9 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
     let stale_ratio = (sstable_info.stale_key_count * 100)
         .checked_div(sstable_info.total_key_count)
         .unwrap_or(0);
-    let range_tombstone_ratio = (sstable_info.range_tombstone_count * 100)
-        .checked_div(sstable_info.total_key_count)
-        .unwrap_or(0);
     writeln!(
         s,
-        "SstableInfo: object id={}, SST id={}, KeyRange=[{:?},{:?}], table_ids: {:?}, size={}KB, stale_ratio={}%, range_tombstone_count={} range_tombstone_ratio={}% bloom_filter_kind {:?}",
+        "SstableInfo: object id={}, SST id={}, KeyRange=[{:?},{:?}], table_ids: {:?}, size={}KB, stale_ratio={}%, bloom_filter_kind {:?}",
         sstable_info.get_object_id(),
         sstable_info.get_sst_id(),
         left_str,
@@ -113,8 +121,6 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
         sstable_info.table_ids,
         sstable_info.file_size / 1024,
         stale_ratio,
-        sstable_info.range_tombstone_count,
-        range_tombstone_ratio,
         sstable_info.bloom_filter_kind,
     )
     .unwrap();

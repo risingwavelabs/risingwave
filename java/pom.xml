@@ -80,11 +80,11 @@
         <jackson.version>2.13.5</jackson.version>
         <spark_sql.version>3.3.1</spark_sql.version>
         <hadoop.version>3.3.3</hadoop.version>
-        <elasticsearch.version>7.17.14</elasticsearch.version>
+        <elasticsearch.version>7.17.19</elasticsearch.version>
         <datastax.version>4.15.0</datastax.version>
         <flink.version>1.18.0</flink.version>
         <testcontainers.version>1.17.6</testcontainers.version>
-        <postgresql.version>42.5.1</postgresql.version>
+        <postgresql.version>42.5.5</postgresql.version>
         <mysql.connector.java.version>8.0.28</mysql.connector.java.version>
         <mongodb.driver.sync.version>4.11.1</mongodb.driver.sync.version>
         <sqlite.version>3.45.0.0</sqlite.version>
@@ -333,7 +333,7 @@
             <dependency>
                 <groupId>org.apache.httpcomponents</groupId>
                 <artifactId>httpclient</artifactId>
-                <version>4.5.10</version>
+                <version>4.5.13</version>
             </dependency>
             <dependency>
                 <groupId>io.prometheus</groupId>

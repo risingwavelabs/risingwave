@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context};
-use futures::future::BoxFuture;
+use futures::future::{try_join_all, BoxFuture};
 use itertools::Itertools;
 use num_integer::Integer;
 use num_traits::abs;
@@ -51,9 +51,12 @@ use tokio::sync::oneshot::Receiver;
 use tokio::sync::{oneshot, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
+use tracing::warn;
 
 use crate::barrier::{Command, Reschedule, StreamRpcManager};
-use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv, MetadataManager, WorkerId};
+use crate::manager::{
+    IdCategory, IdGenManagerImpl, LocalNotification, MetaSrvEnv, MetadataManager, WorkerId,
+};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::serving::{
     to_deleted_fragment_parallel_unit_mapping, to_fragment_parallel_unit_mapping,
@@ -196,9 +199,9 @@ pub struct RescheduleContext {
     upstream_dispatchers: HashMap<ActorId, Vec<(FragmentId, DispatcherId, DispatcherType)>>,
     /// Fragments with stream source
     stream_source_fragment_ids: HashSet<FragmentId>,
-    /// Target fragments in NoShuffle relation
+    /// Target fragments in `NoShuffle` relation
     no_shuffle_target_fragment_ids: HashSet<FragmentId>,
-    /// Source fragments in NoShuffle relation
+    /// Source fragments in `NoShuffle` relation
     no_shuffle_source_fragment_ids: HashSet<FragmentId>,
     // index for dispatcher type from upstream fragment to downstream fragment
     fragment_dispatcher_map: HashMap<FragmentId, HashMap<FragmentId, DispatcherType>>,
@@ -437,8 +440,11 @@ pub fn rebalance_actor_vnode(
 
 #[derive(Debug, Clone, Copy)]
 pub struct RescheduleOptions {
-    /// Whether to resolve the upstream of NoShuffle when scaling. It will check whether all the reschedules in the no shuffle dependency tree are corresponding, and rewrite them to the root of the no shuffle dependency tree.
+    /// Whether to resolve the upstream of `NoShuffle` when scaling. It will check whether all the reschedules in the no shuffle dependency tree are corresponding, and rewrite them to the root of the no shuffle dependency tree.
     pub resolve_no_shuffle_upstream: bool,
+
+    /// Whether to skip creating new actors. If it is true, the scaling-out actors will not be created.
+    pub skip_create_new_actors: bool,
 }
 
 pub type ScaleControllerRef = Arc<ScaleController>;
@@ -729,7 +735,7 @@ impl ScaleController {
 
             if (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0 {
                 let stream_node = fragment.actor_template.nodes.as_ref().unwrap();
-                if TableFragments::find_stream_source(stream_node).is_some() {
+                if stream_node.find_stream_source().is_some() {
                     stream_source_fragment_ids.insert(*fragment_id);
                 }
             }
@@ -1114,94 +1120,96 @@ impl ScaleController {
             }
         }
 
-        // After modification, for newly created actors, both upstream and downstream actor ids
-        // have been modified
-        let mut actor_infos_to_broadcast = BTreeMap::new();
-        let mut node_actors_to_create: HashMap<WorkerId, Vec<_>> = HashMap::new();
-        let mut broadcast_worker_ids = HashSet::new();
+        if !options.skip_create_new_actors {
+            // After modification, for newly created actors, both upstream and downstream actor ids
+            // have been modified
+            let mut actor_infos_to_broadcast = BTreeMap::new();
+            let mut node_actors_to_create: HashMap<WorkerId, Vec<_>> = HashMap::new();
+            let mut broadcast_worker_ids = HashSet::new();
 
-        for actors_to_create in fragment_actors_to_create.values() {
-            for (new_actor_id, new_parallel_unit_id) in actors_to_create {
-                let new_actor = new_created_actors.get(new_actor_id).unwrap();
-                for upstream_actor_id in &new_actor.upstream_actor_id {
-                    if new_created_actors.contains_key(upstream_actor_id) {
-                        continue;
-                    }
-
-                    let upstream_worker_id = ctx
-                        .actor_id_to_parallel_unit(upstream_actor_id)?
-                        .worker_node_id;
-                    let upstream_worker =
-                        ctx.worker_nodes.get(&upstream_worker_id).with_context(|| {
-                            format!("upstream worker {} not found", upstream_worker_id)
-                        })?;
-
-                    // Force broadcast upstream actor info, because the actor information of the new
-                    // node may not have been synchronized yet
-                    actor_infos_to_broadcast.insert(
-                        *upstream_actor_id,
-                        ActorInfo {
-                            actor_id: *upstream_actor_id,
-                            host: upstream_worker.host.clone(),
-                        },
-                    );
-
-                    broadcast_worker_ids.insert(upstream_worker_id);
-                }
-
-                for dispatcher in &new_actor.dispatcher {
-                    for downstream_actor_id in &dispatcher.downstream_actor_id {
-                        if new_created_actors.contains_key(downstream_actor_id) {
+            for actors_to_create in fragment_actors_to_create.values() {
+                for (new_actor_id, new_parallel_unit_id) in actors_to_create {
+                    let new_actor = new_created_actors.get(new_actor_id).unwrap();
+                    for upstream_actor_id in &new_actor.upstream_actor_id {
+                        if new_created_actors.contains_key(upstream_actor_id) {
                             continue;
                         }
-                        let downstream_worker_id = ctx
-                            .actor_id_to_parallel_unit(downstream_actor_id)?
+
+                        let upstream_worker_id = ctx
+                            .actor_id_to_parallel_unit(upstream_actor_id)?
                             .worker_node_id;
-                        let downstream_worker = ctx
-                            .worker_nodes
-                            .get(&downstream_worker_id)
-                            .with_context(|| {
-                                format!("downstream worker {} not found", downstream_worker_id)
+                        let upstream_worker =
+                            ctx.worker_nodes.get(&upstream_worker_id).with_context(|| {
+                                format!("upstream worker {} not found", upstream_worker_id)
                             })?;
 
+                        // Force broadcast upstream actor info, because the actor information of the new
+                        // node may not have been synchronized yet
                         actor_infos_to_broadcast.insert(
-                            *downstream_actor_id,
+                            *upstream_actor_id,
                             ActorInfo {
-                                actor_id: *downstream_actor_id,
-                                host: downstream_worker.host.clone(),
+                                actor_id: *upstream_actor_id,
+                                host: upstream_worker.host.clone(),
                             },
                         );
 
-                        broadcast_worker_ids.insert(downstream_worker_id);
+                        broadcast_worker_ids.insert(upstream_worker_id);
                     }
+
+                    for dispatcher in &new_actor.dispatcher {
+                        for downstream_actor_id in &dispatcher.downstream_actor_id {
+                            if new_created_actors.contains_key(downstream_actor_id) {
+                                continue;
+                            }
+                            let downstream_worker_id = ctx
+                                .actor_id_to_parallel_unit(downstream_actor_id)?
+                                .worker_node_id;
+                            let downstream_worker = ctx
+                                .worker_nodes
+                                .get(&downstream_worker_id)
+                                .with_context(|| {
+                                    format!("downstream worker {} not found", downstream_worker_id)
+                                })?;
+
+                            actor_infos_to_broadcast.insert(
+                                *downstream_actor_id,
+                                ActorInfo {
+                                    actor_id: *downstream_actor_id,
+                                    host: downstream_worker.host.clone(),
+                                },
+                            );
+
+                            broadcast_worker_ids.insert(downstream_worker_id);
+                        }
+                    }
+
+                    let worker = ctx.parallel_unit_id_to_worker(new_parallel_unit_id)?;
+
+                    node_actors_to_create
+                        .entry(worker.id)
+                        .or_default()
+                        .push(new_actor.clone());
+
+                    broadcast_worker_ids.insert(worker.id);
+
+                    actor_infos_to_broadcast.insert(
+                        *new_actor_id,
+                        ActorInfo {
+                            actor_id: *new_actor_id,
+                            host: worker.host.clone(),
+                        },
+                    );
                 }
-
-                let worker = ctx.parallel_unit_id_to_worker(new_parallel_unit_id)?;
-
-                node_actors_to_create
-                    .entry(worker.id)
-                    .or_default()
-                    .push(new_actor.clone());
-
-                broadcast_worker_ids.insert(worker.id);
-
-                actor_infos_to_broadcast.insert(
-                    *new_actor_id,
-                    ActorInfo {
-                        actor_id: *new_actor_id,
-                        host: worker.host.clone(),
-                    },
-                );
             }
-        }
 
-        self.create_actors_on_compute_node(
-            &ctx.worker_nodes,
-            actor_infos_to_broadcast,
-            node_actors_to_create,
-            broadcast_worker_ids,
-        )
-        .await?;
+            self.create_actors_on_compute_node(
+                &ctx.worker_nodes,
+                actor_infos_to_broadcast,
+                node_actors_to_create,
+                broadcast_worker_ids,
+            )
+            .await?;
+        }
 
         // For stream source fragments, we need to reallocate the splits.
         // Because we are in the Pause state, so it's no problem to reallocate
@@ -1229,6 +1237,7 @@ impl ScaleController {
                 fragment_stream_source_actor_splits.insert(*fragment_id, actor_splits);
             }
         }
+        // TODO: support migrate splits for SourceBackfill
 
         // Generate fragment reschedule plan
         let mut reschedule_fragment: HashMap<FragmentId, Reschedule> =
@@ -1489,16 +1498,12 @@ impl ScaleController {
             }
 
             for created_parallel_unit_id in added_parallel_units {
-                let id = match self.env.sql_id_gen_manager_ref() {
-                    None => {
-                        self.env
-                            .id_gen_manager()
-                            .generate::<{ IdCategory::Actor }>()
-                            .await? as ActorId
+                let id = match self.env.id_gen_manager() {
+                    IdGenManagerImpl::Kv(mgr) => {
+                        mgr.generate::<{ IdCategory::Actor }>().await? as ActorId
                     }
-                    Some(id_gen) => {
-                        let id = id_gen.generate_interval::<{ IdCategory::Actor }>(1);
-
+                    IdGenManagerImpl::Sql(mgr) => {
+                        let id = mgr.generate_interval::<{ IdCategory::Actor }>(1);
                         id as ActorId
                     }
                 };
@@ -1734,6 +1739,7 @@ impl ScaleController {
             self.source_manager
                 .apply_source_change(
                     None,
+                    None,
                     Some(stream_source_actor_splits),
                     Some(stream_source_dropped_actors),
                 )
@@ -1823,16 +1829,17 @@ impl ScaleController {
             table_fragment_id_map: &mut HashMap<u32, HashSet<FragmentId>>,
             fragment_actor_id_map: &mut HashMap<FragmentId, HashSet<u32>>,
             table_fragments: &BTreeMap<TableId, TableFragments>,
-        ) {
+        ) -> MetaResult<()> {
             // This is only for assertion purposes and will be removed once the dispatcher_id is guaranteed to always correspond to the downstream fragment_id,
             // such as through the foreign key constraints in the SQL backend.
             let mut actor_fragment_id_map_for_check = HashMap::new();
             for table_fragments in table_fragments.values() {
                 for (fragment_id, fragment) in &table_fragments.fragments {
                     for actor in &fragment.actors {
-                        debug_assert!(actor_fragment_id_map_for_check
-                            .insert(actor.actor_id, *fragment_id)
-                            .is_none());
+                        let prev =
+                            actor_fragment_id_map_for_check.insert(actor.actor_id, *fragment_id);
+
+                        debug_assert!(prev.is_none());
                     }
                 }
             }
@@ -1865,9 +1872,10 @@ impl ScaleController {
                                         dispatcher.dispatcher_id as FragmentId
                                     );
                                 } else {
-                                    tracing::warn!(
-                                        "downstream actor id {} not found in fragment_actor_id_map",
-                                        downstream_actor_id
+                                    bail!(
+                                        "downstream actor id {} from actor {} not found in fragment_actor_id_map",
+                                        downstream_actor_id,
+                                        actor.actor_id,
                                     );
                                 }
 
@@ -1887,6 +1895,8 @@ impl ScaleController {
 
                 actor_status.extend(table_fragments.actor_status.clone());
             }
+
+            Ok(())
         }
 
         match &self.metadata_manager {
@@ -1900,7 +1910,7 @@ impl ScaleController {
                     &mut table_fragment_id_map,
                     &mut fragment_actor_id_map,
                     guard.table_fragments(),
-                );
+                )?;
             }
             MetadataManager::V2(_) => {
                 let all_table_fragments = self.list_all_table_fragments().await?;
@@ -1917,7 +1927,7 @@ impl ScaleController {
                     &mut table_fragment_id_map,
                     &mut fragment_actor_id_map,
                     &all_table_fragments,
-                );
+                )?;
             }
         }
 
@@ -1996,12 +2006,19 @@ impl ScaleController {
                                 ),
                             );
                         }
-                        TableParallelism::Fixed(n) => {
-                            if n > all_available_parallel_unit_ids.len() {
-                                bail!(
-                                    "Not enough ParallelUnits available for fragment {}",
-                                    fragment_id
+                        TableParallelism::Fixed(mut n) => {
+                            let available_parallelism = all_available_parallel_unit_ids.len();
+
+                            if n > available_parallelism {
+                                warn!(
+                                    "not enough parallel units available for job {} fragment {}, required {}, resetting to {}",
+                                    table_id,
+                                    fragment_id,
+                                    n,
+                                    available_parallelism,
                                 );
+
+                                n = available_parallelism;
                             }
 
                             let rebalance_result =
@@ -2646,9 +2663,33 @@ impl GlobalStreamManager {
 
         tracing::debug!("reschedule plan: {:?}", reschedule_fragment);
 
+        let up_down_stream_fragment: HashSet<_> = reschedule_fragment
+            .iter()
+            .flat_map(|(_, reschedule)| {
+                reschedule
+                    .upstream_fragment_dispatcher_ids
+                    .iter()
+                    .map(|(fragment_id, _)| *fragment_id)
+                    .chain(reschedule.downstream_fragment_ids.iter().cloned())
+            })
+            .collect();
+
+        let fragment_actors =
+            try_join_all(up_down_stream_fragment.iter().map(|fragment_id| async {
+                let actor_ids = self
+                    .metadata_manager
+                    .get_running_actors_of_fragment(*fragment_id)
+                    .await?;
+                Result::<_, MetaError>::Ok((*fragment_id, actor_ids))
+            }))
+            .await?
+            .into_iter()
+            .collect();
+
         let command = Command::RescheduleFragment {
             reschedules: reschedule_fragment,
             table_parallelism: table_parallelism.unwrap_or_default(),
+            fragment_actors,
         };
 
         match &self.metadata_manager {
@@ -2679,6 +2720,20 @@ impl GlobalStreamManager {
     }
 
     async fn trigger_parallelism_control(&self) -> MetaResult<bool> {
+        let background_streaming_jobs = self
+            .metadata_manager
+            .list_background_creating_jobs()
+            .await?;
+
+        if !background_streaming_jobs.is_empty() {
+            tracing::debug!(
+                "skipping parallelism control due to background jobs {:?}",
+                background_streaming_jobs
+            );
+            // skip if there are background creating jobs
+            return Ok(true);
+        }
+
         tracing::info!("trigger parallelism control");
 
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
@@ -2725,10 +2780,10 @@ impl GlobalStreamManager {
                     streaming_parallelisms
                         .into_iter()
                         .map(|(table_id, parallelism)| {
-                            // no custom for sql backend
                             let table_parallelism = match parallelism {
                                 StreamingParallelism::Adaptive => TableParallelism::Adaptive,
                                 StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n),
+                                StreamingParallelism::Custom => TableParallelism::Custom,
                             };
 
                             (table_id as u32, table_parallelism)
@@ -2813,6 +2868,7 @@ impl GlobalStreamManager {
             reschedules,
             RescheduleOptions {
                 resolve_no_shuffle_upstream: false,
+                skip_create_new_actors: false,
             },
             None,
         )

@@ -140,8 +140,8 @@ pub struct ConfigMap {
     streaming_enable_bushy_join: bool,
 
     /// Enable arrangement backfill for streaming queries. Defaults to false.
-    #[parameter(default = false)]
-    streaming_enable_arrangement_backfill: bool,
+    #[parameter(default = true)]
+    streaming_use_arrangement_backfill: bool,
 
     /// Allow `jsonb` in stream key
     #[parameter(default = false, rename = "rw_streaming_allow_jsonb_in_stream_key")]
@@ -206,7 +206,7 @@ pub struct ConfigMap {
     synchronize_seqscans: bool,
 
     /// Abort query statement that takes more than the specified amount of time in sec. If
-    /// log_min_error_statement is set to ERROR or lower, the statement that timed out will also be
+    /// `log_min_error_statement` is set to ERROR or lower, the statement that timed out will also be
     /// logged. If this value is specified without units, it is taken as milliseconds. A value of
     /// zero (the default) disables the timeout.
     #[parameter(default = 0u32)]
@@ -235,13 +235,20 @@ pub struct ConfigMap {
     streaming_rate_limit: ConfigNonZeroU64,
 
     /// Cache policy for partition cache in streaming over window.
-    /// Can be "full", "recent", "recent_first_n" or "recent_last_n".
+    /// Can be "full", "recent", "`recent_first_n`" or "`recent_last_n`".
     #[parameter(default = OverWindowCachePolicy::default(), rename = "rw_streaming_over_window_cache_policy")]
     streaming_over_window_cache_policy: OverWindowCachePolicy,
 
     /// Run DDL statements in background
     #[parameter(default = false)]
     background_ddl: bool,
+
+    /// Enable shared source. Currently only for Kafka.
+    ///
+    /// When enabled, `CREATE SOURCE` will create a source streaming job, and `CREATE MATERIALIZED VIEWS` from the source
+    /// will forward the data from the same source streaming job, and also backfill prior data from the external source.
+    #[parameter(default = false)]
+    rw_enable_shared_source: bool,
 
     /// Shows the server-side character set encoding. At present, this parameter can be shown but not set, because the encoding is determined at database creation time.
     #[parameter(default = SERVER_ENCODING)]

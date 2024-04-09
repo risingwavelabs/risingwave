@@ -59,7 +59,7 @@ pub enum StateStoreImpl {
     /// In-memory B-Tree state store. Should only be used in unit and integration tests. If you
     /// want speed up e2e test, you should use Hummock in-memory mode instead. Also, this state
     /// store misses some critical implementation to ensure the correctness of persisting streaming
-    /// state. (e.g., no read_epoch support, no async checkpoint)
+    /// state. (e.g., no `read_epoch` support, no async checkpoint)
     MemoryStateStore(Monitored<MemoryStateStoreType>),
     SledStateStore(Monitored<SledStateStoreType>),
 }
@@ -83,6 +83,8 @@ fn may_verify(state_store: impl StateStore + AsHummock) -> impl StateStore + AsH
     }
     #[cfg(debug_assertions)]
     {
+        use std::marker::PhantomData;
+
         use risingwave_common::util::env_var::env_var_is_true;
         use tracing::info;
 
@@ -98,6 +100,7 @@ fn may_verify(state_store: impl StateStore + AsHummock) -> impl StateStore + AsH
         VerifyStateStore {
             actual: state_store,
             expected,
+            _phantom: PhantomData::<()>,
         }
     }
 }
@@ -202,18 +205,17 @@ macro_rules! dispatch_state_store {
 pub mod verify {
     use std::fmt::Debug;
     use std::future::Future;
+    use std::marker::PhantomData;
     use std::ops::{Bound, Deref};
     use std::sync::Arc;
 
     use bytes::Bytes;
-    use futures::{pin_mut, TryStreamExt};
-    use futures_async_stream::try_stream;
     use risingwave_common::buffer::Bitmap;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
     use tracing::log::warn;
 
-    use crate::error::{StorageError, StorageResult};
+    use crate::error::StorageResult;
     use crate::hummock::HummockStorage;
     use crate::storage_value::StorageValue;
     use crate::store::*;
@@ -239,9 +241,10 @@ pub mod verify {
         }
     }
 
-    pub struct VerifyStateStore<A, E> {
+    pub struct VerifyStateStore<A, E, T = ()> {
         pub actual: A,
         pub expected: Option<E>,
+        pub _phantom: PhantomData<T>,
     }
 
     impl<A: AsHummock, E> AsHummock for VerifyStateStore<A, E> {
@@ -251,7 +254,8 @@ pub mod verify {
     }
 
     impl<A: StateStoreRead, E: StateStoreRead> StateStoreRead for VerifyStateStore<A, E> {
-        type IterStream = impl StateStoreReadIterStream;
+        type ChangeLogIter = impl StateStoreReadChangeLogIter;
+        type Iter = impl StateStoreReadIter;
 
         async fn get(
             &self,
@@ -278,7 +282,7 @@ pub mod verify {
             key_range: TableKeyRange,
             epoch: u64,
             read_options: ReadOptions,
-        ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
+        ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
             async move {
                 let actual = self
                     .actual
@@ -290,31 +294,56 @@ pub mod verify {
                     None
                 };
 
-                Ok(verify_stream(actual, expected))
+                Ok(verify_iter::<StateStoreIterItem>(actual, expected))
             }
+        }
+
+        async fn iter_log(
+            &self,
+            epoch_range: (u64, u64),
+            key_range: TableKeyRange,
+            options: ReadLogOptions,
+        ) -> StorageResult<Self::ChangeLogIter> {
+            let actual = self
+                .actual
+                .iter_log(epoch_range, key_range.clone(), options.clone())
+                .await?;
+            let expected = if let Some(expected) = &self.expected {
+                Some(expected.iter_log(epoch_range, key_range, options).await?)
+            } else {
+                None
+            };
+
+            Ok(verify_iter::<StateStoreReadLogItem>(actual, expected))
         }
     }
 
-    #[try_stream(ok = StateStoreIterItem, error = StorageError)]
-    async fn verify_stream(
-        actual: impl StateStoreIterItemStream,
-        expected: Option<impl StateStoreIterItemStream>,
-    ) {
-        pin_mut!(actual);
-        pin_mut!(expected);
-        let mut expected = expected.as_pin_mut();
-
-        loop {
-            let actual = actual.try_next().await?;
-            if let Some(expected) = expected.as_mut() {
+    impl<A: StateStoreIter<T>, E: StateStoreIter<T>, T: IterItem> StateStoreIter<T>
+        for VerifyStateStore<A, E, T>
+    where
+        for<'a> T::ItemRef<'a>: PartialEq + Debug,
+    {
+        async fn try_next(&mut self) -> StorageResult<Option<T::ItemRef<'_>>> {
+            let actual = self.actual.try_next().await?;
+            if let Some(expected) = self.expected.as_mut() {
                 let expected = expected.try_next().await?;
                 assert_eq!(actual, expected);
             }
-            if let Some(actual) = actual {
-                yield actual;
-            } else {
-                break;
-            }
+            Ok(actual)
+        }
+    }
+
+    fn verify_iter<T: IterItem>(
+        actual: impl StateStoreIter<T>,
+        expected: Option<impl StateStoreIter<T>>,
+    ) -> impl StateStoreIter<T>
+    where
+        for<'a> T::ItemRef<'a>: PartialEq + Debug,
+    {
+        VerifyStateStore {
+            actual,
+            expected,
+            _phantom: PhantomData::<T>,
         }
     }
 
@@ -343,12 +372,13 @@ pub mod verify {
             Self {
                 actual: self.actual.clone(),
                 expected: self.expected.clone(),
+                _phantom: PhantomData,
             }
         }
     }
 
     impl<A: LocalStateStore, E: LocalStateStore> LocalStateStore for VerifyStateStore<A, E> {
-        type IterStream<'a> = impl StateStoreIterItemStream + 'a;
+        type Iter<'a> = impl StateStoreIter + 'a;
 
         // We don't verify `may_exist` across different state stores because
         // the return value of `may_exist` is implementation specific and may not
@@ -379,7 +409,7 @@ pub mod verify {
             &self,
             key_range: TableKeyRange,
             read_options: ReadOptions,
-        ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
+        ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_ {
             async move {
                 let actual = self
                     .actual
@@ -391,7 +421,7 @@ pub mod verify {
                     None
                 };
 
-                Ok(verify_stream(actual, expected))
+                Ok(verify_iter::<StateStoreIterItem>(actual, expected))
             }
         }
 
@@ -505,6 +535,7 @@ pub mod verify {
             VerifyStateStore {
                 actual: self.actual.new_local(option).await,
                 expected,
+                _phantom: PhantomData::<()>,
             }
         }
 
@@ -533,6 +564,7 @@ impl StateStoreImpl {
         object_store_metrics: Arc<ObjectStoreMetrics>,
         storage_metrics: Arc<MonitoredStorageMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
+        await_tree_config: Option<await_tree::Config>,
     ) -> StorageResult<Self> {
         set_foyer_metrics_registry(GLOBAL_METRICS_REGISTRY.clone());
 
@@ -554,7 +586,6 @@ impl StateStoreImpl {
                 flushers: opts.data_file_cache_flushers,
                 reclaimers: opts.data_file_cache_reclaimers,
                 recover_concurrency: opts.data_file_cache_recover_concurrency,
-                ring_buffer_capacity: opts.data_file_cache_ring_buffer_capacity_mb * MB,
                 catalog_bits: opts.data_file_cache_catalog_bits,
                 admissions: vec![],
                 reinsertions: vec![],
@@ -592,7 +623,6 @@ impl StateStoreImpl {
                 flushers: opts.meta_file_cache_flushers,
                 reclaimers: opts.meta_file_cache_reclaimers,
                 recover_concurrency: opts.meta_file_cache_recover_concurrency,
-                ring_buffer_capacity: opts.meta_file_cache_ring_buffer_capacity_mb * MB,
                 catalog_bits: opts.meta_file_cache_catalog_bits,
                 admissions: vec![],
                 reinsertions: vec![],
@@ -621,8 +651,11 @@ impl StateStoreImpl {
                     store: Arc::new(object_store),
                     path: opts.data_directory.to_string(),
                     block_cache_capacity: opts.block_cache_capacity_mb * (1 << 20),
+                    block_cache_shard_num: opts.block_cache_shard_num,
+                    block_cache_eviction: opts.block_cache_eviction_config.clone(),
                     meta_cache_capacity: opts.meta_cache_capacity_mb * (1 << 20),
-                    high_priority_ratio: opts.high_priority_ratio,
+                    meta_cache_shard_num: opts.meta_cache_shard_num,
+                    meta_cache_eviction: opts.meta_cache_eviction_config.clone(),
                     prefetch_buffer_capacity: opts.prefetch_buffer_capacity_mb * (1 << 20),
                     max_prefetch_block_number: opts.max_prefetch_block_number,
                     data_file_cache,
@@ -643,6 +676,7 @@ impl StateStoreImpl {
                     key_filter_manager,
                     state_store_metrics.clone(),
                     compactor_metrics.clone(),
+                    await_tree_config,
                 )
                 .await?;
 
@@ -697,8 +731,6 @@ pub mod boxed_state_store {
 
     use bytes::Bytes;
     use dyn_clone::{clone_trait_object, DynClone};
-    use futures::stream::BoxStream;
-    use futures::StreamExt;
     use risingwave_common::buffer::Bitmap;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
@@ -709,9 +741,31 @@ pub mod boxed_state_store {
     use crate::store_impl::AsHummock;
     use crate::StateStore;
 
+    #[async_trait::async_trait]
+    pub trait DynamicDispatchedStateStoreIter<T: IterItem>: Send {
+        async fn try_next(&mut self) -> StorageResult<Option<T::ItemRef<'_>>>;
+    }
+
+    #[async_trait::async_trait]
+    impl<T: IterItem, I: StateStoreIter<T>> DynamicDispatchedStateStoreIter<T> for I {
+        async fn try_next(&mut self) -> StorageResult<Option<T::ItemRef<'_>>> {
+            self.try_next().await
+        }
+    }
+
+    pub type BoxStateStoreIter<'a, T> = Box<dyn DynamicDispatchedStateStoreIter<T> + 'a>;
+    impl<'a, T: IterItem> StateStoreIter<T> for BoxStateStoreIter<'a, T> {
+        fn try_next(
+            &mut self,
+        ) -> impl Future<Output = StorageResult<Option<T::ItemRef<'_>>>> + Send + '_ {
+            self.deref_mut().try_next()
+        }
+    }
+
     // For StateStoreRead
 
-    pub type BoxStateStoreReadIterStream = BoxStream<'static, StorageResult<StateStoreIterItem>>;
+    pub type BoxStateStoreReadIter = BoxStateStoreIter<'static, StateStoreIterItem>;
+    pub type BoxStateStoreReadChangeLogIter = BoxStateStoreIter<'static, StateStoreReadLogItem>;
 
     #[async_trait::async_trait]
     pub trait DynamicDispatchedStateStoreRead: StaticSendSync {
@@ -727,7 +781,14 @@ pub mod boxed_state_store {
             key_range: TableKeyRange,
             epoch: u64,
             read_options: ReadOptions,
-        ) -> StorageResult<BoxStateStoreReadIterStream>;
+        ) -> StorageResult<BoxStateStoreReadIter>;
+
+        async fn iter_log(
+            &self,
+            epoch_range: (u64, u64),
+            key_range: TableKeyRange,
+            options: ReadLogOptions,
+        ) -> StorageResult<BoxStateStoreReadChangeLogIter>;
     }
 
     #[async_trait::async_trait]
@@ -746,13 +807,24 @@ pub mod boxed_state_store {
             key_range: TableKeyRange,
             epoch: u64,
             read_options: ReadOptions,
-        ) -> StorageResult<BoxStateStoreReadIterStream> {
-            Ok(self.iter(key_range, epoch, read_options).await?.boxed())
+        ) -> StorageResult<BoxStateStoreReadIter> {
+            Ok(Box::new(self.iter(key_range, epoch, read_options).await?))
+        }
+
+        async fn iter_log(
+            &self,
+            epoch_range: (u64, u64),
+            key_range: TableKeyRange,
+            options: ReadLogOptions,
+        ) -> StorageResult<BoxStateStoreReadChangeLogIter> {
+            Ok(Box::new(
+                self.iter_log(epoch_range, key_range, options).await?,
+            ))
         }
     }
 
     // For LocalStateStore
-    pub type BoxLocalStateStoreIterStream<'a> = BoxStream<'a, StorageResult<StateStoreIterItem>>;
+    pub type BoxLocalStateStoreIterStream<'a> = BoxStateStoreIter<'a, StateStoreIterItem>;
     #[async_trait::async_trait]
     pub trait DynamicDispatchedLocalStateStore: StaticSendSync {
         async fn may_exist(
@@ -820,7 +892,7 @@ pub mod boxed_state_store {
             key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> StorageResult<BoxLocalStateStoreIterStream<'_>> {
-            Ok(self.iter(key_range, read_options).await?.boxed())
+            Ok(Box::new(self.iter(key_range, read_options).await?))
         }
 
         fn insert(
@@ -868,7 +940,7 @@ pub mod boxed_state_store {
     pub type BoxDynamicDispatchedLocalStateStore = Box<dyn DynamicDispatchedLocalStateStore>;
 
     impl LocalStateStore for BoxDynamicDispatchedLocalStateStore {
-        type IterStream<'a> = BoxLocalStateStoreIterStream<'a>;
+        type Iter<'a> = BoxLocalStateStoreIterStream<'a>;
 
         fn may_exist(
             &self,
@@ -890,7 +962,7 @@ pub mod boxed_state_store {
             &self,
             key_range: TableKeyRange,
             read_options: ReadOptions,
-        ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
+        ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_ {
             self.deref().iter(key_range, read_options)
         }
 
@@ -986,7 +1058,8 @@ pub mod boxed_state_store {
     pub type BoxDynamicDispatchedStateStore = Box<dyn DynamicDispatchedStateStore>;
 
     impl StateStoreRead for BoxDynamicDispatchedStateStore {
-        type IterStream = BoxStateStoreReadIterStream;
+        type ChangeLogIter = BoxStateStoreReadChangeLogIter;
+        type Iter = BoxStateStoreReadIter;
 
         fn get(
             &self,
@@ -1002,8 +1075,17 @@ pub mod boxed_state_store {
             key_range: TableKeyRange,
             epoch: u64,
             read_options: ReadOptions,
-        ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
+        ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
             self.deref().iter(key_range, epoch, read_options)
+        }
+
+        fn iter_log(
+            &self,
+            epoch_range: (u64, u64),
+            key_range: TableKeyRange,
+            options: ReadLogOptions,
+        ) -> impl Future<Output = StorageResult<Self::ChangeLogIter>> + Send + '_ {
+            self.deref().iter_log(epoch_range, key_range, options)
         }
     }
 

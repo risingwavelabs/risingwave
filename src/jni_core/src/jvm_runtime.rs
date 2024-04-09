@@ -108,13 +108,6 @@ impl JavaVmWrapper {
             .option(format!("-Djava.class.path={}", class_vec.join(":")))
             .option("-Xms16m")
             .option(format!("-Xmx{}", jvm_heap_size))
-            // Quoted from the debezium document:
-            // > Your application should always properly stop the engine to ensure graceful and complete
-            // > shutdown and that each source record is sent to the application exactly one time.
-            // In RisingWave we assume the upstream changelog may contain duplicate events and
-            // handle conflicts in the mview operator, thus we don't need to obey the above
-            // instructions. So we decrease the wait time here to reclaim jvm thread faster.
-            .option("-Ddebezium.embedded.shutdown.pause.before.interrupt.ms=1")
             .option("-Dcdc.source.wait.streaming.before.exit.seconds=30");
 
         tracing::info!("JVM args: {:?}", args_builder);

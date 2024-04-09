@@ -21,7 +21,7 @@ shift $((OPTIND -1))
 download_and_prepare_rw "$profile" source
 
 echo "--- starting risingwave cluster"
-cargo make ci-start ci-sink-test
+risedev ci-start ci-sink-test
 sleep 1
 
 echo "--- waiting until pulsar is healthy"
@@ -29,7 +29,7 @@ HTTP_CODE=404
 MAX_RETRY=20
 while [[ $HTTP_CODE -ne 200 && MAX_RETRY -gt 0 ]]
 do
-    HTTP_CODE=$(curl --connect-timeout 2 -s -o /dev/null -w ''%{http_code}'' http://pulsar:8080/admin/v2/clusters)
+    HTTP_CODE=$(curl --connect-timeout 2 -s -o /dev/null -w ''%{http_code}'' http://pulsar-server:8080/admin/v2/clusters)
     echo Got HTTP Code: $HTTP_CODE
     ((MAX_RETRY--))
     sleep 5
@@ -44,4 +44,4 @@ sqllogictest -p 4566 -d dev './e2e_test/sink/pulsar_sink.slt'
 sleep 1
 
 echo "--- Kill cluster"
-cargo make ci-kill
+risedev ci-kill

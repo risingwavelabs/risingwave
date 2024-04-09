@@ -206,6 +206,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             target_table: value.0.target_table.map(|id| id as _),
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
+            create_type: PbCreateType::Foreground as _,
         }
     }
 }
@@ -231,6 +232,7 @@ impl From<ObjectModel<subscription::Model>> for PbSubscription {
             ),
             stream_job_status: PbStreamJobStatus::Created as _, // todo: deprecate it.
             column_catalogs: value.0.columns.0,
+            subscription_from_name: value.0.subscription_from_name,
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
         }

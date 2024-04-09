@@ -20,11 +20,14 @@ use anyhow::{bail, Result};
 use itertools::Itertools;
 use rand::{thread_rng, Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
-use sqllogictest::{ParallelTestError, Record};
+use sqllogictest::{ParallelTestError, QueryExpect, Record, StatementExpect};
 
 use crate::client::RisingWave;
 use crate::cluster::{Cluster, KillOpts};
 use crate::utils::TimedExt;
+
+// retry a maximum times until it succeed
+const MAX_RETRY: usize = 5;
 
 fn is_create_table_as(sql: &str) -> bool {
     let parts: Vec<String> = sql.split_whitespace().map(|s| s.to_lowercase()).collect();
@@ -32,11 +35,21 @@ fn is_create_table_as(sql: &str) -> bool {
     parts.len() >= 4 && parts[0] == "create" && parts[1] == "table" && parts[3] == "as"
 }
 
+fn is_sink_into_table(sql: &str) -> bool {
+    let parts: Vec<String> = sql.split_whitespace().map(|s| s.to_lowercase()).collect();
+
+    parts.len() >= 4 && parts[0] == "create" && parts[1] == "sink" && parts[3] == "into"
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum SqlCmd {
     /// Other create statements.
     Create {
         is_create_table_as: bool,
+    },
+    /// Create sink.
+    CreateSink {
+        is_sink_into_table: bool,
     },
     /// Create Materialized views
     CreateMaterializedView {
@@ -66,7 +79,11 @@ impl SqlCmd {
                 | SqlCmd::Flush
                 | SqlCmd::Alter
                 | SqlCmd::Create {
-                    is_create_table_as: true
+                    is_create_table_as: true,
+                    ..
+                }
+                | SqlCmd::CreateSink {
+                    is_sink_into_table: true,
                 }
         )
     }
@@ -107,6 +124,9 @@ fn extract_sql_command(sql: &str) -> SqlCmd {
                             SqlCmd::CreateMaterializedView { name }
                         }
                     }
+                    "sink" => SqlCmd::CreateSink {
+                        is_sink_into_table: is_sink_into_table(&sql),
+                    },
                     _ => SqlCmd::Create {
                         is_create_table_as: is_create_table_as(&sql),
                     },
@@ -141,6 +161,8 @@ const KILL_IGNORE_FILES: &[&str] = &[
     "transaction/read_only_multi_conn.slt",
     "transaction/read_only.slt",
     "transaction/tolerance.slt",
+    "transaction/cursor.slt",
+    "transaction/cursor_multi_conn.slt",
 ];
 
 /// Wait for background mv to finish creating
@@ -253,9 +275,8 @@ pub async fn run_slt_task(
                     loc: loc.clone(),
                     conditions: conditions.clone(),
                     connection: connection.clone(),
-                    expected_error: None,
+                    expected: StatementExpect::Ok,
                     sql: format!("SET BACKGROUND_DDL={background_ddl_setting};"),
-                    expected_count: None,
                 };
                 tester.run_async(set_background_ddl).await.unwrap();
                 background_ddl_enabled = background_ddl_setting;
@@ -271,10 +292,13 @@ pub async fn run_slt_task(
                         })
                         .await
                     {
+                        let err_string = err.to_string();
                         // cluster could be still under recovering if killed before, retry if
                         // meets `no reader for dml in table with id {}`.
-                        let should_retry =
-                            err.to_string().contains("no reader for dml in table") && i < 5;
+                        let should_retry = (err_string.contains("no reader for dml in table")
+                            || err_string
+                                .contains("error reading a body from connection: broken pipe"))
+                            || err_string.contains("failed to inject barrier") && i < MAX_RETRY;
                         if !should_retry {
                             panic!("{}", err);
                         }
@@ -302,8 +326,6 @@ pub async fn run_slt_task(
                 None
             };
 
-            // retry up to 5 times until it succeed
-            let max_retry = 5;
             for i in 0usize.. {
                 tracing::debug!(iteration = i, "retry count");
                 let delay = Duration::from_secs(1 << i);
@@ -321,13 +343,13 @@ pub async fn run_slt_task(
                         // For background ddl
                         if let SqlCmd::CreateMaterializedView { ref name } = cmd
                             && background_ddl_enabled
-                            && matches!(
+                            && !matches!(
                                 record,
                                 Record::Statement {
-                                    expected_error: None,
+                                    expected: StatementExpect::Error(_),
                                     ..
                                 } | Record::Query {
-                                    expected_error: None,
+                                    expected: QueryExpect::Error(_),
                                     ..
                                 }
                             )
@@ -348,7 +370,7 @@ pub async fn run_slt_task(
                                         ?err,
                                         "failed to wait for background mv to finish creating"
                                     );
-                                    if i >= max_retry {
+                                    if i >= MAX_RETRY {
                                         panic!("failed to run test after retry {i} times, error={err:#?}");
                                     }
                                     continue;
@@ -362,6 +384,9 @@ pub async fn run_slt_task(
                             // allow 'table exists' error when retry CREATE statement
                             SqlCmd::Create {
                                 is_create_table_as: false,
+                            }
+                            | SqlCmd::CreateSink {
+                                is_sink_into_table: false,
                             }
                             | SqlCmd::CreateMaterializedView { .. }
                                 if i != 0
@@ -379,8 +404,8 @@ pub async fn run_slt_task(
                                 break
                             }
 
-                            // Keep i >= max_retry for other errors. Since these errors indicate that the MV might not yet be created.
-                            _ if i >= max_retry => {
+                            // Keep i >= MAX_RETRY for other errors. Since these errors indicate that the MV might not yet be created.
+                            _ if i >= MAX_RETRY => {
                                 panic!("failed to run test after retry {i} times: {e}")
                             }
                             SqlCmd::CreateMaterializedView { ref name }
@@ -404,7 +429,7 @@ pub async fn run_slt_task(
                                             ?err,
                                             "failed to wait for background mv to finish creating"
                                         );
-                                        if i >= max_retry {
+                                        if i >= MAX_RETRY {
                                             panic!("failed to run test after retry {i} times, error={err:#?}");
                                         }
                                         continue;

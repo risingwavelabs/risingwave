@@ -111,6 +111,7 @@ impl MockHummockMetaClient {
                     sstables.into_iter().map(Into::into).collect(),
                     new_table_watermarks,
                     sst_to_worker,
+                    None,
                 ),
             )
             .await
@@ -308,7 +309,6 @@ impl HummockMetaClient for MockHummockMetaClient {
         let hummock_manager_compact = self.hummock_manager.clone();
         let report_handle = tokio::spawn(async move {
             tracing::info!("report_handle start");
-
             loop {
                 if let Some(item) = request_receiver.recv().await {
                     if let Event::ReportTask(ReportTask {

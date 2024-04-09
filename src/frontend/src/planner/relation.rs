@@ -14,10 +14,12 @@
 
 use std::rc::Rc;
 
+use either::Either;
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, Interval, ScalarImpl};
+use risingwave_sqlparser::ast::AsOf;
 
 use crate::binder::{
     BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
@@ -53,7 +55,11 @@ impl Planner {
                 with_ordinality,
             } => self.plan_table_function(tf, with_ordinality),
             Relation::Watermark(tf) => self.plan_watermark(*tf),
+            // note that rcte (i.e., RecursiveUnion) is included *implicitly* in share.
             Relation::Share(share) => self.plan_share(*share),
+            Relation::BackCteRef(..) => {
+                bail_not_implemented!(issue = 15135, "recursive CTE is not supported")
+            }
         }
     }
 
@@ -68,7 +74,16 @@ impl Planner {
     }
 
     pub(super) fn plan_base_table(&mut self, base_table: &BoundBaseTable) -> Result<PlanRef> {
-        let for_system_time_as_of_proctime = base_table.for_system_time_as_of_proctime;
+        let as_of = base_table.as_of.clone();
+        match as_of {
+            None | Some(AsOf::ProcessTime) => {}
+            Some(AsOf::TimestampString(_)) | Some(AsOf::TimestampNum(_)) => {
+                bail_not_implemented!("As Of Timestamp is not supported yet.")
+            }
+            Some(AsOf::VersionNum(_)) | Some(AsOf::VersionString(_)) => {
+                bail_not_implemented!("As Of Version is not supported yet.")
+            }
+        }
         let table_cardinality = base_table.table_catalog.cardinality;
         Ok(LogicalScan::create(
             base_table.table_catalog.name().to_string(),
@@ -79,19 +94,40 @@ impl Planner {
                 .map(|x| x.as_ref().clone().into())
                 .collect(),
             self.ctx(),
-            for_system_time_as_of_proctime,
+            as_of,
             table_cardinality,
         )
         .into())
     }
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
-        Ok(LogicalSource::with_catalog(
-            Rc::new(source.catalog),
-            SourceNodeKind::CreateMViewOrBatch,
-            self.ctx(),
-        )?
-        .into())
+        if source.is_shareable_cdc_connector() {
+            Err(ErrorCode::InternalError(
+                "Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source. HINT: create TABLE from the source instead.".to_string(),
+            )
+            .into())
+        } else {
+            let as_of = source.as_of.clone();
+            match as_of {
+                None
+                | Some(AsOf::VersionNum(_))
+                | Some(AsOf::TimestampString(_))
+                | Some(AsOf::TimestampNum(_)) => {}
+                Some(AsOf::ProcessTime) => {
+                    bail_not_implemented!("As Of ProcessTime() is not supported yet.")
+                }
+                Some(AsOf::VersionString(_)) => {
+                    bail_not_implemented!("As Of Version is not supported yet.")
+                }
+            }
+            Ok(LogicalSource::with_catalog(
+                Rc::new(source.catalog),
+                SourceNodeKind::CreateMViewOrBatch,
+                self.ctx(),
+                as_of,
+            )?
+            .into())
+        }
     }
 
     pub(super) fn plan_join(&mut self, join: BoundJoin) -> Result<PlanRef> {
@@ -182,12 +218,17 @@ impl Planner {
     }
 
     pub(super) fn plan_share(&mut self, share: BoundShare) -> Result<PlanRef> {
-        match self.share_cache.get(&share.share_id) {
+        let Either::Left(nonrecursive_query) = share.input else {
+            bail_not_implemented!(issue = 15135, "recursive CTE is not supported");
+        };
+        let id = share.share_id;
+        match self.share_cache.get(&id) {
             None => {
-                let result = self.plan_relation(share.input)?;
+                let result = self
+                    .plan_query(nonrecursive_query)?
+                    .into_unordered_subplan();
                 let logical_share = LogicalShare::create(result);
-                self.share_cache
-                    .insert(share.share_id, logical_share.clone());
+                self.share_cache.insert(id, logical_share.clone());
                 Ok(logical_share)
             }
             Some(result) => Ok(result.clone()),
@@ -212,14 +253,11 @@ impl Planner {
                 .iter()
                 .map(|col| col.data_type().clone())
                 .collect(),
-            Relation::Subquery(q) => q
-                .query
-                .schema()
-                .fields
-                .iter()
-                .map(|f| f.data_type())
-                .collect(),
-            Relation::Share(share) => Self::collect_col_data_types_for_tumble_window(&share.input)?,
+            Relation::Subquery(q) => q.query.schema().data_types(),
+            Relation::Share(share) => match &share.input {
+                Either::Left(nonrecursive) => nonrecursive.schema().data_types(),
+                Either::Right(recursive) => recursive.schema.data_types(),
+            },
             r => {
                 return Err(ErrorCode::BindError(format!(
                     "Invalid input relation to tumble: {r:?}"

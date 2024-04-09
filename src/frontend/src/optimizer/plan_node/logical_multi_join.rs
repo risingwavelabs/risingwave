@@ -54,8 +54,8 @@ pub struct LogicalMultiJoin {
     inner2output: ColIndexMapping,
     // NOTE(st1page): these fields will be used in prune_col and
     // pk_derive soon.
-    /// the mapping output_col_idx -> (input_idx, input_col_idx), **"output_col_idx" is internal,
-    /// not consider output_indices**
+    /// the mapping `output_col_idx` -> (`input_idx`, `input_col_idx`), **"`output_col_idx`" is internal,
+    /// not consider `output_indices`**
     inner_o2i_mapping: Vec<(usize, usize)>,
     inner_i2o_mappings: Vec<ColIndexMapping>,
 }

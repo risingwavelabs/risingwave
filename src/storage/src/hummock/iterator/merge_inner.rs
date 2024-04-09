@@ -20,7 +20,9 @@ use futures::FutureExt;
 use risingwave_hummock_sdk::key::FullKey;
 
 use super::Forward;
-use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
+use crate::hummock::iterator::{
+    DirectionEnum, HummockIterator, HummockIteratorDirection, ValueMeta,
+};
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatchIterator, SharedBufferVersionedEntryRef,
 };
@@ -290,5 +292,9 @@ where
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         self.collect_local_statistic_impl(stats);
+    }
+
+    fn value_meta(&self) -> ValueMeta {
+        self.heap.peek().expect("no inner iter").iter.value_meta()
     }
 }

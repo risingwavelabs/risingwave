@@ -24,12 +24,13 @@ use risingwave_pb::catalog::{
     StreamJobStatus, Subscription, Table, View,
 };
 use risingwave_pb::data::DataType;
+use risingwave_pb::user::grant_privilege::PbObject;
 
 use super::{
     ConnectionId, DatabaseId, FunctionId, RelationId, SchemaId, SinkId, SourceId, SubscriptionId,
     ViewId,
 };
-use crate::manager::{IndexId, MetaSrvEnv, TableId};
+use crate::manager::{IndexId, MetaSrvEnv, TableId, UserId};
 use crate::model::MetadataModel;
 use crate::{MetaError, MetaResult};
 
@@ -89,16 +90,16 @@ pub struct DatabaseManager {
 
 impl DatabaseManager {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let databases = Database::list(env.meta_store_checked()).await?;
-        let schemas = Schema::list(env.meta_store_checked()).await?;
-        let sources = Source::list(env.meta_store_checked()).await?;
-        let sinks = Sink::list(env.meta_store_checked()).await?;
-        let tables = Table::list(env.meta_store_checked()).await?;
-        let indexes = Index::list(env.meta_store_checked()).await?;
-        let views = View::list(env.meta_store_checked()).await?;
-        let functions = Function::list(env.meta_store_checked()).await?;
-        let connections = Connection::list(env.meta_store_checked()).await?;
-        let subscriptions = Subscription::list(env.meta_store_checked()).await?;
+        let databases = Database::list(env.meta_store().as_kv()).await?;
+        let schemas = Schema::list(env.meta_store().as_kv()).await?;
+        let sources = Source::list(env.meta_store().as_kv()).await?;
+        let sinks = Sink::list(env.meta_store().as_kv()).await?;
+        let tables = Table::list(env.meta_store().as_kv()).await?;
+        let indexes = Index::list(env.meta_store().as_kv()).await?;
+        let views = View::list(env.meta_store().as_kv()).await?;
+        let functions = Function::list(env.meta_store().as_kv()).await?;
+        let connections = Connection::list(env.meta_store().as_kv()).await?;
+        let subscriptions = Subscription::list(env.meta_store().as_kv()).await?;
 
         let mut relation_ref_count = HashMap::new();
 
@@ -226,7 +227,7 @@ impl DatabaseManager {
                 && x.name.eq(&relation_key.2)
         }) {
             if t.stream_job_status == StreamJobStatus::Creating as i32 {
-                bail!("table is in creating procedure: {}", t.id);
+                bail!("table is in creating procedure, table id: {}", t.id);
             } else {
                 Err(MetaError::catalog_duplicated("table", &relation_key.2))
             }
@@ -401,12 +402,9 @@ impl DatabaseManager {
             .chain(self.indexes.keys().copied())
             .chain(self.sources.keys().copied())
             .chain(
-                // filter cdc source jobs
                 self.sources
                     .iter()
-                    .filter(|(_, source)| {
-                        source.info.as_ref().is_some_and(|info| info.cdc_source_job)
-                    })
+                    .filter(|(_, source)| source.info.as_ref().is_some_and(|info| info.is_shared()))
                     .map(|(id, _)| id)
                     .copied(),
             )
@@ -624,6 +622,52 @@ impl DatabaseManager {
                 "table, view or source",
                 *table_id,
             ))
+        }
+    }
+
+    pub fn get_object_owner(&self, object: &PbObject) -> MetaResult<UserId> {
+        match object {
+            PbObject::DatabaseId(id) => self
+                .databases
+                .get(id)
+                .map(|d| d.owner)
+                .ok_or_else(|| MetaError::catalog_id_not_found("database", id)),
+            PbObject::SchemaId(id) => self
+                .schemas
+                .get(id)
+                .map(|s| s.owner)
+                .ok_or_else(|| MetaError::catalog_id_not_found("schema", id)),
+            PbObject::TableId(id) => self
+                .tables
+                .get(id)
+                .map(|t| t.owner)
+                .ok_or_else(|| MetaError::catalog_id_not_found("table", id)),
+            PbObject::SourceId(id) => self
+                .sources
+                .get(id)
+                .map(|s| s.owner)
+                .ok_or_else(|| MetaError::catalog_id_not_found("source", id)),
+            PbObject::SinkId(id) => self
+                .sinks
+                .get(id)
+                .map(|s| s.owner)
+                .ok_or_else(|| MetaError::catalog_id_not_found("sink", id)),
+            PbObject::SubscriptionId(id) => self
+                .subscriptions
+                .get(id)
+                .map(|s| s.owner)
+                .ok_or_else(|| MetaError::catalog_id_not_found("subscription", id)),
+            PbObject::ViewId(id) => self
+                .views
+                .get(id)
+                .map(|v| v.owner)
+                .ok_or_else(|| MetaError::catalog_id_not_found("view", id)),
+            PbObject::FunctionId(id) => self
+                .functions
+                .get(id)
+                .map(|f| f.owner)
+                .ok_or_else(|| MetaError::catalog_id_not_found("function", id)),
+            _ => unreachable!("unexpected object type: {:?}", object),
         }
     }
 }

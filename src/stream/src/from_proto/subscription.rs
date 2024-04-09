@@ -35,6 +35,17 @@ impl ExecutorBuilder for SubscriptionExecutorBuilder {
     ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let table_id = TableId::new(node.log_store_table.as_ref().unwrap().id);
+        let vnodes = std::sync::Arc::new(
+            params
+                .vnode_bitmap
+                .expect("vnodes not set for subscription"),
+        );
+        let serde = LogStoreRowSerde::new(
+            node.log_store_table.as_ref().unwrap(),
+            Some(vnodes),
+            &KV_LOG_STORE_V2_INFO,
+        );
+
         let local_state_store = state_store
             .new_local(NewLocalOptions {
                 table_id: TableId {
@@ -45,19 +56,10 @@ impl ExecutorBuilder for SubscriptionExecutorBuilder {
                     retention_seconds: None,
                 },
                 is_replicated: false,
+                vnodes: serde.vnodes().clone(),
             })
             .await;
 
-        let vnodes = std::sync::Arc::new(
-            params
-                .vnode_bitmap
-                .expect("vnodes not set for subscription"),
-        );
-        let serde = LogStoreRowSerde::new(
-            node.log_store_table.as_ref().unwrap(),
-            Some(vnodes.clone()),
-            &KV_LOG_STORE_V2_INFO,
-        );
         let log_store_identity = format!(
             "subscription[{}]-executor[{}]",
             node.subscription_catalog.as_ref().unwrap().id,

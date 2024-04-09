@@ -14,12 +14,12 @@
 
 use std::fmt::{Display, Write};
 
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::bytes_array::{BytesWriter, PartialBytesWriter};
 use super::{Array, ArrayBuilder, BytesArray, BytesArrayBuilder, DataType};
 use crate::buffer::Bitmap;
-use crate::estimate_size::EstimateSize;
 
 /// `Utf8Array` is a collection of Rust Utf8 `str`s. It's a wrapper of `BytesArray`.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -205,6 +205,22 @@ message StreamFsFetchNode {
   StreamFsFetch node_inner = 1;
 }
 
+message SourceBackfillNode {
+  uint32 upstream_source_id = 1;
+  optional uint32 row_id_index = 2;
+  repeated plan_common.ColumnCatalog columns = 3;
+  catalog.StreamSourceInfo info = 4;
+  string source_name = 5;
+  map<string, string> with_properties = 6;
+  // Streaming rate limit
+  optional uint32 rate_limit = 7;
+
+  // fields above are the same as StreamSource
+
+  // `| partition_id | backfill_progress |`
+  catalog.Table state_table = 8;
+}
+
 message SinkDesc {
   reserved 4;
   reserved "columns";
@@ -770,6 +786,7 @@ message StreamNode {
     StreamCdcScanNode stream_cdc_scan = 139;
     CdcFilterNode cdc_filter = 140;
     SubscriptionNode subscription = 141;
+    SourceBackfillNode source_backfill = 142;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -859,12 +876,14 @@ enum FragmentTypeFlag {
   FRAGMENT_TYPE_FLAG_MVIEW = 2;
   FRAGMENT_TYPE_FLAG_SINK = 4;
   FRAGMENT_TYPE_FLAG_NOW = 8; // TODO: Remove this and insert a `BarrierRecv` instead.
+  // Include StreamScan and StreamCdcScan
   FRAGMENT_TYPE_FLAG_STREAM_SCAN = 16;
   FRAGMENT_TYPE_FLAG_BARRIER_RECV = 32;
   FRAGMENT_TYPE_FLAG_VALUES = 64;
   FRAGMENT_TYPE_FLAG_DML = 128;
   FRAGMENT_TYPE_FLAG_CDC_FILTER = 256;
   FRAGMENT_TYPE_FLAG_SUBSCRIPTION = 512;
+  FRAGMENT_TYPE_FLAG_SOURCE_SCAN = 1024;
 }
 
 // The streaming context associated with a stream plan

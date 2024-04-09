@@ -20,7 +20,8 @@ use educe::Educe;
 use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_connector::source::ConnectorProperties;
+use risingwave_connector::WithPropertiesExt;
+use risingwave_sqlparser::ast::AsOf;
 
 use super::super::utils::TableCatalogBuilder;
 use super::GenericPlanNode;
@@ -35,13 +36,13 @@ use crate::TableCatalog;
 pub enum SourceNodeKind {
     /// `CREATE TABLE` with a connector.
     CreateTable,
-    /// `CREATE SOURCE` with a streaming job (backfill-able source).
-    CreateSourceWithStreamjob,
-    /// `CREATE MATERIALIZED VIEW` which selects from a source.
+    /// `CREATE SOURCE` with a streaming job (shared source).
+    CreateSharedSource,
+    /// `CREATE MATERIALIZED VIEW` or batch scan from a source.
     ///
     /// Note:
-    /// - For non backfill-able source, `CREATE SOURCE` will not create a source node, and `CREATE MATERIALIZE VIEW` will create a `LogicalSource`.
-    /// - For backfill-able source, `CREATE MATERIALIZE VIEW` will create `LogicalSourceBackfill` instead of `LogicalSource`.
+    /// - For non-shared source, `CREATE SOURCE` will not create a source node, and `CREATE MATERIALIZE VIEW` will create a `StreamSource`.
+    /// - For shared source, `CREATE MATERIALIZE VIEW` will create `StreamSourceScan` instead of `StreamSource`.
     CreateMViewOrBatch,
 }
 
@@ -66,6 +67,8 @@ pub struct Source {
 
     /// Kafka timestamp range, currently we only support kafka, so we just leave it like this.
     pub(crate) kafka_timestamp_range: (Bound<i64>, Bound<i64>),
+
+    pub as_of: Option<AsOf>,
 }
 
 impl GenericPlanNode for Source {
@@ -99,9 +102,20 @@ impl GenericPlanNode for Source {
 
 impl Source {
     pub fn is_new_fs_connector(&self) -> bool {
-        self.catalog.as_ref().is_some_and(|catalog| {
-            ConnectorProperties::is_new_fs_connector_b_tree_map(&catalog.with_properties)
-        })
+        self.catalog
+            .as_ref()
+            .is_some_and(|catalog| catalog.with_properties.is_new_fs_connector())
+    }
+
+    pub fn is_iceberg_connector(&self) -> bool {
+        self.catalog
+            .as_ref()
+            .is_some_and(|catalog| catalog.with_properties.is_iceberg_connector())
+    }
+
+    /// Currently, only iceberg source supports time travel.
+    pub fn support_time_travel(&self) -> bool {
+        self.is_iceberg_connector()
     }
 
     /// The columns in stream/batch source node indicate the actual columns it will produce,

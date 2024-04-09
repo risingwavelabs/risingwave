@@ -19,9 +19,9 @@ use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::sink::log_store::{LogStoreResult, LogWriter};
 use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
 use risingwave_storage::store::{InitOptions, LocalStateStore, SealCurrentEpochOptions};
@@ -83,9 +83,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         epoch: EpochPair,
         pause_read_on_bootstrap: bool,
     ) -> LogStoreResult<()> {
-        self.state_store
-            .init(InitOptions::new(epoch, self.serde.vnodes().clone()))
-            .await?;
+        self.state_store.init(InitOptions::new(epoch)).await?;
         if pause_read_on_bootstrap {
             self.pause()?;
             info!("KvLogStore of {} paused on bootstrap", self.identity);

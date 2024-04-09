@@ -9,12 +9,12 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = { version = "1", features=["macros","rt", "rt-multi-thread"]}
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
 tonic = "0.11.0"
-reqwest = { version = "0.11"}
+reqwest = { version = "0.11" }
 serde_json = "1.0"
 serde_derive = "1.0"
-rand = "0.8"
+rand = { workspace = true }
 clap = "4.4.6"
 prost = "0.12"
 serde = { version = "1", features = ["derive"] }

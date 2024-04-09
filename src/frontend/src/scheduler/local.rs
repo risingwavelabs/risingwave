@@ -24,8 +24,10 @@ use futures::{FutureExt, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pgwire::pg_server::BoxedError;
+use risingwave_batch::error::BatchError;
 use risingwave_batch::executor::ExecutorBuilder;
 use risingwave_batch::task::{ShutdownToken, TaskId};
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::hash::ParallelUnitMapping;
@@ -50,12 +52,10 @@ use crate::error::RwError;
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
-use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::{ReadSnapshot, SchedulerError, SchedulerResult};
 use crate::session::{FrontendEnv, SessionImpl};
 
 pub type LocalQueryStream = ReceiverStream<Result<DataChunk, BoxedError>>;
-
 pub struct LocalQueryExecution {
     sql: String,
     query: Query,
@@ -354,11 +354,21 @@ impl LocalQueryExecution {
                         sources.push(exchange_source);
                     }
                 } else if let Some(source_info) = &second_stage.source_info {
-                    for (id, split) in source_info.split_info().unwrap().iter().enumerate() {
+                    // For file source batch read, all the files  to be read  are divide into several parts to prevent the task from taking up too many resources.
+
+                    let chunk_size = (source_info.split_info().unwrap().len() as f32
+                        / (self.worker_node_manager.schedule_unit_count()) as f32)
+                        .ceil() as usize;
+                    for (id, split) in source_info
+                        .split_info()
+                        .unwrap()
+                        .chunks(chunk_size)
+                        .enumerate()
+                    {
                         let second_stage_plan_node = self.convert_plan_node(
                             &second_stage.root,
                             &mut None,
-                            Some(PartitionInfo::Source(split.clone())),
+                            Some(PartitionInfo::Source(split.to_vec())),
                             next_executor_id.clone(),
                         )?;
                         let second_stage_plan_fragment = PlanFragment {
@@ -470,7 +480,10 @@ impl LocalQueryExecution {
                             let partition = partition
                                 .into_source()
                                 .expect("PartitionInfo should be SourcePartitionInfo here");
-                            source_node.split = partition.encode_to_bytes().into();
+                            source_node.split = partition
+                                .into_iter()
+                                .map(|split| split.encode_to_bytes().into())
+                                .collect_vec();
                         }
                     }
                     _ => unreachable!(),
@@ -566,6 +579,7 @@ impl LocalQueryExecution {
         self.worker_node_manager
             .manager
             .get_streaming_fragment_mapping(fragment_id)
+            .map_err(|e| e.into())
     }
 
     fn choose_worker(&self, stage: &Arc<QueryStage>) -> SchedulerResult<Vec<WorkerNode>> {
@@ -579,7 +593,7 @@ impl LocalQueryExecution {
                     .manager
                     .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
                 if candidates.is_empty() {
-                    return Err(SchedulerError::EmptyWorkerNodes);
+                    return Err(BatchError::EmptyWorkerNodes.into());
                 }
                 candidates[stage.session_id.0 as usize % candidates.len()].clone()
             };

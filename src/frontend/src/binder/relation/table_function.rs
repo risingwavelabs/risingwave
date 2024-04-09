@@ -72,7 +72,7 @@ impl Binder {
                     Some(PG_CATALOG_SCHEMA_NAME),
                     PG_KEYWORDS_TABLE_NAME,
                     alias,
-                    false,
+                    None,
                 );
             }
         }
@@ -108,6 +108,7 @@ impl Binder {
         let func = self.bind_function(Function {
             name,
             args,
+            variadic: false,
             over: None,
             distinct: false,
             order_by: vec![],

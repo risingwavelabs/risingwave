@@ -114,6 +114,7 @@ mod test {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_pb::stream_plan::Dispatcher;
 
     use super::ChainExecutor;
@@ -136,8 +137,8 @@ mod test {
         .into_executor(schema.clone(), PkIndices::new());
 
         let second = MockSource::with_messages(vec![
-            Message::Barrier(Barrier::new_test_barrier(1).with_mutation(Mutation::Add(
-                AddMutation {
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1)).with_mutation(
+                Mutation::Add(AddMutation {
                     adds: maplit::hashmap! {
                         0 => vec![Dispatcher {
                             downstream_actor_id: vec![actor_id],
@@ -147,8 +148,8 @@ mod test {
                     added_actors: maplit::hashset! { actor_id },
                     splits: Default::default(),
                     pause: false,
-                },
-            ))),
+                }),
+            )),
             Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
             Message::Chunk(StreamChunk::from_pretty("I\n + 4")),
         ])

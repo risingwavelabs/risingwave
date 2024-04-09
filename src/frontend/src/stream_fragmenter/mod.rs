@@ -264,9 +264,9 @@ fn build_fragment(
 
             if let Some(source) = node.source_inner.as_ref()
                 && let Some(source_info) = source.info.as_ref()
-                && source_info.cdc_source_job
+                && source_info.is_shared()
+                && !source_info.is_distributed
             {
-                tracing::debug!("mark cdc source job as singleton");
                 current_fragment.requires_singleton = true;
             }
         }
@@ -280,6 +280,10 @@ fn build_fragment(
         }
 
         NodeBody::Sink(_) => current_fragment.fragment_type_mask |= FragmentTypeFlag::Sink as u32,
+
+        NodeBody::Subscription(_) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::Subscription as u32
+        }
 
         NodeBody::TopN(_) => current_fragment.requires_singleton = true,
 
@@ -308,6 +312,13 @@ fn build_fragment(
             current_fragment
                 .upstream_table_ids
                 .push(node.upstream_source_id);
+        }
+        NodeBody::SourceBackfill(node) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::SourceScan as u32;
+            // memorize upstream source id for later use
+            let source_id = node.upstream_source_id;
+            state.dependent_table_ids.insert(source_id.into());
+            current_fragment.upstream_table_ids.push(source_id);
         }
 
         NodeBody::Now(_) => {

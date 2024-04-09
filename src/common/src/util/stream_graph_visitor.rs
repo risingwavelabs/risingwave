@@ -187,11 +187,20 @@ pub fn visit_stream_node_tables_inner<F>(
                     always!(source.state_table, "FsFetch");
                 }
             }
+            NodeBody::SourceBackfill(node) => {
+                always!(node.state_table, "SourceBackfill")
+            }
 
             // Sink
             NodeBody::Sink(node) => {
                 // A sink with a kv log store should have a state table.
                 optional!(node.table, "Sink")
+            }
+
+            // Subscription
+            NodeBody::Subscription(node) => {
+                // A Subscription should have a state table.
+                optional!(node.log_store_table, "Subscription")
             }
 
             // Now

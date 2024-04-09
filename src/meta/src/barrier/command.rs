@@ -31,9 +31,9 @@ use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
-    AddMutation, BarrierMutation, CombinedMutation, Dispatcher, Dispatchers, FragmentTypeFlag,
-    PauseMutation, ResumeMutation, SourceChangeSplitMutation, StopMutation, StreamActor,
-    ThrottleMutation, UpdateMutation,
+    AddMutation, BarrierMutation, CombinedMutation, Dispatcher, Dispatchers, PauseMutation,
+    ResumeMutation, SourceChangeSplitMutation, StopMutation, StreamActor, ThrottleMutation,
+    UpdateMutation,
 };
 use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use thiserror_ext::AsReport;
@@ -141,7 +141,11 @@ pub enum Command {
     /// Barriers from the actors to be dropped will STILL be collected.
     /// After the barrier is collected, it notifies the local stream manager of compute nodes to
     /// drop actors, and then delete the table fragments info from meta store.
-    DropStreamingJobs(Vec<ActorId>),
+    DropStreamingJobs {
+        actors: Vec<ActorId>,
+        unregistered_table_fragment_ids: HashSet<TableId>,
+        unregistered_state_table_ids: HashSet<TableId>,
+    },
 
     /// `CreateStreamingJob` command generates a `Add` barrier by given info.
     ///
@@ -154,7 +158,8 @@ pub enum Command {
     /// will be set to `Created`.
     CreateStreamingJob {
         table_fragments: TableFragments,
-        upstream_mview_actors: HashMap<TableId, Vec<ActorId>>,
+        /// Refer to the doc on [`MetadataManager::get_upstream_root_fragments`] for the meaning of "root".
+        upstream_root_actors: HashMap<TableId, Vec<ActorId>>,
         dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
         init_split_assignment: SplitAssignment,
         definition: String,
@@ -175,6 +180,8 @@ pub enum Command {
     RescheduleFragment {
         reschedules: HashMap<FragmentId, Reschedule>,
         table_parallelism: HashMap<TableId, TableParallelism>,
+        // should contain the actor ids in upstream and downstream fragment of `reschedules`
+        fragment_actors: HashMap<FragmentId, HashSet<ActorId>>,
     },
 
     /// `ReplaceTable` command generates a `Update` barrier with the given `merge_updates`. This is
@@ -190,7 +197,7 @@ pub enum Command {
     SourceSplitAssignment(SplitAssignment),
 
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
-    /// the `rate_limit` of FlowControl Executor after StreamScan or Source.
+    /// the `rate_limit` of `FlowControl` Executor after `StreamScan` or Source.
     Throttle(ThrottleConfig),
 }
 
@@ -212,7 +219,7 @@ impl Command {
             Command::Plain(_) => None,
             Command::Pause(_) => None,
             Command::Resume(_) => None,
-            Command::DropStreamingJobs(actors) => Some(CommandActorChanges {
+            Command::DropStreamingJobs { actors, .. } => Some(CommandActorChanges {
                 to_add: Default::default(),
                 to_remove: actors.iter().cloned().collect(),
             }),
@@ -351,7 +358,7 @@ impl CommandContext {
 
 impl CommandContext {
     /// Generate a mutation for the given command.
-    pub async fn to_mutation(&self) -> MetaResult<Option<Mutation>> {
+    pub fn to_mutation(&self) -> Option<Mutation> {
         let mutation =
             match &self.command {
                 Command::Plain(mutation) => mutation.clone(),
@@ -399,7 +406,7 @@ impl CommandContext {
                     }))
                 }
 
-                Command::DropStreamingJobs(actors) => Some(Mutation::Stop(StopMutation {
+                Command::DropStreamingJobs { actors, .. } => Some(Mutation::Stop(StopMutation {
                     actors: actors.clone(),
                 })),
 
@@ -479,21 +486,23 @@ impl CommandContext {
                     init_split_assignment,
                 ),
 
-                Command::RescheduleFragment { reschedules, .. } => {
-                    let metadata_manager = &self.barrier_manager_context.metadata_manager;
-
+                Command::RescheduleFragment {
+                    reschedules,
+                    fragment_actors,
+                    ..
+                } => {
                     let mut dispatcher_update = HashMap::new();
                     for reschedule in reschedules.values() {
                         for &(upstream_fragment_id, dispatcher_id) in
                             &reschedule.upstream_fragment_dispatcher_ids
                         {
                             // Find the actors of the upstream fragment.
-                            let upstream_actor_ids = metadata_manager
-                                .get_running_actors_of_fragment(upstream_fragment_id)
-                                .await?;
+                            let upstream_actor_ids = fragment_actors
+                                .get(&upstream_fragment_id)
+                                .expect("should contain");
 
                             // Record updates for all actors.
-                            for actor_id in upstream_actor_ids {
+                            for &actor_id in upstream_actor_ids {
                                 // Index with the dispatcher id to check duplicates.
                                 dispatcher_update
                                     .try_insert(
@@ -526,9 +535,9 @@ impl CommandContext {
                     for (&fragment_id, reschedule) in reschedules {
                         for &downstream_fragment_id in &reschedule.downstream_fragment_ids {
                             // Find the actors of the downstream fragment.
-                            let downstream_actor_ids = metadata_manager
-                                .get_running_actors_of_fragment(downstream_fragment_id)
-                                .await?;
+                            let downstream_actor_ids = fragment_actors
+                                .get(&downstream_fragment_id)
+                                .expect("should contain");
 
                             // Downstream removed actors should be skipped
                             // Newly created actors of the current fragment will not dispatch Update
@@ -545,7 +554,7 @@ impl CommandContext {
                                 .unwrap_or_default();
 
                             // Record updates for all actors.
-                            for actor_id in downstream_actor_ids {
+                            for &actor_id in downstream_actor_ids {
                                 if downstream_removed_actors.contains(&actor_id) {
                                     continue;
                                 }
@@ -620,7 +629,7 @@ impl CommandContext {
                 }
             };
 
-        Ok(mutation)
+        mutation
     }
 
     fn generate_update_mutation_for_replace_table(
@@ -682,29 +691,16 @@ impl CommandContext {
         }
     }
 
-    /// For `CreateStreamingJob`, returns the actors of the `StreamScan` nodes. For other commands,
+    /// For `CreateStreamingJob`, returns the actors of the `StreamScan`, and `StreamValue` nodes. For other commands,
     /// returns an empty set.
     pub fn actors_to_track(&self) -> HashSet<ActorId> {
         match &self.command {
             Command::CreateStreamingJob {
-                dispatchers,
-                table_fragments,
-                ..
-            } => {
-                // cdc backfill table job doesn't need to be tracked
-                if table_fragments.fragments().iter().any(|fragment| {
-                    fragment.fragment_type_mask & FragmentTypeFlag::CdcFilter as u32 != 0
-                }) {
-                    Default::default()
-                } else {
-                    dispatchers
-                        .values()
-                        .flatten()
-                        .flat_map(|dispatcher| dispatcher.downstream_actor_id.iter().copied())
-                        .chain(table_fragments.values_actor_ids())
-                        .collect()
-                }
-            }
+                table_fragments, ..
+            } => table_fragments
+                .tracking_progress_actor_ids()
+                .into_iter()
+                .collect(),
             _ => Default::default(),
         }
     }
@@ -785,13 +781,26 @@ impl CommandContext {
                     .await?;
                 self.barrier_manager_context
                     .source_manager
-                    .apply_source_change(None, Some(split_assignment.clone()), None)
+                    .apply_source_change(None, None, Some(split_assignment.clone()), None)
                     .await;
             }
 
-            Command::DropStreamingJobs(actors) => {
+            Command::DropStreamingJobs {
+                actors,
+                unregistered_state_table_ids,
+                ..
+            } => {
                 // Tell compute nodes to drop actors.
                 self.clean_up(actors.clone()).await?;
+
+                let unregistered_state_table_ids = unregistered_state_table_ids
+                    .iter()
+                    .map(|table_id| table_id.table_id)
+                    .collect_vec();
+                self.barrier_manager_context
+                    .hummock_manager
+                    .unregister_table_ids(&unregistered_state_table_ids)
+                    .await?;
             }
 
             Command::CancelStreamingJob(table_fragments) => {
@@ -812,8 +821,8 @@ impl CommandContext {
                 table_ids.push(table_id);
                 self.barrier_manager_context
                     .hummock_manager
-                    .unregister_table_ids_fail_fast(&table_ids)
-                    .await;
+                    .unregister_table_ids(&table_ids)
+                    .await?;
 
                 match &self.barrier_manager_context.metadata_manager {
                     MetadataManager::V1(mgr) => {
@@ -862,7 +871,7 @@ impl CommandContext {
             Command::CreateStreamingJob {
                 table_fragments,
                 dispatchers,
-                upstream_mview_actors,
+                upstream_root_actors,
                 init_split_assignment,
                 definition: _,
                 replace_table,
@@ -871,8 +880,8 @@ impl CommandContext {
                 match &self.barrier_manager_context.metadata_manager {
                     MetadataManager::V1(mgr) => {
                         let mut dependent_table_actors =
-                            Vec::with_capacity(upstream_mview_actors.len());
-                        for (table_id, actors) in upstream_mview_actors {
+                            Vec::with_capacity(upstream_root_actors.len());
+                        for (table_id, actors) in upstream_root_actors {
                             let downstream_actors = dispatchers
                                 .iter()
                                 .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
@@ -945,11 +954,12 @@ impl CommandContext {
 
                 // Extract the fragments that include source operators.
                 let source_fragments = table_fragments.stream_source_fragments();
-
+                let backfill_fragments = table_fragments.source_backfill_fragments()?;
                 self.barrier_manager_context
                     .source_manager
                     .apply_source_change(
                         Some(source_fragments),
+                        Some(backfill_fragments),
                         Some(init_split_assignment.clone()),
                         None,
                     )
@@ -959,6 +969,7 @@ impl CommandContext {
             Command::RescheduleFragment {
                 reschedules,
                 table_parallelism,
+                ..
             } => {
                 let removed_actors = reschedules
                     .values()
@@ -1012,10 +1023,13 @@ impl CommandContext {
                     .drop_source_fragments(std::slice::from_ref(old_table_fragments))
                     .await;
                 let source_fragments = new_table_fragments.stream_source_fragments();
+                // XXX: is it possible to have backfill fragments here?
+                let backfill_fragments = new_table_fragments.source_backfill_fragments()?;
                 self.barrier_manager_context
                     .source_manager
                     .apply_source_change(
                         Some(source_fragments),
+                        Some(backfill_fragments),
                         Some(init_split_assignment.clone()),
                         None,
                     )

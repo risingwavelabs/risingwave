@@ -30,10 +30,10 @@ pub(crate) async fn into_chunk_stream(
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
 ) {
-    let actor_id = source_ctx.source_info.actor_id.to_string();
-    let fragment_id = source_ctx.source_info.fragment_id.to_string();
-    let source_id = source_ctx.source_info.source_id.to_string();
-    let source_name = source_ctx.source_info.source_name.to_string();
+    let actor_id = source_ctx.actor_id.to_string();
+    let fragment_id = source_ctx.fragment_id.to_string();
+    let source_id = source_ctx.source_id.to_string();
+    let source_name = source_ctx.source_name.to_string();
     let metrics = source_ctx.metrics.clone();
 
     let data_stream = reader.into_data_stream();

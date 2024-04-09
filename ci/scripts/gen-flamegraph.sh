@@ -7,8 +7,9 @@ set -euo pipefail
 source ci/scripts/common.sh
 
 RUST_TOOLCHAIN=$(cat rust-toolchain)
-
 QUERY_DIR="/risingwave/ci/scripts/sql/nexmark"
+LATEST_KAFKA_VERSION=$(get_latest_kafka_version)
+KAFKA_DIR="./kafka_2.13-${LATEST_KAFKA_VERSION}"
 
 # TODO(kwannoel): This is a workaround since workdir is `/risingwave` in the docker container.
 # Perhaps we should have a new docker container just for benchmarking?
@@ -97,8 +98,8 @@ install_all() {
   promql --version
 
   echo ">>> Installing Kafka"
-  wget https://downloads.apache.org/kafka/3.4.1/kafka_2.13-3.4.1.tgz
-  tar -zxvf kafka_2.13-3.4.1.tgz
+  wget $(get_latest_kafka_download_url) -O kafka_latest.tgz
+  tar -zxvf kafka_latest.tgz
 
   echo ">>> Installing nexmark bench"
   buildkite-agent artifact download nexmark-server /usr/local/bin
@@ -183,8 +184,8 @@ start_nperf() {
 }
 
 start_kafka() {
-  ./kafka_2.13-3.4.1/bin/zookeeper-server-start.sh ./kafka_2.13-3.4.1/config/zookeeper.properties > zookeeper.log 2>&1 &
-  ./kafka_2.13-3.4.1/bin/kafka-server-start.sh ./kafka_2.13-3.4.1/config/server.properties --override num.partitions=8 > kafka.log 2>&1 &
+  "${KAFKA_DIR}"/bin/zookeeper-server-start.sh "${KAFKA_DIR}"/config/zookeeper.properties > zookeeper.log 2>&1 &
+  "${KAFKA_DIR}"/bin/kafka-server-start.sh "${KAFKA_DIR}"/config/server.properties --override num.partitions=8 > kafka.log 2>&1 &
   sleep 10
   # TODO(kwannoel): `trap ERR` and upload these logs.
   # buildkite-agent artifact upload ./zookeeper.log
@@ -208,7 +209,7 @@ gen_events() {
 }
 
 show_kafka_topics() {
-  ./kafka_2.13-3.4.1/bin/kafka-run-class.sh kafka.tools.GetOffsetShell --topic nexmark --bootstrap-server localhost:9092
+  "${KAFKA_DIR}"/bin/kafka-get-offsets.sh --topic nexmark --bootstrap-server localhost:9092
 }
 
 gen_cpu_flamegraph() {
@@ -249,8 +250,8 @@ monitor() {
 stop_processes() {
   # stop rw
   pushd risingwave
-  ./risedev k
-  ./risedev clean-data
+  risedev k
+  risedev clean-data
   popd
 }
 
@@ -279,7 +280,7 @@ run_heap_flamegraph() {
   # No need for an extra profiling step.
   echo "--- Starting up RW"
   pushd risingwave
-  RISEDEV_ENABLE_HEAP_PROFILE=1 ./risedev d ci-gen-cpu-flamegraph
+  RISEDEV_ENABLE_HEAP_PROFILE=1 risedev d ci-gen-cpu-flamegraph
   popd
 
   echo "--- Machine Debug Info After RW Start"
@@ -337,7 +338,7 @@ run_cpu_flamegraph() {
 
   echo "--- Starting up RW"
   pushd risingwave
-  ./risedev d ci-gen-cpu-flamegraph
+  risedev d ci-gen-cpu-flamegraph
   popd
 
   echo "--- Machine Debug Info After RW Start"

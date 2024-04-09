@@ -12,41 +12,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ops::Bound;
-use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering::Relaxed;
+use std::sync::{Arc, LazyLock};
 
+use await_tree::InstrumentAwait;
 use bytes::Bytes;
+use foyer::memory::CacheContext;
 use futures::future::try_join_all;
-use futures::{stream, StreamExt, TryFutureExt};
+use futures::{stream, FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
-use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, UserKey, EPOCH_LEN};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{CompactionGroupId, EpochWithGap, HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{CompactionGroupId, EpochWithGap, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
 use thiserror_ext::AsReport;
 use tracing::{error, warn};
 
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
-use crate::hummock::compactor::context::CompactorContext;
+use crate::hummock::compactor::context::{await_tree_key, CompactorContext};
 use crate::hummock::compactor::{check_flush_result, CompactOutput, Compactor};
 use crate::hummock::event_handler::uploader::UploadTaskPayload;
 use crate::hummock::event_handler::LocalInstanceId;
-use crate::hummock::iterator::{
-    Forward, ForwardMergeRangeIterator, HummockIterator, MergeIterator, UserIterator,
-};
+use crate::hummock::iterator::{Forward, HummockIterator, MergeIterator, UserIterator};
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchInner, SharedBufferKeyEntry, VersionedSharedBufferValue,
 };
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::{
-    BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRangeIterator, GetObjectId,
-    HummockError, HummockResult, SstableBuilderOptions, SstableObjectIdManagerRef,
+    BlockedXor16FilterBuilder, CachePolicy, GetObjectId, HummockError, HummockResult,
+    SstableBuilderOptions, SstableObjectIdManagerRef,
 };
 use crate::mem_table::ImmutableMemtable;
 use crate::opts::StorageOpts;
@@ -99,7 +100,8 @@ pub async fn compact(
                         result
                     })
                     .collect_vec()
-            }),
+            })
+            .instrument_await(format!("shared_buffer_compact_compaction_group {}", id)),
         );
     }
     // Note that the output is reordered compared with input `payload`.
@@ -179,13 +181,32 @@ async fn compact_shared_buffer(
         }
         let compaction_executor = context.compaction_executor.clone();
         let multi_filter_key_extractor = multi_filter_key_extractor.clone();
-        let handle = compaction_executor.spawn(async move {
-            compactor
-                .run(
-                    MergeIterator::new(forward_iters),
-                    multi_filter_key_extractor,
+        let handle = compaction_executor.spawn({
+            static NEXT_SHARED_BUFFER_COMPACT_ID: LazyLock<AtomicUsize> =
+                LazyLock::new(|| AtomicUsize::new(0));
+            let tree_root = context.await_tree_reg.as_ref().map(|reg| {
+                let id = NEXT_SHARED_BUFFER_COMPACT_ID.fetch_add(1, Relaxed);
+                reg.register(
+                    await_tree_key::CompactSharedBuffer { id },
+                    format!(
+                        "Compact Shared Buffer: {:?}",
+                        payload
+                            .iter()
+                            .flat_map(|imm| imm.epochs().iter())
+                            .copied()
+                            .collect::<BTreeSet<_>>()
+                    ),
                 )
-                .await
+            });
+            let future = compactor.run(
+                MergeIterator::new(forward_iters),
+                multi_filter_key_extractor,
+            );
+            if let Some(root) = tree_root {
+                root.instrument(future).left_future()
+            } else {
+                future.right_future()
+            }
         });
         compaction_futures.push(handle);
     }
@@ -234,7 +255,6 @@ async fn compact_shared_buffer(
         if context.storage_opts.check_compaction_result {
             let compaction_executor = context.compaction_executor.clone();
             let mut forward_iters = Vec::with_capacity(payload.len());
-            let del_iter = ForwardMergeRangeIterator::new(HummockEpoch::MAX);
             for imm in &payload {
                 if !existing_table_ids.contains(&imm.table_id.table_id) {
                     continue;
@@ -248,7 +268,6 @@ async fn compact_shared_buffer(
                 u64::MAX,
                 0,
                 None,
-                del_iter,
             );
             compaction_executor.spawn(async move {
                 match check_flush_result(
@@ -336,16 +355,13 @@ pub async fn merge_imms_in_memory(
             table_id,
             table_key: key_entry.key.clone(),
         };
-        if full_key_tracker
-            .observe_multi_version(
-                user_key,
-                key_entry
-                    .new_values
-                    .iter()
-                    .map(|(epoch_with_gap, _)| *epoch_with_gap),
-            )
-            .is_some()
-        {
+        if full_key_tracker.observe_multi_version(
+            user_key,
+            key_entry
+                .new_values
+                .iter()
+                .map(|(epoch_with_gap, _)| *epoch_with_gap),
+        ) {
             let last_entry = merged_entries.last_mut().expect("non-empty");
             if last_entry.value_offset == values.len() {
                 warn!(key = ?last_entry.key, "key has no value in imm compact. skipped");
@@ -423,7 +439,7 @@ fn generate_splits(
     if existing_table_ids.len() > 1 {
         if parallelism > 1 && compact_data_size > sstable_size {
             let mut last_buffer_size = 0;
-            let mut last_user_key = UserKey::default();
+            let mut last_user_key: UserKey<Vec<u8>> = UserKey::default();
             for (data_size, user_key) in size_and_start_user_keys {
                 if last_buffer_size >= sub_compaction_data_size
                     && last_user_key.as_ref() != user_key
@@ -497,7 +513,7 @@ impl SharedBufferCompactRunner {
             options,
             super::TaskConfig {
                 key_range,
-                cache_policy: CachePolicy::Fill(CachePriority::High),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 gc_delete_keys: GC_DELETE_KEYS_FOR_FLUSH,
                 watermark: GC_WATERMARK_FOR_FLUSH,
                 stats_target_table_ids: None,
@@ -505,6 +521,8 @@ impl SharedBufferCompactRunner {
                 is_target_l0_or_lbase: true,
                 table_vnode_partition,
                 use_block_based_filter,
+                table_schemas: Default::default(),
+                disable_drop_column_optimization: false,
             },
             object_id_getter,
         );
@@ -525,9 +543,6 @@ impl SharedBufferCompactRunner {
             .compact_key_range(
                 iter,
                 dummy_compaction_filter,
-                CompactionDeleteRangeIterator::new(ForwardMergeRangeIterator::new(
-                    HummockEpoch::MAX,
-                )),
                 filter_key_extractor,
                 None,
                 None,
@@ -545,6 +560,7 @@ mod tests {
     use bytes::Bytes;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::key::{prefix_slice_with_vnode, TableKey};
 
     use crate::hummock::compactor::shared_buffer_compact::generate_splits;
@@ -562,7 +578,7 @@ mod tests {
     #[tokio::test]
     async fn test_generate_splits_in_order() {
         let imm1 = ImmutableMemtable::build_shared_buffer_batch_for_test(
-            3,
+            test_epoch(3),
             0,
             vec![(
                 generate_key("dddd"),
@@ -572,7 +588,7 @@ mod tests {
             TableId::new(1),
         );
         let imm2 = ImmutableMemtable::build_shared_buffer_batch_for_test(
-            3,
+            test_epoch(3),
             0,
             vec![(
                 generate_key("abb"),
@@ -583,7 +599,7 @@ mod tests {
         );
 
         let imm3 = ImmutableMemtable::build_shared_buffer_batch_for_test(
-            2,
+            test_epoch(2),
             0,
             vec![(
                 generate_key("abc"),
@@ -593,7 +609,7 @@ mod tests {
             TableId::new(1),
         );
         let imm4 = ImmutableMemtable::build_shared_buffer_batch_for_test(
-            3,
+            test_epoch(3),
             0,
             vec![(
                 generate_key("aaa"),
@@ -604,7 +620,7 @@ mod tests {
         );
 
         let imm5 = ImmutableMemtable::build_shared_buffer_batch_for_test(
-            3,
+            test_epoch(3),
             0,
             vec![(
                 generate_key("aaa"),

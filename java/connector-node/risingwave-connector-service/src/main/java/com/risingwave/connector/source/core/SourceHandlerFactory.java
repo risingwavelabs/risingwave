@@ -31,7 +31,7 @@ public abstract class SourceHandlerFactory {
             String startOffset,
             Map<String, String> userProps,
             boolean snapshotDone,
-            boolean isMultiTableShared) {
+            boolean isCdcSourceJob) {
         // userProps extracted from grpc request, underlying implementation is UnmodifiableMap
         Map<String, String> mutableUserProps = new HashMap<>(userProps);
         mutableUserProps.put("source.id", Long.toString(sourceId));
@@ -42,7 +42,7 @@ public abstract class SourceHandlerFactory {
                         startOffset,
                         mutableUserProps,
                         snapshotDone,
-                        isMultiTableShared);
+                        isCdcSourceJob);
         return new DbzSourceHandler(config);
     }
 }

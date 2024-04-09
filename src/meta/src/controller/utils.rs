@@ -576,6 +576,21 @@ where
     Ok(user_infos)
 }
 
+/// `get_object_owner` returns the owner of the given object.
+pub async fn get_object_owner<C>(object_id: ObjectId, db: &C) -> MetaResult<UserId>
+where
+    C: ConnectionTrait,
+{
+    let obj_owner: UserId = Object::find_by_id(object_id)
+        .select_only()
+        .column(object::Column::OwnerId)
+        .into_tuple()
+        .one(db)
+        .await?
+        .ok_or_else(|| MetaError::catalog_id_not_found("object", object_id))?;
+    Ok(obj_owner)
+}
+
 /// `construct_privilege_dependency_query` constructs a query to find all privileges that are dependent on the given one.
 ///
 /// # Examples
@@ -739,7 +754,8 @@ pub fn extract_grant_obj_id(object: &PbObject) -> ObjectId {
         | PbObject::SourceId(id)
         | PbObject::SinkId(id)
         | PbObject::ViewId(id)
-        | PbObject::FunctionId(id) => *id as _,
+        | PbObject::FunctionId(id)
+        | PbObject::SubscriptionId(id) => *id as _,
         _ => unreachable!("invalid object type: {:?}", object),
     }
 }

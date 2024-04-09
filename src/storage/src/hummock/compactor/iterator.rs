@@ -28,7 +28,7 @@ use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::block_stream::BlockDataStream;
 use crate::hummock::compactor::task_progress::TaskProgress;
-use crate::hummock::iterator::{Forward, HummockIterator};
+use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{BlockHolder, BlockIterator, BlockMeta, HummockResult};
@@ -55,8 +55,8 @@ pub struct SstableStreamIterator {
     sstable_info: SstableInfo,
     existing_table_ids: HashSet<StateTableId>,
     task_progress: Arc<TaskProgress>,
-    io_retry_timeout_ms: u64,
-    create_time: Instant,
+    io_retry_times: usize,
+    max_io_retry_times: usize,
 }
 
 impl SstableStreamIterator {
@@ -82,7 +82,7 @@ impl SstableStreamIterator {
         stats: &StoreLocalStatistic,
         task_progress: Arc<TaskProgress>,
         sstable_store: SstableStoreRef,
-        io_retry_timeout_ms: u64,
+        max_io_retry_times: usize,
     ) -> Self {
         Self {
             block_stream: None,
@@ -92,10 +92,10 @@ impl SstableStreamIterator {
             stats_ptr: stats.remote_io_time.clone(),
             existing_table_ids,
             sstable_info,
-            create_time: Instant::now(),
             sstable_store,
             task_progress,
-            io_retry_timeout_ms,
+            io_retry_times: 0,
+            max_io_retry_times,
         }
     }
 
@@ -178,13 +178,11 @@ impl SstableStreamIterator {
                     }
                     Ok(None) => break,
                     Err(e) => {
-                        if !e.is_object_error()
-                            || self.create_time.elapsed().as_millis() as u64
-                                > self.io_retry_timeout_ms
-                        {
+                        if !e.is_object_error() || !self.need_recreate_io_stream() {
                             return Err(e);
                         }
                         self.block_stream.take();
+                        self.io_retry_times += 1;
                         fail_point!("create_stream_err");
                     }
                 }
@@ -250,6 +248,10 @@ impl SstableStreamIterator {
             self.sstable_info.table_ids
         )
     }
+
+    fn need_recreate_io_stream(&self) -> bool {
+        self.io_retry_times < self.max_io_retry_times
+    }
 }
 
 impl Drop for SstableStreamIterator {
@@ -280,7 +282,7 @@ pub struct ConcatSstableIterator {
 
     stats: StoreLocalStatistic,
     task_progress: Arc<TaskProgress>,
-    io_retry_timeout_ms: u64,
+    max_io_retry_times: usize,
 }
 
 impl ConcatSstableIterator {
@@ -293,7 +295,7 @@ impl ConcatSstableIterator {
         key_range: KeyRange,
         sstable_store: SstableStoreRef,
         task_progress: Arc<TaskProgress>,
-        io_retry_timeout_ms: u64,
+        max_io_retry_times: usize,
     ) -> Self {
         Self {
             key_range,
@@ -304,7 +306,7 @@ impl ConcatSstableIterator {
             sstable_store,
             task_progress,
             stats: StoreLocalStatistic::default(),
-            io_retry_timeout_ms,
+            max_io_retry_times,
         }
     }
 
@@ -405,7 +407,7 @@ impl ConcatSstableIterator {
                     &self.stats,
                     self.task_progress.clone(),
                     self.sstable_store.clone(),
-                    self.io_retry_timeout_ms,
+                    self.max_io_retry_times,
                 );
                 sstable_iter.seek(seek_key).await?;
 
@@ -486,6 +488,17 @@ impl HummockIterator for ConcatSstableIterator {
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         stats.add(&self.stats)
     }
+
+    fn value_meta(&self) -> ValueMeta {
+        let iter = self.sstable_iter.as_ref().expect("no table iter");
+        // sstable_iter's seek_block_idx must have advanced at least one.
+        // See SstableStreamIterator::next_block.
+        assert!(iter.seek_block_idx >= 1);
+        ValueMeta {
+            object_id: Some(iter.sstable_info.object_id),
+            block_id: Some(iter.seek_block_idx as u64 - 1),
+        }
+    }
 }
 
 pub struct MonitoredCompactorIterator<I> {
@@ -546,6 +559,10 @@ impl<I: HummockIterator<Direction = Forward>> HummockIterator for MonitoredCompa
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         self.inner.collect_local_statistic(stats)
+    }
+
+    fn value_meta(&self) -> ValueMeta {
+        self.inner.value_meta()
     }
 }
 

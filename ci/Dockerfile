@@ -37,7 +37,7 @@ ENV PATH /root/.cargo/bin/:$PATH
 RUN rustup show
 RUN rustup default `rustup show active-toolchain | awk '{print $1}'`
 
-RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.4.0/buf-$(uname -s)-$(uname -m).tar.gz" | \
+RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.29.0/buf-$(uname -s)-$(uname -m).tar.gz" | \
     tar -xvzf - -C /usr/local --strip-components 1
 
 # install python dependencies
@@ -64,3 +64,12 @@ RUN cargo binstall -y --no-symlinks cargo-llvm-cov cargo-nextest cargo-hakari ca
     && rm -rf "/root/.cargo/git/db"
 RUN cargo install cargo-dylint@2.6.0 dylint-link@2.6.0
 RUN cargo uninstall cargo-binstall cargo-cache
+
+# install risedev
+COPY <<EOF /root/.cargo/bin/risedev
+#!/usr/bin/env bash
+set -e
+cd "/risingwave"
+./risedev "\$@"
+EOF
+RUN chmod +x /root/.cargo/bin/risedev
