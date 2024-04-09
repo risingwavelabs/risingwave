@@ -550,185 +550,186 @@ mod tests {
         let mut binder = mock_binder();
         let bound = binder.bind(stmt).unwrap();
 
-        let expected = expect![[r#"Query(
-            BoundQuery {
-                body: Select(
-                    BoundSelect {
-                        distinct: All,
-                        select_items: [
-                            InputRef(
-                                InputRef {
-                                    index: 0,
-                                    data_type: Int32,
-                                },
-                            ),
-                            InputRef(
-                                InputRef {
-                                    index: 1,
-                                    data_type: Int32,
-                                },
-                            ),
-                        ],
-                        aliases: [
-                            Some(
-                                "a",
-                            ),
-                            Some(
-                                "?column?",
-                            ),
-                        ],
-                        from: Some(
-                            Share(
-                                BoundShare {
-                                    share_id: 0,
-                                    input: Right(
-                                        RecursiveUnion {
-                                            all: true,
-                                            base: Select(
-                                                BoundSelect {
-                                                    distinct: All,
-                                                    select_items: [
-                                                        Literal(
-                                                            Literal {
-                                                                data: Some(
-                                                                    Int32(
-                                                                        1,
-                                                                    ),
-                                                                ),
-                                                                data_type: Some(
-                                                                    Int32,
-                                                                ),
-                                                            },
-                                                        ),
-                                                    ],
-                                                    aliases: [
-                                                        Some(
-                                                            "a",
-                                                        ),
-                                                    ],
-                                                    from: None,
-                                                    where_clause: None,
-                                                    group_by: GroupKey(
-                                                        [],
-                                                    ),
-                                                    having: None,
-                                                    schema: Schema {
-                                                        fields: [
-                                                            a:Int32,
-                                                        ],
-                                                    },
-                                                },
-                                            ),
-                                            recursive: Select(
-                                                BoundSelect {
-                                                    distinct: All,
-                                                    select_items: [
-                                                        FunctionCall(
-                                                            FunctionCall {
-                                                                func_type: Add,
-                                                                return_type: Int32,
-                                                                inputs: [
-                                                                    InputRef(
-                                                                        InputRef {
-                                                                            index: 0,
-                                                                            data_type: Int32,
-                                                                        },
-                                                                    ),
-                                                                    Literal(
-                                                                        Literal {
-                                                                            data: Some(
-                                                                                Int32(
-                                                                                    1,
-                                                                                ),
-                                                                            ),
-                                                                            data_type: Some(
-                                                                                Int32,
-                                                                            ),
-                                                                        },
-                                                                    ),
-                                                                ],
-                                                            },
-                                                        ),
-                                                    ],
-                                                    aliases: [
-                                                        None,
-                                                    ],
-                                                    from: Some(
-                                                        BackCteRef(
-                                                            BoundBackCteRef {
-                                                                share_id: 0,
-                                                            },
-                                                        ),
-                                                    ),
-                                                    where_clause: Some(
-                                                        FunctionCall(
-                                                            FunctionCall {
-                                                                func_type: LessThan,
-                                                                return_type: Boolean,
-                                                                inputs: [
-                                                                    InputRef(
-                                                                        InputRef {
-                                                                            index: 0,
-                                                                            data_type: Int32,
-                                                                        },
-                                                                    ),
-                                                                    Literal(
-                                                                        Literal {
-                                                                            data: Some(
-                                                                                Int32(
-                                                                                    10,
-                                                                                ),
-                                                                            ),
-                                                                            data_type: Some(
-                                                                                Int32,
-                                                                            ),
-                                                                        },
-                                                                    ),
-                                                                ],
-                                                            },
-                                                        ),
-                                                    ),
-                                                    group_by: GroupKey(
-                                                        [],
-                                                    ),
-                                                    having: None,
-                                                    schema: Schema {
-                                                        fields: [
-                                                            ?column?:Int32,
-                                                        ],
-                                                    },
-                                                },
-                                            ),
-                                            schema: Schema {
-                                                fields: [
-                                                    ?column?:Int32,
-                                                ],
-                                            },
-                                        },
-                                    ),
-                                },
-                            ),
-                        ),
-                        where_clause: None,
-                        group_by: GroupKey(
-                            [],
-                        ),
-                        having: None,
-                        schema: Schema {
-                            fields: [
-                                a:Int32,
-                                ?column?:Int32,
+        let expected = expect![[r#"
+            Query(
+                BoundQuery {
+                    body: Select(
+                        BoundSelect {
+                            distinct: All,
+                            select_items: [
+                                InputRef(
+                                    InputRef {
+                                        index: 0,
+                                        data_type: Int32,
+                                    },
+                                ),
+                                InputRef(
+                                    InputRef {
+                                        index: 1,
+                                        data_type: Int32,
+                                    },
+                                ),
                             ],
+                            aliases: [
+                                Some(
+                                    "a",
+                                ),
+                                Some(
+                                    "?column?",
+                                ),
+                            ],
+                            from: Some(
+                                Share(
+                                    BoundShare {
+                                        share_id: 0,
+                                        input: Right(
+                                            RecursiveUnion {
+                                                all: true,
+                                                base: Select(
+                                                    BoundSelect {
+                                                        distinct: All,
+                                                        select_items: [
+                                                            Literal(
+                                                                Literal {
+                                                                    data: Some(
+                                                                        Int32(
+                                                                            1,
+                                                                        ),
+                                                                    ),
+                                                                    data_type: Some(
+                                                                        Int32,
+                                                                    ),
+                                                                },
+                                                            ),
+                                                        ],
+                                                        aliases: [
+                                                            Some(
+                                                                "a",
+                                                            ),
+                                                        ],
+                                                        from: None,
+                                                        where_clause: None,
+                                                        group_by: GroupKey(
+                                                            [],
+                                                        ),
+                                                        having: None,
+                                                        schema: Schema {
+                                                            fields: [
+                                                                a:Int32,
+                                                            ],
+                                                        },
+                                                    },
+                                                ),
+                                                recursive: Select(
+                                                    BoundSelect {
+                                                        distinct: All,
+                                                        select_items: [
+                                                            FunctionCall(
+                                                                FunctionCall {
+                                                                    func_type: Add,
+                                                                    return_type: Int32,
+                                                                    inputs: [
+                                                                        InputRef(
+                                                                            InputRef {
+                                                                                index: 0,
+                                                                                data_type: Int32,
+                                                                            },
+                                                                        ),
+                                                                        Literal(
+                                                                            Literal {
+                                                                                data: Some(
+                                                                                    Int32(
+                                                                                        1,
+                                                                                    ),
+                                                                                ),
+                                                                                data_type: Some(
+                                                                                    Int32,
+                                                                                ),
+                                                                            },
+                                                                        ),
+                                                                    ],
+                                                                },
+                                                            ),
+                                                        ],
+                                                        aliases: [
+                                                            None,
+                                                        ],
+                                                        from: Some(
+                                                            BackCteRef(
+                                                                BoundBackCteRef {
+                                                                    share_id: 0,
+                                                                },
+                                                            ),
+                                                        ),
+                                                        where_clause: Some(
+                                                            FunctionCall(
+                                                                FunctionCall {
+                                                                    func_type: LessThan,
+                                                                    return_type: Boolean,
+                                                                    inputs: [
+                                                                        InputRef(
+                                                                            InputRef {
+                                                                                index: 0,
+                                                                                data_type: Int32,
+                                                                            },
+                                                                        ),
+                                                                        Literal(
+                                                                            Literal {
+                                                                                data: Some(
+                                                                                    Int32(
+                                                                                        10,
+                                                                                    ),
+                                                                                ),
+                                                                                data_type: Some(
+                                                                                    Int32,
+                                                                                ),
+                                                                            },
+                                                                        ),
+                                                                    ],
+                                                                },
+                                                            ),
+                                                        ),
+                                                        group_by: GroupKey(
+                                                            [],
+                                                        ),
+                                                        having: None,
+                                                        schema: Schema {
+                                                            fields: [
+                                                                ?column?:Int32,
+                                                            ],
+                                                        },
+                                                    },
+                                                ),
+                                                schema: Schema {
+                                                    fields: [
+                                                        ?column?:Int32,
+                                                    ],
+                                                },
+                                            },
+                                        ),
+                                    },
+                                ),
+                            ),
+                            where_clause: None,
+                            group_by: GroupKey(
+                                [],
+                            ),
+                            having: None,
+                            schema: Schema {
+                                fields: [
+                                    a:Int32,
+                                    ?column?:Int32,
+                                ],
+                            },
                         },
-                    },
-                ),
-                order: [],
-                limit: None,
-                offset: None,
-                with_ties: false,
-                extra_order_exprs: [],
-            },
-        )"#]];
+                    ),
+                    order: [],
+                    limit: None,
+                    offset: None,
+                    with_ties: false,
+                    extra_order_exprs: [],
+                },
+            )"#]];
 
         expected.assert_eq(&format!("{:#?}", bound));
     }
