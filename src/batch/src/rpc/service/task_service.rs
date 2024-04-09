@@ -20,7 +20,7 @@ use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::task_service::task_service_server::TaskService;
 use risingwave_pb::task_service::{
     CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest, GetDataResponse,
-    TaskInfoResponse,
+    HeartbeatRequest, HeartbeatResponse, TaskInfoResponse,
 };
 use thiserror_ext::AsReport;
 use tokio_stream::wrappers::ReceiverStream;
@@ -121,6 +121,14 @@ impl TaskService for BatchServiceImpl {
         let env = self.env.clone();
         let mgr = self.mgr.clone();
         BatchServiceImpl::get_execute_stream(env, mgr, req).await
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn heartbeat(
+        &self,
+        _req: Request<HeartbeatRequest>,
+    ) -> Result<Response<HeartbeatResponse>, Status> {
+        Ok(Response::new(HeartbeatResponse {}))
     }
 }
 

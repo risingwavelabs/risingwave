@@ -286,7 +286,7 @@ impl FrontendEnv {
             Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
-            compute_client_pool,
+            compute_client_pool.clone(),
             catalog_reader.clone(),
             Arc::new(GLOBAL_DISTRIBUTED_QUERY_METRICS.clone()),
             batch_config.distributed_query_limit,
@@ -389,6 +389,52 @@ impl FrontendEnv {
                 sessions.read().values().for_each(|session| {
                     let _ = session.check_idle_in_transaction_timeout();
                 })
+            }
+        });
+        join_handles.push(join_handle);
+
+        // Heartbeat between compute nodes (worker nodes) and frontend
+        let heartbeat_worker_node_manager = worker_node_manager.clone();
+        let join_handle = tokio::spawn(async move {
+            let duration = Duration::from_secs(std::cmp::max(
+                batch_config.mask_worker_temporary_secs as u64,
+                1,
+            ));
+
+            let mut check_heartbeat_interval =
+                tokio::time::interval(core::time::Duration::from_secs(2));
+            check_heartbeat_interval
+                .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            check_heartbeat_interval.reset();
+            let heartbeat_fail_retry_num = 3;
+            loop {
+                check_heartbeat_interval.tick().await;
+                for worker in heartbeat_worker_node_manager
+                    .list_worker_nodes()
+                    .into_iter()
+                    .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
+                {
+                    let addr: HostAddr = worker.get_host().unwrap().into();
+                    for i in 0..heartbeat_fail_retry_num {
+                        let success = if let Ok(client) =
+                            compute_client_pool.get_by_addr(addr.clone()).await
+                        {
+                            client.heartbeat().await.is_ok()
+                        } else {
+                            false
+                        };
+
+                        if success {
+                            break;
+                        } else {
+                            compute_client_pool.invalidate(&addr).await;
+                            if i == heartbeat_fail_retry_num - 1 {
+                                info!("Worker node {} is not reachable, mask it", worker.id);
+                                heartbeat_worker_node_manager.mask_worker_node(worker.id, duration);
+                            }
+                        }
+                    }
+                }
             }
         });
         join_handles.push(join_handle);
