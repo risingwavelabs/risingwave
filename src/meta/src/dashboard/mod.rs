@@ -56,6 +56,7 @@ pub(super) mod handlers {
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::{Sink, Source, Table, View};
     use risingwave_pb::common::{WorkerNode, WorkerType};
+    use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
     use risingwave_pb::meta::PbTableFragments;
     use risingwave_pb::monitor_service::{
         GetBackPressureResponse, HeapProfilingResponse, ListHeapProfilingResponse,
@@ -191,6 +192,23 @@ pub(super) mod handlers {
         };
 
         Ok(Json(table_fragments))
+    }
+
+    pub async fn list_object_dependencies(
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<Vec<PbObjectDependencies>>> {
+        let object_dependencies = match &srv.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_object_dependencies().await,
+            MetadataManager::V2(mgr) => mgr
+                .catalog_controller
+                .list_object_dependencies()
+                .await
+                .map_err(err)?,
+        };
+
+        println!("heiheihei: {:?}", object_dependencies);
+
+        Ok(Json(object_dependencies))
     }
 
     async fn dump_await_tree_inner(
@@ -378,6 +396,7 @@ impl DashboardService {
             .route("/internal_tables", get(list_internal_tables))
             .route("/sources", get(list_sources))
             .route("/sinks", get(list_sinks))
+            .route("/object_dependencies", get(list_object_dependencies))
             .route("/metrics/cluster", get(prometheus::list_prometheus_cluster))
             .route(
                 "/metrics/fragment/prometheus_back_pressures",
