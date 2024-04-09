@@ -139,6 +139,7 @@ impl ObserverState for FrontendObserverNode {
             hummock_version: _,
             meta_backup_manifest_id: _,
             hummock_write_limits: _,
+            session_params,
             version,
         } = snapshot;
 
@@ -192,6 +193,12 @@ impl ObserverState for FrontendObserverNode {
         self.user_info_updated_tx
             .send(snapshot_version.catalog_version)
             .unwrap();
+        match serde_json::from_str(&session_params.unwrap().params) {
+            Ok(params) => *self.session_params.write() = params,
+            Err(e) => {
+                tracing::error!(error = %e.as_report(), "failed to parse session params from notification")
+            }
+        }
     }
 }
 

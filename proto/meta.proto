@@ -386,6 +386,7 @@ message MetaSnapshot {
   repeated catalog.Connection connections = 17;
   repeated catalog.Subscription subscriptions = 19;
   repeated user.UserInfo users = 8;
+  GetSessionParamsResponse session_params = 20;
   // for streaming
   repeated FragmentParallelUnitMapping parallel_unit_mappings = 9;
   repeated common.WorkerNode nodes = 10;
@@ -607,7 +608,7 @@ message SetSessionParamRequest {
 }
 
 message SetSessionParamResponse {
-  string params = 1;
+  string param = 1;
 }
 
 // Used for alter system wide default parameters

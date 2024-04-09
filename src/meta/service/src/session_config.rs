@@ -65,7 +65,7 @@ impl SessionParamService for SessionParamsServiceImpl {
         };
 
         Ok(Response::new(SetSessionParamResponse {
-            params: param_value?,
+            param: param_value?,
         }))
     }
 }
