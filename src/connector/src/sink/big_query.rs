@@ -366,7 +366,7 @@ impl BigQuerySinkWriter {
                     &config.common.table
                 ))
             })?;
-        let row_encoder = ProtoEncoder::new_with_bigquery(
+        let row_encoder = ProtoEncoder::new(
             schema.clone(),
             None,
             message_descriptor.clone(),

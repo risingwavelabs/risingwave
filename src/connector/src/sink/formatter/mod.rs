@@ -134,8 +134,7 @@ impl SinkFormatterImpl {
                             None => ProtoHeader::None,
                             Some(sid) => ProtoHeader::ConfluentSchemaRegistry(sid),
                         };
-                        let val_encoder =
-                            ProtoEncoder::new_with_default(schema, None, descriptor, header)?;
+                        let val_encoder = ProtoEncoder::new(schema, None, descriptor, header)?;
                         let formatter = AppendOnlyFormatter::new(key_encoder, val_encoder);
                         Ok(SinkFormatterImpl::AppendOnlyProto(formatter))
                     }

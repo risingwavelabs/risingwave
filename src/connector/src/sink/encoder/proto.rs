@@ -74,24 +74,6 @@ impl ProtoEncoder {
             header,
         })
     }
-
-    pub fn new_with_default(
-        schema: Schema,
-        col_indices: Option<Vec<usize>>,
-        descriptor: MessageDescriptor,
-        header: ProtoHeader,
-    ) -> SinkResult<Self> {
-        Self::new(schema, col_indices, descriptor, header)
-    }
-
-    pub fn new_with_bigquery(
-        schema: Schema,
-        col_indices: Option<Vec<usize>>,
-        descriptor: MessageDescriptor,
-        header: ProtoHeader,
-    ) -> SinkResult<Self> {
-        Self::new(schema, col_indices, descriptor, header)
-    }
 }
 
 pub struct ProtoEncoded {
@@ -499,8 +481,7 @@ mod tests {
         ]);
 
         let encoder =
-            ProtoEncoder::new_with_default(schema, None, descriptor.clone(), ProtoHeader::None)
-                .unwrap();
+            ProtoEncoder::new(schema, None, descriptor.clone(), ProtoHeader::None).unwrap();
         let m = encoder.encode(row).unwrap();
         let encoded: Vec<u8> = m.ser_to().unwrap();
         assert_eq!(
