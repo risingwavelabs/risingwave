@@ -35,6 +35,7 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
+use super::is_write_stop;
 use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
@@ -322,11 +323,13 @@ pub(super) fn calc_new_write_limits(
             Some(levels) => levels,
         };
         // Add write limit conditions here.
-        let threshold = config
-            .compaction_config
-            .level0_stop_write_threshold_sub_level_number as usize;
-        let l0_sub_level_number = levels.l0.as_ref().unwrap().sub_levels.len();
-        if threshold < l0_sub_level_number {
+        let is_write_stop = is_write_stop(levels, config.compaction_config.clone());
+        if is_write_stop {
+            let threshold = config
+                .compaction_config
+                .level0_stop_write_threshold_sub_level_number as usize;
+            let l0_sub_level_number = levels.l0.as_ref().unwrap().sub_levels.len();
+
             new_write_limits.insert(
                 *id,
                 WriteLimit {

@@ -114,6 +114,7 @@ pub mod sequence;
 mod utils;
 mod worker;
 
+pub use compaction::is_write_stop;
 use compaction::*;
 pub(crate) use utils::*;
 
@@ -3506,10 +3507,6 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
         compact_task::TaskType::Tombstone,
         Box::<TombstoneCompactionSelector>::default(),
     );
-    compaction_selectors.insert(
-        compact_task::TaskType::Emergency,
-        Box::<EmergencySelector>::default(),
-    );
     compaction_selectors
 }
 
@@ -3518,7 +3515,6 @@ use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::HummockVersion;
 use tokio::sync::mpsc::error::SendError;
 
-use super::compaction::selector::EmergencySelector;
 use super::compaction::CompactionSelector;
 use crate::controller::SqlMetaStore;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
