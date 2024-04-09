@@ -24,7 +24,7 @@ use std::num::NonZeroUsize;
 use anyhow::Context;
 use clap::ValueEnum;
 use educe::Educe;
-use foyer::memory::{LfuConfig, LruConfig};
+use foyer::memory::{LfuConfig, LruConfig, S3FifoConfig};
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
@@ -575,6 +575,9 @@ pub enum CacheEvictionConfig {
         protected_capacity_ratio_in_percent: Option<usize>,
         cmsketch_eps: Option<f64>,
         cmsketch_confidence: Option<f64>,
+    },
+    S3Fifo {
+        small_queue_capacity_ratio_in_percent: Option<usize>,
     },
 }
 
@@ -1270,14 +1273,21 @@ pub mod default {
         pub fn window_capacity_ratio_in_percent() -> usize {
             10
         }
+
         pub fn protected_capacity_ratio_in_percent() -> usize {
             80
         }
+
         pub fn cmsketch_eps() -> f64 {
             0.002
         }
+
         pub fn cmsketch_confidence() -> f64 {
             0.95
+        }
+
+        pub fn small_queue_capacity_ratio_in_percent() -> usize {
+            10
         }
 
         pub fn meta_cache_capacity_mb() -> usize {
@@ -1756,6 +1766,7 @@ pub mod default {
 pub enum EvictionConfig {
     Lru(LruConfig),
     Lfu(LfuConfig),
+    S3Fifo(S3FifoConfig),
 }
 
 impl EvictionConfig {
@@ -1823,36 +1834,46 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         .compactor_memory_limit_mb
         .unwrap_or(default::storage::compactor_memory_limit_mb());
 
-    let get_eviction_config = |c: &CacheEvictionConfig| match c {
-        CacheEvictionConfig::Lru {
-            high_priority_ratio_in_percent,
-        } => EvictionConfig::Lru(LruConfig {
-            high_priority_pool_ratio: high_priority_ratio_in_percent.unwrap_or(
-                // adapt to old version
-                s.storage
-                    .high_priority_ratio_in_percent
-                    .unwrap_or(default::storage::high_priority_ratio_in_percent()),
-            ) as f64
-                / 100.0,
-        }),
-        CacheEvictionConfig::Lfu {
-            window_capacity_ratio_in_percent,
-            protected_capacity_ratio_in_percent,
-            cmsketch_eps,
-            cmsketch_confidence,
-        } => EvictionConfig::Lfu(LfuConfig {
-            window_capacity_ratio: window_capacity_ratio_in_percent
-                .unwrap_or(default::storage::window_capacity_ratio_in_percent())
-                as f64
-                / 100.0,
-            protected_capacity_ratio: protected_capacity_ratio_in_percent
-                .unwrap_or(default::storage::protected_capacity_ratio_in_percent())
-                as f64
-                / 100.0,
-            cmsketch_eps: cmsketch_eps.unwrap_or(default::storage::cmsketch_eps()),
-            cmsketch_confidence: cmsketch_confidence
-                .unwrap_or(default::storage::cmsketch_confidence()),
-        }),
+    let get_eviction_config = |c: &CacheEvictionConfig| {
+        match c {
+            CacheEvictionConfig::Lru {
+                high_priority_ratio_in_percent,
+            } => EvictionConfig::Lru(LruConfig {
+                high_priority_pool_ratio: high_priority_ratio_in_percent.unwrap_or(
+                    // adapt to old version
+                    s.storage
+                        .high_priority_ratio_in_percent
+                        .unwrap_or(default::storage::high_priority_ratio_in_percent()),
+                ) as f64
+                    / 100.0,
+            }),
+            CacheEvictionConfig::Lfu {
+                window_capacity_ratio_in_percent,
+                protected_capacity_ratio_in_percent,
+                cmsketch_eps,
+                cmsketch_confidence,
+            } => EvictionConfig::Lfu(LfuConfig {
+                window_capacity_ratio: window_capacity_ratio_in_percent
+                    .unwrap_or(default::storage::window_capacity_ratio_in_percent())
+                    as f64
+                    / 100.0,
+                protected_capacity_ratio: protected_capacity_ratio_in_percent
+                    .unwrap_or(default::storage::protected_capacity_ratio_in_percent())
+                    as f64
+                    / 100.0,
+                cmsketch_eps: cmsketch_eps.unwrap_or(default::storage::cmsketch_eps()),
+                cmsketch_confidence: cmsketch_confidence
+                    .unwrap_or(default::storage::cmsketch_confidence()),
+            }),
+            CacheEvictionConfig::S3Fifo {
+                small_queue_capacity_ratio_in_percent,
+            } => EvictionConfig::S3Fifo(S3FifoConfig {
+                small_queue_capacity_ratio: small_queue_capacity_ratio_in_percent
+                    .unwrap_or(default::storage::small_queue_capacity_ratio_in_percent())
+                    as f64
+                    / 100.0,
+            }),
+        }
     };
 
     let block_cache_eviction_config = get_eviction_config(&s.storage.cache.block_cache_eviction);
@@ -1867,6 +1888,9 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
                 }
                 EvictionConfig::Lfu(lfu) => {
                     ((1.0 - lfu.protected_capacity_ratio) * block_cache_capacity_mb as f64) as usize
+                }
+                EvictionConfig::S3Fifo(s3fifo) => {
+                    (s3fifo.small_queue_capacity_ratio * block_cache_capacity_mb as f64) as usize
                 }
             });
 
