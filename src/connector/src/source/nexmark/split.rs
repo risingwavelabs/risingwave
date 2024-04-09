@@ -39,8 +39,8 @@ impl SplitMetaData for NexmarkSplit {
         serde_json::to_value(self.clone()).unwrap().into()
     }
 
-    fn update_offset(&mut self, last_recorded_offset: String) -> ConnectorResult<()> {
-        self.start_offset = Some(last_recorded_offset.as_str().parse::<u64>().unwrap());
+    fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
+        self.start_offset = Some(last_seen_offset.as_str().parse::<u64>().unwrap());
         Ok(())
     }
 }

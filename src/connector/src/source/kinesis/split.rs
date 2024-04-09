@@ -47,11 +47,11 @@ impl SplitMetaData for KinesisSplit {
         serde_json::to_value(self.clone()).unwrap().into()
     }
 
-    fn update_offset(&mut self, last_recorded_offset: String) -> ConnectorResult<()> {
-        let start_offset = if last_recorded_offset.is_empty() {
+    fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
+        let start_offset = if last_seen_offset.is_empty() {
             KinesisOffset::Earliest
         } else {
-            KinesisOffset::SequenceNumber(last_recorded_offset)
+            KinesisOffset::SequenceNumber(last_seen_offset)
         };
 
         self.start_position = start_offset;
