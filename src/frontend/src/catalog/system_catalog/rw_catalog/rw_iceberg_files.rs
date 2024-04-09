@@ -103,6 +103,8 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergFiles>> {
                         sort_order_id: file.sort_order_id,
                     }),
             );
+        } else {
+            unreachable!()
         }
     }
     Ok(result)

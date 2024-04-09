@@ -21,12 +21,31 @@ CREATE SINK s6 AS select mv6.v1 as v1, mv6.v2 as v2, mv6.v3 as v3 from mv6 WITH 
 );
 
 statement ok
+CREATE SOURCE iceberg_demo_source WITH (
+    connector = 'iceberg',
+    warehouse.path = 's3://iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    s3.region = 'us-east-1',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    database.name='demo_db',
+    table.name='demo_table'
+}
+
+statement ok
 INSERT INTO t6 VALUES (1, 2, '1-2'), (2, 2, '2-2'), (3, 2, '3-2'), (5, 2, '5-2'), (8, 2, '8-2'), (13, 2, '13-2'), (21, 2, '21-2');
 
 statement ok
 FLUSH;
 
 sleep 5s
+
+query I
+select sum(record_count) from rw_iceberg_files where source_name = 'iceberg_demo_source';
+----
+7
 
 statement ok
 INSERT INTO t6 VALUES (1, 50, '1-50');
@@ -35,6 +54,9 @@ statement ok
 FLUSH;
 
 sleep 5s
+
+statement ok
+DROP SOURCE iceberg_demo_source;
 
 statement ok
 DROP SINK s6;
