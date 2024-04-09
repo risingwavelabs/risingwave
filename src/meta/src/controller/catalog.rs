@@ -46,8 +46,9 @@ use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
 use risingwave_pb::meta::{
-    FragmentParallelUnitMapping, PbFragmentWorkerMapping, PbRelation, PbRelationGroup,
+    PbFragmentWorkerMapping, PbRelation, PbRelationGroup,
 };
+use risingwave_pb::meta::FragmentParallelUnitMapping;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
 use risingwave_pb::user::PbUserInfo;

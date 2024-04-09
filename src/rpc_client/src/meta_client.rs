@@ -1140,25 +1140,26 @@ impl MetaClient {
     pub async fn list_serving_vnode_mappings(
         &self,
     ) -> Result<HashMap<u32, (u32, ParallelUnitMapping)>> {
-        let req = GetServingVnodeMappingsRequest {};
-        let resp = self.inner.get_serving_vnode_mappings(req).await?;
-        let mappings = resp
-            .mappings
-            .into_iter()
-            .map(|p| {
-                (
-                    p.fragment_id,
-                    (
-                        resp.fragment_to_table
-                            .get(&p.fragment_id)
-                            .cloned()
-                            .unwrap_or(0),
-                        ParallelUnitMapping::from_protobuf(p.mapping.as_ref().unwrap()),
-                    ),
-                )
-            })
-            .collect();
-        Ok(mappings)
+        todo!()
+        // let req = GetServingVnodeMappingsRequest {};
+        // let resp = self.inner.get_serving_vnode_mappings(req).await?;
+        // let mappings = resp
+        //     .mappings
+        //     .into_iter()
+        //     .map(|p| {
+        //         (
+        //             p.fragment_id,
+        //             (
+        //                 resp.fragment_to_table
+        //                     .get(&p.fragment_id)
+        //                     .cloned()
+        //                     .unwrap_or(0),
+        //                 ParallelUnitMapping::from_protobuf(p.mapping.as_ref().unwrap()),
+        //             ),
+        //         )
+        //     })
+        //     .collect();
+        // Ok(mappings)
     }
 
     pub async fn risectl_list_compaction_status(

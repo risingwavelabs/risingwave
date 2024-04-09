@@ -79,7 +79,7 @@ impl ServingService for ServingServiceImpl {
             }
         };
         Ok(Response::new(GetServingVnodeMappingsResponse {
-            mappings: vec![],
+//            mappings: vec![],
             fragment_to_table,
             worker_mappings: mappings,
         }))
