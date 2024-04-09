@@ -31,12 +31,11 @@ use risingwave_connector::source::{
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
+use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::{mpsc, Mutex};
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
-use crate::common::table::state_table::StateTable;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::*;
@@ -753,13 +752,11 @@ mod tests {
         ));
         let source_desc_builder =
             create_source_desc_builder(&schema, row_id_index, source_info, properties, vec![]);
-        let split_state_store = Arc::new(Mutex::new(
-            SourceStateTableHandler::from_table_catalog(
-                &default_source_internal_table(0x2333),
-                MemoryStateStore::new(),
-            )
-            .await,
-        ));
+        let split_state_store = SourceStateTableHandler::from_table_catalog(
+            &default_source_internal_table(0x2333),
+            MemoryStateStore::new(),
+        )
+        .await;
         let core = StreamSourceCore::<MemoryStateStore> {
             source_id: table_id,
             column_ids,
@@ -842,13 +839,11 @@ mod tests {
 
         let column_ids = vec![ColumnId::from(0)];
         let (barrier_tx, barrier_rx) = unbounded_channel::<Barrier>();
-        let split_state_store = Arc::new(Mutex::new(
-            SourceStateTableHandler::from_table_catalog(
-                &default_source_internal_table(0x2333),
-                mem_state_store.clone(),
-            )
-            .await,
-        ));
+        let split_state_store = SourceStateTableHandler::from_table_catalog(
+            &default_source_internal_table(0x2333),
+            mem_state_store.clone(),
+        )
+        .await;
 
         let core = StreamSourceCore::<MemoryStateStore> {
             source_id: table_id,

@@ -13,14 +13,11 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use risingwave_common::catalog::{ColumnId, TableId};
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
 use risingwave_storage::StateStore;
-use tokio::sync::Mutex;
 
 use super::SourceStateTableHandler;
 
