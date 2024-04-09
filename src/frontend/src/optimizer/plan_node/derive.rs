@@ -21,6 +21,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use super::PlanRef;
 use crate::error::{ErrorCode, Result};
+use crate::optimizer::plan_node::generic::PhysicalPlanRef;
 use crate::optimizer::property::Order;
 
 pub(crate) fn derive_columns(
@@ -116,6 +117,20 @@ pub(crate) fn derive_pk(
     }
 
     for &idx in &stream_key {
+        if in_order.contains(idx) {
+            continue;
+        }
+        pk.push(ColumnOrder::new(idx, OrderType::ascending()));
+        in_order.insert(idx);
+    }
+
+    // We need to ensure distribution key is part of pk.
+    // If it is not part of either stream_key or order_key,
+    // It must mean that it is only necessary for storage distribution.
+    // Such a case is rare, but it is possible,
+    // for example in the case of index created on singleton mv.
+    // In this case, we can simply append these columns to pk.
+    for &idx in input.distribution().dist_column_indices() {
         if in_order.contains(idx) {
             continue;
         }

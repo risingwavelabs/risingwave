@@ -63,7 +63,7 @@
     create materialized view v as select count(*) cnt from t1;
     explain (verbose) create index mv_idx on v(cnt);
   explain_output: |
-    StreamMaterialize { columns: [cnt], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [cnt], stream_key: [], pk_columns: [cnt], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(v.cnt) }
       └─StreamTableScan { table: v, columns: [v.cnt], stream_scan_type: ArrangementBackfill, stream_key: [], pk: [], dist: Single }
 - name: test functional dependency for order key pruning (index 2)
