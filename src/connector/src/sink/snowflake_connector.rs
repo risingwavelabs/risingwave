@@ -38,7 +38,7 @@ const SNOWFLAKE_HOST_ADDR: &str = "snowflakecomputing.com";
 const SNOWFLAKE_REQUEST_ID: &str = "RW_SNOWFLAKE_SINK";
 const S3_INTERMEDIATE_FILE_NAME: &str = "RW_SNOWFLAKE_S3_SINK_FILE";
 
-/// The helper function to generate the s3 file name
+/// The helper function to generate the *global unique* s3 file name.
 fn generate_s3_file_name(s3_path: Option<String>, suffix: String) -> String {
     match s3_path {
         Some(path) => format!("{}/{}_{}", path, S3_INTERMEDIATE_FILE_NAME, suffix),

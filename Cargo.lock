@@ -9586,7 +9586,7 @@ dependencies = [
  "itertools 0.12.1",
  "jni",
  "jsonschema-transpiler",
- "jsonwebtoken 9.2.0",
+ "jsonwebtoken 9.3.0",
  "madsim-rdkafka",
  "madsim-tokio",
  "madsim-tonic",
