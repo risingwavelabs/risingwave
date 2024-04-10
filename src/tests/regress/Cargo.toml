@@ -15,10 +15,18 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = { version = "1", features = ["backtrace"] }
-clap = { version = "4", features = ["derive"] }
+clap = { workspace = true }
 path-absolutize = "3.1"
 similar = "2"
-tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "process"] }
+tokio = { version = "0.2", package = "madsim-tokio", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+    "process",
+] }
 tracing = "0.1"
 tracing-subscriber = "0.3.17"
 
