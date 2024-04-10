@@ -1,10 +1,10 @@
 # Running Migrator CLI
 
-> **WARNING:** Migration files are used to define schema changes for the database. Each migration file contains an up and down function, 
+> **WARNING:** Migration files are used to define schema changes for the database. Each migration file contains an up and down function,
 > which are used to define upgrade and downgrade operations for the schema.
 >
-> When you need to make schema changes to the system catalog, you need to generate a new migration file and then apply it to the database. 
-> Note that each migration file can only be applied once and will be recorded in a system table, so for new schema changes, you need to 
+> When you need to make schema changes to the system catalog, you need to generate a new migration file and then apply it to the database.
+> Note that each migration file can only be applied once and will be recorded in a system table, so for new schema changes, you need to
 > generate a new migration file. Unless you are sure the modification of the migration file has not been included in any released version yet,
 > **DO NOT** modify already published migration files.
 
