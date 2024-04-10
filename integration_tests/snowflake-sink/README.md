@@ -21,11 +21,11 @@ note: the required credentials including the following, i.e.,
 
 users will then need to setup the snowflake, which includes, i.e.,
 - generate the key-value pair for later authentication
-- create a role and grant the appropriate permission
+- create a `role` and grant the appropriate permission
 - setup the credential for the user (e.g., `RSA_PUBLIC_KEY`), and retrieve the `snowflake.rsa_public_key_fp` which will later be used in risingwave
-- create a table to store the sink data from risingwave
-- create a stage to refer the external s3 bucket, which will be used internally by snowflake to load the corresponding data
-- create a pipe to actual receive loaded data from the pre-defined stage and copy the data to the snowflake table.
+- create a `table` to store the sink data from risingwave
+- create a `stage` to refer the external s3 bucket, which will be used internally by snowflake to load the corresponding data
+- create a `pipe` to actual receive loaded data from the pre-defined stage and copy the data to the snowflake table.
 
 ps.
 1. this assumes the users have already created their accounts and the corresponding databases in snowflake.
