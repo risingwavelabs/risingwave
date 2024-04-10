@@ -1,6 +1,6 @@
 import json
 
-from flask import Flask, Response
+from flask import Flask, Response, stream_with_context
 
 app = Flask(__name__)
 def format_sse(data: str | None, event=None) -> str:
@@ -20,6 +20,8 @@ def home():
 
 @app.route('/graphql/stream',  methods=['POST'])
 def stream():
+    
+    @stream_with_context
     def eventStream():
         messages = ["Hi", "Bonjour", "Hola", "Ciao", "Zdravo"]
         for msg in messages:
@@ -35,5 +37,7 @@ def stream():
 
 if __name__ == '__main__':
     from waitress import serve
+    from werkzeug.serving import WSGIRequestHandler
+    WSGIRequestHandler.protocol_version = "HTTP/1.1"
     serve(app, host="127.0.0.1", port=4200)
     print("Server stopped.")
