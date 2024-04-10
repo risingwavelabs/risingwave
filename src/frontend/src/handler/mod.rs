@@ -311,6 +311,7 @@ pub async fn handle(
             source_watermarks,
             append_only,
             on_conflict,
+            with_version_column,
             cdc_table_info,
             include_column_options,
         } => {
@@ -329,6 +330,7 @@ pub async fn handle(
                     columns,
                     append_only,
                     on_conflict,
+                    with_version_column,
                 )
                 .await;
             }
@@ -344,6 +346,7 @@ pub async fn handle(
                 source_watermarks,
                 append_only,
                 on_conflict,
+                with_version_column,
                 cdc_table_info,
                 include_column_options,
             )
