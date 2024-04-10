@@ -10,7 +10,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 MigrationTable::alter()
                     .table(Table::Table)
-                    .add_column(ColumnDef::new(Table::VersionColumnIndex).string())
+                    .add_column(ColumnDef::new(Table::VersionColumnIndex).integer())
                     .to_owned(),
             )
             .await?;
