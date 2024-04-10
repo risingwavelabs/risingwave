@@ -46,7 +46,6 @@ pub fn place_vnode(
         .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
         .sorted_by_key(|w| w.id)
         .map(|w| (0..w.parallel_units.len()).map(|idx| WorkerSlot(w.id, idx)))
-        //.map(|w| w.parallel_units.clone().into_iter().sorted_by_key(|p| p.id))
         .collect();
 
     // Set serving parallelism to the minimum of total number of parallel units, specified
