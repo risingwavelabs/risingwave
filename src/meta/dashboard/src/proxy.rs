@@ -16,14 +16,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use anyhow::anyhow;
-use axum::body::Body;
-use axum::http::StatusCode;
+use axum::http::{header, HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::Router;
 use bytes::Bytes;
-use hyper::header::CONTENT_TYPE;
-use hyper::service::service_fn;
-use hyper::{HeaderMap, Request};
 use thiserror_ext::AsReport as _;
 use url::Url;
 
@@ -39,21 +35,21 @@ impl IntoResponse for CachedResponse {
     fn into_response(self) -> Response {
         let guess = mime_guess::from_path(self.uri.path());
         let mut headers = HeaderMap::new();
-        if let Some(x) = self.headers.get(hyper::header::ETAG) {
-            headers.insert(hyper::header::ETAG, x.clone());
+        if let Some(x) = self.headers.get(header::ETAG) {
+            headers.insert(header::ETAG, x.clone());
         }
-        if let Some(x) = self.headers.get(hyper::header::CACHE_CONTROL) {
-            headers.insert(hyper::header::CACHE_CONTROL, x.clone());
+        if let Some(x) = self.headers.get(header::CACHE_CONTROL) {
+            headers.insert(header::CACHE_CONTROL, x.clone());
         }
-        if let Some(x) = self.headers.get(hyper::header::EXPIRES) {
-            headers.insert(hyper::header::EXPIRES, x.clone());
+        if let Some(x) = self.headers.get(header::EXPIRES) {
+            headers.insert(header::EXPIRES, x.clone());
         }
         if let Some(x) = guess.first() {
             if x.type_() == "image" && x.subtype() == "svg" {
-                headers.insert(CONTENT_TYPE, "image/svg+xml".parse().unwrap());
+                headers.insert(header::CONTENT_TYPE, "image/svg+xml".parse().unwrap());
             } else {
                 headers.insert(
-                    CONTENT_TYPE,
+                    header::CONTENT_TYPE,
                     format!("{}/{}", x.type_(), x.subtype()).parse().unwrap(),
                 );
             }
@@ -63,10 +59,10 @@ impl IntoResponse for CachedResponse {
 }
 
 async fn proxy(
-    req: Request<Body>,
+    uri: Uri,
     cache: Arc<Mutex<HashMap<String, CachedResponse>>>,
 ) -> anyhow::Result<Response> {
-    let mut path = req.uri().path().to_string();
+    let mut path = uri.path().to_string();
     if path.ends_with('/') {
         path += "index.html";
     }
@@ -104,16 +100,15 @@ async fn proxy(
 pub(crate) fn router() -> Router {
     let cache = Arc::new(Mutex::new(HashMap::new()));
 
-    Router::new().fallback_service(service_fn(move |req: Request<Body>| {
-        let cache = cache.clone();
-        async move {
-            proxy(req, cache).await.or_else(|err| {
-                Ok((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    err.context("Unhandled internal error").to_report_string(),
-                )
-                    .into_response())
-            })
-        }
-    }))
+    let handler = |uri| async move {
+        proxy(uri, cache.clone()).await.unwrap_or_else(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                err.context("Unhandled internal error").to_report_string(),
+            )
+                .into_response()
+        })
+    };
+
+    Router::new().fallback(handler)
 }

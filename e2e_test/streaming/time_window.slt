@@ -13,6 +13,9 @@ insert into t1 values
     (8, 3, 8, '2022-01-01 11:02:00');
 
 statement ok
+flush;
+
+statement ok
 create materialized view mv_tumble as
 select * from tumble(t1, created_at, interval '30' minute);
 
@@ -43,9 +46,6 @@ create materialized view mv_hop_agg_2 as
 select uid, sum(v) as sum_v, window_start
 from hop(t1, created_at, interval '15' minute, interval '30' minute)
 group by window_start, uid;
-
-statement ok
-flush;
 
 query IITTT
 select row_id, uid, created_at, window_start, window_end

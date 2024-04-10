@@ -687,7 +687,7 @@ impl NatsCommon {
 
 pub(crate) fn load_certs(
     certificates: &str,
-) -> ConnectorResult<Vec<tokio_rustls::rustls::Certificate>> {
+) -> ConnectorResult<Vec<rustls_pki_types::CertificateDer<'static>>> {
     let cert_bytes = if let Some(path) = certificates.strip_prefix("fs://") {
         std::fs::read_to_string(path).map(|cert| cert.as_bytes().to_owned())?
     } else {
@@ -695,13 +695,13 @@ pub(crate) fn load_certs(
     };
 
     rustls_pemfile::certs(&mut cert_bytes.as_slice())
-        .map(|cert| Ok(tokio_rustls::rustls::Certificate(cert?.to_vec())))
+        .map(|cert| Ok(cert?))
         .collect()
 }
 
 pub(crate) fn load_private_key(
     certificate: &str,
-) -> ConnectorResult<tokio_rustls::rustls::PrivateKey> {
+) -> ConnectorResult<rustls_pki_types::PrivateKeyDer<'static>> {
     let cert_bytes = if let Some(path) = certificate.strip_prefix("fs://") {
         std::fs::read_to_string(path).map(|cert| cert.as_bytes().to_owned())?
     } else {
@@ -711,7 +711,5 @@ pub(crate) fn load_private_key(
     let cert = rustls_pemfile::pkcs8_private_keys(&mut cert_bytes.as_slice())
         .next()
         .ok_or_else(|| anyhow!("No private key found"))?;
-    Ok(tokio_rustls::rustls::PrivateKey(
-        cert?.secret_pkcs8_der().to_vec(),
-    ))
+    Ok(cert?.into())
 }

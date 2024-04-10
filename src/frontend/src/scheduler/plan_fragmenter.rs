@@ -24,6 +24,8 @@ use enum_as_inner::EnumAsInner;
 use futures::TryStreamExt;
 use itertools::Itertools;
 use pgwire::pg_server::SessionId;
+use risingwave_batch::error::BatchError;
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableDesc;
@@ -55,7 +57,6 @@ use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
 use crate::optimizer::plan_node::{BatchSource, PlanNodeId, PlanNodeType};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
-use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::SchedulerResult;
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
@@ -341,7 +342,11 @@ impl SourceScanInfo {
                     }
                     Some(AsOf::TimestampString(ts)) => Some(
                         speedate::DateTime::parse_str_rfc3339(&ts)
-                            .map(|t| IcebergTimeTravelInfo::TimestampMs(t.timestamp_tz() * 1000))
+                            .map(|t| {
+                                IcebergTimeTravelInfo::TimestampMs(
+                                    t.timestamp_tz() * 1000 + t.time.microsecond as i64 / 1000,
+                                )
+                            })
                             .map_err(|_e| anyhow!("fail to parse timestamp"))?,
                     ),
                     Some(AsOf::ProcessTime) => unreachable!(),
@@ -898,7 +903,7 @@ impl BatchPlanFragmenter {
             }
         };
         if source_info.is_none() && parallelism == 0 {
-            return Err(SchedulerError::EmptyWorkerNodes);
+            return Err(BatchError::EmptyWorkerNodes.into());
         }
         let parallelism = if parallelism == 0 {
             None

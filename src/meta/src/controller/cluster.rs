@@ -108,11 +108,8 @@ impl From<WorkerInfo> for PbWorkerNode {
 
 impl ClusterController {
     pub async fn new(env: MetaSrvEnv, max_heartbeat_interval: Duration) -> MetaResult<Self> {
-        let meta_store = env
-            .sql_meta_store()
-            .expect("sql meta store is not initialized");
         let inner = ClusterControllerInner::new(
-            meta_store.conn,
+            env.meta_store().as_sql().conn.clone(),
             env.opts.disable_automatic_parallelism_control,
         )
         .await?;
@@ -950,7 +947,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cluster_controller() -> MetaResult<()> {
-        let env = MetaSrvEnv::for_test().await;
+        let env = MetaSrvEnv::for_test_with_sql_meta_store().await;
         let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
 
         let parallelism_num = 4_usize;
@@ -1038,7 +1035,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_schedulability() -> MetaResult<()> {
-        let env = MetaSrvEnv::for_test().await;
+        let env = MetaSrvEnv::for_test_with_sql_meta_store().await;
         let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
 
         let host = HostAddress {

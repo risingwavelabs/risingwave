@@ -69,7 +69,7 @@ pub struct ValueMeta {
 /// After creating the iterator instance,
 /// - if you want to iterate from the beginning, you need to then call its `rewind` method.
 /// - if you want to iterate from some specific position, you need to then call its `seek` method.
-pub trait HummockIterator: Send + Sync {
+pub trait HummockIterator: Send {
     type Direction: HummockIteratorDirection;
     /// Moves a valid iterator to the next key.
     ///

@@ -17,6 +17,7 @@ pub use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 
 pub mod cache;
 mod column_mapping;
+pub mod compact_chunk;
 pub mod log_store_impl;
 pub mod metrics;
 pub mod table;

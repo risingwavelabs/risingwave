@@ -38,11 +38,11 @@ echo "--- Generate RiseDev CI config"
 cp ci/risedev-components.ci.env risedev-components.user.env
 
 echo "--- Prepare RiseDev dev cluster"
-cargo make pre-start-dev
-cargo make --allow-private link-all-in-one-binaries
+risedev pre-start-dev
+risedev --allow-private link-all-in-one-binaries
 
 echo "--- starting risingwave cluster with connector node"
-cargo make ci-start ci-1cn-1fe
+risedev ci-start ci-1cn-1fe
 
 echo "--- Run test"
 python3 -m pip install psycopg2-binary
@@ -50,4 +50,4 @@ python3 e2e_test/source/pulsar/astra-streaming.py
 # python3 e2e_test/source/pulsar/streamnative-cloud.py
 
 echo "--- Kill cluster"
-cargo make ci-kill
+risedev ci-kill
