@@ -6,6 +6,7 @@ mod m20230908_072257_init;
 mod m20231008_020431_hummock;
 mod m20240304_074901_subscription;
 mod m20240322_214331_session_params;
+mod m20240410_082733_with_version_column_migration;
 
 pub struct Migrator;
 
@@ -17,6 +18,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20231008_020431_hummock::Migration),
             Box::new(m20240304_074901_subscription::Migration),
             Box::new(m20240322_214331_session_params::Migration),
+            Box::new(m20240410_082733_with_version_column_migration::Migration),
         ]
     }
 }
