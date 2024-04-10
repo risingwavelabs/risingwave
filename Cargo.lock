@@ -10037,7 +10037,6 @@ dependencies = [
  "thiserror-ext",
  "tokio-retry",
  "tracing",
- "url",
 ]
 
 [[package]]
