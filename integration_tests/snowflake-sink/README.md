@@ -38,8 +38,8 @@ an example for snowflake setup commands could be checked at `snowflake_prep.sql`
 
 launch your risingwave cluster, and execute the following sql commands respectively.
 
-- create_source.sql
-- create_mv.sql
-- create_sink.sql
+- `create_source.sql`
+- `create_mv.sql`
+- `create_sink.sql`
 
 note: the column name(s) in your materialized view should be exactly the same as the ones in your pre-defined snowflake table, due to what we specified for snowflake pipe previously in `snowflake_prep.sql`.
