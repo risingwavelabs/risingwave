@@ -64,6 +64,7 @@ function buildDependencyAsEdges(
 
 export default function StreamingGraph() {
   const { response: relationList } = useFetch(getRelations)
+  // Since dependentRelations will be deprecated, we need to use getRelationDependencies here to separately obtain the dependency relationship.
   const { response: relationDeps } = useFetch(getRelationDependencies)
   const [selectedId, setSelectedId] = useQueryState("id", parseAsInteger)
 
