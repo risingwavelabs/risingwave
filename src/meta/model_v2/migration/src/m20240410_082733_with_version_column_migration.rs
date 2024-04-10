@@ -9,8 +9,8 @@ impl MigrationTrait for Migration {
         manager
             .alter_table(
                 MigrationTable::alter()
-                    .table(VersionColumn::Table)
-                    .add_column(ColumnDef::new(VersionColumn::VersionColumnIndex).string())
+                    .table(Table::Table)
+                    .add_column(ColumnDef::new(Table::VersionColumnIndex).string())
                     .to_owned(),
             )
             .await?;
@@ -22,8 +22,8 @@ impl MigrationTrait for Migration {
         manager
             .alter_table(
                 MigrationTable::alter()
-                    .table(VersionColumn::Table)
-                    .drop_column(Alias::new(VersionColumn::VersionColumnIndex.to_string()))
+                    .table(Table::Table)
+                    .drop_column(Alias::new(Table::VersionColumnIndex.to_string()))
                     .to_owned(),
             )
             .await?;
@@ -32,7 +32,7 @@ impl MigrationTrait for Migration {
 }
 
 #[derive(DeriveIden)]
-enum VersionColumn {
+enum Table {
     Table,
     VersionColumnIndex,
 }

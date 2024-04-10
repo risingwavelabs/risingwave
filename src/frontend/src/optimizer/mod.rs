@@ -731,7 +731,9 @@ impl PlanRoot {
             },
         };
 
-        if let ConflictBehavior::IgnoreConflict = conflict_behavior && version_column_index.is_some() {
+        if let ConflictBehavior::IgnoreConflict = conflict_behavior
+            && version_column_index.is_some()
+        {
             Err(ErrorCode::InvalidParameterValue(
                 "The with version column syntax cannot be used with the ignore behavior of on conflict".to_string(),
             ))?
