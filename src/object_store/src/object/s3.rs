@@ -25,7 +25,7 @@ use aws_sdk_s3::operation::get_object::builders::GetObjectFluentBuilder;
 use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_sdk_s3::operation::list_objects_v2::ListObjectsV2Error;
 use aws_sdk_s3::operation::upload_part::UploadPartOutput;
-use aws_sdk_s3::primitives::{ByteStream, ByteStreamError};
+use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{
     AbortIncompleteMultipartUpload, BucketLifecycleConfiguration, CompletedMultipartUpload,
     CompletedPart, Delete, ExpirationStatus, LifecycleRule, LifecycleRuleFilter, ObjectIdentifier,
@@ -38,18 +38,16 @@ use aws_smithy_runtime_api::client::result::SdkError;
 use aws_smithy_types::body::SdkBody;
 use aws_smithy_types::error::metadata::ProvideErrorMetadata;
 use aws_smithy_types::retry::RetryConfig;
-use either::Either;
 use fail::fail_point;
 use futures::future::{try_join_all, BoxFuture, FutureExt};
 use futures::{stream, Stream, StreamExt, TryStreamExt};
 use hyper::Body;
 use itertools::Itertools;
-use risingwave_common::config::{ObjectStoreConfig, S3ObjectStoreConfig};
+use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::monitor::connection::monitor_connector;
 use risingwave_common::range::RangeBoundsExt;
 use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
-use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
 use super::object_metrics::ObjectStoreMetrics;
 use super::{
@@ -356,37 +354,23 @@ impl ObjectStore for S3ObjectStore {
             "s3 read error"
         )));
 
-        // retry if occurs AWS EC2 HTTP timeout error.
-        let val = tokio_retry::RetryIf::spawn(
-            self.get_retry_strategy(),
-            || async {
-                match self.obj_store_request(path, range.clone()).send().await {
-                    Ok(resp) => {
-                        let val = resp
-                            .body
-                            .collect()
-                            .await
-                            .map_err(either::Right)?
-                            .into_bytes();
-                        Ok(val)
-                    }
-                    Err(err) => {
-                        if let SdkError::DispatchFailure(e) = &err
-                            && e.is_timeout()
-                        {
-                            self.metrics
-                                .request_retry_count
-                                .with_label_values(&["read"])
-                                .inc();
-                        }
-
-                        Err(either::Left(err))
-                    }
+        let val = match self.obj_store_request(path, range.clone()).send().await {
+            Ok(resp) => {
+                let val = resp.body.collect().await?.into_bytes();
+                val
+            }
+            Err(sdk_err) => {
+                if let SdkError::DispatchFailure(e) = &sdk_err
+                    && e.is_timeout()
+                {
+                    self.metrics
+                        .request_retry_count
+                        .with_label_values(&["read"])
+                        .inc();
                 }
-            },
-            RetryCondition::new(&self.config.s3),
-        )
-        .await?;
+                return Err(self.sdk_error_transfer(sdk_err));
+            }
+        };
 
         if let Some(len) = range.len()
             && len != val.len()
@@ -432,33 +416,26 @@ impl ObjectStore for S3ObjectStore {
         path: &str,
         range: Range<usize>,
     ) -> ObjectResult<ObjectDataStream> {
-        fail_point!("s3_streaming_read_err", |_| Err(ObjectError::internal(
-            "s3 streaming read error"
-        )));
+        fail_point!("s3_streaming_read_init_err", |_| Err(
+            ObjectError::internal("s3 streaming read init error")
+        ));
 
-        // retry if occurs AWS EC2 HTTP timeout error.
-        let resp = tokio_retry::RetryIf::spawn(
-            self.get_retry_strategy(),
-            || async {
-                match self.obj_store_request(path, range.clone()).send().await {
-                    Ok(resp) => Ok(resp),
-                    Err(err) => {
-                        if let SdkError::DispatchFailure(e) = &err
-                            && e.is_timeout()
-                        {
-                            self.metrics
-                                .request_retry_count
-                                .with_label_values(&["streaming_read"])
-                                .inc();
-                        }
-
-                        Err(either::Left(err))
-                    }
+        let resp = match self.obj_store_request(path, range.clone()).send().await {
+            Ok(resp) => resp,
+            Err(sdk_err) => {
+                if let SdkError::DispatchFailure(e) = &sdk_err
+                    && e.is_timeout()
+                {
+                    self.metrics
+                        .request_retry_count
+                        .with_label_values(&["streaming_read_init"])
+                        .inc();
                 }
-            },
-            RetryCondition::new(&self.config.s3),
-        )
-        .await?;
+
+                return Err(self.sdk_error_transfer(sdk_err));
+            }
+        };
+
         let reader = FuturesStreamCompatByteStream::new(resp.body);
 
         Ok(Box::pin(
@@ -839,14 +816,54 @@ impl S3ObjectStore {
         is_expiration_configured
     }
 
-    #[inline(always)]
-    fn get_retry_strategy(&self) -> impl Iterator<Item = Duration> {
-        ExponentialBackoff::from_millis(self.config.s3.object_store_req_retry_interval_ms)
-            .max_delay(Duration::from_millis(
-                self.config.s3.object_store_req_retry_max_delay_ms,
-            ))
-            .take(self.config.s3.object_store_req_retry_max_attempts)
-            .map(jitter)
+    fn sdk_error_transfer(
+        &self,
+        sdk_err: SdkError<GetObjectError, aws_smithy_runtime_api::http::Response<SdkBody>>,
+    ) -> ObjectError {
+        let should_retry = match &sdk_err {
+            SdkError::DispatchFailure(e) => {
+                if e.is_timeout() {
+                    tracing::warn!(target: "http_timeout_retry", "{e:?} occurs, retry S3 get_object request.");
+                    true
+                } else {
+                    false
+                }
+            }
+            SdkError::ServiceError(e) => match e.err().code() {
+                None => {
+                    if self
+                        .config
+                        .s3
+                        .developer
+                        .object_store_retry_unknown_service_error
+                        || self.config.s3.retry_unknown_service_error
+                    {
+                        tracing::warn!(target: "unknown_service_error", "{e:?} occurs, retry S3 get_object request.");
+                        true
+                    } else {
+                        false
+                    }
+                }
+                Some(code) => {
+                    if self
+                        .config
+                        .s3
+                        .developer
+                        .object_store_retryable_service_error_codes
+                        .iter()
+                        .any(|s| s.as_str().eq_ignore_ascii_case(code))
+                    {
+                        tracing::warn!(target: "retryable_service_error", "{e:?} occurs, retry S3 get_object request.");
+                        true
+                    } else {
+                        false
+                    }
+                }
+            },
+            _ => false,
+        };
+
+        ObjectError::s3(sdk_err, should_retry)
     }
 }
 
@@ -940,79 +957,6 @@ impl Stream for S3ObjectIter {
         };
         self.send_future = Some(Box::pin(f));
         self.poll_next(cx)
-    }
-}
-
-type RetryError = Either<
-    SdkError<GetObjectError, aws_smithy_runtime_api::http::Response<SdkBody>>,
-    ByteStreamError,
->;
-
-impl From<RetryError> for ObjectError {
-    fn from(e: RetryError) -> Self {
-        match e {
-            Either::Left(e) => e.into(),
-            Either::Right(e) => e.into(),
-        }
-    }
-}
-
-struct RetryCondition {
-    retry_unknown_service_error: bool,
-    retryable_service_error_codes: Vec<String>,
-}
-
-impl RetryCondition {
-    fn new(config: &S3ObjectStoreConfig) -> Self {
-        Self {
-            retry_unknown_service_error: config.developer.object_store_retry_unknown_service_error
-                || config.retry_unknown_service_error,
-            retryable_service_error_codes: config
-                .developer
-                .object_store_retryable_service_error_codes
-                .clone(),
-        }
-    }
-}
-
-impl tokio_retry::Condition<RetryError> for RetryCondition {
-    fn should_retry(&mut self, err: &RetryError) -> bool {
-        match err {
-            Either::Left(err) => match err {
-                SdkError::DispatchFailure(e) => {
-                    if e.is_timeout() {
-                        tracing::warn!(target: "http_timeout_retry", "{e:?} occurs, retry S3 get_object request.");
-                        return true;
-                    }
-                }
-                SdkError::ServiceError(e) => match e.err().code() {
-                    None => {
-                        if self.retry_unknown_service_error {
-                            tracing::warn!(target: "unknown_service_error", "{e:?} occurs, retry S3 get_object request.");
-                            return true;
-                        }
-                    }
-                    Some(code) => {
-                        if self
-                            .retryable_service_error_codes
-                            .iter()
-                            .any(|s| s.as_str().eq_ignore_ascii_case(code))
-                        {
-                            tracing::warn!(target: "retryable_service_error", "{e:?} occurs, retry S3 get_object request.");
-                            return true;
-                        }
-                    }
-                },
-                _ => {}
-            },
-            Either::Right(_) => {
-                // Unfortunately `ErrorKind` of `ByteStreamError` is not accessible.
-                // Always returns true and relies on req_retry_max_attempts to avoid infinite loop.
-                return true;
-            }
-        }
-
-        false
     }
 }
 

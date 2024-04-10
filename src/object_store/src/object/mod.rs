@@ -1020,14 +1020,7 @@ pub async fn build_remote_object_store(
 }
 
 #[inline(always)]
-fn get_retry_strategy(
-    // base_ms: u64,
-    // max_delay_ms: u64,
-    // factor: u64,
-    // retry_times: usize,
-    // enable_jitter: bool,
-    config: &ObjectStoreConfig,
-) -> impl Iterator<Item = Duration> {
+fn get_retry_strategy(config: &ObjectStoreConfig) -> impl Iterator<Item = Duration> {
     ExponentialBackoff::from_millis(config.s3.object_store_req_retry_interval_ms)
         .max_delay(Duration::from_millis(
             config.s3.object_store_req_retry_max_delay_ms,
@@ -1038,8 +1031,8 @@ fn get_retry_strategy(
 }
 
 #[inline(always)]
-fn should_retry(_err: &ObjectError) -> bool {
-    true
+fn should_retry(err: &ObjectError) -> bool {
+    err.is_object_error_should_retry()
 }
 
 pub type ObjectMetadataIter = BoxStream<'static, ObjectResult<ObjectMetadata>>;
