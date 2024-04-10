@@ -780,8 +780,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetDecimalVa
             Decimal::Normalized(_) => {}
         };
 
-        let value = decimal_value
-            .to_string();
+        let value = decimal_value.to_string();
         let string_value = env.new_string(value)?;
         let (decimal_class_ref, constructor) = pointer
             .as_ref()
