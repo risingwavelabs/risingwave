@@ -42,6 +42,7 @@ mod prefix;
 pub use error::*;
 use object_metrics::ObjectStoreMetrics;
 use thiserror_ext::AsReport;
+use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
 #[cfg(madsim)]
 use self::sim::SimObjectStore;
@@ -491,6 +492,8 @@ pub struct MonitoredObjectStore<OS: ObjectStore> {
     streaming_upload_timeout: Option<Duration>,
     read_timeout: Option<Duration>,
     upload_timeout: Option<Duration>,
+
+    config: Arc<ObjectStoreConfig>,
 }
 
 /// Manually dispatch trait methods.
@@ -526,6 +529,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             read_timeout: Some(Duration::from_millis(config.object_store_read_timeout_ms)),
             upload_timeout: Some(Duration::from_millis(config.object_store_upload_timeout_ms)),
             inner: store,
+            config: Arc::new(config),
         }
     }
 
@@ -555,43 +559,68 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
-        let future = async {
-            self.inner
-                .upload(path, obj)
-                .verbose_instrument_await("object_store_upload")
-                .await
-        };
-        let res = match self.upload_timeout.as_ref() {
-            None => future.await,
-            Some(timeout) => tokio::time::timeout(*timeout, future)
-                .await
-                .unwrap_or_else(|_| Err(ObjectError::internal("upload timeout"))),
-        };
+
+        let backoff = get_retry_strategy(&self.config);
+        let res = tokio_retry::RetryIf::spawn(
+            backoff,
+            || async {
+                let future = async {
+                    self.inner
+                        .upload(path, obj.clone())
+                        .verbose_instrument_await("object_store_upload")
+                        .await
+                };
+                let res = match self.upload_timeout.as_ref() {
+                    None => future.await,
+                    Some(timeout) => tokio::time::timeout(*timeout, future)
+                        .await
+                        .unwrap_or_else(|_| Err(ObjectError::internal("upload timeout"))),
+                };
+
+                res
+            },
+            should_retry,
+        )
+        .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
         res
     }
 
     pub async fn streaming_upload(&self, path: &str) -> ObjectResult<MonitoredStreamingUploader> {
-        let operation_type = "streaming_upload_start";
+        let operation_type = "streaming_upload_init";
         let media_type = self.media_type();
         let _timer = self
             .object_store_metrics
             .operation_latency
             .with_label_values(&[media_type, operation_type])
             .start_timer();
-        let future = async {
-            self.inner
-                .streaming_upload(path)
-                .verbose_instrument_await("object_store_streaming_upload")
-                .await
-        };
-        let res = match self.streaming_upload_timeout.as_ref() {
-            None => future.await,
-            Some(timeout) => tokio::time::timeout(*timeout, future)
-                .await
-                .unwrap_or_else(|_| Err(ObjectError::internal("streaming_upload init timeout"))),
-        };
+
+        let backoff = get_retry_strategy(&self.config);
+        let res = tokio_retry::RetryIf::spawn(
+            backoff,
+            || async {
+                let future = async {
+                    self.inner
+                        .streaming_upload(path)
+                        .verbose_instrument_await("object_store_streaming_upload_init")
+                        .await
+                };
+                let res =
+                    match self.streaming_upload_timeout.as_ref() {
+                        None => future.await,
+                        Some(timeout) => tokio::time::timeout(*timeout, future)
+                            .await
+                            .unwrap_or_else(|_| {
+                                Err(ObjectError::internal("streaming_upload init timeout"))
+                            }),
+                    };
+
+                res
+            },
+            should_retry,
+        )
+        .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
         Ok(MonitoredStreamingUploader::new(
@@ -609,18 +638,29 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
-        let future = async {
-            self.inner
-                .read(path, range)
-                .verbose_instrument_await("object_store_read")
-                .await
-        };
-        let res = match self.read_timeout.as_ref() {
-            None => future.await,
-            Some(read_timeout) => tokio::time::timeout(*read_timeout, future)
-                .await
-                .unwrap_or_else(|_| Err(ObjectError::internal("read timeout"))),
-        };
+
+        let backoff = get_retry_strategy(&self.config);
+        let res = tokio_retry::RetryIf::spawn(
+            backoff,
+            || async {
+                let future = async {
+                    self.inner
+                        .read(path, range.clone())
+                        .verbose_instrument_await("object_store_read")
+                        .await
+                };
+                let res = match self.read_timeout.as_ref() {
+                    None => future.await,
+                    Some(timeout) => tokio::time::timeout(*timeout, future)
+                        .await
+                        .unwrap_or_else(|_| Err(ObjectError::internal("read timeout"))),
+                };
+
+                res
+            },
+            should_retry,
+        )
+        .await;
 
         if let Err(e) = &res
             && e.is_object_not_found_error()
@@ -658,18 +698,35 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&[media_type, operation_type])
             .start_timer();
-        let future = self
-            .inner
-            .streaming_read(path, range)
-            .verbose_instrument_await("object_store_streaming_read");
-        let res = match self.streaming_read_timeout.as_ref() {
-            None => future.await,
-            Some(timeout) => tokio::time::timeout(*timeout, future)
-                .await
-                .unwrap_or_else(|_| Err(ObjectError::internal("streaming_read init timeout"))),
-        };
+
+        let backoff = get_retry_strategy(&self.config);
+        let res = tokio_retry::RetryIf::spawn(
+            backoff,
+            || async {
+                let future = async {
+                    self.inner
+                        .streaming_read(path, range.clone())
+                        .verbose_instrument_await("object_store_streaming_read_init")
+                        .await
+                };
+                let res =
+                    match self.streaming_read_timeout.as_ref() {
+                        None => future.await,
+                        Some(timeout) => tokio::time::timeout(*timeout, future)
+                            .await
+                            .unwrap_or_else(|_| {
+                                Err(ObjectError::internal("streaming_read init timeout"))
+                            }),
+                    };
+
+                res
+            },
+            should_retry,
+        )
+        .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+
         Ok(MonitoredStreamingReader::new(
             media_type,
             res?,
@@ -686,18 +743,28 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
 
-        let future = async {
-            self.inner
-                .metadata(path)
-                .verbose_instrument_await("object_store_metadata")
-                .await
-        };
-        let res = match self.read_timeout.as_ref() {
-            None => future.await,
-            Some(timeout) => tokio::time::timeout(*timeout, future)
-                .await
-                .unwrap_or_else(|_| Err(ObjectError::internal("metadata timeout"))),
-        };
+        let backoff = get_retry_strategy(&self.config);
+        let res = tokio_retry::RetryIf::spawn(
+            backoff,
+            || async {
+                let future = async {
+                    self.inner
+                        .metadata(path)
+                        .verbose_instrument_await("object_store_metadata")
+                        .await
+                };
+                let res = match self.read_timeout.as_ref() {
+                    None => future.await,
+                    Some(timeout) => tokio::time::timeout(*timeout, future)
+                        .await
+                        .unwrap_or_else(|_| Err(ObjectError::internal("metadata timeout"))),
+                };
+
+                res
+            },
+            should_retry,
+        )
+        .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
         res
@@ -711,18 +778,28 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
 
-        let future = async {
-            self.inner
-                .delete(path)
-                .verbose_instrument_await("object_store_delete")
-                .await
-        };
-        let res = match self.read_timeout.as_ref() {
-            None => future.await,
-            Some(timeout) => tokio::time::timeout(*timeout, future)
-                .await
-                .unwrap_or_else(|_| Err(ObjectError::internal("delete timeout"))),
-        };
+        let backoff = get_retry_strategy(&self.config);
+        let res = tokio_retry::RetryIf::spawn(
+            backoff,
+            || async {
+                let future = async {
+                    self.inner
+                        .delete(path)
+                        .verbose_instrument_await("object_store_delete")
+                        .await
+                };
+                let res = match self.read_timeout.as_ref() {
+                    None => future.await,
+                    Some(timeout) => tokio::time::timeout(*timeout, future)
+                        .await
+                        .unwrap_or_else(|_| Err(ObjectError::internal("delete timeout"))),
+                };
+
+                res
+            },
+            should_retry,
+        )
+        .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
         res
@@ -736,18 +813,28 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
 
-        let future = async {
-            self.inner
-                .delete_objects(paths)
-                .verbose_instrument_await("object_store_delete_objects")
-                .await
-        };
-        let res = match self.read_timeout.as_ref() {
-            None => future.await,
-            Some(timeout) => tokio::time::timeout(*timeout, future)
-                .await
-                .unwrap_or_else(|_| Err(ObjectError::internal("delete_objects timeout"))),
-        };
+        let backoff = get_retry_strategy(&self.config);
+        let res = tokio_retry::RetryIf::spawn(
+            backoff,
+            || async {
+                let future = async {
+                    self.inner
+                        .delete_objects(paths)
+                        .verbose_instrument_await("object_store_delete_objects")
+                        .await
+                };
+                let res = match self.read_timeout.as_ref() {
+                    None => future.await,
+                    Some(timeout) => tokio::time::timeout(*timeout, future)
+                        .await
+                        .unwrap_or_else(|_| Err(ObjectError::internal("delete_objects timeout"))),
+                };
+
+                res
+            },
+            should_retry,
+        )
+        .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
         res
@@ -761,18 +848,28 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
 
-        let future = async {
-            self.inner
-                .list(prefix)
-                .verbose_instrument_await("object_store_list")
-                .await
-        };
-        let res = match self.read_timeout.as_ref() {
-            None => future.await,
-            Some(timeout) => tokio::time::timeout(*timeout, future)
-                .await
-                .unwrap_or_else(|_| Err(ObjectError::internal("list timeout"))),
-        };
+        let backoff = get_retry_strategy(&self.config);
+        let res = tokio_retry::RetryIf::spawn(
+            backoff,
+            || async {
+                let future = async {
+                    self.inner
+                        .list(prefix)
+                        .verbose_instrument_await("object_store_list")
+                        .await
+                };
+                let res = match self.read_timeout.as_ref() {
+                    None => future.await,
+                    Some(timeout) => tokio::time::timeout(*timeout, future)
+                        .await
+                        .unwrap_or_else(|_| Err(ObjectError::internal("list timeout"))),
+                };
+
+                res
+            },
+            should_retry,
+        )
+        .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
         res
@@ -920,6 +1017,29 @@ pub async fn build_remote_object_store(
             )
         }
     }
+}
+
+#[inline(always)]
+fn get_retry_strategy(
+    // base_ms: u64,
+    // max_delay_ms: u64,
+    // factor: u64,
+    // retry_times: usize,
+    // enable_jitter: bool,
+    config: &ObjectStoreConfig,
+) -> impl Iterator<Item = Duration> {
+    ExponentialBackoff::from_millis(config.s3.object_store_req_retry_interval_ms)
+        .max_delay(Duration::from_millis(
+            config.s3.object_store_req_retry_max_delay_ms,
+        ))
+        .factor(2)
+        .take(config.s3.object_store_req_retry_max_attempts)
+        .map(if true { jitter } else { |x| x })
+}
+
+#[inline(always)]
+fn should_retry(_err: &ObjectError) -> bool {
+    true
 }
 
 pub type ObjectMetadataIter = BoxStream<'static, ObjectResult<ObjectMetadata>>;
