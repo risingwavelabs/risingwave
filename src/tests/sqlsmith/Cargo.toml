@@ -16,8 +16,8 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 chrono = "0.4"
-clap = { version = "4", features = ["derive"] }
-itertools = "0.12"
+clap = { workspace = true }
+itertools = { workspace = true }
 rand = { version = "0.8", features = ["small_rng"] }
 rand_chacha = { version = "0.3.1" }
 regex = "1"

@@ -74,7 +74,7 @@ impl Binder {
             Expr::Identifier(ident) => {
                 if SYS_FUNCTION_WITHOUT_ARGS
                     .iter()
-                    .any(|e| ident.real_value().as_str() == *e)
+                    .any(|e| ident.real_value().as_str() == *e && ident.quote_style().is_none())
                 {
                     // Rewrite a system variable to a function call, e.g. `SELECT current_schema;`
                     // will be rewritten to `SELECT current_schema();`.

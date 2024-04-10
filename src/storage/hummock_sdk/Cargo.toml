@@ -17,7 +17,7 @@ normal = ["workspace-hack"]
 bytes = "1"
 easy-ext = "1"
 hex = "0.4"
-itertools = "0.12"
+itertools = { workspace = true }
 parse-display = "0.9"
 prost = { workspace = true }
 risingwave_common = { workspace = true }

@@ -90,16 +90,16 @@ pub struct DatabaseManager {
 
 impl DatabaseManager {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let databases = Database::list(env.meta_store_checked()).await?;
-        let schemas = Schema::list(env.meta_store_checked()).await?;
-        let sources = Source::list(env.meta_store_checked()).await?;
-        let sinks = Sink::list(env.meta_store_checked()).await?;
-        let tables = Table::list(env.meta_store_checked()).await?;
-        let indexes = Index::list(env.meta_store_checked()).await?;
-        let views = View::list(env.meta_store_checked()).await?;
-        let functions = Function::list(env.meta_store_checked()).await?;
-        let connections = Connection::list(env.meta_store_checked()).await?;
-        let subscriptions = Subscription::list(env.meta_store_checked()).await?;
+        let databases = Database::list(env.meta_store().as_kv()).await?;
+        let schemas = Schema::list(env.meta_store().as_kv()).await?;
+        let sources = Source::list(env.meta_store().as_kv()).await?;
+        let sinks = Sink::list(env.meta_store().as_kv()).await?;
+        let tables = Table::list(env.meta_store().as_kv()).await?;
+        let indexes = Index::list(env.meta_store().as_kv()).await?;
+        let views = View::list(env.meta_store().as_kv()).await?;
+        let functions = Function::list(env.meta_store().as_kv()).await?;
+        let connections = Connection::list(env.meta_store().as_kv()).await?;
+        let subscriptions = Subscription::list(env.meta_store().as_kv()).await?;
 
         let mut relation_ref_count = HashMap::new();
 

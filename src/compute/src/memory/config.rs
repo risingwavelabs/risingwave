@@ -123,17 +123,6 @@ pub fn storage_memory_config(
             .unwrap_or(default_block_cache_capacity_mb),
     );
 
-    let data_file_cache_ring_buffer_capacity_mb = if storage_config.data_file_cache.dir.is_empty() {
-        0
-    } else {
-        storage_config.data_file_cache.ring_buffer_capacity_mb
-    };
-    let meta_file_cache_ring_buffer_capacity_mb = if storage_config.meta_file_cache.dir.is_empty() {
-        0
-    } else {
-        storage_config.meta_file_cache.ring_buffer_capacity_mb
-    };
-
     let compactor_memory_limit_mb = storage_config.compactor_memory_limit_mb.unwrap_or(
         ((non_reserved_memory_bytes as f64 * compactor_memory_proportion).ceil() as usize) >> 20,
     );
@@ -141,8 +130,6 @@ pub fn storage_memory_config(
     let total_calculated_mb = block_cache_capacity_mb
         + meta_cache_capacity_mb
         + shared_buffer_capacity_mb
-        + data_file_cache_ring_buffer_capacity_mb
-        + meta_file_cache_ring_buffer_capacity_mb
         + compactor_memory_limit_mb;
     let soft_limit_mb = (non_reserved_memory_bytes as f64
         * (storage_memory_proportion + compactor_memory_proportion).ceil())
@@ -234,8 +221,6 @@ pub fn storage_memory_config(
         meta_cache_capacity_mb,
         meta_cache_shard_num,
         shared_buffer_capacity_mb,
-        data_file_cache_ring_buffer_capacity_mb,
-        meta_file_cache_ring_buffer_capacity_mb,
         compactor_memory_limit_mb,
         prefetch_buffer_capacity_mb,
         block_cache_eviction_config,
@@ -273,8 +258,6 @@ mod tests {
         assert_eq!(memory_config.block_cache_capacity_mb, 737);
         assert_eq!(memory_config.meta_cache_capacity_mb, 860);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
-        assert_eq!(memory_config.data_file_cache_ring_buffer_capacity_mb, 0);
-        assert_eq!(memory_config.meta_file_cache_ring_buffer_capacity_mb, 0);
         assert_eq!(memory_config.compactor_memory_limit_mb, 819);
 
         storage_config.data_file_cache.dir = "data".to_string();
@@ -284,8 +267,6 @@ mod tests {
         assert_eq!(memory_config.block_cache_capacity_mb, 737);
         assert_eq!(memory_config.meta_cache_capacity_mb, 860);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
-        assert_eq!(memory_config.data_file_cache_ring_buffer_capacity_mb, 256);
-        assert_eq!(memory_config.meta_file_cache_ring_buffer_capacity_mb, 256);
         assert_eq!(memory_config.compactor_memory_limit_mb, 819);
 
         storage_config.cache.block_cache_capacity_mb = Some(512);
@@ -296,8 +277,6 @@ mod tests {
         assert_eq!(memory_config.block_cache_capacity_mb, 512);
         assert_eq!(memory_config.meta_cache_capacity_mb, 128);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 1024);
-        assert_eq!(memory_config.data_file_cache_ring_buffer_capacity_mb, 256);
-        assert_eq!(memory_config.meta_file_cache_ring_buffer_capacity_mb, 256);
         assert_eq!(memory_config.compactor_memory_limit_mb, 512);
     }
 }
