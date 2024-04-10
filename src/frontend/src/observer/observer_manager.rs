@@ -27,11 +27,9 @@ use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{
-    FragmentParallelUnitMapping, FragmentWorkerMapping, MetaSnapshot, SubscribeResponse,
+    FragmentWorkerMapping, MetaSnapshot, SubscribeResponse,
 };
 use risingwave_rpc_client::ComputeClientPoolRef;
-
-
 use tokio::sync::watch::Sender;
 
 use crate::catalog::root_catalog::Catalog;
