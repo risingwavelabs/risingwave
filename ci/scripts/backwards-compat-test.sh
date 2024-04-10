@@ -114,7 +114,7 @@ setup_old_cluster() {
   wget $OLD_URL
   if [[ "$?" -ne 0 ]]; then
     set -e
-    echo "Failed to download ${OLD_VERSION} from github releases, build from source later during ./risedev d"
+    echo "Failed to download ${OLD_VERSION} from github releases, build from source later during \`risedev d\`"
     configure_rw_build
   else
     set -e

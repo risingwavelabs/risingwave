@@ -97,16 +97,14 @@ pub struct ReleaseContext {
 }
 
 impl CatalogController {
-    pub fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let meta_store = env
-            .sql_meta_store()
-            .expect("sql meta store is not initialized");
-        Ok(Self {
+    pub fn new(env: MetaSrvEnv) -> Self {
+        let meta_store = env.meta_store().as_sql().clone();
+        Self {
             env,
             inner: RwLock::new(CatalogControllerInner {
                 db: meta_store.conn,
             }),
-        })
+        }
     }
 
     /// Used in `NotificationService::subscribe`.
@@ -3056,7 +3054,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_database_func() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await);
         let pb_database = PbDatabase {
             name: "db1".to_string(),
             owner: TEST_OWNER_ID as _,
@@ -3088,7 +3086,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_schema_func() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await);
         let pb_schema = PbSchema {
             database_id: TEST_DATABASE_ID as _,
             name: "schema1".to_string(),
@@ -3121,7 +3119,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_view() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await);
         let pb_view = PbView {
             schema_id: TEST_SCHEMA_ID as _,
             database_id: TEST_DATABASE_ID as _,
@@ -3146,7 +3144,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_function() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await);
         let test_data_type = risingwave_pb::data::DataType {
             type_name: risingwave_pb::data::data_type::TypeName::Int32 as _,
             ..Default::default()
@@ -3194,7 +3192,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_alter_relation_rename() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await);
         let pb_source = PbSource {
             schema_id: TEST_SCHEMA_ID as _,
             database_id: TEST_DATABASE_ID as _,

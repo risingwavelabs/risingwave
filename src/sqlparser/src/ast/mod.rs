@@ -167,6 +167,10 @@ impl Ident {
             _ => self.value.to_lowercase(),
         }
     }
+
+    pub fn quote_style(&self) -> Option<char> {
+        self.quote_style
+    }
 }
 
 impl From<&str> for Ident {

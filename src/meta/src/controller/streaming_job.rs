@@ -623,6 +623,29 @@ impl CatalogController {
         table.incoming_sinks = Set(incoming_sinks.into());
         let table = table.update(&txn).await?;
 
+        // Update state table fragment id.
+        let fragment_table_ids: Vec<(FragmentId, I32Array)> = Fragment::find()
+            .select_only()
+            .columns([
+                fragment::Column::FragmentId,
+                fragment::Column::StateTableIds,
+            ])
+            .filter(fragment::Column::JobId.eq(dummy_id))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+        for (fragment_id, state_table_ids) in fragment_table_ids {
+            for state_table_id in state_table_ids.into_inner() {
+                table::ActiveModel {
+                    table_id: Set(state_table_id as _),
+                    fragment_id: Set(Some(fragment_id)),
+                    ..Default::default()
+                }
+                .update(&txn)
+                .await?;
+            }
+        }
+
         // let old_fragment_mappings = get_fragment_mappings(&txn, job_id).await?;
         // 1. replace old fragments/actors with new ones.
         Fragment::delete_many()

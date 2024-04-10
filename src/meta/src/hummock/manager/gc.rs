@@ -24,12 +24,11 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::FullScanTask;
 
 use crate::hummock::error::{Error, Result};
-use crate::hummock::manager::{
-    commit_multi_var, create_trx_wrapper, read_lock, write_lock, ResponseEvent,
-};
+use crate::hummock::manager::{commit_multi_var, create_trx_wrapper, read_lock, write_lock};
 use crate::hummock::HummockManager;
 use crate::manager::MetadataManager;
 use crate::model::{BTreeMapTransaction, BTreeMapTransactionWrapper, ValTransaction};
@@ -83,7 +82,7 @@ impl HummockManager {
             return Ok((0, deltas_to_delete.len()));
         }
         let mut hummock_version_deltas = create_trx_wrapper!(
-            self.sql_meta_store(),
+            self.meta_store_ref(),
             BTreeMapTransactionWrapper,
             BTreeMapTransaction::new(&mut versioning.hummock_version_deltas,)
         );
@@ -98,11 +97,7 @@ impl HummockManager {
         for delta_id in &batch {
             hummock_version_deltas.remove(*delta_id);
         }
-        commit_multi_var!(
-            self.env.meta_store(),
-            self.sql_meta_store(),
-            hummock_version_deltas
-        )?;
+        commit_multi_var!(self.meta_store_ref(), hummock_version_deltas)?;
         #[cfg(test)]
         {
             drop(versioning_guard);
