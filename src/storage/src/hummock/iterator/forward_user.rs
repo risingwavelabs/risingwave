@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
 use std::ops::Bound::*;
 
 use risingwave_common::must_match;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
-use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, UserKey, UserKeyRange};
+use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, KeyPayloadType, UserKey, UserKeyRange};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
 
-use crate::hummock::iterator::{Forward, HummockIterator};
+use crate::hummock::iterator::{Forward, HummockIterator, UserKeyEndBoundedIterator};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
@@ -28,13 +29,13 @@ use crate::monitor::StoreLocalStatistic;
 /// [`UserIterator`] can be used by user directly.
 pub struct UserIterator<I: HummockIterator<Direction = Forward>> {
     /// Inner table iterator.
-    iterator: I,
+    iterator: UserKeyEndBoundedIterator<I>,
 
     // Track the last seen full key
     full_key_tracker: FullKeyTracker<Vec<u8>, true>,
 
     /// Start and end bounds of user key.
-    key_range: UserKeyRange,
+    start_bound: Bound<UserKey<KeyPayloadType>>,
 
     /// Only reads values if `ts <= self.read_epoch`.
     read_epoch: HummockEpoch,
@@ -46,29 +47,24 @@ pub struct UserIterator<I: HummockIterator<Direction = Forward>> {
     _version: Option<PinnedVersion>,
 
     stats: StoreLocalStatistic,
-
-    /// Whether the iterator is pointing to a valid position
-    is_current_pos_valid: bool,
 }
 
-// TODO: decide whether this should also impl `HummockIterator`
 impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     /// Create [`UserIterator`] with given `read_epoch`.
     pub(crate) fn new(
         iterator: I,
-        key_range: UserKeyRange,
+        (start_bound, end_bound): UserKeyRange,
         read_epoch: u64,
         min_epoch: u64,
         version: Option<PinnedVersion>,
     ) -> Self {
         Self {
-            iterator,
-            key_range,
+            iterator: UserKeyEndBoundedIterator::new(iterator, end_bound),
+            start_bound,
             read_epoch,
             min_epoch,
             stats: StoreLocalStatistic::default(),
             _version: version,
-            is_current_pos_valid: false,
             full_key_tracker: FullKeyTracker::new(FullKey::default()),
         }
     }
@@ -87,8 +83,6 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     ///   (may reach to the end and thus not valid)
     /// - if `Err(_) ` is returned, it means that some error happened.
     pub async fn next(&mut self) -> HummockResult<()> {
-        // Reset the valid flag to make sure if error happens, `is_valid` should return false.
-        self.is_current_pos_valid = false;
         // Move the iterator to the next step if it is currently potined to a ready entry.
         self.iterator.next().await?;
 
@@ -105,6 +99,10 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     /// Note: before call the function you need to ensure that the iterator is valid.
     pub fn key(&self) -> FullKey<&[u8]> {
         assert!(self.is_valid());
+        debug_assert_eq!(
+            self.full_key_tracker.latest_full_key.to_ref(),
+            self.iterator.key()
+        );
         self.full_key_tracker.latest_full_key.to_ref()
     }
 
@@ -119,11 +117,10 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     /// Resets the iterating position to the beginning.
     pub async fn rewind(&mut self) -> HummockResult<()> {
         // Reset
-        self.is_current_pos_valid = false;
         self.full_key_tracker = FullKeyTracker::new(FullKey::default());
 
         // Handle range scan
-        match &self.key_range.0 {
+        match &self.start_bound {
             Included(begin_key) => {
                 let full_key = FullKey {
                     user_key: begin_key.clone(),
@@ -143,11 +140,10 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     /// Resets the iterating position to the first position where the key >= provided key.
     pub async fn seek(&mut self, user_key: UserKey<&[u8]>) -> HummockResult<()> {
         // Reset
-        self.is_current_pos_valid = false;
         self.full_key_tracker = FullKeyTracker::new(FullKey::default());
 
         // Handle range scan when key < begin_key
-        let user_key = match &self.key_range.0 {
+        let user_key = match &self.start_bound {
             Included(begin_key) => {
                 let begin_key = begin_key.as_ref();
                 if begin_key > user_key {
@@ -171,7 +167,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 
     /// Indicates whether the iterator can be used.
     pub fn is_valid(&self) -> bool {
-        self.is_current_pos_valid
+        self.iterator.is_valid()
     }
 
     pub fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
@@ -182,11 +178,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     /// Advance the inner iterator to a valid position, in which the entry can be exposed.
     /// Iterator will not be advanced if it already pointed to a valid position.
     async fn try_advance_to_next_valid(&mut self) -> HummockResult<()> {
-        loop {
-            if !self.iterator.is_valid() {
-                break;
-            }
-
+        while self.iterator.is_valid() {
             let full_key = self.iterator.key();
             let epoch = full_key.epoch_with_gap.pure_epoch();
 
@@ -205,15 +197,10 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 
             // A new user key is observed.
 
-            if self.user_key_out_of_range(full_key.user_key) {
-                break;
-            }
-
             // Handle delete operation
             match self.iterator.value() {
                 HummockValue::Put(_val) => {
                     self.stats.processed_key_count += 1;
-                    self.is_current_pos_valid = true;
                     return Ok(());
                 }
                 // It means that the key is deleted from the storage.
@@ -225,19 +212,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             }
             self.iterator.next().await?;
         }
-
-        self.is_current_pos_valid = false;
         Ok(())
-    }
-
-    // Validate whether the current key is already out of range.
-    fn user_key_out_of_range(&self, user_key: UserKey<&[u8]>) -> bool {
-        // handle range scan
-        match &self.key_range.1 {
-            Included(end_key) => user_key > end_key.as_ref(),
-            Excluded(end_key) => user_key >= end_key.as_ref(),
-            Unbounded => false,
-        }
     }
 }
 
