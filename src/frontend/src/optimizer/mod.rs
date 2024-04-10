@@ -731,6 +731,12 @@ impl PlanRoot {
             },
         };
 
+        if let ConflictBehavior::IgnoreConflict = conflict_behavior && version_column_index.is_some() {
+            Err(ErrorCode::InvalidParameterValue(
+                "The with version column syntax cannot be used with the ignore behavior of on conflict".to_string(),
+            ))?
+        }
+
         let table_required_dist = {
             let mut bitset = FixedBitSet::with_capacity(columns.len());
             for idx in &pk_column_indices {
