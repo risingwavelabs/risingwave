@@ -22,13 +22,11 @@ use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::fragment::StreamNode;
-use risingwave_meta_model_v2::prelude::{
-    Actor, ActorDispatcher, Fragment, Sink, StreamingJob, WorkerProperty,
-};
+use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
 use risingwave_meta_model_v2::{
-    actor, actor_dispatcher, fragment, object, sink, streaming_job, worker_property, ActorId,
-    ActorUpstreamActors, ConnectorSplits, ExprContext, FragmentId, FragmentVnodeMapping, I32Array,
-    JobStatus, ObjectId, SinkId, SourceId, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
+    actor, actor_dispatcher, fragment, object, sink, streaming_job, ActorId, ActorUpstreamActors,
+    ConnectorSplits, ExprContext, FragmentId, FragmentVnodeMapping, I32Array, JobStatus, ObjectId,
+    SinkId, SourceId, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
 };
 use risingwave_pb::common::PbParallelUnit;
 use risingwave_pb::meta::subscribe_response::{

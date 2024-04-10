@@ -1413,11 +1413,9 @@ impl FragmentManager {
             })
             .collect();
 
-        let worker_mapping = ParallelUnitMapping::from_protobuf(&vnode_mapping)
+        ParallelUnitMapping::from_protobuf(vnode_mapping)
             .to_worker(&parallel_unit_to_worker)
-            .to_protobuf();
-
-        worker_mapping
+            .to_protobuf()
     }
 
     pub async fn table_node_actors(
