@@ -4925,9 +4925,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.1.3"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f59727e86709e4eab603f8a5086f3b2c7d3ddddf7c8b31d8dea2b00364b7fb95"
+checksum = "0d1c86096f23d567783f7fd3ad34e9d7e94a56854b405305c6b0fe24850a2731"
 dependencies = [
  "ahash 0.8.6",
  "bitflags 2.5.0",
