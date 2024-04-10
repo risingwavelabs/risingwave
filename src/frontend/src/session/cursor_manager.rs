@@ -33,6 +33,11 @@ use crate::handler::util::{
 use crate::handler::HandlerArgs;
 use crate::{Binder, PgResponseStream};
 
+pub const KV_LOG_STORE_EPOCH: &str = "kv_log_store_epoch";
+const KV_LOG_STORE_ROW_OP: &str = "kv_log_store_row_op";
+pub const KV_LOG_STORE_SEQ_ID: &str = "kv_log_store_seq_id";
+pub const KV_LOG_STORE_VNODE: &str = "kv_log_store_vnode";
+
 pub enum Cursor {
     Subscription(SubscriptionCursor),
     Query(QueryCursor),
@@ -327,11 +332,11 @@ pub fn build_row_with_logstore(
     mut row: Vec<Option<Bytes>>,
     rw_timestamp: i64,
 ) -> Result<Vec<Option<Bytes>>> {
-    // remove sqr_id, vnode ,_row_id
     let mut new_row = vec![Some(Bytes::from(
         convert_logstore_i64_to_unix_millis(rw_timestamp).to_string(),
     ))];
-    new_row.extend(row.drain(3..row.len() - 1).collect_vec());
+    // need remove kv_log_store_epoch
+    new_row.extend(row.drain(1..row.len()).collect_vec());
     Ok(new_row)
 }
 
@@ -348,10 +353,23 @@ pub fn build_desc(mut descs: Vec<PgFieldDescriptor>, is_snapshot: bool) -> Vec<P
             DataType::Int16.type_len(),
         ),
     ];
+    // need remove kv_log_store_epoch and kv_log_store_row_op
     if is_snapshot {
         new_descs.extend(descs)
     } else {
-        new_descs.extend(descs.drain(4..descs.len() - 1));
+        assert_eq!(
+            descs.get(0).unwrap().get_name(),
+            KV_LOG_STORE_EPOCH,
+            "Cursor query logstore: first column must be {}",
+            KV_LOG_STORE_EPOCH
+        );
+        assert_eq!(
+            descs.get(1).unwrap().get_name(),
+            KV_LOG_STORE_ROW_OP,
+            "Cursor query logstore: first column must be {}",
+            KV_LOG_STORE_ROW_OP
+        );
+        new_descs.extend(descs.drain(2..descs.len()));
     }
     new_descs
 }

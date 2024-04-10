@@ -34,7 +34,7 @@ pub async fn handle_declare_cursor(
     handle_args: HandlerArgs,
     stmt: DeclareCursorStatement,
 ) -> Result<RwPgResponse> {
-    match stmt.cursor_from {
+    match stmt.declare_cursor {
         risingwave_sqlparser::ast::DeclareCursor::Query(query) => {
             handle_declare_query_cursor(handle_args, stmt.cursor_name, query).await
         }
@@ -183,5 +183,5 @@ pub async fn create_stream_for_cursor(
         let plan_result = gen_batch_plan_by_statement(&session, context.into(), stmt)?;
         gen_batch_plan_fragmenter(&session, plan_result)?
     };
-    create_stream(session.clone(), plan_fragmenter_result, vec![]).await
+    create_stream(session, plan_fragmenter_result, vec![]).await
 }

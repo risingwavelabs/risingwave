@@ -656,9 +656,10 @@ impl fmt::Display for DeclareCursor {
 }
 // sql_grammar!(DeclareCursorStatement {
 //     cursor_name: Ident,
+//     [Keyword::SUBSCRIPTION]
 //     [Keyword::CURSOR],
 //     [Keyword::FOR],
-//     subscription: Ident,
+//     subscription: Ident or query: Query,
 //     [Keyword::SINCE],
 //     rw_timestamp: Ident,
 // });
@@ -666,28 +667,28 @@ impl fmt::Display for DeclareCursor {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DeclareCursorStatement {
     pub cursor_name: ObjectName,
-    pub cursor_from: DeclareCursor,
+    pub declare_cursor: DeclareCursor,
 }
 
 impl ParseTo for DeclareCursorStatement {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
         impl_parse_to!(cursor_name: ObjectName, p);
 
-        let cursor_from = if !p.parse_keyword(Keyword::SUBSCRIPTION) {
+        let declare_cursor = if !p.parse_keyword(Keyword::SUBSCRIPTION) {
             p.expect_keyword(Keyword::CURSOR)?;
             p.expect_keyword(Keyword::FOR)?;
             DeclareCursor::Query(Box::new(p.parse_query()?))
         } else {
             p.expect_keyword(Keyword::CURSOR)?;
             p.expect_keyword(Keyword::FOR)?;
-            let cursor_from_name = p.parse_object_name()?;
+            let cursor_for_name = p.parse_object_name()?;
             let rw_timestamp = p.parse_since()?;
-            DeclareCursor::Subscription(cursor_from_name, rw_timestamp)
+            DeclareCursor::Subscription(cursor_for_name, rw_timestamp)
         };
 
         Ok(Self {
             cursor_name,
-            cursor_from,
+            declare_cursor,
         })
     }
 }
@@ -696,7 +697,7 @@ impl fmt::Display for DeclareCursorStatement {
         let mut v: Vec<String> = vec![];
         impl_fmt_display!(cursor_name, v, self);
         v.push("CURSOR FOR ".to_string());
-        impl_fmt_display!(cursor_from, v, self);
+        impl_fmt_display!(declare_cursor, v, self);
         v.iter().join(" ").fmt(f)
     }
 }
