@@ -34,7 +34,7 @@ bigdecimal = { version = "0.4" }
 bit-set = { version = "0.5" }
 bit-vec = { version = "0.6" }
 bitflags = { version = "2", default-features = false, features = ["serde", "std"] }
-brotli = { version = "3" }
+brotli = { version = "4" }
 byteorder = { version = "1" }
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", features = ["serde"] }
@@ -179,7 +179,7 @@ base64 = { version = "0.21" }
 bit-set = { version = "0.5" }
 bit-vec = { version = "0.6" }
 bitflags = { version = "2", default-features = false, features = ["serde", "std"] }
-brotli = { version = "3" }
+brotli = { version = "4" }
 byteorder = { version = "1" }
 bytes = { version = "1", features = ["serde"] }
 cc = { version = "1", default-features = false, features = ["parallel"] }
