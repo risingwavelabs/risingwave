@@ -26,9 +26,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{
-    FragmentWorkerMapping, MetaSnapshot, SubscribeResponse,
-};
+use risingwave_pb::meta::{FragmentWorkerMapping, MetaSnapshot, SubscribeResponse};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::watch::Sender;
 
@@ -96,12 +94,6 @@ impl ObserverState for FrontendObserverNode {
             Info::HummockStats(stats) => {
                 self.handle_table_stats_notification(stats);
             }
-
-            // Info::ParallelUnitMapping(_) => self.handle_fragment_mapping_notification(resp),
-            //
-            // Info::ServingParallelUnitMappings(m) => {
-            //     // self.handle_fragment_serving_mapping_notification(m.mappings, resp.operation());
-            // }
             Info::StreamingWorkerMapping(_) => self.handle_fragment_mapping_notification(resp),
             Info::ServingWorkerMappings(m) => {
                 self.handle_fragment_serving_mapping_notification(m.mappings, resp.operation())
@@ -133,8 +125,6 @@ impl ObserverState for FrontendObserverNode {
             functions,
             connections,
             users,
-            // parallel_unit_mappings: _,
-            // serving_parallel_unit_mappings: _,
             nodes,
             hummock_snapshot,
             hummock_version: _,
@@ -385,30 +375,6 @@ impl FrontendObserverNode {
             return;
         };
         match info {
-            // Info::ParallelUnitMapping(parallel_unit_mapping) => {
-            //     let fragment_id = parallel_unit_mapping.fragment_id;
-            //     let mapping = || {
-            //         ParallelUnitMapping::from_protobuf(
-            //             parallel_unit_mapping.mapping.as_ref().unwrap(),
-            //         )
-            //     };
-            //
-            //     match resp.operation() {
-            //         Operation::Add => {
-            //             self.worker_node_manager
-            //                 .insert_streaming_fragment_mapping(fragment_id, mapping());
-            //         }
-            //         Operation::Delete => {
-            //             self.worker_node_manager
-            //                 .remove_streaming_fragment_mapping(&fragment_id);
-            //         }
-            //         Operation::Update => {
-            //             self.worker_node_manager
-            //                 .update_streaming_fragment_mapping(fragment_id, mapping());
-            //         }
-            //         _ => panic!("receive an unsupported notify {:?}", resp),
-            //     }
-            // }
             Info::StreamingWorkerMapping(streaming_worker_mapping) => {
                 let fragment_id = streaming_worker_mapping.fragment_id;
                 let mapping = || {

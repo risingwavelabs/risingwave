@@ -1149,24 +1149,25 @@ fn derive_partitions(
         match vnode {
             None => {
                 // put this scan_range to all partitions
-                vnode_mapping.to_bitmaps().into_iter().for_each(
-                    |(parallel_unit_id, vnode_bitmap)| {
+                vnode_mapping
+                    .to_bitmaps()
+                    .into_iter()
+                    .for_each(|(worker_id, vnode_bitmap)| {
                         let (bitmap, scan_ranges) = partitions
-                            .entry(parallel_unit_id)
+                            .entry(worker_id)
                             .or_insert_with(|| (BitmapBuilder::zeroed(num_vnodes), vec![]));
                         vnode_bitmap
                             .iter()
                             .enumerate()
                             .for_each(|(vnode, b)| bitmap.set(vnode, b));
                         scan_ranges.push(scan_range.to_protobuf());
-                    },
-                );
+                    });
             }
             // scan a single partition
             Some(vnode) => {
-                let parallel_unit_id = vnode_mapping[vnode];
+                let worker_id = vnode_mapping[vnode];
                 let (bitmap, scan_ranges) = partitions
-                    .entry(parallel_unit_id)
+                    .entry(worker_id)
                     .or_insert_with(|| (BitmapBuilder::zeroed(num_vnodes), vec![]));
                 bitmap.set(vnode.to_index(), true);
                 scan_ranges.push(scan_range.to_protobuf());

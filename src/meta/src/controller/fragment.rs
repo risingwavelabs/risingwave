@@ -76,25 +76,8 @@ impl CatalogControllerInner {
             .all(&txn)
             .await?;
 
-        let worker_parallel_units = WorkerProperty::find()
-            .select_only()
-            .columns([
-                worker_property::Column::WorkerId,
-                worker_property::Column::ParallelUnitIds,
-            ])
-            .into_tuple::<(WorkerId, I32Array)>()
-            .all(&txn)
-            .await?;
-
-        let parallel_unit_to_worker = worker_parallel_units
-            .into_iter()
-            .flat_map(|(worker_id, parallel_unit_ids)| {
-                parallel_unit_ids
-                    .into_inner()
-                    .into_iter()
-                    .map(move |parallel_unit_id| (parallel_unit_id as u32, worker_id as u32))
-            })
-            .collect::<HashMap<_, _>>();
+        let parallel_unit_to_worker =
+            CatalogController::get_parallel_unit_to_worker_map(&txn).await?;
 
         Ok(fragment_mappings
             .into_iter()

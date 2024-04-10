@@ -24,6 +24,7 @@ use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping}
 use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_cont};
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model_v2::SourceId;
+use risingwave_pb::common::{PbParallelUnitMapping, PbWorkerMapping};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
@@ -60,25 +61,16 @@ impl FragmentManagerCore {
             .values()
             .filter(|tf| tf.state() != State::Initial)
             .flat_map(|table_fragments| {
-                let parallel_unit_to_worker: HashMap<_, _> = table_fragments
-                    .actor_status
+                table_fragments
+                    .fragments
                     .values()
-                    .map(|status| status.get_parallel_unit().unwrap())
-                    .map(|parallel_unit| (parallel_unit.id, parallel_unit.worker_node_id))
-                    .collect();
-
-                table_fragments.fragments.values().map(move |fragment| {
-                    let parallel_unit_mapping = ParallelUnitMapping::from_protobuf(
-                        fragment.vnode_mapping.as_ref().unwrap(),
-                    );
-
-                    let worker_mapping = parallel_unit_mapping.to_worker(&parallel_unit_to_worker);
-
-                    FragmentWorkerMapping {
+                    .map(move |fragment| FragmentWorkerMapping {
                         fragment_id: fragment.fragment_id,
-                        mapping: Some(worker_mapping.to_protobuf()),
-                    }
-                })
+                        mapping: Some(FragmentManager::convert_mapping(
+                            &table_fragments.actor_status,
+                            fragment.vnode_mapping.as_ref().unwrap(),
+                        )),
+                    })
             })
     }
 
@@ -201,29 +193,17 @@ impl FragmentManager {
     }
 
     async fn notify_fragment_mapping(&self, table_fragment: &TableFragments, operation: Operation) {
-        let parallel_unit_to_worker = table_fragment
-            .actor_status
-            .values()
-            .map(|actor_status| {
-                let parallel_unit = actor_status.get_parallel_unit().unwrap();
-                (parallel_unit.id, parallel_unit.worker_node_id)
-            })
-            .collect();
-
         // Notify all fragment mapping to frontend nodes
         for fragment in table_fragment.fragments.values() {
-            let mapping = fragment
-                .vnode_mapping
-                .clone()
-                .expect("no data distribution found");
-
-            let worker_mapping = ParallelUnitMapping::from_protobuf(&mapping)
-                .to_worker(&parallel_unit_to_worker)
-                .to_protobuf();
-
             let fragment_mapping = FragmentWorkerMapping {
                 fragment_id: fragment.fragment_id,
-                mapping: Some(worker_mapping),
+                mapping: Some(Self::convert_mapping(
+                    &table_fragment.actor_status,
+                    fragment
+                        .vnode_mapping
+                        .as_ref()
+                        .expect("no data distribution found"),
+                )),
             };
 
             self.env
@@ -1287,17 +1267,7 @@ impl FragmentManager {
 
                 *fragment.vnode_mapping.as_mut().unwrap() = vnode_mapping.clone();
 
-                let parallel_unit_to_worker = actor_status
-                    .values()
-                    .map(|actor_status| {
-                        let parallel_unit = actor_status.get_parallel_unit().unwrap();
-                        (parallel_unit.id, parallel_unit.worker_node_id)
-                    })
-                    .collect();
-
-                let worker_mapping = ParallelUnitMapping::from_protobuf(&vnode_mapping)
-                    .to_worker(&parallel_unit_to_worker)
-                    .to_protobuf();
+                let worker_mapping = Self::convert_mapping(&actor_status, &vnode_mapping);
 
                 // Notify fragment mapping to frontend nodes.
                 let fragment_mapping = FragmentWorkerMapping {
@@ -1429,6 +1399,25 @@ impl FragmentManager {
         }
 
         Ok(())
+    }
+
+    fn convert_mapping(
+        actor_status: &BTreeMap<ActorId, ActorStatus>,
+        vnode_mapping: &PbParallelUnitMapping,
+    ) -> PbWorkerMapping {
+        let parallel_unit_to_worker = actor_status
+            .values()
+            .map(|actor_status| {
+                let parallel_unit = actor_status.get_parallel_unit().unwrap();
+                (parallel_unit.id, parallel_unit.worker_node_id)
+            })
+            .collect();
+
+        let worker_mapping = ParallelUnitMapping::from_protobuf(&vnode_mapping)
+            .to_worker(&parallel_unit_to_worker)
+            .to_protobuf();
+
+        worker_mapping
     }
 
     pub async fn table_node_actors(

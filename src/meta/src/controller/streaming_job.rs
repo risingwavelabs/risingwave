@@ -1023,25 +1023,7 @@ impl CatalogController {
 
         let txn = inner.db.begin().await?;
 
-        let worker_parallel_unit_ids: Vec<(WorkerId, I32Array)> = WorkerProperty::find()
-            .select_only()
-            .columns([
-                worker_property::Column::WorkerId,
-                worker_property::Column::ParallelUnitIds,
-            ])
-            .into_tuple()
-            .all(&txn)
-            .await?;
-
-        let parallel_unit_to_worker = worker_parallel_unit_ids
-            .into_iter()
-            .flat_map(|(worker_id, parallel_unit_ids)| {
-                parallel_unit_ids
-                    .0
-                    .into_iter()
-                    .map(move |parallel_unit_id| (parallel_unit_id as u32, worker_id as u32))
-            })
-            .collect::<HashMap<_, _>>();
+        let parallel_unit_to_worker = Self::get_parallel_unit_to_worker_map(&txn).await?;
 
         let mut fragment_mapping_to_notify = vec![];
 
