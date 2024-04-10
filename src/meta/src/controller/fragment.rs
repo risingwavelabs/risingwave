@@ -24,7 +24,7 @@ use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, Sink, 
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, fragment, object, sink, streaming_job, ActorId, ActorUpstreamActors,
     ConnectorSplits, ExprContext, FragmentId, FragmentVnodeMapping, I32Array, JobStatus, ObjectId,
-    SinkId, SourceId, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
+    SinkId, SourceId, StreamNode, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
 };
 use risingwave_pb::common::PbParallelUnit;
 use risingwave_pb::meta::subscribe_response::{
