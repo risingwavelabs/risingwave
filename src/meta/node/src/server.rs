@@ -19,10 +19,8 @@ use anyhow::Context;
 use either::Either;
 use etcd_client::ConnectOptions;
 use futures::future::join_all;
-use itertools::Itertools;
 use otlp_embedded::TraceServiceServer;
 use regex::Regex;
-use risingwave_common::config::MetaBackend;
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -32,7 +30,7 @@ use risingwave_common_service::tracing::TracingExtractLayer;
 use risingwave_meta::barrier::StreamRpcManager;
 use risingwave_meta::controller::catalog::CatalogController;
 use risingwave_meta::controller::cluster::ClusterController;
-use risingwave_meta::manager::MetadataManager;
+use risingwave_meta::manager::{MetaStoreImpl, MetadataManager, SystemParamsManagerImpl};
 use risingwave_meta::rpc::intercept::MetricsMiddlewareLayer;
 use risingwave_meta::rpc::ElectionClientRef;
 use risingwave_meta::stream::ScaleController;
@@ -101,10 +99,7 @@ use crate::rpc::metrics::{
     start_fragment_info_monitor, start_worker_info_monitor, GLOBAL_META_METRICS,
 };
 use crate::serving::ServingVnodeMapping;
-use crate::storage::{
-    EtcdMetaStore, MemStore, MetaStore, MetaStoreBoxExt, MetaStoreRef,
-    WrappedEtcdClient as EtcdClient,
-};
+use crate::storage::{EtcdMetaStore, MemStore, MetaStoreBoxExt, WrappedEtcdClient as EtcdClient};
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
 use crate::{hummock, serving, MetaError, MetaResult};
@@ -151,9 +146,8 @@ pub async fn rpc_serve(
             );
 
             rpc_serve_with_store(
-                Some(meta_store),
+                MetaStoreImpl::Kv(meta_store),
                 Some(election_client),
-                None,
                 address_info,
                 max_cluster_heartbeat_interval,
                 lease_interval_secs,
@@ -164,8 +158,7 @@ pub async fn rpc_serve(
         MetaStoreBackend::Mem => {
             let meta_store = MemStore::new().into_ref();
             rpc_serve_with_store(
-                Some(meta_store),
-                None,
+                MetaStoreImpl::Kv(meta_store),
                 None,
                 address_info,
                 max_cluster_heartbeat_interval,
@@ -208,9 +201,8 @@ pub async fn rpc_serve(
             election_client.init().await?;
 
             rpc_serve_with_store(
-                None,
+                MetaStoreImpl::Sql(meta_store_sql),
                 Some(election_client),
-                Some(meta_store_sql),
                 address_info,
                 max_cluster_heartbeat_interval,
                 lease_interval_secs,
@@ -223,9 +215,8 @@ pub async fn rpc_serve(
 
 #[expect(clippy::type_complexity)]
 pub fn rpc_serve_with_store(
-    meta_store: Option<MetaStoreRef>,
+    meta_store_impl: MetaStoreImpl,
     election_client: Option<ElectionClientRef>,
-    meta_store_sql: Option<SqlMetaStore>,
     address_info: AddressInfo,
     max_cluster_heartbeat_interval: Duration,
     lease_interval_secs: u64,
@@ -306,8 +297,7 @@ pub fn rpc_serve_with_store(
         };
 
         start_service_as_election_leader(
-            meta_store,
-            meta_store_sql,
+            meta_store_impl,
             address_info,
             max_cluster_heartbeat_interval,
             opts,
@@ -378,8 +368,7 @@ pub async fn start_service_as_election_follower(
 /// ## Returns
 /// Returns an error if the service initialization failed
 pub async fn start_service_as_election_leader(
-    meta_store: Option<MetaStoreRef>,
-    meta_store_sql: Option<SqlMetaStore>,
+    meta_store_impl: MetaStoreImpl,
     address_info: AddressInfo,
     max_cluster_heartbeat_interval: Duration,
     opts: MetaOpts,
@@ -388,21 +377,14 @@ pub async fn start_service_as_election_leader(
     mut svc_shutdown_rx: WatchReceiver<()>,
 ) -> MetaResult<()> {
     tracing::info!("Defining leader services");
-    if let Some(sql_store) = &meta_store_sql {
+    if let MetaStoreImpl::Sql(sql_store) = &meta_store_impl {
         // Try to upgrade if any new model changes are added.
         Migrator::up(&sql_store.conn, None)
             .await
             .expect("Failed to upgrade models in meta store");
     }
 
-    let env = MetaSrvEnv::new(
-        opts.clone(),
-        init_system_params,
-        meta_store.clone(),
-        meta_store_sql.clone(),
-    )
-    .await?;
-
+    let env = MetaSrvEnv::new(opts.clone(), init_system_params, meta_store_impl).await?;
     let system_params_reader = env.system_params_reader().await;
 
     let data_directory = system_params_reader.data_directory();
@@ -416,16 +398,8 @@ pub async fn start_service_as_election_leader(
         )));
     }
 
-    let metadata_manager = if meta_store_sql.is_some() {
-        let cluster_controller = Arc::new(
-            ClusterController::new(env.clone(), max_cluster_heartbeat_interval)
-                .await
-                .unwrap(),
-        );
-        let catalog_controller = Arc::new(CatalogController::new(env.clone()).unwrap());
-        MetadataManager::new_v2(cluster_controller, catalog_controller)
-    } else {
-        MetadataManager::new_v1(
+    let metadata_manager = match env.meta_store() {
+        MetaStoreImpl::Kv(_) => MetadataManager::new_v1(
             Arc::new(
                 ClusterManager::new(env.clone(), max_cluster_heartbeat_interval)
                     .await
@@ -433,7 +407,16 @@ pub async fn start_service_as_election_leader(
             ),
             Arc::new(CatalogManager::new(env.clone()).await.unwrap()),
             Arc::new(FragmentManager::new(env.clone()).await.unwrap()),
-        )
+        ),
+        MetaStoreImpl::Sql(_) => {
+            let cluster_controller = Arc::new(
+                ClusterController::new(env.clone(), max_cluster_heartbeat_interval)
+                    .await
+                    .unwrap(),
+            );
+            let catalog_controller = Arc::new(CatalogController::new(env.clone()));
+            MetadataManager::new_v2(cluster_controller, catalog_controller)
+        }
     };
 
     let serving_vnode_mapping = Arc::new(ServingVnodeMapping::default());
@@ -499,7 +482,6 @@ pub async fn start_service_as_election_leader(
             prometheus_selector,
             metadata_manager: metadata_manager.clone(),
             compute_clients: ComputeClientPool::default(),
-            ui_path: address_info.ui_path,
             diagnose_command,
             trace_state,
         };
@@ -517,7 +499,6 @@ pub async fn start_service_as_election_leader(
 
     let source_manager = Arc::new(
         SourceManager::new(
-            env.clone(),
             barrier_scheduler.clone(),
             metadata_manager.clone(),
             meta_metrics.clone(),
@@ -563,30 +544,11 @@ pub async fn start_service_as_election_leader(
             metadata_manager.clone(),
             barrier_scheduler.clone(),
             source_manager.clone(),
-            hummock_manager.clone(),
             stream_rpc_manager,
             scale_controller.clone(),
         )
         .unwrap(),
     );
-
-    let all_state_table_ids = match &metadata_manager {
-        MetadataManager::V1(mgr) => mgr
-            .catalog_manager
-            .list_tables()
-            .await
-            .into_iter()
-            .map(|t| t.id)
-            .collect_vec(),
-        MetadataManager::V2(mgr) => mgr
-            .catalog_controller
-            .list_all_state_table_ids()
-            .await?
-            .into_iter()
-            .map(|id| id as u32)
-            .collect_vec(),
-    };
-    hummock_manager.purge(&all_state_table_ids).await;
 
     // Initialize services.
     let backup_manager = BackupManager::new(
@@ -655,11 +617,8 @@ pub async fn start_service_as_election_leader(
     );
     let health_srv = HealthServiceImpl::new();
     let backup_srv = BackupServiceImpl::new(backup_manager);
-    let telemetry_srv = TelemetryInfoServiceImpl::new(meta_store.clone(), env.sql_meta_store());
-    let system_params_srv = SystemParamsServiceImpl::new(
-        env.system_params_manager_ref(),
-        env.system_params_controller_ref(),
-    );
+    let telemetry_srv = TelemetryInfoServiceImpl::new(env.meta_store_ref());
+    let system_params_srv = SystemParamsServiceImpl::new(env.system_params_manager_impl_ref());
     let serving_srv =
         ServingServiceImpl::new(serving_vnode_mapping.clone(), metadata_manager.clone());
     let cloud_srv = CloudServiceImpl::new(metadata_manager.clone(), aws_cli);
@@ -687,14 +646,13 @@ pub async fn start_service_as_election_leader(
         hummock_manager.clone(),
         meta_metrics.clone(),
     ));
-    if let Some(system_params_ctl) = env.system_params_controller_ref() {
-        sub_tasks.push(SystemParamsController::start_params_notifier(
-            system_params_ctl,
-        ));
-    } else {
-        sub_tasks.push(SystemParamsManager::start_params_notifier(
-            env.system_params_manager_ref().unwrap(),
-        ));
+    match env.system_params_manager_impl_ref() {
+        SystemParamsManagerImpl::Kv(mgr) => {
+            sub_tasks.push(SystemParamsManager::start_params_notifier(mgr));
+        }
+        SystemParamsManagerImpl::Sql(mgr) => {
+            sub_tasks.push(SystemParamsController::start_params_notifier(mgr));
+        }
     }
     sub_tasks.push(HummockManager::hummock_timer_task(hummock_manager.clone()));
     sub_tasks.extend(HummockManager::compaction_event_loop(
@@ -748,10 +706,7 @@ pub async fn start_service_as_election_leader(
         Arc::new(MetaTelemetryInfoFetcher::new(env.cluster_id().clone())),
         Arc::new(MetaReportCreator::new(
             metadata_manager.clone(),
-            meta_store
-                .as_ref()
-                .map(|m| m.meta_store_type())
-                .unwrap_or(MetaBackend::Sql),
+            env.meta_store().backend(),
         )),
     );
 
@@ -792,15 +747,6 @@ pub async fn start_service_as_election_leader(
             }
         }
     };
-
-    // Persist params before starting services so that invalid params that cause meta node
-    // to crash will not be persisted.
-    if meta_store_sql.is_none() {
-        env.system_params_manager().unwrap().flush_params().await?;
-        env.cluster_id()
-            .put_at_meta_store(meta_store.as_ref().unwrap())
-            .await?;
-    }
 
     tracing::info!("Assigned cluster id {:?}", *env.cluster_id());
     tracing::info!("Starting meta services");
@@ -863,8 +809,7 @@ pub async fn start_service_as_election_leader(
 
     #[cfg(not(madsim))]
     if let Some(dashboard_task) = dashboard_task {
-        // Join the task while ignoring the cancellation error.
-        let _ = dashboard_task.await;
+        dashboard_task.abort();
     }
     Ok(())
 }

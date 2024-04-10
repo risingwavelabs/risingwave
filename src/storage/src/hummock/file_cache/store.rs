@@ -43,7 +43,7 @@ pub mod preclude {
 
 pub type Result<T> = core::result::Result<T, FileCacheError>;
 
-pub type EvictionConfig = foyer::intrusive::eviction::lfu::LfuConfig;
+pub type FileCacheEvictionConfig = foyer::intrusive::eviction::lfu::LfuConfig;
 pub type DeviceConfig = foyer::storage::device::fs::FsDeviceConfig;
 
 pub type FileCacheResult<T> = foyer::storage::error::Result<T>;
@@ -74,7 +74,6 @@ where
     pub lfu_window_to_cache_size_ratio: usize,
     pub lfu_tiny_lru_capacity_ratio: f64,
     pub insert_rate_limit: usize,
-    pub ring_buffer_capacity: usize,
     pub catalog_bits: usize,
     pub admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>>,
     pub reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
@@ -100,7 +99,6 @@ where
             lfu_window_to_cache_size_ratio: self.lfu_window_to_cache_size_ratio,
             lfu_tiny_lru_capacity_ratio: self.lfu_tiny_lru_capacity_ratio,
             insert_rate_limit: self.insert_rate_limit,
-            ring_buffer_capacity: self.ring_buffer_capacity,
             catalog_bits: self.catalog_bits,
             admissions: self.admissions.clone(),
             reinsertions: self.reinsertions.clone(),
@@ -279,7 +277,6 @@ where
                 catalog_bits: config.catalog_bits,
                 admissions,
                 reinsertions: config.reinsertions,
-                flusher_buffer_size: 131072, // TODO: make it configurable
                 flushers: config.flushers,
                 reclaimers: config.reclaimers,
                 clean_region_threshold: config.reclaimers + config.reclaimers / 2,

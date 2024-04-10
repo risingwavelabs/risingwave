@@ -28,11 +28,10 @@ use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::sync::Mutex;
 use tonic::Status;
 
-use crate::controller::SqlMetaStore;
 use crate::manager::cluster::WorkerKey;
 use crate::manager::notification_version::NotificationVersionGenerator;
+use crate::manager::MetaStoreImpl;
 use crate::model::FragmentId;
-use crate::storage::MetaStoreRef;
 
 pub type MessageStatus = Status;
 pub type Notification = Result<SubscribeResponse, Status>;
@@ -48,7 +47,6 @@ pub enum LocalNotification {
     SystemParamsChange(SystemParamsReader),
     FragmentMappingsUpsert(Vec<FragmentId>),
     FragmentMappingsDelete(Vec<FragmentId>),
-    UnregisterTablesFromHummock(Vec<u32>),
 }
 
 #[derive(Debug)]
@@ -85,15 +83,12 @@ pub struct NotificationManager {
 }
 
 impl NotificationManager {
-    pub async fn new(
-        meta_store: Option<MetaStoreRef>,
-        meta_store_sql: Option<SqlMetaStore>,
-    ) -> Self {
+    pub async fn new(meta_store_impl: MetaStoreImpl) -> Self {
         // notification waiting queue.
         let (task_tx, mut task_rx) = mpsc::unbounded_channel::<Task>();
         let core = Arc::new(Mutex::new(NotificationManagerCore::new()));
         let core_clone = core.clone();
-        let version_generator = NotificationVersionGenerator::new(meta_store, meta_store_sql)
+        let version_generator = NotificationVersionGenerator::new(meta_store_impl)
             .await
             .unwrap();
 
@@ -422,7 +417,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_subscribers_one_worker() {
-        let mgr = NotificationManager::new(Some(MemStore::new().into_ref()), None).await;
+        let mgr = NotificationManager::new(MetaStoreImpl::Kv(MemStore::new().into_ref())).await;
         let worker_key1 = WorkerKey(HostAddress {
             host: "a".to_string(),
             port: 1,

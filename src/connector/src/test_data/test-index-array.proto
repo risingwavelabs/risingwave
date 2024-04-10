@@ -1,0 +1,39 @@
+// Example taken from https://docs.confluent.io/platform/7.6/schema-registry/fundamentals/serdes-develop/index.html#wire-format
+// `test.package.MessageH.MessageI`          `[1, 0]`    `2, 1, 0`    0x040200
+// `test.package.MessageA.MessageE.MessageG` `[0, 2, 1]` `3, 0, 2, 1` 0x06000402
+// `test.package.MessageA`                   `[0]`       `1, 0`/`0`   0x00
+
+syntax = "proto3";
+package test.package;
+
+message MessageA {
+  string field_a = 1;
+
+  message MessageB {
+    double field_b = 1;
+
+    message MessageC {
+      sint32 field_c = 1;
+    }
+  }
+  message MessageD {
+    sint32 field_d = 1;
+  }
+  message MessageE {
+    string field_e = 1;
+
+    message MessageF {
+      double field_f = 1;
+    }
+    message MessageG {
+      sint32 field_g = 1;
+    }
+  }
+}
+message MessageH {
+  double field_h = 1;
+
+  message MessageI {
+    sint32 field_i = 1;
+  }
+}

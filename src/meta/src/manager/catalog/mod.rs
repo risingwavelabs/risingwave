@@ -89,7 +89,7 @@ macro_rules! commit_meta_with_trx {
                     $val_txn.apply_to_txn(&mut $trx).await?;
                 )*
                 // Commit to meta store
-                $manager.env.meta_store_checked().txn($trx).await?;
+                $manager.env.meta_store().as_kv().txn($trx).await?;
                 // Upon successful commit, commit the change to in-mem meta
                 $(
                     $val_txn.commit();
@@ -126,11 +126,12 @@ use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::{Relation, RelationGroup};
 pub(crate) use {commit_meta, commit_meta_with_trx};
 
-use crate::manager::catalog::utils::{
-    alter_relation_rename, alter_relation_rename_refs, refcnt_dec_connection,
-    refcnt_inc_connection, ReplaceTableExprRewriter,
+use crate::controller::rename::{
+    alter_relation_rename, alter_relation_rename_refs, ReplaceTableExprRewriter,
 };
+use crate::manager::catalog::utils::{refcnt_dec_connection, refcnt_inc_connection};
 use crate::rpc::ddl_controller::DropMode;
+use crate::telemetry::MetaTelemetryJobDesc;
 
 pub type CatalogManagerRef = Arc<CatalogManager>;
 
@@ -242,6 +243,7 @@ impl CatalogManager {
             database.id = self
                 .env
                 .id_gen_manager()
+                .as_kv()
                 .generate::<{ IdCategory::Database }>()
                 .await? as u32;
             self.create_database(&database).await?;
@@ -266,6 +268,7 @@ impl CatalogManager {
                 id: self
                     .env
                     .id_gen_manager()
+                    .as_kv()
                     .generate::<{ IdCategory::Schema }>()
                     .await? as u32,
                 database_id: database.id,
@@ -1168,7 +1171,7 @@ impl CatalogManager {
         let mut all_subscription_ids: HashSet<SubscriptionId> = HashSet::default();
         let mut all_source_ids: HashSet<SourceId> = HashSet::default();
         let mut all_view_ids: HashSet<ViewId> = HashSet::default();
-        let mut all_cdc_source_ids: HashSet<SourceId> = HashSet::default();
+        let mut all_streaming_job_source_ids: HashSet<SourceId> = HashSet::default();
 
         let relations_depend_on = |relation_id: RelationId| -> Vec<RelationInfo> {
             let tables_depend_on = tables
@@ -1452,11 +1455,10 @@ impl CatalogManager {
                         continue;
                     }
 
-                    // cdc source streaming job
                     if let Some(info) = source.info
-                        && info.cdc_source_job
+                        && info.is_shared()
                     {
-                        all_cdc_source_ids.insert(source.id);
+                        all_streaming_job_source_ids.insert(source.id);
                         let source_table_fragments = fragment_manager
                             .select_table_fragments_by_table_id(&source.id.into())
                             .await?;
@@ -1779,7 +1781,7 @@ impl CatalogManager {
             .map(|id| id.into())
             .chain(all_sink_ids.into_iter().map(|id| id.into()))
             .chain(all_subscription_ids.into_iter().map(|id| id.into()))
-            .chain(all_cdc_source_ids.into_iter().map(|id| id.into()))
+            .chain(all_streaming_job_source_ids.into_iter().map(|id| id.into()))
             .collect_vec();
 
         Ok((version, catalog_deleted_ids))
@@ -1901,7 +1903,7 @@ impl CatalogManager {
         if let Some(source) = &to_update_source {
             sources.insert(source.id, source.clone());
         }
-        commit_meta!(self, tables, views, sinks, sources)?;
+        commit_meta!(self, tables, views, sinks, sources, subscriptions)?;
 
         // 5. notify frontend.
         assert!(
@@ -3532,6 +3534,41 @@ impl CatalogManager {
         self.core.lock().await.database.list_tables()
     }
 
+    pub async fn list_stream_job_for_telemetry(&self) -> MetaResult<Vec<MetaTelemetryJobDesc>> {
+        let tables = self.list_tables().await;
+        let mut res = Vec::with_capacity(tables.len());
+        let source_read_lock = self.core.lock().await;
+        for table_def in tables {
+            // filter out internal tables, only allow Table and MaterializedView
+            if !(table_def.table_type == TableType::Table as i32
+                || table_def.table_type == TableType::MaterializedView as i32)
+            {
+                continue;
+            }
+            if let Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id)) =
+                table_def.optional_associated_source_id
+                && let Some(source) = source_read_lock.database.sources.get(&source_id)
+            {
+                res.push(MetaTelemetryJobDesc {
+                    table_id: table_def.id as i32,
+                    connector: source
+                        .with_properties
+                        .get(UPSTREAM_SOURCE_KEY)
+                        .map(|v| v.to_lowercase()),
+                    optimization: vec![],
+                })
+            } else {
+                res.push(MetaTelemetryJobDesc {
+                    table_id: table_def.id as i32,
+                    connector: None,
+                    optimization: vec![],
+                })
+            }
+        }
+
+        Ok(res)
+    }
+
     pub async fn list_tables_by_type(&self, table_type: TableType) -> Vec<Table> {
         self.core
             .lock()
@@ -3823,7 +3860,7 @@ impl CatalogManager {
                     ..Default::default()
                 };
 
-                default_user.insert(self.env.meta_store_checked()).await?;
+                default_user.insert(self.env.meta_store().as_kv()).await?;
                 core.user_info.insert(default_user.id, default_user);
             }
         }
@@ -3879,9 +3916,9 @@ impl CatalogManager {
             UpdateField::Login => user.can_login = update_user.can_login,
             UpdateField::CreateDb => user.can_create_db = update_user.can_create_db,
             UpdateField::CreateUser => user.can_create_user = update_user.can_create_user,
-            UpdateField::AuthInfo => user.auth_info = update_user.auth_info.clone(),
+            UpdateField::AuthInfo => user.auth_info.clone_from(&update_user.auth_info),
             UpdateField::Rename => {
-                user.name = update_user.name.clone();
+                user.name.clone_from(&update_user.name);
             }
         });
 

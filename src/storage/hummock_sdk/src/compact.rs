@@ -12,7 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo};
+
+pub fn compact_task_output_to_string(compact_task: &CompactTask) -> String {
+    use std::fmt::Write;
+
+    let mut s = String::default();
+    writeln!(
+        s,
+        "Compaction task id: {:?}, group-id: {:?}, type: {:?}, target level: {:?}, target sub level: {:?} watermark: {:?}, target_file_size: {:?}, splits: {:?}, status: {:?}",
+        compact_task.task_id,
+        compact_task.compaction_group_id,
+        compact_task.task_type(),
+        compact_task.target_level,
+        compact_task.target_sub_level_id,
+        compact_task.watermark,
+        compact_task.target_file_size,
+        compact_task.splits.len(),
+        compact_task.task_status()
+    )
+    .unwrap();
+    s.push_str("Output: \n");
+    for sst in &compact_task.sorted_output_ssts {
+        append_sstable_info_to_string(&mut s, sst);
+    }
+    s
+}
 
 pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     use std::fmt::Write;
@@ -20,48 +47,44 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     let mut s = String::new();
     writeln!(
         s,
-        "Compaction task id: {:?}, group-id: {:?}, task type: {:?}, target level: {:?}, target sub level: {:?}",
+        "Compaction task id: {:?}, group-id: {:?}, type: {:?}, target level: {:?}, target sub level: {:?} watermark: {:?}, target_file_size: {:?}, splits: {:?}",
         compact_task.task_id,
         compact_task.compaction_group_id,
         compact_task.task_type(),
         compact_task.target_level,
-        compact_task.target_sub_level_id
+        compact_task.target_sub_level_id,
+        compact_task.watermark,
+        compact_task.target_file_size,
+        compact_task.splits.len(),
     )
     .unwrap();
-    writeln!(s, "Compaction watermark: {:?} ", compact_task.watermark).unwrap();
-    writeln!(
-        s,
-        "Compaction target_file_size: {:?} ",
-        compact_task.target_file_size
-    )
-    .unwrap();
-    writeln!(s, "Compaction # splits: {:?} ", compact_task.splits.len()).unwrap();
-    writeln!(
-        s,
-        "Compaction task status: {:?} ",
-        compact_task.task_status()
-    )
-    .unwrap();
-    writeln!(
-        s,
-        "Compaction task table_ids: {:?} ",
-        compact_task.existing_table_ids,
-    )
-    .unwrap();
-    s.push_str("Compaction Sstables structure: \n");
+    s.push_str("Input: \n");
+    let existing_table_ids: HashSet<u32> = compact_task
+        .existing_table_ids
+        .clone()
+        .into_iter()
+        .collect();
+    let mut input_sst_table_ids: HashSet<u32> = HashSet::new();
+    let mut dropped_table_ids = HashSet::new();
     for level_entry in &compact_task.input_ssts {
         let tables: Vec<String> = level_entry
             .table_infos
             .iter()
             .map(|table| {
+                for tid in &table.table_ids {
+                    if !existing_table_ids.contains(tid) {
+                        dropped_table_ids.insert(tid);
+                    } else {
+                        input_sst_table_ids.insert(*tid);
+                    }
+                }
                 if table.total_key_count != 0 {
                     format!(
-                        "[id: {}, obj_id: {} {}KB stale_ratio {} delete_range_ratio {}]",
+                        "[id: {}, obj_id: {} {}KB stale_ratio {}]",
                         table.get_sst_id(),
                         table.object_id,
                         table.file_size / 1024,
                         (table.stale_key_count * 100 / table.total_key_count),
-                        (table.range_tombstone_count * 100 / table.total_key_count),
                     )
                 } else {
                     format!(
@@ -75,9 +98,19 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
             .collect();
         writeln!(s, "Level {:?} {:?} ", level_entry.level_idx, tables).unwrap();
     }
-    s.push_str("Compaction task output: \n");
-    for sst in &compact_task.sorted_output_ssts {
-        append_sstable_info_to_string(&mut s, sst);
+    if !compact_task.table_vnode_partition.is_empty() {
+        writeln!(s, "Table vnode partition info:").unwrap();
+        compact_task
+            .table_vnode_partition
+            .iter()
+            .filter(|t| input_sst_table_ids.contains(t.0))
+            .for_each(|(tid, partition)| {
+                writeln!(s, " [{:?}, {:?}]", tid, partition).unwrap();
+            });
+    }
+
+    if !dropped_table_ids.is_empty() {
+        writeln!(s, "Dropped table_ids: {:?} ", dropped_table_ids).unwrap();
     }
     s
 }
@@ -100,12 +133,9 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
     let stale_ratio = (sstable_info.stale_key_count * 100)
         .checked_div(sstable_info.total_key_count)
         .unwrap_or(0);
-    let range_tombstone_ratio = (sstable_info.range_tombstone_count * 100)
-        .checked_div(sstable_info.total_key_count)
-        .unwrap_or(0);
     writeln!(
         s,
-        "SstableInfo: object id={}, SST id={}, KeyRange=[{:?},{:?}], table_ids: {:?}, size={}KB, stale_ratio={}%, range_tombstone_count={} range_tombstone_ratio={}% bloom_filter_kind {:?}",
+        "SstableInfo: object id={}, SST id={}, KeyRange=[{:?},{:?}], table_ids: {:?}, size={}KB, stale_ratio={}%, bloom_filter_kind {:?}",
         sstable_info.get_object_id(),
         sstable_info.get_sst_id(),
         left_str,
@@ -113,8 +143,6 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
         sstable_info.table_ids,
         sstable_info.file_size / 1024,
         stale_ratio,
-        sstable_info.range_tombstone_count,
-        range_tombstone_ratio,
         sstable_info.bloom_filter_kind,
     )
     .unwrap();

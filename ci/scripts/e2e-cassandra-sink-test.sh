@@ -32,7 +32,7 @@ mkdir ./connector-node
 tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
 echo "--- starting risingwave cluster"
-cargo make ci-start ci-sink-test
+risedev ci-start ci-sink-test
 sleep 1
 
 echo "--- create cassandra table"
@@ -62,4 +62,4 @@ fi
 
 echo "--- Kill cluster"
 cd ../../
-cargo make ci-kill
+risedev ci-kill

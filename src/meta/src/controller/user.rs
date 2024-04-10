@@ -294,10 +294,13 @@ impl CatalogController {
             if *privilege.with_grant_option.as_ref() {
                 on_conflict.update_columns([user_privilege::Column::WithGrantOption]);
             } else {
-                on_conflict.do_nothing();
+                // Workaround to support MYSQL for `DO NOTHING`.
+                on_conflict.update_column(user_privilege::Column::UserId);
             }
+
             UserPrivilege::insert(privilege)
                 .on_conflict(on_conflict)
+                .do_nothing()
                 .exec(&txn)
                 .await?;
         }
@@ -503,7 +506,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_user_and_privilege() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await);
         mgr.create_user(make_test_user("test_user_1")).await?;
         mgr.create_user(make_test_user("test_user_2")).await?;
         let user_1 = mgr.get_user_by_name("test_user_1").await?;

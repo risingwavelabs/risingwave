@@ -47,25 +47,25 @@ const STARROCK_MYSQL_WAIT_TIMEOUT: usize = 28800;
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct StarrocksCommon {
-    /// The StarRocks host address.
+    /// The `StarRocks` host address.
     #[serde(rename = "starrocks.host")]
     pub host: String,
-    /// The port to the MySQL server of StarRocks FE.
+    /// The port to the MySQL server of `StarRocks` FE.
     #[serde(rename = "starrocks.mysqlport", alias = "starrocks.query_port")]
     pub mysql_port: String,
-    /// The port to the HTTP server of StarRocks FE.
+    /// The port to the HTTP server of `StarRocks` FE.
     #[serde(rename = "starrocks.httpport", alias = "starrocks.http_port")]
     pub http_port: String,
-    /// The user name used to access the StarRocks database.
+    /// The user name used to access the `StarRocks` database.
     #[serde(rename = "starrocks.user")]
     pub user: String,
     /// The password associated with the user.
     #[serde(rename = "starrocks.password")]
     pub password: String,
-    /// The StarRocks database where the target table is located
+    /// The `StarRocks` database where the target table is located
     #[serde(rename = "starrocks.database")]
     pub database: String,
-    /// The StarRocks table you want to sink data to.
+    /// The `StarRocks` table you want to sink data to.
     #[serde(rename = "starrocks.table")]
     pub table: String,
     #[serde(rename = "starrocks.partial_update")]
@@ -153,7 +153,7 @@ impl StarrocksSink {
     ) -> Result<bool> {
         match rw_data_type {
             risingwave_common::types::DataType::Boolean => {
-                Ok(starrocks_data_type.contains("tinyint"))
+                Ok(starrocks_data_type.contains("tinyint") | starrocks_data_type.contains("boolean"))
             }
             risingwave_common::types::DataType::Int16 => {
                 Ok(starrocks_data_type.contains("smallint"))
@@ -315,7 +315,7 @@ impl StarrocksSinkWriter {
             config.common.database.clone(),
             config.common.table.clone(),
             header,
-        );
+        )?;
         Ok(Self {
             config,
             schema: schema.clone(),

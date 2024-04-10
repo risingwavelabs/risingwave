@@ -33,6 +33,7 @@ impl From<TelemetryReportBase> for PbTelemetryReportBase {
             up_time: val.up_time,
             report_time: val.time_stamp,
             node_type: from_telemetry_node_type(val.node_type) as i32,
+            is_test: val.is_test,
         }
     }
 }

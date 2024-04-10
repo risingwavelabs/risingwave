@@ -14,10 +14,10 @@
 
 use std::marker::PhantomData;
 
-use risingwave_common::estimate_size::collections::EstimatedVecDeque;
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::Datum;
 use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
+use risingwave_common_estimate_size::collections::EstimatedVecDeque;
+use risingwave_common_estimate_size::EstimateSize;
 use smallvec::SmallVec;
 
 use self::private::RankFuncCount;

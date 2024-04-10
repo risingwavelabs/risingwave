@@ -50,6 +50,7 @@ use self::stream::StreamPlanRef;
 use self::utils::Distill;
 use super::property::{Distribution, FunctionalDependencySet, Order};
 use crate::error::{ErrorCode, Result};
+use crate::optimizer::ExpressionSimplifyRewriter;
 
 /// A marker trait for different conventions, used for enforcing type safety.
 ///
@@ -450,8 +451,27 @@ impl PlanRef {
                     })
                     .reduce(|a, b| a.or(b))
                     .unwrap();
+
+                // rewrite the *entire* predicate for `LogicalShare`
+                // before pushing down to whatever plan node(s)
+                // ps: the reason here contains a "special" optimization
+                // rather than directly apply explicit rule in stream or
+                // batch plan optimization, is because predicate push down
+                // will *instantly* push down all predicates, and rule(s)
+                // can not be applied in the middle.
+                // thus we need some on-the-fly (in the middle) rewrite
+                // technique to help with this kind of optimization.
+                let mut expr_rewriter = ExpressionSimplifyRewriter {};
+                let mut new_predicate = Condition::true_cond();
+
+                for c in merge_predicate.conjunctions {
+                    let c = Condition::with_expr(expr_rewriter.rewrite_cond(c));
+                    // rebuild the conjunctions
+                    new_predicate = new_predicate.and(c);
+                }
+
                 let input: PlanRef = logical_share.input();
-                let input = input.predicate_pushdown(merge_predicate, ctx);
+                let input = input.predicate_pushdown(new_predicate, ctx);
                 logical_share.replace_input(input);
             }
             LogicalFilter::create(self.clone(), predicate)
@@ -495,6 +515,7 @@ impl PredicatePushdown for PlanRef {
             &LogicalFilter::new(self.clone(), predicate_clone).into(),
             &res,
         );
+
         res
     }
 }
@@ -676,8 +697,8 @@ impl dyn PlanNode {
 impl dyn PlanNode {
     /// Serialize the plan node and its children to a stream plan proto.
     ///
-    /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
-    /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
+    /// Note that some operators has their own implementation of `to_stream_prost`. We have a
+    /// hook inside to do some ad-hoc things.
     pub fn to_stream_prost(
         &self,
         state: &mut BuildFragmentGraphState,
@@ -689,6 +710,9 @@ impl dyn PlanNode {
         }
         if let Some(stream_cdc_table_scan) = self.as_stream_cdc_table_scan() {
             return stream_cdc_table_scan.adhoc_to_stream_prost(state);
+        }
+        if let Some(stream_source_scan) = self.as_stream_source_scan() {
+            return stream_source_scan.adhoc_to_stream_prost(state);
         }
         if let Some(stream_share) = self.as_stream_share() {
             return stream_share.adhoc_to_stream_prost(state);
@@ -853,7 +877,9 @@ mod stream_simple_agg;
 mod stream_sink;
 mod stream_sort;
 mod stream_source;
+mod stream_source_scan;
 mod stream_stateless_simple_agg;
+mod stream_subscription;
 mod stream_table_scan;
 mod stream_topn;
 mod stream_values;
@@ -946,7 +972,9 @@ pub use stream_simple_agg::StreamSimpleAgg;
 pub use stream_sink::{IcebergPartitionInfo, PartitionComputeInfo, StreamSink};
 pub use stream_sort::StreamEowcSort;
 pub use stream_source::StreamSource;
+pub use stream_source_scan::StreamSourceScan;
 pub use stream_stateless_simple_agg::StreamStatelessSimpleAgg;
+pub use stream_subscription::StreamSubscription;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_temporal_join::StreamTemporalJoin;
 pub use stream_topn::StreamTopN;
@@ -1039,7 +1067,9 @@ macro_rules! for_all_plan_nodes {
             , { Stream, TableScan }
             , { Stream, CdcTableScan }
             , { Stream, Sink }
+            , { Stream, Subscription }
             , { Stream, Source }
+            , { Stream, SourceScan }
             , { Stream, HashJoin }
             , { Stream, Exchange }
             , { Stream, HashAgg }
@@ -1155,7 +1185,9 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, TableScan }
             , { Stream, CdcTableScan }
             , { Stream, Sink }
+            , { Stream, Subscription }
             , { Stream, Source }
+            , { Stream, SourceScan }
             , { Stream, HashAgg }
             , { Stream, SimpleAgg }
             , { Stream, StatelessSimpleAgg }

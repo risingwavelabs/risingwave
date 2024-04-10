@@ -95,7 +95,7 @@ impl Rule for IndexSelectionRule {
         if indexes.is_empty() {
             return None;
         }
-        if logical_scan.for_system_time_as_of_proctime() {
+        if logical_scan.as_of().is_some() {
             return None;
         }
         let primary_table_row_size = TableScanIoEstimator::estimate_row_size(logical_scan);
@@ -230,7 +230,7 @@ impl IndexSelectionRule {
             index.index_table.clone(),
             vec![],
             logical_scan.ctx(),
-            false,
+            None,
             index.index_table.cardinality,
         );
 
@@ -239,7 +239,7 @@ impl IndexSelectionRule {
             index.primary_table.clone(),
             vec![],
             logical_scan.ctx(),
-            false,
+            None,
             index.primary_table.cardinality,
         );
 
@@ -338,7 +338,7 @@ impl IndexSelectionRule {
             logical_scan.table_catalog(),
             vec![],
             logical_scan.ctx(),
-            false,
+            None,
             logical_scan.table_cardinality(),
         );
 
@@ -560,7 +560,7 @@ impl IndexSelectionRule {
             }
         }
 
-        let primary_access = generic::Scan::new(
+        let primary_access = generic::TableScan::new(
             logical_scan.table_name().to_string(),
             primary_table_desc
                 .pk
@@ -573,7 +573,7 @@ impl IndexSelectionRule {
             Condition {
                 conjunctions: conjunctions.to_vec(),
             },
-            false,
+            None,
             logical_scan.table_cardinality(),
         );
 
@@ -602,7 +602,7 @@ impl IndexSelectionRule {
         }
 
         Some(
-            generic::Scan::new(
+            generic::TableScan::new(
                 index.index_table.name.to_string(),
                 index
                     .primary_table_pk_ref_to_index_table()
@@ -613,7 +613,7 @@ impl IndexSelectionRule {
                 vec![],
                 ctx,
                 new_predicate,
-                false,
+                None,
                 index.index_table.cardinality,
             )
             .into(),

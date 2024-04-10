@@ -143,7 +143,7 @@ async fn test_read_version_basic() {
             .rev()
             .collect::<Vec<_>>();
 
-        let dummy_sst = StagingSstableInfo::new(
+        let dummy_sst = Arc::new(StagingSstableInfo::new(
             vec![
                 LocalSstableInfo::for_test(SstableInfo {
                     object_id: 1,
@@ -181,7 +181,7 @@ async fn test_read_version_basic() {
             epoch_id_vec_for_clear,
             batch_id_vec_for_clear,
             1,
-        );
+        ));
 
         {
             read_version.update(VersionUpdate::Staging(StagingData::Sst(dummy_sst)));
@@ -368,7 +368,7 @@ async fn test_read_filter_basic() {
 
 //     // Update read version via staging SSTs
 //     let sst_id = 233;
-//     let staging_sst = gen_dummy_sst_info(sst_id, imms.clone(), table_id, epoch);
+//     let staging_sst = Arc::new(gen_dummy_sst_info(sst_id, imms.clone(), table_id, epoch));
 //     read_version_vec.iter().for_each(|v| {
 //         v.write().update(VersionUpdate::Staging(StagingData::Sst(
 //             StagingSstableInfo::new(

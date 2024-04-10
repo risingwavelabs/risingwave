@@ -17,13 +17,14 @@ normal = ["workspace-hack"]
 [dependencies]
 async-trait = "0.1"
 bytes = { version = "1" }
-clap = { version = "4", features = ["derive"] }
+clap = { workspace = true }
 fail = "0.5"
+foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2.9"
-itertools = "0.12"
-parking_lot = "0.12"
-rand = "0.8"
+itertools = { workspace = true }
+parking_lot = { workspace = true }
+rand = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_service = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }

@@ -62,9 +62,22 @@ message StreamSourceInfo {
   SchemaRegistryNameStrategy name_strategy = 10;
   optional string key_message_name = 11;
   plan_common.ExternalTableDesc external_table = 12;
-  // Whether the stream source is a cdc source streaming job.
-  // We need this field to differentiate the cdc source job until we fully implement risingwavelabs/rfcs#72.
+  // **This field should now be called `is_shared`.** Not renamed for backwards compatibility.
+  //
+  // Whether the stream source is a shared source (it has a streaming job).
+  // This is related with [RFC: Reusable Source Executor](https://github.com/risingwavelabs/rfcs/pull/72).
+  //
+  // Currently, the following sources can be shared:
+  //
+  // - Direct CDC sources (mysql & postgresql)
+  // - MQ sources (Kafka)
   bool cdc_source_job = 13;
+  // Only used when `cdc_source_job` is `true`.
+  // If `false`, `requires_singleton` will be set in the stream plan.
+  //
+  // - Direct CDC sources: `false`
+  // - MQ sources (Kafka): `true`
+  bool is_distributed = 15;
   // Options specified by user in the FORMAT ENCODE clause.
   map<string, string> format_encode_options = 14;
 }
@@ -157,6 +170,9 @@ message Sink {
   // Cluster version (tracked by git commit) when initialized/created
   optional string initialized_at_cluster_version = 22;
   optional string created_at_cluster_version = 23;
+
+  // Whether it should use background ddl or block until backfill finishes.
+  CreateType create_type = 24;
 }
 
 message Subscription {
@@ -177,6 +193,8 @@ message Subscription {
 
   optional string initialized_at_cluster_version = 15;
   optional string created_at_cluster_version = 16;
+
+  string subscription_from_name = 17;
 }
 
 message Connection {
@@ -353,6 +371,7 @@ enum HandleConflictBehavior {
   HANDLE_CONFLICT_BEHAVIOR_OVERWRITE = 1;
   HANDLE_CONFLICT_BEHAVIOR_IGNORE = 2;
   HANDLE_CONFLICT_BEHAVIOR_NO_CHECK = 3;
+  HANDLE_CONFLICT_BEHAVIOR_DO_UPDATE_IF_NOT_NULL = 4;
 }
 
 message View {

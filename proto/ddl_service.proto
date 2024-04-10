@@ -161,7 +161,7 @@ message DropViewResponse {
 // - GENERAL: Table streaming jobs w/ or w/o a connector
 // - SHARED_CDC_SOURCE: The table streaming job is created based on a shared CDC source job (risingwavelabs/rfcs#73).
 //
-// And one may add other types to support Table jobs that based on other backfill-able sources (risingwavelabs/rfcs#72).
+// And one may add other types to support Table jobs that based on other shared sources (risingwavelabs/rfcs#72).
 //
 // Currently, it's usages include:
 // - When creating the streaming actor graph, different table jobs may need different treatment.

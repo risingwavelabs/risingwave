@@ -12,15 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(assert_matches)]
 #![cfg_attr(coverage, feature(coverage_attribute))]
 
+use std::ffi::OsString;
 use std::str::FromStr;
 
-use anyhow::Result;
-use clap::error::ErrorKind;
-use clap::{command, ArgMatches, Args, Command, FromArgMatches};
+use clap::error::Result as ClapResult;
+use clap::{command, ArgMatches, Args, Command, CommandFactory, FromArgMatches};
 use risingwave_cmd::{compactor, compute, ctl, frontend, meta};
-use risingwave_cmd_all::{PlaygroundOpts, SingleNodeOpts, StandaloneOpts};
+use risingwave_cmd_all::{SingleNodeOpts, StandaloneOpts};
 use risingwave_common::git_sha;
 use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
@@ -31,10 +32,6 @@ use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString, IntoStaticStr};
 use tracing::Level;
 
-#[cfg(enable_task_local_alloc)]
-risingwave_common::enable_task_local_jemalloc!();
-
-#[cfg(not(enable_task_local_alloc))]
 risingwave_common::enable_jemalloc!();
 
 const BINARY_NAME: &str = "risingwave";
@@ -90,7 +87,7 @@ const VERSION: &str = {
 };
 
 /// Component to launch.
-#[derive(Clone, Copy, EnumIter, EnumString, Display, IntoStaticStr)]
+#[derive(Debug, Clone, Copy, EnumIter, EnumString, Display, IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
 enum Component {
     Compute,
@@ -123,7 +120,7 @@ impl Component {
             Self::Frontend => frontend(parse_opts(matches)),
             Self::Compactor => compactor(parse_opts(matches)),
             Self::Ctl => ctl(parse_opts(matches)),
-            Self::Playground => playground(parse_opts(matches)),
+            Self::Playground => single_node(SingleNodeOpts::new_for_playground()),
             Self::Standalone => standalone(parse_opts(matches)),
             Self::SingleNode => single_node(parse_opts(matches)),
         }
@@ -151,7 +148,8 @@ impl Component {
             Component::Frontend => FrontendOpts::augment_args(cmd),
             Component::Compactor => CompactorOpts::augment_args(cmd),
             Component::Ctl => CtlOpts::augment_args(cmd),
-            Component::Playground => PlaygroundOpts::augment_args(cmd),
+            Component::Playground => cmd
+                .about("Shortcut for `single-node --in-memory`, should not be used in production"),
             Component::Standalone => StandaloneOpts::augment_args(cmd),
             Component::SingleNode => SingleNodeOpts::augment_args(cmd),
         }
@@ -169,8 +167,12 @@ impl Component {
     }
 }
 
-#[cfg_attr(coverage, coverage(off))]
-fn main() -> Result<()> {
+/// Parse the given arguments and return the component and its matches.
+fn parse_args<I, T>(args: I) -> ClapResult<(Component, ArgMatches)>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString> + Clone,
+{
     let risingwave = || {
         command!(BINARY_NAME)
             .about("All-in-one executable for components of RisingWave")
@@ -186,44 +188,38 @@ fn main() -> Result<()> {
             risingwave()
                 .subcommand_value_name("COMPONENT")
                 .subcommand_help_heading("Components")
-                .subcommand_required(true)
-                .subcommands(Component::commands()),
+                .subcommands(Component::commands())
+                // Make single node the "default subcommand"
+                .args_conflicts_with_subcommands(true)
+                .args(SingleNodeOpts::command().get_arguments()),
         );
 
-    let matches = match command.try_get_matches() {
-        Ok(m) => m,
-        Err(e) if e.kind() == ErrorKind::MissingSubcommand => {
-            // `$ ./risingwave`
-            // NOTE(kwannoel): This is a hack to make `risingwave`
-            // work as an alias of `risingwave single-process`.
-            // If invocation is not a multicall and there's no subcommand,
-            // we will try to invoke it as a single node.
-            let command = Component::SingleNode.augment_args(risingwave());
-            let matches = command.get_matches();
-            Component::SingleNode.start(&matches);
-            return Ok(());
-        }
-        Err(e) => {
-            e.exit();
-        }
+    let matches = command.try_get_matches_from(args)?;
+    let multicall = matches.subcommand().unwrap();
+
+    let (component_name, matches) = if multicall.0 == BINARY_NAME {
+        // This is not a multicall. Match argv[1] as a component.
+        (multicall.1)
+            .subcommand()
+            // If there's no subcommand, it must be single node ("default subcommand").
+            .unwrap_or_else(|| (Component::SingleNode.into(), multicall.1))
+    } else {
+        multicall
     };
 
-    let multicall = matches.subcommand().unwrap();
-    let argv_1 = multicall.1.subcommand();
-    let (component_name, matches) = argv_1.unwrap_or(multicall);
+    let component = Component::from_str(component_name).unwrap(); // always succeeds
+    let matches = matches.clone();
 
-    let component = Component::from_str(component_name)?;
-    component.start(matches);
-
-    Ok(())
+    Ok((component, matches))
 }
 
-fn playground(opts: PlaygroundOpts) {
-    let settings = risingwave_rt::LoggerSettings::from_opts(&opts)
-        .with_target("risingwave_storage", Level::WARN)
-        .with_thread_name(true);
-    risingwave_rt::init_risingwave_logger(settings);
-    risingwave_rt::main_okk(risingwave_cmd_all::playground(opts)).unwrap();
+#[cfg_attr(coverage, coverage(off))]
+fn main() {
+    let (component, matches) = parse_args(std::env::args_os())
+        .map_err(|e| e.exit())
+        .unwrap();
+
+    component.start(&matches);
 }
 
 fn standalone(opts: StandaloneOpts) {
@@ -239,11 +235,86 @@ fn standalone(opts: StandaloneOpts) {
 /// high level options to standalone mode node-level options.
 /// We will start a standalone instance, with all nodes in the same process.
 fn single_node(opts: SingleNodeOpts) {
-    opts.create_store_directories().unwrap();
-    let opts = risingwave_cmd_all::map_single_node_opts_to_standalone_opts(&opts);
+    let opts = risingwave_cmd_all::map_single_node_opts_to_standalone_opts(opts);
     let settings = risingwave_rt::LoggerSettings::from_opts(&opts)
         .with_target("risingwave_storage", Level::WARN)
         .with_thread_name(true);
     risingwave_rt::init_risingwave_logger(settings);
     risingwave_rt::main_okk(risingwave_cmd_all::standalone(opts)).unwrap();
+}
+
+#[cfg(test)]
+mod tests {
+    use std::assert_matches::assert_matches;
+
+    use clap::error::ErrorKind;
+
+    use super::{parse_args, Component};
+
+    #[test]
+    fn test_basic() {
+        let (c, _) =
+            parse_args(["./risingwave", "meta", "--advertise-addr", "1.2.3.4:5678"]).unwrap();
+        assert_matches!(c, Component::Meta);
+    }
+
+    #[test]
+    fn test_multicall() {
+        let (c, _) = parse_args(["./meta-node", "--advertise-addr", "1.2.3.4:5678"]).unwrap();
+        assert_matches!(c, Component::Meta);
+    }
+
+    #[test]
+    fn test_missing_sub_subcommand() {
+        let e = parse_args(["./risingwave", "ctl"]).unwrap_err();
+        assert_matches!(
+            e.kind(),
+            ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+        );
+    }
+
+    #[test]
+    fn test_sub_expected_subcommand_but_got_unknown_arg() {
+        let e = parse_args(["./risingwave", "ctl", "--foo"]).unwrap_err();
+        assert_matches!(e.kind(), ErrorKind::UnknownArgument);
+    }
+
+    #[test]
+    fn test_issue_16065() {
+        let e = parse_args([
+            "./risingwave",
+            "ctl",
+            "meta",
+            "unregister-worker",
+            "my-bad-arg",
+        ])
+        .unwrap_err();
+        assert_matches!(e.kind(), ErrorKind::UnknownArgument);
+        assert!(e.to_string().contains("my-bad-arg"), "{e}")
+    }
+
+    #[test]
+    fn test_default_subcommand_single_node() {
+        let (c, _) = parse_args(["./risingwave"]).unwrap();
+        assert_matches!(c, Component::SingleNode);
+    }
+
+    #[test]
+    fn test_default_subcommand_single_node_with_args() {
+        let (c, _) = parse_args(["./risingwave", "--in-memory"]).unwrap();
+        assert_matches!(c, Component::SingleNode);
+    }
+
+    #[test]
+    fn test_default_subcommand_single_node_with_unknown_args() {
+        let e = parse_args(["./risingwave", "--foo"]).unwrap_err();
+        assert_matches!(e.kind(), ErrorKind::UnknownArgument);
+    }
+
+    #[test]
+    fn test_default_subcommand_single_node_with_other_explicit_subcommand() {
+        let e = parse_args(["./risingwave", "--in-memory", "ctl"]).unwrap_err();
+        assert_matches!(e.kind(), ErrorKind::ArgumentConflict);
+        assert!(e.to_string().contains("cannot be used with"), "{e}");
+    }
 }
