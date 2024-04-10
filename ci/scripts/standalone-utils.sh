@@ -38,7 +38,7 @@ start_standalone_without_compactor() {
 }
 
 # You can fill up this section by consulting
-# .risingwave/log/risedev.log, after calling ./risedev d full.
+# .risingwave/log/risedev.log, after calling `risedev d full`.
 # It is expected that minio, etcd will be started after this is called.
 start_standalone() {
   RUST_BACKTRACE=1 \

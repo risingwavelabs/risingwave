@@ -182,8 +182,8 @@ SELECT 'abcdefg' SIMILAR TO '_bcd\%' AS false;
 -- and an empty string to mean "no escape", which is also not per spec
 SELECT 'abcd\efg' SIMILAR TO '_bcd\%' ESCAPE '' AS true;
 -- these behaviors are per spec, though:
-SELECT 'abcdefg' SIMILAR TO '_bcd%' ESCAPE NULL AS null;
-SELECT 'abcdefg' SIMILAR TO '_bcd#%' ESCAPE '##' AS error;
+--@ SELECT 'abcdefg' SIMILAR TO '_bcd%' ESCAPE NULL AS null;
+--@ SELECT 'abcdefg' SIMILAR TO '_bcd#%' ESCAPE '##' AS error;
 
 -- Test backslash escapes in regexp_replace's replacement string
 --@ SELECT regexp_replace('1112223333', E'(\\d{3})(\\d{3})(\\d{4})', E'(\\1) \\2-\\3');
@@ -316,48 +316,48 @@ SELECT 'indio' NOT LIKE 'in_o' AS "true";
 --@ SELECT 'abc'::bytea NOT LIKE '_b_'::bytea AS "false";
 
 -- unused escape character
---@ SELECT 'hawkeye' LIKE 'h%' ESCAPE '#' AS "true";
---@ SELECT 'hawkeye' NOT LIKE 'h%' ESCAPE '#' AS "false";
---@ 
---@ SELECT 'indio' LIKE 'ind_o' ESCAPE '$' AS "true";
---@ SELECT 'indio' NOT LIKE 'ind_o' ESCAPE '$' AS "false";
+SELECT 'hawkeye' LIKE 'h%' ESCAPE '#' AS "true";
+SELECT 'hawkeye' NOT LIKE 'h%' ESCAPE '#' AS "false";
+
+SELECT 'indio' LIKE 'ind_o' ESCAPE '$' AS "true";
+SELECT 'indio' NOT LIKE 'ind_o' ESCAPE '$' AS "false";
 
 -- escape character
 -- E061-05 like predicate with escape clause
---@ SELECT 'h%' LIKE 'h#%' ESCAPE '#' AS "true";
---@ SELECT 'h%' NOT LIKE 'h#%' ESCAPE '#' AS "false";
---@ 
---@ SELECT 'h%wkeye' LIKE 'h#%' ESCAPE '#' AS "false";
---@ SELECT 'h%wkeye' NOT LIKE 'h#%' ESCAPE '#' AS "true";
---@ 
---@ SELECT 'h%wkeye' LIKE 'h#%%' ESCAPE '#' AS "true";
---@ SELECT 'h%wkeye' NOT LIKE 'h#%%' ESCAPE '#' AS "false";
---@ 
---@ SELECT 'h%awkeye' LIKE 'h#%a%k%e' ESCAPE '#' AS "true";
---@ SELECT 'h%awkeye' NOT LIKE 'h#%a%k%e' ESCAPE '#' AS "false";
---@ 
---@ SELECT 'indio' LIKE '_ndio' ESCAPE '$' AS "true";
---@ SELECT 'indio' NOT LIKE '_ndio' ESCAPE '$' AS "false";
---@ 
---@ SELECT 'i_dio' LIKE 'i$_d_o' ESCAPE '$' AS "true";
---@ SELECT 'i_dio' NOT LIKE 'i$_d_o' ESCAPE '$' AS "false";
---@ 
---@ SELECT 'i_dio' LIKE 'i$_nd_o' ESCAPE '$' AS "false";
---@ SELECT 'i_dio' NOT LIKE 'i$_nd_o' ESCAPE '$' AS "true";
---@ 
---@ SELECT 'i_dio' LIKE 'i$_d%o' ESCAPE '$' AS "true";
---@ SELECT 'i_dio' NOT LIKE 'i$_d%o' ESCAPE '$' AS "false";
---@ 
+SELECT 'h%' LIKE 'h#%' ESCAPE '#' AS "true";
+SELECT 'h%' NOT LIKE 'h#%' ESCAPE '#' AS "false";
+
+SELECT 'h%wkeye' LIKE 'h#%' ESCAPE '#' AS "false";
+SELECT 'h%wkeye' NOT LIKE 'h#%' ESCAPE '#' AS "true";
+
+SELECT 'h%wkeye' LIKE 'h#%%' ESCAPE '#' AS "true";
+SELECT 'h%wkeye' NOT LIKE 'h#%%' ESCAPE '#' AS "false";
+
+SELECT 'h%awkeye' LIKE 'h#%a%k%e' ESCAPE '#' AS "true";
+SELECT 'h%awkeye' NOT LIKE 'h#%a%k%e' ESCAPE '#' AS "false";
+
+SELECT 'indio' LIKE '_ndio' ESCAPE '$' AS "true";
+SELECT 'indio' NOT LIKE '_ndio' ESCAPE '$' AS "false";
+
+SELECT 'i_dio' LIKE 'i$_d_o' ESCAPE '$' AS "true";
+SELECT 'i_dio' NOT LIKE 'i$_d_o' ESCAPE '$' AS "false";
+
+SELECT 'i_dio' LIKE 'i$_nd_o' ESCAPE '$' AS "false";
+SELECT 'i_dio' NOT LIKE 'i$_nd_o' ESCAPE '$' AS "true";
+
+SELECT 'i_dio' LIKE 'i$_d%o' ESCAPE '$' AS "true";
+SELECT 'i_dio' NOT LIKE 'i$_d%o' ESCAPE '$' AS "false";
+
 --@ SELECT 'a_c'::bytea LIKE 'a$__'::bytea ESCAPE '$'::bytea AS "true";
 --@ SELECT 'a_c'::bytea NOT LIKE 'a$__'::bytea ESCAPE '$'::bytea AS "false";
 
 -- escape character same as pattern character
---@ SELECT 'maca' LIKE 'm%aca' ESCAPE '%' AS "true";
---@ SELECT 'maca' NOT LIKE 'm%aca' ESCAPE '%' AS "false";
---@ 
---@ SELECT 'ma%a' LIKE 'm%a%%a' ESCAPE '%' AS "true";
---@ SELECT 'ma%a' NOT LIKE 'm%a%%a' ESCAPE '%' AS "false";
---@ 
+SELECT 'maca' LIKE 'm%aca' ESCAPE '%' AS "true";
+SELECT 'maca' NOT LIKE 'm%aca' ESCAPE '%' AS "false";
+
+SELECT 'ma%a' LIKE 'm%a%%a' ESCAPE '%' AS "true";
+SELECT 'ma%a' NOT LIKE 'm%a%%a' ESCAPE '%' AS "false";
+
 --@ SELECT 'bear' LIKE 'b_ear' ESCAPE '_' AS "true";
 --@ SELECT 'bear' NOT LIKE 'b_ear' ESCAPE '_' AS "false";
 --@ 

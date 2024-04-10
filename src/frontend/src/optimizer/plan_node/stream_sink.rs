@@ -20,7 +20,7 @@ use fixedbitset::FixedBitSet;
 use icelake::types::Transform;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnCatalog, TableId};
+use risingwave_common::catalog::{ColumnCatalog, CreateType, TableId};
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::match_sink_name_str;
@@ -371,6 +371,11 @@ impl StreamSink {
         };
         let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;
         let distribution_key = input.distribution().dist_column_indices().to_vec();
+        let create_type = if input.ctx().session_ctx().config().background_ddl() {
+            CreateType::Background
+        } else {
+            CreateType::Foreground
+        };
         let sink_desc = SinkDesc {
             id: SinkId::placeholder(),
             name,
@@ -386,6 +391,7 @@ impl StreamSink {
             format_desc,
             target_table,
             extra_partition_col_idx,
+            create_type,
         };
         Ok((input, sink_desc))
     }

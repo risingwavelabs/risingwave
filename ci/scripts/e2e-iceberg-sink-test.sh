@@ -33,7 +33,7 @@ tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
 echo "--- starting risingwave cluster"
 mkdir -p .risingwave/log
-cargo make ci-start ci-iceberg-test
+risedev ci-start ci-iceberg-test
 sleep 1
 
 # prepare minio iceberg sink
@@ -82,4 +82,4 @@ else
 fi
 
 echo "--- Kill cluster"
-cargo make ci-kill
+risedev ci-kill

@@ -19,6 +19,7 @@ use futures_async_stream::try_stream;
 use multimap::MultiMap;
 use risingwave_common::array::*;
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::config;
 use risingwave_common::types::*;
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_expr::aggregate::AggCall;
@@ -127,6 +128,7 @@ async fn test_merger_sum_aggr() {
         0,
         ctx,
         metrics,
+        config::default::developer::stream_chunk_size(),
     );
     let actor = Actor::new(
         dispatcher,

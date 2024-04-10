@@ -32,6 +32,7 @@ impl OpendalObjectStore {
             .unwrap_or_else(|_| panic!("AZBLOB_ENDPOINT not found from environment variables"));
 
         builder.endpoint(&endpoint);
+
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())

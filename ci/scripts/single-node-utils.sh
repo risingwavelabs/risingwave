@@ -7,7 +7,7 @@ export PREFIX_BIN=./target/debug
 export PREFIX_LOG=$RW_PREFIX/log
 
 # You can fill up this section by consulting
-# .risingwave/log/risedev.log, after calling ./risedev d full.
+# .risingwave/log/risedev.log, after calling `risedev d full`.
 # It is expected that minio, etcd will be started after this is called.
 start_single_node() {
   mkdir -p "$HOME/.risingwave/state_store"
