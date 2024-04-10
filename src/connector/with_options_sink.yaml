@@ -87,6 +87,9 @@ DeltaLakeConfig:
   - name: s3.endpoint
     field_type: String
     required: false
+  - name: gcs.service.account
+    field_type: String
+    required: false
   - name: r#type
     field_type: String
     required: true
@@ -159,6 +162,10 @@ IcebergConfig:
   - name: java_catalog_props
     field_type: HashMap<String,String>
     required: false
+  - name: commit_checkpoint_interval
+    field_type: u64
+    required: false
+    default: Default::default
 KafkaConfig:
   fields:
   - name: properties.bootstrap.server

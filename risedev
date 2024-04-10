@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-if [ -z "$(which cargo-binstall)" ]; then
+if [ -z "$(which cargo-binstall)" ] && [ -z "$RISINGWAVE_CI" ]; then
     echo "Installing cargo-binstall..."
     curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 fi

@@ -82,7 +82,7 @@ impl HummockManager {
             return Ok((0, deltas_to_delete.len()));
         }
         let mut hummock_version_deltas = create_trx_wrapper!(
-            self.sql_meta_store(),
+            self.meta_store_ref(),
             BTreeMapTransactionWrapper,
             BTreeMapTransaction::new(&mut versioning.hummock_version_deltas,)
         );
@@ -97,11 +97,7 @@ impl HummockManager {
         for delta_id in &batch {
             hummock_version_deltas.remove(*delta_id);
         }
-        commit_multi_var!(
-            self.env.meta_store(),
-            self.sql_meta_store(),
-            hummock_version_deltas
-        )?;
+        commit_multi_var!(self.meta_store_ref(), hummock_version_deltas)?;
         #[cfg(test)]
         {
             drop(versioning_guard);

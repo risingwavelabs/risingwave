@@ -490,6 +490,7 @@ impl ObjectStore for S3ObjectStore {
     async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
         // AWS restricts the number of objects per request to 1000.
         const MAX_LEN: usize = 1000;
+        let mut all_errors = Vec::new();
 
         // If needed, split given set into subsets of size with no more than `MAX_LEN` objects.
         for start_idx /* inclusive */ in (0..paths.len()).step_by(MAX_LEN) {
@@ -512,8 +513,14 @@ impl ObjectStore for S3ObjectStore {
 
             // Check if there were errors.
             if !delete_output.errors().is_empty() {
-                return Err(ObjectError::internal(format!("DeleteObjects request returned exception for some objects: {:?}", delete_output.errors())));
+                all_errors.append(&mut delete_output.errors().to_owned());
             }
+        }
+        if !all_errors.is_empty() {
+            return Err(ObjectError::internal(format!(
+                "DeleteObjects request returned exception for some objects: {:?}",
+                all_errors
+            )));
         }
 
         Ok(())

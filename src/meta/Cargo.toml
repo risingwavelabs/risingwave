@@ -23,7 +23,7 @@ aws-sdk-ec2 = { workspace = true }
 base64-url = { version = "2.0.0" }
 bytes = { version = "1", features = ["serde"] }
 chrono = "0.4"
-clap = { version = "4", features = ["derive", "env"] }
+clap = { workspace = true }
 comfy-table = "7"
 crepe = "0.1"
 easy-ext = "1"
@@ -35,18 +35,18 @@ function_name = "0.3.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
 hyper = "0.14" # required by tonic
-itertools = "0.12"
+itertools = { workspace = true }
 maplit = "1.0.2"
 memcomparable = { version = "0.2" }
 mime_guess = "2"
 num-integer = "0.1"
 num-traits = "0.2"
 otlp-embedded = { workspace = true }
-parking_lot = { version = "0.12", features = ["arc_lock"] }
+parking_lot = { workspace = true }
 prometheus = "0.13"
 prometheus-http-query = "0.8"
 prost = { workspace = true }
-rand = "0.8"
+rand = { workspace = true }
 risingwave_backup = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_heap_profiling = { workspace = true }
@@ -85,7 +85,7 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
-axum = "=0.7.4" # TODO: 0.7.5+ does not work with current toolchain
+axum = { workspace = true }
 tower-http = { version = "0.5", features = [
     "add-extension",
     "cors",
@@ -97,7 +97,7 @@ workspace-hack = { path = "../workspace-hack" }
 [dev-dependencies]
 assert_matches = "1"
 expect-test = "1.5"
-rand = "0.8"
+rand = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_test_runner = { workspace = true }
 

@@ -154,7 +154,7 @@ impl StarrocksSink {
     ) -> Result<bool> {
         match rw_data_type {
             risingwave_common::types::DataType::Boolean => {
-                Ok(starrocks_data_type.contains("tinyint"))
+                Ok(starrocks_data_type.contains("tinyint") | starrocks_data_type.contains("boolean"))
             }
             risingwave_common::types::DataType::Int16 => {
                 Ok(starrocks_data_type.contains("smallint"))

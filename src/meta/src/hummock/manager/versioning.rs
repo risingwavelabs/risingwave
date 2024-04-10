@@ -295,13 +295,13 @@ impl HummockManager {
         let mut versioning = write_lock!(self, versioning).await;
         let new_stats = rebuild_table_stats(&versioning.current_version);
         let mut version_stats = create_trx_wrapper!(
-            self.sql_meta_store(),
+            self.meta_store_ref(),
             VarTransactionWrapper,
             VarTransaction::new(&mut versioning.version_stats)
         );
         // version_stats.hummock_version_id is always 0 in meta store.
         version_stats.table_stats = new_stats.table_stats;
-        commit_multi_var!(self.env.meta_store(), self.sql_meta_store(), version_stats)?;
+        commit_multi_var!(self.meta_store_ref(), version_stats)?;
         Ok(())
     }
 
@@ -326,7 +326,7 @@ impl HummockManager {
             );
             let mut new_version: HummockVersion = versioning.current_version.clone();
             let new_version_delta = create_trx_wrapper!(
-                self.sql_meta_store(),
+                self.meta_store_ref(),
                 BTreeMapEntryTransactionWrapper,
                 BTreeMapEntryTransaction::new_insert(
                     &mut versioning.hummock_version_deltas,
@@ -335,11 +335,7 @@ impl HummockManager {
                 )
             );
             new_version.apply_version_delta(&new_version_delta);
-            commit_multi_var!(
-                self.env.meta_store(),
-                self.sql_meta_store(),
-                new_version_delta
-            )?;
+            commit_multi_var!(self.meta_store_ref(), new_version_delta)?;
             versioning.current_version = new_version;
         }
         Ok(())
