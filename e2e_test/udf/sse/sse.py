@@ -20,7 +20,7 @@ def home():
 
 @app.route('/graphql/stream',  methods=['POST'])
 def stream():
-    
+
     @stream_with_context
     def eventStream():
         messages = ["Hi", "Bonjour", "Hola", "Ciao", "Zdravo"]
