@@ -1,24 +1,43 @@
-import http.server
-import sys
+import json
 
-class MockHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
-    """HTTPServer mock request handler"""
+from flask import Flask, Response, stream_with_context, jsonify
 
-    def do_GET(self):  # pylint: disable=invalid-name
-        """Handle GET requests"""
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(b'{"results": [{"idx": 1}, {"idx": 2}]}')
+app = Flask(__name__)
+def format_sse(data: str | None, event=None) -> str:
+    if data:
+        msg = f'data: {data}\n\n'
+    else:
+        msg = '\n'
 
-    def log_request(self, code=None, size=None):
-        """Don't log anything"""
+    if event is not None:
+        msg = f'event: {event}\n{msg}'
 
-def main() -> int:
-    """Echo the input arguments to standard output"""
+    return msg
 
-    httpd = http.server.HTTPServer( ("127.0.0.1", 4101), MockHTTPRequestHandler)
-    httpd.serve_forever()
+@app.route('/')
+def home():
+    return jsonify({"results": [{"idx": 1}, {"idx": 2}]})
+
+@app.route('/graphql/stream',  methods=['POST'])
+def stream():
+    print("sse stream called")
+    @stream_with_context
+    def eventStream():
+        messages = ["Hi", "Bonjour", "Hola", "Ciao", "Zdravo"]
+        for msg in messages:
+            data = {
+                "data": {
+                    "greetings": msg
+                }
+            }
+            yield format_sse(json.dumps(data), "next")
+
+        yield format_sse(None, "complete")
+    return Response(eventStream(), mimetype="text/event-stream")
 
 if __name__ == '__main__':
-    sys.exit(main())
+    from waitress import serve
+    from werkzeug.serving import WSGIRequestHandler
+    WSGIRequestHandler.protocol_version = "HTTP/1.1"
+    serve(app, host="127.0.0.1", port=4200)
+    print("Server stopped.")

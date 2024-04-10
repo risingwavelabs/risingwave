@@ -1,5 +1,5 @@
 system ok
-pip3 install -r e2e_test/udf/sse/requirements.txt
+pip3 install -r e2e_test/udf/requirements.txt
 
 statement ok
 CREATE FUNCTION gcd(a int, b int) RETURNS int LANGUAGE javascript RUNTIME deno AS $$
@@ -202,7 +202,7 @@ sleep 1s
 
 statement ok
 CREATE FUNCTION fetch_api() RETURNS TABLE ( data struct< idx int>) LANGUAGE javascript RUNTIME deno AS $$
-    const response = await fetch('http://127.0.0.1:4101');
+    const response = await fetch('http://127.0.0.1:4200');
     const resp = await response.json();
     for (const r of resp.results) {
         yield r;
@@ -217,15 +217,6 @@ select * FROM fetch_api();
 
 statement ok
 drop function fetch_api;
-
-system ok
-pkill -9 python3
-
-system ok
-python3 e2e_test/udf/sse/sse.py &
-
-# waits for the server to start
-sleep 2s
 
 statement ok
 CREATE FUNCTION call_sse() RETURNS TABLE ( data struct<data struct<greetings string>>) LANGUAGE javascript RUNTIME deno USING LINK 'fs://e2e_test/udf/sse/bundled.table.js' SYNC;
