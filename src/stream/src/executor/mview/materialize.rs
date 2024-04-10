@@ -159,7 +159,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         .inc_by(chunk.cardinality() as u64);
 
                     // This is an optimization that handles conflicts only when a particular materialized view downstream has no MV dependencies.
-                    // This optimization is applied only when there is no specified version column and the is_consistent_op flag of the state table is false, 
+                    // This optimization is applied only when there is no specified version column and the is_consistent_op flag of the state table is false,
                     // and the conflict behavior is overwrite.
                     let do_not_handle_conflict =
                         !self.state_table.is_consistent_op() && self.version_column_index.is_none() && self.conflict_behavior == ConflictBehavior::Overwrite;
