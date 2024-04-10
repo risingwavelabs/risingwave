@@ -5,6 +5,7 @@ pub use sea_orm_migration::prelude::*;
 mod m20230908_072257_init;
 mod m20231008_020431_hummock;
 mod m20240304_074901_subscription;
+mod m20240410_082733_with_version_column_migration;
 
 pub struct Migrator;
 
@@ -15,26 +16,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20230908_072257_init::Migration),
             Box::new(m20231008_020431_hummock::Migration),
             Box::new(m20240304_074901_subscription::Migration),
+            Box::new(m20240410_082733_with_version_column_migration::Migration),
         ]
-    }
-}
-
-#[macro_export]
-macro_rules! assert_not_has_tables {
-    ($manager:expr, $( $table:ident ),+) => {
-        $(
-            assert!(
-                !$manager
-                    .has_table($table::Table.to_string())
-                    .await?,
-                "Table `{}` already exists",
-                $table::Table.to_string()
-            );
-        )+
-    };
-}
-
-#[macro_export]
 macro_rules! drop_tables {
     ($manager:expr, $( $table:ident ),+) => {
         $(
