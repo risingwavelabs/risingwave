@@ -16300,7 +16300,7 @@ dependencies = [
  "sqlx-postgres",
  "sqlx-sqlite",
  "stable_deref_trait",
- "strum 0.25.0",
+ "strum 0.26.1",
  "subtle",
  "syn 1.0.109",
  "syn 2.0.57",
