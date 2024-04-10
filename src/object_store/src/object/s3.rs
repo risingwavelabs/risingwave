@@ -50,6 +50,7 @@ use risingwave_common::range::RangeBoundsExt;
 use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
+use url::Url;
 
 use super::object_metrics::ObjectStoreMetrics;
 use super::{
@@ -644,17 +645,20 @@ impl S3ObjectStore {
     ) -> Self {
         let server = server.strip_prefix("minio://").unwrap();
         let (access_key_id, rest) = server.split_once(':').unwrap();
-        let (secret_access_key, mut rest) = rest.split_once('@').unwrap();
-        let endpoint_prefix = if let Some(rest_stripped) = rest.strip_prefix("https://") {
-            rest = rest_stripped;
-            "https://"
-        } else if let Some(rest_stripped) = rest.strip_prefix("http://") {
-            rest = rest_stripped;
-            "http://"
-        } else {
-            "http://"
+        let (secret_access_key, rest) = rest.split_once('@').unwrap();
+        let mut parsed_url = Url::parse(rest).unwrap();
+        let endpoint_prefix = match parsed_url.scheme() {
+            "https" => {
+                parsed_url.set_scheme("http").unwrap();
+                "https://"
+            }
+            "http" => "http://",
+            _ => "http://",
         };
-        let (address, bucket) = rest.split_once('/').unwrap();
+
+        let modified_rest = parsed_url.as_str();
+
+        let (address, bucket) = modified_rest.split_once('/').unwrap();
 
         #[cfg(madsim)]
         let builder = aws_sdk_s3::config::Builder::new().credentials_provider(
