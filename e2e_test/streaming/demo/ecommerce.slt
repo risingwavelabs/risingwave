@@ -20,6 +20,9 @@ values
     ('63', '74', 390.383406, '2022-07-19 12:31:22.07');
 
 statement ok
+flush;
+
+statement ok
 CREATE MATERIALIZED VIEW order_details AS
 SELECT
     order_id,
@@ -29,9 +32,6 @@ FROM
     order_events
 GROUP BY
     order_id;
-
-statement ok
-flush;
 
 query IRR rowsort
 SELECT * FROM order_details;
