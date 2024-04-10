@@ -9,8 +9,8 @@ impl MigrationTrait for Migration {
         manager
             .alter_table(
                 MigrationTable::alter()
-                    .table(VersonColumn::Table)
-                    .add_column(ColumnDef::new(VersonColumn::VersionColumnIndex).string())
+                    .table(VersionColumn::Table)
+                    .add_column(ColumnDef::new(VersionColumn::VersionColumnIndex).string())
                     .to_owned(),
             )
             .await?;
@@ -19,16 +19,20 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Replace the sample below with your own migration scripts
-
         manager
-            .drop_table(Table::drop().table(VersonColumn::Table).to_owned())
-            .await
+            .alter_table(
+                MigrationTable::alter()
+                    .table(VersionColumn::Table)
+                    .drop_column(Alias::new(VersionColumn::VersionColumnIndex.to_string()))
+                    .to_owned(),
+            )
+            .await?;
+        Ok(())
     }
 }
 
 #[derive(DeriveIden)]
-enum VersonColumn {
+enum VersionColumn {
     Table,
     VersionColumnIndex,
 }
