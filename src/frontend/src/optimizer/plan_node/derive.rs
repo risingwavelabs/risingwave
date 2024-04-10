@@ -108,7 +108,8 @@ pub(crate) fn derive_pk(
     let mut pk = vec![];
 
     let func_dep = input.functional_dependency();
-    let user_order_by = func_dep.minimize_order_key(user_order_by);
+    let user_order_by =
+        func_dep.minimize_order_key(user_order_by, input.distribution().dist_column_indices());
 
     for order in &user_order_by.column_orders {
         let idx = order.column_index;
@@ -117,20 +118,6 @@ pub(crate) fn derive_pk(
     }
 
     for &idx in &stream_key {
-        if in_order.contains(idx) {
-            continue;
-        }
-        pk.push(ColumnOrder::new(idx, OrderType::ascending()));
-        in_order.insert(idx);
-    }
-
-    // We need to ensure distribution key is part of pk.
-    // If it is not part of either stream_key or order_key,
-    // It must mean that it is only necessary for storage distribution.
-    // Such a case is rare, but it is possible,
-    // for example in the case of index created on singleton mv.
-    // In this case, we can simply append these columns to pk.
-    for &idx in input.distribution().dist_column_indices() {
         if in_order.contains(idx) {
             continue;
         }

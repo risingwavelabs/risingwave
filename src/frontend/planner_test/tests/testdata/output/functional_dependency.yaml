@@ -4,20 +4,20 @@
     create table t1 (id int primary key, i int);
     select id, i from t1 order by id, i limit 2;
   logical_plan: |-
-    LogicalTopN { order: [t1.id ASC], limit: 2, offset: 0 }
+    LogicalTopN { order: [t1.id ASC, t1.i ASC], limit: 2, offset: 0 }
     └─LogicalProject { exprs: [t1.id, t1.i] }
       └─LogicalScan { table: t1, columns: [t1.id, t1.i] }
   batch_plan: |-
-    BatchTopN { order: [t1.id ASC], limit: 2, offset: 0 }
+    BatchTopN { order: [t1.id ASC, t1.i ASC], limit: 2, offset: 0 }
     └─BatchExchange { order: [], dist: Single }
-      └─BatchLimit { limit: 2, offset: 0 }
-        └─BatchScan { table: t1, columns: [t1.id, t1.i], limit: 2, distribution: UpstreamHashShard(t1.id) }
+      └─BatchTopN { order: [t1.id ASC, t1.i ASC], limit: 2, offset: 0 }
+        └─BatchScan { table: t1, columns: [t1.id, t1.i], distribution: UpstreamHashShard(t1.id) }
   stream_plan: |-
     StreamMaterialize { columns: [id, i], stream_key: [id], pk_columns: [id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t1.id, t1.i] }
-      └─StreamTopN { order: [t1.id ASC], limit: 2, offset: 0 }
+      └─StreamTopN { order: [t1.id ASC, t1.i ASC], limit: 2, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [t1.id ASC], limit: 2, offset: 0, group_key: [_vnode] }
+          └─StreamGroupTopN { order: [t1.id ASC, t1.i ASC], limit: 2, offset: 0, group_key: [_vnode] }
             └─StreamProject { exprs: [t1.id, t1.i, Vnode(t1.id) as _vnode] }
               └─StreamTableScan { table: t1, columns: [t1.id, t1.i], stream_scan_type: ArrangementBackfill, stream_key: [t1.id], pk: [id], dist: UpstreamHashShard(t1.id) }
 - name: test functional dependency for order key pruning (order by - suffix fd)
@@ -50,8 +50,9 @@
     LogicalProject { exprs: [v.cnt] }
     └─LogicalScan { table: v, columns: [v.cnt], cardinality: 0..=1 }
   batch_plan: |-
-    BatchExchange { order: [], dist: Single }
-    └─BatchScan { table: v, columns: [v.cnt], distribution: Single }
+    BatchExchange { order: [v.cnt ASC], dist: Single }
+    └─BatchSort { order: [v.cnt ASC] }
+      └─BatchScan { table: v, columns: [v.cnt], distribution: Single }
   stream_plan: |-
     StreamMaterialize { columns: [cnt], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamTableScan { table: v, columns: [v.cnt], stream_scan_type: ArrangementBackfill, stream_key: [], pk: [], dist: Single }

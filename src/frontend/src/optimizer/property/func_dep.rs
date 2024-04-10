@@ -327,7 +327,11 @@ impl FunctionalDependencySet {
 
     /// Wrapper around `Self::minimize_order_key_bitset` to minimize `order_key`.
     /// View the documentation of `Self::minimize_order_key_bitset` for more information.
-    pub fn minimize_order_key(&self, order_key: Order) -> Order {
+    /// In the process of minimizing the order key,
+    /// we must ensure that if the indices are part of
+    /// distribution key, they must not be pruned.
+    pub fn minimize_order_key(&self, order_key: Order, dist_key_indices: &[usize]) -> Order {
+        let dist_key_bitset = FixedBitSet::from_iter(dist_key_indices.iter().copied());
         let order_key_indices = order_key
             .column_orders
             .iter()
@@ -337,7 +341,9 @@ impl FunctionalDependencySet {
         let order = order_key
             .column_orders
             .iter()
-            .filter(|o| min_bitset.contains(o.column_index))
+            .filter(|o| {
+                min_bitset.contains(o.column_index) || dist_key_bitset.contains(o.column_index)
+            })
             .cloned()
             .collect_vec();
         Order::new(order)
