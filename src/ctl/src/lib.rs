@@ -141,6 +141,17 @@ pub enum DebugCommands {
         #[command(flatten)]
         common: DebugCommon,
     },
+    /// Fix table fragments info.
+    FixTableFragments {
+        #[command(flatten)]
+        common: DebugCommon,
+
+        #[clap(long)]
+        table_id: u32,
+
+        #[clap(long, value_delimiter = ',')]
+        dirty_fragment_ids: Vec<u32>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -853,6 +864,11 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 .await?
         }
         Commands::Debug(DebugCommands::Dump { common }) => cmd_impl::debug::dump(common).await?,
+        Commands::Debug(DebugCommands::FixTableFragments {
+            common,
+            table_id,
+            dirty_fragment_ids,
+        }) => cmd_impl::debug::fix_table_fragments(common, table_id, dirty_fragment_ids).await?,
         Commands::Throttle(ThrottleCommands::Source(args)) => {
             apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Source, args).await?
         }
