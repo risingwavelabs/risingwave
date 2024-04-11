@@ -35,11 +35,17 @@ fn sink_mod_path() -> PathBuf {
 }
 
 fn common_mod_path() -> PathBuf {
-    connector_crate_path().join("src").join("common.rs")
+    connector_crate_path()
+        .join("src")
+        .join("connector_common")
+        .join("common.rs")
 }
 
 fn mqtt_common_mod_path() -> PathBuf {
-    connector_crate_path().join("src").join("mqtt_common.rs")
+    connector_crate_path()
+        .join("src")
+        .join("connector_common")
+        .join("mqtt_common.rs")
 }
 
 pub fn generate_with_options_yaml_source() -> String {
@@ -163,8 +169,10 @@ fn generate_with_options_yaml_inner(path: &Path) -> String {
     let struct_infos = flatten_nested_options(struct_infos);
 
     // Generate the output
-    "# THIS FILE IS AUTO_GENERATED. DO NOT EDIT\n\n".to_string()
-        + &serde_yaml::to_string(&struct_infos).unwrap()
+    format!(
+        "# THIS FILE IS AUTO_GENERATED. DO NOT EDIT\n\n{}",
+        serde_yaml::to_string(&struct_infos).unwrap()
+    )
 }
 
 #[derive(Debug, Serialize, Clone)]

@@ -114,6 +114,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             handle_pk_conflict_behavior: PbHandleConflictBehavior::from(
                 value.0.handle_pk_conflict_behavior,
             ) as _,
+            version_column_index: value.0.version_column_index.map(|x| x as u32),
             read_prefix_len_hint: value.0.read_prefix_len_hint as _,
             watermark_indices: value.0.watermark_indices.0,
             dist_key_in_pk: value.0.dist_key_in_pk.0,
@@ -206,6 +207,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             target_table: value.0.target_table.map(|id| id as _),
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
+            create_type: PbCreateType::Foreground as _,
         }
     }
 }
@@ -231,6 +233,7 @@ impl From<ObjectModel<subscription::Model>> for PbSubscription {
             ),
             stream_job_status: PbStreamJobStatus::Created as _, // todo: deprecate it.
             column_catalogs: value.0.columns.0,
+            subscription_from_name: value.0.subscription_from_name,
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
         }
@@ -314,6 +317,8 @@ impl From<ObjectModel<function::Model>> for PbFunction {
             compressed_binary: value.0.compressed_binary,
             kind: Some(value.0.kind.into()),
             always_retry_on_network_error: value.0.always_retry_on_network_error,
+            runtime: value.0.runtime,
+            function_type: value.0.function_type,
         }
     }
 }

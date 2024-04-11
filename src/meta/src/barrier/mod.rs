@@ -35,7 +35,6 @@ use risingwave_hummock_sdk::table_watermark::{
 };
 use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
 use risingwave_pb::catalog::table::TableType;
-use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::PausedReason;
@@ -58,11 +57,11 @@ use crate::barrier::notifier::BarrierInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::state::BarrierManagerState;
-use crate::hummock::{CommitEpochInfo, HummockManagerRef};
+use crate::hummock::{CommitEpochInfo, HummockManagerRef, NewTableFragmentInfo};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv,
-    MetadataManager, WorkerId,
+    MetadataManager, SystemParamsManagerImpl, WorkerId,
 };
 use crate::model::{ActorId, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
@@ -199,7 +198,7 @@ pub struct GlobalBarrierManager {
 /// Controls the concurrent execution of commands.
 struct CheckpointControl {
     /// Save the state and message of barrier in order.
-    /// Key is the prev_epoch.
+    /// Key is the `prev_epoch`.
     command_ctx_queue: BTreeMap<u64, EpochNode>,
 
     /// Command that has been collected but is still completing.
@@ -509,17 +508,16 @@ impl GlobalBarrierManager {
                  To resume the data sources, either restart the cluster again or use `risectl meta resume`.",
                 PAUSE_ON_NEXT_BOOTSTRAP_KEY
             );
-            if let Some(system_ctl) = self.env.system_params_controller() {
-                system_ctl
-                    .set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
-                    .await?;
-            } else {
-                self.env
-                    .system_params_manager()
-                    .unwrap()
-                    .set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
-                    .await?;
-            }
+            match self.env.system_params_manager_impl_ref() {
+                SystemParamsManagerImpl::Kv(mgr) => {
+                    mgr.set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
+                        .await?;
+                }
+                SystemParamsManagerImpl::Sql(mgr) => {
+                    mgr.set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
+                        .await?;
+                }
+            };
         }
         Ok(paused)
     }
@@ -600,6 +598,7 @@ impl GlobalBarrierManager {
                 changed_worker = self.active_streaming_nodes.changed() => {
                     #[cfg(debug_assertions)]
                     {
+                        use risingwave_pb::common::WorkerNode;
                         match self
                             .context
                             .metadata_manager
@@ -745,12 +744,19 @@ impl GlobalBarrierManager {
 
         send_latency_timer.observe_duration();
 
-        let node_to_collect = self
+        let node_to_collect = match self
             .control_stream_manager
             .inject_barrier(command_ctx.clone())
-            .inspect_err(|_| {
+        {
+            Ok(node_to_collect) => node_to_collect,
+            Err(err) => {
+                for notifier in notifiers {
+                    notifier.notify_failed(err.clone());
+                }
                 fail_point!("inject_barrier_err_success");
-            })?;
+                return Err(err);
+            }
+        };
 
         // Notify about the injection.
         let prev_paused_reason = self.state.paused_reason();
@@ -812,7 +818,7 @@ impl GlobalBarrierManagerContext {
         assert!(state.node_to_collect.is_empty());
         let resps = state.resps;
         let wait_commit_timer = self.metrics.barrier_wait_commit_latency.start_timer();
-        let (commit_info, create_mview_progress) = collect_commit_epoch_info(resps);
+        let (commit_info, create_mview_progress) = collect_commit_epoch_info(resps, &command_ctx);
         if let Err(e) = self.update_snapshot(&command_ctx, commit_info).await {
             for notifier in notifiers {
                 notifier.notify_collection_failed(e.clone());
@@ -828,6 +834,9 @@ impl GlobalBarrierManagerContext {
         let duration_sec = enqueue_time.stop_and_record();
         self.report_complete_event(duration_sec, &command_ctx);
         wait_commit_timer.observe_duration();
+        self.metrics
+            .last_committed_barrier_time
+            .set(command_ctx.curr_epoch.value().as_unix_secs() as i64);
         Ok(BarrierCompleteOutput {
             command_ctx,
             require_next_checkpoint: has_remaining,
@@ -1036,18 +1045,18 @@ impl GlobalBarrierManagerContext {
     /// will create or drop before this barrier flow through them.
     async fn resolve_actor_info(
         &self,
-        all_nodes: Vec<WorkerNode>,
+        active_nodes: &ActiveStreamingWorkerNodes,
     ) -> MetaResult<InflightActorInfo> {
         let info = match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
                 let all_actor_infos = mgr.fragment_manager.load_all_actors().await;
 
-                InflightActorInfo::resolve(all_nodes, all_actor_infos)
+                InflightActorInfo::resolve(active_nodes, all_actor_infos)
             }
             MetadataManager::V2(mgr) => {
                 let all_actor_infos = mgr.catalog_controller.load_all_actors().await?;
 
-                InflightActorInfo::resolve(all_nodes, all_actor_infos)
+                InflightActorInfo::resolve(active_nodes, all_actor_infos)
             }
         };
 
@@ -1099,6 +1108,7 @@ pub type BarrierManagerRef = GlobalBarrierManagerContext;
 
 fn collect_commit_epoch_info(
     resps: Vec<BarrierCompleteResponse>,
+    command_ctx: &CommandContext,
 ) -> (CommitEpochInfo, Vec<CreateMviewProgress>) {
     let mut sst_to_worker: HashMap<HummockSstableObjectId, WorkerId> = HashMap::new();
     let mut synced_ssts: Vec<ExtendedSstableInfo> = vec![];
@@ -1118,6 +1128,23 @@ fn collect_commit_epoch_info(
         table_watermarks.push(resp.table_watermarks);
         progresses.extend(resp.create_mview_progress);
     }
+    let new_table_fragment_info = if let Command::CreateStreamingJob {
+        table_fragments, ..
+    } = &command_ctx.command
+    {
+        Some(NewTableFragmentInfo {
+            table_id: table_fragments.table_id(),
+            mv_table_id: table_fragments.mv_table_id().map(TableId::new),
+            internal_table_ids: table_fragments
+                .internal_table_ids()
+                .into_iter()
+                .map(TableId::new)
+                .collect(),
+        })
+    } else {
+        None
+    };
+
     let info = CommitEpochInfo::new(
         synced_ssts,
         merge_multiple_new_table_watermarks(
@@ -1137,6 +1164,7 @@ fn collect_commit_epoch_info(
                 .collect_vec(),
         ),
         sst_to_worker,
+        new_table_fragment_info,
     );
     (info, progresses)
 }

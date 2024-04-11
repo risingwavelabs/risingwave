@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::string::ToString;
-
 use rand::distributions::Alphanumeric;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -32,8 +30,10 @@ impl VarcharRandomVariableLengthField {
     }
 
     pub fn generate_string(&mut self, offset: u64) -> String {
+        let len = rand::thread_rng().gen_range(0..=DEFAULT_LENGTH * 2);
         StdRng::seed_from_u64(offset ^ self.seed)
             .sample_iter(&Alphanumeric)
+            .take(len)
             .map(char::from)
             .collect()
     }

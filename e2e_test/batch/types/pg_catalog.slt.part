@@ -1,0 +1,47 @@
+statement ok
+create table myy_table (val int);
+
+# Tab-completion for table name
+query TT
+SELECT c.relname,
+       NULL::pg_catalog.text
+FROM pg_catalog.pg_class c
+WHERE c.relkind IN ('r',
+                    'S',
+                    'v',
+                    'm',
+                    'f',
+                    'p')
+  AND (c.relname) LIKE 'myy\_%'
+  AND pg_catalog.pg_table_is_visible(c.oid)
+  AND c.relnamespace <>
+    (SELECT oid
+     FROM pg_catalog.pg_namespace
+     WHERE nspname = 'pg_catalog')
+UNION ALL
+SELECT NULL::pg_catalog.text,
+       n.nspname
+FROM pg_catalog.pg_namespace n
+WHERE n.nspname LIKE 'myy\_%'
+  AND n.nspname NOT LIKE E'pg\\_%'
+----
+myy_table	NULL
+
+# Tab-completion for column name in the given table
+query TT
+SELECT a.attname,
+       NULL::pg_catalog.text
+FROM pg_catalog.pg_attribute a,
+     pg_catalog.pg_class c
+WHERE c.oid = a.attrelid
+  AND a.attnum > 0
+  AND NOT a.attisdropped
+  AND (a.attname) LIKE 'v%'
+  AND c.relname = 'myy_table'
+  AND pg_catalog.pg_table_is_visible(c.oid)
+LIMIT 1000
+----
+val	NULL
+
+statement ok
+drop table myy_table;

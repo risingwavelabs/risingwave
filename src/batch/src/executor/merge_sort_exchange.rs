@@ -17,11 +17,10 @@ use std::sync::Arc;
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::estimate_size::collections::MemMonitoredHeap;
-use risingwave_common::estimate_size::EstimateSize;
-use risingwave_common::memory::{MemoryContext, MonitoredGlobalAlloc};
+use risingwave_common::memory::{MemMonitoredHeap, MemoryContext, MonitoredGlobalAlloc};
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::sort_util::{ColumnOrder, HeapElem};
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PbExchangeSource;
 
@@ -45,7 +44,7 @@ pub struct MergeSortExchangeExecutorImpl<CS, C> {
     min_heap: MemMonitoredHeap<HeapElem>,
     proto_sources: Vec<PbExchangeSource>,
     sources: Vec<ExchangeSourceImpl>, // impl
-    /// Mock-able CreateSource.
+    /// Mock-able `CreateSource`.
     source_creators: Vec<CS>,
     schema: Schema,
     task_id: TaskId,

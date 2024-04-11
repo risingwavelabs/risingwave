@@ -13,7 +13,10 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::pin::pin;
+use std::time::Duration;
 
+use futures::future::{select, Either};
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_meta_model_v2::SourceId;
 use risingwave_pb::catalog::{PbSource, PbTable};
@@ -23,6 +26,7 @@ use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, PbFragment};
 use risingwave_pb::stream_plan::{PbDispatchStrategy, PbStreamActor, StreamActor};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use tokio::time::sleep;
 use tracing::warn;
 
 use crate::barrier::Reschedule;
@@ -34,6 +38,7 @@ use crate::manager::{
 };
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, TableParallelism};
 use crate::stream::SplitAssignment;
+use crate::telemetry::MetaTelemetryJobDesc;
 use crate::MetaResult;
 
 #[derive(Clone)]
@@ -88,6 +93,21 @@ impl ActiveStreamingWorkerNodes {
 
     pub(crate) fn current(&self) -> &HashMap<WorkerId, WorkerNode> {
         &self.worker_nodes
+    }
+
+    pub(crate) async fn wait_changed(
+        &mut self,
+        verbose_internal: Duration,
+        verbose_fn: impl Fn(&Self),
+    ) -> ActiveStreamingWorkerChange {
+        loop {
+            if let Either::Left((change, _)) =
+                select(pin!(self.changed()), pin!(sleep(verbose_internal))).await
+            {
+                break change;
+            }
+            verbose_fn(self)
+        }
     }
 
     pub(crate) async fn changed(&mut self) -> ActiveStreamingWorkerChange {
@@ -427,7 +447,7 @@ impl MetadataManager {
     /// In other words, it's the `MView` fragment if it exists, otherwise it's the `Source` fragment.
     ///
     /// ## What do we expect to get for different creating streaming job
-    /// - MV/Sink/Index should have MV upstream fragments for upstream MV/Tables, and Source upstream fragments for upstream backfill-able sources.
+    /// - MV/Sink/Index should have MV upstream fragments for upstream MV/Tables, and Source upstream fragments for upstream shared sources.
     /// - CDC Table has a Source upstream fragment.
     /// - Sources and other Tables shouldn't have an upstream fragment.
     pub async fn get_upstream_root_fragments(
@@ -613,6 +633,38 @@ impl MetadataManager {
         }
     }
 
+    pub async fn get_running_actors_and_upstream_actors_of_fragment(
+        &self,
+        id: FragmentId,
+    ) -> MetaResult<HashSet<(ActorId, Vec<ActorId>)>> {
+        match self {
+            MetadataManager::V1(mgr) => {
+                mgr.fragment_manager
+                    .get_running_actors_and_upstream_of_fragment(id)
+                    .await
+            }
+            MetadataManager::V2(mgr) => {
+                let actor_ids = mgr
+                    .catalog_controller
+                    .get_running_actors_and_upstream_of_fragment(id as _)
+                    .await?;
+                Ok(actor_ids
+                    .into_iter()
+                    .map(|(id, actors)| {
+                        (
+                            id as ActorId,
+                            actors
+                                .into_inner()
+                                .into_iter()
+                                .flat_map(|(_, ids)| ids.into_iter().map(|id| id as ActorId))
+                                .collect(),
+                        )
+                    })
+                    .collect())
+            }
+        }
+    }
+
     pub async fn get_job_fragments_by_ids(
         &self,
         ids: &[TableId],
@@ -681,6 +733,17 @@ impl MetadataManager {
                 .list_streaming_job_states()
                 .await
                 .map(|x| x.len()),
+        }
+    }
+
+    pub async fn list_stream_job_desc(&self) -> MetaResult<Vec<MetaTelemetryJobDesc>> {
+        match self {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_stream_job_for_telemetry().await,
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
+                    .list_stream_job_desc_for_telemetry()
+                    .await
+            }
         }
     }
 

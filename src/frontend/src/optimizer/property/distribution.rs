@@ -49,6 +49,7 @@ use std::fmt::Debug;
 use fixedbitset::FixedBitSet;
 use generic::PhysicalPlanRef;
 use itertools::Itertools;
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::catalog::{FieldDisplay, Schema, TableId};
 use risingwave_common::hash::ParallelUnitId;
 use risingwave_pb::batch_plan::exchange_info::{
@@ -62,7 +63,6 @@ use crate::catalog::FragmentId;
 use crate::error::Result;
 use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
-use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 
 /// the distribution property provided by a operator.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -86,8 +86,8 @@ pub enum Distribution {
     /// `UpstreamHashShard` contains distribution keys, which might be useful in some cases, e.g.,
     /// two-phase Agg. It also satisfies [`RequiredDist::ShardByKey`].
     ///
-    /// TableId is used to represent the data distribution(`vnode_mapping`) of this
-    /// UpstreamHashShard. The scheduler can fetch TableId's corresponding `vnode_mapping` to do
+    /// `TableId` is used to represent the data distribution(`vnode_mapping`) of this
+    /// `UpstreamHashShard`. The scheduler can fetch `TableId`'s corresponding `vnode_mapping` to do
     /// shuffle.
     UpstreamHashShard(Vec<usize>, TableId),
     /// Records are available on all downstream shards.

@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ConflictBehavior, Field, Schema, TableDesc, TableId, TableVersionId,
+    ColumnCatalog, ConflictBehavior, CreateType, Field, Schema, TableDesc, TableId, TableVersionId,
 };
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -79,10 +79,10 @@ pub struct TableCatalog {
     /// All columns in this table.
     pub columns: Vec<ColumnCatalog>,
 
-    /// Key used as materialize's storage key prefix, including MV order columns and stream_key.
+    /// Key used as materialize's storage key prefix, including MV order columns and `stream_key`.
     pub pk: Vec<ColumnOrder>,
 
-    /// pk_indices of the corresponding materialize operator's output.
+    /// `pk_indices` of the corresponding materialize operator's output.
     pub stream_key: Vec<usize>,
 
     /// Type of the table. Used to distinguish user-created tables, materialized views, index
@@ -130,6 +130,8 @@ pub struct TableCatalog {
     /// `No Check`.
     pub conflict_behavior: ConflictBehavior,
 
+    pub version_column_index: Option<usize>,
+
     pub read_prefix_len_hint: usize,
 
     /// Per-table catalog version, used by schema change. `None` for internal tables and tests.
@@ -161,38 +163,6 @@ pub struct TableCatalog {
     pub created_at_cluster_version: Option<String>,
 
     pub initialized_at_cluster_version: Option<String>,
-}
-
-// How the stream job was created will determine
-// whether they are persisted.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub enum CreateType {
-    Background,
-    Foreground,
-}
-
-#[cfg(test)]
-impl Default for CreateType {
-    fn default() -> Self {
-        Self::Foreground
-    }
-}
-
-impl CreateType {
-    fn from_prost(prost: PbCreateType) -> Self {
-        match prost {
-            PbCreateType::Background => Self::Background,
-            PbCreateType::Foreground => Self::Foreground,
-            PbCreateType::Unspecified => unreachable!(),
-        }
-    }
-
-    pub(crate) fn to_prost(self) -> PbCreateType {
-        match self {
-            Self::Background => PbCreateType::Background,
-            Self::Foreground => PbCreateType::Foreground,
-        }
-    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -438,12 +408,13 @@ impl TableCatalog {
             watermark_indices: self.watermark_columns.ones().map(|x| x as _).collect_vec(),
             dist_key_in_pk: self.dist_key_in_pk.iter().map(|x| *x as _).collect(),
             handle_pk_conflict_behavior: self.conflict_behavior.to_protobuf().into(),
+            version_column_index: self.version_column_index.map(|value| value as u32),
             cardinality: Some(self.cardinality.to_protobuf()),
             initialized_at_epoch: self.initialized_at_epoch.map(|epoch| epoch.0),
             created_at_epoch: self.created_at_epoch.map(|epoch| epoch.0),
             cleaned_by_watermark: self.cleaned_by_watermark,
             stream_job_status: PbStreamJobStatus::Creating.into(),
-            create_type: self.create_type.to_prost().into(),
+            create_type: self.create_type.to_proto().into(),
             description: self.description.clone(),
             incoming_sinks: self.incoming_sinks.clone(),
             created_at_cluster_version: self.created_at_cluster_version.clone(),
@@ -519,6 +490,7 @@ impl From<PbTable> for TableCatalog {
         let mut col_index: HashMap<i32, usize> = HashMap::new();
 
         let conflict_behavior = ConflictBehavior::from_protobuf(&tb_conflict_behavior);
+        let version_column_index = tb.version_column_index.map(|value| value as usize);
         let columns: Vec<ColumnCatalog> = tb.columns.into_iter().map(ColumnCatalog::from).collect();
         for (idx, catalog) in columns.clone().into_iter().enumerate() {
             let col_name = catalog.name();
@@ -558,6 +530,7 @@ impl From<PbTable> for TableCatalog {
             value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
             definition: tb.definition,
             conflict_behavior,
+            version_column_index,
             read_prefix_len_hint: tb.read_prefix_len_hint as usize,
             version: tb.version.map(TableVersion::from_prost),
             watermark_columns,
@@ -569,7 +542,7 @@ impl From<PbTable> for TableCatalog {
             created_at_epoch: tb.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: tb.initialized_at_epoch.map(Epoch::from),
             cleaned_by_watermark: tb.cleaned_by_watermark,
-            create_type: CreateType::from_prost(create_type),
+            create_type: CreateType::from_proto(create_type),
             description: tb.description,
             incoming_sinks: tb.incoming_sinks.clone(),
             created_at_cluster_version: tb.created_at_cluster_version.clone(),
@@ -672,6 +645,7 @@ mod tests {
             incoming_sinks: vec![],
             created_at_cluster_version: None,
             initialized_at_cluster_version: None,
+            version_column_index: None,
         }
         .into();
 
@@ -732,6 +706,7 @@ mod tests {
                 created_at_cluster_version: None,
                 initialized_at_cluster_version: None,
                 dependent_relations: vec![],
+                version_column_index: None,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

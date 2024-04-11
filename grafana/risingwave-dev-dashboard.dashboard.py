@@ -678,6 +678,46 @@ def section_streaming(outer_panels):
         outer_panels.row_collapsed(
             "Streaming",
             [
+                panels.timeseries_count(
+                    "Barrier Number",
+                    "The number of barriers that have been ingested but not completely processed. This metric reflects the "
+                    "current level of congestion within the system.",
+                    [
+                        panels.target(f"{metric('all_barrier_nums')}", "all_barrier"),
+                        panels.target(
+                            f"{metric('in_flight_barrier_nums')}", "in_flight_barrier"
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Barrier Latency",
+                    "The time that the data between two consecutive barriers gets fully processed, i.e. the computation "
+                    "results are made durable into materialized views or sink to external systems. This metric shows to users "
+                    "the freshness of materialized views.",
+                    quantile(
+                        lambda quantile, legend: panels.target(
+                            f"histogram_quantile({quantile}, sum(rate({metric('meta_barrier_duration_seconds_bucket')}[$__rate_interval])) by (le))",
+                            f"barrier_latency_p{legend}",
+                        ),
+                        [50, 90, 99, 999, "max"],
+                    )
+                    + [
+                        panels.target(
+                            f"rate({metric('meta_barrier_duration_seconds_sum')}[$__rate_interval]) / rate({metric('meta_barrier_duration_seconds_count')}[$__rate_interval])",
+                            "barrier_latency_avg",
+                        ),
+                    ],
+                ),
+                panels.timeseries(
+                    "Barrier pending time (secs)",
+                    "The duration from the last committed barrier's epoch time to the current time. This metric reflects the "
+                    "data freshness of the system. During this time, no new data has been committed.",
+                    [
+                        panels.target(
+                            f"timestamp({metric('last_committed_barrier_time')}) - {metric('last_committed_barrier_time')}", "barrier_pending_time"
+                        )
+                    ],
+                ),
                 panels.timeseries_rowsps(
                     "Source Throughput(rows/s)",
                     "The figure shows the number of rows read by each source per second.",
@@ -824,39 +864,6 @@ def section_streaming(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_rowsps(
-                    "Arrangement Backfill Snapshot Read Throughput(rows)",
-                    "Total number of rows that have been read from the backfill snapshot",
-                    [
-                        panels.target(
-                            f"rate({table_metric('stream_arrangement_backfill_snapshot_read_row_count')}[$__rate_interval])",
-                            "table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
-                            % NODE_LABEL,
-                            ),
-                    ],
-                ),
-                panels.timeseries_rowsps(
-                    "Arrangement Backfill Upstream Throughput(rows)",
-                    "Total number of rows that have been output from the backfill upstream",
-                    [
-                        panels.target(
-                            f"rate({table_metric('stream_arrangement_backfill_upstream_output_row_count')}[$__rate_interval])",
-                            "table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
-                            % NODE_LABEL,
-                            ),
-                    ],
-                ),
-                panels.timeseries_count(
-                    "Barrier Number",
-                    "The number of barriers that have been ingested but not completely processed. This metric reflects the "
-                    "current level of congestion within the system.",
-                    [
-                        panels.target(f"{metric('all_barrier_nums')}", "all_barrier"),
-                        panels.target(
-                            f"{metric('in_flight_barrier_nums')}", "in_flight_barrier"
-                        ),
-                    ],
-                ),
                 panels.timeseries_latency(
                     "Barrier Send Latency",
                     "The duration between the time point when the scheduled barrier needs to be sent and the time point when "
@@ -873,25 +880,6 @@ def section_streaming(outer_panels):
                         panels.target(
                             f"rate({metric('meta_barrier_send_duration_seconds_sum')}[$__rate_interval]) / rate({metric('meta_barrier_send_duration_seconds_count')}[$__rate_interval])",
                             "barrier_send_latency_avg",
-                        ),
-                    ],
-                ),
-                panels.timeseries_latency(
-                    "Barrier Latency",
-                    "The time that the data between two consecutive barriers gets fully processed, i.e. the computation "
-                    "results are made durable into materialized views or sink to external systems. This metric shows to users "
-                    "the freshness of materialized views.",
-                    quantile(
-                        lambda quantile, legend: panels.target(
-                            f"histogram_quantile({quantile}, sum(rate({metric('meta_barrier_duration_seconds_bucket')}[$__rate_interval])) by (le))",
-                            f"barrier_latency_p{legend}",
-                        ),
-                        [50, 90, 99, 999, "max"],
-                    )
-                    + [
-                        panels.target(
-                            f"rate({metric('meta_barrier_duration_seconds_sum')}[$__rate_interval]) / rate({metric('meta_barrier_duration_seconds_count')}[$__rate_interval])",
-                            "barrier_latency_avg",
                         ),
                     ],
                 ),
@@ -1746,7 +1734,11 @@ def section_batch(outer_panels):
                     "All memory usage of batch executors in bytes",
                     [
                         panels.target(
-                            f"{metric('batch_total_mem')}",
+                            f"{metric('compute_batch_total_mem')}",
+                            "",
+                        ),
+                        panels.target(
+                            f"{metric('frontend_batch_total_mem')}",
                             "",
                         ),
                     ],
@@ -1941,17 +1933,17 @@ def section_hummock_read(outer_panels):
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Cache Miss Rate",
+                    "Cache Miss Ratio",
                     "",
                     [
                         panels.target(
                             f"(sum(rate({table_metric('state_store_sst_store_block_request_counts', meta_miss_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)) / (sum(rate({table_metric('state_store_sst_store_block_request_counts', meta_total_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id))",
-                            "meta cache miss rate - {{table_id}} @ {{%s}} @ {{%s}}"
+                            "meta cache miss ratio - {{table_id}} @ {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                         panels.target(
                             f"(sum(rate({table_metric('state_store_sst_store_block_request_counts', data_miss_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)) / (sum(rate({table_metric('state_store_sst_store_block_request_counts', data_total_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id))",
-                            "block cache miss rate - {{table_id}} @ {{%s}} @ {{%s}}"
+                            "block cache miss ratio - {{table_id}} @ {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
@@ -2726,9 +2718,9 @@ def section_hummock_manager(outer_panels):
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('hummock_manager_lock_time_bucket')}[$__rate_interval])) by (le, lock_name, lock_type))",
+                                f"histogram_quantile({quantile}, sum(rate({metric('hummock_manager_lock_time_bucket')}[$__rate_interval])) by (le, method, lock_name, lock_type))",
                                 f"Lock Time p{legend}"
-                                + " - {{lock_type}} @ {{lock_name}}",
+                                + " - {{method}} @ {{lock_type}} @ {{lock_name}}",
                             ),
                             [50, 99, "max"],
                         ),
@@ -4357,6 +4349,7 @@ dashboard = Dashboard(
     sharedCrosshair=True,
     templating=templating,
     version=dashboard_version,
+    refresh="",
     panels=[
         *section_actor_info(panels),
         *section_cluster_node(panels),

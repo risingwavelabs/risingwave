@@ -47,7 +47,7 @@ use risingwave_common::array::{ArrayError, StreamChunk};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::test_prelude::StreamChunkTestExt;
-use risingwave_common::types::ScalarRefImpl;
+use risingwave_common::types::{Decimal, ScalarRefImpl};
 use risingwave_common::util::panic::rw_catch_unwind;
 use risingwave_pb::connector_service::{
     GetEventStreamResponse, SinkCoordinatorStreamRequest, SinkCoordinatorStreamResponse,
@@ -767,12 +767,20 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetDecimalVa
     idx: jint,
 ) -> JObject<'a> {
     execute_and_catch(env, move |env: &mut EnvParam<'_>| {
-        let value = pointer
+        let decimal_value = pointer
             .as_ref()
             .datum_at(idx as usize)
             .unwrap()
-            .into_decimal()
-            .to_string();
+            .into_decimal();
+
+        match decimal_value {
+            Decimal::NaN | Decimal::NegativeInf | Decimal::PositiveInf => {
+                return Ok(JObject::null());
+            }
+            Decimal::Normalized(_) => {}
+        };
+
+        let value = decimal_value.to_string();
         let string_value = env.new_string(value)?;
         let (decimal_class_ref, constructor) = pointer
             .as_ref()
@@ -1024,16 +1032,26 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceErrorTo
     msg: JString<'a>,
 ) -> jboolean {
     execute_and_catch(env, move |env| {
-        let err_msg: String = env
-            .get_string(&msg)
-            .expect("source error message should be a java string")
-            .into();
-
-        match channel.as_ref().blocking_send(Err(anyhow!(err_msg))) {
-            Ok(_) => Ok(JNI_TRUE),
-            Err(e) => {
-                tracing::error!(error = ?e.as_report(), "send error");
-                Ok(JNI_FALSE)
+        let ret = env.get_string(&msg);
+        match ret {
+            Ok(str) => {
+                let err_msg: String = str.into();
+                match channel.as_ref().blocking_send(Err(anyhow!(err_msg))) {
+                    Ok(_) => Ok(JNI_TRUE),
+                    Err(e) => {
+                        tracing::info!(error = ?e.as_report(), "send error");
+                        Ok(JNI_FALSE)
+                    }
+                }
+            }
+            Err(err) => {
+                if msg.is_null() {
+                    tracing::warn!("source error message is null");
+                    Ok(JNI_TRUE)
+                } else {
+                    tracing::error!(error = ?err.as_report(), "source error message should be a java string");
+                    Ok(JNI_FALSE)
+                }
             }
         }
     })
@@ -1129,16 +1147,26 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendSinkWriterEr
     msg: JString<'a>,
 ) -> jboolean {
     execute_and_catch(env, move |env| {
-        let err_msg: String = env
-            .get_string(&msg)
-            .expect("sink error message should be a java string")
-            .into();
-
-        match channel.as_ref().blocking_send(Err(anyhow!(err_msg))) {
-            Ok(_) => Ok(JNI_TRUE),
-            Err(e) => {
-                tracing::info!(error = ?e.as_report(), "send error");
-                Ok(JNI_FALSE)
+        let ret = env.get_string(&msg);
+        match ret {
+            Ok(str) => {
+                let err_msg: String = str.into();
+                match channel.as_ref().blocking_send(Err(anyhow!(err_msg))) {
+                    Ok(_) => Ok(JNI_TRUE),
+                    Err(e) => {
+                        tracing::info!(error = ?e.as_report(), "send error");
+                        Ok(JNI_FALSE)
+                    }
+                }
+            }
+            Err(err) => {
+                if msg.is_null() {
+                    tracing::warn!("sink error message is null");
+                    Ok(JNI_TRUE)
+                } else {
+                    tracing::error!(error = ?err.as_report(), "sink error message should be a java string");
+                    Ok(JNI_FALSE)
+                }
             }
         }
     })

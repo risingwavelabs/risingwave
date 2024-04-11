@@ -11,23 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-use std::assert_matches::assert_matches;
-use std::collections::HashMap;
 use std::num::NonZeroU32;
-// Copyright 2024 RisingWave Labs
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
 use std::ops::DerefMut;
 
 pub mod plan_node;
@@ -47,12 +31,16 @@ mod plan_visitor;
 pub use plan_visitor::{
     ExecutionModeDecider, PlanVisitor, RelationCollectorVisitor, SysTableVisitor,
 };
+use risingwave_sqlparser::ast::OnConflict;
 
 mod logical_optimization;
 mod optimizer_context;
 pub mod plan_expr_rewriter;
 mod plan_expr_visitor;
 mod rule;
+
+use std::assert_matches::assert_matches;
+use std::collections::{HashMap, HashSet};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
@@ -62,8 +50,9 @@ use plan_expr_rewriter::ConstEvalRewriter;
 use property::Order;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId,
+    ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId, UserId,
 };
+use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::sink::catalog::SinkFormatDesc;
@@ -75,7 +64,7 @@ use self::plan_node::generic::{self, PhysicalPlanRef};
 use self::plan_node::{
     stream_enforce_eowc_requirement, BatchProject, Convention, LogicalProject, LogicalSource,
     PartitionComputeInfo, StreamDml, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink,
-    StreamWatermarkFilter, ToStreamContext,
+    StreamSubscription, StreamWatermarkFilter, ToStreamContext,
 };
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
@@ -183,7 +172,7 @@ impl PlanRoot {
     pub fn into_array_agg(self) -> Result<PlanRef> {
         use generic::Agg;
         use plan_node::PlanAggCall;
-        use risingwave_common::types::{DataType, ListValue};
+        use risingwave_common::types::ListValue;
         use risingwave_expr::aggregate::AggKind;
 
         use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
@@ -375,13 +364,7 @@ impl PlanRoot {
 
     /// Generate optimized stream plan
     fn gen_optimized_stream_plan(&mut self, emit_on_window_close: bool) -> Result<PlanRef> {
-        let stream_scan_type = if self
-            .plan
-            .ctx()
-            .session_ctx()
-            .config()
-            .streaming_enable_arrangement_backfill()
-        {
+        let stream_scan_type = if self.should_use_arrangement_backfill() {
             StreamScanType::ArrangementBackfill
         } else {
             StreamScanType::Backfill
@@ -548,6 +531,8 @@ impl PlanRoot {
         pk_column_ids: Vec<ColumnId>,
         row_id_index: Option<usize>,
         append_only: bool,
+        on_conflict: Option<OnConflict>,
+        with_version_column: Option<String>,
         watermark_descs: Vec<WatermarkDesc>,
         version: Option<TableVersion>,
         with_external_source: bool,
@@ -631,6 +616,12 @@ impl PlanRoot {
             .map(|c| c.column_desc.clone())
             .collect();
 
+        let version_column_index = if let Some(version_column) = with_version_column {
+            find_version_column_index(&columns, version_column)?
+        } else {
+            None
+        };
+
         let union_inputs = if with_external_source {
             let mut external_source_node = stream_plan;
             external_source_node =
@@ -652,6 +643,7 @@ impl PlanRoot {
                 row_id_index,
                 SourceNodeKind::CreateTable,
                 context.clone(),
+                None,
             )
             .and_then(|s| s.to_stream(&mut ToStreamContext::new(false)))?;
 
@@ -727,10 +719,25 @@ impl PlanRoot {
             }
         }
 
-        let conflict_behavior = match append_only {
-            true => ConflictBehavior::NoCheck,
-            false => ConflictBehavior::Overwrite,
+        let conflict_behavior = match on_conflict {
+            Some(on_conflict) => match on_conflict {
+                OnConflict::OverWrite => ConflictBehavior::Overwrite,
+                OnConflict::Ignore => ConflictBehavior::IgnoreConflict,
+                OnConflict::DoUpdateIfNotNull => ConflictBehavior::DoUpdateIfNotNull,
+            },
+            None => match append_only {
+                true => ConflictBehavior::NoCheck,
+                false => ConflictBehavior::Overwrite,
+            },
         };
+
+        if let ConflictBehavior::IgnoreConflict = conflict_behavior
+            && version_column_index.is_some()
+        {
+            Err(ErrorCode::InvalidParameterValue(
+                "The with version column syntax cannot be used with the ignore behavior of on conflict".to_string(),
+            ))?
+        }
 
         let table_required_dist = {
             let mut bitset = FixedBitSet::with_capacity(columns.len());
@@ -750,6 +757,7 @@ impl PlanRoot {
             columns,
             definition,
             conflict_behavior,
+            version_column_index,
             pk_column_indices,
             row_id_index,
             version,
@@ -822,13 +830,7 @@ impl PlanRoot {
     ) -> Result<StreamSink> {
         let stream_scan_type = if without_backfill {
             StreamScanType::UpstreamOnly
-        } else if self
-            .plan
-            .ctx()
-            .session_ctx()
-            .config()
-            .streaming_enable_arrangement_backfill()
-        {
+        } else if self.should_use_arrangement_backfill() {
             StreamScanType::ArrangementBackfill
         } else {
             StreamScanType::Backfill
@@ -853,10 +855,80 @@ impl PlanRoot {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
+    /// Optimize and generate a create subscription plan.
+    pub fn gen_subscription_plan(
+        &mut self,
+        database_id: u32,
+        schema_id: u32,
+        dependent_relations: HashSet<TableId>,
+        subscription_name: String,
+        definition: String,
+        properties: WithOptions,
+        emit_on_window_close: bool,
+        subscription_from_table_name: String,
+        user_id: UserId,
+    ) -> Result<StreamSubscription> {
+        let stream_scan_type = StreamScanType::UpstreamOnly;
+        let stream_plan =
+            self.gen_optimized_stream_plan_inner(emit_on_window_close, stream_scan_type)?;
+
+        StreamSubscription::create(
+            database_id,
+            schema_id,
+            dependent_relations,
+            stream_plan,
+            subscription_name,
+            subscription_from_table_name,
+            self.required_dist.clone(),
+            self.required_order.clone(),
+            self.out_fields.clone(),
+            self.out_names.clone(),
+            definition,
+            properties,
+            user_id,
+        )
+    }
+
     /// Set the plan root's required dist.
     pub fn set_required_dist(&mut self, required_dist: RequiredDist) {
         self.required_dist = required_dist;
     }
+
+    pub fn should_use_arrangement_backfill(&self) -> bool {
+        let ctx = self.plan.ctx();
+        let session_ctx = ctx.session_ctx();
+        let arrangement_backfill_enabled = session_ctx
+            .env()
+            .streaming_config()
+            .developer
+            .enable_arrangement_backfill;
+        arrangement_backfill_enabled && session_ctx.config().streaming_use_arrangement_backfill()
+    }
+}
+
+fn find_version_column_index(
+    column_catalog: &Vec<ColumnCatalog>,
+    version_column_name: String,
+) -> Result<Option<usize>> {
+    for (index, column) in column_catalog.iter().enumerate() {
+        if column.column_desc.name == version_column_name {
+            if let &DataType::Jsonb
+            | &DataType::List(_)
+            | &DataType::Struct(_)
+            | &DataType::Bytea
+            | &DataType::Boolean = column.data_type()
+            {
+                Err(ErrorCode::InvalidParameterValue(
+                    "The specified version column data type is invalid.".to_string(),
+                ))?
+            }
+            return Ok(Some(index));
+        }
+    }
+    Err(ErrorCode::InvalidParameterValue(
+        "The specified version column name is not in the current columns.".to_string(),
+    ))?
 }
 
 fn const_eval_exprs(plan: PlanRef) -> Result<PlanRef> {

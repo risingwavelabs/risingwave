@@ -113,7 +113,7 @@ pub struct FragmentManager {
 }
 
 pub struct ActorInfos {
-    /// node_id => actor_ids
+    /// `node_id` => `actor_ids`
     pub actor_maps: HashMap<WorkerId, Vec<ActorId>>,
 
     /// all reachable barrier inject actors
@@ -124,7 +124,7 @@ pub type FragmentManagerRef = Arc<FragmentManager>;
 
 impl FragmentManager {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let table_fragments = TableFragments::list(env.meta_store_checked()).await?;
+        let table_fragments = TableFragments::list(env.meta_store().as_kv()).await?;
 
         // `expr_context` of `StreamActor` is introduced in 1.6.0.
         // To ensure compatibility, we fill it for table fragments that were created with older versions.
@@ -133,7 +133,7 @@ impl FragmentManager {
             .map(|tf| (tf.table_id(), tf.fill_expr_context()))
             .collect();
 
-        let table_revision = TableRevision::get(env.meta_store_checked()).await?;
+        let table_revision = TableRevision::get(env.meta_store().as_kv()).await?;
 
         Ok(Self {
             env,
@@ -439,8 +439,8 @@ impl FragmentManager {
                                 if m.upstream_fragment_id == merge_update.upstream_fragment_id {
                                     m.upstream_fragment_id =
                                         merge_update.new_upstream_fragment_id.unwrap();
-                                    m.upstream_actor_id =
-                                        merge_update.added_upstream_actor_id.clone();
+                                    m.upstream_actor_id
+                                        .clone_from(&merge_update.added_upstream_actor_id);
                                 }
                                 upstream_actor_ids.extend(m.upstream_actor_id.clone());
                             }
@@ -1021,6 +1021,30 @@ impl FragmentManager {
                     .filter(|a| table_fragment.actor_status[a].state == ActorState::Running as i32)
                     .collect();
                 return Ok(running_actor_ids);
+            }
+        }
+
+        bail!("fragment not found: {}", fragment_id)
+    }
+
+    /// Get the actor ids, and each actor's upstream actor ids of the fragment with `fragment_id` with `Running` status.
+    pub async fn get_running_actors_and_upstream_of_fragment(
+        &self,
+        fragment_id: FragmentId,
+    ) -> MetaResult<HashSet<(ActorId, Vec<ActorId>)>> {
+        let map = &self.core.read().await.table_fragments;
+
+        for table_fragment in map.values() {
+            if let Some(fragment) = table_fragment.fragments.get(&fragment_id) {
+                let running_actors = fragment
+                    .actors
+                    .iter()
+                    .filter(|a| {
+                        table_fragment.actor_status[&a.actor_id].state == ActorState::Running as i32
+                    })
+                    .map(|a| (a.actor_id, a.upstream_actor_id.clone()))
+                    .collect();
+                return Ok(running_actors);
             }
         }
 

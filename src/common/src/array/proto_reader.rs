@@ -17,16 +17,10 @@ use std::io::{Cursor, Read};
 use anyhow::Context;
 use byteorder::{BigEndian, ReadBytesExt};
 use paste::paste;
-use risingwave_pb::data::{PbArray, PbArrayType};
+use risingwave_pb::data::PbArrayType;
 
 use super::*;
 use crate::array::value_reader::{PrimitiveValueReader, VarSizedValueReader};
-use crate::array::{
-    Array, ArrayBuilder, ArrayImpl, ArrayResult, BoolArray, DateArrayBuilder, IntervalArrayBuilder,
-    PrimitiveArrayBuilder, PrimitiveArrayItemType, TimeArrayBuilder, TimestampArrayBuilder,
-};
-use crate::buffer::Bitmap;
-use crate::types::{Date, Interval, Time, Timestamp};
 
 impl ArrayImpl {
     pub fn from_protobuf(array: &PbArray, cardinality: usize) -> ArrayResult<Self> {

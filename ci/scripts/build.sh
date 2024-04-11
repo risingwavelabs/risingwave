@@ -28,11 +28,12 @@ if [[ "$profile" != "ci-dev" ]] && [[ "$profile" != "ci-release" ]]; then
 fi
 
 echo "--- Rust cargo-sort check"
-cargo sort --check --workspace
+cargo sort --check --workspace --grouped
 
-echo "--- Rust cargo-hakari check"
-cargo hakari generate --diff
-cargo hakari verify
+# Disable hakari until we make sure it's useful
+# echo "--- Rust cargo-hakari check"
+# cargo hakari generate --diff
+# cargo hakari verify
 
 echo "--- Rust format check"
 cargo fmt --all -- --check
@@ -53,6 +54,7 @@ cargo build \
     -p risingwave_compaction_test \
     -p risingwave_e2e_extended_mode_test \
     $RISINGWAVE_FEATURE_FLAGS \
+    --features embedded-deno-udf \
     --features embedded-python-udf \
     --profile "$profile"
 

@@ -26,6 +26,7 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericGauge};
 use prometheus::{Histogram, IntGauge};
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use thiserror_ext::AsReport;
@@ -38,7 +39,7 @@ use tracing::{debug, error, info, trace, warn};
 use super::refiller::{CacheRefillConfig, CacheRefiller};
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::filter_key_extractor::FilterKeyExtractorManager;
-use crate::hummock::compactor::{compact, CompactorContext};
+use crate::hummock::compactor::{await_tree_key, compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::refiller::{CacheRefillerEvent, SpawnRefillTask};
 use crate::hummock::event_handler::uploader::{
@@ -244,8 +245,8 @@ impl HummockEventHandler {
                     LazyLock::new(|| AtomicUsize::new(0));
                 let tree_root = upload_compactor_context.await_tree_reg.as_ref().map(|reg| {
                     let upload_task_id = NEXT_UPLOAD_TASK_ID.fetch_add(1, Relaxed);
-                    reg.write().register(
-                        format!("spawn_upload_task/{}", upload_task_id),
+                    reg.register(
+                        await_tree_key::SpawnUploadTask { id: upload_task_id },
                         format!("Spawn Upload Task: {}", task_info),
                     )
                 });
@@ -391,9 +392,10 @@ impl HummockEventHandler {
                 // older data first
                 .rev()
                 .for_each(|staging_sstable_info| {
+                    let staging_sstable_info_ref = Arc::new(staging_sstable_info);
                     self.for_each_read_version(|read_version| {
                         read_version.update(VersionUpdate::Staging(StagingData::Sst(
-                            staging_sstable_info.clone(),
+                            staging_sstable_info_ref.clone(),
                         )))
                     });
                 });
@@ -437,6 +439,7 @@ impl HummockEventHandler {
 
     fn handle_data_spilled(&mut self, staging_sstable_info: StagingSstableInfo) {
         // todo: do some prune for version update
+        let staging_sstable_info = Arc::new(staging_sstable_info);
         self.for_each_read_version(|read_version| {
             trace!("data_spilled. SST size {}", staging_sstable_info.imm_size());
             read_version.update(VersionUpdate::Staging(StagingData::Sst(
@@ -894,15 +897,17 @@ impl HummockEventHandler {
                     LocalInstanceGuard {
                         table_id,
                         instance_id,
-                        event_sender: self.hummock_event_tx.clone(),
+                        event_sender: Some(self.hummock_event_tx.clone()),
                     },
                 )) {
                     Ok(_) => {}
-                    Err(_) => {
+                    Err((_, mut guard)) => {
                         warn!(
                             "RegisterReadVersion send fail table_id {:?} instance_is {:?}",
                             table_id, instance_id
-                        )
+                        );
+                        guard.event_sender.take().expect("sender is just set");
+                        self.destroy_read_version(table_id, instance_id);
                     }
                 }
             }
@@ -911,6 +916,14 @@ impl HummockEventHandler {
                 table_id,
                 instance_id,
             } => {
+                self.destroy_read_version(table_id, instance_id);
+            }
+        }
+    }
+
+    fn destroy_read_version(&mut self, table_id: TableId, instance_id: LocalInstanceId) {
+        {
+            {
                 debug!(
                     "read version deregister: table_id: {}, instance_id: {}",
                     table_id, instance_id

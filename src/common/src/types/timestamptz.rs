@@ -20,13 +20,13 @@ use bytes::{Bytes, BytesMut};
 use chrono::{DateTime, Datelike, TimeZone, Utc};
 use chrono_tz::Tz;
 use postgres_types::{accepts, to_sql_checked, IsNull, ToSql, Type};
+use risingwave_common_estimate_size::ZeroHeapSize;
 use serde::{Deserialize, Serialize};
 
 use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use super::DataType;
 use crate::array::ArrayResult;
-use crate::estimate_size::ZeroHeapSize;
 
 /// Timestamp with timezone.
 #[derive(

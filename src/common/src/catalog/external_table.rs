@@ -42,7 +42,7 @@ pub struct CdcTableDesc {
 
     pub value_indices: Vec<usize>,
 
-    /// properties will be passed into the StreamScanNode
+    /// properties will be passed into the `StreamScanNode`
     pub connect_properties: BTreeMap<String, String>,
 }
 

@@ -238,6 +238,25 @@ impl TrackingJob {
     }
 }
 
+impl std::fmt::Debug for TrackingJob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TrackingJob::New(command) => write!(
+                f,
+                "TrackingJob::New({:?})",
+                command.context.table_to_create()
+            ),
+            TrackingJob::Recovered(recovered) => {
+                write!(
+                    f,
+                    "TrackingJob::Recovered({:?})",
+                    recovered.fragments.table_id()
+                )
+            }
+        }
+    }
+}
+
 pub struct RecoveredTrackingJob {
     pub fragments: TableFragments,
     pub finished: Notifier,
@@ -262,7 +281,7 @@ pub(super) struct TrackingCommand {
 /// 3. With `progress_map` we can use the ID of the `StreamJob` to view its progress.
 /// 4. With `actor_map` we can use an actor's `ActorId` to find the ID of the `StreamJob`.
 pub(super) struct CreateMviewProgressTracker {
-    /// Progress of the create-mview DDL indicated by the TableId.
+    /// Progress of the create-mview DDL indicated by the `TableId`.
     progress_map: HashMap<TableId, (Progress, TrackingJob)>,
 
     /// Find the epoch of the create-mview DDL by the actor containing the backfill executors.
@@ -367,6 +386,7 @@ impl CreateMviewProgressTracker {
     ///
     /// Returns whether there are still remaining stashed jobs to finish.
     pub(super) async fn finish_jobs(&mut self, checkpoint: bool) -> MetaResult<bool> {
+        tracing::trace!(finished_jobs=?self.finished_jobs, progress_map=?self.progress_map, "finishing jobs");
         for job in self
             .finished_jobs
             .extract_if(|job| checkpoint || !job.is_checkpoint_required())
@@ -414,7 +434,7 @@ impl CreateMviewProgressTracker {
             if let Command::CreateStreamingJob {
                 table_fragments,
                 dispatchers,
-                upstream_mview_actors,
+                upstream_root_actors,
                 definition,
                 ddl_type,
                 ..
@@ -422,7 +442,7 @@ impl CreateMviewProgressTracker {
             {
                 // Keep track of how many times each upstream MV appears.
                 let mut upstream_mv_count = HashMap::new();
-                for (table_id, actors) in upstream_mview_actors {
+                for (table_id, actors) in upstream_root_actors {
                     assert!(!actors.is_empty());
                     let dispatch_count: usize = dispatchers
                         .iter()

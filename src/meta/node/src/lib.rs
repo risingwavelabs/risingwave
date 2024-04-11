@@ -78,22 +78,16 @@ pub struct MetaNodeOpts {
     pub sql_endpoint: Option<String>,
 
     /// The HTTP REST-API address of the Prometheus instance associated to this cluster.
-    /// This address is used to serve PromQL queries to Prometheus.
+    /// This address is used to serve `PromQL` queries to Prometheus.
     /// It is also used by Grafana Dashboard Service to fetch metrics and visualize them.
     #[clap(long, env = "RW_PROMETHEUS_ENDPOINT")]
     pub prometheus_endpoint: Option<String>,
 
     /// The additional selector used when querying Prometheus.
     ///
-    /// The format is same as PromQL. Example: `instance="foo",namespace="bar"`
+    /// The format is same as `PromQL`. Example: `instance="foo",namespace="bar"`
     #[clap(long, env = "RW_PROMETHEUS_SELECTOR")]
     pub prometheus_selector: Option<String>,
-
-    // TODO(eric): remove me
-    /// Endpoint of the connector node, there will be a sidecar connector node
-    /// colocated with Meta node in the cloud environment
-    #[clap(long, hide = true, env = "RW_CONNECTOR_RPC_ENDPOINT")]
-    pub connector_rpc_endpoint: Option<String>,
 
     /// Default tag for the endpoint created when creating a privatelink connection.
     /// Will be appended to the tags specified in the `tags` field in with clause in `create
@@ -166,6 +160,16 @@ pub struct MetaNodeOpts {
     #[clap(long, hide = true, env = "RW_HEAP_PROFILING_DIR")]
     #[override_opts(path = server.heap_profiling.dir)]
     pub heap_profiling_dir: Option<String>,
+
+    /// Exit if idle for a certain period of time.
+    #[clap(long, hide = true, env = "RW_DANGEROUS_MAX_IDLE_SECS")]
+    #[override_opts(path = meta.dangerous_max_idle_secs)]
+    pub dangerous_max_idle_secs: Option<u64>,
+
+    /// Endpoint of the connector node.
+    #[deprecated = "connector node has been deprecated."]
+    #[clap(long, hide = true, env = "RW_CONNECTOR_RPC_ENDPOINT")]
+    pub connector_rpc_endpoint: Option<String>,
 }
 
 impl risingwave_common::opts::Opts for MetaNodeOpts {
@@ -314,7 +318,6 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 prometheus_selector: opts.prometheus_selector,
                 vpc_id: opts.vpc_id,
                 security_group_id: opts.security_group_id,
-                connector_rpc_endpoint: opts.connector_rpc_endpoint,
                 privatelink_endpoint_default_tags,
                 periodic_space_reclaim_compaction_interval_sec: config
                     .meta
@@ -358,6 +361,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .developer
                     .enable_check_task_level_overlap,
                 enable_dropped_column_reclaim: config.meta.enable_dropped_column_reclaim,
+                object_store_config: config.storage.object_store,
             },
             config.system.into_init_system_params(),
         )

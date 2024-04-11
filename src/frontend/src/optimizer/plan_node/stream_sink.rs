@@ -20,11 +20,7 @@ use fixedbitset::FixedBitSet;
 use icelake::types::Transform;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnCatalog, Field, TableId};
-use risingwave_common::constants::log_store::v2::{
-    KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, VNODE_COLUMN_INDEX,
-};
-use risingwave_common::session_config::sink_decouple::SinkDecouple;
+use risingwave_common::catalog::{ColumnCatalog, CreateType, TableId};
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::match_sink_name_str;
@@ -43,7 +39,9 @@ use risingwave_pb::stream_plan::SinkLogStoreType;
 use super::derive::{derive_columns, derive_pk};
 use super::generic::{self, GenericPlanRef};
 use super::stream::prelude::*;
-use super::utils::{childless_record, Distill, IndicesDisplay, TableCatalogBuilder};
+use super::utils::{
+    childless_record, infer_kv_log_store_table_catalog_inner, Distill, IndicesDisplay,
+};
 use super::{ExprRewritable, PlanBase, PlanRef, StreamNode, StreamProject};
 use crate::error::{ErrorCode, Result};
 use crate::expr::{ExprImpl, FunctionCall, InputRef};
@@ -170,16 +168,12 @@ pub struct StreamSink {
     pub base: PlanBase<Stream>,
     input: PlanRef,
     sink_desc: SinkDesc,
-    default_log_store_type: SinkLogStoreType,
+    log_store_type: SinkLogStoreType,
 }
 
 impl StreamSink {
     #[must_use]
-    pub fn new(
-        input: PlanRef,
-        sink_desc: SinkDesc,
-        default_log_store_type: SinkLogStoreType,
-    ) -> Self {
+    pub fn new(input: PlanRef, sink_desc: SinkDesc, log_store_type: SinkLogStoreType) -> Self {
         let base = input
             .plan_base()
             .into_stream()
@@ -189,7 +183,7 @@ impl StreamSink {
             base,
             input,
             sink_desc,
-            default_log_store_type,
+            log_store_type,
         }
     }
 
@@ -233,7 +227,7 @@ impl StreamSink {
             |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)));
 
         // check and ensure that the sink connector is specified and supported
-        let default_sink_decouple = match sink.properties.get(CONNECTOR_TYPE_KEY) {
+        let sink_decouple = match sink.properties.get(CONNECTOR_TYPE_KEY) {
             Some(connector) => {
                 match_sink_name_str!(
                     connector.to_lowercase().as_str(),
@@ -243,7 +237,10 @@ impl StreamSink {
                         if connector == TABLE_SINK && sink.target_table.is_none() {
                             unsupported_sink(TABLE_SINK)
                         } else {
-                            Ok(SinkType::default_sink_decouple(&sink))
+                            SinkType::is_sink_decouple(
+                                &sink,
+                                &input.ctx().session_ctx().config().sink_decouple(),
+                            )
                         }
                     },
                     |other: &str| unsupported_sink(other)
@@ -256,13 +253,13 @@ impl StreamSink {
             }
         };
 
-        let default_log_store_type = if default_sink_decouple {
+        let log_store_type = if sink_decouple {
             SinkLogStoreType::KvLogStore
         } else {
             SinkLogStoreType::InMemoryLogStore
         };
 
-        Ok(Self::new(input, sink, default_log_store_type))
+        Ok(Self::new(input, sink, log_store_type))
     }
 
     fn derive_iceberg_sink_distribution(
@@ -374,6 +371,11 @@ impl StreamSink {
         };
         let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;
         let distribution_key = input.distribution().dist_column_indices().to_vec();
+        let create_type = if input.ctx().session_ctx().config().background_ddl() {
+            CreateType::Background
+        } else {
+            CreateType::Foreground
+        };
         let sink_desc = SinkDesc {
             id: SinkId::placeholder(),
             name,
@@ -389,6 +391,7 @@ impl StreamSink {
             format_desc,
             target_table,
             extra_partition_col_idx,
+            create_type,
         };
         Ok((input, sink_desc))
     }
@@ -510,52 +513,7 @@ impl StreamSink {
     /// The table schema is: | epoch | seq id | row op | sink columns |
     /// Pk is: | epoch | seq id |
     fn infer_kv_log_store_table_catalog(&self) -> TableCatalog {
-        let mut table_catalog_builder = TableCatalogBuilder::default();
-
-        let mut value_indices = Vec::with_capacity(
-            KV_LOG_STORE_PREDEFINED_COLUMNS.len() + self.sink_desc.columns.len(),
-        );
-
-        for (name, data_type) in KV_LOG_STORE_PREDEFINED_COLUMNS {
-            let indice = table_catalog_builder.add_column(&Field::with_name(data_type, name));
-            value_indices.push(indice);
-        }
-
-        table_catalog_builder.set_vnode_col_idx(VNODE_COLUMN_INDEX);
-
-        for (i, ordering) in PK_ORDERING.iter().enumerate() {
-            table_catalog_builder.add_order_column(i, *ordering);
-        }
-
-        let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
-
-        let payload_indices = table_catalog_builder.extend_columns(
-            &self
-                .sink_desc()
-                .columns
-                .iter()
-                .map(|column| {
-                    // make payload hidden column visible in kv log store batch query
-                    let mut column = column.clone();
-                    column.is_hidden = false;
-                    column
-                })
-                .collect_vec(),
-        );
-
-        value_indices.extend(payload_indices);
-        table_catalog_builder.set_value_indices(value_indices);
-
-        // Modify distribution key indices based on the pre-defined columns.
-        let dist_key = self
-            .input
-            .distribution()
-            .dist_column_indices()
-            .iter()
-            .map(|idx| idx + KV_LOG_STORE_PREDEFINED_COLUMNS.len())
-            .collect_vec();
-
-        table_catalog_builder.build(dist_key, read_prefix_len_hint)
+        infer_kv_log_store_table_catalog_inner(&self.input, &self.sink_desc().columns)
     }
 }
 
@@ -565,7 +523,7 @@ impl PlanTreeNodeUnary for StreamSink {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.sink_desc.clone(), self.default_log_store_type)
+        Self::new(input, self.sink_desc.clone(), self.log_store_type)
         // TODO(nanderstabel): Add assertions (assert_eq!)
     }
 }
@@ -618,11 +576,7 @@ impl StreamNode for StreamSink {
         PbNodeBody::Sink(SinkNode {
             sink_desc: Some(self.sink_desc.to_proto()),
             table: Some(table.to_internal_table_prost()),
-            log_store_type: match self.base.ctx().session_ctx().config().sink_decouple() {
-                SinkDecouple::Default => self.default_log_store_type as i32,
-                SinkDecouple::Enable => SinkLogStoreType::KvLogStore as i32,
-                SinkDecouple::Disable => SinkLogStoreType::InMemoryLogStore as i32,
-            },
+            log_store_type: self.log_store_type as i32,
         })
     }
 }

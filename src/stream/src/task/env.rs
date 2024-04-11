@@ -97,7 +97,7 @@ impl StreamEnvironment {
         use risingwave_storage::monitor::MonitoredStorageMetrics;
         StreamEnvironment {
             server_addr: "127.0.0.1:5688".parse().unwrap(),
-            connector_params: ConnectorParams::new(None, SinkPayloadFormat::Json),
+            connector_params: ConnectorParams::new(SinkPayloadFormat::Json),
             config: Arc::new(StreamingConfig::default()),
             worker_id: WorkerNodeId::default(),
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
@@ -115,8 +115,8 @@ impl StreamEnvironment {
         &self.server_addr
     }
 
-    pub fn config(&self) -> &StreamingConfig {
-        self.config.as_ref()
+    pub fn config(&self) -> &Arc<StreamingConfig> {
+        &self.config
     }
 
     pub fn worker_id(&self) -> WorkerNodeId {

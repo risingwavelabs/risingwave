@@ -21,7 +21,6 @@
 //! are encoded from both `t.b` and `t.c`. If `t.b="abc"` and `t.c=1`, the hashkey may be
 //! encoded in certain format of `("abc", 1)`.
 
-use std::convert::TryInto;
 use std::default::Default;
 use std::fmt::Debug;
 use std::hash::{BuildHasher, Hasher};
@@ -30,11 +29,11 @@ use std::marker::PhantomData;
 use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
 use fixedbitset::FixedBitSet;
+use risingwave_common_estimate_size::EstimateSize;
 use smallbitset::Set64;
 use static_assertions::const_assert_eq;
 
 use crate::array::{ListValue, StructValue};
-use crate::estimate_size::EstimateSize;
 use crate::types::{
     DataType, Date, Decimal, Int256, Int256Ref, JsonbVal, Scalar, ScalarRef, ScalarRefImpl, Serial,
     Time, Timestamp, Timestamptz, F32, F64,

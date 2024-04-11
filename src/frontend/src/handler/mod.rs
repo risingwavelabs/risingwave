@@ -30,7 +30,6 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::*;
 
 use self::util::{DataChunkToRowSetAdapter, SourceSchemaCompatExt};
-use self::variable::handle_set_time_zone;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result};
 use crate::handler::cancel_job::handle_cancel;
@@ -50,6 +49,7 @@ mod alter_table_column;
 mod alter_table_with_sr;
 pub mod alter_user;
 pub mod cancel_job;
+pub mod close_cursor;
 mod comment;
 pub mod create_connection;
 mod create_database;
@@ -60,10 +60,12 @@ pub mod create_schema;
 pub mod create_sink;
 pub mod create_source;
 pub mod create_sql_function;
+pub mod create_subscription;
 pub mod create_table;
 pub mod create_table_as;
 pub mod create_user;
 pub mod create_view;
+pub mod declare_cursor;
 pub mod describe;
 mod drop_connection;
 mod drop_database;
@@ -73,11 +75,13 @@ pub mod drop_mv;
 mod drop_schema;
 pub mod drop_sink;
 pub mod drop_source;
+pub mod drop_subscription;
 pub mod drop_table;
 pub mod drop_user;
 mod drop_view;
 pub mod explain;
 pub mod extended_handle;
+pub mod fetch_cursor;
 mod flush;
 pub mod handle_privilege;
 mod kill_process;
@@ -206,6 +210,11 @@ impl HandlerArgs {
             } => {
                 *if_not_exists = false;
             }
+            Statement::CreateSubscription {
+                stmt: CreateSubscriptionStatement { if_not_exists, .. },
+            } => {
+                *if_not_exists = false;
+            }
             Statement::CreateConnection {
                 stmt: CreateConnectionStatement { if_not_exists, .. },
             } => {
@@ -237,6 +246,9 @@ pub async fn handle(
             create_source::handle_create_source(handler_args, stmt).await
         }
         Statement::CreateSink { stmt } => create_sink::handle_create_sink(handler_args, stmt).await,
+        Statement::CreateSubscription { stmt } => {
+            create_subscription::handle_create_subscription(handler_args, stmt).await
+        }
         Statement::CreateConnection { stmt } => {
             create_connection::handle_create_connection(handler_args, stmt).await
         }
@@ -298,6 +310,8 @@ pub async fn handle(
             source_schema,
             source_watermarks,
             append_only,
+            on_conflict,
+            with_version_column,
             cdc_table_info,
             include_column_options,
         } => {
@@ -315,6 +329,8 @@ pub async fn handle(
                     query,
                     columns,
                     append_only,
+                    on_conflict,
+                    with_version_column,
                 )
                 .await;
             }
@@ -329,6 +345,8 @@ pub async fn handle(
                 source_schema,
                 source_watermarks,
                 append_only,
+                on_conflict,
+                with_version_column,
                 cdc_table_info,
                 include_column_options,
             )
@@ -374,6 +392,7 @@ pub async fn handle(
                     | ObjectType::View
                     | ObjectType::Sink
                     | ObjectType::Source
+                    | ObjectType::Subscription
                     | ObjectType::Index
                     | ObjectType::Table => {
                         cascade = true;
@@ -404,6 +423,15 @@ pub async fn handle(
                 }
                 ObjectType::Sink => {
                     drop_sink::handle_drop_sink(handler_args, object_name, if_exists, cascade).await
+                }
+                ObjectType::Subscription => {
+                    drop_subscription::handle_drop_subscription(
+                        handler_args,
+                        object_name,
+                        if_exists,
+                        cascade,
+                    )
+                    .await
                 }
                 ObjectType::Database => {
                     drop_database::handle_drop_database(
@@ -486,7 +514,9 @@ pub async fn handle(
             variable,
             value,
         } => variable::handle_set(handler_args, variable, value),
-        Statement::SetTimeZone { local: _, value } => handle_set_time_zone(handler_args, value),
+        Statement::SetTimeZone { local: _, value } => {
+            variable::handle_set_time_zone(handler_args, value)
+        }
         Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable).await,
         Statement::CreateIndex {
             name,
@@ -754,6 +784,52 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterSubscription {
+            name,
+            operation: AlterSubscriptionOperation::RenameSubscription { subscription_name },
+        } => alter_rename::handle_rename_subscription(handler_args, name, subscription_name).await,
+        Statement::AlterSubscription {
+            name,
+            operation: AlterSubscriptionOperation::ChangeOwner { new_owner_name },
+        } => {
+            alter_owner::handle_alter_owner(
+                handler_args,
+                name,
+                new_owner_name,
+                StatementType::ALTER_SUBSCRIPTION,
+            )
+            .await
+        }
+        Statement::AlterSubscription {
+            name,
+            operation: AlterSubscriptionOperation::SetSchema { new_schema_name },
+        } => {
+            alter_set_schema::handle_alter_set_schema(
+                handler_args,
+                name,
+                new_schema_name,
+                StatementType::ALTER_SUBSCRIPTION,
+                None,
+            )
+            .await
+        }
+        Statement::AlterSubscription {
+            name,
+            operation:
+                AlterSubscriptionOperation::SetParallelism {
+                    parallelism,
+                    deferred,
+                },
+        } => {
+            alter_parallelism::handle_alter_parallelism(
+                handler_args,
+                name,
+                parallelism,
+                StatementType::ALTER_SUBSCRIPTION,
+                deferred,
+            )
+            .await
+        }
         Statement::AlterSource {
             name,
             operation: AlterSourceOperation::RenameSource { source_name },
@@ -794,6 +870,10 @@ pub async fn handle(
             alter_source_with_sr::handle_alter_source_with_sr(handler_args, name, connector_schema)
                 .await
         }
+        Statement::AlterSource {
+            name,
+            operation: AlterSourceOperation::RefreshSchema,
+        } => alter_source_with_sr::handler_refresh_schema(handler_args, name).await,
         Statement::AlterFunction {
             name,
             args,
@@ -847,6 +927,15 @@ pub async fn handle(
             object_name,
             comment,
         } => comment::handle_comment(handler_args, object_type, object_name, comment).await,
+        Statement::DeclareCursor { cursor_name, query } => {
+            declare_cursor::handle_declare_cursor(handler_args, cursor_name, *query).await
+        }
+        Statement::FetchCursor { cursor_name, count } => {
+            fetch_cursor::handle_fetch_cursor(handler_args, cursor_name, count).await
+        }
+        Statement::CloseCursor { cursor_name } => {
+            close_cursor::handle_close_cursor(handler_args, cursor_name).await
+        }
         _ => bail_not_implemented!("Unhandled statement: {}", stmt),
     }
 }

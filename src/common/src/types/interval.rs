@@ -22,16 +22,13 @@ use std::sync::LazyLock;
 
 use byteorder::{BigEndian, NetworkEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
-use chrono::Timelike;
 use num_traits::{CheckedAdd, CheckedNeg, CheckedSub, Zero};
-use postgres_types::{to_sql_checked, FromSql};
+use postgres_types::to_sql_checked;
 use regex::Regex;
 use risingwave_pb::data::PbInterval;
 use rust_decimal::prelude::Decimal;
 
-use super::to_binary::ToBinary;
 use super::*;
-use crate::estimate_size::ZeroHeapSize;
 
 /// Every interval can be represented by a `Interval`.
 ///

@@ -352,8 +352,12 @@ pub(crate) async fn bind_columns_from_source(
             )?;
 
             stream_source_info.use_schema_registry = protobuf_schema.use_schema_registry;
-            stream_source_info.row_schema_location = protobuf_schema.row_schema_location.0.clone();
-            stream_source_info.proto_message_name = protobuf_schema.message_name.0.clone();
+            stream_source_info
+                .row_schema_location
+                .clone_from(&protobuf_schema.row_schema_location.0);
+            stream_source_info
+                .proto_message_name
+                .clone_from(&protobuf_schema.message_name.0);
             stream_source_info.key_message_name =
                 get_key_message_name(&mut format_encode_options_to_consume);
             stream_source_info.name_strategy =
@@ -388,7 +392,9 @@ pub(crate) async fn bind_columns_from_source(
             )?;
 
             stream_source_info.use_schema_registry = use_schema_registry;
-            stream_source_info.row_schema_location = row_schema_location.0.clone();
+            stream_source_info
+                .row_schema_location
+                .clone_from(&row_schema_location.0);
             stream_source_info.proto_message_name = message_name.unwrap_or(AstString("".into())).0;
             stream_source_info.key_message_name =
                 get_key_message_name(&mut format_encode_options_to_consume);
@@ -506,6 +512,7 @@ fn bind_columns_from_source_for_cdc(
         format_encode_options,
         use_schema_registry: json_schema_infer_use_schema_registry(&schema_config),
         cdc_source_job: true,
+        is_distributed: false,
         ..Default::default()
     };
     if !format_encode_options_to_consume.is_empty() {
@@ -1006,7 +1013,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::DebeziumMongo => vec![Encode::Json],
                 ),
                 NATS_CONNECTOR => hashmap!(
-                    Format::Plain => vec![Encode::Json, Encode::Protobuf],
+                    Format::Plain => vec![Encode::Json, Encode::Protobuf, Encode::Bytes],
                 ),
                 MQTT_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Bytes],
@@ -1306,13 +1313,20 @@ pub async fn handle_create_source(
     ensure_table_constraints_supported(&stmt.constraints)?;
     let sql_pk_names = bind_sql_pk_names(&stmt.columns, &stmt.constraints)?;
 
-    let create_cdc_source_job = with_properties.is_backfillable_cdc_connector();
+    let create_cdc_source_job = with_properties.is_shareable_cdc_connector();
+    let is_shared = create_cdc_source_job
+        || (with_properties.is_kafka_connector() && session.config().rw_enable_shared_source());
 
-    let (columns_from_resolve_source, source_info) = if create_cdc_source_job {
+    let (columns_from_resolve_source, mut source_info) = if create_cdc_source_job {
         bind_columns_from_source_for_cdc(&session, &source_schema, &with_properties)?
     } else {
         bind_columns_from_source(&session, &source_schema, &with_properties).await?
     };
+    if is_shared {
+        // Note: this field should be called is_shared. Check field doc for more details.
+        source_info.cdc_source_job = true;
+        source_info.is_distributed = !create_cdc_source_job;
+    }
     let columns_from_sql = bind_sql_columns(&stmt.columns)?;
 
     let mut columns = bind_all_columns(
@@ -1409,18 +1423,16 @@ pub async fn handle_create_source(
 
     let catalog_writer = session.catalog_writer()?;
 
-    if create_cdc_source_job {
-        // create a streaming job for the cdc source, which will mark as *singleton* in the Fragmenter
+    if is_shared {
         let graph = {
             let context = OptimizerContext::from_handler_args(handler_args);
-            // cdc source is an append-only source in plain json format
             let source_node = LogicalSource::with_catalog(
                 Rc::new(SourceCatalog::from(&source)),
-                SourceNodeKind::CreateSourceWithStreamjob,
+                SourceNodeKind::CreateSharedSource,
                 context.into(),
+                None,
             )?;
 
-            // generate stream graph for cdc source job
             let stream_plan = source_node.to_stream(&mut ToStreamContext::new(false))?;
             let mut graph = build_graph(stream_plan)?;
             graph.parallelism =

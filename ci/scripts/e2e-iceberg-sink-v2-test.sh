@@ -25,7 +25,7 @@ download_and_prepare_rw "$profile" source
 
 echo "--- starting risingwave cluster"
 mkdir -p .risingwave/log
-cargo make ci-start ci-iceberg-test
+risedev ci-start ci-iceberg-test
 sleep 1
 
 # prepare minio iceberg sink
@@ -44,8 +44,9 @@ bash ./start_spark_connect_server.sh
 "$HOME"/.local/bin/poetry run python main.py -t ./test_case/partition_upsert.toml
 "$HOME"/.local/bin/poetry run python main.py -t ./test_case/range_partition_append_only.toml
 "$HOME"/.local/bin/poetry run python main.py -t ./test_case/range_partition_upsert.toml
+"$HOME"/.local/bin/poetry run python main.py -t ./test_case/append_only_with_checkpoint_interval.toml
 
 
 echo "--- Kill cluster"
 cd ../../
-cargo make ci-kill
+risedev ci-kill

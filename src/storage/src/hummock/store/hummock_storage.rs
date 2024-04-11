@@ -21,13 +21,13 @@ use arc_swap::ArcSwap;
 use bytes::Bytes;
 use itertools::Itertools;
 use more_asserts::assert_gt;
-use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_common_service::observer_manager::{NotificationClient, ObserverManager};
 use risingwave_hummock_sdk::key::{
     is_empty_key_range, vnode, vnode_range, TableKey, TableKeyRange,
 };
+use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
@@ -107,7 +107,7 @@ pub struct HummockStorage {
 
     backup_reader: BackupReaderRef,
 
-    /// current_epoch < min_current_epoch cannot be read.
+    /// `current_epoch` < `min_current_epoch` cannot be read.
     min_current_epoch: Arc<AtomicU64>,
 
     write_limiter: WriteLimiterRef,
@@ -123,8 +123,9 @@ pub fn get_committed_read_version_tuple(
     mut key_range: TableKeyRange,
     epoch: HummockEpoch,
 ) -> (TableKeyRange, ReadVersionTuple) {
-    if let Some(index) = version.table_watermark_index().get(&table_id) {
-        index.rewrite_range_with_table_watermark(epoch, &mut key_range)
+    if let Some(table_watermarks) = version.version().table_watermarks.get(&table_id) {
+        TableWatermarksIndex::new_committed(table_watermarks.clone(), version.max_committed_epoch())
+            .rewrite_range_with_table_watermark(epoch, &mut key_range)
     }
     (key_range, (vec![], vec![], version))
 }
@@ -149,6 +150,7 @@ impl HummockStorage {
         let backup_reader = BackupReader::new(
             &options.backup_storage_url,
             &options.backup_storage_directory,
+            &options.object_store_config,
         )
         .await
         .map_err(HummockError::read_backup_error)?;
@@ -451,12 +453,13 @@ impl HummockStorage {
         self.backup_reader.clone()
     }
 
-    pub fn compaction_await_tree_reg(&self) -> Option<&RwLock<await_tree::Registry<String>>> {
-        self.compact_await_tree_reg.as_ref().map(AsRef::as_ref)
+    pub fn compaction_await_tree_reg(&self) -> Option<&await_tree::Registry> {
+        self.compact_await_tree_reg.as_ref()
     }
 }
 
 impl StateStoreRead for HummockStorage {
+    type ChangeLogIter = PanicStateStoreIter<StateStoreReadLogItem>;
     type Iter = HummockStorageIterator;
 
     fn get(
@@ -483,6 +486,15 @@ impl StateStoreRead for HummockStorage {
             read_options.table_id
         );
         self.iter_inner(key_range, epoch, read_options)
+    }
+
+    async fn iter_log(
+        &self,
+        _epoch_range: (u64, u64),
+        _key_range: TableKeyRange,
+        _options: ReadLogOptions,
+    ) -> StorageResult<Self::ChangeLogIter> {
+        unimplemented!()
     }
 }
 
@@ -586,6 +598,8 @@ impl StateStore for HummockStorage {
 
 #[cfg(any(test, feature = "test"))]
 use risingwave_hummock_sdk::version::HummockVersion;
+
+use crate::panic_store::PanicStateStoreIter;
 
 #[cfg(any(test, feature = "test"))]
 impl HummockStorage {

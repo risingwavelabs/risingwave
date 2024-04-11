@@ -34,6 +34,7 @@ is_release = get_env ENABLE_RELEASE_PROFILE
 is_not_release = not ${is_release}
 is_dynamic_linking = get_env ENABLE_DYNAMIC_LINKING
 is_hummock_trace = get_env ENABLE_HUMMOCK_TRACE
+is_deno_udf_enabled = get_env ENABLE_DENO_UDF
 is_python_udf_enabled = get_env ENABLE_PYTHON_UDF
 
 if ${is_sanitizer_enabled}
@@ -45,9 +46,6 @@ else
   set_env RISEDEV_BUILD_TARGET_DIR ""
 end
 
-set_env RISEDEV_CARGO_BUILD_CRATE "risingwave_cmd_all"
-set_env RISEDEV_CTL_RUN_CMD "-- risectl"
-
 if ${is_hdfs_backend}
   set_env BUILD_HDFS_BACKEND_CMD "-p risingwave_object_store --features hdfs-backend"
 else
@@ -58,6 +56,11 @@ if ${is_not_release} and ${is_dynamic_linking}
   set_env RISINGWAVE_FEATURE_FLAGS "--features rw-dynamic-link --no-default-features"
 else
   set_env RISINGWAVE_FEATURE_FLAGS "--features rw-static-link"
+end
+
+if ${is_deno_udf_enabled}
+  flags = get_env RISINGWAVE_FEATURE_FLAGS
+  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features embedded-deno-udf"
 end
 
 if ${is_python_udf_enabled}
@@ -86,11 +89,13 @@ if ${is_not_ci}
   no_rust_log = not ${rust_log}
 
   if ${no_rust_log}
-    set_env RUST_LOG "pgwire_query_log=info"
+    set_env RUST_LOG "pgwire_query_log=info,hyper::client::connect::http=info"
   else
-    set_env RUST_LOG "pgwire_query_log=info,${rust_log}"
+    set_env RUST_LOG "pgwire_query_log=info,hyper::client::connect::http=info,${rust_log}"
   end
 end
+
+set_env TMUX "tmux -L risedev"
 ''',
 ]
 
@@ -101,7 +106,7 @@ skip_core_tasks = true
 skip_git_env_info = true
 skip_rust_env_info = false
 skip_crate_env_info = true
-min_version = "0.36.10"
+min_version = "0.37.1"
 
 [tasks.clean-full]
 category = "Misc"
@@ -155,7 +160,7 @@ category = "Misc"
 description = "List all nodes in the cluster"
 script = '''
 #!/usr/bin/env bash
-tmux list-windows -t risedev | grep -v active | cut -d'(' -f1
+${TMUX} list-windows -t risedev | grep -v active | cut -d'(' -f1
 '''
 
 [tasks.lsw]
@@ -163,7 +168,7 @@ category = "Misc"
 description = "List --watch all nodes in the cluster"
 script = '''
 #!/usr/bin/env bash
-watch -n 1 "tmux list-windows -t risedev | grep -v active | cut -d'(' -f1"
+watch -n 1 "${TMUX} list-windows -t risedev | grep -v active | cut -d'(' -f1"
 '''
 
 [tasks.del]
@@ -176,7 +181,7 @@ script = '''
 #!/usr/bin/env bash
 
 risedev_ls () {
-  tmux list-windows -t risedev | grep -v active | cut -d'(' -f1
+  ${TMUX} list-windows -t risedev | grep -v active | cut -d'(' -f1
 }
 
 err () {
@@ -195,7 +200,7 @@ if [[ -z $(risedev_ls | grep "$1" ) ]]; then
   err
 fi
 
-tmux kill-window -t $1
+${TMUX} kill-window -t $1
 '''
 
 [tasks.f]
@@ -365,7 +370,8 @@ echo "$(tput setaf 4)$(tput bold)[Reminder]$(tput sgr0) risedev will only build 
 [[ -z "${RISEDEV_RUSTFLAGS}" ]] || export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
 echo + RUSTFLAGS="${RUSTFLAGS:-<not set>}"
 set -xe
-cargo build -p ${RISEDEV_CARGO_BUILD_CRATE} -p risedev ${BUILD_HDFS_BACKEND_CMD}\
+cargo build -p risedev
+cargo build -p risingwave_cmd_all ${BUILD_HDFS_BACKEND_CMD}\
 ${BUILD_HUMMOCK_TRACE_CMD}\
             --profile "${RISINGWAVE_BUILD_PROFILE}" \
             ${RISINGWAVE_FEATURE_FLAGS} \
@@ -586,7 +592,7 @@ dependencies = ["check-risedev-env-file"]
 env_files = ["${PREFIX_CONFIG}/risedev-env"]
 script = '''
 #!/usr/bin/env bash
-cargo run -p ${RISEDEV_CARGO_BUILD_CRATE} --profile "${RISINGWAVE_BUILD_PROFILE}" ${RISEDEV_CTL_RUN_CMD} "$@"
+cargo run -p risingwave_cmd_all --profile "${RISINGWAVE_BUILD_PROFILE}" -- ctl "$@"
 test $? -eq 0 || exit 1
 '''
 
@@ -695,14 +701,19 @@ kill_zookeeper() {
   wait_zookeeper_exit
 }
 
+if ! ${TMUX} ls &>/dev/null ; then
+  echo "No risedev cluster to kill. Exiting..."
+  exit 0
+fi
+
 # Kill other components
-tmux list-windows -t risedev -F "#{window_name} #{pane_id}" \
+${TMUX} list-windows -F "#{window_name} #{pane_id}" \
 | grep -v 'kafka' \
 | grep -v 'zookeeper' \
 | awk '{ print $2 }' \
-| xargs -I {} tmux send-keys -t {} C-c C-d
+| xargs -I {} ${TMUX} send-keys -t {} C-c C-d
 
-if [[ -n $(tmux list-windows -t risedev | grep kafka) ]];
+if [[ -n $(${TMUX} list-windows | grep kafka) ]];
 then
   echo "kill kafka"
   kill_kafka || true
@@ -710,11 +721,11 @@ then
   echo "kill zookeeper"
   kill_zookeeper || true
 
-  # Kill their tmux sessions
-  tmux list-windows -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c C-d
+  # Kill their ${TMUX} sessions
+  ${TMUX} list-windows -t risedev -F "#{pane_id}" | xargs -I {} ${TMUX} send-keys -t {} C-c C-d
 fi
 
-tmux kill-session -t risedev
+${TMUX} kill-server
 test $? -eq 0 || { echo "Failed to stop all RiseDev components."; exit 1; }
 '''
 
@@ -768,8 +779,8 @@ do
   echo
 done
 
-echo "check: $(tput setaf 4)tmux >= v3.2a$(tput sgr0)"
-tmux -V || echo "$(tput setaf 3)tmux$(tput sgr0) not found."
+echo "check: $(tput setaf 4)${TMUX} >= v3.2a$(tput sgr0)"
+${TMUX} -V || echo "$(tput setaf 3)tmux$(tput sgr0) not found."
 echo
 
 echo "check: $(tput setaf 4)psql >= 14$(tput sgr0)"
@@ -1074,8 +1085,8 @@ script = """
 echo "Running $(tput setaf 4)cargo sort$(tput sgr0) checks and attempting to fix"
 
 # Rewriting Cargo.toml will cause a full rebuild of all crates, so we always check before fix.
-(cargo sort -w -c > /dev/null) || cargo sort -w
-test $? -eq 0 || { echo "cargo sort check failed. You may run $(tput setaf 4)cargo sort -w$(tput sgr0) to fix it."; exit 1; }
+(cargo sort -g -w -c > /dev/null) || cargo sort -g -w
+test $? -eq 0 || { echo "cargo sort check failed. You may run $(tput setaf 4)cargo sort -g -w$(tput sgr0) to fix it."; exit 1; }
 """
 
 [tasks.check-fmt]
@@ -1098,7 +1109,7 @@ script = """
 #!/usr/bin/env bash
 
 echo "Running $(tput setaf 4)cargo clippy$(tput sgr0) checks"
-cargo clippy --all-targets ${RISINGWAVE_FEATURE_FLAGS}
+cargo clippy $@ ${RISINGWAVE_FEATURE_FLAGS}
 echo "If cargo clippy check failed or generates warning, you may run $(tput setaf 4)cargo clippy --workspace --all-targets --fix$(tput sgr0) to fix it. Note that clippy fix requires manual review, as not all auto fixes are guaranteed to be reasonable."
 echo "Alternately, you may run $(tput setaf 4)./risedev cf {package_names}$(tput sgr0) to fix those packages (e.g. frontend, meta)."
 """
@@ -1127,7 +1138,7 @@ fi
 private = true
 category = "RiseDev - Check"
 description = "Run cargo typos-cli check"
-install_crate = { min_version = "1.15.0", crate_name = "typos-cli", binary = "typos", test_arg = [
+install_crate = { min_version = "1.20.4", crate_name = "typos-cli", binary = "typos", test_arg = [
   "--help",
 ], install_command = "binstall" }
 script = """
@@ -1173,7 +1184,8 @@ scripts/check/check-trailing-spaces.sh --fix
 category = "RiseDev - Check"
 dependencies = [
   "warn-on-missing-tools",
-  "check-hakari",
+  # Disable hakari until we make sure it's useful
+  # "check-hakari",
   "check-dep-sort",
   "check-fmt",
   "check-trailing-spaces",

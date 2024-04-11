@@ -15,13 +15,13 @@
 use std::io::{Cursor, Read};
 
 use ethnum::I256;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::data::PbArray;
 
 use crate::array::{Array, ArrayBuilder, ArrayImpl, ArrayResult};
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::estimate_size::{EstimateSize, ZeroHeapSize};
 use crate::types::{DataType, Int256, Int256Ref, Scalar};
 
 #[derive(Debug, Clone, EstimateSize)]
@@ -35,8 +35,6 @@ pub struct Int256Array {
     bitmap: Bitmap,
     data: Box<[I256]>,
 }
-
-impl ZeroHeapSize for I256 {}
 
 #[rustfmt::skip]
 macro_rules! impl_array_for_num256 {

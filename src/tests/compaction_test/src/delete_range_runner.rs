@@ -25,7 +25,8 @@ use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig, RwConfig,
+    extract_storage_memory_config, load_config, EvictionConfig, NoOverride, ObjectStoreConfig,
+    RwConfig,
 };
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
@@ -141,6 +142,7 @@ async fn compaction_test(
         value_indices: vec![],
         definition: "".to_string(),
         handle_pk_conflict_behavior: 0,
+        version_column_index: None,
         read_prefix_len_hint: 0,
         optional_associated_source_id: None,
         table_type: 0,
@@ -213,15 +215,16 @@ async fn compaction_test(
         path: system_params.data_directory().to_string(),
         block_cache_capacity: storage_memory_config.block_cache_capacity_mb * (1 << 20),
         meta_cache_capacity: storage_memory_config.meta_cache_capacity_mb * (1 << 20),
-        high_priority_ratio: 0,
+        block_cache_shard_num: storage_memory_config.block_cache_shard_num,
+        meta_cache_shard_num: storage_memory_config.meta_cache_shard_num,
+        block_cache_eviction: EvictionConfig::for_test(),
+        meta_cache_eviction: EvictionConfig::for_test(),
         prefetch_buffer_capacity: storage_memory_config.prefetch_buffer_capacity_mb * (1 << 20),
         max_prefetch_block_number: storage_opts.max_prefetch_block_number,
         data_file_cache: FileCache::none(),
         meta_file_cache: FileCache::none(),
         recent_filter: None,
         state_store_metrics: state_store_metrics.clone(),
-        meta_shard_num: storage_memory_config.meta_shard_num,
-        block_shard_num: storage_memory_config.block_shard_num,
     }));
 
     let store = HummockStorage::new(

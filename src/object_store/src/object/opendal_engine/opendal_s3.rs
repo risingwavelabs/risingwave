@@ -15,6 +15,7 @@
 use std::time::Duration;
 
 use opendal::layers::{LoggingLayer, RetryLayer};
+use opendal::raw::HttpClient;
 use opendal::services::S3;
 use opendal::Operator;
 use risingwave_common::config::ObjectStoreConfig;
@@ -40,6 +41,9 @@ impl OpendalObjectStore {
             builder.enable_virtual_host_style();
         }
 
+        let http_client = Self::new_http_client(&object_store_config)?;
+        builder.http_client(http_client);
+
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(
@@ -59,5 +63,19 @@ impl OpendalObjectStore {
             op,
             engine_type: EngineType::S3,
         })
+    }
+
+    pub fn new_http_client(config: &ObjectStoreConfig) -> ObjectResult<HttpClient> {
+        let mut client_builder = reqwest::ClientBuilder::new();
+
+        if let Some(keepalive_ms) = config.s3.object_store_keepalive_ms.as_ref() {
+            client_builder = client_builder.tcp_keepalive(Duration::from_millis(*keepalive_ms));
+        }
+
+        if let Some(nodelay) = config.s3.object_store_nodelay.as_ref() {
+            client_builder = client_builder.tcp_nodelay(*nodelay);
+        }
+
+        Ok(HttpClient::build(client_builder)?)
     }
 }

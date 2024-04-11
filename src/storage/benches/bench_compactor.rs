@@ -19,7 +19,7 @@ use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
 use foyer::memory::CacheContext;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
+use risingwave_common::config::{EvictionConfig, MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
@@ -63,9 +63,10 @@ pub fn mock_sstable_store() -> SstableStoreRef {
         path,
         block_cache_capacity: 64 << 20,
         meta_cache_capacity: 128 << 20,
-        high_priority_ratio: 0,
-        meta_shard_num: 2,
-        block_shard_num: 2,
+        meta_cache_shard_num: 2,
+        block_cache_shard_num: 2,
+        block_cache_eviction: EvictionConfig::for_test(),
+        meta_cache_eviction: EvictionConfig::for_test(),
         prefetch_buffer_capacity: 64 << 20,
         max_prefetch_block_number: 16,
         data_file_cache: FileCache::none(),
@@ -214,6 +215,7 @@ fn bench_table_build(c: &mut Criterion) {
     c.bench_function("bench_table_build", |b| {
         let sstable_store = mock_sstable_store();
         let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
             .build()
             .unwrap();
         b.to_async(&runtime).iter(|| async {
@@ -225,6 +227,7 @@ fn bench_table_build(c: &mut Criterion) {
 fn bench_table_scan(c: &mut Criterion) {
     let sstable_store = mock_sstable_store();
     let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
         .build()
         .unwrap();
     let info = runtime.block_on(async {
@@ -283,6 +286,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(
 
 fn bench_merge_iterator_compactor(c: &mut Criterion) {
     let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
         .build()
         .unwrap();
     let sstable_store = mock_sstable_store();
@@ -301,12 +305,12 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     let level1 = vec![info1, info2];
 
     let info1 = runtime
-        .block_on(async { build_table(sstable_store.clone(), 3, 0..test_key_size / 2, 2).await });
+        .block_on(async { build_table(sstable_store.clone(), 3, 0..(test_key_size / 2), 2).await });
     let info2 = runtime.block_on(async {
         build_table(
             sstable_store.clone(),
             4,
-            test_key_size / 2..test_key_size,
+            (test_key_size / 2)..test_key_size,
             2,
         )
         .await
@@ -358,6 +362,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
 
 fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
     let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
         .build()
         .unwrap();
     let sstable_store = mock_sstable_store();
