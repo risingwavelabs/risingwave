@@ -115,7 +115,10 @@ impl VacuumManager {
         let mut sent_batch = Vec::with_capacity(objects_to_delete.len());
         if self.env.opts.enable_hummock_data_archive {
             if !objects_to_delete.is_empty() {
-                warn!(?objects_to_delete, "objects not deleted in vacuum due to enable_hummock_data_archive");
+                warn!(
+                    ?objects_to_delete,
+                    "objects not deleted in vacuum due to enable_hummock_data_archive"
+                );
             }
             return Ok(objects_to_delete);
         }
