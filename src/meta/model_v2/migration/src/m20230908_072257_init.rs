@@ -1,6 +1,6 @@
 use sea_orm_migration::prelude::{Index as MigrationIndex, Table as MigrationTable, *};
 
-use crate::sea_orm::DbBackend;
+use crate::sea_orm::{DatabaseBackend, DbBackend, Statement};
 use crate::{assert_not_has_tables, drop_tables};
 
 #[derive(DeriveMigrationName)]
@@ -869,6 +869,7 @@ impl MigrationTrait for Migration {
         let insert_sys_users = Query::insert()
             .into_table(User::Table)
             .columns([
+                User::UserId,
                 User::Name,
                 User::IsSuper,
                 User::CanCreateUser,
@@ -876,6 +877,7 @@ impl MigrationTrait for Migration {
                 User::CanLogin,
             ])
             .values_panic([
+                1.into(),
                 "root".into(),
                 true.into(),
                 true.into(),
@@ -883,6 +885,7 @@ impl MigrationTrait for Migration {
                 true.into(),
             ])
             .values_panic([
+                2.into(),
                 "postgres".into(),
                 true.into(),
                 true.into(),
@@ -894,15 +897,19 @@ impl MigrationTrait for Migration {
         // Since User table is newly created, we assume that the initial user id of `root` is 1 and `postgres` is 2.
         let insert_objects = Query::insert()
             .into_table(Object::Table)
-            .columns([Object::ObjType, Object::OwnerId, Object::DatabaseId])
-            .values_panic(["DATABASE".into(), 1.into(), None::<i32>.into()])
-            .values_panic(["SCHEMA".into(), 1.into(), 1.into()]) // public
-            .values_panic(["SCHEMA".into(), 1.into(), 1.into()]) // pg_catalog
-            .values_panic(["SCHEMA".into(), 1.into(), 1.into()]) // information_schema
-            .values_panic(["SCHEMA".into(), 1.into(), 1.into()]) // rw_catalog
+            .columns([
+                Object::Oid,
+                Object::ObjType,
+                Object::OwnerId,
+                Object::DatabaseId,
+            ])
+            .values_panic([1.into(), "DATABASE".into(), 1.into(), None::<i32>.into()])
+            .values_panic([2.into(), "SCHEMA".into(), 1.into(), 1.into()]) // public
+            .values_panic([3.into(), "SCHEMA".into(), 1.into(), 1.into()]) // pg_catalog
+            .values_panic([4.into(), "SCHEMA".into(), 1.into(), 1.into()]) // information_schema
+            .values_panic([5.into(), "SCHEMA".into(), 1.into(), 1.into()]) // rw_catalog
             .to_owned();
 
-        // Since all tables are newly created, we assume that the initial object id of `dev` is 1 and the schemas' ids are 2, 3, 4, 5.
         let insert_sys_database = Query::insert()
             .into_table(Database::Table)
             .columns([Database::DatabaseId, Database::Name])
@@ -922,6 +929,43 @@ impl MigrationTrait for Migration {
         manager.exec_stmt(insert_objects).await?;
         manager.exec_stmt(insert_sys_database).await?;
         manager.exec_stmt(insert_sys_schemas).await?;
+
+        // Rest auto increment offset
+        match manager.get_database_backend() {
+            DbBackend::MySql => {
+                manager
+                    .get_connection()
+                    .execute(Statement::from_string(
+                        DatabaseBackend::MySql,
+                        "ALTER TABLE object AUTO_INCREMENT = 6",
+                    ))
+                    .await?;
+                manager
+                    .get_connection()
+                    .execute(Statement::from_string(
+                        DatabaseBackend::MySql,
+                        "ALTER TABLE user AUTO_INCREMENT = 3",
+                    ))
+                    .await?;
+            }
+            DbBackend::Postgres => {
+                manager
+                    .get_connection()
+                    .execute(Statement::from_string(
+                        DatabaseBackend::Postgres,
+                        "SELECT setval('object_oid_seq', 5)",
+                    ))
+                    .await?;
+                manager
+                    .get_connection()
+                    .execute(Statement::from_string(
+                        DatabaseBackend::Postgres,
+                        "SELECT setval('user_user_id_seq', 2)",
+                    ))
+                    .await?;
+            }
+            DbBackend::Sqlite => {}
+        }
 
         Ok(())
     }
