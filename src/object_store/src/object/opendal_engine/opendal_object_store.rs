@@ -33,6 +33,7 @@ pub struct OpendalObjectStore {
     pub(crate) op: Operator,
     pub(crate) engine_type: EngineType,
 }
+
 #[derive(Clone)]
 pub enum EngineType {
     Memory,
@@ -216,6 +217,7 @@ impl ObjectStore for OpendalObjectStore {
 pub struct OpendalStreamingUploader {
     writer: Writer,
 }
+
 impl OpendalStreamingUploader {
     pub async fn new(op: Operator, path: String) -> ObjectResult<Self> {
         let writer = op

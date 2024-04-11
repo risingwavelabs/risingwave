@@ -18,12 +18,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use aws_config;
 use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_s3::config::Credentials;
-use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::Client as S3Client;
 use aws_types::region::Region;
 use bytes::Bytes;
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use reqwest::{header, Client, RequestBuilder, StatusCode};
+use risingwave_common::config::ObjectStoreConfig;
+use risingwave_object_store::object::*;
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 
@@ -191,6 +192,7 @@ pub struct SnowflakeS3Client {
     s3_bucket: String,
     s3_path: Option<String>,
     s3_client: S3Client,
+    opendal_s3_engine: OpendalObjectStore,
 }
 
 impl SnowflakeS3Client {
@@ -202,15 +204,15 @@ impl SnowflakeS3Client {
         aws_region: String,
     ) -> Self {
         let credentials = Credentials::new(
-            aws_access_key_id,
-            aws_secret_access_key,
+            aws_access_key_id.clone(),
+            aws_secret_access_key.clone(),
             // we don't allow temporary credentials
             None,
             None,
             "rw_sink_to_s3_credentials",
         );
 
-        let region = RegionProviderChain::first_try(Region::new(aws_region)).or_default_provider();
+        let region = RegionProviderChain::first_try(Region::new(aws_region.clone())).or_default_provider();
 
         let config = aws_config::from_env()
             .credentials_provider(credentials)
@@ -221,25 +223,35 @@ impl SnowflakeS3Client {
         // create the brand new s3 client used to sink files to s3
         let s3_client = S3Client::new(&config);
 
+        // just use default here
+        let config = ObjectStoreConfig::default();
+
+        // create the s3 engine for streaming upload to the intermediate s3 bucket
+        // note: this will lead to a complete panic if any credential / intermediate creation
+        // process has error, which may not be acceptable...
+        // but it's hard to gracefully handle the error without modifying downstream return type(s)...
+        let opendal_s3_engine = OpendalObjectStore::new_s3_engine_with_credentials(
+            &s3_bucket,
+            config,
+            &aws_access_key_id,
+            &aws_secret_access_key,
+            &aws_region,
+        ).unwrap();
+
         Self {
             s3_bucket,
             s3_path,
             s3_client,
+            opendal_s3_engine,
         }
     }
 
     pub async fn sink_to_s3(&self, data: Bytes, file_suffix: String) -> Result<()> {
-        self.s3_client
-            .put_object()
-            .bucket(self.s3_bucket.clone())
-            .key(generate_s3_file_name(self.s3_path.clone(), file_suffix))
-            .body(ByteStream::from(data))
-            .send()
-            .await
-            .map_err(|err| {
-                SinkError::Snowflake(format!("failed to sink data to S3, error: {}", err))
-            })?;
-
+        let path = generate_s3_file_name(self.s3_path.clone(), file_suffix);
+        let mut uploader = self.opendal_s3_engine.streaming_upload(&path).await.
+        map_err(|err| SinkError::Snowflake(format!("failed to create the streaming uploader of opendal s3 engine, error: {}", err)))?;
+        uploader.write_bytes(data).await.map_err(|err| SinkError::Snowflake(format!("failed to write bytes when streaming uploading to s3 for snowflake sink, error: {}", err)))?;
+        uploader.finish().await.map_err(|err| SinkError::Snowflake(format!("failed to finish streaming upload to s3 for snowflake sink, error: {}", err)))?;
         Ok(())
     }
 }
