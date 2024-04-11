@@ -202,9 +202,6 @@ sleep 1s
 statement ok
 CREATE FUNCTION call_sse() RETURNS TABLE ( data struct<data struct<greetings string>>) LANGUAGE javascript RUNTIME deno USING LINK 'fs://e2e_test/udf/sse/bundled.table.js' SYNC;
 
-system ok
-echo "Executing query"
-
 query I
 select * FROM call_sse();
 ----
