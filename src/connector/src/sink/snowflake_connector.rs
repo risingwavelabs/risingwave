@@ -22,14 +22,10 @@ use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::Client as S3Client;
 use aws_types::region::Region;
 use bytes::Bytes;
-use http::header;
-use http::request::Builder;
-use hyper::body::Body;
-use hyper::client::HttpConnector;
-use hyper::{Client, Request, StatusCode};
-use hyper_tls::HttpsConnector;
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+use reqwest::{header, Client, RequestBuilder, StatusCode};
 use serde::{Deserialize, Serialize};
+use thiserror_ext::AsReport;
 
 use super::doris_starrocks_connector::POOL_IDLE_TIMEOUT;
 use super::{Result, SinkError};
@@ -148,21 +144,19 @@ impl SnowflakeHttpClient {
         Ok(jwt_token)
     }
 
-    fn build_request_and_client(&self) -> (Builder, Client<HttpsConnector<HttpConnector>>) {
-        let builder = Request::post(self.url.clone());
-
-        let connector = HttpsConnector::new();
+    fn build_request_and_client(&self) -> RequestBuilder {
         let client = Client::builder()
             .pool_idle_timeout(POOL_IDLE_TIMEOUT)
-            .build(connector);
+            .build()
+            .unwrap();
 
-        (builder, client)
+        client.post(&self.url)
     }
 
     /// NOTE: this function should ONLY be called *after*
     /// uploading files to remote external staged storage, i.e., AWS S3
     pub async fn send_request(&self, file_suffix: String) -> Result<()> {
-        let (builder, client) = self.build_request_and_client();
+        let builder = self.build_request_and_client();
 
         // Generate the jwt_token
         let jwt_token = self.generate_jwt_token()?;
@@ -172,19 +166,13 @@ impl SnowflakeHttpClient {
             .header(
                 "X-Snowflake-Authorization-Token-Type".to_string(),
                 "KEYPAIR_JWT",
-            );
+            )
+            .body(generate_s3_file_name(self.s3_path.clone(), file_suffix));
 
-        let request = builder
-            .body(Body::from(generate_s3_file_name(
-                self.s3_path.clone(),
-                file_suffix,
-            )))
-            .map_err(|err| SinkError::Snowflake(err.to_string()))?;
-
-        let response = client
-            .request(request)
+        let response = builder
+            .send()
             .await
-            .map_err(|err| SinkError::Snowflake(err.to_string()))?;
+            .map_err(|err| SinkError::Snowflake(err.to_report_string()))?;
 
         if response.status() != StatusCode::OK {
             return Err(SinkError::Snowflake(format!(

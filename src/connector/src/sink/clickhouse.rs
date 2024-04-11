@@ -11,9 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use core::fmt::Debug;
 use std::collections::{HashMap, HashSet};
-use std::time::Duration;
 
 use anyhow::anyhow;
 use clickhouse::insert::Insert;
@@ -191,18 +191,9 @@ impl ClickHouseEngine {
     }
 }
 
-const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
-
 impl ClickHouseCommon {
     pub(crate) fn build_client(&self) -> ConnectorResult<ClickHouseClient> {
-        use hyper_tls::HttpsConnector;
-
-        let https = HttpsConnector::new();
-        let client = hyper::Client::builder()
-            .pool_idle_timeout(POOL_IDLE_TIMEOUT)
-            .build::<_, hyper::Body>(https);
-
-        let client = ClickHouseClient::with_http_client(client)
+        let client = ClickHouseClient::default() // hyper(0.14) client inside
             .with_url(&self.url)
             .with_user(&self.user)
             .with_password(&self.password)
