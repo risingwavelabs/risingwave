@@ -14,6 +14,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::fmt::Display;
 use std::mem::size_of;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::sync::Arc;
@@ -258,11 +259,11 @@ pub enum WatermarkDirection {
     Descending,
 }
 
-impl ToString for WatermarkDirection {
-    fn to_string(&self) -> String {
+impl Display for WatermarkDirection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            WatermarkDirection::Ascending => "Ascending".to_string(),
-            WatermarkDirection::Descending => "Descending".to_string(),
+            WatermarkDirection::Ascending => write!(f, "Ascending"),
+            WatermarkDirection::Descending => write!(f, "Descending"),
         }
     }
 }
