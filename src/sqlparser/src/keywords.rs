@@ -551,6 +551,7 @@ define_keywords!(
     VAR_POP,
     VAR_SAMP,
     VERBOSE,
+    VERSION,
     VERSIONING,
     VIEW,
     VIEWS,

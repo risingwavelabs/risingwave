@@ -342,7 +342,11 @@ impl SourceScanInfo {
                     }
                     Some(AsOf::TimestampString(ts)) => Some(
                         speedate::DateTime::parse_str_rfc3339(&ts)
-                            .map(|t| IcebergTimeTravelInfo::TimestampMs(t.timestamp_tz() * 1000))
+                            .map(|t| {
+                                IcebergTimeTravelInfo::TimestampMs(
+                                    t.timestamp_tz() * 1000 + t.time.microsecond as i64 / 1000,
+                                )
+                            })
                             .map_err(|_e| anyhow!("fail to parse timestamp"))?,
                     ),
                     Some(AsOf::ProcessTime) => unreachable!(),

@@ -18,13 +18,13 @@ anyhow = "1"
 async-trait = "0.1"
 await-tree = { workspace = true }
 chrono = { version = "0.4" }
-clap = { version = "4", features = ["derive"] }
+clap = { workspace = true }
 either = "1"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hyper = "0.14" # required by tonic
-itertools = "0.12"
+itertools = { workspace = true }
 maplit = "1.0.2"
 pprof = { version = "0.13", features = ["flamegraph"] }
 prometheus = { version = "0.13" }
@@ -64,7 +64,7 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 futures-async-stream = { workspace = true }
-rand = "0.8"
+rand = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 tempfile = "3"
 

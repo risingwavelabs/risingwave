@@ -129,6 +129,10 @@ where
             .unwrap()
             .clone())
     }
+
+    pub fn invalidate_all(&self) {
+        self.clients.invalidate_all()
+    }
 }
 
 /// `ExtraInfoSource` is used by heartbeat worker to pull extra info that needs to be piggybacked.

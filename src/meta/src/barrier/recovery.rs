@@ -23,8 +23,9 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_meta_model_v2::StreamingParallelism;
 use risingwave_pb::common::ActorInfo;
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::State;
-use risingwave_pb::meta::PausedReason;
+use risingwave_pb::meta::{PausedReason, Recovery};
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
@@ -543,6 +544,10 @@ impl GlobalBarrierManager {
             paused = ?self.state.paused_reason(),
             "recovery success"
         );
+
+        self.env
+            .notification_manager()
+            .notify_frontend_without_version(Operation::Update, Info::Recovery(Recovery {}));
     }
 }
 
@@ -685,7 +690,7 @@ impl GlobalBarrierManagerContext {
             .migrate_fragment_actors(&migration_plan)
             .await?;
         // 3. remove the migration plan.
-        migration_plan.delete(self.env.meta_store_checked()).await?;
+        migration_plan.delete(self.env.meta_store().as_kv()).await?;
         debug!("migrate actors succeed.");
 
         self.resolve_actor_info(active_nodes).await
@@ -989,7 +994,7 @@ impl GlobalBarrierManagerContext {
     ) -> MetaResult<MigrationPlan> {
         let mgr = self.metadata_manager.as_v1_ref();
 
-        let mut cached_plan = MigrationPlan::get(self.env.meta_store_checked()).await?;
+        let mut cached_plan = MigrationPlan::get(self.env.meta_store().as_kv()).await?;
 
         let all_worker_parallel_units = mgr.fragment_manager.all_worker_parallel_units().await;
 
@@ -1102,7 +1107,7 @@ impl GlobalBarrierManagerContext {
             new_plan.parallel_unit_plan
         );
 
-        new_plan.insert(self.env.meta_store_checked()).await?;
+        new_plan.insert(self.env.meta_store().as_kv()).await?;
         Ok(new_plan)
     }
 

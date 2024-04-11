@@ -21,28 +21,24 @@ use risingwave_frontend_macro::system_catalog;
 #[system_catalog(
     view,
     "pg_catalog.pg_matviews",
-    "SELECT schemaname,
-            i.relationname AS matviewname,
-            i.relationowner AS matviewowner,
-            definition,
-            i.relationid AS matviewid,
-            i.relationtimezone AS matviewtimezone,
-            i.fragments AS matviewgraph
-        FROM rw_catalog.rw_relation_info i
-        WHERE i.relationtype = 'MATERIALIZED VIEW'"
+    "SELECT
+       s.name as schemaname,
+       mv.name as matviewname,
+       mv.owner as matviewowner,
+       NULL AS tablespace,
+       false AS hasindexes,
+       true AS ispopulated,
+       mv.definition as definition
+     FROM rw_materialized_views mv
+     JOIN rw_schemas s ON mv.schema_id = s.id"
 )]
 #[derive(Fields)]
 struct PgMatview {
     schemaname: String,
     matviewname: String,
     matviewowner: i32,
+    tablespace: Option<String>,
+    hasindexes: bool,
+    ispopulated: bool,
     definition: String,
-    // Below are some columns that PostgreSQL doesn't have.
-    // TODO: these field is only exist in RW and used by cloud side, need to remove it and let
-    // cloud switch to use `rw_catalog.rw_relation_info`.
-    matviewid: i32,
-    // The timezone used to interpret ambiguous dates/timestamps as tstz
-    matviewtimezone: String,
-    // materialized view graph is json encoded fragment infos.
-    matviewgraph: String,
 }

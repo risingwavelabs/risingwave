@@ -33,7 +33,7 @@ use risingwave_pb::stream_plan::{
 
 use super::id::GlobalFragmentIdsExt;
 use super::Locations;
-use crate::manager::{MetaSrvEnv, StreamingClusterInfo, StreamingJob};
+use crate::manager::{IdGenManagerImpl, MetaSrvEnv, StreamingClusterInfo, StreamingJob};
 use crate::model::{DispatcherId, FragmentId};
 use crate::stream::stream_graph::fragment::{
     CompleteStreamFragmentGraph, EdgeId, EitherFragment, StreamFragmentEdge,
@@ -729,10 +729,9 @@ impl ActorGraphBuilder {
             .values()
             .map(|d| d.parallelism())
             .sum::<usize>() as u64;
-        let id_gen = if let Some(sql_id_gen) = env.sql_id_gen_manager_ref() {
-            GlobalActorIdGen::new_v2(&sql_id_gen, actor_len)
-        } else {
-            GlobalActorIdGen::new(env.id_gen_manager(), actor_len).await?
+        let id_gen = match env.id_gen_manager() {
+            IdGenManagerImpl::Kv(mgr) => GlobalActorIdGen::new(mgr, actor_len).await?,
+            IdGenManagerImpl::Sql(mgr) => GlobalActorIdGen::new_v2(mgr, actor_len),
         };
 
         // Build the actor graph and get the final state.

@@ -129,10 +129,6 @@ impl RisingWave {
                 tracing::error!("postgres connection error: {e}");
             }
         });
-        // for recovery
-        client
-            .simple_query("SET RW_IMPLICIT_FLUSH TO true;")
-            .await?;
         // replay all SET statements
         for stmt in SetStmtsIterator::new(set_stmts) {
             client.simple_query(&stmt).await?;

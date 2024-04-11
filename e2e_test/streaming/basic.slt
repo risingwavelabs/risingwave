@@ -32,6 +32,9 @@ statement ok
 insert into t5 values ('-inf');
 
 statement ok
+flush;
+
+statement ok
 create materialized view mv1 as select * from t1;
 
 statement ok

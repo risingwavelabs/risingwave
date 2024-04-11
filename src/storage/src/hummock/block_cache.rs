@@ -19,6 +19,7 @@ use ahash::RandomState;
 use await_tree::InstrumentAwait;
 use foyer::memory::{
     Cache, CacheContext, CacheEntry, Entry, EntryState, LfuCacheConfig, LruCacheConfig,
+    S3FifoCacheConfig,
 };
 use futures::Future;
 use risingwave_common::config::EvictionConfig;
@@ -139,6 +140,14 @@ impl BlockCache {
                 event_listener,
             }),
             EvictionConfig::Lfu(eviction_config) => Cache::lfu(LfuCacheConfig {
+                capacity,
+                shards,
+                eviction_config,
+                object_pool_capacity,
+                hash_builder,
+                event_listener,
+            }),
+            EvictionConfig::S3Fifo(eviction_config) => Cache::s3fifo(S3FifoCacheConfig {
                 capacity,
                 shards,
                 eviction_config,
