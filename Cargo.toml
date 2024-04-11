@@ -130,11 +130,11 @@ prost = { version = "0.12" }
 icelake = { git = "https://github.com/icelake-io/icelake", rev = "54fd72fbd1dd8c592f05eeeb79223c8a6a33c297", features = [
     "prometheus",
 ] }
-arrow-array = "50"
+arrow-array = "51"
 arrow-arith = "50"
 arrow-cast = "50"
-arrow-schema = "50"
-arrow-buffer = "50"
+arrow-schema = "51"
+arrow-buffer = "51"
 arrow-flight = "50"
 arrow-select = "50"
 arrow-ord = "50"
