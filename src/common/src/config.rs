@@ -1000,7 +1000,9 @@ pub struct ObjectStoreConfig {
         default = "default::object_store_config::object_store_streaming_upload_attempt_timeout_ms"
     )]
     pub object_store_streaming_upload_attempt_timeout_ms: u64,
-    #[serde(default = "default::object_store_config::object_store_streaming_upload_retry_attempts")]
+    #[serde(
+        default = "default::object_store_config::object_store_streaming_upload_retry_attempts"
+    )]
     pub object_store_streaming_upload_retry_attempts: usize,
 
     // read
@@ -1758,7 +1760,7 @@ pub mod default {
         }
 
         pub fn object_store_req_retry_max_retry_attempts() -> usize {
-            DEFAULT_RETRY_MAX_retry_attempts
+            DEFAULT_RETRY_MAX_RETRY_ATTEMPTS
         }
 
         pub fn object_store_upload_attempt_timeout_ms() -> u64 {
@@ -1766,7 +1768,7 @@ pub mod default {
         }
 
         pub fn object_store_upload_retry_attempts() -> usize {
-            DEFAULT_RETRY_MAX_retry_attempts
+            DEFAULT_RETRY_MAX_RETRY_ATTEMPTS
         }
 
         pub fn object_store_streaming_upload_attempt_timeout_ms() -> u64 {
@@ -1774,7 +1776,7 @@ pub mod default {
         }
 
         pub fn object_store_streaming_upload_retry_attempts() -> usize {
-            DEFAULT_RETRY_MAX_retry_attempts
+            DEFAULT_RETRY_MAX_RETRY_ATTEMPTS
         }
 
         pub fn object_store_read_attempt_timeout_ms() -> u64 {
@@ -1782,7 +1784,7 @@ pub mod default {
         }
 
         pub fn object_store_read_retry_attempts() -> usize {
-            DEFAULT_RETRY_MAX_retry_attempts
+            DEFAULT_RETRY_MAX_RETRY_ATTEMPTS
         }
 
         pub fn object_store_streaming_read_attempt_timeout_ms() -> u64 {
@@ -1790,7 +1792,7 @@ pub mod default {
         }
 
         pub fn object_store_streaming_read_retry_attempts() -> usize {
-            DEFAULT_RETRY_MAX_retry_attempts
+            DEFAULT_RETRY_MAX_RETRY_ATTEMPTS
         }
 
         pub fn object_store_metadata_attempt_timeout_ms() -> u64 {
@@ -1798,7 +1800,7 @@ pub mod default {
         }
 
         pub fn object_store_metadata_retry_attempts() -> usize {
-            DEFAULT_RETRY_MAX_retry_attempts
+            DEFAULT_RETRY_MAX_RETRY_ATTEMPTS
         }
 
         pub fn object_store_delete_attempt_timeout_ms() -> u64 {
@@ -1806,7 +1808,7 @@ pub mod default {
         }
 
         pub fn object_store_delete_retry_attempts() -> usize {
-            DEFAULT_RETRY_MAX_retry_attempts
+            DEFAULT_RETRY_MAX_RETRY_ATTEMPTS
         }
 
         pub fn object_store_delete_objects_attempt_timeout_ms() -> u64 {
@@ -1814,7 +1816,7 @@ pub mod default {
         }
 
         pub fn object_store_delete_objects_retry_attempts() -> usize {
-            DEFAULT_RETRY_MAX_retry_attempts
+            DEFAULT_RETRY_MAX_RETRY_ATTEMPTS
         }
 
         pub fn object_store_list_attempt_timeout_ms() -> u64 {
@@ -1822,7 +1824,7 @@ pub mod default {
         }
 
         pub fn object_store_list_retry_attempts() -> usize {
-            DEFAULT_RETRY_MAX_retry_attempts
+            DEFAULT_RETRY_MAX_RETRY_ATTEMPTS
         }
 
         pub mod s3 {
