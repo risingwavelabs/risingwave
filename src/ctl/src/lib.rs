@@ -141,8 +141,9 @@ pub enum DebugCommands {
         #[command(flatten)]
         common: DebugCommon,
     },
-    /// Fix table fragments info.
-    FixTableFragments {
+    /// Fix table fragments by cleaning up some un-exist fragments, which happens when the upstream
+    /// streaming job is failed to create and the fragments are not cleaned up due to some unidentified issues.
+    FixDirtyUpstreams {
         #[command(flatten)]
         common: DebugCommon,
 
@@ -864,7 +865,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 .await?
         }
         Commands::Debug(DebugCommands::Dump { common }) => cmd_impl::debug::dump(common).await?,
-        Commands::Debug(DebugCommands::FixTableFragments {
+        Commands::Debug(DebugCommands::FixDirtyUpstreams {
             common,
             table_id,
             dirty_fragment_ids,
