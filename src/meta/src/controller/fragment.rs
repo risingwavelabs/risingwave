@@ -1109,19 +1109,7 @@ impl CatalogController {
             .into_tuple()
             .all(&inner.db)
             .await?;
-        Ok(actors
-            .into_iter()
-            .map(|(id, upstream_ids)| {
-                (
-                    id,
-                    upstream_ids
-                        .into_inner()
-                        .into_iter()
-                        .flat_map(|(_, ids)| ids.into_iter())
-                        .collect(),
-                )
-            })
-            .collect())
+        Ok(actors)
     }
 
     pub async fn get_actors_by_job_ids(&self, job_ids: Vec<ObjectId>) -> MetaResult<Vec<ActorId>> {
