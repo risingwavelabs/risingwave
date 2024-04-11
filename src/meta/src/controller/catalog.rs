@@ -45,6 +45,7 @@ use risingwave_pb::meta::subscribe_response::{
 };
 use risingwave_pb::meta::{PbRelation, PbRelationGroup};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
 use risingwave_pb::user::PbUserInfo;
 use sea_orm::sea_query::{Expr, SimpleExpr};
@@ -67,8 +68,9 @@ use crate::controller::utils::{
 };
 use crate::controller::ObjectModel;
 use crate::manager::{Catalog, MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
+use crate::model::TableFragments;
 use crate::rpc::ddl_controller::DropMode;
-use crate::stream::SourceManagerRef;
+use crate::stream::{ReplaceTableContext, SourceManagerRef};
 use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};
 
@@ -813,7 +815,11 @@ impl CatalogController {
     }
 
     /// `finish_streaming_job` marks job related objects as `Created` and notify frontend.
-    pub async fn finish_streaming_job(&self, job_id: ObjectId) -> MetaResult<NotificationVersion> {
+    pub async fn finish_streaming_job(
+        &self,
+        job_id: ObjectId,
+        replace_table_job_info: &Option<(StreamingJob, ReplaceTableContext, TableFragments)>,
+    ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
@@ -953,6 +959,19 @@ impl CatalogController {
         }
 
         let fragment_mapping = get_fragment_mappings(&txn, job_id).await?;
+
+        if let Some((streaming_job, merge_updates, table_id)) = replace_table_job_info {
+            self.finish_replace_streaming_job(
+                table_id.table_id as _,
+                streaming_job,
+                merge_updates,
+                None,
+                Some(stream_job_id),
+                None,
+            )
+            .await?;
+        }
+
         txn.commit().await?;
 
         self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)

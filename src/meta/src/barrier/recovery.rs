@@ -288,7 +288,7 @@ impl GlobalBarrierManagerContext {
                     tracing::debug!("recovering stream job {}", id);
                     finished.await.ok().context("failed to finish command")??;
                     tracing::debug!(id, "finished stream job");
-                    catalog_controller.finish_streaming_job(id).await?;
+                    catalog_controller.finish_streaming_job(id, ).await?;
                 };
                 if let Err(e) = &res {
                     tracing::error!(
