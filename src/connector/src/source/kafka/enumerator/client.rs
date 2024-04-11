@@ -314,6 +314,7 @@ impl KafkaSplitEnumerator {
         let mut result = HashMap::with_capacity(partitions.len());
 
         for elem in offsets.elements_for_topic(self.topic.as_str()) {
+            println!("[rc] offset {:?}", elem.offset());
             match elem.offset() {
                 Offset::Offset(offset) => {
                     result.insert(elem.partition(), Some(offset));
