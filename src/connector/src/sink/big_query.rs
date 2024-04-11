@@ -29,7 +29,7 @@ use google_cloud_googleapis::cloud::bigquery::storage::v1::append_rows_request::
     ProtoData, Rows as AppendRowsRequestRows,
 };
 use google_cloud_googleapis::cloud::bigquery::storage::v1::{
-    AppendRowsRequest, ProtoRows, ProtoSchema
+    AppendRowsRequest, ProtoRows, ProtoSchema,
 };
 use google_cloud_pubsub::client::google_cloud_auth;
 use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
@@ -269,6 +269,10 @@ impl Sink for BigQuerySink {
     }
 
     async fn validate(&self) -> Result<()> {
+        if !self.is_append_only && self.pk_indices.is_empty() {
+            return Err(SinkError::Config(anyhow!(
+                "Primary key not defined for upsert bigquery sink (please define in `primary_key` field)")));
+        }
         let client = self
             .config
             .common
@@ -433,7 +437,7 @@ impl BigQuerySinkWriter {
                     .message
                     .try_set_field(
                         self.proto_field.as_ref().unwrap(),
-                        prost_reflect::Value::String("INSERT".to_string()),
+                        prost_reflect::Value::String("UPSERT".to_string()),
                     )
                     .map_err(|e| SinkError::BigQuery(e.into()))?,
                 Op::Delete => pb_row
@@ -479,17 +483,18 @@ impl SinkWriter for BigQuerySinkWriter {
         } else {
             self.upsert(chunk)?
         };
-        self.write_rows_count += serialized_rows.len();
-        let rows = AppendRowsRequestRows::ProtoRows(ProtoData {
-            writer_schema: Some(self.writer_pb_schema.clone()),
-            rows: Some(ProtoRows { serialized_rows }),
-        });
-        self.write_rows.push(rows);
+        if !serialized_rows.is_empty() {
+            self.write_rows_count += serialized_rows.len();
+            let rows = AppendRowsRequestRows::ProtoRows(ProtoData {
+                writer_schema: Some(self.writer_pb_schema.clone()),
+                rows: Some(ProtoRows { serialized_rows }),
+            });
+            self.write_rows.push(rows);
 
-        if self.write_rows_count >= self.config.common.max_batch_rows {
-            self.write_rows().await?;
+            if self.write_rows_count >= self.config.common.max_batch_rows {
+                self.write_rows().await?;
+            }
         }
-
         Ok(())
     }
 
@@ -502,7 +507,7 @@ impl SinkWriter for BigQuerySinkWriter {
     }
 
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
-        if is_checkpoint{
+        if is_checkpoint {
             self.write_rows().await?;
         }
         Ok(())
