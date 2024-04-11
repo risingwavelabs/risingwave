@@ -956,9 +956,18 @@ impl CatalogController {
                 || (*fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0)
             {
                 visit_stream_node(stream_node, |node| {
-                    if let PbNodeBody::StreamScan(node) = node {
-                        node.rate_limit = rate_limit;
-                        found = true;
+                    match node {
+                        PbNodeBody::StreamScan(node) => {
+                            node.rate_limit = rate_limit;
+                            found = true;
+                        }
+                        PbNodeBody::Source(node) => {
+                            node.source_inner.as_mut().map(|inner| {
+                                inner.rate_limit = rate_limit;
+                            });
+                            found = true;
+                        }
+                        _ => {}
                     }
                 });
             }
@@ -967,7 +976,7 @@ impl CatalogController {
 
         if fragments.is_empty() {
             return Err(MetaError::invalid_parameter(format!(
-                "stream scan node not found in job id {job_id}"
+                "stream scan node or source node not found in job id {job_id}"
             )));
         }
         let fragment_ids = fragments.iter().map(|(id, _, _)| *id).collect_vec();

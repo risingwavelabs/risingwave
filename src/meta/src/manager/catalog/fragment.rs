@@ -952,7 +952,9 @@ impl FragmentManager {
         let mut fragment_to_apply = HashMap::new();
 
         for fragment in fragment.fragments.values_mut() {
-            if (fragment.get_fragment_type_mask() & FragmentTypeFlag::StreamScan as u32) != 0 {
+            if (fragment.get_fragment_type_mask() & FragmentTypeFlag::StreamScan as u32) != 0
+                || (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0
+            {
                 let mut actor_to_apply = Vec::new();
                 for actor in &mut fragment.actors {
                     if let Some(node) = actor.nodes.as_mut() {
