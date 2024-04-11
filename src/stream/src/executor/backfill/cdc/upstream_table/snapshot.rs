@@ -108,7 +108,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
         let mut builder = DataChunkBuilder::new(self.inner.schema().data_types(), args.chunk_size);
         let chunk_stream = iter_chunks(row_stream, &mut builder);
 
-        if limit == 0 {
+        if args.chunk_size == 0 {
             // If limit is 0, we should not read any data from the upstream table.
             // Keep waiting util the stream is rebuilt.
             let future = futures::future::pending::<()>();
