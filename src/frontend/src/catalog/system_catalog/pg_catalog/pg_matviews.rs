@@ -21,15 +21,16 @@ use risingwave_frontend_macro::system_catalog;
 #[system_catalog(
     view,
     "pg_catalog.pg_matviews",
-    "SELECT schemaname,
-            i.relationname AS matviewname,
-            i.relationowner AS matviewowner,
-            NULL AS tablespace,
-            false AS hasindexes,
-            true AS ispopulated,
-            definition
-        FROM rw_catalog.rw_relation_info i
-        WHERE i.relationtype = 'MATERIALIZED VIEW'"
+    "SELECT
+       s.name as schemaname,
+       mv.name as matviewname,
+       mv.owner as matviewowner,
+       NULL AS tablespace,
+       false AS hasindexes,
+       true AS ispopulated,
+       mv.definition as definition
+     FROM rw_materialized_views mv
+     JOIN rw_schemas s ON mv.schema_id = s.id"
 )]
 #[derive(Fields)]
 struct PgMatview {
