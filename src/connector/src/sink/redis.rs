@@ -356,8 +356,8 @@ mod test {
     use std::collections::BTreeMap;
 
     use rdkafka::message::FromBytes;
-    use risingwave_common::array::{Array, I32Array, Op, StreamChunk, Utf8Array};
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::array::{Array, I32Array, Op, Utf8Array};
+    use risingwave_common::catalog::Field;
     use risingwave_common::types::DataType;
     use risingwave_common::util::iter_util::ZipEqDebug;
 

@@ -255,8 +255,6 @@ impl StreamingUploader for OpendalStreamingUploader {
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
-
     use super::*;
 
     async fn list_all(prefix: &str, store: &OpendalObjectStore) -> Vec<ObjectMetadata> {

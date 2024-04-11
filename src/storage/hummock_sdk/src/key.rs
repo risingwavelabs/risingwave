@@ -1100,8 +1100,6 @@ impl<T: AsRef<[u8]> + Ord + Eq, const SKIP_DEDUP: bool> FullKeyTracker<T, SKIP_D
 
 #[cfg(test)]
 mod tests {
-    use std::cmp::Ordering;
-
     use risingwave_common::util::epoch::test_epoch;
 
     use super::*;

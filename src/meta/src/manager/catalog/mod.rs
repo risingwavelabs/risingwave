@@ -19,7 +19,6 @@ mod utils;
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::iter;
-use std::option::Option::Some;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};

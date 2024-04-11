@@ -24,7 +24,6 @@ use aws_sdk_kinesis::Client as KinesisClient;
 use futures_async_stream::try_stream;
 use risingwave_common::bail;
 use thiserror_ext::AsReport;
-use tokio_retry;
 
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
@@ -306,7 +305,6 @@ mod tests {
 
     use super::*;
     use crate::connector_common::KinesisCommon;
-    use crate::source::kinesis::split::KinesisSplit;
 
     #[tokio::test]
     async fn test_reject_redundant_seq_props() {

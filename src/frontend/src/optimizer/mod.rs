@@ -1019,11 +1019,7 @@ fn require_additional_exchange_on_root_in_local_mode(plan: PlanRef) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::catalog::Field;
-    use risingwave_common::types::DataType;
-
     use super::*;
-    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
 
     #[tokio::test]

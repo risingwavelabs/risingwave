@@ -189,8 +189,6 @@ impl RdKafkaPropertiesConsumer {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
-
     use maplit::hashmap;
 
     use super::*;

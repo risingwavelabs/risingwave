@@ -272,14 +272,11 @@ impl LevelCompactionPicker {
 
 #[cfg(test)]
 pub mod tests {
-    use itertools::Itertools;
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::selector::tests::*;
-    use crate::hummock::compaction::{
-        CompactionDeveloperConfig, CompactionMode, TierCompactionPicker,
-    };
+    use crate::hummock::compaction::{CompactionMode, TierCompactionPicker};
 
     fn create_compaction_picker_for_test() -> LevelCompactionPicker {
         let config = Arc::new(

@@ -22,7 +22,7 @@ use arrow_udf_js::{CallMode as JsCallMode, Runtime as JsRuntime};
 use arrow_udf_python::{CallMode as PythonCallMode, Runtime as PythonRuntime};
 use cfg_or_panic::cfg_or_panic;
 use futures_util::stream;
-use risingwave_common::array::{ArrayError, DataChunk, I32Array};
+use risingwave_common::array::{ArrayError, I32Array};
 use risingwave_common::bail;
 use thiserror_ext::AsReport;
 

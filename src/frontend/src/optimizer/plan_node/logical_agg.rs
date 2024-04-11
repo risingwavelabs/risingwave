@@ -1202,12 +1202,9 @@ impl ToStream for LogicalAgg {
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::expr::{
-        assert_eq_input_ref, input_ref_to_column_indices, AggCall, ExprType, FunctionCall, OrderBy,
-    };
+    use crate::expr::{assert_eq_input_ref, input_ref_to_column_indices};
     use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
 

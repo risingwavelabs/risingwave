@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::convert::Into;
 use core::fmt::Formatter;
 use std::cell::{RefCell, RefMut};
 use std::rc::Rc;

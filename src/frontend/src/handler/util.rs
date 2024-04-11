@@ -193,10 +193,8 @@ impl CompatibleSourceSchema {
 
 #[cfg(test)]
 mod tests {
-    use bytes::BytesMut;
     use postgres_types::{ToSql, Type};
     use risingwave_common::array::*;
-    use risingwave_common::types::Timestamptz;
 
     use super::*;
 

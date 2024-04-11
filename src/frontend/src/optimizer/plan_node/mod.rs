@@ -33,7 +33,7 @@ use std::ops::Deref;
 use std::rc::Rc;
 
 use downcast_rs::{impl_downcast, Downcast};
-use dyn_clone::{self, DynClone};
+use dyn_clone::DynClone;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use paste::paste;

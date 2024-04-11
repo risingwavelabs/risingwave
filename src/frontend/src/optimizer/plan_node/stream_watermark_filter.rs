@@ -20,7 +20,6 @@ use risingwave_pb::catalog::WatermarkDesc;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
-use super::stream::StreamPlanRef;
 use super::utils::{childless_record, watermark_pretty, Distill, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{ExprDisplay, ExprImpl};

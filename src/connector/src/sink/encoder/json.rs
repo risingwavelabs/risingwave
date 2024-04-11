@@ -459,8 +459,8 @@ fn type_as_json_schema(rw_type: &DataType) -> Map<String, Value> {
 mod tests {
 
     use risingwave_common::types::{
-        DataType, Date, Decimal, Interval, Scalar, ScalarImpl, StructRef, StructType, StructValue,
-        Time, Timestamp,
+        Date, Decimal, Interval, Scalar, ScalarImpl, StructRef, StructType, StructValue, Time,
+        Timestamp,
     };
 
     use super::*;
