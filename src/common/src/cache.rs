@@ -1019,20 +1019,19 @@ impl<K: LruKey, T: LruValue> Clone for CacheableEntry<K, T> {
 #[cfg(test)]
 mod tests {
     use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
+    use std::hash::Hasher;
     use std::pin::Pin;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering::Relaxed;
-    use std::sync::Arc;
     use std::task::{Context, Poll};
 
-    use futures::FutureExt;
     use rand::rngs::SmallRng;
     use rand::{RngCore, SeedableRng};
     use tokio::sync::oneshot::error::TryRecvError;
 
     use super::*;
 
+    #[expect(dead_code)]
     pub struct Block {
         pub offset: u64,
         pub sst: u64,

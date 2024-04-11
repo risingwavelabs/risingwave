@@ -245,7 +245,7 @@ impl SnowflakeSinkWriter {
     }
 
     /// reset the `payload` and `row_counter`.
-    /// shall *only* be called after a successful sink.
+    /// shall *only* be called after a successful sink to s3.
     fn reset(&mut self) {
         self.payload.clear();
         self.row_counter = 0;
@@ -288,13 +288,14 @@ impl SnowflakeSinkWriter {
         if self.payload.is_empty() {
             return Ok(());
         }
+        let file_suffix = self.file_suffix();
         // todo: change this to streaming upload
         // first sink to the external stage provided by user (i.e., s3)
         self.s3_client
-            .sink_to_s3(self.payload.clone().into(), self.file_suffix())
+            .sink_to_s3(self.payload.clone().into(), file_suffix.clone())
             .await?;
         // then trigger `insertFiles` post request to snowflake
-        self.http_client.send_request(self.file_suffix()).await?;
+        self.http_client.send_request(file_suffix).await?;
         // reset `payload` & `row_counter`
         self.reset();
         Ok(())

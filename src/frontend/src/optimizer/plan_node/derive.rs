@@ -21,6 +21,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use super::PlanRef;
 use crate::error::{ErrorCode, Result};
+use crate::optimizer::plan_node::generic::PhysicalPlanRef;
 use crate::optimizer::property::Order;
 
 pub(crate) fn derive_columns(
@@ -105,6 +106,10 @@ pub(crate) fn derive_pk(
 
     let mut in_order = FixedBitSet::with_capacity(schema.len());
     let mut pk = vec![];
+
+    let func_dep = input.functional_dependency();
+    let user_order_by =
+        func_dep.minimize_order_key(user_order_by, input.distribution().dist_column_indices());
 
     for order in &user_order_by.column_orders {
         let idx = order.column_index;

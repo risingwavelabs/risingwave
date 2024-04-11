@@ -2416,9 +2416,6 @@ impl Parser {
             } else if self.parse_keyword(Keyword::LANGUAGE) {
                 ensure_not_set(&body.language, "LANGUAGE")?;
                 body.language = Some(self.parse_identifier()?);
-            } else if self.parse_keyword(Keyword::RUNTIME) {
-                ensure_not_set(&body.runtime, "RUNTIME")?;
-                body.runtime = Some(self.parse_function_runtime()?);
             } else if self.parse_keyword(Keyword::IMMUTABLE) {
                 ensure_not_set(&body.behavior, "IMMUTABLE | STABLE | VOLATILE")?;
                 body.behavior = Some(FunctionBehavior::Immutable);
@@ -2434,15 +2431,6 @@ impl Parser {
             } else if self.parse_keyword(Keyword::USING) {
                 ensure_not_set(&body.using, "USING")?;
                 body.using = Some(self.parse_create_function_using()?);
-            } else if self.parse_keyword(Keyword::SYNC) {
-                ensure_not_set(&body.function_type, "SYNC | ASYNC")?;
-                body.function_type = Some(self.parse_function_type(false, false)?);
-            } else if self.parse_keyword(Keyword::ASYNC) {
-                ensure_not_set(&body.function_type, "SYNC | ASYNC")?;
-                body.function_type = Some(self.parse_function_type(true, false)?);
-            } else if self.parse_keyword(Keyword::GENERATOR) {
-                ensure_not_set(&body.function_type, "SYNC | ASYNC")?;
-                body.function_type = Some(self.parse_function_type(false, true)?);
             } else {
                 return Ok(body);
             }
@@ -2462,36 +2450,6 @@ impl Parser {
                 Ok(CreateFunctionUsing::Base64(base64))
             }
             _ => unreachable!("{}", keyword),
-        }
-    }
-
-    fn parse_function_runtime(&mut self) -> Result<FunctionRuntime, ParserError> {
-        let ident = self.parse_identifier()?;
-        match ident.value.to_lowercase().as_str() {
-            "deno" => Ok(FunctionRuntime::Deno),
-            "quickjs" => Ok(FunctionRuntime::QuickJs),
-            r => Err(ParserError::ParserError(format!(
-                "Unsupported runtime: {r}"
-            ))),
-        }
-    }
-
-    fn parse_function_type(
-        &mut self,
-        is_async: bool,
-        is_generator: bool,
-    ) -> Result<CreateFunctionType, ParserError> {
-        let is_generator = if is_generator {
-            true
-        } else {
-            self.parse_keyword(Keyword::GENERATOR)
-        };
-
-        match (is_async, is_generator) {
-            (false, false) => Ok(CreateFunctionType::Sync),
-            (true, false) => Ok(CreateFunctionType::Async),
-            (false, true) => Ok(CreateFunctionType::Generator),
-            (true, true) => Ok(CreateFunctionType::AsyncGenerator),
         }
     }
 

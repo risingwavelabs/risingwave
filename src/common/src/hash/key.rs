@@ -642,11 +642,9 @@ mod tests {
         DateArray, DecimalArray, F32Array, F64Array, I16Array, I32Array, I32ArrayBuilder, I64Array,
         TimeArray, TimestampArray, Utf8Array,
     };
-    use crate::hash::{
-        HashKey, Key128, Key16, Key256, Key32, Key64, KeySerialized, PrecomputedBuildHasher,
-    };
+    use crate::hash::{HashKey, Key128, Key16, Key256, Key32, Key64, KeySerialized};
     use crate::test_utils::rand_array::seed_rand_array_ref;
-    use crate::types::{DataType, Datum};
+    use crate::types::Datum;
 
     #[derive(Hash, PartialEq, Eq)]
     struct Row(Vec<Datum>);

@@ -574,13 +574,11 @@ pub fn cmp_rows(lhs: impl Row, rhs: impl Row, order_types: &[OrderType]) -> Orde
 
 #[cfg(test)]
 mod tests {
-    use std::cmp::Ordering;
-
     use itertools::Itertools;
 
     use super::*;
-    use crate::array::{DataChunk, ListValue, StructValue};
-    use crate::row::{OwnedRow, Row};
+    use crate::array::{ListValue, StructValue};
+    use crate::row::OwnedRow;
     use crate::types::{DataType, Datum, ScalarImpl};
 
     #[test]

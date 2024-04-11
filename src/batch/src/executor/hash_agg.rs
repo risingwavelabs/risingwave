@@ -308,7 +308,6 @@ mod tests {
     use std::sync::Arc;
 
     use futures_async_stream::for_await;
-    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::metrics::LabelGuardedIntGauge;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_pb::data::data_type::TypeName;

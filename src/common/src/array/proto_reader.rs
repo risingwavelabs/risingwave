@@ -246,12 +246,6 @@ fn read_string_array<B: ArrayBuilder, R: VarSizedValueReader<B>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array::{
-        Array, ArrayBuilder, BoolArray, BoolArrayBuilder, DateArray, DateArrayBuilder,
-        DecimalArray, DecimalArrayBuilder, I32Array, I32ArrayBuilder, TimeArray, TimeArrayBuilder,
-        TimestampArray, TimestampArrayBuilder, Utf8Array, Utf8ArrayBuilder,
-    };
-    use crate::types::{Date, Decimal, Time, Timestamp};
 
     // Convert a column to protobuf, then convert it back to column, and ensures the two are
     // identical.

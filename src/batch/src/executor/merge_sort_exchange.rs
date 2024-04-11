@@ -273,10 +273,8 @@ impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use futures::StreamExt;
-    use risingwave_common::array::{Array, DataChunk};
+    use risingwave_common::array::Array;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
