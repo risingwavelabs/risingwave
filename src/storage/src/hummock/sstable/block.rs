@@ -22,7 +22,6 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::KeyComparator;
-use {lz4, zstd};
 
 use super::utils::{bytes_diff_below_max_key_length, xxhash64_verify, CompressionAlgorithm};
 use crate::hummock::sstable::utils;
@@ -793,9 +792,9 @@ impl BlockBuilder {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::catalog::TableId;
+
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_hummock_sdk::key::{FullKey, MAX_KEY_LEN};
+    use risingwave_hummock_sdk::key::MAX_KEY_LEN;
 
     use super::*;
     use crate::hummock::{BlockHolder, BlockIterator};

@@ -779,7 +779,7 @@ impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Bound::{Excluded, Included};
+    use std::ops::Bound::Excluded;
 
     use risingwave_common::util::epoch::{test_epoch, EpochExt};
     use risingwave_hummock_sdk::key::map_table_key_range;

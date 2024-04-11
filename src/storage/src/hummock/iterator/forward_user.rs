@@ -274,7 +274,6 @@ mod tests {
         SstableIterator, SstableIteratorReadOptions, SstableIteratorType,
     };
     use crate::hummock::sstable_store::SstableStoreRef;
-    use crate::hummock::value::HummockValue;
     use crate::hummock::TableHolder;
 
     #[tokio::test]
