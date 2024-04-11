@@ -44,7 +44,7 @@ mod migration {
     pub fn v0_to_v1(mut value: serde_json::Value) -> serde_json::Value {
         // In v0, the `start_offset` field represented the last seen offset, which means when
         // initializing a reader from the split, we should add 1 to the offset. But in the case
-        // of timestamp offset, it happended that we forgot to substract 1 from the offset
+        // of timestamp offset, it happened that we forgot to subtract 1 from the offset
         // when creating `KafkaSplit`, causing the first message to be missed.
         // See https://github.com/risingwavelabs/risingwave/issues/16046 for more.
         //
