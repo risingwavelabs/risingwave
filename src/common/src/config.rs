@@ -982,6 +982,67 @@ pub struct ObjectStoreConfig {
     #[serde(default = "default::object_store_config::object_store_set_atomic_write_dir")]
     pub object_store_set_atomic_write_dir: bool,
 
+    #[serde(default = "default::object_store_config::object_store_req_retry_interval_ms")]
+    pub object_store_req_retry_interval_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_req_retry_max_delay_ms")]
+    pub object_store_req_retry_max_delay_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_req_retry_max_retry_attempts")]
+    pub object_store_req_retry_max_retry_attempts: usize,
+
+    // upload
+    #[serde(default = "default::object_store_config::object_store_upload_attempt_timeout_ms")]
+    pub object_store_upload_attempt_timeout_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_upload_retry_attempts")]
+    pub object_store_upload_retry_attempts: usize,
+
+    // streaming_upload_init + streaming_upload
+    #[serde(
+        default = "default::object_store_config::object_store_streaming_upload_attempt_timeout_ms"
+    )]
+    pub object_store_streaming_upload_attempt_timeout_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_streaming_upload_retry_attempts")]
+    pub object_store_streaming_upload_retry_attempts: usize,
+
+    // read
+    #[serde(default = "default::object_store_config::object_store_read_attempt_timeout_ms")]
+    pub object_store_read_attempt_timeout_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_read_retry_attempts")]
+    pub object_store_read_retry_attempts: usize,
+
+    // streaming_read_init + streaming_read
+    #[serde(
+        default = "default::object_store_config::object_store_streaming_read_attempt_timeout_ms"
+    )]
+    pub object_store_streaming_read_attempt_timeout_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_streaming_read_retry_attempts")]
+    pub object_store_streaming_read_retry_attempts: usize,
+
+    // metadata
+    #[serde(default = "default::object_store_config::object_store_metadata_attempt_timeout_ms")]
+    pub object_store_metadata_attempt_timeout_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_metadata_retry_attempts")]
+    pub object_store_metadata_retry_attempts: usize,
+
+    // delete
+    #[serde(default = "default::object_store_config::object_store_delete_attempt_timeout_ms")]
+    pub object_store_delete_attempt_timeout_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_delete_retry_attempts")]
+    pub object_store_delete_retry_attempts: usize,
+
+    // delete_object
+    #[serde(
+        default = "default::object_store_config::object_store_delete_objects_attempt_timeout_ms"
+    )]
+    pub object_store_delete_objects_attempt_timeout_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_delete_objects_retry_attempts")]
+    pub object_store_delete_objects_retry_attempts: usize,
+
+    // list
+    #[serde(default = "default::object_store_config::object_store_list_attempt_timeout_ms")]
+    pub object_store_list_attempt_timeout_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_list_retry_attempts")]
+    pub object_store_list_retry_attempts: usize,
+
     #[serde(default)]
     pub s3: S3ObjectStoreConfig,
 }
@@ -1003,12 +1064,6 @@ pub struct S3ObjectStoreConfig {
     pub object_store_send_buffer_size: Option<usize>,
     #[serde(default = "default::object_store_config::s3::object_store_nodelay")]
     pub object_store_nodelay: Option<bool>,
-    #[serde(default = "default::object_store_config::s3::object_store_req_retry_interval_ms")]
-    pub object_store_req_retry_interval_ms: u64,
-    #[serde(default = "default::object_store_config::s3::object_store_req_retry_max_delay_ms")]
-    pub object_store_req_retry_max_delay_ms: u64,
-    #[serde(default = "default::object_store_config::s3::object_store_req_retry_max_attempts")]
-    pub object_store_req_retry_max_attempts: usize,
     /// For backwards compatibility, users should use `S3ObjectStoreDeveloperConfig` instead.
     #[serde(
         default = "default::object_store_config::s3::developer::object_store_retry_unknown_service_error"
@@ -1670,6 +1725,10 @@ pub mod default {
     }
 
     pub mod object_store_config {
+        const DEFAULT_RETRY_INTERVAL_MS: u64 = 20;
+        const DEFAULT_RETRY_MAX_DELAY_MS: u64 = 10 * 1000;
+        const DEFAULT_RETRY_MAX_retry_attempts: usize = 3;
+
         pub fn object_store_streaming_read_timeout_ms() -> u64 {
             8 * 60 * 1000
         }
@@ -1690,11 +1749,83 @@ pub mod default {
             false
         }
 
+        pub fn object_store_req_retry_interval_ms() -> u64 {
+            DEFAULT_RETRY_INTERVAL_MS
+        }
+
+        pub fn object_store_req_retry_max_delay_ms() -> u64 {
+            DEFAULT_RETRY_MAX_DELAY_MS // 10s
+        }
+
+        pub fn object_store_req_retry_max_retry_attempts() -> usize {
+            DEFAULT_RETRY_MAX_retry_attempts
+        }
+
+        pub fn object_store_upload_attempt_timeout_ms() -> u64 {
+            5 * 60 * 1000
+        }
+
+        pub fn object_store_upload_retry_attempts() -> usize {
+            DEFAULT_RETRY_MAX_retry_attempts
+        }
+
+        pub fn object_store_streaming_upload_attempt_timeout_ms() -> u64 {
+            1 * 60 * 1000
+        }
+
+        pub fn object_store_streaming_upload_retry_attempts() -> usize {
+            DEFAULT_RETRY_MAX_retry_attempts
+        }
+
+        pub fn object_store_read_attempt_timeout_ms() -> u64 {
+            1 * 60 * 1000
+        }
+
+        pub fn object_store_read_retry_attempts() -> usize {
+            DEFAULT_RETRY_MAX_retry_attempts
+        }
+
+        pub fn object_store_streaming_read_attempt_timeout_ms() -> u64 {
+            2 * 60 * 1000
+        }
+
+        pub fn object_store_streaming_read_retry_attempts() -> usize {
+            DEFAULT_RETRY_MAX_retry_attempts
+        }
+
+        pub fn object_store_metadata_attempt_timeout_ms() -> u64 {
+            5 * 60 * 1000
+        }
+
+        pub fn object_store_metadata_retry_attempts() -> usize {
+            DEFAULT_RETRY_MAX_retry_attempts
+        }
+
+        pub fn object_store_delete_attempt_timeout_ms() -> u64 {
+            2 * 60 * 1000
+        }
+
+        pub fn object_store_delete_retry_attempts() -> usize {
+            DEFAULT_RETRY_MAX_retry_attempts
+        }
+
+        pub fn object_store_delete_objects_attempt_timeout_ms() -> u64 {
+            10 * 60 * 1000
+        }
+
+        pub fn object_store_delete_objects_retry_attempts() -> usize {
+            DEFAULT_RETRY_MAX_retry_attempts
+        }
+
+        pub fn object_store_list_attempt_timeout_ms() -> u64 {
+            10 * 60 * 1000
+        }
+
+        pub fn object_store_list_retry_attempts() -> usize {
+            DEFAULT_RETRY_MAX_retry_attempts
+        }
+
         pub mod s3 {
-            /// Retry config for compute node http timeout error.
-            const DEFAULT_RETRY_INTERVAL_MS: u64 = 20;
-            const DEFAULT_RETRY_MAX_DELAY_MS: u64 = 10 * 1000;
-            const DEFAULT_RETRY_MAX_ATTEMPTS: usize = 8;
             const DEFAULT_IDENTITY_RESOLUTION_TIMEOUT_S: u64 = 5;
 
             const DEFAULT_KEEPALIVE_MS: u64 = 600 * 1000; // 10min
@@ -1713,18 +1844,6 @@ pub mod default {
 
             pub fn object_store_nodelay() -> Option<bool> {
                 Some(true)
-            }
-
-            pub fn object_store_req_retry_interval_ms() -> u64 {
-                DEFAULT_RETRY_INTERVAL_MS
-            }
-
-            pub fn object_store_req_retry_max_delay_ms() -> u64 {
-                DEFAULT_RETRY_MAX_DELAY_MS // 10s
-            }
-
-            pub fn object_store_req_retry_max_attempts() -> usize {
-                DEFAULT_RETRY_MAX_ATTEMPTS
             }
 
             pub fn identity_resolution_timeout_s() -> u64 {

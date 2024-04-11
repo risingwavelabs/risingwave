@@ -14,6 +14,7 @@
 
 use std::cmp;
 use std::collections::VecDeque;
+use std::error::Error;
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;

@@ -488,11 +488,10 @@ impl Drop for MonitoredStreamingReader {
 pub struct MonitoredObjectStore<OS: ObjectStore> {
     inner: OS,
     object_store_metrics: Arc<ObjectStoreMetrics>,
-    streaming_read_timeout: Option<Duration>,
-    streaming_upload_timeout: Option<Duration>,
-    read_timeout: Option<Duration>,
-    upload_timeout: Option<Duration>,
-
+    // streaming_read_timeout: Option<Duration>,
+    // streaming_upload_timeout: Option<Duration>,
+    // read_timeout: Option<Duration>,
+    // upload_timeout: Option<Duration>,
     config: Arc<ObjectStoreConfig>,
 }
 
@@ -520,14 +519,14 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     ) -> Self {
         Self {
             object_store_metrics,
-            streaming_read_timeout: Some(Duration::from_millis(
-                config.object_store_streaming_read_timeout_ms,
-            )),
-            streaming_upload_timeout: Some(Duration::from_millis(
-                config.object_store_streaming_upload_timeout_ms,
-            )),
-            read_timeout: Some(Duration::from_millis(config.object_store_read_timeout_ms)),
-            upload_timeout: Some(Duration::from_millis(config.object_store_upload_timeout_ms)),
+            // streaming_read_timeout: Some(Duration::from_millis(
+            //     config.object_store_streaming_read_timeout_ms,
+            // )),
+            // streaming_upload_timeout: Some(Duration::from_millis(
+            //     config.object_store_streaming_upload_timeout_ms,
+            // )),
+            // read_timeout: Some(Duration::from_millis(config.object_store_read_timeout_ms)),
+            // upload_timeout: Some(Duration::from_millis(config.object_store_upload_timeout_ms)),
             inner: store,
             config: Arc::new(config),
         }
@@ -546,21 +545,26 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     }
 
     pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
-        let operation_type = "upload";
+        let operation_type = OperationType::Upload;
+        let operation_type_str = operation_type.as_str();
+
         self.object_store_metrics
             .write_bytes
             .inc_by(obj.len() as u64);
         self.object_store_metrics
             .operation_size
-            .with_label_values(&[operation_type])
+            .with_label_values(&[operation_type_str])
             .observe(obj.len() as f64);
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), operation_type])
+            .with_label_values(&[self.media_type(), operation_type_str])
             .start_timer();
 
-        let backoff = get_retry_strategy(&self.config);
+        let backoff = get_retry_strategy(&self.config, operation_type);
+        let timeout_duration =
+            Duration::from_millis(get_attempt_timeout_by_type(&self.config, operation_type));
+
         let res = tokio_retry::RetryIf::spawn(
             backoff,
             || async {
@@ -570,11 +574,13 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .verbose_instrument_await("object_store_upload")
                         .await
                 };
-                let res = match self.upload_timeout.as_ref() {
-                    None => future.await,
-                    Some(timeout) => tokio::time::timeout(*timeout, future)
+
+                let res = if timeout_duration.is_zero() {
+                    future.await
+                } else {
+                    tokio::time::timeout(timeout_duration, future)
                         .await
-                        .unwrap_or_else(|_| Err(ObjectError::internal("upload timeout"))),
+                        .unwrap_or_else(|_| Err(ObjectError::internal("upload timeout")))
                 };
 
                 res
@@ -583,20 +589,24 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         )
         .await;
 
-        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
         res
     }
 
     pub async fn streaming_upload(&self, path: &str) -> ObjectResult<MonitoredStreamingUploader> {
-        let operation_type = "streaming_upload_init";
+        let operation_type = OperationType::StreamingUploadInit;
+        let operation_type_str = operation_type.as_str();
         let media_type = self.media_type();
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[media_type, operation_type])
+            .with_label_values(&[media_type, operation_type_str])
             .start_timer();
 
-        let backoff = get_retry_strategy(&self.config);
+        let backoff = get_retry_strategy(&self.config, operation_type);
+        let timeout_duration =
+            Duration::from_millis(get_attempt_timeout_by_type(&self.config, operation_type));
+
         let res = tokio_retry::RetryIf::spawn(
             backoff,
             || async {
@@ -606,15 +616,16 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .verbose_instrument_await("object_store_streaming_upload_init")
                         .await
                 };
-                let res =
-                    match self.streaming_upload_timeout.as_ref() {
-                        None => future.await,
-                        Some(timeout) => tokio::time::timeout(*timeout, future)
-                            .await
-                            .unwrap_or_else(|_| {
-                                Err(ObjectError::internal("streaming_upload init timeout"))
-                            }),
-                    };
+
+                let res = if timeout_duration.is_zero() {
+                    future.await
+                } else {
+                    tokio::time::timeout(timeout_duration, future)
+                        .await
+                        .unwrap_or_else(|_| {
+                            Err(ObjectError::internal("streaming_upload init timeout"))
+                        })
+                };
 
                 res
             },
@@ -622,24 +633,34 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         )
         .await;
 
-        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
         Ok(MonitoredStreamingUploader::new(
             media_type,
             res?,
             self.object_store_metrics.clone(),
-            self.streaming_upload_timeout,
+            if self.config.object_store_streaming_upload_timeout_ms == 0 {
+                None
+            } else {
+                Some(Duration::from_millis(
+                    self.config.object_store_streaming_upload_timeout_ms,
+                ))
+            },
         ))
     }
 
     pub async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
-        let operation_type = "read";
+        let operation_type = OperationType::Read;
+        let operation_type_str = operation_type.as_str();
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), operation_type])
+            .with_label_values(&[self.media_type(), operation_type_str])
             .start_timer();
 
-        let backoff = get_retry_strategy(&self.config);
+        let backoff = get_retry_strategy(&self.config, operation_type);
+        let timeout_duration =
+            Duration::from_millis(get_attempt_timeout_by_type(&self.config, operation_type));
+
         let res = tokio_retry::RetryIf::spawn(
             backoff,
             || async {
@@ -649,11 +670,13 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .verbose_instrument_await("object_store_read")
                         .await
                 };
-                let res = match self.read_timeout.as_ref() {
-                    None => future.await,
-                    Some(timeout) => tokio::time::timeout(*timeout, future)
+
+                let res = if timeout_duration.is_zero() {
+                    future.await
+                } else {
+                    tokio::time::timeout(timeout_duration, future)
                         .await
-                        .unwrap_or_else(|_| Err(ObjectError::internal("read timeout"))),
+                        .unwrap_or_else(|_| Err(ObjectError::internal("read timeout")))
                 };
 
                 res
@@ -669,7 +692,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             // Some not_found_error is expected, e.g. metadata backup's manifest.json.
             // This is a quick fix that'll only log error in `try_update_failure_metric` in state store usage.
         } else {
-            try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+            try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
         }
 
         let data = res?;
@@ -678,7 +701,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .inc_by(data.len() as u64);
         self.object_store_metrics
             .operation_size
-            .with_label_values(&[operation_type])
+            .with_label_values(&[operation_type_str])
             .observe(data.len() as f64);
         Ok(data)
     }
@@ -691,15 +714,19 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         path: &str,
         range: Range<usize>,
     ) -> ObjectResult<MonitoredStreamingReader> {
-        let operation_type = "streaming_read_start";
+        let operation_type = OperationType::StreamingReadInit;
+        let operation_type_str = operation_type.as_str();
         let media_type = self.media_type();
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[media_type, operation_type])
+            .with_label_values(&[media_type, operation_type_str])
             .start_timer();
 
-        let backoff = get_retry_strategy(&self.config);
+        let backoff = get_retry_strategy(&self.config, operation_type);
+        let timeout_duration =
+            Duration::from_millis(get_attempt_timeout_by_type(&self.config, operation_type));
+
         let res = tokio_retry::RetryIf::spawn(
             backoff,
             || async {
@@ -709,15 +736,16 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .verbose_instrument_await("object_store_streaming_read_init")
                         .await
                 };
-                let res =
-                    match self.streaming_read_timeout.as_ref() {
-                        None => future.await,
-                        Some(timeout) => tokio::time::timeout(*timeout, future)
-                            .await
-                            .unwrap_or_else(|_| {
-                                Err(ObjectError::internal("streaming_read init timeout"))
-                            }),
-                    };
+
+                let res = if timeout_duration.is_zero() {
+                    future.await
+                } else {
+                    tokio::time::timeout(timeout_duration, future)
+                        .await
+                        .unwrap_or_else(|_| {
+                            Err(ObjectError::internal("streaming_read init timeout"))
+                        })
+                };
 
                 res
             },
@@ -725,25 +753,35 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         )
         .await;
 
-        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
 
         Ok(MonitoredStreamingReader::new(
             media_type,
             res?,
             self.object_store_metrics.clone(),
-            self.streaming_read_timeout,
+            if self.config.object_store_streaming_read_timeout_ms == 0 {
+                None
+            } else {
+                Some(Duration::from_millis(
+                    self.config.object_store_streaming_read_timeout_ms,
+                ))
+            },
         ))
     }
 
     pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
-        let operation_type = "metadata";
+        let operation_type = OperationType::Metadata;
+        let operation_type_str = operation_type.as_str();
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), operation_type])
+            .with_label_values(&[self.media_type(), operation_type_str])
             .start_timer();
 
-        let backoff = get_retry_strategy(&self.config);
+        let backoff = get_retry_strategy(&self.config, operation_type);
+        let timeout_duration =
+            Duration::from_millis(get_attempt_timeout_by_type(&self.config, operation_type));
+
         let res = tokio_retry::RetryIf::spawn(
             backoff,
             || async {
@@ -753,11 +791,12 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .verbose_instrument_await("object_store_metadata")
                         .await
                 };
-                let res = match self.read_timeout.as_ref() {
-                    None => future.await,
-                    Some(timeout) => tokio::time::timeout(*timeout, future)
+                let res = if timeout_duration.is_zero() {
+                    future.await
+                } else {
+                    tokio::time::timeout(timeout_duration, future)
                         .await
-                        .unwrap_or_else(|_| Err(ObjectError::internal("metadata timeout"))),
+                        .unwrap_or_else(|_| Err(ObjectError::internal("metadata timeout")))
                 };
 
                 res
@@ -766,19 +805,23 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         )
         .await;
 
-        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
         res
     }
 
     pub async fn delete(&self, path: &str) -> ObjectResult<()> {
-        let operation_type = "delete";
+        let operation_type = OperationType::Delete;
+        let operation_type_str = operation_type.as_str();
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), operation_type])
+            .with_label_values(&[self.media_type(), operation_type_str])
             .start_timer();
 
-        let backoff = get_retry_strategy(&self.config);
+        let backoff = get_retry_strategy(&self.config, operation_type);
+        let timeout_duration =
+            Duration::from_millis(get_attempt_timeout_by_type(&self.config, operation_type));
+
         let res = tokio_retry::RetryIf::spawn(
             backoff,
             || async {
@@ -788,11 +831,13 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .verbose_instrument_await("object_store_delete")
                         .await
                 };
-                let res = match self.read_timeout.as_ref() {
-                    None => future.await,
-                    Some(timeout) => tokio::time::timeout(*timeout, future)
+
+                let res = if timeout_duration.is_zero() {
+                    future.await
+                } else {
+                    tokio::time::timeout(timeout_duration, future)
                         .await
-                        .unwrap_or_else(|_| Err(ObjectError::internal("delete timeout"))),
+                        .unwrap_or_else(|_| Err(ObjectError::internal("delete timeout")))
                 };
 
                 res
@@ -801,19 +846,23 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         )
         .await;
 
-        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
         res
     }
 
     async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
-        let operation_type = "delete_objects";
+        let operation_type = OperationType::DeleteObjects;
+        let operation_type_str = operation_type.as_str();
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), operation_type])
+            .with_label_values(&[self.media_type(), operation_type_str])
             .start_timer();
 
-        let backoff = get_retry_strategy(&self.config);
+        let backoff = get_retry_strategy(&self.config, operation_type);
+        let timeout_duration =
+            Duration::from_millis(get_attempt_timeout_by_type(&self.config, operation_type));
+
         let res = tokio_retry::RetryIf::spawn(
             backoff,
             || async {
@@ -823,11 +872,13 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .verbose_instrument_await("object_store_delete_objects")
                         .await
                 };
-                let res = match self.read_timeout.as_ref() {
-                    None => future.await,
-                    Some(timeout) => tokio::time::timeout(*timeout, future)
+
+                let res = if timeout_duration.is_zero() {
+                    future.await
+                } else {
+                    tokio::time::timeout(timeout_duration, future)
                         .await
-                        .unwrap_or_else(|_| Err(ObjectError::internal("delete_objects timeout"))),
+                        .unwrap_or_else(|_| Err(ObjectError::internal("delete_objects timeout")))
                 };
 
                 res
@@ -836,19 +887,24 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         )
         .await;
 
-        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
         res
     }
 
     pub async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
-        let operation_type = "list";
+        let operation_type = OperationType::List;
+        let operation_type_str = operation_type.as_str();
+
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), operation_type])
+            .with_label_values(&[self.media_type(), operation_type_str])
             .start_timer();
 
-        let backoff = get_retry_strategy(&self.config);
+        let backoff = get_retry_strategy(&self.config, operation_type);
+        let timeout_duration =
+            Duration::from_millis(get_attempt_timeout_by_type(&self.config, operation_type));
+
         let res = tokio_retry::RetryIf::spawn(
             backoff,
             || async {
@@ -858,11 +914,13 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .verbose_instrument_await("object_store_list")
                         .await
                 };
-                let res = match self.read_timeout.as_ref() {
-                    None => future.await,
-                    Some(timeout) => tokio::time::timeout(*timeout, future)
+
+                let res = if timeout_duration.is_zero() {
+                    future.await
+                } else {
+                    tokio::time::timeout(timeout_duration, future)
                         .await
-                        .unwrap_or_else(|_| Err(ObjectError::internal("list timeout"))),
+                        .unwrap_or_else(|_| Err(ObjectError::internal("list timeout")))
                 };
 
                 res
@@ -871,7 +929,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         )
         .await;
 
-        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
         res
     }
 }
@@ -1020,13 +1078,17 @@ pub async fn build_remote_object_store(
 }
 
 #[inline(always)]
-fn get_retry_strategy(config: &ObjectStoreConfig) -> impl Iterator<Item = Duration> {
-    ExponentialBackoff::from_millis(config.s3.object_store_req_retry_interval_ms)
+fn get_retry_strategy(
+    config: &ObjectStoreConfig,
+    operation_type: OperationType,
+) -> impl Iterator<Item = Duration> {
+    let attempts = get_retry_attempts_by_type(config, operation_type);
+    ExponentialBackoff::from_millis(config.object_store_req_retry_interval_ms)
         .max_delay(Duration::from_millis(
-            config.s3.object_store_req_retry_max_delay_ms,
+            config.object_store_req_retry_max_delay_ms,
         ))
         .factor(2)
-        .take(config.s3.object_store_req_retry_max_attempts)
+        .take(attempts)
         .map(if true { jitter } else { |x| x })
 }
 
@@ -1037,3 +1099,68 @@ fn should_retry(err: &ObjectError) -> bool {
 
 pub type ObjectMetadataIter = BoxStream<'static, ObjectResult<ObjectMetadata>>;
 pub type ObjectDataStream = BoxStream<'static, ObjectResult<Bytes>>;
+
+#[derive(Debug, Clone, Copy)]
+enum OperationType {
+    Upload,
+    StreamingUploadInit,
+    StreamingUpload,
+    Read,
+    StreamingReadInit,
+    StreamingRead,
+    Metadata,
+    Delete,
+    DeleteObjects,
+    List,
+}
+
+impl OperationType {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Upload => "upload",
+            Self::StreamingUploadInit => "streaming_upload_init",
+            Self::StreamingUpload => "streaming_upload",
+            Self::Read => "read",
+            Self::StreamingReadInit => "streaming_read_init",
+            Self::StreamingRead => "streaming_read",
+            Self::Metadata => "metadata",
+            Self::Delete => "delete",
+            Self::DeleteObjects => "delete_objects",
+            Self::List => "list",
+        }
+    }
+}
+
+fn get_retry_attempts_by_type(config: &ObjectStoreConfig, operation_type: OperationType) -> usize {
+    match operation_type {
+        OperationType::Upload => config.object_store_upload_retry_attempts,
+        OperationType::StreamingUploadInit | OperationType::StreamingUpload => {
+            config.object_store_streaming_upload_retry_attempts
+        }
+        OperationType::Read => config.object_store_read_retry_attempts,
+        OperationType::StreamingReadInit | OperationType::StreamingRead => {
+            config.object_store_streaming_read_retry_attempts
+        }
+        OperationType::Metadata => config.object_store_metadata_retry_attempts,
+        OperationType::Delete => config.object_store_delete_retry_attempts,
+        OperationType::DeleteObjects => config.object_store_delete_objects_retry_attempts,
+        OperationType::List => config.object_store_list_retry_attempts,
+    }
+}
+
+fn get_attempt_timeout_by_type(config: &ObjectStoreConfig, operation_type: OperationType) -> u64 {
+    match operation_type {
+        OperationType::Upload => config.object_store_upload_attempt_timeout_ms,
+        OperationType::StreamingUploadInit | OperationType::StreamingUpload => {
+            config.object_store_streaming_upload_attempt_timeout_ms
+        }
+        OperationType::Read => config.object_store_read_attempt_timeout_ms,
+        OperationType::StreamingReadInit | OperationType::StreamingRead => {
+            config.object_store_streaming_read_attempt_timeout_ms
+        }
+        OperationType::Metadata => config.object_store_metadata_attempt_timeout_ms,
+        OperationType::Delete => config.object_store_delete_attempt_timeout_ms,
+        OperationType::DeleteObjects => config.object_store_delete_attempt_timeout_ms,
+        OperationType::List => config.object_store_list_attempt_timeout_ms,
+    }
+}
