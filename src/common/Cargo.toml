@@ -54,7 +54,7 @@ humantime = "2.1"
 hytra = { workspace = true }
 itertools = { workspace = true }
 itoa = "1.0"
-jsonbb = "0.1.2"
+jsonbb = { workspace = true }
 lru = { workspace = true }
 memcomparable = { version = "0.2", features = ["decimal"] }
 num-integer = "0.1"

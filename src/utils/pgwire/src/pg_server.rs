@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::io;
-use std::result::Result;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;

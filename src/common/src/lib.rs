@@ -40,8 +40,6 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(map_entry_replace)]
 #![feature(negative_impls)]
-#![feature(bound_map)]
-#![feature(array_methods)]
 #![feature(register_tool)]
 #![feature(btree_cursors)]
 #![register_tool(rw)]

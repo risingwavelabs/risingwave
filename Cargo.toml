@@ -155,6 +155,7 @@ deltalake = { git = "https://github.com/risingwavelabs/delta-rs", rev = "5c2dccd
     "gcs",
 ] }
 itertools = "0.12.0"
+jsonbb = "0.1.4"
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "2682b85" }
 parquet = "50"
 thiserror-ext = "0.0.11"
