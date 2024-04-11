@@ -24,9 +24,9 @@ use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
-    object_dependency, schema, sink, source, table, user, user_privilege, view, worker_property,
-    ActorId, DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId,
-    PrivilegeId, SchemaId, SourceId, UserId, WorkerId,
+    object_dependency, schema, sink, source, table, user, user_privilege, view, ActorId,
+    DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId, PrivilegeId,
+    SchemaId, SourceId, UserId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction};
 use risingwave_pb::meta::{PbFragmentParallelUnitMapping, PbFragmentWorkerMapping};
@@ -43,6 +43,7 @@ use sea_orm::{
     Order, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, Statement,
 };
 
+use crate::controller::catalog::CatalogController;
 use crate::{MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
@@ -791,25 +792,7 @@ pub async fn get_fragment_mappings<C>(
 where
     C: ConnectionTrait,
 {
-    let worker_parallel_unit_ids: Vec<(WorkerId, I32Array)> = WorkerProperty::find()
-        .select_only()
-        .columns([
-            worker_property::Column::WorkerId,
-            worker_property::Column::ParallelUnitIds,
-        ])
-        .into_tuple()
-        .all(db)
-        .await?;
-
-    let parallel_unit_to_worker = worker_parallel_unit_ids
-        .into_iter()
-        .flat_map(|(worker_id, parallel_unit_ids)| {
-            parallel_unit_ids
-                .0
-                .into_iter()
-                .map(move |parallel_unit_id| (parallel_unit_id as u32, worker_id as u32))
-        })
-        .collect::<HashMap<_, _>>();
+    let parallel_unit_to_worker = CatalogController::get_parallel_unit_to_worker_map(db).await?;
 
     let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
         .select_only()
@@ -821,16 +804,13 @@ where
 
     Ok(fragment_mappings
         .into_iter()
-        .map(|(fragment_id, mapping)| {
-            let mapping1 = mapping.into_inner();
-            PbFragmentWorkerMapping {
-                fragment_id: fragment_id as _,
-                mapping: Some(
-                    ParallelUnitMapping::from_protobuf(&mapping1)
-                        .to_worker(&parallel_unit_to_worker)
-                        .to_protobuf(),
-                ),
-            }
+        .map(|(fragment_id, mapping)| PbFragmentWorkerMapping {
+            fragment_id: fragment_id as _,
+            mapping: Some(
+                ParallelUnitMapping::from_protobuf(&mapping.into_inner())
+                    .to_worker(&parallel_unit_to_worker)
+                    .to_protobuf(),
+            ),
         })
         .collect())
 }

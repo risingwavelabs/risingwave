@@ -39,8 +39,8 @@ pub fn place_vnode(
             self.0
         }
     }
-    // Get all serving parallel units from all available workers, grouped by worker id and ordered
-    // by parallel unit id in each group.
+    // Get all serving worker slots from all available workers, grouped by worker id and ordered
+    // by worker slot id in each group.
     let mut worker_slots: LinkedList<_> = workers
         .iter()
         .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
@@ -48,14 +48,14 @@ pub fn place_vnode(
         .map(|w| (0..w.parallel_units.len()).map(|idx| WorkerSlot(w.id, idx)))
         .collect();
 
-    // Set serving parallelism to the minimum of total number of parallel units, specified
+    // Set serving parallelism to the minimum of total number of worker slots, specified
     // `max_parallelism` and total number of virtual nodes.
     let serving_parallelism = std::cmp::min(
         worker_slots.iter().map(|slots| slots.len()).sum(),
         std::cmp::min(max_parallelism.unwrap_or(usize::MAX), VirtualNode::COUNT),
     );
 
-    // Select `serving_parallelism` parallel units in a round-robin fashion, to distribute workload
+    // Select `serving_parallelism` worker slots in a round-robin fashion, to distribute workload
     // evenly among workers.
     let mut selected_slots = Vec::new();
     while !worker_slots.is_empty() {
@@ -76,9 +76,9 @@ pub fn place_vnode(
         return None;
     }
 
-    // Calculate balance for each selected parallel unit. Initially, each parallel unit is assigned
+    // Calculate balance for each selected worker slot. Initially, each worker slot is assigned
     // no vnodes. Thus its negative balance means that many vnodes should be assigned to it later.
-    // `is_temp` is a mark for a special temporary parallel unit, only to simplify implementation.
+    // `is_temp` is a mark for a special temporary worker slot, only to simplify implementation.
     #[derive(Debug)]
     struct Balance {
         slot: WorkerSlot,
@@ -119,10 +119,10 @@ pub fn place_vnode(
                 let worker_slot = WorkerSlot(worker_id, 0);
 
                 let b = if selected_slots_set.contains(&worker_slot) {
-                    // Assign vnode to the same parallel unit as hint.
+                    // Assign vnode to the same worker slot as hint.
                     balances.get_mut(&worker_slot).unwrap()
                 } else {
-                    // Assign vnode that doesn't belong to any parallel unit to `temp_pu`
+                    // Assign vnode that doesn't belong to any worker slot to `temp_pu`
                     // temporarily. They will be reassigned later.
                     &mut temp_slot
                 };
@@ -140,10 +140,10 @@ pub fn place_vnode(
         }
     }
 
-    // The final step is to move vnodes from parallel units with positive balance to parallel units
-    // with negative balance, until all parallel units are of 0 balance.
-    // A double-ended queue with parallel units ordered by balance in descending order is consumed:
-    // 1. Peek 2 parallel units from front and back.
+    // The final step is to move vnodes from worker slots with positive balance to worker slots
+    // with negative balance, until all worker slots are of 0 balance.
+    // A double-ended queue with worker slots ordered by balance in descending order is consumed:
+    // 1. Peek 2 worker slots from front and back.
     // 2. It any of them is of 0 balance, pop it and go to step 1.
     // 3. Otherwise, move vnodes from front to back.
     let mut balances: VecDeque<_> = balances

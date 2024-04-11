@@ -54,9 +54,9 @@ use risingwave_pb::user::PbUserInfo;
 use sea_orm::sea_query::{Expr, SimpleExpr};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
-    IntoActiveModel, JoinType, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait,
-    TransactionTrait, Value,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, DatabaseTransaction,
+    EntityTrait, IntoActiveModel, JoinType, PaginatorTrait, QueryFilter, QuerySelect,
+    RelationTrait, TransactionTrait, Value,
 };
 use tokio::sync::{RwLock, RwLockReadGuard};
 
@@ -335,9 +335,10 @@ impl CatalogController {
         ))
     }
 
-    pub(crate) async fn get_parallel_unit_to_worker_map(
-        txn: &DatabaseTransaction,
-    ) -> MetaResult<HashMap<u32, u32>> {
+    pub(crate) async fn get_parallel_unit_to_worker_map<C>(db: &C) -> MetaResult<HashMap<u32, u32>>
+    where
+        C: ConnectionTrait,
+    {
         let worker_parallel_units = WorkerProperty::find()
             .select_only()
             .columns([
@@ -345,7 +346,7 @@ impl CatalogController {
                 worker_property::Column::ParallelUnitIds,
             ])
             .into_tuple::<(WorkerId, I32Array)>()
-            .all(txn)
+            .all(db)
             .await?;
 
         let parallel_unit_to_worker = worker_parallel_units

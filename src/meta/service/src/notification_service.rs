@@ -242,7 +242,6 @@ impl NotificationServiceImpl {
             self.get_worker_mapping_snapshot().await?;
         let serving_worker_mappings = self.get_serving_vnode_mappings();
 
-        // let serving_parallel_unit_mappings = self.get_serving_vnode_mappings();
         let (nodes, worker_node_version) = self.get_worker_node_snapshot().await?;
 
         let hummock_snapshot = Some(self.hummock_manager.latest_snapshot());
