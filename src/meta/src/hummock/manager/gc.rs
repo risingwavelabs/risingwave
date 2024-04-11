@@ -28,6 +28,7 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::Event as Respon
 use risingwave_pb::hummock::FullScanTask;
 
 use crate::hummock::error::{Error, Result};
+use crate::hummock::manager::versioning::Versioning;
 use crate::hummock::manager::{commit_multi_var, create_trx_wrapper, read_lock, write_lock};
 use crate::hummock::HummockManager;
 use crate::manager::MetadataManager;
@@ -117,10 +118,10 @@ impl HummockManager {
     ) -> usize {
         let tracked_object_ids: HashSet<HummockSstableObjectId> = {
             let versioning_guard = read_lock!(self, versioning).await;
-            let mut tracked_object_ids =
-                HashSet::from_iter(versioning_guard.current_version.get_object_ids());
+            let versioning: &Versioning = &*versioning_guard;
+            let mut tracked_object_ids = versioning.checkpoint.version.get_object_ids();
             for delta in versioning_guard.hummock_version_deltas.values() {
-                tracked_object_ids.extend(delta.gc_object_ids.iter().cloned());
+                tracked_object_ids.extend(delta.newly_added_object_ids());
             }
             tracked_object_ids
         };

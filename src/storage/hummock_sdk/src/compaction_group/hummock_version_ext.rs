@@ -158,7 +158,7 @@ impl HummockVersion {
     }
 
     /// This function does NOT dedup.
-    pub fn get_object_ids(&self) -> Vec<u64> {
+    pub fn get_object_ids(&self) -> HashSet<HummockSstableObjectId> {
         self.get_combined_levels()
             .flat_map(|level| {
                 level
@@ -166,7 +166,7 @@ impl HummockVersion {
                     .iter()
                     .map(|table_info| table_info.get_object_id())
             })
-            .collect_vec()
+            .collect()
     }
 
     pub fn level_iter<F: FnMut(&Level) -> bool>(
@@ -1066,7 +1066,6 @@ pub fn build_version_delta_after_version(version: &HummockVersion) -> HummockVer
         trivial_move: false,
         max_committed_epoch: version.max_committed_epoch,
         group_deltas: Default::default(),
-        gc_object_ids: vec![],
         new_table_watermarks: HashMap::new(),
         removed_table_ids: vec![],
     }
