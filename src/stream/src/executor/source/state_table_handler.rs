@@ -298,7 +298,7 @@ pub(crate) mod tests {
             store,
         )
         .await;
-        let split_impl = SplitImpl::Kafka(KafkaSplit::new(0, Some(0), None, "test".into()));
+        let split_impl = SplitImpl::Kafka(KafkaSplit::new("test".into(), 0, Some(0), None));
         let serialized = split_impl.encode_to_bytes();
         let serialized_json = split_impl.encode_to_json();
 
