@@ -2,26 +2,13 @@ impl ::risingwave_common::types::Fields for Data {
     const PRIMARY_KEY: Option<&'static [usize]> = Some(&[1usize, 0usize]);
     fn fields() -> Vec<(&'static str, ::risingwave_common::types::DataType)> {
         vec![
-            (
-                "v1",
-                <i16 as ::risingwave_common::types::WithDataType>::default_data_type(),
-            ),
-            (
-                "v2",
-                <std::primitive::i32 as ::risingwave_common::types::WithDataType>::default_data_type(),
-            ),
-            (
-                "v3",
-                <bool as ::risingwave_common::types::WithDataType>::default_data_type(),
-            ),
-            (
-                "v4",
-                <Serial as ::risingwave_common::types::WithDataType>::default_data_type(),
-            ),
-            (
-                "type",
-                <i32 as ::risingwave_common::types::WithDataType>::default_data_type(),
-            ),
+            ("v1", < i16 as ::risingwave_common::types::WithDataType >
+            ::default_data_type()), ("v2", < std::primitive::i32 as
+            ::risingwave_common::types::WithDataType > ::default_data_type()), ("v3", <
+            bool as ::risingwave_common::types::WithDataType > ::default_data_type()),
+            ("v4", < Serial as ::risingwave_common::types::WithDataType >
+            ::default_data_type()), ("type", < i32 as
+            ::risingwave_common::types::WithDataType > ::default_data_type())
         ]
     }
     fn into_owned_row(self) -> ::risingwave_common::row::OwnedRow {
@@ -31,7 +18,7 @@ impl ::risingwave_common::types::Fields for Data {
                 ::risingwave_common::types::ToOwnedDatum::to_owned_datum(self.v2),
                 ::risingwave_common::types::ToOwnedDatum::to_owned_datum(self.v3),
                 ::risingwave_common::types::ToOwnedDatum::to_owned_datum(self.v4),
-                ::risingwave_common::types::ToOwnedDatum::to_owned_datum(self.r#type),
+                ::risingwave_common::types::ToOwnedDatum::to_owned_datum(self.r#type)
             ],
         )
     }
@@ -44,7 +31,7 @@ impl From<Data> for ::risingwave_common::types::ScalarImpl {
                     ::risingwave_common::types::ToOwnedDatum::to_owned_datum(v.v2),
                     ::risingwave_common::types::ToOwnedDatum::to_owned_datum(v.v3),
                     ::risingwave_common::types::ToOwnedDatum::to_owned_datum(v.v4),
-                    ::risingwave_common::types::ToOwnedDatum::to_owned_datum(v.r#type),
+                    ::risingwave_common::types::ToOwnedDatum::to_owned_datum(v.r#type)
                 ],
             )
             .into()
