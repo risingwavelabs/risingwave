@@ -77,6 +77,8 @@ pub struct CdcBackfillExecutor<S: StateStore> {
     chunk_size: usize,
 
     disable_backfill: bool,
+
+    snapshot_interval: u32,
 }
 
 impl<S: StateStore> CdcBackfillExecutor<S> {
@@ -102,6 +104,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             metrics,
             chunk_size,
             disable_backfill,
+            snapshot_interval: 1,
         }
     }
 
@@ -253,6 +256,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
                 let mut cur_barrier_upstream_processed_rows: u64 = 0;
+                let mut barrier_count: u32 = 0;
 
                 #[for_await]
                 for either in &mut backfill_stream {
@@ -261,6 +265,10 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                         Either::Left(msg) => {
                             match msg? {
                                 Message::Barrier(barrier) => {
+                                    barrier_count += 1;
+                                    let can_start_new_snapshot =
+                                        (barrier_count == self.snapshot_interval);
+
                                     if let Some(mutation) = barrier.mutation.as_deref() {
                                         use crate::executor::Mutation;
                                         match mutation {
@@ -331,13 +339,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                                         &pk_in_output_indices,
                                                     ));
 
-                                                    let chunk_cardinality =
-                                                        chunk.cardinality() as u64;
+                                                    let row_count = chunk.cardinality() as u64;
                                                     cur_barrier_snapshot_processed_rows +=
-                                                        chunk_cardinality;
-                                                    total_snapshot_row_count += chunk_cardinality;
-                                                    snapshot_read_row_cnt +=
-                                                        chunk_cardinality as usize;
+                                                        row_count;
+                                                    total_snapshot_row_count += row_count;
+                                                    snapshot_read_row_cnt += row_count as usize;
 
                                                     tracing::debug!(
                                                         upstream_table_id,
@@ -354,32 +360,36 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         }
                                     }
 
-                                    // If it is a barrier, switch snapshot and consume buffered
-                                    // upstream chunk.
-                                    // If no current_pos, means we did not process any snapshot yet.
-                                    // In that case we can just ignore the upstream buffer chunk.
-                                    if let Some(current_pos) = &current_pk_pos {
-                                        for chunk in upstream_chunk_buffer.drain(..) {
-                                            cur_barrier_upstream_processed_rows +=
-                                                chunk.cardinality() as u64;
+                                    if can_start_new_snapshot {
+                                        // If the number of barriers reaches the snapshot interval,
+                                        // consume the buffered upstream chunks.
+                                        if let Some(current_pos) = &current_pk_pos {
+                                            for chunk in upstream_chunk_buffer.drain(..) {
+                                                cur_barrier_upstream_processed_rows +=
+                                                    chunk.cardinality() as u64;
 
-                                            // record the consumed binlog offset that will be
-                                            // persisted later
-                                            consumed_binlog_offset = get_cdc_chunk_last_offset(
-                                                &offset_parse_func,
-                                                &chunk,
-                                            )?;
-                                            yield Message::Chunk(mapping_chunk(
-                                                mark_cdc_chunk(
+                                                // record the consumed binlog offset that will be
+                                                // persisted later
+                                                consumed_binlog_offset = get_cdc_chunk_last_offset(
                                                     &offset_parse_func,
-                                                    chunk,
-                                                    current_pos,
-                                                    &pk_in_output_indices,
-                                                    &pk_order,
-                                                    last_binlog_offset.clone(),
-                                                )?,
-                                                &self.output_indices,
-                                            ));
+                                                    &chunk,
+                                                )?;
+                                                yield Message::Chunk(mapping_chunk(
+                                                    mark_cdc_chunk(
+                                                        &offset_parse_func,
+                                                        chunk,
+                                                        current_pos,
+                                                        &pk_in_output_indices,
+                                                        &pk_order,
+                                                        last_binlog_offset.clone(),
+                                                    )?,
+                                                    &self.output_indices,
+                                                ));
+                                            }
+                                        } else {
+                                            // If no current_pos, means we did not process any snapshot yet.
+                                            // we can just ignore the upstream buffer chunk in that case.
+                                            upstream_chunk_buffer.clear();
                                         }
                                     }
 
@@ -423,10 +433,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                             total_snapshot_row_count,
                                         );
                                     }
-
                                     yield Message::Barrier(barrier);
-                                    // Break the for loop and start a new snapshot read stream.
-                                    break;
+
+                                    if can_start_new_snapshot {
+                                        // Break the for loop and start a new snapshot read stream.
+                                        break;
+                                    }
                                 }
                                 Message::Chunk(chunk) => {
                                     // skip empty upstream chunk
