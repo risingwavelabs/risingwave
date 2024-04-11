@@ -132,7 +132,6 @@ async fn handle_declare_subscription_cursor(
             pg_descs,
             start_rw_timestamp,
             is_snapshot,
-            false,
             sub_name,
             subscription.get_retention_seconds()?,
         )
