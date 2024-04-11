@@ -228,7 +228,7 @@ impl SnowflakeS3Client {
         let config = ObjectStoreConfig::default();
 
         // create the s3 engine for streaming upload to the intermediate s3 bucket
-        // note: this will lead to a complete panic if any credential / intermediate creation
+        // note: this will lead to an internal panic if any credential / intermediate creation
         // process has error, which may not be acceptable...
         // but it's hard to gracefully handle the error without modifying downstream return type(s)...
         let opendal_s3_engine = OpendalObjectStore::new_s3_engine_with_credentials(
