@@ -642,7 +642,8 @@ impl MigrationTrait for Migration {
                         &mut ForeignKey::create()
                             .name("FK_table_optional_associated_source_id")
                             .from(Table::Table, Table::OptionalAssociatedSourceId)
-                            .to(Source::Table, Source::SourceId)
+                            .to(Object::Table, Object::Oid)
+                            .on_delete(ForeignKeyAction::Cascade)
                             .to_owned(),
                     )
                     .to_owned(),
