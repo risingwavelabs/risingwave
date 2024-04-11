@@ -1163,10 +1163,7 @@ mod tests {
             serde_json::from_value(value.take()).map_err(Into::into)
         }
 
-        fn update_with_last_read_offset(
-            &mut self,
-            _last_read_offset: String,
-        ) -> ConnectorResult<()> {
+        fn update_offset(&mut self, _last_read_offset: String) -> ConnectorResult<()> {
             Ok(())
         }
     }
