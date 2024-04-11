@@ -44,7 +44,6 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
-use tower::ServiceBuilder;
 
 use crate::error::{Result, RpcError};
 use crate::{RpcClient, RpcClientPool};

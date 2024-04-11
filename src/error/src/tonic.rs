@@ -165,7 +165,7 @@ impl std::fmt::Display for TonicStatusWrapper {
             .and_then(|s| s.downcast_ref::<ServerError>())
             .and_then(|s| s.service_name.as_ref())
             // if no service name from the server side, use the client side one
-            .or_else(|| self.client_side_service_name.as_ref())
+            .or(self.client_side_service_name.as_ref())
         {
             write!(f, " to {} service", service_name)?;
         }
