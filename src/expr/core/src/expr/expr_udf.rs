@@ -21,8 +21,6 @@ use std::time::Duration;
 use anyhow::{Context, Error};
 use arrow_schema::{Field, Fields, Schema};
 use arrow_udf_js::{CallMode as JsCallMode, Runtime as JsRuntime};
-#[cfg(feature = "embedded-deno-udf")]
-use arrow_udf_js_deno::{CallMode as DenoCallMode, Runtime as DenoRuntime};
 #[cfg(feature = "embedded-python-udf")]
 use arrow_udf_python::{CallMode as PythonCallMode, Runtime as PythonRuntime};
 use arrow_udf_wasm::Runtime as WasmRuntime;
@@ -75,8 +73,6 @@ pub enum UdfImpl {
     JavaScript(JsRuntime),
     #[cfg(feature = "embedded-python-udf")]
     Python(PythonRuntime),
-    #[cfg(feature = "embedded-deno-udf")]
-    Deno(Arc<DenoRuntime>),
 }
 
 #[async_trait::async_trait]
@@ -131,11 +127,9 @@ impl UserDefinedFunction {
         };
         let language = match &self.imp {
             UdfImpl::Wasm(_) => "wasm",
-            UdfImpl::JavaScript(_) => "javascript(quickjs)",
+            UdfImpl::JavaScript(_) => "javascript",
             #[cfg(feature = "embedded-python-udf")]
             UdfImpl::Python(_) => "python",
-            #[cfg(feature = "embedded-deno-udf")]
-            UdfImpl::Deno(_) => "javascript(deno)",
             UdfImpl::External(_) => "external",
         };
         let labels: &[&str; 4] = &[addr, language, &self.identifier, fragment_id.as_str()];
@@ -158,11 +152,6 @@ impl UserDefinedFunction {
             UdfImpl::JavaScript(runtime) => runtime.call(&self.identifier, &arrow_input),
             #[cfg(feature = "embedded-python-udf")]
             UdfImpl::Python(runtime) => runtime.call(&self.identifier, &arrow_input),
-            #[cfg(feature = "embedded-deno-udf")]
-            UdfImpl::Deno(runtime) => tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current()
-                    .block_on(runtime.call(&self.identifier, arrow_input))
-            }),
             UdfImpl::External(client) => {
                 let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
                 let result = if self.always_retry_on_network_error {
@@ -251,15 +240,6 @@ impl Build for UserDefinedFunction {
         let return_type = DataType::from(prost.get_return_type().unwrap());
         let udf = prost.get_rex_node().unwrap().as_udf().unwrap();
 
-        #[cfg(not(feature = "embedded-deno-udf"))]
-        let runtime = "quickjs";
-
-        #[cfg(feature = "embedded-deno-udf")]
-        let runtime = match udf.runtime.as_deref() {
-            Some("deno") => "deno",
-            _ => "quickjs",
-        };
-
         let identifier = udf.get_identifier()?;
         let imp = match udf.language.as_str() {
             #[cfg(not(madsim))]
@@ -270,7 +250,7 @@ impl Build for UserDefinedFunction {
                 let runtime = get_or_create_wasm_runtime(&wasm_binary)?;
                 UdfImpl::Wasm(runtime)
             }
-            "javascript" if runtime != "deno" => {
+            "javascript" => {
                 let mut rt = JsRuntime::new()?;
                 let body = format!(
                     "export function {}({}) {{ {} }}",
@@ -285,48 +265,6 @@ impl Build for UserDefinedFunction {
                     &body,
                 )?;
                 UdfImpl::JavaScript(rt)
-            }
-            #[cfg(feature = "embedded-deno-udf")]
-            "javascript" if runtime == "deno" => {
-                let rt = DenoRuntime::new();
-                let body = match udf.get_body() {
-                    Ok(body) => body.clone(),
-                    Err(_) => match udf.get_compressed_binary() {
-                        Ok(compressed_binary) => {
-                            let binary = zstd::stream::decode_all(compressed_binary.as_slice())
-                                .context("failed to decompress binary")?;
-                            String::from_utf8(binary).context("failed to decode binary")?
-                        }
-                        Err(_) => {
-                            bail!("UDF body or compressed binary is required for deno UDF");
-                        }
-                    },
-                };
-
-                let body = if matches!(udf.function_type.as_deref(), Some("async")) {
-                    format!(
-                        "export async function {}({}) {{ {} }}",
-                        identifier,
-                        udf.arg_names.join(","),
-                        body
-                    )
-                } else {
-                    format!(
-                        "export function {}({}) {{ {} }}",
-                        identifier,
-                        udf.arg_names.join(","),
-                        body
-                    )
-                };
-
-                futures::executor::block_on(rt.add_function(
-                    identifier,
-                    arrow_schema::DataType::try_from(&return_type)?,
-                    DenoCallMode::CalledOnNullInput,
-                    &body,
-                ))?;
-
-                UdfImpl::Deno(rt)
             }
             #[cfg(feature = "embedded-python-udf")]
             "python" if udf.body.is_some() => {
