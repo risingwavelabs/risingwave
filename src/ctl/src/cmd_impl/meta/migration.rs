@@ -815,14 +815,14 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 .conn
                 .execute(Statement::from_string(
                     DatabaseBackend::Postgres,
-                    "SELECT setval('object_oid_seq', (SELECT MAX(oid) FROM object) + 1);",
+                    "SELECT setval('object_oid_seq', SELECT MAX(oid) FROM object);",
                 ))
                 .await?;
             meta_store_sql
                 .conn
                 .execute(Statement::from_string(
                     DatabaseBackend::Postgres,
-                    "SELECT setval('user_user_id_seq', (SELECT MAX(user_id) FROM \"user\") + 1);",
+                    "SELECT setval('user_user_id_seq', SELECT MAX(user_id) FROM \"user\");",
                 ))
                 .await?;
         }

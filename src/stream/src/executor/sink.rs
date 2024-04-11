@@ -343,6 +343,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 .reconstructed_compacted_chunks(
                                     chunk_size,
                                     input_data_types.clone(),
+                                    sink_type != SinkType::ForceAppendOnly,
                                 )
                         } else {
                             chunks
