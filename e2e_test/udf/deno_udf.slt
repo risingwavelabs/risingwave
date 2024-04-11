@@ -1,5 +1,5 @@
 system ok
-pip3 install -r e2e_test/udf/requirements.txt
+pip3 install -r e2e_test/udf/requirements.txt -q
 
 statement ok
 CREATE FUNCTION gcd(a int, b int) RETURNS int LANGUAGE javascript RUNTIME deno AS $$
@@ -152,7 +152,6 @@ CREATE FUNCTION digest( t string ) RETURNS bytea LANGUAGE javascript RUNTIME den
         const result = await subtle.sign({
         name: 'HMAC',
         }, key, message);
-    console.log('result', result);
     return result;
 $$ ASYNC;
 
@@ -201,6 +200,24 @@ python3 e2e_test/udf/mock_server.py &
 sleep 1s
 
 statement ok
+CREATE FUNCTION call_sse() RETURNS TABLE ( data struct<data struct<greetings string>>) LANGUAGE javascript RUNTIME deno USING LINK 'fs://e2e_test/udf/sse/bundled.table.js' SYNC;
+
+system ok
+echo "Executing query"
+
+query I
+select * FROM call_sse();
+----
+(Hi)
+(Bonjour)
+(Hola)
+(Ciao)
+(Zdravo)
+
+statement ok
+drop function call_sse;
+
+statement ok
 CREATE FUNCTION fetch_api() RETURNS TABLE ( data struct< idx int>) LANGUAGE javascript RUNTIME deno AS $$
     const response = await fetch('http://127.0.0.1:4200');
     const resp = await response.json();
@@ -218,20 +235,5 @@ select * FROM fetch_api();
 statement ok
 drop function fetch_api;
 
-statement ok
-CREATE FUNCTION call_sse() RETURNS TABLE ( data struct<data struct<greetings string>>) LANGUAGE javascript RUNTIME deno USING LINK 'fs://e2e_test/udf/sse/bundled.table.js' SYNC;
-
-query I
-select * FROM call_sse();
-----
-(Hi)
-(Bonjour)
-(Hola)
-(Ciao)
-(Zdravo)
-
 system ok
 pkill -9 python3
-
-statement ok
-drop function call_sse;
