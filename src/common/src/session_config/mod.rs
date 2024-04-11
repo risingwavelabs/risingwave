@@ -59,7 +59,6 @@ pub struct SessionConfig {
     /// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
     /// until the entire dataflow is refreshed. In other words, every related table & MV will
     /// be able to see the write.
-    #[serde(rename = "rw_implicit_flush")]
     #[parameter(default = false, rename = "rw_implicit_flush")]
     implicit_flush: bool,
 
@@ -87,24 +86,20 @@ pub struct SessionConfig {
 
     /// It is typically set by an application upon connection to the server.
     /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-DATESTYLE>
-    #[serde(rename = "datestyle")]
     #[parameter(default = "", rename = "datestyle")]
     date_style: String,
 
     /// Force the use of lookup join instead of hash join when possible for local batch execution.
-    #[serde(rename = "rw_batch_enable_lookup_join")]
     #[parameter(default = true, rename = "rw_batch_enable_lookup_join")]
     batch_enable_lookup_join: bool,
 
     /// Enable usage of sortAgg instead of hash agg when order property is satisfied in batch
     /// execution
-    #[serde(rename = "rw_batch_enable_sort_agg")]
     #[parameter(default = true, rename = "rw_batch_enable_sort_agg")]
     batch_enable_sort_agg: bool,
 
     /// Enable distributed DML, so an insert, delete, and update statement can be executed in a distributed way (e.g. running in multiple compute nodes).
     /// No atomicity guarantee in this mode. Its goal is to gain the best ingestion performance for initial batch ingestion where users always can drop their table when failure happens.
-    #[serde(rename = "batch_enable_distributed_dml")]
     #[parameter(default = false, rename = "batch_enable_distributed_dml")]
     batch_enable_distributed_dml: bool,
 
@@ -146,12 +141,10 @@ pub struct SessionConfig {
     streaming_parallelism: ConfigNonZeroU64,
 
     /// Enable delta join for streaming queries. Defaults to false.
-    #[serde(rename = "rw_streaming_enable_delta_join")]
     #[parameter(default = false, rename = "rw_streaming_enable_delta_join")]
     streaming_enable_delta_join: bool,
 
     /// Enable bushy join for streaming queries. Defaults to true.
-    #[serde(rename = "rw_streaming_enable_bushy_join")]
     #[parameter(default = true, rename = "rw_streaming_enable_bushy_join")]
     streaming_enable_bushy_join: bool,
 
@@ -160,42 +153,35 @@ pub struct SessionConfig {
     streaming_use_arrangement_backfill: bool,
 
     /// Allow `jsonb` in stream key
-    #[serde(rename = "rw_streaming_allow_jsonb_in_stream_key")]
     #[parameter(default = false, rename = "rw_streaming_allow_jsonb_in_stream_key")]
     streaming_allow_jsonb_in_stream_key: bool,
 
     /// Enable join ordering for streaming and batch queries. Defaults to true.
-    #[serde(rename = "rw_enable_join_ordering")]
     #[parameter(default = true, rename = "rw_enable_join_ordering")]
     enable_join_ordering: bool,
 
     /// Enable two phase agg optimization. Defaults to true.
     /// Setting this to true will always set `FORCE_TWO_PHASE_AGG` to false.
-    #[serde(rename = "rw_enable_two_phase_agg")]
     #[parameter(default = true, flags = "SETTER", rename = "rw_enable_two_phase_agg")]
     enable_two_phase_agg: bool,
 
     /// Force two phase agg optimization whenever there's a choice between
     /// optimizations. Defaults to false.
     /// Setting this to true will always set `ENABLE_TWO_PHASE_AGG` to false.
-    #[serde(rename = "rw_force_two_phase_agg")]
     #[parameter(default = false, flags = "SETTER", rename = "rw_force_two_phase_agg")]
     force_two_phase_agg: bool,
 
     /// Enable sharing of common sub-plans.
     /// This means that DAG structured query plans can be constructed,
-    #[serde(rename = "rw_enable_share_plan")]
     #[parameter(default = true, rename = "rw_enable_share_plan")]
     /// rather than only tree structured query plans.
     enable_share_plan: bool,
 
     /// Enable split distinct agg
-    #[serde(rename = "rw_force_split_distinct_agg")]
     #[parameter(default = false, rename = "rw_force_split_distinct_agg")]
     force_split_distinct_agg: bool,
 
     /// See <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-INTERVALSTYLE>
-    #[serde(rename = "intervalstyle")]
     #[parameter(default = "", rename = "intervalstyle")]
     interval_style: String,
 
@@ -263,7 +249,6 @@ pub struct SessionConfig {
     /// Cache policy for partition cache in streaming over window.
     /// Can be "full", "recent", "`recent_first_n`" or "`recent_last_n`".
     #[serde_as(as = "DisplayFromStr")]
-    #[serde(rename = "rw_streaming_over_window_cache_policy")]
     #[parameter(default = OverWindowCachePolicy::default(), rename = "rw_streaming_over_window_cache_policy")]
     streaming_over_window_cache_policy: OverWindowCachePolicy,
 
