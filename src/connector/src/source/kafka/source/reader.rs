@@ -105,7 +105,7 @@ impl SplitReader for KafkaSplitReader {
                 tpl.add_partition_offset(
                     split.topic.as_str(),
                     split.partition,
-                    Offset::Offset(offset + 1),
+                    Offset::Offset(offset),
                 )?;
             } else {
                 tpl.add_partition(split.topic.as_str(), split.partition);
@@ -165,8 +165,9 @@ impl CommonSplitReader for KafkaSplitReader {
     #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     async fn into_data_stream(self) {
         if self.offsets.values().all(|(start_offset, stop_offset)| {
+            // note the offset pair is left-inclusive-right-exclusive
             match (start_offset, stop_offset) {
-                (Some(start), Some(stop)) if (*start + 1) >= *stop => true,
+                (Some(start), Some(stop)) if *start >= *stop => true,
                 (_, Some(stop)) if *stop == 0 => true,
                 _ => false,
             }

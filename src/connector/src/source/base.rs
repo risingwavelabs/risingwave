@@ -612,7 +612,7 @@ mod tests {
 
     #[test]
     fn test_split_impl_get_fn() -> Result<()> {
-        let split = KafkaSplit::new(0, Some(0), Some(0), "demo".to_string());
+        let split = KafkaSplit::new("demo".to_string(), 0, Some(0), Some(0));
         let split_impl = SplitImpl::Kafka(split.clone());
         let get_value = split_impl.into_kafka().unwrap();
         println!("{:?}", get_value);

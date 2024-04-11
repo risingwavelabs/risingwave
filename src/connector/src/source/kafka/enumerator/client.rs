@@ -124,11 +124,13 @@ impl SplitEnumerator for KafkaSplitEnumerator {
 
         let ret = topic_partitions
             .into_iter()
-            .map(|partition| KafkaSplit {
-                topic: self.topic.clone(),
-                partition,
-                start_offset: start_offsets.remove(&partition).unwrap(),
-                stop_offset: stop_offsets.remove(&partition).unwrap(),
+            .map(|partition| {
+                KafkaSplit::new(
+                    self.topic.clone(),
+                    partition,
+                    start_offsets.remove(&partition).unwrap(),
+                    stop_offsets.remove(&partition).unwrap(),
+                )
             })
             .collect();
 
@@ -137,6 +139,9 @@ impl SplitEnumerator for KafkaSplitEnumerator {
 }
 
 impl KafkaSplitEnumerator {
+    /// Note that according to Kafka documents, the low watermark is the offset of the
+    /// earliest message available for reading, and the high watermark is the offset of
+    /// the latest message available for reading + 1.
     async fn get_watermarks(&self, partitions: &[i32]) -> KafkaResult<HashMap<i32, (i64, i64)>> {
         let mut map = HashMap::new();
         for partition in partitions {
@@ -185,7 +190,7 @@ impl KafkaSplitEnumerator {
         };
 
         // Watermark here has nothing to do with watermark in streaming processing. Watermark
-        // here means smallest/largest offset available for reading.
+        // here means smallest/(largest+1) offset available for reading.
         let mut watermarks = {
             let mut ret = HashMap::new();
             for partition in &topic_partitions {
@@ -193,7 +198,7 @@ impl KafkaSplitEnumerator {
                     .client
                     .fetch_watermarks(self.topic.as_str(), *partition, self.sync_call_timeout)
                     .await?;
-                ret.insert(partition, (low - 1, high));
+                ret.insert(partition, (low, high));
             }
             ret
         };
@@ -205,17 +210,16 @@ impl KafkaSplitEnumerator {
                 let start_offset = {
                     let start = expect_start_offset
                         .as_mut()
-                        .map(|m| m.remove(partition).flatten().map(|t| t-1).unwrap_or(low))
+                        .and_then(|offsets| offsets.remove(partition).unwrap())
                         .unwrap_or(low);
-                    i64::max(start, low)
+                    start.max(low)
                 };
                 let stop_offset = {
                     let stop = expect_stop_offset
                         .as_mut()
-                        .map(|m| m.remove(partition).unwrap_or(Some(high)))
-                        .unwrap_or(Some(high))
+                        .and_then(|offsets| offsets.remove(partition).unwrap())
                         .unwrap_or(high);
-                    i64::min(stop, high)
+                    stop.min(high)
                 };
 
                 if start_offset > stop_offset {
@@ -227,12 +231,12 @@ impl KafkaSplitEnumerator {
                         stop_offset
                     );
                 }
-                KafkaSplit {
-                    topic: self.topic.clone(),
-                    partition: *partition,
-                    start_offset: Some(start_offset),
-                    stop_offset: Some(stop_offset),
-                }
+                KafkaSplit::new(
+                    self.topic.clone(),
+                    *partition,
+                    Some(start_offset),
+                    Some(stop_offset),
+                )
             })
             .collect::<Vec<KafkaSplit>>())
     }
@@ -273,8 +277,8 @@ impl KafkaSplitEnumerator {
                 for partition in partitions {
                     let (low_watermark, high_watermark) = watermarks.get(partition).unwrap();
                     let offset = match self.start_offset {
-                        KafkaEnumeratorOffset::Earliest => low_watermark - 1,
-                        KafkaEnumeratorOffset::Latest => high_watermark - 1,
+                        KafkaEnumeratorOffset::Earliest => *low_watermark,
+                        KafkaEnumeratorOffset::Latest => *high_watermark, /* means consume from the next message */
                         _ => unreachable!(),
                     };
                     map.insert(*partition, Some(offset));
@@ -312,10 +316,9 @@ impl KafkaSplitEnumerator {
         for elem in offsets.elements_for_topic(self.topic.as_str()) {
             match elem.offset() {
                 Offset::Offset(offset) => {
-                    // XXX(rc): currently in RW source, `offset` means the last consumed offset, so we need to subtract 1
-                    result.insert(elem.partition(), Some(offset - 1));
+                    result.insert(elem.partition(), Some(offset));
                 }
-                _ => {
+                Offset::End => {
                     let (_, high_watermark) = self
                         .client
                         .fetch_watermarks(
@@ -326,6 +329,7 @@ impl KafkaSplitEnumerator {
                         .await?;
                     result.insert(elem.partition(), Some(high_watermark));
                 }
+                _ => unreachable!(),
             }
         }
 
