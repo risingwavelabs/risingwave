@@ -1591,7 +1591,11 @@ impl MetaMemberManagement {
     async fn refresh_members(&mut self) -> Result<()> {
         let leader_addr = match self.members.as_mut() {
             Either::Left(client) => {
-                let resp = client.to_owned().members(MembersRequest {}).await?;
+                let resp = client
+                    .to_owned()
+                    .members(MembersRequest {})
+                    .await
+                    .map_err(RpcError::from_meta_status)?;
                 let resp = resp.into_inner();
                 resp.members.into_iter().find(|member| member.is_leader)
             }

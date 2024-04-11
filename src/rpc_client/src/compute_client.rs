@@ -44,8 +44,9 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
+use tower::ServiceBuilder;
 
-use crate::error::Result;
+use crate::error::{Result, RpcError};
 use crate::{RpcClient, RpcClientPool};
 
 #[derive(Clone)]
@@ -98,7 +99,8 @@ impl ComputeClient {
             .get_data(GetDataRequest {
                 task_output_id: Some(output_id),
             })
-            .await?
+            .await
+            .map_err(RpcError::from_compute_status)?
             .into_inner())
     }
 
@@ -149,7 +151,8 @@ impl ComputeClient {
                     up_actor_id,
                     down_actor_id
                 )
-            })?
+            })
+            .map_err(RpcError::from_compute_status)?
             .into_inner();
 
         Ok((response_stream, permits_tx))
@@ -172,12 +175,19 @@ impl ComputeClient {
                 tracing_context: TracingContext::from_current_span().to_protobuf(),
                 expr_context: Some(expr_context),
             })
-            .await?
+            .await
+            .map_err(RpcError::from_compute_status)?
             .into_inner())
     }
 
     pub async fn execute(&self, req: ExecuteRequest) -> Result<Streaming<GetDataResponse>> {
-        Ok(self.task_client.to_owned().execute(req).await?.into_inner())
+        Ok(self
+            .task_client
+            .to_owned()
+            .execute(req)
+            .await
+            .map_err(RpcError::from_compute_status)?
+            .into_inner())
     }
 
     pub async fn cancel(&self, req: CancelTaskRequest) -> Result<CancelTaskResponse> {
@@ -185,7 +195,8 @@ impl ComputeClient {
             .task_client
             .to_owned()
             .cancel_task(req)
-            .await?
+            .await
+            .map_err(RpcError::from_compute_status)?
             .into_inner())
     }
 
@@ -194,7 +205,8 @@ impl ComputeClient {
             .monitor_client
             .to_owned()
             .stack_trace(StackTraceRequest::default())
-            .await?
+            .await
+            .map_err(RpcError::from_compute_status)?
             .into_inner())
     }
 
@@ -203,7 +215,8 @@ impl ComputeClient {
             .monitor_client
             .to_owned()
             .get_back_pressure(GetBackPressureRequest::default())
-            .await?
+            .await
+            .map_err(RpcError::from_compute_status)?
             .into_inner())
     }
 
@@ -212,7 +225,8 @@ impl ComputeClient {
             .monitor_client
             .to_owned()
             .profiling(ProfilingRequest { sleep_s })
-            .await?
+            .await
+            .map_err(RpcError::from_compute_status)?
             .into_inner())
     }
 
@@ -221,7 +235,8 @@ impl ComputeClient {
             .monitor_client
             .to_owned()
             .heap_profiling(HeapProfilingRequest { dir })
-            .await?
+            .await
+            .map_err(RpcError::from_compute_status)?
             .into_inner())
     }
 
@@ -230,7 +245,8 @@ impl ComputeClient {
             .monitor_client
             .to_owned()
             .list_heap_profiling(ListHeapProfilingRequest {})
-            .await?
+            .await
+            .map_err(RpcError::from_compute_status)?
             .into_inner())
     }
 
@@ -239,7 +255,8 @@ impl ComputeClient {
             .monitor_client
             .to_owned()
             .analyze_heap(AnalyzeHeapRequest { path })
-            .await?
+            .await
+            .map_err(RpcError::from_compute_status)?
             .into_inner())
     }
 
@@ -248,7 +265,8 @@ impl ComputeClient {
             .config_client
             .to_owned()
             .show_config(ShowConfigRequest {})
-            .await?
+            .await
+            .map_err(RpcError::from_compute_status)?
             .into_inner())
     }
 }

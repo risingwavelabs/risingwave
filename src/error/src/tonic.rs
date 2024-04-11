@@ -98,7 +98,24 @@ where
 /// A wrapper of [`tonic::Status`] that provides better error message and extracts
 /// the source chain from the `details` field.
 #[derive(Debug)]
-pub struct TonicStatusWrapper(tonic::Status);
+pub struct TonicStatusWrapper {
+    inner: tonic::Status,
+
+    /// Optional service name from the client side.
+    ///
+    /// # Explanation
+    ///
+    /// [`tonic::Status`] is used for both client and server side. When the error is created on
+    /// the server side, we encourage developers to provide the service name with
+    /// [`ToTonicStatus::to_status`], so that the info can be included in the HTTP response and
+    /// then extracted by the client side (in [`TonicStatusWrapper::new`]).
+    ///
+    /// However, if there's something wrong with the server side and the error is directly
+    /// created on the client side, the approach above is not applicable. In this case, the
+    /// caller should set a "client side" service name to provide better error message. This is
+    /// achieved by [`TonicStatusWrapperExt::with_client_side_service_name`].
+    client_side_service_name: Option<ServiceName>,
+}
 
 impl TonicStatusWrapper {
     /// Create a new [`TonicStatusWrapper`] from the given [`tonic::Status`] and extract
@@ -115,17 +132,21 @@ impl TonicStatusWrapper {
                 }
             }
         }
-        Self(status)
+
+        Self {
+            inner: status,
+            client_side_service_name: None,
+        }
     }
 
     /// Returns the reference to the inner [`tonic::Status`].
     pub fn inner(&self) -> &tonic::Status {
-        &self.0
+        &self.inner
     }
 
     /// Consumes `self` and returns the inner [`tonic::Status`].
     pub fn into_inner(self) -> tonic::Status {
-        self.0
+        self.inner
     }
 }
 
@@ -138,28 +159,50 @@ impl From<tonic::Status> for TonicStatusWrapper {
 impl std::fmt::Display for TonicStatusWrapper {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "gRPC request")?;
+
         if let Some(service_name) = self
             .source()
             .and_then(|s| s.downcast_ref::<ServerError>())
             .and_then(|s| s.service_name.as_ref())
+            // if no service name from the server side, use the client side one
+            .or_else(|| self.client_side_service_name.as_ref())
         {
             write!(f, " to {} service", service_name)?;
         }
-        write!(f, " failed: {}: ", self.0.code())?;
+        write!(f, " failed: {}: ", self.inner.code())?;
+
         #[expect(rw::format_error)] // intentionally format the source itself
         if let Some(source) = self.source() {
             // Prefer the source chain from the `details` field.
             write!(f, "{}", source)
         } else {
-            write!(f, "{}", self.0.message())
+            write!(f, "{}", self.inner.message())
         }
+    }
+}
+
+#[easy_ext::ext(TonicStatusWrapperExt)]
+impl<T> T
+where
+    T: Into<TonicStatusWrapper>,
+{
+    /// Set the client side service name to provide better error message.
+    ///
+    /// See the documentation on the field `client_side_service_name` for more details.
+    pub fn with_client_side_service_name(
+        self,
+        service_name: impl Into<ServiceName>,
+    ) -> TonicStatusWrapper {
+        let mut this = self.into();
+        this.client_side_service_name = Some(service_name.into());
+        this
     }
 }
 
 impl std::error::Error for TonicStatusWrapper {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        // Delegate to `self.0` as if we're transparent.
-        self.0.source()
+        // Delegate to `self.inner` as if we're transparent.
+        self.inner.source()
     }
 }
 
