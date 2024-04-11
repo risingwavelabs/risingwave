@@ -842,6 +842,7 @@ pub fn create_builder(
 ) -> DataChunkBuilder {
     if let Some(rate_limit) = rate_limit
         && rate_limit < chunk_size
+        && rate_limit > 0
     {
         DataChunkBuilder::new(data_types, rate_limit)
     } else {
@@ -858,11 +859,20 @@ pub fn create_limiter(rate_limit: usize) -> Option<BackfillRateLimiter> {
     Some(RateLimiter::direct_with_clock(quota, &clock))
 }
 
-pub async fn wait_for_rate_limiter(limiter: &BackfillRateLimiter, chunk_cardinality: usize) {
-    if chunk_cardinality > 0 {
-        limiter
-            .until_n_ready(NonZeroU32::new(chunk_cardinality as u32).unwrap())
-            .await
-            .unwrap();
+pub async fn wait_for_rate_limiter(
+    limiter: &Option<BackfillRateLimiter>,
+    chunk_cardinality: usize,
+) {
+    if let Some(limiter) = limiter {
+        if chunk_cardinality > 0 {
+            limiter
+                .until_n_ready(NonZeroU32::new(chunk_cardinality as u32).unwrap())
+                .await
+                .unwrap();
+        }
+    } else {
+        // got rate_limit None, means limit to zero
+        // stop the current stream until changing by barrier
+        futures::future::pending::<()>().await;
     }
 }

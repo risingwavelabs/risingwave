@@ -231,7 +231,9 @@ where
                     self.actor_id.to_string().as_str(),
                 ]);
 
-            let limiter = self.rate_limit.and_then(create_limiter);
+            // The limit type is Option<Option<_>>, where the outer Option is for no rate limit and the inner Option is None for limiting to zero.
+            let limiter = self.rate_limit.map(create_limiter);
+
             'backfill_loop: loop {
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
                 let mut cur_barrier_upstream_processed_rows: u64 = 0;
