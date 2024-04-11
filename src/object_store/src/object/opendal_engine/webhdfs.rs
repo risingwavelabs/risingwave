@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use opendal::layers::{LoggingLayer, RetryLayer};
+use opendal::layers::LoggingLayer;
 use opendal::services::Webhdfs;
 use opendal::Operator;
 
@@ -35,7 +35,6 @@ impl OpendalObjectStore {
         builder.atomic_write_dir(&atomic_write_dir);
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
-            .layer(RetryLayer::default())
             .finish();
         Ok(Self {
             op,

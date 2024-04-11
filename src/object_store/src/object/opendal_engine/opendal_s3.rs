@@ -14,7 +14,7 @@
 
 use std::time::Duration;
 
-use opendal::layers::{LoggingLayer, RetryLayer};
+use opendal::layers::LoggingLayer;
 use opendal::raw::HttpClient;
 use opendal::services::S3;
 use opendal::Operator;
@@ -46,18 +46,6 @@ impl OpendalObjectStore {
 
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
-            .layer(
-                RetryLayer::new()
-                    .with_min_delay(Duration::from_millis(
-                        object_store_config.s3.object_store_req_retry_interval_ms,
-                    ))
-                    .with_max_delay(Duration::from_millis(
-                        object_store_config.s3.object_store_req_retry_max_delay_ms,
-                    ))
-                    .with_max_times(object_store_config.s3.object_store_req_retry_max_attempts)
-                    .with_factor(1.0)
-                    .with_jitter(),
-            )
             .finish();
         Ok(Self {
             op,

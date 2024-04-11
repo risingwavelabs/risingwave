@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use opendal::layers::{LoggingLayer, RetryLayer};
+use opendal::layers::LoggingLayer;
 use opendal::services::Oss;
 use opendal::Operator;
 
@@ -43,7 +43,6 @@ impl OpendalObjectStore {
 
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
-            .layer(RetryLayer::default())
             .finish();
         Ok(Self {
             op,

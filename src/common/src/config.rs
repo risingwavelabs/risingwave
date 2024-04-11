@@ -1727,7 +1727,7 @@ pub mod default {
     pub mod object_store_config {
         const DEFAULT_RETRY_INTERVAL_MS: u64 = 20;
         const DEFAULT_RETRY_MAX_DELAY_MS: u64 = 10 * 1000;
-        const DEFAULT_RETRY_MAX_retry_attempts: usize = 3;
+        const DEFAULT_RETRY_MAX_RETRY_ATTEMPTS: usize = 3;
 
         pub fn object_store_streaming_read_timeout_ms() -> u64 {
             8 * 60 * 1000
