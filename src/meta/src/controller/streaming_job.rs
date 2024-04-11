@@ -955,20 +955,18 @@ impl CatalogController {
             if (*fragment_type_mask & PbFragmentTypeFlag::StreamScan as i32 != 0)
                 || (*fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0)
             {
-                visit_stream_node(stream_node, |node| {
-                    match node {
-                        PbNodeBody::StreamScan(node) => {
-                            node.rate_limit = rate_limit;
-                            found = true;
-                        }
-                        PbNodeBody::Source(node) => {
-                            node.source_inner.as_mut().map(|inner| {
-                                inner.rate_limit = rate_limit;
-                            });
-                            found = true;
-                        }
-                        _ => {}
+                visit_stream_node(stream_node, |node| match node {
+                    PbNodeBody::StreamScan(node) => {
+                        node.rate_limit = rate_limit;
+                        found = true;
                     }
+                    PbNodeBody::Source(node) => {
+                        if let Some(inner) = node.source_inner.as_mut() {
+                            inner.rate_limit = rate_limit;
+                            found = true;
+                        }
+                    }
+                    _ => {}
                 });
             }
             found
