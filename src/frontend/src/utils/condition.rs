@@ -1017,6 +1017,8 @@ mod cast_compare {
 
 #[cfg(test)]
 mod tests {
+    use std::mem;
+
     use rand::Rng;
     use risingwave_common::types::DataType;
 
@@ -1025,6 +1027,11 @@ mod tests {
 
     #[test]
     fn test_split() {
+        use risingwave_pb::stream_plan::StreamNode as StreamPlanPb;
+
+        use crate::scheduler::SchedulerResult;
+        dbg!(mem::size_of::<StreamPlanPb>());
+        dbg!(mem::size_of::<SchedulerResult<StreamPlanPb>>());
         let left_col_num = 3;
         let right_col_num = 2;
 
