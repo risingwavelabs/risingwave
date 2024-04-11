@@ -581,6 +581,7 @@ pub(crate) mod tests {
             value_indices: vec![0, 1, 2],
             definition: "".to_string(),
             conflict_behavior: ConflictBehavior::NoCheck,
+            version_column_index: None,
             read_prefix_len_hint: 0,
             version: None,
             watermark_columns: FixedBitSet::with_capacity(3),
