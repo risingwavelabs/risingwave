@@ -15,7 +15,7 @@ For example, given the following stream chunk, where stream key is `k1, k2`:
 | +  | 0  | 1  | 2  | 3  |
 ```
 
-We can tell that the record corresponding to the key `(1, 2)` 
+We can tell that the record corresponding to the key `(1, 2)`
 has been updated from `(1, 2, 1, 1)` to `(1, 2, 3, 4)`.
 
 The record corresponding to key `(0, 1)` has been inserted with `(0, 1, 2, 3)`.
@@ -46,7 +46,7 @@ create materialized view mv1 as select id, i from t1 order by i, id;
    columns: [id, i],
    stream_key: [id],
    pk_columns: [i, id], -- notice the pk_columns
-   pk_conflict: NoCheck 
+   pk_conflict: NoCheck
  }
  └─StreamTableScan { table: t1, columns: [id, i] }
 ```
