@@ -877,7 +877,7 @@ impl AccessBuilderImpl {
                 AccessBuilderImpl::Bytes(BytesAccessBuilder::new(config)?)
             }
             EncodingProperties::Json(config) => {
-                AccessBuilderImpl::Json(JsonAccessBuilder::new(config.use_schema_registry)?)
+                AccessBuilderImpl::Json(JsonAccessBuilder::new(config)?)
             }
             _ => unreachable!(),
         };

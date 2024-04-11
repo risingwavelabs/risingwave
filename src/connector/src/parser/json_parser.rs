@@ -23,7 +23,7 @@ use risingwave_pb::plan_common::ColumnDesc;
 
 use super::avro::schema_resolver::ConfluentSchemaResolver;
 use super::util::{bytes_from_url, get_kafka_topic};
-use super::{EncodingProperties, SchemaRegistryAuth, SpecificParserConfig};
+use super::{EncodingProperties, JsonProperties, SchemaRegistryAuth, SpecificParserConfig};
 use crate::error::ConnectorResult;
 use crate::only_parse_payload;
 use crate::parser::avro::util::avro_schema_to_column_descs;
@@ -40,6 +40,7 @@ use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 pub struct JsonAccessBuilder {
     value: Option<Vec<u8>>,
     payload_start_idx: usize,
+    json_parse_options: JsonParseOptions,
 }
 
 impl AccessBuilder for JsonAccessBuilder {
@@ -58,16 +59,21 @@ impl AccessBuilder for JsonAccessBuilder {
             value,
             // Debezium and Canal have their special json access builder and will not
             // use this
-            &JsonParseOptions::DEFAULT,
+            &self.json_parse_options,
         )))
     }
 }
 
 impl JsonAccessBuilder {
-    pub fn new(use_schema_registry: bool) -> ConnectorResult<Self> {
+    pub fn new(config: JsonProperties) -> ConnectorResult<Self> {
+        let mut json_parse_options = JsonParseOptions::DEFAULT;
+        if let Some(mode) = config.timestamptz_handling {
+            json_parse_options.timestamptz_handling = mode;
+        }
         Ok(Self {
             value: None,
-            payload_start_idx: if use_schema_registry { 5 } else { 0 },
+            payload_start_idx: if config.use_schema_registry { 5 } else { 0 },
+            json_parse_options,
         })
     }
 }

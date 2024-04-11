@@ -432,7 +432,10 @@ pub(crate) async fn bind_columns_from_source(
             Format::Plain | Format::Upsert | Format::Maxwell | Format::Canal | Format::Debezium,
             Encode::Json,
         ) => {
-            if source_schema.format == Format::Debezium {
+            if matches!(
+                source_schema.format,
+                Format::Plain | Format::Upsert | Format::Debezium
+            ) {
                 // Parse the value but throw it away.
                 // It would be too late to report error in `SpecificParserConfig::new`,
                 // which leads to recovery loop.
