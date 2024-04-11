@@ -21,6 +21,7 @@ use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::VacuumTask;
 use thiserror_ext::AsReport;
+use tracing::warn;
 
 use super::CompactorManagerRef;
 use crate::backup_restore::BackupManagerRef;
@@ -112,6 +113,12 @@ impl VacuumManager {
         let mut batch_idx = 0;
         let batch_size = 500usize;
         let mut sent_batch = Vec::with_capacity(objects_to_delete.len());
+        if self.env.opts.enable_hummock_data_archive {
+            if !objects_to_delete.is_empty() {
+                warn!(?objects_to_delete, "objects not deleted in vacuum due to enable_hummock_data_archive");
+            }
+            return Ok(objects_to_delete);
+        }
         while batch_idx < objects_to_delete.len() {
             if batch_idx != 0 && self.env.opts.vacuum_spin_interval_ms != 0 {
                 tokio::time::sleep(Duration::from_millis(self.env.opts.vacuum_spin_interval_ms))
