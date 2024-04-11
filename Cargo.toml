@@ -66,7 +66,7 @@ members = [
     "src/utils/workspace-config",
     "src/workspace-hack",
 ]
-exclude = ["e2e_test/udf/sse/server", "e2e_test/udf/wasm", "lints"]
+exclude = ["e2e_test/udf/wasm", "lints"]
 resolver = "2"
 
 [workspace.package]
