@@ -212,7 +212,8 @@ impl SnowflakeS3Client {
             "rw_sink_to_s3_credentials",
         );
 
-        let region = RegionProviderChain::first_try(Region::new(aws_region.clone())).or_default_provider();
+        let region =
+            RegionProviderChain::first_try(Region::new(aws_region.clone())).or_default_provider();
 
         let config = aws_config::from_env()
             .credentials_provider(credentials)
@@ -236,7 +237,8 @@ impl SnowflakeS3Client {
             &aws_access_key_id,
             &aws_secret_access_key,
             &aws_region,
-        ).unwrap();
+        )
+        .unwrap();
 
         Self {
             s3_bucket,
@@ -248,10 +250,23 @@ impl SnowflakeS3Client {
 
     pub async fn sink_to_s3(&self, data: Bytes, file_suffix: String) -> Result<()> {
         let path = generate_s3_file_name(self.s3_path.clone(), file_suffix);
-        let mut uploader = self.opendal_s3_engine.streaming_upload(&path).await.
-        map_err(|err| SinkError::Snowflake(format!("failed to create the streaming uploader of opendal s3 engine, error: {}", err)))?;
+        let mut uploader = self
+            .opendal_s3_engine
+            .streaming_upload(&path)
+            .await
+            .map_err(|err| {
+                SinkError::Snowflake(format!(
+                    "failed to create the streaming uploader of opendal s3 engine, error: {}",
+                    err
+                ))
+            })?;
         uploader.write_bytes(data).await.map_err(|err| SinkError::Snowflake(format!("failed to write bytes when streaming uploading to s3 for snowflake sink, error: {}", err)))?;
-        uploader.finish().await.map_err(|err| SinkError::Snowflake(format!("failed to finish streaming upload to s3 for snowflake sink, error: {}", err)))?;
+        uploader.finish().await.map_err(|err| {
+            SinkError::Snowflake(format!(
+                "failed to finish streaming upload to s3 for snowflake sink, error: {}",
+                err
+            ))
+        })?;
         Ok(())
     }
 }
