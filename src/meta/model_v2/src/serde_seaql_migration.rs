@@ -12,38 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/// It duplicates the on found crate sea-orm-migration, but derives serde.
+/// It's only used by metadata backup/restore.
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-
-use crate::{CreateType, JobStatus, StreamingParallelism};
-
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
-#[sea_orm(table_name = "streaming_job")]
+#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
+// One should override the name of migration table via `MigratorTrait::migration_table_name` method
+#[sea_orm(table_name = "seaql_migrations")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub job_id: i32,
-    pub job_status: JobStatus,
-    pub create_type: CreateType,
-    pub timezone: Option<String>,
-    pub parallelism: StreamingParallelism,
+    pub version: String,
+    pub applied_at: i64,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::object::Entity",
-        from = "Column::JobId",
-        to = "super::object::Column::Oid",
-        on_update = "NoAction",
-        on_delete = "Cascade"
-    )]
-    Object,
-}
-
-impl Related<super::object::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Object.def()
-    }
-}
+pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}

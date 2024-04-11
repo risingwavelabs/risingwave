@@ -16,10 +16,11 @@ use risingwave_pb::catalog::function::Kind;
 use risingwave_pb::catalog::PbFunction;
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
+use serde::{Deserialize, Serialize};
 
 use crate::{DataType, DataTypeArray, FunctionId};
 
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum FunctionKind {
     #[sea_orm(string_value = "Scalar")]
@@ -30,7 +31,7 @@ pub enum FunctionKind {
     Aggregate,
 }
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "function")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
