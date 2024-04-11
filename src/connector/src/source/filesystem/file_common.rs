@@ -60,10 +60,6 @@ impl SplitMetaData for FsSplit {
         self.offset = offset;
         Ok(())
     }
-
-    fn get_encoded_offset(&self) -> String {
-        self.offset.to_string()
-    }
 }
 
 impl FsSplit {
@@ -114,10 +110,6 @@ impl<Src: OpendalSource> SplitMetaData for OpendalFsSplit<Src> {
         let offset = start_offset.parse().unwrap();
         self.offset = offset;
         Ok(())
-    }
-
-    fn get_encoded_offset(&self) -> String {
-        self.offset.to_string()
     }
 }
 

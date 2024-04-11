@@ -41,10 +41,6 @@ impl SplitMetaData for MqttSplit {
     fn update_with_offset(&mut self, _start_sequence: String) -> ConnectorResult<()> {
         Ok(())
     }
-
-    fn get_encoded_offset(&self) -> String {
-        String::default()
-    }
 }
 
 impl MqttSplit {

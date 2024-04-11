@@ -335,7 +335,7 @@ impl<S: StateStore> SourceExecutor<S> {
         core.updated_splits_in_epoch
             .drain()
             .for_each(|(split_id, split_impl)| {
-                updated_offsets.insert(split_id, split_impl.get_encoded_offset());
+                updated_offsets.insert(split_id, split_impl.get_cdc_split_offset());
             });
 
         assert!(core.updated_splits_in_epoch.is_empty());

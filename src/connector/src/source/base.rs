@@ -46,6 +46,7 @@ use crate::parser::ParserConfig;
 pub(crate) use crate::source::common::CommonSplitReader;
 use crate::source::filesystem::FsPageItem;
 use crate::source::monitor::EnumeratorMetrics;
+use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc};
 use crate::with_options::WithOptions;
 use crate::{
     dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
@@ -443,6 +444,17 @@ impl SplitImpl {
             |other| bail!("connector '{}' is not supported", other)
         )
     }
+
+    /// Get the current split offset.
+    pub fn get_cdc_split_offset(&self) -> String {
+        match self {
+            MysqlCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            PostgresCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            MongodbCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            CitusCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            _ => "".to_string(),
+        }
+    }
 }
 
 impl SplitMetaData for SplitImpl {
@@ -476,10 +488,6 @@ impl SplitMetaData for SplitImpl {
             IgnoreType,
             inner.update_with_offset(start_offset)
         )
-    }
-
-    fn get_encoded_offset(&self) -> String {
-        dispatch_split_impl!(self, inner, IgnoreType, inner.get_encoded_offset())
     }
 }
 
@@ -565,10 +573,6 @@ pub trait SplitMetaData: Sized {
     fn encode_to_json(&self) -> JsonbVal;
     fn restore_from_json(value: JsonbVal) -> Result<Self>;
     fn update_with_offset(&mut self, start_offset: String) -> crate::error::ConnectorResult<()>;
-
-    /// Get the current offset of the split in `String` format.
-    /// How to encode the offset into a `String` is up to the implementation.
-    fn get_encoded_offset(&self) -> String;
 }
 
 /// [`ConnectorState`] maintains the consuming splits' info. In specific split readers,

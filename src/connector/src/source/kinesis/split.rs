@@ -57,10 +57,6 @@ impl SplitMetaData for KinesisSplit {
         self.start_position = start_offset;
         Ok(())
     }
-
-    fn get_encoded_offset(&self) -> String {
-        serde_json::to_string(&self.start_position).unwrap()
-    }
 }
 
 impl KinesisSplit {

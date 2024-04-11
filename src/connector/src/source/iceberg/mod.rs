@@ -129,10 +129,6 @@ impl SplitMetaData for IcebergSplit {
     fn update_with_offset(&mut self, _start_offset: String) -> ConnectorResult<()> {
         unimplemented!()
     }
-
-    fn get_encoded_offset(&self) -> String {
-        unimplemented!()
-    }
 }
 
 #[derive(Debug, Clone)]

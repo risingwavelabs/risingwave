@@ -50,8 +50,4 @@ impl SplitMetaData for PulsarSplit {
         self.start_offset = start_offset;
         Ok(())
     }
-
-    fn get_encoded_offset(&self) -> String {
-        serde_json::to_string(&self.start_offset).unwrap()
-    }
 }

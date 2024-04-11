@@ -1166,10 +1166,6 @@ mod tests {
         fn update_with_offset(&mut self, _start_offset: String) -> ConnectorResult<()> {
             Ok(())
         }
-
-        fn get_encoded_offset(&self) -> String {
-            String::default()
-        }
     }
 
     fn check_all_splits(

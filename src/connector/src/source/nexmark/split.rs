@@ -43,10 +43,6 @@ impl SplitMetaData for NexmarkSplit {
         self.start_offset = Some(start_offset.as_str().parse::<u64>().unwrap());
         Ok(())
     }
-
-    fn get_encoded_offset(&self) -> String {
-        self.start_offset.map(|x| x.to_string()).unwrap_or_default()
-    }
 }
 
 impl NexmarkSplit {

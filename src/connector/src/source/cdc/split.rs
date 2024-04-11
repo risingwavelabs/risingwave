@@ -271,10 +271,6 @@ impl<T: CdcSourceTypeTrait> SplitMetaData for DebeziumCdcSplit<T> {
     fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
         self.update_with_offset(start_offset)
     }
-
-    fn get_encoded_offset(&self) -> String {
-        self.start_offset().clone().unwrap_or_default()
-    }
 }
 
 impl<T: CdcSourceTypeTrait> DebeziumCdcSplit<T> {
