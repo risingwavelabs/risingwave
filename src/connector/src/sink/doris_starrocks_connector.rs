@@ -22,7 +22,7 @@ use base64::engine::general_purpose;
 use base64::Engine;
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::StreamExt;
-use reqwest::{Body, Client, RequestBuilder, StatusCode};
+use reqwest::{redirect, Body, Client, RequestBuilder, StatusCode};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 use url::Url;
@@ -186,9 +186,10 @@ impl InserterInnerBuilder {
         })
     }
 
-    fn build_request_and_client(&self, uri: String) -> RequestBuilder {
+    fn build_request(&self, uri: String) -> RequestBuilder {
         let client = Client::builder()
             .pool_idle_timeout(POOL_IDLE_TIMEOUT)
+            .redirect(redirect::Policy::none()) // we handle redirect by ourselves
             .build()
             .unwrap();
 
@@ -200,11 +201,12 @@ impl InserterInnerBuilder {
     }
 
     pub async fn build(&self) -> Result<InserterInner> {
-        let builder = self.build_request_and_client(self.url.clone());
+        let builder = self.build_request(self.url.clone());
         let resp = builder
             .send()
             .await
             .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
+        // TODO: shall we let `reqwest` handle the redirect?
         let mut be_url = if resp.status() == StatusCode::TEMPORARY_REDIRECT {
             resp.headers()
                 .get("location")
@@ -244,7 +246,7 @@ impl InserterInnerBuilder {
         let body = Body::wrap_stream(
             tokio_stream::wrappers::UnboundedReceiverStream::new(receiver).map(Ok::<_, Infallible>),
         );
-        let builder = self.build_request_and_client(be_url).body(body);
+        let builder = self.build_request(be_url).body(body);
 
         let handle: JoinHandle<Result<Vec<u8>>> = tokio::spawn(async move {
             let response = builder
