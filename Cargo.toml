@@ -66,7 +66,7 @@ members = [
     "src/utils/workspace-config",
     "src/workspace-hack",
 ]
-exclude = ["e2e_test/udf/sse/server", "e2e_test/udf/wasm", "lints"]
+exclude = ["e2e_test/udf/wasm", "lints"]
 resolver = "2"
 
 [workspace.package]
@@ -140,7 +140,6 @@ arrow-select = "50"
 arrow-ord = "50"
 arrow-row = "50"
 arrow-udf-js = "0.1"
-arrow-udf-js-deno = { git = "https://github.com/bakjos/arrow-udf.git", rev = "2be0ab5" }
 arrow-udf-wasm = { version = "0.2.1", features = ["build"] }
 arrow-udf-python = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "6c32f71" }
 arrow-array-deltalake = { package = "arrow-array", version = "48.0.1" }
@@ -316,15 +315,6 @@ futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = 
 etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "4e84d40" }
 # todo(wcy-fdu): remove this patch fork after opendal release a new version to apply azure workload identity change.
 reqsign = { git = "https://github.com/wcy-fdu/reqsign.git", rev = "e6cb304" }
-# patch to remove preserve_order from serde_json
-deno_core = { git = "https://github.com/bakjos/deno_core", rev = "9b241c6" }
-# patch to user reqwest 0.12.2
-deno_fetch = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_http = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_net = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_tls = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_web = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_websocket = { git = "https://github.com/bakjos/deno", rev = "787a232" }
 
 [workspace.metadata.dylint]
 libraries = [{ path = "./lints" }]
