@@ -124,14 +124,8 @@ impl SubscriptionCatalog {
         self.definition.clone()
     }
 
-    pub fn get_log_store_name(&self) -> Result<String> {
-        let log_store_name = self
-            .subscription_internal_table_name
-            .clone()
-            .ok_or_else(|| {
-                ErrorCode::InternalError("Fetch Cursor can't find log_store's name".to_string())
-            })?;
-        Ok(log_store_name)
+    pub fn get_log_store_name(&self) -> String {
+        self.subscription_internal_table_name.clone().unwrap()
     }
 
     pub fn to_proto(&self) -> PbSubscription {

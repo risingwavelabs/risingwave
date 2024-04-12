@@ -15,15 +15,10 @@
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::util::epoch::Epoch;
-use risingwave_sqlparser::ast::{
-    DeclareCursorStatement, Ident, ObjectName, Query, Since, Statement,
-};
+use risingwave_sqlparser::ast::{DeclareCursorStatement, ObjectName, Query, Since, Statement};
 
 use super::query::{gen_batch_plan_by_statement, gen_batch_plan_fragmenter};
-use super::util::{
-    convert_epoch_to_logstore_i64, convert_unix_millis_to_logstore_i64,
-    gen_query_from_logstore_ge_rw_timestamp, gen_query_from_table_name,
-};
+use super::util::{convert_epoch_to_logstore_i64, convert_unix_millis_to_logstore_i64};
 use super::RwPgResponse;
 use crate::error::{ErrorCode, Result};
 use crate::handler::query::create_stream;
@@ -64,45 +59,23 @@ async fn handle_declare_subscription_cursor(
     let subscription =
         session.get_subscription_by_name(schema_name, &cursor_from_subscription_name)?;
     // Start the first query of cursor, which includes querying the table and querying the subscription's logstore
-    let (start_rw_timestamp, row_stream, pg_descs, is_snapshot) = match rw_timestamp {
+    let (start_rw_timestamp, from_snapshot) = match rw_timestamp {
         Some(risingwave_sqlparser::ast::Since::TimestampMsNum(start_rw_timestamp)) => {
             check_cursor_unix_millis(start_rw_timestamp, subscription.get_retention_seconds()?)?;
             let start_rw_timestamp = convert_unix_millis_to_logstore_i64(start_rw_timestamp);
-            let query_stmt = Statement::Query(Box::new(gen_query_from_logstore_ge_rw_timestamp(
-                &subscription.get_log_store_name()?,
-                start_rw_timestamp,
-            )));
-            let (row_stream, pg_descs) = create_stream_for_cursor(handle_args, query_stmt).await?;
-            (start_rw_timestamp, row_stream, pg_descs, false)
+            (start_rw_timestamp, false)
         }
         Some(risingwave_sqlparser::ast::Since::ProcessTime) => {
             let start_rw_timestamp = convert_epoch_to_logstore_i64(Epoch::now().0);
-            let query_stmt = Statement::Query(Box::new(gen_query_from_logstore_ge_rw_timestamp(
-                &subscription.get_log_store_name()?,
-                start_rw_timestamp,
-            )));
-            let (row_stream, pg_descs) = create_stream_for_cursor(handle_args, query_stmt).await?;
-            (start_rw_timestamp, row_stream, pg_descs, false)
+            (start_rw_timestamp, false)
         }
         Some(risingwave_sqlparser::ast::Since::Begin) => {
             let min_unix_millis =
                 Epoch::now().as_unix_millis() - subscription.get_retention_seconds()? * 1000;
             let start_rw_timestamp = convert_unix_millis_to_logstore_i64(min_unix_millis);
-            let query_stmt = Statement::Query(Box::new(gen_query_from_logstore_ge_rw_timestamp(
-                &subscription.get_log_store_name()?,
-                start_rw_timestamp,
-            )));
-            let (row_stream, pg_descs) = create_stream_for_cursor(handle_args, query_stmt).await?;
-            (start_rw_timestamp, row_stream, pg_descs, false)
+            (start_rw_timestamp, false)
         }
         None => {
-            let subscription_from_table_name = ObjectName(vec![Ident::from(
-                subscription.subscription_from_name.as_ref(),
-            )]);
-            let query_stmt = Statement::Query(Box::new(gen_query_from_table_name(
-                subscription_from_table_name,
-            )));
-            let (row_stream, pg_descs) = create_stream_for_cursor(handle_args, query_stmt).await?;
             let pinned_epoch = session
                 .get_pinned_snapshot()
                 .ok_or_else(|| {
@@ -115,12 +88,7 @@ async fn handle_declare_subscription_cursor(
                     )
                 })?
                 .0;
-            (
-                convert_epoch_to_logstore_i64(pinned_epoch),
-                row_stream,
-                pg_descs,
-                true,
-            )
+            (convert_epoch_to_logstore_i64(pinned_epoch), true)
         }
     };
     // Create cursor based on the response
@@ -128,12 +96,10 @@ async fn handle_declare_subscription_cursor(
         .get_cursor_manager()
         .add_subscription_cursor(
             cursor_name.clone(),
-            row_stream,
-            pg_descs,
             start_rw_timestamp,
-            is_snapshot,
-            sub_name,
-            subscription.get_retention_seconds()?,
+            from_snapshot,
+            subscription,
+            &handle_args,
         )
         .await?;
 
