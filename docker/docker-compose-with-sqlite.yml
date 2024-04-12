@@ -51,10 +51,10 @@ services:
       - "5691:5691"
       - "1250:1250"
     depends_on:
+      - etcd-0
       - minio-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
-      - "meta-0:/meta-data"
     environment:
       RUST_BACKTRACE: "1"
       # If ENABLE_TELEMETRY is not set, telemetry will start by default
@@ -216,7 +216,7 @@ services:
       retries: 5
     restart: always
 volumes:
-  meta-0:
+  etcd-0:
     external: false
   grafana-0:
     external: false
