@@ -24,6 +24,7 @@ hyper = "0.14" # required by tonic
 itertools = { workspace = true }
 lru = { workspace = true }
 moka = { version = "0.12", features = ["future"] }
+paste = "1"
 rand = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_error = { workspace = true }

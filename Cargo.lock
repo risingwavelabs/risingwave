@@ -10360,6 +10360,7 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "moka",
+ "paste",
  "rand",
  "risingwave_common",
  "risingwave_error",
