@@ -10,7 +10,7 @@ output = subprocess.Popen(
         "mqtt",
         "mosquitto_sub",
         "-h",
-        "localhost",
+        "hivemq-ce",
         "-t",
         "test",
         "-p",

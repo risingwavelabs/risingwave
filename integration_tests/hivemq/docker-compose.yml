@@ -5,11 +5,8 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: risingwave-standalone
-  mqtt-server:
+  mqtt:
     image: eclipse-mosquitto
-    command:
-    - echo
-    - mqtt
   hivemq-ce:
     image: hivemq/hivemq-ce
     ports:
