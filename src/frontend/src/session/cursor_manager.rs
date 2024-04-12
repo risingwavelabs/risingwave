@@ -24,12 +24,13 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::types::Row;
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{ObjectName, Statement};
+use risingwave_sqlparser::ast::{Ident, ObjectName, Statement};
 
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::declare_cursor::create_stream_for_cursor;
 use crate::handler::util::{
     convert_logstore_i64_to_unix_millis, gen_query_from_logstore_ge_rw_timestamp,
+    gen_query_from_table_name,
 };
 use crate::handler::HandlerArgs;
 use crate::{Binder, PgResponseStream};
@@ -44,17 +45,14 @@ pub enum Cursor {
     Query(QueryCursor),
 }
 impl Cursor {
-    pub async fn next(&mut self, count: u32, handle_args: HandlerArgs) -> Result<Vec<Row>> {
+    pub async fn next(
+        &mut self,
+        count: u32,
+        handle_args: HandlerArgs,
+    ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
         match self {
             Cursor::Subscription(cursor) => cursor.next(count, handle_args).await,
             Cursor::Query(cursor) => cursor.next(count).await,
-        }
-    }
-
-    pub fn pg_descs(&self) -> Vec<PgFieldDescriptor> {
-        match self {
-            Cursor::Subscription(cursor) => cursor.pg_descs(),
-            Cursor::Query(cursor) => cursor.pg_descs(),
         }
     }
 }
@@ -89,7 +87,7 @@ impl QueryCursor {
         Ok(Some(row))
     }
 
-    pub async fn next(&mut self, count: u32) -> Result<Vec<Row>> {
+    pub async fn next(&mut self, count: u32) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
         // `FETCH NEXT` is equivalent to `FETCH 1`.
         // min with 100 to avoid allocating too many memory at once.
         let mut ans = Vec::with_capacity(std::cmp::min(100, count) as usize);
@@ -100,19 +98,12 @@ impl QueryCursor {
             cur += 1;
             ans.push(row);
         }
-        Ok(ans)
-    }
-
-    pub fn pg_descs(&self) -> Vec<PgFieldDescriptor> {
-        self.pg_descs.clone()
+        Ok((ans, self.pg_descs.clone()))
     }
 }
 
 pub struct SubscriptionCursor {
     cursor_name: String,
-    row_stream: PgResponseStream,
-    pg_descs: Vec<PgFieldDescriptor>,
-    data_chunk_cache: VecDeque<Row>,
     rw_timestamp: i64,
     is_snapshot: bool,
     subscription_name: ObjectName,
@@ -123,8 +114,6 @@ pub struct SubscriptionCursor {
 impl SubscriptionCursor {
     pub fn new(
         cursor_name: String,
-        row_stream: PgResponseStream,
-        pg_descs: Vec<PgFieldDescriptor>,
         start_timestamp: i64,
         is_snapshot: bool,
         subscription_name: ObjectName,
@@ -132,93 +121,134 @@ impl SubscriptionCursor {
     ) -> Result<Self> {
         Ok(Self {
             cursor_name,
-            row_stream,
-            pg_descs,
-            data_chunk_cache: VecDeque::default(),
             rw_timestamp: start_timestamp,
             is_snapshot,
             subscription_name,
             cursor_need_drop_time: Instant::now() + retention_times,
-            state: State::Init,
+            state: State::InitiateQuery(None),
         })
     }
 
-    async fn update_cursor_to_can_fetch(&mut self, need_check_timestamp: bool) -> Result<()> {
-        // Cursor created based on table, no need to update start_timestamp
-        if !self.is_snapshot {
-            let data_chunk_cache = self
-                .row_stream
-                .next()
-                .await
-                .unwrap_or_else(|| Ok(Vec::new()))
-                .map_err(|e| {
-                    ErrorCode::InternalError(format!(
-                        "Cursor get next chunk error {:?}",
-                        e.to_string()
-                    ))
-                })?;
-            // Use the first line of the log store to update start_timestamp
-            let query_timestamp = data_chunk_cache
-                .get(0)
-                .map(|row| {
-                    row.index(0)
-                        .as_ref()
-                        .map(|bytes| std::str::from_utf8(bytes).unwrap().parse().unwrap())
-                        .unwrap()
-                })
-                .unwrap_or_else(|| self.rw_timestamp);
-            if need_check_timestamp
-                && (data_chunk_cache.is_empty() || query_timestamp != self.rw_timestamp)
-            {
-                // If the previous cursor returns next_rw_timestamp, then this check is triggered,
-                // and query_timestamp and start_timestamp must be equal to each other to prevent data errors caused by two long cursor times
-                return Err(ErrorCode::CatalogError(format!(
-                        " No data found for rw_timestamp {:?}, data may have been recycled, please recreate cursor"
-                    ,convert_logstore_i64_to_unix_millis(self.rw_timestamp)).into()).into());
-            }
-            self.data_chunk_cache = VecDeque::from(data_chunk_cache);
-            self.rw_timestamp = query_timestamp;
-        };
-        let pg_descs = mem::take(&mut self.pg_descs);
-        self.pg_descs = build_desc(pg_descs, self.is_snapshot);
-        self.state = State::Fetch;
+    async fn transition_to_fetch(
+        &mut self,
+        row_stream: PgResponseStream,
+        pg_descs: Vec<PgFieldDescriptor>,
+        data_chunk_cache: VecDeque<Row>,
+    ) -> Result<()> {
+        // // Cursor created based on table, no need to update start_timestamp
+        // if !self.is_snapshot {
+        //     let data_chunk_cache = self
+        //         .row_stream
+        //         .next()
+        //         .await
+        //         .unwrap_or_else(|| Ok(Vec::new()))
+        //         .map_err(|e| {
+        //             ErrorCode::InternalError(format!(
+        //                 "Cursor get next chunk error {:?}",
+        //                 e.to_string()
+        //             ))
+        //         })?;
+        //     // Use the first line of the log store to update start_timestamp
+        //     let query_timestamp = data_chunk_cache
+        //         .get(0)
+        //         .map(|row| {
+        //             row.index(0)
+        //                 .as_ref()
+        //                 .map(|bytes| std::str::from_utf8(bytes).unwrap().parse().unwrap())
+        //                 .unwrap()
+        //         })
+        //         .unwrap_or_else(|| self.rw_timestamp);
+        //     if need_check_timestamp
+        //         && (data_chunk_cache.is_empty() || query_timestamp != self.rw_timestamp)
+        //     {
+        //         // If the previous cursor returns next_rw_timestamp, then this check is triggered,
+        //         // and query_timestamp and start_timestamp must be equal to each other to prevent data errors caused by two long cursor times
+        //         return Err(ErrorCode::CatalogError(format!(
+        //                 " No data found for rw_timestamp {:?}, data may have been recycled, please recreate cursor"
+        //             ,convert_logstore_i64_to_unix_millis(self.rw_timestamp)).into()).into());
+        //     }
+        //     self.data_chunk_cache = VecDeque::from(data_chunk_cache);
+        //     self.rw_timestamp = query_timestamp;
+        // };
+        // let pg_descs = mem::take(&mut self.pg_descs);
+        // self.pg_descs = build_desc(pg_descs, self.is_snapshot);
+        self.state = State::Fetch {row_stream, pg_descs, data_chunk_cache};
         Ok(())
     }
 
-    async fn update_row_stream_with_rw_timestamp(
+    fn transition_to_initiate_query(
         &mut self,
-        rw_timestamp: i64,
+        next_timestamp: i64,
+        expected_timestamp: Option<i64>,
+    ) {
+        assert!(next_timestamp >= self.rw_timestamp);
+        self.is_snapshot = false;
+        self.rw_timestamp = next_timestamp;
+        self.state = State::InitiateQuery(expected_timestamp);
+    }
+
+    async fn initiate_query(
+        &mut self,
         handle_args: HandlerArgs,
-    ) -> Result<()> {
+    ) -> Result<(PgResponseStream, Vec<PgFieldDescriptor>)> {
         let session = handle_args.session.clone();
         let db_name = session.database();
         let (schema_name, subscription_name) =
             Binder::resolve_schema_qualified_name(db_name, self.subscription_name.clone())?;
         let subscription = session.get_subscription_by_name(schema_name, &subscription_name)?;
 
-        let query_stmt = Statement::Query(Box::new(gen_query_from_logstore_ge_rw_timestamp(
-            &subscription.get_log_store_name()?,
-            rw_timestamp,
-        )));
+        let query_stmt = if self.is_snapshot {
+            let subscription_from_table_name = ObjectName(vec![Ident::from(
+                subscription.subscription_from_name.as_ref(),
+            )]);
+            Statement::Query(Box::new(gen_query_from_table_name(
+                subscription_from_table_name,
+            )));
+        } else {
+            Statement::Query(Box::new(gen_query_from_logstore_ge_rw_timestamp(
+                &subscription.get_log_store_name()?,
+                self.rw_timestamp,
+            )))
+        };
         let (row_stream, pg_descs) = create_stream_for_cursor(handle_args, query_stmt).await?;
-        self.row_stream = row_stream;
-        self.pg_descs = pg_descs;
-        self.is_snapshot = false;
         self.cursor_need_drop_time =
             Instant::now() + Duration::from_secs(subscription.get_retention_seconds()?);
+        if let Some(row_set) = self.row_stream.next().await {
+            // 2a. Get the data from the stream and consume it in the next cycle
+            self.data_chunk_cache = VecDeque::from(row_set.map_err(|e| {
+                ErrorCode::InternalError(format!("Cursor get next chunk error {:?}", e.to_string()))
+            })?);
+        }
+        Ok((row_stream, pg_descs))
+    }
+
+    async fn fill_cache(&mut self) -> Result<()> {
+        
         Ok(())
+    }
+
+    async fn next_row(&mut self) -> Result<Option<Row>> {
+        self.data_chunk_cache.pop_front().or_else(|| async {
+            self.fill_cache().await?;
+            self.data_chunk_cache.pop_front()
+        })
     }
 
     pub async fn next_once(&mut self, handle_args: HandlerArgs) -> Result<Option<Row>> {
         loop {
             match self.state {
-                State::Init => {
-                    // Update cursor, and state to Fetch
-                    self.update_cursor_to_can_fetch(false).await?;
+                State::InitiateQuery(expected_timestamp) => {
+                    // 3. Query data with next_rw_timestamp
+                    let (row_stream, pg_desc) = self.initiate_query(handle_args.clone()).await?;
+                    if let Some(row_set) = self.row_stream.next().await {
+                        let data_chunk_cache = VecDeque::from(row_set.map_err(|e| {
+                            ErrorCode::InternalError(format!("Cursor get next chunk error {:?}", e.to_string()))
+                        })?);
+                    }
                 }
-                State::Fetch => {
+                State::Fetch(row_stream, pg_desc, data_chunk_cache) => {
                     // Return result, and checkout state
-                    if let Some(row) = self.data_chunk_cache.pop_front() {
+                    if let Some(row) = self.next_row().await? {
                         // 1. fetch data
                         let new_row = row.take();
                         if self.is_snapshot {
@@ -235,8 +265,7 @@ impl SubscriptionCursor {
 
                         if timestamp_row != self.rw_timestamp {
                             // 1b. Find next_rw_timestamp, need update cursor with next_rw_timestamp.
-                            self.rw_timestamp = timestamp_row;
-                            self.state = State::QueryWithNext;
+                            self.transition_to_initiate_query(timestamp_row, Some(timestamp_row));
                         } else {
                             // 1c. The rw_timestamp of this row is equal to self.rw_timestamp, return row
                             return Ok(Some(Row::new(build_row_with_logstore(
@@ -245,46 +274,8 @@ impl SubscriptionCursor {
                             )?)));
                         }
                     } else {
-                        // 2. Cache is empty, need to query data
-                        if let Some(row_set) = self.row_stream.next().await {
-                            // 2a. Get the data from the stream and consume it in the next cycle
-                            self.data_chunk_cache = VecDeque::from(row_set.map_err(|e| {
-                                ErrorCode::InternalError(format!(
-                                    "Cursor get next chunk error {:?}",
-                                    e.to_string()
-                                ))
-                            })?);
-                        } else {
-                            // 2b. No data was fetched and next_rw_timestamp was not found, so need to query using the rw_timestamp+1. So we don't need to update self.rw_timestamp
-                            self.state = State::QueryWithStart;
-                        }
-                    }
-                }
-                State::QueryWithNext => {
-                    self.update_row_stream_with_rw_timestamp(
-                        self.rw_timestamp,
-                        handle_args.clone(),
-                    )
-                    .await?;
-                    self.update_cursor_to_can_fetch(true).await?;
-                    if self.data_chunk_cache.is_empty() {
-                        return Err(ErrorCode::CatalogError(
-                            "Must get row with state:'State::QueryWithNext'"
-                                .to_string()
-                                .into(),
-                        )
-                        .into());
-                    }
-                }
-                State::QueryWithStart => {
-                    self.update_row_stream_with_rw_timestamp(
-                        self.rw_timestamp + 1,
-                        handle_args.clone(),
-                    )
-                    .await?;
-                    self.update_cursor_to_can_fetch(false).await?;
-                    if self.data_chunk_cache.is_empty() {
-                        return Ok(None);
+                        // 2. No data was fetched and next_rw_timestamp was not found, so need to query using the rw_timestamp+1. So we don't need to update self.rw_timestamp
+                        self.transition_to_initiate_query(self.rw_timestamp + 1, None);
                     }
                 }
             }
@@ -317,10 +308,13 @@ impl SubscriptionCursor {
 }
 
 enum State {
-    Init,
-    Fetch,
-    QueryWithNext,
-    QueryWithStart,
+    InitiateQuery(Option<i64>),
+    Fetch {
+        row_stream: PgResponseStream,
+        pg_descs: Vec<PgFieldDescriptor>,
+        data_chunk_cache: VecDeque<Row>,
+    },
+    Invalid,
 }
 
 pub fn build_row_with_snapshot(row: Vec<Option<Bytes>>) -> Vec<Option<Bytes>> {
@@ -384,8 +378,6 @@ impl CursorManager {
     pub async fn add_subscription_cursor(
         &self,
         cursor_name: String,
-        row_stream: PgResponseStream,
-        pg_descs: Vec<PgFieldDescriptor>,
         start_timestamp: i64,
         is_snapshot: bool,
         subscription_name: ObjectName,
@@ -393,8 +385,6 @@ impl CursorManager {
     ) -> Result<()> {
         let cursor = SubscriptionCursor::new(
             cursor_name.clone(),
-            row_stream,
-            pg_descs,
             start_timestamp,
             is_snapshot,
             subscription_name.clone(),
@@ -457,7 +447,7 @@ impl CursorManager {
         handle_args: HandlerArgs,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
         if let Some(cursor) = self.cursor_map.lock().await.get_mut(&cursor_name) {
-            Ok((cursor.next(count, handle_args).await?, cursor.pg_descs()))
+            cursor.next(count, handle_args).await
         } else {
             Err(ErrorCode::ItemNotFound(format!("Cannot find cursor `{}`", cursor_name)).into())
         }
