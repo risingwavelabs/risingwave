@@ -729,7 +729,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 let future = async {
                     self.inner
                         .streaming_read(path, range.clone())
-                        .verbose_instrument_await("object_store_streaming_read_init")
+                        .verbose_instrument_await(operation_type_str)
                         .await
                 };
 
