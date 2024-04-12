@@ -16,10 +16,6 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use aws_config;
-use aws_config::meta::region::RegionProviderChain;
-use aws_sdk_s3::config::Credentials;
-use aws_sdk_s3::Client as S3Client;
-use aws_types::region::Region;
 use bytes::Bytes;
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use reqwest::{header, Client, RequestBuilder, StatusCode};
@@ -191,7 +187,6 @@ impl SnowflakeHttpClient {
 pub struct SnowflakeS3Client {
     s3_bucket: String,
     s3_path: Option<String>,
-    s3_client: S3Client,
     opendal_s3_engine: OpendalObjectStore,
 }
 
@@ -203,28 +198,7 @@ impl SnowflakeS3Client {
         aws_secret_access_key: String,
         aws_region: String,
     ) -> Self {
-        let credentials = Credentials::new(
-            aws_access_key_id.clone(),
-            aws_secret_access_key.clone(),
-            // we don't allow temporary credentials
-            None,
-            None,
-            "rw_sink_to_s3_credentials",
-        );
-
-        let region =
-            RegionProviderChain::first_try(Region::new(aws_region.clone())).or_default_provider();
-
-        let config = aws_config::from_env()
-            .credentials_provider(credentials)
-            .region(region)
-            .load()
-            .await;
-
-        // create the brand new s3 client used to sink files to s3
-        let s3_client = S3Client::new(&config);
-
-        // just use default here
+        // just use default configuration here for opendal s3 engine
         let config = ObjectStoreConfig::default();
 
         // create the s3 engine for streaming upload to the intermediate s3 bucket
@@ -243,7 +217,6 @@ impl SnowflakeS3Client {
         Self {
             s3_bucket,
             s3_path,
-            s3_client,
             opendal_s3_engine,
         }
     }
