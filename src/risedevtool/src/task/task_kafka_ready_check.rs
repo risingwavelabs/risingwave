@@ -33,8 +33,12 @@ impl KafkaReadyCheckTask {
 
 impl Task for KafkaReadyCheckTask {
     fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
-        ctx.pb.set_message("waiting for online...");
-
+        if self.config.user_managed {
+            ctx.pb
+                .set_message("waiting for user-managed service online...");
+        } else {
+            ctx.pb.set_message("waiting for online...");
+        }
         let mut config = ClientConfig::new();
         config.set(
             "bootstrap.servers",

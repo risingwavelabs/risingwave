@@ -31,6 +31,10 @@ impl Task for EnsureStopService {
         ctx.service(self);
 
         for (port, service) in &self.ports {
+            // Do not require stopping kafka services
+            if service.starts_with("kafka") {
+                continue;
+            }
             let address = format!("127.0.0.1:{}", port);
 
             ctx.pb.set_message(format!(

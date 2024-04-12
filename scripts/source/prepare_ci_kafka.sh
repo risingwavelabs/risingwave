@@ -13,8 +13,6 @@ fi
 SCRIPT_PATH="$(cd "$(dirname "$0")" >/dev/null 2>&1 && pwd)"
 cd "$SCRIPT_PATH/.." || exit 1
 
-KAFKA_BIN="$SCRIPT_PATH/../../.risingwave/bin/kafka/bin"
-
 echo "$SCRIPT_PATH"
 
 if [ "$1" == "compress" ]; then
@@ -46,10 +44,10 @@ for filename in $kafka_data_files; do
 
     # always ok
     echo "Drop topic $topic"
-    "$KAFKA_BIN"/kafka-topics.sh --bootstrap-server message_queue:29092 --topic "$topic" --delete || true
+    risedev kafka-topics --topic "$topic" --delete || true
 
     echo "Recreate topic $topic with partition $partition"
-    "$KAFKA_BIN"/kafka-topics.sh --bootstrap-server message_queue:29092 --topic "$topic" --create --partitions "$partition") &
+    risedev kafka-topics --topic "$topic" --create --partitions "$partition") &
 done
 wait
 

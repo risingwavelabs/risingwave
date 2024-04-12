@@ -277,6 +277,8 @@ pub struct KafkaConfig {
     pub provide_zookeeper: Option<Vec<ZooKeeperConfig>>,
     pub persist_data: bool,
     pub broker_id: u32,
+
+    pub user_managed: bool,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

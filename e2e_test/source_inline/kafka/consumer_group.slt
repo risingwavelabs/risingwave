@@ -1,0 +1,119 @@
+# Note: control substitution on will force us to use "\\n" instead of "\n" in commands
+control substitution on
+
+# Note either `./risedev rpk` or `rpk` is ok here.
+# risedev-env contains env var RPK_BROKERS, which is read by rpk
+system ok
+rpk topic create test_consumer_group -p 3
+
+system ok
+cat <<EOF | rpk topic produce test_consumer_group -f "%p %v\\n" -p 0
+0 {"x":"a"}
+1 {"x":"b"}
+2 {"x":"c"}
+EOF
+
+statement ok
+CREATE SOURCE s(x varchar)
+WITH(
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'test_consumer_group',
+    scan.startup.mode = 'earliest',
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE MATERIALIZED VIEW mv AS SELECT * from s;
+
+query ?
+SELECT * FROM s order by x;
+----
+a
+b
+c
+
+sleep 2s
+
+query ?
+SELECT * FROM mv order by x;
+----
+a
+b
+c
+
+
+# There are 4 consumer groups, 1 for batch query, 3 for MV. All of them are "Empty" state with 0 members, because we manually `assign` partitions to them.
+# At the begginning, the MV's consumer group will not occur. They will be created after committing offset to Kafka.
+# (enable.auto.commit defaults to true, and auto.commit.interval.ms defaults to 5s)
+sleep 8s
+
+system ok
+rpk group list | tail -n +2 | cut -w -f2 | xargs -n1 -I {} sh -c "rpk group describe -s {} | grep "MEMBERS""
+----
+MEMBERS      0
+MEMBERS      0
+MEMBERS      0
+MEMBERS      0
+
+
+# The lag for batch query's group is 0, and each MV parition's group is 2 (1 of 3 consumed).
+system ok
+rpk group list | tail -n +2 | cut -w -f2 | xargs -n1 -I {} sh -c "rpk group describe -t {} | grep "test_consumer_group"" | sort
+----
+test_consumer_group  0
+test_consumer_group  2
+test_consumer_group  2
+test_consumer_group  2
+
+
+# We try to interfere by creating consumers that subscribing to the topic with the RW's group id.
+system ok
+rpk group list | tail -n +2 | cut -w -f2 | xargs -P4 -n1 -I {} sh -c "timeout 10s rpk topic consume test_consumer_group -g {}" &
+
+# Wait a while for them to subscribe to the topic.
+sleep 5s
+
+# The lag is changed to 0
+system ok
+rpk group list | tail -n +2 | cut -w -f2 | xargs -n1 -I {} sh -c "rpk group describe -t {} | grep "test_consumer_group""
+----
+test_consumer_group  0
+test_consumer_group  0
+test_consumer_group  0
+test_consumer_group  0
+
+
+system ok
+cat <<EOF | rpk topic produce test_consumer_group -f "%p %v\\n" -p 0
+0 {"x":"d"}
+1 {"x":"e"}
+2 {"x":"f"}
+EOF
+
+sleep 2s
+
+# Verify that RisingWave's Kafka consumer works independently from the console consumers subscribing to the same group.
+query ?
+SELECT * FROM mv order by x;
+----
+a
+b
+c
+d
+e
+f
+
+statement ok
+DROP SOURCE s CASCADE;
+
+# consumer groups are not deleted after MV is dropped.
+system ok
+rpk group list | tail -n +2 | cut -w -f2 | xargs -n1 -I {} sh -c "rpk group describe -s {} | grep "MEMBERS""
+----
+MEMBERS      0
+MEMBERS      0
+MEMBERS      0
+MEMBERS      0
+
+
+system ok
+rpk topic delete test_consumer_group

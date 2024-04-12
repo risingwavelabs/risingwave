@@ -168,6 +168,9 @@ echo "--- e2e, kafka alter source again"
 ./scripts/source/prepare_data_after_alter.sh 3
 risedev slt './e2e_test/source/basic/alter/kafka_after_new_data_2.slt'
 
+echo "--- e2e, inline test"
+risedev slt './e2e_test/source_inline/**/*.slt'
+
 echo "--- Run CH-benCHmark"
 risedev slt './e2e_test/ch_benchmark/batch/ch_benchmark.slt'
 risedev slt './e2e_test/ch_benchmark/streaming/*.slt'

@@ -71,6 +71,12 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 let port = &c.port;
                 writeln!(env, "RISEDEV_RW_FRONTEND_PORT=\"{port}\"",).unwrap();
             }
+            ServiceConfig::Kafka(c) => {
+                let brokers = format!("{}:{}", c.address, c.port);
+                writeln!(env, r#"RISEDEV_KAFKA_BOOTSTRAP_SERVERS="{brokers}""#,).unwrap();
+                writeln!(env, r#"RISEDEV_KAFKA_WITH_OPTIONS_COMMON="connector='kafka',properties.bootstrap.server='{brokers}'""#).unwrap();
+                writeln!(env, r#"RPK_BROKERS="{brokers}""#).unwrap();
+            }
             _ => {}
         }
     }
