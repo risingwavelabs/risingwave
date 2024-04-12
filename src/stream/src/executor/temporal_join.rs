@@ -45,12 +45,18 @@ use super::{
 };
 use crate::cache::{cache_may_stale, new_with_hasher_in, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
+use crate::common::table::state_table::StateTable;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, Executor, Watermark};
 use crate::task::AtomicU64Ref;
 
-pub struct TemporalJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitive> {
+pub struct TemporalJoinExecutor<
+    K: HashKey,
+    S: StateStore,
+    const T: JoinTypePrimitive,
+    const A: bool,
+> {
     ctx: ActorContextRef,
     #[allow(dead_code)]
     info: ExecutorInfo,
@@ -63,9 +69,8 @@ pub struct TemporalJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrim
     condition: Option<NonStrictExpression>,
     output_indices: Vec<usize>,
     chunk_size: usize,
-    // TODO: update metrics
-    #[allow(dead_code)]
-    metrics: Arc<StreamingMetrics>,
+    output_table: Option<StateTable<S>>,
+    output_table_pk_indices: Vec<usize>,
 }
 
 #[derive(Default)]
@@ -425,7 +430,13 @@ mod phase1 {
 
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
     #[allow(clippy::too_many_arguments)]
-    pub(super) async fn handle_chunk<'a, K: HashKey, S: StateStore, E: Phase1Evaluation>(
+    pub(super) async fn handle_chunk<
+        'a,
+        K: HashKey,
+        S: StateStore,
+        E: Phase1Evaluation,
+        const A: bool,
+    >(
         chunk_size: usize,
         right_size: usize,
         full_schema: Vec<DataType>,
@@ -435,45 +446,120 @@ mod phase1 {
         null_matched: &'a K::Bitmap,
         chunk: StreamChunk,
     ) {
-        let mut builder = StreamChunkBuilder::new(chunk_size, full_schema);
-        let keys = K::build_many(left_join_keys, chunk.data_chunk());
-        let to_fetch_keys = chunk
-            .visibility()
-            .iter()
-            .zip_eq_debug(keys.iter())
-            .filter_map(|(vis, key)| if vis { Some(key) } else { None });
-        right_table
-            .fetch_or_promote_keys(to_fetch_keys, epoch)
-            .await?;
-        for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.into_iter()) {
-            let Some((op, left_row)) = r else {
-                continue;
-            };
-            let mut matched = false;
-            if key.null_bitmap().is_subset(null_matched)
-                && let join_entry = right_table.force_peek(&key)
-                && !join_entry.is_empty()
-            {
-                matched = true;
-                for right_row in join_entry.cached.values() {
-                    if let Some(chunk) =
-                        E::append_matched_row(op, &mut builder, left_row, right_row)
-                    {
-                        yield chunk;
+        // Append-only temporal join
+        if A == true {
+            let mut builder = StreamChunkBuilder::new(chunk_size, full_schema);
+            let keys = K::build_many(left_join_keys, chunk.data_chunk());
+            let to_fetch_keys = chunk
+                .visibility()
+                .iter()
+                .zip_eq_debug(keys.iter())
+                .filter_map(|(vis, key)| if vis { Some(key) } else { None });
+            right_table
+                .fetch_or_promote_keys(to_fetch_keys, epoch)
+                .await?;
+            for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.into_iter()) {
+                let Some((op, left_row)) = r else {
+                    continue;
+                };
+                let mut matched = false;
+                if key.null_bitmap().is_subset(null_matched)
+                    && let join_entry = right_table.force_peek(&key)
+                    && !join_entry.is_empty()
+                {
+                    matched = true;
+                    for right_row in join_entry.cached.values() {
+                        if let Some(chunk) =
+                            E::append_matched_row(op, &mut builder, left_row, right_row)
+                        {
+                            yield chunk;
+                        }
                     }
                 }
             }
-            if let Some(chunk) = E::match_end(&mut builder, op, left_row, right_size, matched) {
+            if let Some(chunk) = builder.take() {
                 yield chunk;
             }
-        }
-        if let Some(chunk) = builder.take() {
-            yield chunk;
+        } else {
+            // Non-append-only temporal join
+            let mut builder = StreamChunkBuilder::new(chunk_size, full_schema);
+            let keys = K::build_many(left_join_keys, chunk.data_chunk());
+            let to_fetch_keys = chunk
+                .visibility()
+                .iter()
+                .zip_eq_debug(keys.iter())
+                .zip_eq_debug(chunk.ops())
+                .filter_map(|((vis, key), op)| {
+                    if vis {
+                        match op {
+                            Op::Insert | Op::UpdateInsert => Some(key),
+                            Op::Delete | Op::UpdateDelete => None,
+                        }
+                    } else {
+                        None
+                    }
+                });
+            right_table
+                .fetch_or_promote_keys(to_fetch_keys, epoch)
+                .await?;
+            for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.into_iter()) {
+                let Some((op, left_row)) = r else {
+                    continue;
+                };
+
+                match op {
+                    Op::Insert | Op::UpdateInsert => {
+                        let mut matched = false;
+                        if key.null_bitmap().is_subset(null_matched)
+                            && let join_entry = right_table.force_peek(&key)
+                            && !join_entry.is_empty()
+                        {
+                            matched = true;
+                            for right_row in join_entry.cached.values() {
+                                if let Some(chunk) =
+                                    E::append_matched_row(op, &mut builder, left_row, right_row)
+                                {
+                                    yield chunk;
+                                }
+                            }
+                        }
+                        if let Some(chunk) =
+                            E::match_end(&mut builder, op, left_row, right_size, matched)
+                        {
+                            yield chunk;
+                        }
+                    }
+                    Op::Delete | Op::UpdateDelete => {
+                        todo!()
+                        // let mut matched = false;
+                        // if key.null_bitmap().is_subset(null_matched)
+                        //     && let output_rows = output_table.fetch(&key)
+                        // {
+                        //     matched = true;
+                        //     for output_row in output_rows {
+                        //         if let Some(chunk) =
+                        //         E::append_matched_row(op, &mut builder, left_row, right_row)
+                        //         {
+                        //             yield chunk;
+                        //         }
+                        //     }
+                        // }
+                        // if let Some(chunk) = E::match_end(&mut builder, op, left_row, right_size, matched) {
+                        //     yield chunk;
+                        // }
+                    }
+                }
+            }
+            if let Some(chunk) = builder.take() {
+                yield chunk;
+            }
         }
     }
 }
 
-impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor<K, S, T> {
+impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const A: bool>
+    TemporalJoinExecutor<K, S, T, A>
+{
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
@@ -492,6 +578,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
         join_key_data_types: Vec<DataType>,
+        output_table: Option<StateTable<S>>,
+        output_table_pk_indices: Vec<usize>,
     ) -> Self {
         let alloc = StatsAlloc::new(Global).shared();
 
@@ -528,7 +616,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
             condition,
             output_indices,
             chunk_size,
-            metrics,
+            output_table,
+            output_table_pk_indices,
         }
     }
 
@@ -591,7 +680,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                     let full_schema = full_schema.clone();
 
                     if T == JoinType::Inner {
-                        let st1 = phase1::handle_chunk::<K, S, phase1::Inner>(
+                        let st1 = phase1::handle_chunk::<K, S, phase1::Inner, A>(
                             self.chunk_size,
                             right_size,
                             full_schema,
@@ -621,7 +710,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                         }
                     } else if let Some(ref cond) = self.condition {
                         // Joined result without evaluating non-lookup conditions.
-                        let st1 = phase1::handle_chunk::<K, S, phase1::LeftOuterWithCond>(
+                        let st1 = phase1::handle_chunk::<K, S, phase1::LeftOuterWithCond, A>(
                             self.chunk_size,
                             right_size,
                             full_schema,
@@ -670,7 +759,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                         // The last row should always be marker row,
                         assert_eq!(matched_count, 0);
                     } else {
-                        let st1 = phase1::handle_chunk::<K, S, phase1::LeftOuter>(
+                        let st1 = phase1::handle_chunk::<K, S, phase1::LeftOuter, A>(
                             self.chunk_size,
                             right_size,
                             full_schema,
@@ -710,8 +799,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
     }
 }
 
-impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> Execute
-    for TemporalJoinExecutor<K, S, T>
+impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const A: bool> Execute
+    for TemporalJoinExecutor<K, S, T, A>
 {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.into_stream().boxed()
