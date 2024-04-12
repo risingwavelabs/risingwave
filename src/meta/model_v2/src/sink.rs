@@ -124,7 +124,7 @@ impl From<PbSink> for ActiveModel {
             connection_id: Set(pb_sink.connection_id.map(|x| x as _)),
             db_name: Set(pb_sink.db_name),
             sink_from_name: Set(pb_sink.sink_from_name),
-            sink_format_desc: Set(pb_sink.format_desc.map(|x| x.into())),
+            sink_format_desc: Set(pb_sink.format_desc.as_ref().map(|x| x.into())),
             target_table: Set(pb_sink.target_table.map(|x| x as _)),
         }
     }

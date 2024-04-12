@@ -38,7 +38,6 @@ use risingwave_meta::stream::TableRevision;
 use risingwave_meta_model_migration::{Migrator, MigratorTrait};
 use risingwave_meta_model_v2::catalog_version::VersionCategory;
 use risingwave_meta_model_v2::compaction_status::LevelHandlers;
-use risingwave_meta_model_v2::fragment::StreamNode;
 use risingwave_meta_model_v2::hummock_sequence::{
     COMPACTION_GROUP_ID, COMPACTION_TASK_ID, META_BACKUP_ID, SSTABLE_OBJECT_ID,
 };
@@ -435,7 +434,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             table.schema_id = *schema_rewrite.get(&table.schema_id).unwrap();
         });
         let mut fragment = fragment.into_active_model();
-        fragment.stream_node = Set(StreamNode::from_protobuf(&stream_node));
+        fragment.stream_node = Set((&stream_node).into());
         Fragment::insert(fragment)
             .exec(&meta_store_sql.conn)
             .await?;
@@ -683,7 +682,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                     max_committed_epoch: Set(vd.max_committed_epoch as _),
                     safe_epoch: Set(vd.safe_epoch as _),
                     trivial_move: Set(vd.trivial_move),
-                    full_version_delta: Set(vd.to_protobuf().into()),
+                    full_version_delta: Set((&vd.to_protobuf()).into()),
                 })
                 .collect_vec(),
         )
@@ -716,7 +715,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 .into_iter()
                 .map(|cg| compaction_config::ActiveModel {
                     compaction_group_id: Set(cg.group_id as _),
-                    config: Set((*cg.compaction_config).clone().into()),
+                    config: Set((&*cg.compaction_config).into()),
                 })
                 .collect_vec(),
         )
@@ -733,7 +732,9 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 .into_iter()
                 .map(|cs| compaction_status::ActiveModel {
                     compaction_group_id: Set(cs.compaction_group_id as _),
-                    status: Set(LevelHandlers(cs.level_handlers.iter().map_into().collect())),
+                    status: Set(LevelHandlers::from(
+                        cs.level_handlers.iter().map_into().collect_vec(),
+                    )),
                 })
                 .collect_vec(),
         )
@@ -751,7 +752,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             compaction_task::ActiveModel {
                 id: Set(task.task_id as _),
                 context_id: Set(context_id as _),
-                task: Set(task.into()),
+                task: Set((&task).into()),
             }
         }))
         .exec(&meta_store_sql.conn)
