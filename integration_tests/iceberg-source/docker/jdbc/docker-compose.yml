@@ -43,7 +43,7 @@ services:
 
   risingwave-standalone:
     extends:
-      file: ../../../../docker/docker-compose.yml
+      file: ../../../../docker/docker-compose-with-sqlite.yml
       service: risingwave-standalone
     healthcheck:
       test:
