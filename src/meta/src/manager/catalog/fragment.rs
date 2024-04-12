@@ -958,24 +958,18 @@ impl FragmentManager {
                 let mut actor_to_apply = Vec::new();
                 for actor in &mut fragment.actors {
                     if let Some(node) = actor.nodes.as_mut() {
-                        visit_stream_node(node, |node_body| {
-                            // if let NodeBody::StreamScan(ref mut node) = node_body {
-                            //     node.rate_limit = rate_limit;
-                            //     actor_to_apply.push(actor.actor_id);
-                            // }
-                            match node_body {
-                                NodeBody::StreamScan(ref mut node) => {
-                                    node.rate_limit = rate_limit;
+                        visit_stream_node(node, |node_body| match node_body {
+                            NodeBody::StreamScan(ref mut node) => {
+                                node.rate_limit = rate_limit;
+                                actor_to_apply.push(actor.actor_id);
+                            }
+                            NodeBody::Source(ref mut node) => {
+                                if let Some(ref mut node_inner) = node.source_inner {
+                                    node_inner.rate_limit = rate_limit;
                                     actor_to_apply.push(actor.actor_id);
                                 }
-                                NodeBody::Source(ref mut node) => {
-                                    if let Some(ref mut node_inner) = node.source_inner {
-                                        node_inner.rate_limit = rate_limit;
-                                        actor_to_apply.push(actor.actor_id);
-                                    }
-                                }
-                                _ => {}
                             }
+                            _ => {}
                         })
                     };
                 }

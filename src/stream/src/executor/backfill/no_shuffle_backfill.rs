@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::num::NonZeroU32;
 use std::pin::pin;
 use std::sync::Arc;
 
@@ -34,7 +33,7 @@ use risingwave_storage::StateStore;
 use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
-    compute_bounds, construct_initial_finished_state, create_builder_and_limiter, get_new_pos,
+    compute_bounds, construct_initial_finished_state, create_builder, create_limiter, get_new_pos,
     mapping_chunk, mapping_message, mark_chunk, owned_row_iter, METADATA_STATE_LEN,
 };
 use crate::executor::monitor::StreamingMetrics;
@@ -168,8 +167,7 @@ where
         let data_types = self.upstream_table.schema().data_types();
 
         // Chunk builder will be instantiated with min(rate_limit, self.chunk_size) as the chunk's max size.
-        let (mut builder, mut limiter) =
-            create_builder_and_limiter(rate_limit, self.chunk_size, data_types.clone());
+        let mut builder = create_builder(rate_limit, self.chunk_size, data_types.clone());
 
         // Use this buffer to construct state,
         // which will then be persisted.
@@ -298,27 +296,14 @@ where
                                     None => {
                                         // Consume remaining rows in the builder.
                                         if let Some(data_chunk) = builder.consume_all() {
-                                            let chunk = Self::handle_snapshot_chunk(
+                                            yield Message::Chunk(Self::handle_snapshot_chunk(
                                                 data_chunk,
                                                 &mut current_pos,
                                                 &mut cur_barrier_snapshot_processed_rows,
                                                 &mut total_snapshot_processed_rows,
                                                 &pk_indices,
                                                 &self.output_indices,
-                                            );
-                                            if let Some(rate_limit) = limiter.as_ref()
-                                                && chunk.cardinality() > 0
-                                            {
-                                                rate_limit
-                                                    .until_n_ready(
-                                                        NonZeroU32::new(chunk.cardinality() as u32)
-                                                            .unwrap(),
-                                                    )
-                                                    .await
-                                                    .unwrap();
-                                            }
-
-                                            yield Message::Chunk(chunk);
+                                            ));
                                         }
 
                                         // End of the snapshot read stream.
@@ -345,27 +330,14 @@ where
                                     Some(record) => {
                                         // Buffer the snapshot read row.
                                         if let Some(data_chunk) = builder.append_one_row(record) {
-                                            let chunk = Self::handle_snapshot_chunk(
+                                            yield Message::Chunk(Self::handle_snapshot_chunk(
                                                 data_chunk,
                                                 &mut current_pos,
                                                 &mut cur_barrier_snapshot_processed_rows,
                                                 &mut total_snapshot_processed_rows,
                                                 &pk_indices,
                                                 &self.output_indices,
-                                            );
-                                            if let Some(rate_limit) = limiter.as_ref()
-                                                && chunk.cardinality() > 0
-                                            {
-                                                rate_limit
-                                                    .until_n_ready(
-                                                        NonZeroU32::new(chunk.cardinality() as u32)
-                                                            .unwrap(),
-                                                    )
-                                                    .await
-                                                    .unwrap();
-                                            }
-
-                                            yield Message::Chunk(chunk);
+                                            ));
                                         }
                                     }
                                 }
@@ -398,27 +370,14 @@ where
                                 }
                                 Some(row) => {
                                     let chunk = DataChunk::from_rows(&[row], &data_types);
-                                    let stream_chunk = Self::handle_snapshot_chunk(
+                                    yield Message::Chunk(Self::handle_snapshot_chunk(
                                         chunk,
                                         &mut current_pos,
                                         &mut cur_barrier_snapshot_processed_rows,
                                         &mut total_snapshot_processed_rows,
                                         &pk_indices,
                                         &self.output_indices,
-                                    );
-                                    if let Some(rate_limit) = limiter.as_ref()
-                                        && stream_chunk.cardinality() > 0
-                                    {
-                                        rate_limit
-                                            .until_n_ready(
-                                                NonZeroU32::new(stream_chunk.cardinality() as u32)
-                                                    .unwrap(),
-                                            )
-                                            .await
-                                            .unwrap();
-                                    }
-
-                                    yield Message::Chunk(stream_chunk);
+                                    ));
                                     break;
                                 }
                             }
@@ -441,24 +400,14 @@ where
                 // Consume snapshot rows left in builder
                 let chunk = builder.consume_all();
                 if let Some(chunk) = chunk {
-                    let chunk = Self::handle_snapshot_chunk(
+                    yield Message::Chunk(Self::handle_snapshot_chunk(
                         chunk,
                         &mut current_pos,
                         &mut cur_barrier_snapshot_processed_rows,
                         &mut total_snapshot_processed_rows,
                         &pk_indices,
                         &self.output_indices,
-                    );
-                    if let Some(rate_limit) = limiter.as_ref()
-                        && chunk.cardinality() > 0
-                    {
-                        rate_limit
-                            .until_n_ready(NonZeroU32::new(chunk.cardinality() as u32).unwrap())
-                            .await
-                            .unwrap();
-                    }
-
-                    yield Message::Chunk(chunk);
+                    ));
                 }
 
                 // Consume upstream buffer chunk
@@ -528,7 +477,7 @@ where
                                     "actor rate limit changed",
                                 );
                                 assert!(builder.is_empty());
-                                (builder, limiter) = create_builder_and_limiter(
+                                builder = create_builder(
                                     rate_limit,
                                     self.chunk_size,
                                     self.upstream_table.schema().data_types(),
@@ -708,8 +657,13 @@ where
                 yield None;
             }
         } else {
+            // Checked the rate limit is not zero.
+            let limiter = rate_limit.and_then(create_limiter);
             #[for_await]
             for r in Self::snapshot_read(upstream_table, epoch, current_pos) {
+                if let Some(rate_limit) = &limiter {
+                    rate_limit.until_ready().await;
+                }
                 yield r?;
             }
         }

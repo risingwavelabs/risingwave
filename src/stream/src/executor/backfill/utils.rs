@@ -811,30 +811,6 @@ pub type BackfillRateLimiter =
 /// Creates a data chunk builder for snapshot read.
 /// If the `rate_limit` is smaller than `chunk_size`, it will take precedence.
 /// This is so we can partition snapshot read into smaller chunks than chunk size.
-pub fn create_builder_and_limiter(
-    rate_limit: Option<usize>,
-    chunk_size: usize,
-    data_types: Vec<DataType>,
-) -> (DataChunkBuilder, Option<BackfillRateLimiter>) {
-    if let Some(rate_limit) = rate_limit {
-        if rate_limit > 0 {
-            let actual_chunk_size = rate_limit.min(chunk_size);
-            (
-                DataChunkBuilder::new(data_types, actual_chunk_size),
-                Some(create_limiter(rate_limit)).flatten(),
-            )
-        } else {
-            // if rate_limit is 0, we rely on check when building the snapshot reader stream.
-            (DataChunkBuilder::new(data_types, chunk_size), None)
-        }
-    } else {
-        (DataChunkBuilder::new(data_types, chunk_size), None)
-    }
-}
-
-/// Creates a data chunk builder for snapshot read.
-/// If the `rate_limit` is smaller than `chunk_size`, it will take precedence.
-/// This is so we can partition snapshot read into smaller chunks than chunk size.
 pub fn create_builder(
     rate_limit: Option<usize>,
     chunk_size: usize,
@@ -857,22 +833,4 @@ pub fn create_limiter(rate_limit: usize) -> Option<BackfillRateLimiter> {
     let quota = Quota::per_second(NonZeroU32::new(rate_limit as u32).unwrap());
     let clock = MonotonicClock;
     Some(RateLimiter::direct_with_clock(quota, &clock))
-}
-
-pub async fn wait_for_rate_limiter(
-    limiter: &Option<BackfillRateLimiter>,
-    chunk_cardinality: usize,
-) {
-    if let Some(limiter) = limiter {
-        if chunk_cardinality > 0 {
-            limiter
-                .until_n_ready(NonZeroU32::new(chunk_cardinality as u32).unwrap())
-                .await
-                .unwrap();
-        }
-    } else {
-        // got rate_limit None, means limit to zero
-        // stop the current stream until changing by barrier
-        futures::future::pending::<()>().await;
-    }
 }
