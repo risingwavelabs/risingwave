@@ -15,13 +15,18 @@
 use opendal::layers::LoggingLayer;
 use opendal::services::Gcs;
 use opendal::Operator;
+use risingwave_common::config::ObjectStoreConfig;
 
 use super::{EngineType, OpendalObjectStore};
 use crate::object::ObjectResult;
 
 impl OpendalObjectStore {
     /// create opendal gcs engine.
-    pub fn new_gcs_engine(bucket: String, root: String) -> ObjectResult<Self> {
+    pub fn new_gcs_engine(
+        bucket: String,
+        root: String,
+        config: ObjectStoreConfig,
+    ) -> ObjectResult<Self> {
         // Create gcs backend builder.
         let mut builder = Gcs::default();
 
@@ -41,6 +46,7 @@ impl OpendalObjectStore {
         Ok(Self {
             op,
             engine_type: EngineType::Gcs,
+            config,
         })
     }
 }

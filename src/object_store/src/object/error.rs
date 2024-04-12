@@ -99,7 +99,7 @@ impl ObjectError {
         false
     }
 
-    pub fn is_object_error_should_retry(&self) -> bool {
+    pub fn should_retry(&self) -> bool {
         // return true;
         match self.inner() {
             ObjectErrorInner::S3 {
@@ -107,9 +107,9 @@ impl ObjectError {
                 should_retry,
             } => *should_retry,
 
-            ObjectErrorInner::Opendal(e) => return e.is_temporary(),
+            ObjectErrorInner::Opendal(e) => e.is_temporary(),
 
-            _ => true,
+            _ => false,
         }
     }
 }

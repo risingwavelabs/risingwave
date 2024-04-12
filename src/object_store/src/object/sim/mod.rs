@@ -55,7 +55,7 @@ impl SimStreamingUploader {
 
 #[async_trait::async_trait]
 impl StreamingUploader for SimStreamingUploader {
-    async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
+    async fn write_bytes(&'static mut self, data: Bytes) -> ObjectResult<()> {
         self.buf.put(data);
         Ok(())
     }

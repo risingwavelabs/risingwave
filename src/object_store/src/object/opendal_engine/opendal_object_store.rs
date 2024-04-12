@@ -13,12 +13,15 @@
 // limitations under the License.
 
 use std::ops::Range;
+use std::time::Duration;
 
 use bytes::Bytes;
 use fail::fail_point;
 use futures::{stream, StreamExt, TryStreamExt};
+use opendal::layers::{RetryLayer, TimeoutLayer};
 use opendal::services::Memory;
 use opendal::{Metakey, Operator, Writer};
+use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::range::RangeBoundsExt;
 use thiserror_ext::AsReport;
 
@@ -32,6 +35,8 @@ use crate::object::{
 pub struct OpendalObjectStore {
     pub(crate) op: Operator,
     pub(crate) engine_type: EngineType,
+
+    pub(crate) config: ObjectStoreConfig,
 }
 #[derive(Clone)]
 pub enum EngineType {
@@ -48,13 +53,14 @@ pub enum EngineType {
 
 impl OpendalObjectStore {
     /// create opendal memory engine, used for unit tests.
-    pub fn new_memory_engine() -> ObjectResult<Self> {
+    pub fn test_new_memory_engine() -> ObjectResult<Self> {
         // Create memory backend builder.
         let builder = Memory::default();
         let op: Operator = Operator::new(builder)?.finish();
         Ok(Self {
             op,
             engine_type: EngineType::Memory,
+            config: ObjectStoreConfig::default(),
         })
     }
 }
@@ -86,7 +92,8 @@ impl ObjectStore for OpendalObjectStore {
 
     async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
         Ok(Box::new(
-            OpendalStreamingUploader::new(self.op.clone(), path.to_string()).await?,
+            OpendalStreamingUploader::new(self.op.clone(), path.to_string(), self.config.clone())
+                .await?,
         ))
     }
 
@@ -127,7 +134,27 @@ impl ObjectStore for OpendalObjectStore {
             ObjectError::internal("opendal streaming read error")
         ));
         let range: Range<u64> = (range.start as u64)..(range.end as u64);
-        let reader = self.op.reader_with(path).range(range).await?;
+        let reader = self
+            .op
+            .clone()
+            .layer(
+                RetryLayer::new()
+                    .with_min_delay(Duration::from_millis(
+                        self.config.object_store_req_retry_interval_ms,
+                    ))
+                    .with_max_delay(Duration::from_millis(
+                        self.config.object_store_req_retry_max_delay_ms,
+                    ))
+                    .with_max_times(self.config.object_store_req_retry_max_retry_attempts)
+                    .with_factor(2.0)
+                    .with_jitter(),
+            )
+            .layer(TimeoutLayer::new().with_io_timeout(Duration::from_millis(
+                self.config.object_store_streaming_read_attempt_timeout_ms,
+            )))
+            .reader_with(path)
+            .range(range)
+            .await?;
         let stream = reader.into_stream().map(|item| {
             item.map_err(|e| ObjectError::internal(format!("OpendalError: {}", e.as_report())))
         });
@@ -216,9 +243,26 @@ impl ObjectStore for OpendalObjectStore {
 pub struct OpendalStreamingUploader {
     writer: Writer,
 }
+
 impl OpendalStreamingUploader {
-    pub async fn new(op: Operator, path: String) -> ObjectResult<Self> {
+    pub async fn new(op: Operator, path: String, config: ObjectStoreConfig) -> ObjectResult<Self> {
         let writer = op
+            .clone()
+            .layer(
+                RetryLayer::new()
+                    .with_min_delay(Duration::from_millis(
+                        config.object_store_req_retry_interval_ms,
+                    ))
+                    .with_max_delay(Duration::from_millis(
+                        config.object_store_req_retry_max_delay_ms,
+                    ))
+                    .with_max_times(config.object_store_req_retry_max_retry_attempts)
+                    .with_factor(2.0)
+                    .with_jitter(),
+            )
+            .layer(TimeoutLayer::new().with_io_timeout(Duration::from_millis(
+                config.object_store_streaming_upload_attempt_timeout_ms,
+            )))
             .writer_with(&path)
             .concurrent(8)
             .buffer(OPENDAL_BUFFER_SIZE)
@@ -233,6 +277,7 @@ const OPENDAL_BUFFER_SIZE: usize = 16 * 1024 * 1024;
 impl StreamingUploader for OpendalStreamingUploader {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
         self.writer.write(data).await?;
+
         Ok(())
     }
 
@@ -272,7 +317,7 @@ mod tests {
     #[tokio::test]
     async fn test_memory_upload() {
         let block = Bytes::from("123456");
-        let store = OpendalObjectStore::new_memory_engine().unwrap();
+        let store = OpendalObjectStore::test_new_memory_engine().unwrap();
         store.upload("/abc", block).await.unwrap();
 
         // No such object.
@@ -294,7 +339,7 @@ mod tests {
     async fn test_memory_metadata() {
         let block = Bytes::from("123456");
         let path = "/abc".to_string();
-        let obj_store = OpendalObjectStore::new_memory_engine().unwrap();
+        let obj_store = OpendalObjectStore::test_new_memory_engine().unwrap();
         obj_store.upload("/abc", block).await.unwrap();
 
         let err = obj_store.metadata("/not_exist").await.unwrap_err();
@@ -308,7 +353,7 @@ mod tests {
     async fn test_memory_delete_objects_and_list_object() {
         let block1 = Bytes::from("123456");
         let block2 = Bytes::from("987654");
-        let store = OpendalObjectStore::new_memory_engine().unwrap();
+        let store = OpendalObjectStore::test_new_memory_engine().unwrap();
         store.upload("abc", Bytes::from("123456")).await.unwrap();
         store.upload("prefix/abc", block1).await.unwrap();
 

@@ -38,6 +38,7 @@ impl OpendalObjectStore {
         Ok(Self {
             op,
             engine_type: EngineType::Fs,
+            config,
         })
     }
 }

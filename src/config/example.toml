@@ -188,14 +188,30 @@ object_store_streaming_upload_timeout_ms = 480000
 object_store_upload_timeout_ms = 480000
 object_store_read_timeout_ms = 480000
 object_store_set_atomic_write_dir = false
+object_store_req_retry_interval_ms = 20
+object_store_req_retry_max_delay_ms = 10000
+object_store_req_retry_max_retry_attempts = 3
+object_store_upload_attempt_timeout_ms = 300000
+object_store_upload_retry_attempts = 3
+object_store_streaming_upload_attempt_timeout_ms = 60000
+object_store_streaming_upload_retry_attempts = 3
+object_store_read_attempt_timeout_ms = 60000
+object_store_read_retry_attempts = 3
+object_store_streaming_read_attempt_timeout_ms = 120000
+object_store_streaming_read_retry_attempts = 3
+object_store_metadata_attempt_timeout_ms = 300000
+object_store_metadata_retry_attempts = 3
+object_store_delete_attempt_timeout_ms = 120000
+object_store_delete_retry_attempts = 3
+object_store_delete_objects_attempt_timeout_ms = 600000
+object_store_delete_objects_retry_attempts = 3
+object_store_list_attempt_timeout_ms = 600000
+object_store_list_retry_attempts = 3
 
 [storage.object_store.s3]
 object_store_keepalive_ms = 600000
 object_store_recv_buffer_size = 2097152
 object_store_nodelay = true
-object_store_req_retry_interval_ms = 20
-object_store_req_retry_max_delay_ms = 10000
-object_store_req_retry_max_attempts = 8
 retry_unknown_service_error = false
 identity_resolution_timeout_s = 5
 

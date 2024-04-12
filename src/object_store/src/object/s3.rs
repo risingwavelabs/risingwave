@@ -54,7 +54,10 @@ use super::{
     prefix, BoxedStreamingUploader, Bytes, ObjectError, ObjectMetadata, ObjectRangeBounds,
     ObjectResult, ObjectStore, StreamingUploader,
 };
-use crate::object::{try_update_failure_metric, ObjectDataStream, ObjectMetadataIter};
+use crate::object::{
+    get_attempt_timeout_by_type, get_retry_strategy, should_retry, try_update_failure_metric,
+    ObjectDataStream, ObjectMetadataIter, OperationType,
+};
 
 type PartId = i32;
 
@@ -94,6 +97,8 @@ pub struct S3StreamingUploader {
     not_uploaded_len: usize,
     /// To record metrics for uploading part.
     metrics: Arc<ObjectStoreMetrics>,
+
+    config: ObjectStoreConfig,
 }
 
 impl S3StreamingUploader {
@@ -103,6 +108,7 @@ impl S3StreamingUploader {
         part_size: usize,
         key: String,
         metrics: Arc<ObjectStoreMetrics>,
+        config: ObjectStoreConfig,
     ) -> S3StreamingUploader {
         Self {
             client,
@@ -115,11 +121,13 @@ impl S3StreamingUploader {
             buf: Default::default(),
             not_uploaded_len: 0,
             metrics,
+            config,
         }
     }
 
     async fn upload_next_part(&mut self) -> ObjectResult<()> {
-        let operation_type = "s3_upload_part";
+        let operation_type = OperationType::StreamingUpload;
+        let operation_type_str = operation_type.as_str();
 
         // Lazily create multipart upload.
         if self.upload_id.is_none() {
@@ -154,26 +162,51 @@ impl S3StreamingUploader {
         let metrics = self.metrics.clone();
         metrics
             .operation_size
-            .with_label_values(&[operation_type])
+            .with_label_values(&[operation_type_str])
             .observe(len as f64);
+
+        let backoff = get_retry_strategy(&self.config, operation_type);
+        let timeout_duration =
+            Duration::from_millis(get_attempt_timeout_by_type(&self.config, operation_type));
 
         self.join_handles.push(tokio::spawn(async move {
             let _timer = metrics
                 .operation_latency
-                .with_label_values(&["s3", operation_type])
+                .with_label_values(&["s3", operation_type_str])
                 .start_timer();
-            let upload_output_res = client_cloned
-                .upload_part()
-                .bucket(bucket)
-                .key(key)
-                .upload_id(upload_id)
-                .part_number(part_id)
-                .body(get_upload_body(data))
-                .content_length(len as i64)
-                .send()
-                .await
-                .map_err(Into::into);
-            try_update_failure_metric(&metrics, &upload_output_res, operation_type);
+
+            let upload_output_res = tokio_retry::RetryIf::spawn(
+                backoff,
+                || async {
+                    let future = async {
+                        client_cloned
+                            .upload_part()
+                            .bucket(bucket.clone())
+                            .key(key.clone())
+                            .upload_id(upload_id.clone())
+                            .part_number(part_id)
+                            .body(get_upload_body(data.clone()))
+                            .content_length(len as i64)
+                            .send()
+                            .await
+                    };
+
+                    if timeout_duration.is_zero() {
+                        future.await.map_err(ObjectError::from)
+                    } else {
+                        let ret = tokio::time::timeout(timeout_duration, future).await;
+                        match ret {
+                            Ok(Ok(res)) => Ok(res),
+                            Ok(Err(err)) => Err(ObjectError::from(err)),
+                            Err(_) => Err(ObjectError::internal("streaming upload part timeout")),
+                        }
+                    }
+                },
+                should_retry,
+            )
+            .await;
+
+            try_update_failure_metric(&metrics, &upload_output_res, operation_type_str);
             Ok((part_id, upload_output_res?))
         }));
 
@@ -345,6 +378,7 @@ impl ObjectStore for S3ObjectStore {
             self.part_size,
             path.to_string(),
             self.metrics.clone(),
+            self.config.clone(),
         )))
     }
 
@@ -355,10 +389,7 @@ impl ObjectStore for S3ObjectStore {
         )));
 
         let val = match self.obj_store_request(path, range.clone()).send().await {
-            Ok(resp) => {
-                let val = resp.body.collect().await?.into_bytes();
-                val
-            }
+            Ok(resp) => resp.body.collect().await?.into_bytes(),
             Err(sdk_err) => {
                 if let SdkError::DispatchFailure(e) = &sdk_err
                     && e.is_timeout()

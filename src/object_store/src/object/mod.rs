@@ -332,19 +332,20 @@ impl MonitoredStreamingUploader {
 
 impl MonitoredStreamingUploader {
     pub async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
-        let operation_type = "streaming_upload_write_bytes";
+        let operation_type = OperationType::StreamingUpload;
+        let operation_type_str = operation_type.as_str();
         let data_len = data.len();
         self.object_store_metrics
             .write_bytes
             .inc_by(data.len() as u64);
         self.object_store_metrics
             .operation_size
-            .with_label_values(&[operation_type])
+            .with_label_values(&[operation_type_str])
             .observe(data_len as f64);
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type, operation_type])
+            .with_label_values(&[self.media_type, operation_type_str])
             .start_timer();
         self.operation_size += data_len;
 
@@ -365,7 +366,7 @@ impl MonitoredStreamingUploader {
                 }),
         };
 
-        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
         res
     }
 
@@ -435,16 +436,17 @@ impl MonitoredStreamingReader {
     }
 
     pub async fn read_bytes(&mut self) -> Option<ObjectResult<Bytes>> {
-        let operation_type = "streaming_read_read_bytes";
+        let operation_type = OperationType::StreamingRead;
+        let operation_type_str = operation_type.as_str();
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type, operation_type])
+            .with_label_values(&[self.media_type, operation_type_str])
             .start_timer();
         let future = async {
             self.inner
                 .next()
-                .verbose_instrument_await("object_store_streaming_read_read_bytes")
+                .verbose_instrument_await(operation_type_str)
                 .await
         };
         let res = match self.streaming_read_timeout.as_ref() {
@@ -459,14 +461,14 @@ impl MonitoredStreamingReader {
         };
 
         if let Some(ret) = &res {
-            try_update_failure_metric(&self.object_store_metrics, ret, operation_type);
+            try_update_failure_metric(&self.object_store_metrics, ret, operation_type_str);
         }
         if let Some(Ok(data)) = &res {
             let data_len = data.len();
             self.object_store_metrics.read_bytes.inc_by(data_len as u64);
             self.object_store_metrics
                 .operation_size
-                .with_label_values(&[operation_type])
+                .with_label_values(&[operation_type_str])
                 .observe(data_len as f64);
             self.operation_size += data_len;
         }
@@ -492,7 +494,7 @@ pub struct MonitoredObjectStore<OS: ObjectStore> {
     // streaming_upload_timeout: Option<Duration>,
     // read_timeout: Option<Duration>,
     // upload_timeout: Option<Duration>,
-    config: Arc<ObjectStoreConfig>,
+    config: ObjectStoreConfig,
 }
 
 /// Manually dispatch trait methods.
@@ -528,7 +530,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             // read_timeout: Some(Duration::from_millis(config.object_store_read_timeout_ms)),
             // upload_timeout: Some(Duration::from_millis(config.object_store_upload_timeout_ms)),
             inner: store,
-            config: Arc::new(config),
+            config,
         }
     }
 
@@ -575,15 +577,13 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .await
                 };
 
-                let res = if timeout_duration.is_zero() {
+                if timeout_duration.is_zero() {
                     future.await
                 } else {
                     tokio::time::timeout(timeout_duration, future)
                         .await
                         .unwrap_or_else(|_| Err(ObjectError::internal("upload timeout")))
-                };
-
-                res
+                }
             },
             should_retry,
         )
@@ -617,7 +617,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .await
                 };
 
-                let res = if timeout_duration.is_zero() {
+                if timeout_duration.is_zero() {
                     future.await
                 } else {
                     tokio::time::timeout(timeout_duration, future)
@@ -625,9 +625,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .unwrap_or_else(|_| {
                             Err(ObjectError::internal("streaming_upload init timeout"))
                         })
-                };
-
-                res
+                }
             },
             should_retry,
         )
@@ -671,15 +669,13 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .await
                 };
 
-                let res = if timeout_duration.is_zero() {
+                if timeout_duration.is_zero() {
                     future.await
                 } else {
                     tokio::time::timeout(timeout_duration, future)
                         .await
                         .unwrap_or_else(|_| Err(ObjectError::internal("read timeout")))
-                };
-
-                res
+                }
             },
             should_retry,
         )
@@ -737,7 +733,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .await
                 };
 
-                let res = if timeout_duration.is_zero() {
+                if timeout_duration.is_zero() {
                     future.await
                 } else {
                     tokio::time::timeout(timeout_duration, future)
@@ -745,9 +741,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .unwrap_or_else(|_| {
                             Err(ObjectError::internal("streaming_read init timeout"))
                         })
-                };
-
-                res
+                }
             },
             should_retry,
         )
@@ -791,15 +785,14 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .verbose_instrument_await("object_store_metadata")
                         .await
                 };
-                let res = if timeout_duration.is_zero() {
+
+                if timeout_duration.is_zero() {
                     future.await
                 } else {
                     tokio::time::timeout(timeout_duration, future)
                         .await
                         .unwrap_or_else(|_| Err(ObjectError::internal("metadata timeout")))
-                };
-
-                res
+                }
             },
             should_retry,
         )
@@ -832,15 +825,13 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .await
                 };
 
-                let res = if timeout_duration.is_zero() {
+                if timeout_duration.is_zero() {
                     future.await
                 } else {
                     tokio::time::timeout(timeout_duration, future)
                         .await
                         .unwrap_or_else(|_| Err(ObjectError::internal("delete timeout")))
-                };
-
-                res
+                }
             },
             should_retry,
         )
@@ -873,15 +864,13 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .await
                 };
 
-                let res = if timeout_duration.is_zero() {
+                if timeout_duration.is_zero() {
                     future.await
                 } else {
                     tokio::time::timeout(timeout_duration, future)
                         .await
                         .unwrap_or_else(|_| Err(ObjectError::internal("delete_objects timeout")))
-                };
-
-                res
+                }
             },
             should_retry,
         )
@@ -915,15 +904,13 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .await
                 };
 
-                let res = if timeout_duration.is_zero() {
+                if timeout_duration.is_zero() {
                     future.await
                 } else {
                     tokio::time::timeout(timeout_duration, future)
                         .await
                         .unwrap_or_else(|_| Err(ObjectError::internal("list timeout")))
-                };
-
-                res
+                }
             },
             should_retry,
         )
@@ -986,18 +973,26 @@ pub async fn build_remote_object_store(
             let gcs = gcs.strip_prefix("gcs://").unwrap();
             let (bucket, root) = gcs.split_once('@').unwrap_or((gcs, ""));
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_gcs_engine(bucket.to_string(), root.to_string())
-                    .unwrap()
-                    .monitored(metrics, config),
+                OpendalObjectStore::new_gcs_engine(
+                    bucket.to_string(),
+                    root.to_string(),
+                    config.clone(),
+                )
+                .unwrap()
+                .monitored(metrics, config),
             )
         }
         obs if obs.starts_with("obs://") => {
             let obs = obs.strip_prefix("obs://").unwrap();
             let (bucket, root) = obs.split_once('@').unwrap_or((obs, ""));
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_obs_engine(bucket.to_string(), root.to_string())
-                    .unwrap()
-                    .monitored(metrics, config),
+                OpendalObjectStore::new_obs_engine(
+                    bucket.to_string(),
+                    root.to_string(),
+                    config.clone(),
+                )
+                .unwrap()
+                .monitored(metrics, config),
             )
         }
 
@@ -1005,27 +1000,39 @@ pub async fn build_remote_object_store(
             let oss = oss.strip_prefix("oss://").unwrap();
             let (bucket, root) = oss.split_once('@').unwrap_or((oss, ""));
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_oss_engine(bucket.to_string(), root.to_string())
-                    .unwrap()
-                    .monitored(metrics, config),
+                OpendalObjectStore::new_oss_engine(
+                    bucket.to_string(),
+                    root.to_string(),
+                    config.clone(),
+                )
+                .unwrap()
+                .monitored(metrics, config),
             )
         }
         webhdfs if webhdfs.starts_with("webhdfs://") => {
             let webhdfs = webhdfs.strip_prefix("webhdfs://").unwrap();
             let (namenode, root) = webhdfs.split_once('@').unwrap_or((webhdfs, ""));
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_webhdfs_engine(namenode.to_string(), root.to_string())
-                    .unwrap()
-                    .monitored(metrics, config),
+                OpendalObjectStore::new_webhdfs_engine(
+                    namenode.to_string(),
+                    root.to_string(),
+                    config.clone(),
+                )
+                .unwrap()
+                .monitored(metrics, config),
             )
         }
         azblob if azblob.starts_with("azblob://") => {
             let azblob = azblob.strip_prefix("azblob://").unwrap();
             let (container_name, root) = azblob.split_once('@').unwrap_or((azblob, ""));
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_azblob_engine(container_name.to_string(), root.to_string())
-                    .unwrap()
-                    .monitored(metrics, config),
+                OpendalObjectStore::new_azblob_engine(
+                    container_name.to_string(),
+                    root.to_string(),
+                    config.clone(),
+                )
+                .unwrap()
+                .monitored(metrics, config),
             )
         }
         fs if fs.starts_with("fs://") => {
@@ -1093,8 +1100,8 @@ fn get_retry_strategy(
 }
 
 #[inline(always)]
-fn should_retry(err: &ObjectError) -> bool {
-    err.is_object_error_should_retry()
+pub fn should_retry(err: &ObjectError) -> bool {
+    err.should_retry()
 }
 
 pub type ObjectMetadataIter = BoxStream<'static, ObjectResult<ObjectMetadata>>;

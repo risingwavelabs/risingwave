@@ -15,6 +15,7 @@
 use opendal::layers::LoggingLayer;
 use opendal::services::Webhdfs;
 use opendal::Operator;
+use risingwave_common::config::ObjectStoreConfig;
 
 use super::{EngineType, OpendalObjectStore};
 use crate::object::opendal_engine::ATOMIC_WRITE_DIR;
@@ -22,7 +23,11 @@ use crate::object::ObjectResult;
 
 impl OpendalObjectStore {
     /// create opendal webhdfs engine.
-    pub fn new_webhdfs_engine(endpoint: String, root: String) -> ObjectResult<Self> {
+    pub fn new_webhdfs_engine(
+        endpoint: String,
+        root: String,
+        config: ObjectStoreConfig,
+    ) -> ObjectResult<Self> {
         // Create webhdfs backend builder.
         let mut builder = Webhdfs::default();
         // Set the name node for webhdfs.
@@ -39,6 +44,7 @@ impl OpendalObjectStore {
         Ok(Self {
             op,
             engine_type: EngineType::Webhdfs,
+            config,
         })
     }
 }

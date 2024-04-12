@@ -15,13 +15,18 @@
 use opendal::layers::LoggingLayer;
 use opendal::services::Oss;
 use opendal::Operator;
+use risingwave_common::config::ObjectStoreConfig;
 
 use super::{EngineType, OpendalObjectStore};
 use crate::object::ObjectResult;
 
 impl OpendalObjectStore {
     /// create opendal oss engine.
-    pub fn new_oss_engine(bucket: String, root: String) -> ObjectResult<Self> {
+    pub fn new_oss_engine(
+        bucket: String,
+        root: String,
+        config: ObjectStoreConfig,
+    ) -> ObjectResult<Self> {
         // Create oss backend builder.
         let mut builder = Oss::default();
 
@@ -47,6 +52,7 @@ impl OpendalObjectStore {
         Ok(Self {
             op,
             engine_type: EngineType::Oss,
+            config,
         })
     }
 }
