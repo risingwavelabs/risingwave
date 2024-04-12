@@ -19,41 +19,75 @@ use std::cell::RefCell;
 const RED_ZONE: usize = 128 * 1024; // 128KiB
 const STACK_SIZE: usize = 16 * RED_ZONE; // 2MiB
 
+/// Recursion depth.
+struct Depth {
+    /// The current depth.
+    current: usize,
+    /// The max depth reached so far, not considering the current depth.
+    last_max: usize,
+}
+
+impl Depth {
+    const fn new() -> Self {
+        Self {
+            current: 0,
+            last_max: 0,
+        }
+    }
+
+    fn reset(&mut self) {
+        *self = Self::new();
+    }
+}
+
 /// The tracker for a recursive function.
 pub struct Tracker {
-    depth: RefCell<usize>,
+    depth: RefCell<Depth>,
 }
 
 impl Tracker {
     /// Create a new tracker.
     pub const fn new() -> Self {
         Self {
-            depth: RefCell::new(0),
+            depth: RefCell::new(Depth::new()),
         }
     }
 
     /// Retrieve the current depth of the recursion. Starts from 1 once the
     /// recursive function is called.
     pub fn depth(&self) -> usize {
-        *self.depth.borrow()
+        self.depth.borrow().current
+    }
+
+    /// Check if the current depth reaches the given depth **for the first time**.
+    ///
+    /// This is useful for logging without any duplication.
+    pub fn depth_reaches(&self, depth: usize) -> bool {
+        let d = self.depth.borrow();
+        d.current == depth && d.current > d.last_max
     }
 
     /// Run a recursive function. Grow the stack if necessary.
     fn recurse<T>(&self, f: impl FnOnce() -> T) -> T {
         struct DepthGuard<'a> {
-            depth: &'a RefCell<usize>,
+            depth: &'a RefCell<Depth>,
         }
 
         impl<'a> DepthGuard<'a> {
-            fn new(depth: &'a RefCell<usize>) -> Self {
-                *depth.borrow_mut() += 1;
+            fn new(depth: &'a RefCell<Depth>) -> Self {
+                depth.borrow_mut().current += 1;
                 Self { depth }
             }
         }
 
         impl<'a> Drop for DepthGuard<'a> {
             fn drop(&mut self) {
-                *self.depth.borrow_mut() -= 1;
+                let mut d = self.depth.borrow_mut();
+                d.last_max = d.last_max.max(d.current); // update the last max depth
+                d.current -= 1; // restore the current depth
+                if d.current == 0 {
+                    d.reset(); // reset state if the recursion is finished
+                }
             }
         }
 

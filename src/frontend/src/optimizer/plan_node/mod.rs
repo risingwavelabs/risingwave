@@ -710,7 +710,7 @@ impl dyn PlanNode {
         state: &mut BuildFragmentGraphState,
     ) -> SchedulerResult<StreamPlanPb> {
         recursive::tracker!().recurse(|t| {
-            if t.depth() == PLAN_DEPTH_THRESHOLD {
+            if t.depth_reaches(PLAN_DEPTH_THRESHOLD) {
                 notice_to_user(PLAN_TOO_DEEP_NOTICE);
             }
 
@@ -762,7 +762,7 @@ impl dyn PlanNode {
     /// (for testing).
     pub fn to_batch_prost_identity(&self, identity: bool) -> SchedulerResult<BatchPlanPb> {
         recursive::tracker!().recurse(|t| {
-            if t.depth() == PLAN_DEPTH_THRESHOLD {
+            if t.depth_reaches(PLAN_DEPTH_THRESHOLD) {
                 notice_to_user(PLAN_TOO_DEEP_NOTICE);
             }
 
