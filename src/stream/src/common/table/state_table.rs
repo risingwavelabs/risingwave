@@ -212,6 +212,10 @@ where
             .expect("non-replicated state store should start immediately.")
             .expect("non-replicated state store should not wait_for_epoch, and fail because of it.")
     }
+
+    pub fn state_store(&self) -> &S {
+        &self.store
+    }
 }
 
 fn consistent_old_value_op(row_serde: impl ValueRowSerde) -> OpConsistencyLevel {

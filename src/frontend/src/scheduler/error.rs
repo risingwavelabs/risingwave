@@ -17,7 +17,6 @@ use risingwave_common::session_config::QueryMode;
 use risingwave_connector::error::ConnectorError;
 use risingwave_rpc_client::error::RpcError;
 use thiserror::Error;
-use tonic::{Code, Status};
 
 use crate::error::{ErrorCode, RwError};
 use crate::scheduler::plan_fragmenter::QueryId;
@@ -67,16 +66,6 @@ pub enum SchedulerError {
         #[backtrace]
         anyhow::Error,
     ),
-}
-
-/// Only if the code is Internal, change it to Execution Error. Otherwise convert to Rpc Error.
-impl From<tonic::Status> for SchedulerError {
-    fn from(s: Status) -> Self {
-        match s.code() {
-            Code::Internal => Self::TaskExecutionError(s.message().to_string()),
-            _ => Self::RpcError(s.into()),
-        }
-    }
 }
 
 impl From<SchedulerError> for RwError {

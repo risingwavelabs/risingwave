@@ -170,7 +170,7 @@ if [[ "$RUN_COMPACTION" -eq "1" ]]; then
 
     # Poll the current version id until we have around 100 version deltas
     delta_log_cnt=0
-    while [ $delta_log_cnt -le 90 ]
+    while [ "$delta_log_cnt" -le 90 ]
     do
         delta_log_cnt="$(./target/debug/risingwave risectl hummock list-version --verbose | grep -w '^ *id:' | grep -o '[0-9]\+' | head -n 1)"
         echo "Current version $delta_log_cnt"
