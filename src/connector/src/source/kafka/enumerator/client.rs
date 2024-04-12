@@ -319,7 +319,7 @@ impl KafkaSplitEnumerator {
                 Offset::Offset(offset) => {
                     result.insert(elem.partition(), Some(offset));
                 }
-                Offset::End => {
+                _ => {
                     let (_, high_watermark) = self
                         .client
                         .fetch_watermarks(
@@ -330,7 +330,6 @@ impl KafkaSplitEnumerator {
                         .await?;
                     result.insert(elem.partition(), Some(high_watermark));
                 }
-                _ => unreachable!(),
             }
         }
 
