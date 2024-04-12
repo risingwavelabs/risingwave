@@ -445,6 +445,13 @@ impl SplitImpl {
         )
     }
 
+    pub fn is_cdc_split(&self) -> bool {
+        matches!(
+            self,
+            MysqlCdc(_) | PostgresCdc(_) | MongodbCdc(_) | CitusCdc(_)
+        )
+    }
+
     /// Get the current split offset.
     pub fn get_cdc_split_offset(&self) -> String {
         match self {

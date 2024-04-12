@@ -313,7 +313,7 @@ impl<S: StateStore> SourceExecutor<S> {
     async fn persist_state_and_clear_cache(
         &mut self,
         epoch: EpochPair,
-    ) -> StreamExecutorResult<HashMap<SplitId, String>> {
+    ) -> StreamExecutorResult<HashMap<SplitId, SplitImpl>> {
         let core = self.stream_source_core.as_mut().unwrap();
 
         let cache = core
@@ -330,16 +330,11 @@ impl<S: StateStore> SourceExecutor<S> {
         // commit anyway, even if no message saved
         core.split_state_store.state_table.commit(epoch).await?;
 
-        let mut updated_offsets = HashMap::new();
+        let updated_splits = core.updated_splits_in_epoch.clone();
 
-        core.updated_splits_in_epoch
-            .drain()
-            .for_each(|(split_id, split_impl)| {
-                updated_offsets.insert(split_id, split_impl.get_cdc_split_offset());
-            });
+        core.updated_splits_in_epoch.clear();
 
-        assert!(core.updated_splits_in_epoch.is_empty());
-        Ok(updated_offsets)
+        Ok(updated_splits)
     }
 
     /// try mem table spill
@@ -509,13 +504,20 @@ impl<S: StateStore> SourceExecutor<S> {
                         }
                     }
 
-                    let updated_offsets = self.persist_state_and_clear_cache(epoch).await?;
+                    let updated_splits = self.persist_state_and_clear_cache(epoch).await?;
 
                     // when handle a checkpoint barrier, spawn a task to wait for epoch commit notification
                     if barrier.kind.is_checkpoint()
-                        && !updated_offsets.is_empty()
+                        && !updated_splits.is_empty()
                         && let Some(ref tx) = wait_epoch_tx
                     {
+                        let mut updated_offsets = HashMap::new();
+                        for (split_id, split_impl) in updated_splits {
+                            if split_impl.is_cdc_split() {
+                                updated_offsets.insert(split_id, split_impl.get_cdc_split_offset());
+                            }
+                        }
+
                         tracing::debug!("epoch to wait {:?}", epoch);
                         tx.send((Epoch(epoch.prev), updated_offsets))
                             .expect("wait_epoch_tx send success");
