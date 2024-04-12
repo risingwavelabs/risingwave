@@ -563,17 +563,8 @@ mod tests {
                                         data_type: Int32,
                                     },
                                 ),
-                                InputRef(
-                                    InputRef {
-                                        index: 1,
-                                        data_type: Int32,
-                                    },
-                                ),
                             ],
                             aliases: [
-                                Some(
-                                    "a",
-                                ),
                                 Some(
                                     "a",
                                 ),
@@ -717,7 +708,6 @@ mod tests {
                             having: None,
                             schema: Schema {
                                 fields: [
-                                    a:Int32,
                                     a:Int32,
                                 ],
                             },

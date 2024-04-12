@@ -612,6 +612,7 @@ pub(crate) async fn reparse_table_for_sink(
         source_watermarks,
         append_only,
         on_conflict,
+        with_version_column,
         ..
     } = definition
     else {
@@ -631,6 +632,7 @@ pub(crate) async fn reparse_table_for_sink(
         source_watermarks,
         append_only,
         on_conflict,
+        with_version_column,
     )
     .await?;
 
