@@ -64,8 +64,8 @@ use super::{
     ObjectRangeBounds, ObjectResult, ObjectStore, StreamingUploader,
 };
 use crate::object::{
-    get_attempt_timeout_by_type, get_retry_strategy, should_retry, try_update_failure_metric,
-    ObjectDataStream, ObjectMetadataIter, OperationType,
+    get_attempt_timeout_by_type, get_retry_strategy, try_update_failure_metric, ObjectDataStream,
+    ObjectMetadataIter, OperationType, RetryCondition,
 };
 
 type PartId = i32;
@@ -224,7 +224,7 @@ impl S3StreamingUploader {
                         }
                     }
                 },
-                should_retry,
+                RetryCondition::new(config.object_store_upload_timeout_ms),
             )
             .await;
 
@@ -1007,13 +1007,7 @@ impl Stream for S3ObjectIter {
 
 fn set_error_should_retry<E>(config: Arc<ObjectStoreConfig>, object_err: ObjectError) -> ObjectError
 where
-    E: ProvideErrorMetadata
-        + Into<BoxError>
-        + Sync
-        + Send
-        // + Debug
-        + std::error::Error
-        + 'static,
+    E: ProvideErrorMetadata + Into<BoxError> + Sync + Send + std::error::Error + 'static,
 {
     let mut inner = object_err.into_inner();
     match inner.borrow_mut() {

@@ -16,7 +16,7 @@
 pub mod sim;
 use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use prometheus::HistogramTimer;
@@ -585,7 +585,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .unwrap_or_else(|_| Err(ObjectError::internal("upload timeout")))
                 }
             },
-            should_retry,
+            RetryCondition::new(self.config.object_store_upload_timeout_ms),
         )
         .await;
 
@@ -627,7 +627,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         })
                 }
             },
-            should_retry,
+            RetryCondition::new(self.config.object_store_streaming_upload_timeout_ms),
         )
         .await;
 
@@ -677,7 +677,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .unwrap_or_else(|_| Err(ObjectError::internal("read timeout")))
                 }
             },
-            should_retry,
+            RetryCondition::new(self.config.object_store_read_timeout_ms),
         )
         .await;
 
@@ -743,7 +743,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         })
                 }
             },
-            should_retry,
+            RetryCondition::new(self.config.object_store_streaming_read_timeout_ms),
         )
         .await;
 
@@ -794,7 +794,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .unwrap_or_else(|_| Err(ObjectError::internal("metadata timeout")))
                 }
             },
-            should_retry,
+            RetryCondition::new(UNSET_MAX_TIMEOUT),
         )
         .await;
 
@@ -833,7 +833,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .unwrap_or_else(|_| Err(ObjectError::internal("delete timeout")))
                 }
             },
-            should_retry,
+            RetryCondition::new(UNSET_MAX_TIMEOUT),
         )
         .await;
 
@@ -872,7 +872,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .unwrap_or_else(|_| Err(ObjectError::internal("delete_objects timeout")))
                 }
             },
-            should_retry,
+            RetryCondition::new(UNSET_MAX_TIMEOUT),
         )
         .await;
 
@@ -912,7 +912,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .unwrap_or_else(|_| Err(ObjectError::internal("list timeout")))
                 }
             },
-            should_retry,
+            RetryCondition::new(UNSET_MAX_TIMEOUT),
         )
         .await;
 
@@ -1099,11 +1099,6 @@ fn get_retry_strategy(
         .map(if true { jitter } else { |x| x })
 }
 
-#[inline(always)]
-pub fn should_retry(err: &ObjectError) -> bool {
-    err.should_retry()
-}
-
 pub type ObjectMetadataIter = BoxStream<'static, ObjectResult<ObjectMetadata>>;
 pub type ObjectDataStream = BoxStream<'static, ObjectResult<Bytes>>;
 
@@ -1171,3 +1166,37 @@ fn get_attempt_timeout_by_type(config: &ObjectStoreConfig, operation_type: Opera
         OperationType::List => config.object_store_list_attempt_timeout_ms,
     }
 }
+
+struct RetryCondition {
+    max_duration_ms: u64,
+
+    init_instant: Instant,
+}
+
+impl RetryCondition {
+    fn new(max_duration_ms: u64) -> Self {
+        Self {
+            max_duration_ms,
+            init_instant: Instant::now(),
+        }
+    }
+
+    #[inline(always)]
+    fn should_retry_inner(&mut self, err: &ObjectError) -> bool {
+        if self.max_duration_ms != UNSET_MAX_TIMEOUT
+            && self.init_instant.elapsed().as_millis() > self.max_duration_ms as u128
+        {
+            return false;
+        }
+
+        err.should_retry()
+    }
+}
+
+impl tokio_retry::Condition<ObjectError> for RetryCondition {
+    fn should_retry(&mut self, err: &ObjectError) -> bool {
+        self.should_retry_inner(err)
+    }
+}
+
+const UNSET_MAX_TIMEOUT: u64 = 0;

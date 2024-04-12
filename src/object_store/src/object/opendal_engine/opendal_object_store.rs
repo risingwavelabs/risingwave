@@ -256,7 +256,7 @@ impl OpendalStreamingUploader {
                     .with_max_delay(Duration::from_millis(
                         config.object_store_req_retry_max_delay_ms,
                     ))
-                    .with_max_times(config.object_store_req_retry_max_retry_attempts)
+                    .with_max_times(config.object_store_streaming_upload_retry_attempts)
                     .with_factor(2.0)
                     .with_jitter(),
             )
