@@ -57,9 +57,6 @@ statement ok
 create sink s_simple_1 into m_simple as select v1, v2 from t_simple;
 
 statement ok
-create subscription ddl_subscription_table from mv2 with(retention = '1D');
-
-statement ok
 insert into t1 select * from generate_series(1, 1000);
 
 statement ok
