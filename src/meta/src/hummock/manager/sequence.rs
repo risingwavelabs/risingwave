@@ -96,6 +96,7 @@ pub async fn next_compaction_task_id(env: &MetaSrvEnv) -> Result<u64> {
     match env.hummock_seq.clone() {
         None => env
             .id_gen_manager()
+            .as_kv()
             .generate::<{ IdCategory::HummockCompactionTask }>()
             .await
             .map_err(Into::into),
@@ -107,6 +108,7 @@ pub async fn next_meta_backup_id(env: &MetaSrvEnv) -> Result<u64> {
     match env.hummock_seq.clone() {
         None => env
             .id_gen_manager()
+            .as_kv()
             .generate::<{ IdCategory::Backup }>()
             .await
             .map_err(Into::into),
@@ -118,6 +120,7 @@ pub async fn next_compaction_group_id(env: &MetaSrvEnv) -> Result<u64> {
     match env.hummock_seq.clone() {
         None => env
             .id_gen_manager()
+            .as_kv()
             .generate::<{ IdCategory::CompactionGroup }>()
             .await
             .map_err(Into::into),
@@ -135,6 +138,7 @@ pub async fn next_sstable_object_id(
     match env.hummock_seq.clone() {
         None => env
             .id_gen_manager()
+            .as_kv()
             .generate_interval::<{ IdCategory::HummockSstableId }>(num as u64)
             .await
             .map_err(Into::into),

@@ -126,7 +126,7 @@ impl SplitMetaData for IcebergSplit {
         serde_json::to_value(self.clone()).unwrap().into()
     }
 
-    fn update_with_offset(&mut self, _start_offset: String) -> ConnectorResult<()> {
+    fn update_offset(&mut self, _last_seen_offset: String) -> ConnectorResult<()> {
         unimplemented!()
     }
 }
@@ -210,7 +210,15 @@ impl IcebergSplitEnumerator {
             },
         };
         let mut files = vec![];
-        for file in table.current_data_files().await? {
+        for file in table
+            .data_files_of_snapshot(
+                table
+                    .current_table_metadata()
+                    .snapshot(snapshot_id)
+                    .expect("snapshot must exists"),
+            )
+            .await?
+        {
             if file.content != DataContentType::Data {
                 bail!("Reading iceberg table with delete files is unsupported. Please try to compact the table first.");
             }

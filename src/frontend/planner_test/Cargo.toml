@@ -16,7 +16,7 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 expect-test = "1"
-itertools = "0.12"
+itertools = { workspace = true }
 paste = "1"
 risingwave_expr_impl = { workspace = true }
 risingwave_frontend = { workspace = true }

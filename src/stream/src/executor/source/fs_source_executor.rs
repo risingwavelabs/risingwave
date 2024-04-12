@@ -169,7 +169,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         for sc in rhs {
             if let Some(s) = core.updated_splits_in_epoch.get(&sc.id()) {
                 let fs = s
-                    .as_fs()
+                    .as_s3()
                     .unwrap_or_else(|| panic!("split {:?} is not fs", s));
                 // unfinished this epoch
                 if fs.offset < fs.size {
@@ -237,7 +237,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .values()
             .filter(|split| {
                 let fs = split
-                    .as_fs()
+                    .as_s3()
                     .unwrap_or_else(|| panic!("split {:?} is not fs", split));
                 fs.offset < fs.size
             })
@@ -249,7 +249,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .values()
             .filter(|split| {
                 let fs = split
-                    .as_fs()
+                    .as_s3()
                     .unwrap_or_else(|| panic!("split {:?} is not fs", split));
                 fs.offset == fs.size
             })

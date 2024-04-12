@@ -539,6 +539,7 @@ mod tests {
             value_indices: vec![0],
             definition: "".into(),
             handle_pk_conflict_behavior: 0,
+            version_column_index: None,
             read_prefix_len_hint: 1,
             version: None,
             watermark_indices: vec![],

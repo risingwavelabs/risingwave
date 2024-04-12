@@ -28,13 +28,13 @@ buildkite-agent artifact download java-binding-integration-test.tar.zst ./
 tar xf java-binding-integration-test.tar.zst
 
 echo "--- starting risingwave cluster"
-cargo make ci-start java-binding-demo
+risedev ci-start java-binding-demo
 
 echo "--- ingest data and run java binding"
-cargo make ingest-data-and-run-java-binding
+risedev ingest-data-and-run-java-binding
 
 echo "--- Kill cluster"
-cargo make ci-kill
+risedev ci-kill
 
 echo "--- run stream chunk java binding"
 RISINGWAVE_ROOT=$(git rev-parse --show-toplevel)

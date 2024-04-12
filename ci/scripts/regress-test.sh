@@ -58,7 +58,7 @@ RUST_BACKTRACE=1 target/debug/risingwave_regress_test --host db \
 
 echo "--- ci-3cn-1fe, RisingWave regress test"
 rm -rf `pwd`/src/tests/regress/output
-cargo make ci-start ci-3cn-1fe
+risedev ci-start ci-3cn-1fe
 RUST_BACKTRACE=1 target/debug/risingwave_regress_test --host 127.0.0.1 \
   -p 4566 \
   -u root \
@@ -68,4 +68,4 @@ RUST_BACKTRACE=1 target/debug/risingwave_regress_test --host 127.0.0.1 \
   --mode risingwave
 
 echo "--- Kill cluster"
-cargo make ci-kill
+risedev ci-kill

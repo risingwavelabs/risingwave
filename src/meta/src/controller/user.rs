@@ -119,7 +119,7 @@ impl CatalogController {
             PbUpdateField::CreateDb => user.can_create_db = Set(update_user.can_create_db),
             PbUpdateField::CreateUser => user.can_create_user = Set(update_user.can_create_user),
             PbUpdateField::AuthInfo => {
-                user.auth_info = Set(update_user.auth_info.clone().map(AuthInfo))
+                user.auth_info = Set(update_user.auth_info.as_ref().map(AuthInfo::from))
             }
             PbUpdateField::Rename => user.name = Set(update_user.name.clone()),
         });
@@ -506,7 +506,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_user_and_privilege() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await);
         mgr.create_user(make_test_user("test_user_1")).await?;
         mgr.create_user(make_test_user("test_user_2")).await?;
         let user_1 = mgr.get_user_by_name("test_user_1").await?;
