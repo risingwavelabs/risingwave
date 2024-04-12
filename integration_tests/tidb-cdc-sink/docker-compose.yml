@@ -200,6 +200,8 @@ services:
 volumes:
   risingwave-standalone:
     external: false
+  meta-0:
+    external: false
   grafana-0:
     external: false
   minio-0:

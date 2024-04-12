@@ -99,6 +99,8 @@ services:
 volumes:
   risingwave-standalone:
     external: false
+  meta-0:
+    external: false
   minio-0:
     external: false
 
