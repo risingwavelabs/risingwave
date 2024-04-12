@@ -167,7 +167,7 @@ async fn do_handle_explain(
                     | Statement::Delete { .. }
                     | Statement::Update { .. }
                     | Statement::Query { .. } => {
-                        gen_batch_plan_by_statement(&session, context.into(), stmt).map(|x| x.plan)
+                        gen_batch_plan_by_statement(&session, context, stmt).map(|x| x.plan)
                     }
 
                     _ => bail_not_implemented!("unsupported statement {:?}", stmt),
