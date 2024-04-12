@@ -452,7 +452,7 @@ impl SplitImpl {
             PostgresCdc(split) => split.start_offset().clone().unwrap_or_default(),
             MongodbCdc(split) => split.start_offset().clone().unwrap_or_default(),
             CitusCdc(split) => split.start_offset().clone().unwrap_or_default(),
-            _ => "".to_string(),
+            _ => unreachable!("get_cdc_split_offset() is only for cdc split"),
         }
     }
 }
