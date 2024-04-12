@@ -124,7 +124,7 @@ AUCTION_TOPIC="nexmark-auction"
 BID_TOPIC="nexmark-bid"
 PERSON_TOPIC="nexmark-person"
 NUM_PARTITIONS=8
-# NOTE: Due to https://github.com/risingwavelabs/risingwave/issues/6747, use $(SEPARATE_TOPICS=false)
+# NOTE: Due to https://github.com/risingwavelabs/risingwave/issues/6747, use SEPARATE_TOPICS=false
 SEPARATE_TOPICS=false
 RUST_LOG="nexmark_server=info"
 
