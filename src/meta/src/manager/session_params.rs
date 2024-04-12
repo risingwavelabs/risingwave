@@ -53,11 +53,11 @@ impl SessionParamsManager {
             params
         } else {
             return Err(MetaError::system_params(
-                "cluster is not newly created but no system parameters can be found",
+                "cluster is not newly created but no session parameters can be found",
             ));
         };
 
-        info!("system parameters: {:?}", params);
+        info!(?params, "session parameters");
 
         Ok(Self {
             meta_store,

@@ -29,7 +29,6 @@ use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{FragmentParallelUnitMapping, MetaSnapshot, SubscribeResponse};
 use risingwave_rpc_client::ComputeClientPoolRef;
-use thiserror_ext::AsReport;
 use tokio::sync::watch::Sender;
 
 use crate::catalog::root_catalog::Catalog;
@@ -96,13 +95,10 @@ impl ObserverState for FrontendObserverNode {
                 self.system_params_manager.try_set_params(p);
             }
             Info::SessionParam(p) => {
-                if let Err(e) =
-                    self.session_params
-                        .write()
-                        .set(&p.param, p.value().to_string(), &mut ())
-                {
-                    tracing::error!(error = %e.as_report(), "failed to set session param notified by meta");
-                }
+                self.session_params
+                    .write()
+                    .set(&p.param, p.value().to_string(), &mut ())
+                    .unwrap();
             }
             Info::HummockStats(stats) => {
                 self.handle_table_stats_notification(stats);
@@ -198,12 +194,8 @@ impl ObserverState for FrontendObserverNode {
         self.user_info_updated_tx
             .send(snapshot_version.catalog_version)
             .unwrap();
-        match serde_json::from_str(&session_params.unwrap().params) {
-            Ok(params) => *self.session_params.write() = params,
-            Err(e) => {
-                tracing::error!(error = %e.as_report(), "failed to parse session params from initial notification")
-            }
-        }
+        *self.session_params.write() =
+            serde_json::from_str(&session_params.unwrap().params).unwrap();
     }
 }
 

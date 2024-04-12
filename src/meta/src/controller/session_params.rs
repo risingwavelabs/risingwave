@@ -62,7 +62,7 @@ impl SessionParamsController {
             }
         }
 
-        info!("session parameters: {:?}", init_params);
+        info!(?init_params, "session parameters");
 
         let ctl = Self {
             db,

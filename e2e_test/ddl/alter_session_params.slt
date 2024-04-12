@@ -11,7 +11,15 @@ show RW_STREAMING_ENABLE_DELTA_JOIN;
 false
 
 statement ok
+set RW_STREAMING_ENABLE_DELTA_JOIN to false;
+
+statement ok
 alter system set rw_streaming_enable_delta_join to true;
+
+query T
+show RW_STREAMING_ENABLE_DELTA_JOIN;
+----
+false
 
 sleep 1s
 
