@@ -474,7 +474,7 @@ pub(crate) mod tests {
         WorkerNodeManager, WorkerNodeSelector,
     };
     use risingwave_common::catalog::{
-        ColumnCatalog, ColumnDesc, ConflictBehavior, DEFAULT_SUPER_USER_ID,
+        ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, DEFAULT_SUPER_USER_ID,
     };
     use risingwave_common::hash::ParallelUnitMapping;
     use risingwave_common::types::DataType;
@@ -485,7 +485,7 @@ pub(crate) mod tests {
 
     use crate::catalog::catalog_service::CatalogReader;
     use crate::catalog::root_catalog::Catalog;
-    use crate::catalog::table_catalog::{CreateType, TableType};
+    use crate::catalog::table_catalog::TableType;
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
         generic, BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalScan, ToBatch,
@@ -581,6 +581,7 @@ pub(crate) mod tests {
             value_indices: vec![0, 1, 2],
             definition: "".to_string(),
             conflict_behavior: ConflictBehavior::NoCheck,
+            version_column_index: None,
             read_prefix_len_hint: 0,
             version: None,
             watermark_columns: FixedBitSet::with_capacity(3),

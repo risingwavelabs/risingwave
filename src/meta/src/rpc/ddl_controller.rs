@@ -262,7 +262,7 @@ impl DdlController {
     }
 
     async fn gen_unique_id<const C: IdCategoryType>(&self) -> MetaResult<u32> {
-        let id = self.env.id_gen_manager().generate::<C>().await? as u32;
+        let id = self.env.id_gen_manager().as_kv().generate::<C>().await? as u32;
         Ok(id)
     }
 
@@ -1245,6 +1245,7 @@ impl DdlController {
                 let dummy_id = self
                     .env
                     .id_gen_manager()
+                    .as_kv()
                     .generate::<{ IdCategory::Table }>()
                     .await? as u32;
 
@@ -1424,6 +1425,7 @@ impl DdlController {
                     MetadataManager::V1(_) => {
                         self.env
                             .id_gen_manager()
+                            .as_kv()
                             .generate::<{ IdCategory::Table }>()
                             .await? as u32
                     }
@@ -1713,6 +1715,7 @@ impl DdlController {
         let dummy_id = self
             .env
             .id_gen_manager()
+            .as_kv()
             .generate::<{ IdCategory::Table }>()
             .await? as u32;
 

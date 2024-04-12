@@ -286,7 +286,7 @@ impl FrontendEnv {
             Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
-            compute_client_pool,
+            compute_client_pool.clone(),
             catalog_reader.clone(),
             Arc::new(GLOBAL_DISTRIBUTED_QUERY_METRICS.clone()),
             batch_config.distributed_query_limit,
@@ -311,6 +311,7 @@ impl FrontendEnv {
             user_info_updated_tx,
             hummock_snapshot_manager.clone(),
             system_params_manager.clone(),
+            compute_client_pool,
         );
         let observer_manager =
             ObserverManager::new_with_meta_client(meta_client.clone(), frontend_observer_node)

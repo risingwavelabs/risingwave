@@ -34,7 +34,6 @@ use serde::de::DeserializeOwned;
 
 use super::cdc::DebeziumCdcMeta;
 use super::datagen::DatagenMeta;
-use super::filesystem::FsSplit;
 use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
 use super::kinesis::KinesisMeta;
@@ -416,24 +415,6 @@ impl TryFrom<&ConnectorSplit> for SplitImpl {
     }
 }
 
-// for the `FsSourceExecutor`
-impl SplitImpl {
-    #[allow(clippy::result_unit_err)]
-    pub fn into_fs(self) -> Result<FsSplit, ()> {
-        match self {
-            Self::S3(split) => Ok(split),
-            _ => Err(()),
-        }
-    }
-
-    pub fn as_fs(&self) -> Option<&FsSplit> {
-        match self {
-            Self::S3(split) => Some(split),
-            _ => None,
-        }
-    }
-}
-
 impl SplitImpl {
     fn restore_from_json_inner(split_type: &str, value: JsonbVal) -> Result<Self> {
         match_source_name_str!(
@@ -469,12 +450,12 @@ impl SplitMetaData for SplitImpl {
         Self::restore_from_json_inner(&split_type, inner_value.into())
     }
 
-    fn update_with_offset(&mut self, start_offset: String) -> Result<()> {
+    fn update_offset(&mut self, last_seen_offset: String) -> Result<()> {
         dispatch_split_impl!(
             self,
             inner,
             IgnoreType,
-            inner.update_with_offset(start_offset)
+            inner.update_offset(last_seen_offset)
         )
     }
 }
@@ -486,9 +467,9 @@ impl SplitImpl {
         })
     }
 
-    pub fn update_in_place(&mut self, start_offset: String) -> Result<()> {
+    pub fn update_in_place(&mut self, last_seen_offset: String) -> Result<()> {
         dispatch_split_impl!(self, inner, IgnoreType, {
-            inner.update_with_offset(start_offset)?
+            inner.update_offset(last_seen_offset)?
         });
         Ok(())
     }
@@ -559,7 +540,7 @@ pub trait SplitMetaData: Sized {
 
     fn encode_to_json(&self) -> JsonbVal;
     fn restore_from_json(value: JsonbVal) -> Result<Self>;
-    fn update_with_offset(&mut self, start_offset: String) -> crate::error::ConnectorResult<()>;
+    fn update_offset(&mut self, last_seen_offset: String) -> crate::error::ConnectorResult<()>;
 }
 
 /// [`ConnectorState`] maintains the consuming splits' info. In specific split readers,

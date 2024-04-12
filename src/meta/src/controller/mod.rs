@@ -114,6 +114,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             handle_pk_conflict_behavior: PbHandleConflictBehavior::from(
                 value.0.handle_pk_conflict_behavior,
             ) as _,
+            version_column_index: value.0.version_column_index.map(|x| x as u32),
             read_prefix_len_hint: value.0.read_prefix_len_hint as _,
             watermark_indices: value.0.watermark_indices.0,
             dist_key_in_pk: value.0.dist_key_in_pk.0,
@@ -206,6 +207,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             target_table: value.0.target_table.map(|id| id as _),
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
+            create_type: PbCreateType::Foreground as _,
         }
     }
 }
