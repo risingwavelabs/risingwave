@@ -14,6 +14,7 @@
 
 use risingwave_common::bail;
 
+use super::unified::json::TimestamptzHandling;
 use super::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType,
     SourceStreamChunkRowWriter, SpecificParserConfig,
@@ -66,7 +67,7 @@ impl PlainParser {
         };
 
         let transaction_meta_builder = Some(AccessBuilderImpl::DebeziumJson(
-            DebeziumJsonAccessBuilder::new()?,
+            DebeziumJsonAccessBuilder::new(TimestamptzHandling::GuessNumberUnit)?,
         ));
         Ok(Self {
             key_builder,
