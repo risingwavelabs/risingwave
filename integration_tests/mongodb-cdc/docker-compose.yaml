@@ -3,12 +3,8 @@ version: "3"
 services:
   risingwave-standalone:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-with-sqlite.yml
       service: risingwave-standalone
-  etcd-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: etcd-0
   grafana-0:
     extends:
       file: ../../docker/docker-compose.yml
@@ -36,8 +32,6 @@ services:
 
 volumes:
   risingwave-standalone:
-    external: false
-  etcd-0:
     external: false
   grafana-0:
     external: false

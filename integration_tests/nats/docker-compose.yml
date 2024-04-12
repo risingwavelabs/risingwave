@@ -3,17 +3,13 @@ version: "3"
 services:
   risingwave-standalone:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-with-sqlite.yml
       service: risingwave-standalone
   nats-server:
     image: nats:latest
     ports:
       - "4222:4222"
     command: -js
-  etcd-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: etcd-0
   grafana-0:
     extends:
       file: ../../docker/docker-compose.yml
@@ -49,8 +45,6 @@ services:
     container_name: datagen
 volumes:
   compute-node-0:
-    external: false
-  etcd-0:
     external: false
   grafana-0:
     external: false

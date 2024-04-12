@@ -30,16 +30,12 @@ services:
         ipv4_address: 172.21.0.3
   risingwave-standalone:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-with-sqlite.yml
       service: risingwave-standalone
     networks:
       mynetwork:
         ipv4_address: 172.21.0.4
-  etcd-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: etcd-0
-    networks:
+  networks:
       mynetwork:
         ipv4_address: 172.21.0.5
   grafana-0:
@@ -85,8 +81,6 @@ services:
         ipv4_address: 172.21.0.11
 volumes:
   risingwave-standalone:
-    external: false
-  etcd-0:
     external: false
   grafana-0:
     external: false

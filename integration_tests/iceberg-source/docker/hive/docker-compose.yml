@@ -75,13 +75,6 @@ services:
     networks:
       iceberg_net:
 
-  etcd-0:
-    extends:
-      file: ../../../../docker/docker-compose.yml
-      service: etcd-0
-    networks:
-      iceberg_net:
-
   metastore:
     image: naushadh/hive-metastore
     depends_on:
@@ -105,8 +98,6 @@ services:
 
 volumes:
   risingwave-standalone:
-    external: false
-  etcd-0:
     external: false
   minio-0:
     external: false

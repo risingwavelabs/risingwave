@@ -76,17 +76,8 @@ services:
     networks:
       iceberg_net:
 
-  etcd-0:
-    extends:
-      file: ../../../../docker/docker-compose.yml
-      service: etcd-0
-    networks:
-      iceberg_net:
-
 volumes:
   risingwave-standalone:
-    external: false
-  etcd-0:
     external: false
   minio-0:
     external: false
