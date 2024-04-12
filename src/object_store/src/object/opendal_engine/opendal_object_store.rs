@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::ops::Range;
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -36,7 +37,7 @@ pub struct OpendalObjectStore {
     pub(crate) op: Operator,
     pub(crate) engine_type: EngineType,
 
-    pub(crate) config: ObjectStoreConfig,
+    pub(crate) config: Arc<ObjectStoreConfig>,
 }
 #[derive(Clone)]
 pub enum EngineType {
@@ -60,7 +61,7 @@ impl OpendalObjectStore {
         Ok(Self {
             op,
             engine_type: EngineType::Memory,
-            config: ObjectStoreConfig::default(),
+            config: Arc::new(ObjectStoreConfig::default()),
         })
     }
 }
@@ -245,7 +246,11 @@ pub struct OpendalStreamingUploader {
 }
 
 impl OpendalStreamingUploader {
-    pub async fn new(op: Operator, path: String, config: ObjectStoreConfig) -> ObjectResult<Self> {
+    pub async fn new(
+        op: Operator,
+        path: String,
+        config: Arc<ObjectStoreConfig>,
+    ) -> ObjectResult<Self> {
         let writer = op
             .clone()
             .layer(

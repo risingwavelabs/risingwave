@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use opendal::layers::LoggingLayer;
 use opendal::services::Oss;
 use opendal::Operator;
@@ -52,7 +54,7 @@ impl OpendalObjectStore {
         Ok(Self {
             op,
             engine_type: EngineType::Oss,
-            config,
+            config: Arc::new(config),
         })
     }
 }

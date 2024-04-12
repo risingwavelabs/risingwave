@@ -490,7 +490,7 @@ impl Drop for MonitoredStreamingReader {
 pub struct MonitoredObjectStore<OS: ObjectStore> {
     inner: OS,
     object_store_metrics: Arc<ObjectStoreMetrics>,
-    config: ObjectStoreConfig,
+    config: Arc<ObjectStoreConfig>,
 }
 
 /// Manually dispatch trait methods.
@@ -517,16 +517,8 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     ) -> Self {
         Self {
             object_store_metrics,
-            // streaming_read_timeout: Some(Duration::from_millis(
-            //     config.object_store_streaming_read_timeout_ms,
-            // )),
-            // streaming_upload_timeout: Some(Duration::from_millis(
-            //     config.object_store_streaming_upload_timeout_ms,
-            // )),
-            // read_timeout: Some(Duration::from_millis(config.object_store_read_timeout_ms)),
-            // upload_timeout: Some(Duration::from_millis(config.object_store_upload_timeout_ms)),
             inner: store,
-            config,
+            config: Arc::new(config),
         }
     }
 

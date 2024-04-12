@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use opendal::layers::LoggingLayer;
@@ -47,7 +48,7 @@ impl OpendalObjectStore {
         Ok(Self {
             op,
             engine_type: EngineType::S3,
-            config,
+            config: Arc::new(config),
         })
     }
 
