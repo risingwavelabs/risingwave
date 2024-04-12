@@ -23,7 +23,6 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::actor_dispatcher::DispatcherType;
-use risingwave_meta_model_v2::fragment::StreamNode;
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::{
     Actor, ActorDispatcher, Fragment, Index, Object, ObjectDependency, Sink, Source,
@@ -33,7 +32,7 @@ use risingwave_meta_model_v2::{
     actor, actor_dispatcher, fragment, index, object, object_dependency, sink, source,
     streaming_job, subscription, table, ActorId, ActorUpstreamActors, CreateType, DatabaseId,
     ExprNodeArray, FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SourceId,
-    StreamingParallelism, TableId, TableVersion, UserId,
+    StreamNode, StreamingParallelism, TableId, TableVersion, UserId,
 };
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableVersion};
@@ -481,7 +480,7 @@ impl CatalogController {
         for splits in split_assignment.values() {
             for (actor_id, splits) in splits {
                 let splits = splits.iter().map(PbConnectorSplit::from).collect_vec();
-                let connector_splits = PbConnectorSplits { splits };
+                let connector_splits = &PbConnectorSplits { splits };
                 actor::ActiveModel {
                     actor_id: Set(*actor_id as _),
                     splits: Set(Some(connector_splits.into())),
@@ -542,7 +541,7 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Table.as_str(), id))?;
         let original_version = original_version.expect("version for table should exist");
-        if version.version != original_version.inner_ref().version + 1 {
+        if version.version != original_version.to_protobuf().version + 1 {
             return Err(MetaError::permission_denied("table version is stale"));
         }
 
@@ -734,7 +733,7 @@ impl CatalogController {
             }
             fragment::ActiveModel {
                 fragment_id: Set(fragment_id),
-                stream_node: Set(StreamNode::from_protobuf(&stream_node)),
+                stream_node: Set(StreamNode::from(&stream_node)),
                 upstream_fragment_id: Set(upstream_fragment_id),
                 ..Default::default()
             }
@@ -767,14 +766,14 @@ impl CatalogController {
                 .into_tuple()
                 .all(&txn)
                 .await?;
-            for (index_id, mut nodes) in index_items {
-                nodes
-                    .0
+            for (index_id, nodes) in index_items {
+                let mut pb_nodes = nodes.to_protobuf();
+                pb_nodes
                     .iter_mut()
                     .for_each(|x| expr_rewriter.rewrite_expr(x));
                 let index = index::ActiveModel {
                     index_id: Set(index_id),
-                    index_items: Set(nodes),
+                    index_items: Set(pb_nodes.into()),
                     ..Default::default()
                 }
                 .update(&txn)
@@ -839,7 +838,7 @@ impl CatalogController {
             if let Some(table_id) = source.optional_associated_table_id {
                 vec![table_id]
             } else if let Some(source_info) = &source.source_info
-                && source_info.inner_ref().cdc_source_job
+                && source_info.to_protobuf().cdc_source_job
             {
                 vec![source_id]
             } else {
@@ -899,7 +898,7 @@ impl CatalogController {
         for (id, _, stream_node) in fragments {
             fragment::ActiveModel {
                 fragment_id: Set(id),
-                stream_node: Set(StreamNode::from_protobuf(&stream_node)),
+                stream_node: Set(StreamNode::from(&stream_node)),
                 ..Default::default()
             }
             .update(&txn)
@@ -960,7 +959,7 @@ impl CatalogController {
         for (id, _, stream_node) in fragments {
             fragment::ActiveModel {
                 fragment_id: Set(id),
-                stream_node: Set(StreamNode::from_protobuf(&stream_node)),
+                stream_node: Set(StreamNode::from(&stream_node)),
                 ..Default::default()
             }
             .update(&txn)
@@ -1107,12 +1106,12 @@ impl CatalogController {
                     actor_id: Set(actor_id as _),
                     fragment_id: Set(fragment_id as _),
                     status: Set(ActorStatus::Running),
-                    splits: Set(splits.map(|splits| PbConnectorSplits { splits }.into())),
+                    splits: Set(splits.map(|splits| (&PbConnectorSplits { splits }).into())),
                     parallel_unit_id: Set(parallel_unit.id as _),
                     worker_id: Set(parallel_unit.worker_node_id as _),
                     upstream_actor_ids: Set(actor_upstreams),
-                    vnode_bitmap: Set(vnode_bitmap.map(|bitmap| bitmap.into())),
-                    expr_context: Set(expr_context.unwrap().into()),
+                    vnode_bitmap: Set(vnode_bitmap.as_ref().map(|bitmap| bitmap.into())),
+                    expr_context: Set(expr_context.as_ref().unwrap().into()),
                 });
 
                 for PbDispatcher {
@@ -1132,7 +1131,7 @@ impl CatalogController {
                             .into()),
                         dist_key_indices: Set(dist_key_indices.into()),
                         output_indices: Set(output_indices.into()),
-                        hash_mapping: Set(hash_mapping.map(|mapping| mapping.into())),
+                        hash_mapping: Set(hash_mapping.as_ref().map(|mapping| mapping.into())),
                         dispatcher_id: Set(dispatcher_id as _),
                         downstream_actor_ids: Set(downstream_actor_id.into()),
                     })
@@ -1157,7 +1156,7 @@ impl CatalogController {
                     .ok_or_else(|| MetaError::catalog_id_not_found("actor", actor_id))?;
 
                 let mut actor = actor.into_active_model();
-                actor.vnode_bitmap = Set(Some(bitmap.to_protobuf().into()));
+                actor.vnode_bitmap = Set(Some((&bitmap.to_protobuf()).into()));
                 actor.update(&txn).await?;
             }
 
@@ -1174,7 +1173,7 @@ impl CatalogController {
             for actor in &fragment_actors {
                 actor_to_parallel_unit.insert(actor.actor_id as u32, actor.parallel_unit_id as _);
                 if let Some(vnode_bitmap) = &actor.vnode_bitmap {
-                    let bitmap = Bitmap::from(vnode_bitmap.inner_ref());
+                    let bitmap = Bitmap::from(&vnode_bitmap.to_protobuf());
                     actor_to_vnode_bitmap.insert(actor.actor_id as u32, bitmap);
                 }
             }
@@ -1191,7 +1190,7 @@ impl CatalogController {
             .to_protobuf();
 
             let mut fragment = fragment.into_active_model();
-            fragment.vnode_mapping = Set(vnode_mapping.clone().into());
+            fragment.vnode_mapping = Set((&vnode_mapping).into());
             fragment.update(&txn).await?;
 
             fragment_mapping_to_notify.push(FragmentParallelUnitMapping {
@@ -1236,7 +1235,7 @@ impl CatalogController {
                     if dispatcher.dispatcher_type.as_ref() == &DispatcherType::Hash {
                         dispatcher.hash_mapping =
                             Set(upstream_dispatcher_mapping.as_ref().map(|m| {
-                                risingwave_meta_model_v2::ActorMapping::from(m.to_protobuf())
+                                risingwave_meta_model_v2::ActorMapping::from(&m.to_protobuf())
                             }));
                     } else {
                         debug_assert!(upstream_dispatcher_mapping.is_none());
