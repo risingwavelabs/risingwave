@@ -63,7 +63,11 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
             }
             ServiceConfig::Frontend(c) => {
                 let listen_address = &c.listen_address;
-                writeln!(env, "RISEDEV_RW_FRONTEND_LISTEN_ADDRESS=\"{listen_address}\"",).unwrap();
+                writeln!(
+                    env,
+                    "RISEDEV_RW_FRONTEND_LISTEN_ADDRESS=\"{listen_address}\"",
+                )
+                .unwrap();
                 let port = &c.port;
                 writeln!(env, "RISEDEV_RW_FRONTEND_PORT=\"{port}\"",).unwrap();
             }
