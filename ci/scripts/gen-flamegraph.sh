@@ -124,7 +124,7 @@ AUCTION_TOPIC="nexmark-auction"
 BID_TOPIC="nexmark-bid"
 PERSON_TOPIC="nexmark-person"
 NUM_PARTITIONS=8
-# NOTE: Due to https://github.com/risingwavelabs/risingwave/issues/6747, use `SEPARATE_TOPICS=false`
+# NOTE: Due to https://github.com/risingwavelabs/risingwave/issues/6747, use $(SEPARATE_TOPICS=false)
 SEPARATE_TOPICS=false
 RUST_LOG="nexmark_server=info"
 
@@ -180,7 +180,7 @@ configure_all() {
 # This has minor effect on the flamegraph, so can ignore for now.
 # could it be related to profiling on Docker? Needs further investigation.
 start_nperf() {
-  ./nperf record -p `pidof compute-node` -o perf.data &
+  ./nperf record -p $(pidof compute-node) -o perf.data &
 }
 
 start_kafka() {
@@ -231,7 +231,7 @@ gen_heap_flamegraph() {
     JEPROF=$(find . -name 'jeprof' | head -1)
     chmod +x "$JEPROF"
     COMPUTE_NODE=".risingwave/bin/risingwave/compute-node"
-    $JEPROF --collapsed $COMPUTE_NODE $LATEST_HEAP_PROFILE > heap.collapsed
+    $JEPROF --collapsed $COMPUTE_NODE "$LATEST_HEAP_PROFILE" > heap.collapsed
     ../flamegraph.pl --color=mem --countname=bytes heap.collapsed > perf.svg
     mv perf.svg ..
     popd
@@ -268,7 +268,7 @@ run_heap_flamegraph() {
   echo "--- Running benchmark for $QUERY"
   echo "--- Setting variables"
   QUERY_LABEL="$1"
-  QUERY_FILE_NAME="$(echo $QUERY_LABEL | sed 's/nexmark\-\(.*\)/\1.sql/')"
+  QUERY_FILE_NAME="$(echo "$QUERY_LABEL" | sed 's/nexmark\-\(.*\)/\1.sql/')"
   QUERY_PATH="$QUERY_DIR/$QUERY_FILE_NAME"
   FLAMEGRAPH_PATH="perf-$QUERY_LABEL.svg"
   echo "QUERY_LABEL: $QUERY_LABEL"
@@ -328,7 +328,7 @@ run_cpu_flamegraph() {
   echo "--- Running benchmark for $QUERY"
   echo "--- Setting variables"
   QUERY_LABEL="$1"
-  QUERY_FILE_NAME="$(echo $QUERY_LABEL | sed 's/nexmark\-\(.*\)/\1.sql/')"
+  QUERY_FILE_NAME="$(echo "$QUERY_LABEL" | sed 's/nexmark\-\(.*\)/\1.sql/')"
   QUERY_PATH="$QUERY_DIR/$QUERY_FILE_NAME"
   FLAMEGRAPH_PATH="perf-$QUERY_LABEL.svg"
   echo "QUERY_LABEL: $QUERY_LABEL"
@@ -367,7 +367,7 @@ run_cpu_flamegraph() {
 
   echo "--- Generate flamegraph"
   gen_cpu_flamegraph
-  mv perf.svg $FLAMEGRAPH_PATH
+  mv perf.svg "$FLAMEGRAPH_PATH"
 
   echo "--- Uploading flamegraph"
   buildkite-agent artifact upload "./$FLAMEGRAPH_PATH"
