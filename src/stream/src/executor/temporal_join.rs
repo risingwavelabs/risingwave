@@ -453,7 +453,7 @@ mod phase1 {
         chunk: StreamChunk,
     ) {
         // Append-only temporal join
-        if A == true {
+        if A {
             let mut builder = StreamChunkBuilder::new(chunk_size, full_schema);
             let keys = K::build_many(left_join_keys, chunk.data_chunk());
             let to_fetch_keys = chunk
@@ -527,6 +527,7 @@ mod phase1 {
                             matched = true;
                             for right_row in join_entry.cached.values() {
                                 let right_row: OwnedRow = right_row.clone();
+                                // Insert into memo table
                                 memo_table.insert(right_row.clone().chain(
                                     left_row.project(memo_table_lookup_prefix).into_owned_row(),
                                 ));
@@ -555,8 +556,8 @@ mod phase1 {
                                 .await?;
                             pin_mut!(state_table_iter);
 
-                            matched = true;
                             while let Some(memo_row) = state_table_iter.next().await {
+                                matched = true;
                                 let memo_row = memo_row?.into_owned_row();
                                 memo_rows_to_delete.push(memo_row.clone());
                                 if let Some(chunk) = E::append_matched_row(
@@ -570,6 +571,7 @@ mod phase1 {
                             }
                         }
                         for memo_row in memo_rows_to_delete {
+                            // Delete from memo table
                             memo_table.delete(memo_row);
                         }
                         if let Some(chunk) =
@@ -821,7 +823,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const A: bool>
                     }
                 }
                 InternalMessage::Barrier(updates, barrier) => {
-                    if A == false {
+                    if !A {
                         if wait_first_barrier {
                             wait_first_barrier = false;
                             self.memo_table.as_mut().unwrap().init_epoch(barrier.epoch);

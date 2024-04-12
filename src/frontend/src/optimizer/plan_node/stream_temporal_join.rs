@@ -132,10 +132,8 @@ impl StreamTemporalJoin {
             internal_table_catalog_builder.add_order_column(*idx, OrderType::ascending())
         });
 
-        let internal_table_dist_keys = (right_scan_schema.len()
-            ..(right_scan_schema.len() + left_eq_indexes.len()))
-            .into_iter()
-            .collect();
+        let internal_table_dist_keys =
+            (right_scan_schema.len()..(right_scan_schema.len() + left_eq_indexes.len())).collect();
         internal_table_catalog_builder.build(internal_table_dist_keys, read_prefix_len_hint)
     }
 }
