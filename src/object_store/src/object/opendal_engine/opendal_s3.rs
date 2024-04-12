@@ -98,15 +98,6 @@ impl OpendalObjectStore {
         builder.secret_access_key(aws_secret_access_key);
         builder.region(aws_region);
 
-        // For AWS S3, there is no need to set an endpoint; for other S3 compatible object stores, it is necessary to set this field.
-        if let Ok(endpoint_url) = std::env::var("RW_S3_ENDPOINT") {
-            builder.endpoint(&endpoint_url);
-        }
-
-        if std::env::var("RW_IS_FORCE_PATH_STYLE").is_err() {
-            builder.enable_virtual_host_style();
-        }
-
         let http_client = Self::new_http_client(&object_store_config)?;
         builder.http_client(http_client);
 
