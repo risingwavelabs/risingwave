@@ -29,6 +29,7 @@ pub struct Model {
     pub distribution_key: I32Array,
     pub properties: Property,
     pub definition: String,
+    pub subscription_from_name: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -61,6 +62,7 @@ impl From<PbSubscription> for ActiveModel {
             distribution_key: Set(pb_subscription.distribution_key.into()),
             properties: Set(pb_subscription.properties.into()),
             definition: Set(pb_subscription.definition),
+            subscription_from_name: Set(pb_subscription.subscription_from_name),
         }
     }
 }

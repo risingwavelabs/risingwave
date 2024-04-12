@@ -399,7 +399,7 @@ impl DdlController {
         // delete vpc endpoints.
         for conn in connections {
             let _ = self
-                .delete_vpc_endpoint_v2(conn.into_inner())
+                .delete_vpc_endpoint_v2(conn.to_protobuf())
                 .await
                 .inspect_err(|err| {
                     tracing::warn!(err = ?err.as_report(), "failed to delete vpc endpoint");

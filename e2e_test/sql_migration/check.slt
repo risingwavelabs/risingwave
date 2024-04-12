@@ -24,7 +24,6 @@ SELECT setting FROM pg_catalog.pg_settings where name = 'max_concurrent_creating
 query T rowsort
 select name, relation_type from rw_relations where relation_type != 'system table' AND relation_type != 'view';
 ----
-ddl_subscription_table subscription
 idx1 index
 m_simple table
 mv1 materialized view
