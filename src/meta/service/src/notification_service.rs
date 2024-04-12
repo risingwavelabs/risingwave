@@ -78,6 +78,7 @@ impl NotificationServiceImpl {
                     views,
                     functions,
                     connections,
+                    secrets,
                 ) = catalog_guard.database.get_catalog();
                 let users = catalog_guard.user.list_users();
                 let notification_version = self.env.notification_manager().current_version().await;
@@ -93,6 +94,7 @@ impl NotificationServiceImpl {
                         views,
                         functions,
                         connections,
+                        secrets,
                     ),
                     users,
                     notification_version,
@@ -112,6 +114,7 @@ impl NotificationServiceImpl {
                         views,
                         functions,
                         connections,
+                        secrets,
                     ),
                     users,
                 ) = catalog_guard.snapshot().await?;
@@ -128,6 +131,7 @@ impl NotificationServiceImpl {
                         views,
                         functions,
                         connections,
+                        secrets,
                     ),
                     users,
                     notification_version,
@@ -235,6 +239,7 @@ impl NotificationServiceImpl {
                 views,
                 functions,
                 connections,
+                secrets,
             ),
             users,
             catalog_version,

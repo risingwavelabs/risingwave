@@ -63,6 +63,7 @@ pub type RelationId = u32;
 pub type IndexId = u32;
 pub type ViewId = u32;
 pub type FunctionId = u32;
+pub type SecretId = u32;
 
 pub type UserId = u32;
 pub type ConnectionId = u32;

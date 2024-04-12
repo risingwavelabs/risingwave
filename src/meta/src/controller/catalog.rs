@@ -34,7 +34,7 @@ use risingwave_meta_model_v2::{
 };
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
-    PbComment, PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
+    PbComment, PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSecret, PbSink, PbSource,
     PbSubscription, PbTable, PbView,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbCreatingJobInfo;
@@ -2793,6 +2793,7 @@ impl CatalogControllerInner {
         let views = self.list_views().await?;
         let functions = self.list_functions().await?;
         let connections = self.list_connections().await?;
+        let secrets = self.list_secrets().await?;
 
         let users = self.list_users().await?;
 
@@ -2808,6 +2809,7 @@ impl CatalogControllerInner {
                 views,
                 functions,
                 connections,
+                secrets,
             ),
             users,
         ))
@@ -3026,6 +3028,10 @@ impl CatalogControllerInner {
             .into_iter()
             .map(|(conn, obj)| ObjectModel(conn, obj.unwrap()).into())
             .collect())
+    }
+
+    async fn list_secrets(&self) -> MetaResult<Vec<PbSecret>> {
+        todo!()
     }
 
     async fn list_functions(&self) -> MetaResult<Vec<PbFunction>> {

@@ -20,15 +20,15 @@ use risingwave_common::bail;
 use risingwave_common::catalog::TableOption;
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::{
-    Connection, CreateType, Database, Function, Index, PbStreamJobStatus, Schema, Sink, Source,
-    StreamJobStatus, Subscription, Table, View,
+    Connection, CreateType, Database, Function, Index, PbStreamJobStatus, Schema, Secret, Sink,
+    Source, StreamJobStatus, Subscription, Table, View,
 };
 use risingwave_pb::data::DataType;
 use risingwave_pb::user::grant_privilege::PbObject;
 
 use super::{
-    ConnectionId, DatabaseId, FunctionId, RelationId, SchemaId, SinkId, SourceId, SubscriptionId,
-    ViewId,
+    ConnectionId, DatabaseId, FunctionId, RelationId, SchemaId, SecretId, SinkId, SourceId,
+    SubscriptionId, ViewId,
 };
 use crate::manager::{IndexId, MetaSrvEnv, TableId, UserId};
 use crate::model::MetadataModel;
@@ -45,6 +45,7 @@ pub type Catalog = (
     Vec<View>,
     Vec<Function>,
     Vec<Connection>,
+    Vec<Secret>,
 );
 
 type DatabaseKey = String;
@@ -75,6 +76,8 @@ pub struct DatabaseManager {
     pub(super) functions: BTreeMap<FunctionId, Function>,
     /// Cached connection information.
     pub(super) connections: BTreeMap<ConnectionId, Connection>,
+    /// Cached secret information.
+    pub(super) secrets: BTreeMap<SecretId, Secret>,
 
     /// Relation reference count mapping.
     // TODO(zehua): avoid key conflicts after distinguishing table's and source's id generator.
@@ -100,6 +103,7 @@ impl DatabaseManager {
         let functions = Function::list(env.meta_store().as_kv()).await?;
         let connections = Connection::list(env.meta_store().as_kv()).await?;
         let subscriptions = Subscription::list(env.meta_store().as_kv()).await?;
+        let secrets = Secret::list(env.meta_store().as_kv()).await?;
 
         let mut relation_ref_count = HashMap::new();
 
@@ -128,6 +132,7 @@ impl DatabaseManager {
             }
             (subscription.id, subscription)
         }));
+        let secrets = BTreeMap::from_iter(secrets.into_iter().map(|secret| (secret.id, secret)));
         let indexes = BTreeMap::from_iter(indexes.into_iter().map(|index| (index.id, index)));
         let tables = BTreeMap::from_iter(tables.into_iter().map(|table| {
             for depend_relation_id in &table.dependent_relations {
@@ -156,6 +161,7 @@ impl DatabaseManager {
             functions,
             connections,
             relation_ref_count,
+            secrets,
             in_progress_creation_tracker: HashSet::default(),
             in_progress_creation_streaming_job: HashMap::default(),
             in_progress_creating_tables: HashMap::default(),
@@ -202,6 +208,7 @@ impl DatabaseManager {
             self.views.values().cloned().collect_vec(),
             self.functions.values().cloned().collect_vec(),
             self.connections.values().cloned().collect_vec(),
+            self.secrets.values().cloned().collect_vec(),
         )
     }
 
