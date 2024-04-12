@@ -1652,7 +1652,7 @@ dependencies = [
  "bitflags 2.5.0",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "log",
@@ -8448,7 +8448,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.11.2",
+ "parking_lot 0.12.1",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
@@ -12076,9 +12076,9 @@ dependencies = [
 
 [[package]]
 name = "sqllogictest"
-version = "0.19.1"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "004809e4710d743a13eb2975fb6a1498da76157e19ad059d595d032e6a50e30b"
+checksum = "b8518892e5e36bfa90163e53c4e4f36a388e0afa1cd6a3de0614253b3c9029c7"
 dependencies = [
  "async-trait",
  "educe 0.4.23",
