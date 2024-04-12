@@ -51,7 +51,6 @@ services:
       - "5691:5691"
       - "1250:1250"
     depends_on:
-      - etcd-0
       - minio-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
@@ -216,8 +215,6 @@ services:
       retries: 5
     restart: always
 volumes:
-  etcd-0:
-    external: false
   grafana-0:
     external: false
   minio-0:
