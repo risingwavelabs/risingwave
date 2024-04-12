@@ -211,8 +211,7 @@ impl SnowflakeSinkWriter {
             config.common.aws_access_key_id.clone(),
             config.common.aws_secret_access_key.clone(),
             config.common.aws_region.clone(),
-        )
-        .await;
+        );
 
         let max_batch_row_num = config
             .common

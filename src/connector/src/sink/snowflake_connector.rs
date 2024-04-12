@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use aws_config;
 use bytes::Bytes;
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use reqwest::{header, Client, RequestBuilder, StatusCode};
@@ -191,7 +190,7 @@ pub struct SnowflakeS3Client {
 }
 
 impl SnowflakeS3Client {
-    pub async fn new(
+    pub fn new(
         s3_bucket: String,
         s3_path: Option<String>,
         aws_access_key_id: String,
