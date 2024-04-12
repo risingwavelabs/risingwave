@@ -22,6 +22,7 @@ use either::Either;
 use futures::stream::{self, PollNext};
 use futures::{pin_mut, StreamExt, TryStreamExt};
 use futures_async_stream::{for_await, try_stream};
+use itertools::Itertools;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use lru::DefaultHasher;
 use risingwave_common::array::{Op, StreamChunk};
@@ -69,8 +70,7 @@ pub struct TemporalJoinExecutor<
     condition: Option<NonStrictExpression>,
     output_indices: Vec<usize>,
     chunk_size: usize,
-    output_table: Option<StateTable<S>>,
-    output_table_pk_indices: Vec<usize>,
+    memo_table: Option<StateTable<S>>,
 }
 
 #[derive(Default)]
@@ -315,17 +315,21 @@ async fn align_input(left: Executor, right: Executor) {
 }
 
 mod phase1 {
+    use std::ops::Bound;
+
+    use futures::{pin_mut, StreamExt};
     use futures_async_stream::try_stream;
     use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
     use risingwave_common::array::{Op, StreamChunk};
     use risingwave_common::hash::{HashKey, NullBitmap};
-    use risingwave_common::row::{self, Row, RowExt};
+    use risingwave_common::row::{self, OwnedRow, Row, RowExt};
     use risingwave_common::types::{DataType, DatumRef};
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_hummock_sdk::HummockEpoch;
     use risingwave_storage::StateStore;
 
     use super::{StreamExecutorError, TemporalSide};
+    use crate::common::table::state_table::StateTable;
 
     pub(super) trait Phase1Evaluation {
         /// Called when a matched row is found.
@@ -443,6 +447,8 @@ mod phase1 {
         epoch: HummockEpoch,
         left_join_keys: &'a [usize],
         right_table: &'a mut TemporalSide<K, S>,
+        memo_table_lookup_prefix: &'a [usize],
+        memo_table: &'a mut Option<StateTable<S>>,
         null_matched: &'a K::Bitmap,
         chunk: StreamChunk,
     ) {
@@ -476,6 +482,9 @@ mod phase1 {
                         }
                     }
                 }
+                if let Some(chunk) = E::match_end(&mut builder, op, left_row, right_size, matched) {
+                    yield chunk;
+                }
             }
             if let Some(chunk) = builder.take() {
                 yield chunk;
@@ -484,6 +493,7 @@ mod phase1 {
             // Non-append-only temporal join
             let mut builder = StreamChunkBuilder::new(chunk_size, full_schema);
             let keys = K::build_many(left_join_keys, chunk.data_chunk());
+            let memo_table = memo_table.as_mut().unwrap();
             let to_fetch_keys = chunk
                 .visibility()
                 .iter()
@@ -516,6 +526,10 @@ mod phase1 {
                         {
                             matched = true;
                             for right_row in join_entry.cached.values() {
+                                let right_row: OwnedRow = right_row.clone();
+                                memo_table.insert(right_row.clone().chain(
+                                    left_row.project(memo_table_lookup_prefix).into_owned_row(),
+                                ));
                                 if let Some(chunk) =
                                     E::append_matched_row(op, &mut builder, left_row, right_row)
                                 {
@@ -530,23 +544,39 @@ mod phase1 {
                         }
                     }
                     Op::Delete | Op::UpdateDelete => {
-                        todo!()
-                        // let mut matched = false;
-                        // if key.null_bitmap().is_subset(null_matched)
-                        //     && let output_rows = output_table.fetch(&key)
-                        // {
-                        //     matched = true;
-                        //     for output_row in output_rows {
-                        //         if let Some(chunk) =
-                        //         E::append_matched_row(op, &mut builder, left_row, right_row)
-                        //         {
-                        //             yield chunk;
-                        //         }
-                        //     }
-                        // }
-                        // if let Some(chunk) = E::match_end(&mut builder, op, left_row, right_size, matched) {
-                        //     yield chunk;
-                        // }
+                        let mut memo_rows_to_delete = vec![];
+                        let mut matched = false;
+                        if key.null_bitmap().is_subset(null_matched) {
+                            let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
+                                &(Bound::Unbounded, Bound::Unbounded);
+                            let prefix = left_row.project(memo_table_lookup_prefix);
+                            let state_table_iter = memo_table
+                                .iter_with_prefix(prefix, sub_range, Default::default())
+                                .await?;
+                            pin_mut!(state_table_iter);
+
+                            matched = true;
+                            while let Some(memo_row) = state_table_iter.next().await {
+                                let memo_row = memo_row?.into_owned_row();
+                                memo_rows_to_delete.push(memo_row.clone());
+                                if let Some(chunk) = E::append_matched_row(
+                                    op,
+                                    &mut builder,
+                                    left_row,
+                                    memo_row.slice(0..right_size),
+                                ) {
+                                    yield chunk;
+                                }
+                            }
+                        }
+                        for memo_row in memo_rows_to_delete {
+                            memo_table.delete(memo_row);
+                        }
+                        if let Some(chunk) =
+                            E::match_end(&mut builder, op, left_row, right_size, matched)
+                        {
+                            yield chunk;
+                        }
                     }
                 }
             }
@@ -578,8 +608,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const A: bool>
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
         join_key_data_types: Vec<DataType>,
-        output_table: Option<StateTable<S>>,
-        output_table_pk_indices: Vec<usize>,
+        memo_table: Option<StateTable<S>>,
     ) -> Self {
         let alloc = StatsAlloc::new(Global).shared();
 
@@ -616,8 +645,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const A: bool>
             condition,
             output_indices,
             chunk_size,
-            output_table,
-            output_table_pk_indices,
+            memo_table,
         }
     }
 
@@ -644,7 +672,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const A: bool>
 
         let left_to_output: HashMap<usize, usize> = HashMap::from_iter(left_map.iter().cloned());
 
+        let left_stream_key_indices = self.left.pk_indices().to_vec();
         let right_stream_key_indices = self.right.pk_indices().to_vec();
+        let memo_table_lookup_prefix = self
+            .left_join_keys
+            .iter()
+            .cloned()
+            .chain(left_stream_key_indices)
+            .collect_vec();
 
         let null_matched = K::Bitmap::from_bool_vec(self.null_safe);
 
@@ -660,6 +695,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const A: bool>
             .into_iter()
             .chain(self.right.schema().data_types().into_iter())
             .collect();
+
+        let mut wait_first_barrier = true;
 
         #[for_await]
         for msg in align_input(self.left, self.right) {
@@ -687,6 +724,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const A: bool>
                             epoch,
                             &self.left_join_keys,
                             &mut self.right_table,
+                            &memo_table_lookup_prefix,
+                            &mut self.memo_table,
                             &null_matched,
                             chunk,
                         );
@@ -717,6 +756,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const A: bool>
                             epoch,
                             &self.left_join_keys,
                             &mut self.right_table,
+                            &memo_table_lookup_prefix,
+                            &mut self.memo_table,
                             &null_matched,
                             chunk,
                         );
@@ -766,6 +807,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const A: bool>
                             epoch,
                             &self.left_join_keys,
                             &mut self.right_table,
+                            &memo_table_lookup_prefix,
+                            &mut self.memo_table,
                             &null_matched,
                             chunk,
                         );
@@ -778,6 +821,18 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const A: bool>
                     }
                 }
                 InternalMessage::Barrier(updates, barrier) => {
+                    if A == false {
+                        if wait_first_barrier {
+                            wait_first_barrier = false;
+                            self.memo_table.as_mut().unwrap().init_epoch(barrier.epoch);
+                        } else {
+                            self.memo_table
+                                .as_mut()
+                                .unwrap()
+                                .commit(barrier.epoch)
+                                .await?;
+                        }
+                    }
                     if let Some(vnodes) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         let prev_vnodes =
                             self.right_table.source.update_vnode_bitmap(vnodes.clone());

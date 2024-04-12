@@ -436,9 +436,7 @@ message TemporalJoinNode {
   // The output indices of the lookup side table
   repeated uint32 table_output_indices = 8;
   // The state table used for non-append-only temporal join.
-  catalog.Table output_table = 9;
-  // The pk (`join_key` + `left_pk` + `right_pk`) of the output_table.
-  repeated uint32 output_table_pk_indices = 10;
+  catalog.Table memo_table = 9;
 }
 
 message DynamicFilterNode {

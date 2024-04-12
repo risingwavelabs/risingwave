@@ -100,32 +100,22 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
             .map(|idx| source_l.schema().fields[*idx].data_type())
             .collect_vec();
 
-        let output_table_pk_indices = node
-            .get_output_table_pk_indices()
-            .iter()
-            .map(|&x| x as usize)
-            .collect_vec();
-
-        let output_table = node.get_output_table();
-        let output_table = match output_table {
-            Ok(output_table) => {
+        let memo_table = node.get_memo_table();
+        let memo_table = match memo_table {
+            Ok(memo_table) => {
                 let vnodes = Arc::new(
                     params
                         .vnode_bitmap
                         .expect("vnodes not set for temporal join"),
                 );
                 Some(
-                    StateTable::from_table_catalog(
-                        output_table,
-                        store.clone(),
-                        Some(vnodes.clone()),
-                    )
-                    .await,
+                    StateTable::from_table_catalog(memo_table, store.clone(), Some(vnodes.clone()))
+                        .await,
                 )
             }
             Err(_) => None,
         };
-        let append_only = output_table.is_none();
+        let append_only = memo_table.is_none();
 
         let dispatcher_args = TemporalJoinExecutorDispatcherArgs {
             ctx: params.actor_context,
@@ -145,8 +135,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
             metrics: params.executor_stats,
             join_type_proto: node.get_join_type()?,
             join_key_data_types,
-            output_table,
-            output_table_pk_indices,
+            memo_table,
             append_only,
         };
 
@@ -172,8 +161,7 @@ struct TemporalJoinExecutorDispatcherArgs<S: StateStore> {
     metrics: Arc<StreamingMetrics>,
     join_type_proto: JoinTypeProto,
     join_key_data_types: Vec<DataType>,
-    output_table: Option<StateTable<S>>,
-    output_table_pk_indices: Vec<usize>,
+    memo_table: Option<StateTable<S>>,
     append_only: bool,
 }
 
@@ -206,8 +194,7 @@ impl<S: StateStore> HashKeyDispatcher for TemporalJoinExecutorDispatcherArgs<S> 
                     self.metrics,
                     self.chunk_size,
                     self.join_key_data_types,
-                    self.output_table,
-                    self.output_table_pk_indices,
+                    self.memo_table,
                 )))
             };
         }
