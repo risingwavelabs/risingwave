@@ -44,7 +44,7 @@ c
 # There are 4 consumer groups, 1 for batch query, 3 for MV. All of them are "Empty" state with 0 members, because we manually `assign` partitions to them.
 # At the begginning, the MV's consumer group will not occur. They will be created after committing offset to Kafka.
 # (enable.auto.commit defaults to true, and auto.commit.interval.ms defaults to 5s)
-sleep 8s
+sleep 15s
 
 system ok
 rpk group list | tail -n +2 | cut -w -f2 | xargs -n1 -I {} sh -c "rpk group describe -s {} | grep "MEMBERS""
