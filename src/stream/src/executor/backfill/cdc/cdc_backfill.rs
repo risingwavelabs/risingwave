@@ -618,6 +618,7 @@ pub async fn transform_upstream(upstream: BoxedMessageStream, schema: &Schema) {
         key_encoding_config: None,
         encoding_config: EncodingProperties::Json(JsonProperties {
             use_schema_registry: false,
+            timestamptz_handling: None,
         }),
         // the cdc message is generated internally so the key must exist.
         protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
