@@ -490,10 +490,6 @@ impl Drop for MonitoredStreamingReader {
 pub struct MonitoredObjectStore<OS: ObjectStore> {
     inner: OS,
     object_store_metrics: Arc<ObjectStoreMetrics>,
-    // streaming_read_timeout: Option<Duration>,
-    // streaming_upload_timeout: Option<Duration>,
-    // read_timeout: Option<Duration>,
-    // upload_timeout: Option<Duration>,
     config: ObjectStoreConfig,
 }
 
@@ -585,7 +581,11 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .unwrap_or_else(|_| Err(ObjectError::internal("upload timeout")))
                 }
             },
-            RetryCondition::new(self.config.object_store_upload_timeout_ms),
+            RetryCondition::new(
+                self.config.object_store_upload_timeout_ms,
+                operation_type,
+                self.object_store_metrics.clone(),
+            ),
         )
         .await;
 
@@ -627,7 +627,11 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         })
                 }
             },
-            RetryCondition::new(self.config.object_store_streaming_upload_timeout_ms),
+            RetryCondition::new(
+                self.config.object_store_streaming_upload_timeout_ms,
+                operation_type,
+                self.object_store_metrics.clone(),
+            ),
         )
         .await;
 
@@ -677,7 +681,11 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .unwrap_or_else(|_| Err(ObjectError::internal("read timeout")))
                 }
             },
-            RetryCondition::new(self.config.object_store_read_timeout_ms),
+            RetryCondition::new(
+                self.config.object_store_read_timeout_ms,
+                operation_type,
+                self.object_store_metrics.clone(),
+            ),
         )
         .await;
 
@@ -743,7 +751,11 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         })
                 }
             },
-            RetryCondition::new(self.config.object_store_streaming_read_timeout_ms),
+            RetryCondition::new(
+                self.config.object_store_streaming_read_timeout_ms,
+                operation_type,
+                self.object_store_metrics.clone(),
+            ),
         )
         .await;
 
@@ -794,7 +806,11 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .unwrap_or_else(|_| Err(ObjectError::internal("metadata timeout")))
                 }
             },
-            RetryCondition::new(UNSET_MAX_TIMEOUT),
+            RetryCondition::new(
+                UNSET_MAX_TIMEOUT,
+                operation_type,
+                self.object_store_metrics.clone(),
+            ),
         )
         .await;
 
@@ -833,7 +849,11 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .unwrap_or_else(|_| Err(ObjectError::internal("delete timeout")))
                 }
             },
-            RetryCondition::new(UNSET_MAX_TIMEOUT),
+            RetryCondition::new(
+                UNSET_MAX_TIMEOUT,
+                operation_type,
+                self.object_store_metrics.clone(),
+            ),
         )
         .await;
 
@@ -872,7 +892,11 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .unwrap_or_else(|_| Err(ObjectError::internal("delete_objects timeout")))
                 }
             },
-            RetryCondition::new(UNSET_MAX_TIMEOUT),
+            RetryCondition::new(
+                UNSET_MAX_TIMEOUT,
+                operation_type,
+                self.object_store_metrics.clone(),
+            ),
         )
         .await;
 
@@ -912,7 +936,11 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         .unwrap_or_else(|_| Err(ObjectError::internal("list timeout")))
                 }
             },
-            RetryCondition::new(UNSET_MAX_TIMEOUT),
+            RetryCondition::new(
+                UNSET_MAX_TIMEOUT,
+                operation_type,
+                self.object_store_metrics.clone(),
+            ),
         )
         .await;
 
@@ -1169,27 +1197,47 @@ fn get_attempt_timeout_by_type(config: &ObjectStoreConfig, operation_type: Opera
 
 struct RetryCondition {
     max_duration_ms: u64,
-
+    operation_type: OperationType,
     init_instant: Instant,
+    retry_count: usize,
+    metrics: Arc<ObjectStoreMetrics>,
 }
 
 impl RetryCondition {
-    fn new(max_duration_ms: u64) -> Self {
+    fn new(
+        max_duration_ms: u64,
+        operation_type: OperationType,
+        metrics: Arc<ObjectStoreMetrics>,
+    ) -> Self {
         Self {
             max_duration_ms,
+            operation_type,
             init_instant: Instant::now(),
+            retry_count: 0,
+            metrics,
         }
     }
 
     #[inline(always)]
     fn should_retry_inner(&mut self, err: &ObjectError) -> bool {
-        if self.max_duration_ms != UNSET_MAX_TIMEOUT
+        let should_retry = if self.max_duration_ms != UNSET_MAX_TIMEOUT
             && self.init_instant.elapsed().as_millis() > self.max_duration_ms as u128
         {
-            return false;
+            false
+        } else {
+            err.should_retry()
+        };
+
+        if !should_retry {
+            self.metrics
+                .request_retry_count
+                .with_label_values(&[self.operation_type.as_str()])
+                .inc_by(self.retry_count as _);
+        } else {
+            self.retry_count += 1;
         }
 
-        err.should_retry()
+        should_retry
     }
 }
 

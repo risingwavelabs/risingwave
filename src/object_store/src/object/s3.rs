@@ -224,7 +224,11 @@ impl S3StreamingUploader {
                         }
                     }
                 },
-                RetryCondition::new(config.object_store_upload_timeout_ms),
+                RetryCondition::new(
+                    config.object_store_upload_timeout_ms,
+                    operation_type,
+                    metrics.clone(),
+                ),
             )
             .await;
 
@@ -435,15 +439,6 @@ impl ObjectStore for S3ObjectStore {
                 })?
                 .into_bytes(),
             Err(sdk_err) => {
-                if let SdkError::DispatchFailure(e) = &sdk_err
-                    && e.is_timeout()
-                {
-                    self.metrics
-                        .request_retry_count
-                        .with_label_values(&["read"])
-                        .inc();
-                }
-
                 return Err(set_error_should_retry::<GetObjectError>(
                     self.config.clone(),
                     sdk_err.into(),
@@ -505,15 +500,6 @@ impl ObjectStore for S3ObjectStore {
         let resp = match self.obj_store_request(path, range.clone()).send().await {
             Ok(resp) => resp,
             Err(sdk_err) => {
-                // if let SdkError::DispatchFailure(e) = &sdk_err
-                //     && e.is_timeout()
-                // {
-                //     self.metrics
-                //         .request_retry_count
-                //         .with_label_values(&["streaming_read_init"])
-                //         .inc();
-                // }
-
                 return Err(set_error_should_retry::<GetObjectError>(
                     self.config.clone(),
                     sdk_err.into(),
@@ -959,7 +945,7 @@ impl Stream for S3ObjectIter {
                 }
                 Err(e) => {
                     self.send_future = None;
-                    Poll::Ready(Some(Err(e.into())))
+                    Poll::Ready(Some(Err(e)))
                 }
             };
         }
