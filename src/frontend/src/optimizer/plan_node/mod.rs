@@ -696,9 +696,9 @@ impl dyn PlanNode {
     }
 }
 
-const PLAN_DEPTH_THRESHOLD: usize = 256;
+const PLAN_DEPTH_THRESHOLD: usize = 30;
 const PLAN_TOO_DEEP_NOTICE: &str = "The plan is too deep. \
-Consider rewriting the query to simplify it if you encounter any issues.";
+Consider simplifying or splitting the query if you encounter any issues.";
 
 impl dyn PlanNode {
     /// Serialize the plan node and its children to a stream plan proto.
@@ -710,7 +710,7 @@ impl dyn PlanNode {
         state: &mut BuildFragmentGraphState,
     ) -> SchedulerResult<StreamPlanPb> {
         recursive::tracker!().recurse(|t| {
-            if t.depth() > PLAN_DEPTH_THRESHOLD {
+            if t.depth() == PLAN_DEPTH_THRESHOLD {
                 notice_to_user(PLAN_TOO_DEEP_NOTICE);
             }
 
@@ -762,7 +762,7 @@ impl dyn PlanNode {
     /// (for testing).
     pub fn to_batch_prost_identity(&self, identity: bool) -> SchedulerResult<BatchPlanPb> {
         recursive::tracker!().recurse(|t| {
-            if t.depth() > PLAN_DEPTH_THRESHOLD {
+            if t.depth() == PLAN_DEPTH_THRESHOLD {
                 notice_to_user(PLAN_TOO_DEEP_NOTICE);
             }
 
