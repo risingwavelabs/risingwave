@@ -532,14 +532,14 @@ mod phase1 {
                                     left_row.project(memo_table_lookup_prefix).into_owned_row(),
                                 ));
                                 if let Some(chunk) =
-                                    E::append_matched_row(op, &mut builder, left_row, right_row)
+                                    E::append_matched_row(Op::Insert, &mut builder, left_row, right_row)
                                 {
                                     yield chunk;
                                 }
                             }
                         }
                         if let Some(chunk) =
-                            E::match_end(&mut builder, op, left_row, right_size, matched)
+                            E::match_end(&mut builder, Op::Insert, left_row, right_size, matched)
                         {
                             yield chunk;
                         }
@@ -561,7 +561,7 @@ mod phase1 {
                                 let memo_row = memo_row?.into_owned_row();
                                 memo_rows_to_delete.push(memo_row.clone());
                                 if let Some(chunk) = E::append_matched_row(
-                                    op,
+                                    Op::Delete,
                                     &mut builder,
                                     left_row,
                                     memo_row.slice(0..right_size),
@@ -575,7 +575,7 @@ mod phase1 {
                             memo_table.delete(memo_row);
                         }
                         if let Some(chunk) =
-                            E::match_end(&mut builder, op, left_row, right_size, matched)
+                            E::match_end(&mut builder, Op::Delete, left_row, right_size, matched)
                         {
                             yield chunk;
                         }
