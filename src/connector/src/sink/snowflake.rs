@@ -287,8 +287,8 @@ impl SnowflakeSinkWriter {
             return Ok(());
         }
         let file_suffix = self.file_suffix();
-        // todo: change this to streaming upload
-        // first sink to the external stage provided by user (i.e., s3)
+        // first sink to the external stage provided by user. (i.e., s3 bucket)
+        // note: this upload is streaming.
         self.s3_client
             .sink_to_s3(self.payload.clone().into(), file_suffix.clone())
             .await?;
