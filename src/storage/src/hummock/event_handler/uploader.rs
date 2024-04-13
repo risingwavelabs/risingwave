@@ -390,16 +390,18 @@ struct UnsealedEpochData {
     spilled_data: SpilledData,
 
     table_watermarks: HashMap<TableId, (WatermarkDirection, Vec<VnodeWatermark>, BitmapBuilder)>,
+    size: usize,
 }
 
 impl UnsealedEpochData {
     fn get_imm_data_size(&self) -> usize {
-        self.imms.iter().map(|imm| imm.size()).sum()
+        self.size
     }
 
     fn flush(&mut self, context: &UploaderContext) {
         let imms = self.imms.drain(..).collect_vec();
         if !imms.is_empty() {
+            self.size = 0;
             let task = UploadingTask::new(imms, context);
             context.stats.spill_task_counts_from_unsealed.inc();
             context
@@ -815,11 +817,9 @@ impl HummockUploader {
             epoch,
             self.max_sealed_epoch
         );
-        self.unsealed_data
-            .entry(epoch)
-            .or_default()
-            .imms
-            .push_front(imm);
+        let data = self.unsealed_data.entry(epoch).or_default();
+        data.size += imm.size();
+        data.imms.push_front(imm);
     }
 
     pub(crate) fn add_table_watermarks(
@@ -1050,8 +1050,7 @@ impl HummockUploader {
             }
             // flush large data at first to avoid generate small files.
             unseal_epochs.sort_by_key(|item| item.0);
-            unseal_epochs.reverse();
-            for (_, epoch) in unseal_epochs {
+            for (_, epoch) in unseal_epochs.iter().rev() {
                 let unsealed_data = self.unsealed_data.get_mut(&epoch).unwrap();
                 unsealed_data.flush(&self.context);
                 flushed = true;

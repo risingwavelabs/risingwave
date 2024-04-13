@@ -586,14 +586,6 @@ impl LocalHummockStorage {
     }
 }
 
-pub type StorageSubIteratorUnion<'a> = HummockIteratorUnion<
-    Forward,
-    SharedBufferBatchIterator<Forward>,
-    SstableIterator,
-    ConcatIteratorInner<SstableIterator>,
-    MemTableHummockIterator<'a>,
->;
-
 pub type HummockStorageIteratorPayloadInner<'a> = MergeIterator<
     HummockIteratorUnion<
         Forward,
