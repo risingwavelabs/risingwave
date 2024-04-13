@@ -138,7 +138,6 @@ impl Sink for SnowflakeSink {
             self.pk_indices.clone(),
             self.is_append_only,
         )
-        .await
         .into_log_sinker(writer_param.sink_metrics))
     }
 
@@ -187,7 +186,7 @@ pub struct SnowflakeSinkWriter {
 }
 
 impl SnowflakeSinkWriter {
-    pub async fn new(
+    pub fn new(
         config: SnowflakeConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
