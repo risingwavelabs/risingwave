@@ -22,6 +22,7 @@ use futures::future::join_all;
 use otlp_embedded::TraceServiceServer;
 use regex::Regex;
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
+use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
@@ -48,6 +49,7 @@ use risingwave_meta_service::meta_member_service::MetaMemberServiceImpl;
 use risingwave_meta_service::notification_service::NotificationServiceImpl;
 use risingwave_meta_service::scale_service::ScaleServiceImpl;
 use risingwave_meta_service::serving_service::ServingServiceImpl;
+use risingwave_meta_service::session_config::SessionParamsServiceImpl;
 use risingwave_meta_service::sink_coordination_service::SinkCoordinationServiceImpl;
 use risingwave_meta_service::stream_service::StreamServiceImpl;
 use risingwave_meta_service::system_params_service::SystemParamsServiceImpl;
@@ -67,6 +69,7 @@ use risingwave_pb::meta::meta_member_service_server::MetaMemberServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
 use risingwave_pb::meta::serving_service_server::ServingServiceServer;
+use risingwave_pb::meta::session_param_service_server::SessionParamServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use risingwave_pb::meta::system_params_service_server::SystemParamsServiceServer;
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoServiceServer;
@@ -111,6 +114,7 @@ pub async fn rpc_serve(
     lease_interval_secs: u64,
     opts: MetaOpts,
     init_system_params: SystemParams,
+    init_session_config: SessionConfig,
 ) -> MetaResult<(JoinHandle<()>, Option<JoinHandle<()>>, WatchSender<()>)> {
     match meta_store_backend {
         MetaStoreBackend::Etcd {
@@ -153,6 +157,7 @@ pub async fn rpc_serve(
                 lease_interval_secs,
                 opts,
                 init_system_params,
+                init_session_config,
             )
         }
         MetaStoreBackend::Mem => {
@@ -165,6 +170,7 @@ pub async fn rpc_serve(
                 lease_interval_secs,
                 opts,
                 init_system_params,
+                init_session_config,
             )
         }
         MetaStoreBackend::Sql { endpoint } => {
@@ -208,6 +214,7 @@ pub async fn rpc_serve(
                 lease_interval_secs,
                 opts,
                 init_system_params,
+                init_session_config,
             )
         }
     }
@@ -222,6 +229,7 @@ pub fn rpc_serve_with_store(
     lease_interval_secs: u64,
     opts: MetaOpts,
     init_system_params: SystemParams,
+    init_session_config: SessionConfig,
 ) -> MetaResult<(JoinHandle<()>, Option<JoinHandle<()>>, WatchSender<()>)> {
     let (svc_shutdown_tx, svc_shutdown_rx) = watch::channel(());
 
@@ -302,6 +310,7 @@ pub fn rpc_serve_with_store(
             max_cluster_heartbeat_interval,
             opts,
             init_system_params,
+            init_session_config,
             election_client,
             svc_shutdown_rx,
         )
@@ -373,6 +382,7 @@ pub async fn start_service_as_election_leader(
     max_cluster_heartbeat_interval: Duration,
     opts: MetaOpts,
     init_system_params: SystemParams,
+    init_session_config: SessionConfig,
     election_client: Option<ElectionClientRef>,
     mut svc_shutdown_rx: WatchReceiver<()>,
 ) -> MetaResult<()> {
@@ -384,7 +394,13 @@ pub async fn start_service_as_election_leader(
             .expect("Failed to upgrade models in meta store");
     }
 
-    let env = MetaSrvEnv::new(opts.clone(), init_system_params, meta_store_impl).await?;
+    let env = MetaSrvEnv::new(
+        opts.clone(),
+        init_system_params,
+        init_session_config,
+        meta_store_impl,
+    )
+    .await?;
     let system_params_reader = env.system_params_reader().await;
 
     let data_directory = system_params_reader.data_directory();
@@ -619,6 +635,7 @@ pub async fn start_service_as_election_leader(
     let backup_srv = BackupServiceImpl::new(backup_manager);
     let telemetry_srv = TelemetryInfoServiceImpl::new(env.meta_store_ref());
     let system_params_srv = SystemParamsServiceImpl::new(env.system_params_manager_impl_ref());
+    let session_params_srv = SessionParamsServiceImpl::new(env.session_params_manager_impl_ref());
     let serving_srv =
         ServingServiceImpl::new(serving_vnode_mapping.clone(), metadata_manager.clone());
     let cloud_srv = CloudServiceImpl::new(metadata_manager.clone(), aws_cli);
@@ -777,6 +794,7 @@ pub async fn start_service_as_election_leader(
         .add_service(HealthServer::new(health_srv))
         .add_service(BackupServiceServer::new(backup_srv))
         .add_service(SystemParamsServiceServer::new(system_params_srv))
+        .add_service(SessionParamServiceServer::new(session_params_srv))
         .add_service(TelemetryInfoServiceServer::new(telemetry_srv))
         .add_service(ServingServiceServer::new(serving_srv))
         .add_service(CloudServiceServer::new(cloud_srv))

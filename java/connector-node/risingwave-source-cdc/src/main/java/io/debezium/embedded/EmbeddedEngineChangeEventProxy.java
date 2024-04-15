@@ -12,29 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod catalog;
-mod cluster;
-pub mod diagnose;
-mod env;
-pub mod event_log;
-mod id;
-mod idle;
-mod metadata;
-mod notification;
-mod notification_version;
-mod session_params;
-pub mod sink_coordination;
-mod streaming_job;
-mod system_param;
+package io.debezium.embedded;
 
-pub use catalog::*;
-pub use cluster::{WorkerKey, *};
-pub use env::{MetaSrvEnv, *};
-pub use id::*;
-pub use idle::*;
-pub use metadata::*;
-pub use notification::{LocalNotification, MessageStatus, NotificationManagerRef, *};
-pub use risingwave_meta_model_v2::prelude;
-pub use session_params::*;
-pub use streaming_job::*;
-pub use system_param::*;
+import io.debezium.engine.ChangeEvent;
+import java.util.Collections;
+import org.apache.kafka.connect.source.SourceRecord;
+
+/** Act as a proxy to the package-private class EmbeddedEngineChangeEvent */
+public class EmbeddedEngineChangeEventProxy {
+    public static ChangeEvent<SourceRecord, SourceRecord> create(
+            SourceRecord key, SourceRecord value, SourceRecord sourceRecord) {
+        return new EmbeddedEngineChangeEvent<>(key, value, Collections.emptyList(), sourceRecord);
+    }
+}
