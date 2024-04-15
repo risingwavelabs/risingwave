@@ -9,9 +9,9 @@ source ci/scripts/common.sh
 #   $1: subject name
 #   $2: schema file path
 function register_schema_registry() {
-    curl -X POST http://message_queue:8081/subjects/$1/versions \
+    curl -X POST http://message_queue:8081/subjects/"$1"/versions \
         -H ‘Content-Type: application/vnd.schemaregistry.v1+json’ \
-        --data-binary @<(jq -n --arg schema “$(cat $2)” ‘{schemaType: “PROTOBUF”, schema: $schema}’)
+        --data-binary @<(jq -n --arg schema “$(cat "$2")” ‘{schemaType: “PROTOBUF”, schema: "$schema"}’)
 }
 
 # prepare environment
@@ -93,9 +93,9 @@ sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.share_stream.slt'
 
 # create a share source and check whether heartbeat message is received
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.create_source_job.slt'
-table_id=`psql -U root -h localhost -p 4566 -d dev -t -c "select id from rw_internal_tables where name like '%mysql_source%';" | xargs`;
-table_count=`psql -U root -h localhost -p 4566 -d dev -t -c "select count(*) from rw_table(${table_id}, public);" | xargs`;
-if [ $table_count -eq 0 ]; then
+table_id=$(psql -U root -h localhost -p 4566 -d dev -t -c "select id from rw_internal_tables where name like '%mysql_source%';" | xargs);
+table_count=$(psql -U root -h localhost -p 4566 -d dev -t -c "select count(*) from rw_table(${table_id}, public);" | xargs);
+if [ "$table_count" -eq 0 ]; then
     echo "ERROR: internal table of cdc share source is empty!"
     exit 1
 fi

@@ -150,13 +150,6 @@ impl From<ValueEncodingError> for BatchError {
     }
 }
 
-impl From<tonic::Status> for BatchError {
-    fn from(status: tonic::Status) -> Self {
-        // Always wrap the status into a `RpcError`.
-        Self::from(RpcError::from(status))
-    }
-}
-
 impl<'a> From<&'a BatchError> for Status {
     fn from(err: &'a BatchError) -> Self {
         err.to_status(tonic::Code::Internal, "batch")

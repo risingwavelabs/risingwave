@@ -680,7 +680,7 @@ impl SourceManager {
                         (
                             actor_id as ActorId,
                             splits
-                                .into_inner()
+                                .to_protobuf()
                                 .splits
                                 .iter()
                                 .map(|split| SplitImpl::try_from(split).unwrap())
@@ -1163,7 +1163,7 @@ mod tests {
             serde_json::from_value(value.take()).map_err(Into::into)
         }
 
-        fn update_with_offset(&mut self, _start_offset: String) -> ConnectorResult<()> {
+        fn update_offset(&mut self, _last_read_offset: String) -> ConnectorResult<()> {
             Ok(())
         }
     }

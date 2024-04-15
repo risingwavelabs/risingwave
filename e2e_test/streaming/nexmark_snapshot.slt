@@ -5,6 +5,10 @@ include ../nexmark/insert_person.slt.part
 include ../nexmark/insert_auction.slt.part
 include ../nexmark/insert_bid.slt.part
 
+# Ensure that the upstream data is fully consumed
+statement ok
+flush;
+
 # Then, create materialized views based on the historical data (snapshot)
 include ./nexmark/create_views.slt.part
 

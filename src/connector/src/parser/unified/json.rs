@@ -34,6 +34,7 @@ use thiserror_ext::AsReport;
 use super::{Access, AccessError, AccessResult};
 use crate::parser::common::json_object_get_case_insensitive;
 use crate::parser::unified::avro::extract_decimal;
+use crate::schema::{bail_invalid_option_error, InvalidOptionError};
 
 #[derive(Clone, Debug)]
 pub enum ByteaHandling {
@@ -46,6 +47,44 @@ pub enum TimeHandling {
     Milli,
     Micro,
 }
+
+#[derive(Clone, Debug)]
+pub enum TimestamptzHandling {
+    /// `"2024-04-11T02:00:00.123456Z"`
+    UtcString,
+    /// `"2024-04-11 02:00:00.123456"`
+    UtcWithoutSuffix,
+    /// `1712800800123`
+    Milli,
+    /// `1712800800123456`
+    Micro,
+    /// Both `1712800800123` (ms) and `1712800800123456` (us) maps to `2024-04-11`.
+    ///
+    /// Only works for `[1973-03-03 09:46:40, 5138-11-16 09:46:40)`.
+    ///
+    /// This option is backward compatible.
+    GuessNumberUnit,
+}
+
+impl TimestamptzHandling {
+    pub const OPTION_KEY: &'static str = "timestamptz.handling.mode";
+
+    pub fn from_options(
+        options: &std::collections::BTreeMap<String, String>,
+    ) -> Result<Option<Self>, InvalidOptionError> {
+        let mode = match options.get(Self::OPTION_KEY).map(std::ops::Deref::deref) {
+            Some("utc_string") => Self::UtcString,
+            Some("utc_without_suffix") => Self::UtcWithoutSuffix,
+            Some("micro") => Self::Micro,
+            Some("milli") => Self::Milli,
+            Some("guess_number_unit") => Self::GuessNumberUnit,
+            Some(v) => bail_invalid_option_error!("unrecognized {} value {}", Self::OPTION_KEY, v),
+            None => return Ok(None),
+        };
+        Ok(Some(mode))
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum JsonValueHandling {
     AsValue,
@@ -95,6 +134,7 @@ pub enum StructHandling {
 pub struct JsonParseOptions {
     pub bytea_handling: ByteaHandling,
     pub time_handling: TimeHandling,
+    pub timestamptz_handling: TimestamptzHandling,
     pub json_value_handling: JsonValueHandling,
     pub numeric_handling: NumericHandling,
     pub boolean_handling: BooleanHandling,
@@ -113,6 +153,7 @@ impl JsonParseOptions {
     pub const CANAL: JsonParseOptions = JsonParseOptions {
         bytea_handling: ByteaHandling::Standard,
         time_handling: TimeHandling::Micro,
+        timestamptz_handling: TimestamptzHandling::GuessNumberUnit, // backward-compatible
         json_value_handling: JsonValueHandling::AsValue,
         numeric_handling: NumericHandling::Relax {
             string_parsing: true,
@@ -125,24 +166,10 @@ impl JsonParseOptions {
         struct_handling: StructHandling::Strict,
         ignoring_keycase: true,
     };
-    pub const DEBEZIUM: JsonParseOptions = JsonParseOptions {
-        bytea_handling: ByteaHandling::Base64,
-        time_handling: TimeHandling::Micro,
-        json_value_handling: JsonValueHandling::AsString,
-        numeric_handling: NumericHandling::Relax {
-            string_parsing: false,
-        },
-        boolean_handling: BooleanHandling::Relax {
-            string_parsing: false,
-            string_integer_parsing: false,
-        },
-        varchar_handling: VarcharHandling::Strict,
-        struct_handling: StructHandling::Strict,
-        ignoring_keycase: true,
-    };
     pub const DEFAULT: JsonParseOptions = JsonParseOptions {
         bytea_handling: ByteaHandling::Standard,
         time_handling: TimeHandling::Micro,
+        timestamptz_handling: TimestamptzHandling::GuessNumberUnit, // backward-compatible
         json_value_handling: JsonValueHandling::AsValue,
         numeric_handling: NumericHandling::Relax {
             string_parsing: true,
@@ -152,6 +179,25 @@ impl JsonParseOptions {
         struct_handling: StructHandling::AllowJsonString,
         ignoring_keycase: true,
     };
+
+    pub fn new_for_debezium(timestamptz_handling: TimestamptzHandling) -> Self {
+        Self {
+            bytea_handling: ByteaHandling::Base64,
+            time_handling: TimeHandling::Micro,
+            timestamptz_handling,
+            json_value_handling: JsonValueHandling::AsString,
+            numeric_handling: NumericHandling::Relax {
+                string_parsing: false,
+            },
+            boolean_handling: BooleanHandling::Relax {
+                string_parsing: false,
+                string_integer_parsing: false,
+            },
+            varchar_handling: VarcharHandling::Strict,
+            struct_handling: StructHandling::Strict,
+            ignoring_keycase: true,
+        }
+    }
 
     pub fn parse(
         &self,
@@ -436,17 +482,34 @@ impl JsonParseOptions {
                 .map_err(|_| create_error())?
                 .into(),
             // ---- Timestamptz -----
-            (Some(DataType::Timestamptz), ValueType::String) => value
-                .as_str()
-                .unwrap()
-                .parse::<Timestamptz>()
-                .map_err(|_| create_error())?
-                .into(),
+            (Some(DataType::Timestamptz), ValueType::String) => match self.timestamptz_handling {
+                TimestamptzHandling::UtcWithoutSuffix => value
+                    .as_str()
+                    .unwrap()
+                    .parse::<Timestamp>()
+                    .map(|naive_utc| Timestamptz::from_micros(naive_utc.0.timestamp_micros()))
+                    .map_err(|_| create_error())?
+                    .into(),
+                // Unless explicitly requested `utc_without_utc`, we parse string with `YYYY-MM-DDTHH:MM:SSZ`.
+                _ => value
+                    .as_str()
+                    .unwrap()
+                    .parse::<Timestamptz>()
+                    .map_err(|_| create_error())?
+                    .into(),
+            }
             (
                 Some(DataType::Timestamptz),
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
-            ) => i64_to_timestamptz(value.as_i64().unwrap())
-                .map_err(|_| create_error())?
+            ) => value.as_i64()
+                .and_then(|num| match self.timestamptz_handling {
+                    TimestamptzHandling::GuessNumberUnit => i64_to_timestamptz(num).ok(),
+                    TimestamptzHandling::Micro => Some(Timestamptz::from_micros(num)),
+                    TimestamptzHandling::Milli => Timestamptz::from_millis(num),
+                    // When explicitly requested string format, number without units are rejected.
+                    TimestamptzHandling::UtcString | TimestamptzHandling::UtcWithoutSuffix => None,
+                })
+                .ok_or_else(create_error)?
                 .into(),
             // ---- Interval -----
             (Some(DataType::Interval), ValueType::String) => {

@@ -217,7 +217,7 @@ impl RemoteInput {
                     // TODO(error-handling): maintain the source chain
                     return Err(StreamExecutorError::channel_closed(format!(
                         "RemoteInput tonic error: {}",
-                        TonicStatusWrapper::from(e).as_report()
+                        TonicStatusWrapper::new(e).as_report()
                     )));
                 }
             }

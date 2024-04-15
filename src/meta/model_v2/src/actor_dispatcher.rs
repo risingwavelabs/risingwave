@@ -61,7 +61,7 @@ impl From<(u32, PbDispatcher)> for Model {
             dispatcher_type: dispatcher.r#type().into(),
             dist_key_indices: dispatcher.dist_key_indices.into(),
             output_indices: dispatcher.output_indices.into(),
-            hash_mapping: dispatcher.hash_mapping.map(ActorMapping),
+            hash_mapping: dispatcher.hash_mapping.as_ref().map(ActorMapping::from),
             dispatcher_id: dispatcher.dispatcher_id as _,
             downstream_actor_ids: dispatcher.downstream_actor_id.into(),
         }
@@ -74,7 +74,7 @@ impl From<Model> for PbDispatcher {
             r#type: PbDispatcherType::from(model.dispatcher_type) as _,
             dist_key_indices: model.dist_key_indices.into_u32_array(),
             output_indices: model.output_indices.into_u32_array(),
-            hash_mapping: model.hash_mapping.map(|mapping| mapping.into_inner()),
+            hash_mapping: model.hash_mapping.map(|mapping| mapping.to_protobuf()),
             dispatcher_id: model.dispatcher_id as _,
             downstream_actor_id: model.downstream_actor_ids.into_u32_array(),
         }
