@@ -114,11 +114,10 @@ impl CompactStatus {
             return Some(task);
         } else {
             let compaction_group_config = &group.compaction_config;
-            if check_cg_write_limit(levels, compaction_group_config.clone()).is_write_stop()
+            if check_cg_write_limit(levels, compaction_group_config.as_ref()).is_write_stop()
                 && compaction_group_config.enable_emergency_picker
             {
-                let mut emergency_selector = Box::<EmergencySelector>::default();
-                return emergency_selector.pick_compaction(
+                return EmergencySelector::default().pick_compaction(
                     task_id,
                     group,
                     levels,

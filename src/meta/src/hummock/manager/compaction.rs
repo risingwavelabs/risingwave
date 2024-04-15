@@ -263,7 +263,7 @@ impl HummockManager {
 
 pub fn check_cg_write_limit(
     levels: &Levels,
-    compaction_config: Arc<CompactionConfig>,
+    compaction_config: &CompactionConfig,
 ) -> WriteLimitType {
     let threshold = compaction_config.level0_stop_write_threshold_sub_level_number as usize;
     let l0_sub_level_number = levels.l0.as_ref().unwrap().sub_levels.len();

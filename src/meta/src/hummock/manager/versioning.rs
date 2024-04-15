@@ -323,7 +323,7 @@ pub(super) fn calc_new_write_limits(
             Some(levels) => levels,
         };
 
-        let write_limit_type = check_cg_write_limit(levels, config.compaction_config.clone());
+        let write_limit_type = check_cg_write_limit(levels, config.compaction_config.as_ref());
         if write_limit_type.is_write_stop() {
             new_write_limits.insert(
                 *id,
