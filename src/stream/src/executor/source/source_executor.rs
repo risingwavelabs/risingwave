@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt::Formatter;
+use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -22,14 +23,17 @@ use futures_async_stream::try_stream;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_connector::source::cdc::jni_source;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
     BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitMetaData,
 };
 use risingwave_connector::ConnectorParams;
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
@@ -83,6 +87,18 @@ impl<S: StateStore> SourceExecutor<S> {
             source_ctrl_opts,
             connector_params,
         }
+    }
+
+    pub fn spawn_wait_epoch_worker(
+        core: &StreamSourceCore<S>,
+    ) -> UnboundedSender<(Epoch, HashMap<SplitId, String>)> {
+        let (wait_epoch_tx, wait_epoch_rx) = mpsc::unbounded_channel();
+        let wait_epoch_worker = WaitEpochWorker {
+            wait_epoch_rx,
+            state_store: core.split_state_store.state_table.state_store().clone(),
+        };
+        tokio::spawn(wait_epoch_worker.run());
+        wait_epoch_tx
     }
 
     pub async fn build_stream_source_reader(
@@ -305,7 +321,7 @@ impl<S: StateStore> SourceExecutor<S> {
     async fn persist_state_and_clear_cache(
         &mut self,
         epoch: EpochPair,
-    ) -> StreamExecutorResult<()> {
+    ) -> StreamExecutorResult<HashMap<SplitId, SplitImpl>> {
         let core = self.stream_source_core.as_mut().unwrap();
 
         let cache = core
@@ -320,16 +336,19 @@ impl<S: StateStore> SourceExecutor<S> {
         }
 
         // commit anyway, even if no message saved
-        core.split_state_store.state_store.commit(epoch).await?;
+        core.split_state_store.state_table.commit(epoch).await?;
+
+        let updated_splits = core.updated_splits_in_epoch.clone();
+
         core.updated_splits_in_epoch.clear();
 
-        Ok(())
+        Ok(updated_splits)
     }
 
     /// try mem table spill
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
         let core = self.stream_source_core.as_mut().unwrap();
-        core.split_state_store.state_store.try_flush().await?;
+        core.split_state_store.state_table.try_flush().await?;
 
         Ok(())
     }
@@ -360,6 +379,12 @@ impl<S: StateStore> SourceExecutor<S> {
         let source_desc = source_desc_builder
             .build()
             .map_err(StreamExecutorError::connector_error)?;
+
+        let wait_epoch_tx = if source_desc.source.need_commit_offset_to_upstream() {
+            Some(Self::spawn_wait_epoch_worker(&core))
+        } else {
+            None
+        };
 
         let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
         else {
@@ -487,7 +512,24 @@ impl<S: StateStore> SourceExecutor<S> {
                         }
                     }
 
-                    self.persist_state_and_clear_cache(epoch).await?;
+                    let updated_splits = self.persist_state_and_clear_cache(epoch).await?;
+
+                    // when handle a checkpoint barrier, spawn a task to wait for epoch commit notification
+                    if barrier.kind.is_checkpoint()
+                        && !updated_splits.is_empty()
+                        && let Some(ref tx) = wait_epoch_tx
+                    {
+                        let mut updated_offsets = HashMap::new();
+                        for (split_id, split_impl) in updated_splits {
+                            if split_impl.is_cdc_split() {
+                                updated_offsets.insert(split_id, split_impl.get_cdc_split_offset());
+                            }
+                        }
+
+                        tracing::debug!("epoch to wait {:?}", epoch);
+                        tx.send((Epoch(epoch.prev), updated_offsets))
+                            .expect("wait_epoch_tx send success");
+                    }
 
                     yield Message::Barrier(barrier);
                 }
@@ -614,6 +656,59 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
                 .finish()
         } else {
             f.debug_struct("SourceExecutor").finish()
+        }
+    }
+}
+
+struct WaitEpochWorker<S: StateStore> {
+    wait_epoch_rx: UnboundedReceiver<(Epoch, HashMap<SplitId, String>)>,
+    state_store: S,
+}
+
+impl<S: StateStore> WaitEpochWorker<S> {
+    pub async fn run(mut self) {
+        tracing::debug!("wait epoch worker start success");
+        loop {
+            // poll the rx and wait for the epoch commit
+            match self.wait_epoch_rx.recv().await {
+                Some((epoch, updated_offsets)) => {
+                    tracing::debug!("start to wait epoch {}", epoch.0);
+                    let ret = self
+                        .state_store
+                        .try_wait_epoch(HummockReadEpoch::Committed(epoch.0))
+                        .await;
+
+                    match ret {
+                        Ok(()) => {
+                            tracing::debug!(epoch = epoch.0, "wait epoch success");
+                            // cdc source only has one split
+                            assert_eq!(1, updated_offsets.len());
+                            let (split_id, offset) = updated_offsets.into_iter().next().unwrap();
+                            let source_id: u64 = u64::from_str(split_id.as_ref()).unwrap();
+                            // notify cdc connector to commit offset
+                            match jni_source::commit_cdc_offset(source_id, offset.clone()) {
+                                Ok(_) => {}
+                                Err(e) => {
+                                    tracing::error!(
+                                        error = %e.as_report(),
+                                        "source#{source_id}: failed to commit cdc offset: {offset}.",
+                                    )
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                            error = %e.as_report(),
+                            "wait epoch {} failed", epoch.0
+                            );
+                        }
+                    }
+                }
+                None => {
+                    tracing::error!("wait epoch rx closed");
+                    break;
+                }
+            }
         }
     }
 }
