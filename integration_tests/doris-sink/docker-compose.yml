@@ -35,9 +35,6 @@ services:
     networks:
       mynetwork:
         ipv4_address: 172.21.0.4
-  networks:
-      mynetwork:
-        ipv4_address: 172.21.0.5
   grafana-0:
     extends:
       file: ../../docker/docker-compose.yml
