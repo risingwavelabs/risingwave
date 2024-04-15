@@ -514,7 +514,7 @@ mod tests {
         );
         assert_eq!(
             new_write_limits.get(&1).as_ref().unwrap().reason,
-            "too many L0 sub levels: 11 > 10"
+            "WriteStop(l0_level_count: 11, threshold: 10) too many L0 sub levels"
         );
         assert_eq!(new_write_limits.len(), 2);
 
@@ -535,7 +535,7 @@ mod tests {
         );
         assert_eq!(
             new_write_limits.get(&1).as_ref().unwrap().reason,
-            "too many L0 sub levels: 11 > 5"
+            "WriteStop(l0_level_count: 11, threshold: 5) too many L0 sub levels"
         );
     }
 
