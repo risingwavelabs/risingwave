@@ -191,7 +191,10 @@ impl HummockManager {
         let versioning = versioning_guard.deref_mut();
         assert!(new_checkpoint.version.id >= versioning.checkpoint.version.id);
         versioning.checkpoint = new_checkpoint;
-        versioning.mark_objects_for_deletion();
+        // Not delete stale objects when archive is enabled
+        if !self.env.opts.enable_hummock_data_archive {
+            versioning.mark_objects_for_deletion();
+        }
 
         let min_pinned_version_id = versioning.min_pinned_version_id();
         trigger_gc_stat(&self.metrics, &versioning.checkpoint, min_pinned_version_id);
