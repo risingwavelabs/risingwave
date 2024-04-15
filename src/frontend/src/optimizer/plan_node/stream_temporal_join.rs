@@ -100,9 +100,9 @@ impl StreamTemporalJoin {
     /// (`join_key` + `left_pk` + `right_pk`) -> (`right_scan_schema` + `join_key` + `left_pk`)
     ///
     /// Write pattern:
-    ///   for each output row (with insert op), construct the output table pk and insert the row.
+    ///   for each left input row (with insert op), construct the memo table pk and insert the row into the memo table.
     /// Read pattern:
-    ///   for each left input row (with delete op), construct pk prefix (`join_key` + `left_pk`) to fetch rows.
+    ///   for each left input row (with delete op), construct pk prefix (`join_key` + `left_pk`) to fetch rows and delete them from the memo table.
     pub fn infer_memo_table_catalog(&self, right_scan: &StreamTableScan) -> TableCatalog {
         let left_eq_indexes = self.eq_join_predicate.left_eq_indexes();
         let read_prefix_len_hint = left_eq_indexes.len() + self.left().stream_key().unwrap().len();
