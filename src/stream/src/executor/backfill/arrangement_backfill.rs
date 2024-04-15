@@ -35,7 +35,7 @@ use crate::executor::backfill::utils::METADATA_STATE_LEN;
 use crate::executor::backfill::utils::{
     compute_bounds, create_builder, create_limiter, get_progress_per_vnode, mapping_chunk,
     mapping_message, mark_chunk_ref_by_vnode, owned_row_iter, persist_state_per_vnode,
-    update_pos_by_vnode, BackfillProgressPerVnode, BackfillState,
+    update_pos_by_vnode, BackfillProgressPerVnode, BackfillRateLimiter, BackfillState,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -215,6 +215,9 @@ where
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
             let mut pending_barrier: Option<Barrier> = None;
 
+            let rate_limiter = self.rate_limit.and_then(create_limiter);
+            let rate_limit = self.rate_limit;
+
             let backfill_snapshot_read_row_count_metric = self
                 .metrics
                 .backfill_snapshot_read_row_count
@@ -243,11 +246,14 @@ where
                 {
                     let left_upstream = upstream.by_ref().map(Either::Left);
 
+                    // Check if stream paused
+                    let paused = paused || matches!(rate_limit, Some(0));
+                    // Create the snapshot stream
                     let right_snapshot = pin!(Self::make_snapshot_stream(
                         &upstream_table,
                         backfill_state.clone(), // FIXME: Use mutable reference instead.
                         paused,
-                        self.rate_limit,
+                        &rate_limiter,
                     )
                     .map(Either::Right));
 
@@ -586,30 +592,23 @@ where
     }
 
     #[try_stream(ok = Option<(VirtualNode, OwnedRow)>, error = StreamExecutorError)]
-    async fn make_snapshot_stream(
-        upstream_table: &ReplicatedStateTable<S, SD>,
+    async fn make_snapshot_stream<'a>(
+        upstream_table: &'a ReplicatedStateTable<S, SD>,
         backfill_state: BackfillState,
         paused: bool,
-        rate_limit: Option<usize>,
+        rate_limiter: &'a Option<BackfillRateLimiter>,
     ) {
-        if paused || {
-            if let Some(rate_limit) = rate_limit {
-                rate_limit == 0
-            } else {
-                false
-            }
-        } {
+        if paused {
             #[for_await]
             for _ in tokio_stream::pending() {
                 yield None;
             }
         } else {
             // Checked the rate limit is not zero.
-            let limiter = rate_limit.and_then(create_limiter);
             #[for_await]
             for r in Self::snapshot_read_per_vnode(upstream_table, backfill_state) {
                 let r = r?;
-                if let Some(rate_limit) = &limiter {
+                if let Some(rate_limit) = rate_limiter {
                     rate_limit.until_ready().await;
                 }
                 yield r;
