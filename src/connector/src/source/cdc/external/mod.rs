@@ -266,7 +266,8 @@ pub enum SslMode {
 
 impl Default for SslMode {
     fn default() -> Self {
-        Self::Prefer
+        // default to `disable` for backward compatibility
+        Self::Disable
     }
 }
 
