@@ -22,6 +22,8 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
+source ci/scripts/common.sh
+
 echo "--- Download artifacts"
 download-and-decompress-artifact risingwave_simulation .
 chmod +x ./risingwave_simulation
