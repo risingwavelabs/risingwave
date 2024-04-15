@@ -5,6 +5,7 @@ set -euo pipefail
 
 export LOGDIR=.risingwave/log
 export RUST_LOG=info
+mkdir -p $LOGDIR
 
 while getopts 'p:' opt; do
     case ${opt} in
