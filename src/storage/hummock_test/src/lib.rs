@@ -18,6 +18,8 @@
 #![feature(type_alias_impl_trait)]
 #![feature(associated_type_bounds)]
 
+extern crate core;
+
 #[cfg(test)]
 mod compactor_tests;
 #[cfg(all(test, feature = "failpoints"))]
