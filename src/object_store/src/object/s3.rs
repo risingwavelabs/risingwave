@@ -46,7 +46,6 @@ use aws_smithy_runtime_api::client::http::HttpClient;
 use aws_smithy_runtime_api::client::result::SdkError;
 use aws_smithy_types::body::SdkBody;
 use aws_smithy_types::error::metadata::ProvideErrorMetadata;
-use aws_smithy_types::retry::RetryConfig;
 use fail::fail_point;
 use futures::future::{try_join_all, BoxFuture, FutureExt};
 use futures::{stream, Stream, StreamExt, TryStreamExt};
@@ -635,9 +634,7 @@ impl S3ObjectStore {
         metrics: Arc<ObjectStoreMetrics>,
         config: ObjectStoreConfig,
     ) -> Self {
-        let sdk_config_loader = aws_config::from_env()
-            .retry_config(RetryConfig::standard().with_max_attempts(4))
-            .http_client(Self::new_http_client(&config));
+        let sdk_config_loader = aws_config::from_env().http_client(Self::new_http_client(&config));
 
         // Retry 3 times if we get server-side errors or throttling errors
         let client = match std::env::var("RW_S3_ENDPOINT") {
