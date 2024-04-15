@@ -275,7 +275,14 @@ mod tests {
 
     #[test]
     fn test_channel_close() {
-        let (tx, mut rx) = channel_for_test();
+        let (tx, mut rx) = channel(
+            PbPermits {
+                records: 0,
+                bytes: 0,
+                barriers: 1,
+            },
+            (0, 0),
+        );
 
         let send = || {
             tx.send(Message::Barrier(Barrier::with_prev_epoch_for_test(
