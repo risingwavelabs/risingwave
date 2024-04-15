@@ -454,7 +454,6 @@ mod phase1 {
     ) {
         let mut builder = StreamChunkBuilder::new(chunk_size, full_schema);
         let keys = K::build_many(left_join_keys, chunk.data_chunk());
-        let memo_table = memo_table.as_mut().unwrap();
         let to_fetch_keys = chunk
             .visibility()
             .iter()
@@ -498,6 +497,7 @@ mod phase1 {
                 }
             } else {
                 // Non-append-only temporal join
+                let memo_table = memo_table.as_mut().unwrap();
                 match op {
                     Op::Insert | Op::UpdateInsert => {
                         if key.null_bitmap().is_subset(null_matched)
