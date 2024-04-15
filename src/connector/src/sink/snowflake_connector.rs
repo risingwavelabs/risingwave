@@ -211,7 +211,12 @@ impl SnowflakeS3Client {
             &aws_secret_access_key,
             &aws_region,
         )
-        .map_err(|e| SinkError::Snowflake(format!("failed to create opendal s3 engine, error: {}", e.to_string())))?;
+        .map_err(|e| {
+            SinkError::Snowflake(format!(
+                "failed to create opendal s3 engine, error: {}",
+                e.to_string()
+            ))
+        })?;
 
         Ok(Self {
             s3_bucket,
