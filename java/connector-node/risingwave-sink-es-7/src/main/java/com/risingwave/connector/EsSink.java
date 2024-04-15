@@ -278,20 +278,32 @@ public class EsSink extends SinkWriterBase {
     }
 
     private void processUpsert(SinkRow row) throws JsonMappingException, JsonProcessingException {
-        final String key = (String) row.get(0);
-        String doc = (String) row.get(1);
+        final String index = (String) row.get(0);
+        final String key = (String) row.get(1);
+        String doc = (String) row.get(2);
 
-        UpdateRequest updateRequest =
-                new UpdateRequest(config.getIndex(), "_doc", key).doc(doc, XContentType.JSON);
+        UpdateRequest updateRequest;
+        if (config.getIndex() != null) {
+            updateRequest =
+                    new UpdateRequest(config.getIndex(), "_doc", key).doc(doc, XContentType.JSON);
+        } else {
+            updateRequest = new UpdateRequest(index, "_doc", key).doc(doc, XContentType.JSON);
+        }
         updateRequest.docAsUpsert(true);
         this.requestTracker.addWriteTask();
         bulkProcessor.add(updateRequest);
     }
 
     private void processDelete(SinkRow row) throws JsonMappingException, JsonProcessingException {
-        final String key = (String) row.get(0);
+        final String index = (String) row.get(0);
+        final String key = (String) row.get(1);
 
-        DeleteRequest deleteRequest = new DeleteRequest(config.getIndex(), "_doc", key);
+        DeleteRequest deleteRequest;
+        if (config.getIndex() != null) {
+            deleteRequest = new DeleteRequest(config.getIndex(), "_doc", key);
+        } else {
+            deleteRequest = new DeleteRequest(index, "_doc", key);
+        }
         this.requestTracker.addWriteTask();
         bulkProcessor.add(deleteRequest);
     }
