@@ -453,7 +453,7 @@ impl MetadataManager {
     pub async fn get_upstream_root_fragments(
         &self,
         upstream_table_ids: &HashSet<TableId>,
-    ) -> MetaResult<HashMap<TableId, Fragment>> {
+    ) -> MetaResult<(HashMap<TableId, Fragment>, HashMap<ActorId, u32>)> {
         match self {
             MetadataManager::V1(mgr) => {
                 mgr.fragment_manager
@@ -470,10 +470,15 @@ impl MetadataManager {
                             .collect(),
                     )
                     .await?;
-                Ok(upstream_root_fragments
-                    .into_iter()
-                    .map(|(id, fragment)| ((id as u32).into(), fragment))
-                    .collect())
+
+                // todo
+                Ok((
+                    upstream_root_fragments
+                        .into_iter()
+                        .map(|(id, fragment)| ((id as u32).into(), fragment))
+                        .collect(),
+                    HashMap::new(),
+                ))
             }
         }
     }

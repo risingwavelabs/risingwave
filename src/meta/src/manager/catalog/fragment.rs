@@ -1479,9 +1479,11 @@ impl FragmentManager {
     pub async fn get_upstream_root_fragments(
         &self,
         upstream_table_ids: &HashSet<TableId>,
-    ) -> MetaResult<HashMap<TableId, Fragment>> {
+    ) -> MetaResult<(HashMap<TableId, Fragment>, HashMap<ActorId, u32>)> {
         let map = &self.core.read().await.table_fragments;
         let mut fragments = HashMap::new();
+
+        let mut actor_locations = HashMap::new();
 
         for &table_id in upstream_table_ids {
             let table_fragments = map
@@ -1494,9 +1496,20 @@ impl FragmentManager {
                 // look for Source fragment if there's no MView fragment
                 fragments.insert(table_id, fragment);
             }
+
+            // todo: reduce memory usage
+            table_fragments
+                .actor_status
+                .iter()
+                .for_each(|(actor_id, status)| {
+                    actor_locations.insert(
+                        *actor_id,
+                        status.get_parallel_unit().unwrap().worker_node_id,
+                    );
+                });
         }
 
-        Ok(fragments)
+        Ok((fragments, actor_locations))
     }
 
     /// Get the downstream `StreamTableScan` fragments of the specified MV.

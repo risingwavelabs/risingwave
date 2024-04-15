@@ -3039,6 +3039,25 @@ pub fn schedule_units_for_slots(
         .collect())
 }
 
+pub fn schedule_units_for_slots_v2(
+    slots: &BTreeMap<WorkerId, usize>,
+    total_unit_size: usize,
+    salt: u32,
+) -> MetaResult<BTreeMap<WorkerId, usize>> {
+    let mut ch = ConsistentHashRing::new(salt);
+
+    for (worker_id, size) in slots {
+        ch.add_worker(*worker_id, *size as u32);
+    }
+
+    let target_distribution = ch.distribute_tasks(total_unit_size as u32)?;
+
+    Ok(target_distribution
+        .into_iter()
+        .map(|(k, v)| (k, v as usize))
+        .collect())
+}
+
 pub struct ConsistentHashRing {
     ring: BTreeMap<u64, u32>,
     capacities: BTreeMap<u32, u32>,

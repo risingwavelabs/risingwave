@@ -24,9 +24,14 @@ use std::num::NonZeroUsize;
 use either::Either;
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
-use risingwave_common::bail;
-use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping};
-use risingwave_pb::common::{ActorInfo, ParallelUnit};
+use risingwave_common::buffer::Bitmap;
+use risingwave_common::hash::marker::WorkerSlot;
+use risingwave_common::hash::{
+    ActorMapping, ParallelUnitId, ParallelUnitMapping, WorkerSlotId, WorkerSlotMapping,
+};
+use risingwave_common::range::RangeBoundsExt;
+use risingwave_common::{bail, hash};
+use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode};
 use risingwave_pb::meta::table_fragments::fragment::{
     FragmentDistributionType, PbFragmentDistributionType,
 };
@@ -34,9 +39,9 @@ use risingwave_pb::stream_plan::DispatcherType::{self, *};
 
 use crate::manager::{WorkerId, WorkerLocations};
 use crate::model::ActorId;
-use crate::stream::schedule_units_for_slots;
 use crate::stream::stream_graph::fragment::CompleteStreamFragmentGraph;
 use crate::stream::stream_graph::id::GlobalFragmentId as Id;
+use crate::stream::{schedule_units_for_slots, schedule_units_for_slots_v2};
 use crate::MetaResult;
 
 type HashMappingId = usize;
@@ -46,7 +51,7 @@ type HashMappingId = usize;
 /// See [`Distribution`] for the public interface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum DistId {
-    Singleton(ParallelUnitId),
+    Singleton(WorkerSlotId),
     Hash(HashMappingId),
 }
 
@@ -130,20 +135,20 @@ crepe::crepe! {
 #[derive(Debug, Clone, EnumAsInner)]
 pub(super) enum Distribution {
     /// The fragment is singleton and is scheduled to the given parallel unit.
-    Singleton(ParallelUnitId),
+    Singleton(WorkerSlotId),
 
     /// The fragment is hash-distributed and is scheduled by the given hash mapping.
-    Hash(ParallelUnitMapping),
+    Hash(WorkerSlotMapping),
 }
 
 impl Distribution {
     /// The parallelism required by the distribution.
     pub fn parallelism(&self) -> usize {
-        self.parallel_units().count()
+        self.worker_slots().count()
     }
 
     /// All parallel units required by the distribution.
-    pub fn parallel_units(&self) -> impl Iterator<Item = ParallelUnitId> + '_ {
+    pub fn worker_slots(&self) -> impl Iterator<Item = WorkerSlotId> + '_ {
         match self {
             Distribution::Singleton(p) => Either::Left(std::iter::once(*p)),
             Distribution::Hash(mapping) => Either::Right(mapping.iter_unique()),
@@ -154,16 +159,33 @@ impl Distribution {
     ///
     /// - For singleton distribution, all of the virtual nodes are mapped to the same parallel unit.
     /// - For hash distribution, the mapping is returned as is.
-    pub fn into_mapping(self) -> ParallelUnitMapping {
+    pub fn into_mapping(self) -> WorkerSlotMapping {
         match self {
-            Distribution::Singleton(p) => ParallelUnitMapping::new_single(p),
+            Distribution::Singleton(worker_slot_id) => {
+                WorkerSlotMapping::new_single(worker_slot_id)
+            }
             Distribution::Hash(mapping) => mapping,
         }
     }
 
     /// Create a distribution from a persisted protobuf `Fragment`.
-    pub fn from_fragment(fragment: &risingwave_pb::meta::table_fragments::Fragment) -> Self {
-        let mapping = ParallelUnitMapping::from_protobuf(fragment.get_vnode_mapping().unwrap());
+    pub fn from_fragment(
+        fragment: &risingwave_pb::meta::table_fragments::Fragment,
+        actor_location: &HashMap<u32, u32>,
+    ) -> Self {
+        let actor_bitmaps: HashMap<_, _> = fragment
+            .actors
+            .iter()
+            .map(|actor| {
+                (
+                    actor.actor_id as hash::ActorId,
+                    Bitmap::from(actor.vnode_bitmap.as_ref().unwrap()),
+                )
+            })
+            .collect();
+
+        let actor_mapping = ActorMapping::from_bitmaps(&actor_bitmaps);
+        let mapping = actor_mapping.to_worker_slot(actor_location);
 
         match fragment.get_distribution_type().unwrap() {
             FragmentDistributionType::Unspecified => unreachable!(),
@@ -187,10 +209,10 @@ impl Distribution {
 /// [`Scheduler`] schedules the distribution of fragments in a stream graph.
 pub(super) struct Scheduler {
     /// The default hash mapping for hash-distributed fragments, if there's no requirement derived.
-    default_hash_mapping: ParallelUnitMapping,
+    default_hash_mapping: WorkerSlotMapping,
 
     /// The default parallel unit for singleton fragments, if there's no requirement derived.
-    default_singleton_parallel_unit: ParallelUnitId,
+    default_singleton_worker_slot: WorkerSlotId,
 }
 
 impl Scheduler {
@@ -203,38 +225,39 @@ impl Scheduler {
     /// For different streaming jobs, we even out possible scheduling skew by using the streaming job id as the salt for the scheduling algorithm.
     pub fn new(
         streaming_job_id: u32,
-        parallel_units: impl IntoIterator<Item = ParallelUnit>,
+        workers: &HashMap<u32, WorkerNode>,
         default_parallelism: NonZeroUsize,
     ) -> MetaResult<Self> {
         // Group parallel units with worker node.
-        let mut slots = BTreeMap::new();
-        for parallel_unit in parallel_units {
-            slots
-                .entry(parallel_unit.worker_node_id as WorkerId)
-                .or_insert_with(BTreeSet::new)
-                .insert(parallel_unit.id as ParallelUnitId);
-        }
+
+        let slots = workers
+            .iter()
+            .map(|(worker_id, worker)| (*worker_id, worker.parallel_units.len()))
+            .collect();
 
         let parallelism = default_parallelism.get();
-        let scheduled = schedule_units_for_slots(&slots, parallelism, streaming_job_id)?;
+        let scheduled = schedule_units_for_slots_v2(&slots, parallelism, streaming_job_id)?;
 
-        let scheduled_parallel_units = scheduled.values().flatten().cloned().sorted().collect_vec();
-        assert_eq!(scheduled_parallel_units.len(), parallelism);
+        let scheduled_worker_slots = scheduled
+            .into_iter()
+            .flat_map(|(worker_id, size)| {
+                (0..size).map(move |slot| WorkerSlotId(worker_id, slot as u32))
+            })
+            .collect_vec();
+
+        assert_eq!(scheduled_worker_slots.len(), parallelism);
 
         // Build the default hash mapping uniformly.
-        let default_hash_mapping = ParallelUnitMapping::build_from_ids(&scheduled_parallel_units);
+        let default_hash_mapping = WorkerSlotMapping::build_from_ids(&scheduled_worker_slots);
 
-        let single_scheduled = schedule_units_for_slots(&slots, 1, streaming_job_id)?;
-        let default_singleton_parallel_unit = single_scheduled
-            .values()
-            .flatten()
-            .exactly_one()
-            .cloned()
-            .unwrap();
+        let single_scheduled = schedule_units_for_slots_v2(&slots, 1, streaming_job_id)?;
+        let default_single_worker_id = single_scheduled.keys().exactly_one().cloned().unwrap();
+
+        let default_singleton_worker_slot = WorkerSlotId(default_single_worker_id, 0);
 
         Ok(Self {
             default_hash_mapping,
-            default_singleton_parallel_unit,
+            default_singleton_worker_slot,
         })
     }
 
@@ -301,8 +324,8 @@ impl Scheduler {
             .map(|Success(id, result)| {
                 let distribution = match result {
                     // Required
-                    Result::Required(DistId::Singleton(parallel_unit)) => {
-                        Distribution::Singleton(parallel_unit)
+                    Result::Required(DistId::Singleton(worker_slot)) => {
+                        Distribution::Singleton(worker_slot)
                     }
                     Result::Required(DistId::Hash(mapping)) => {
                         Distribution::Hash(all_hash_mappings[mapping].clone())
@@ -310,7 +333,7 @@ impl Scheduler {
 
                     // Default
                     Result::DefaultSingleton => {
-                        Distribution::Singleton(self.default_singleton_parallel_unit)
+                        Distribution::Singleton(self.default_singleton_worker_slot)
                     }
                     Result::DefaultHash => Distribution::Hash(self.default_hash_mapping.clone()),
                 };
@@ -328,7 +351,7 @@ impl Scheduler {
 #[cfg_attr(test, derive(Default))]
 pub struct Locations {
     /// actor location map.
-    pub actor_locations: BTreeMap<ActorId, ParallelUnit>,
+    pub actor_locations: BTreeMap<ActorId, WorkerSlotId>,
     /// worker location map.
     pub worker_locations: WorkerLocations,
 }
@@ -338,7 +361,7 @@ impl Locations {
     pub fn worker_actors(&self) -> HashMap<WorkerId, Vec<ActorId>> {
         self.actor_locations
             .iter()
-            .map(|(actor_id, parallel_unit)| (parallel_unit.worker_node_id, *actor_id))
+            .map(|(actor_id, WorkerSlotId(worker_id, _))| (*worker_id, *actor_id))
             .into_group_map()
     }
 
@@ -346,11 +369,9 @@ impl Locations {
     pub fn actor_infos(&self) -> impl Iterator<Item = ActorInfo> + '_ {
         self.actor_locations
             .iter()
-            .map(|(actor_id, parallel_unit)| ActorInfo {
+            .map(|(actor_id, WorkerSlotId(worker_id, _))| ActorInfo {
                 actor_id: *actor_id,
-                host: self.worker_locations[&parallel_unit.worker_node_id]
-                    .host
-                    .clone(),
+                host: self.worker_locations[worker_id].host.clone(),
             })
     }
 }

@@ -22,6 +22,7 @@ use itertools::Itertools;
 use risingwave_pb::common::{
     ParallelUnit, ParallelUnitMapping as ParallelUnitMappingProto, PbWorkerMapping,
 };
+use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::stream_plan::ActorMapping as ActorMappingProto;
 
 use super::bitmap::VnodeBitmapExt;
@@ -33,6 +34,9 @@ use crate::util::iter_util::ZipEqDebug;
 // TODO: find a better place for this.
 pub type ActorId = u32;
 pub type WorkerId = u32;
+
+#[derive(Debug, Hash, Ord, Copy, Clone, PartialOrd, PartialEq, Eq)]
+pub struct WorkerSlotId(pub u32, pub u32);
 
 /// Trait for items that can be used as keys in [`VnodeMapping`].
 pub trait VnodeMappingItem {
@@ -248,12 +252,14 @@ pub mod marker {
 
     /// A marker type for items of [`ActorId`].
     pub struct Actor;
+
     impl VnodeMappingItem for Actor {
         type Item = ActorId;
     }
 
     /// A marker type for items of [`ParallelUnitId`].
     pub struct ParallelUnit;
+
     impl VnodeMappingItem for ParallelUnit {
         type Item = ParallelUnitId;
     }
@@ -262,6 +268,12 @@ pub mod marker {
     pub struct Worker;
     impl VnodeMappingItem for Worker {
         type Item = WorkerId;
+    }
+
+    pub struct WorkerSlot;
+
+    impl VnodeMappingItem for WorkerSlot {
+        type Item = WorkerSlotId;
     }
 }
 
@@ -280,6 +292,9 @@ pub type WorkerMapping = VnodeMapping<marker::Worker>;
 /// An expanded mapping from [`VirtualNode`] to [`WorkerId`].
 pub type ExpandedWorkerMapping = ExpandedMapping<marker::Worker>;
 
+pub type WorkerSlotMapping = VnodeMapping<marker::WorkerSlot>;
+pub type ExpandedWorkerSlotMapping = ExpandedMapping<marker::WorkerSlot>;
+
 impl ActorMapping {
     /// Transform this actor mapping to a parallel unit mapping, essentially `transform`.
     pub fn to_parallel_unit<M>(&self, to_map: &M) -> ParallelUnitMapping
@@ -287,6 +302,23 @@ impl ActorMapping {
         M: for<'a> Index<&'a ActorId, Output = ParallelUnitId>,
     {
         self.transform(to_map)
+    }
+
+    pub fn to_worker_slot(&self, to_map: &HashMap<ActorId, u32>) -> WorkerSlotMapping {
+        let x: HashMap<_, _> =
+            self.iter()
+                .map(|actor_id| (to_map.get(&actor_id).cloned().unwrap(), actor_id))
+                .into_group_map()
+                .into_iter()
+                .flat_map(|(worker_id, mut actors)| {
+                    actors.sort();
+                    actors.into_iter().enumerate().map(move |(slot, actor_id)| {
+                        (actor_id, WorkerSlotId(worker_id, slot as u32))
+                    })
+                })
+                .collect();
+
+        self.transform(&x)
     }
 
     /// Create an actor mapping from the protobuf representation.
@@ -371,6 +403,27 @@ impl ParallelUnitMapping {
     }
 }
 
+impl WorkerSlotMapping {
+    /// Create a uniform parallel unit mapping from the given parallel units ids
+    pub fn build_from_ids(worker_slots: &[WorkerSlotId]) -> Self {
+        Self::new_uniform(worker_slots.iter().cloned())
+    }
+
+    /// Transform this parallel unit mapping to an actor mapping, essentially `transform`.
+    pub fn to_actor(&self, to_map: &HashMap<WorkerSlotId, ActorId>) -> ActorMapping {
+        self.transform(to_map)
+    }
+
+    pub fn to_fake_mapping(&self) -> ParallelUnitMapping {
+        let map: HashMap<_, _> = self
+            .iter()
+            .map(|x @ WorkerSlotId(worker, slot)| (x, worker << 10 | slot as ParallelUnitId))
+            .collect();
+
+        self.transform(&map)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::iter::repeat_with;
@@ -381,11 +434,13 @@ mod tests {
     use crate::util::iter_util::ZipEqDebug;
 
     struct Test;
+
     impl VnodeMappingItem for Test {
         type Item = u32;
     }
 
     struct Test2;
+
     impl VnodeMappingItem for Test2 {
         type Item = u32;
     }
