@@ -47,7 +47,7 @@ c
 sleep 15s
 
 system ok
-rpk group list | tail -n +2 | cut -w -f2 | xargs -n1 -I {} sh -c "rpk group describe -s {} | grep "MEMBERS""
+rpk group list && (rpk group list | tail -n +2 | cut -w -f2 | xargs -n1 -I {} sh -c "rpk group describe -s {} ")
 ----
 MEMBERS      0
 MEMBERS      0
