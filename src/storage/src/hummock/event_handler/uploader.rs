@@ -1051,7 +1051,7 @@ impl HummockUploader {
             // flush large data at first to avoid generate small files.
             unseal_epochs.sort_by_key(|item| item.0);
             for (_, epoch) in unseal_epochs.iter().rev() {
-                let unsealed_data = self.unsealed_data.get_mut(&epoch).unwrap();
+                let unsealed_data = self.unsealed_data.get_mut(epoch).unwrap();
                 unsealed_data.flush(&self.context);
                 flushed = true;
                 if !self.context.buffer_tracker.need_more_flush() {
