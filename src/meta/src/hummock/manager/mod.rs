@@ -114,6 +114,7 @@ mod utils;
 mod worker;
 
 use compaction::*;
+pub use compaction::{check_cg_write_limit, WriteLimitType};
 pub(crate) use utils::*;
 
 type Snapshot = ArcSwap<HummockSnapshot>;
@@ -2812,6 +2813,7 @@ impl HummockManager {
         *self.group_to_table_vnode_partition.write() = group_to_table_vnode_partition;
     }
 
+    /// dedicated event runtime for CPU/IO bound event
     pub fn compaction_event_loop(
         hummock_manager: Arc<Self>,
         mut compactor_streams_change_rx: UnboundedReceiver<(
@@ -3019,39 +3021,14 @@ impl HummockManager {
 
     /// This method will return all compaction group id in a random order and task type. If there are any group block by `write_limit`, it will return a single array with `TaskType::Emergency`.
     /// If these groups get different task-type, it will return all group id with `TaskType::Dynamic` if the first group get `TaskType::Dynamic`, otherwise it will return the single group with other task type.
-    #[named]
     pub async fn auto_pick_compaction_groups_and_type(
         &self,
     ) -> (Vec<CompactionGroupId>, compact_task::TaskType) {
-        let versioning_guard = read_lock!(self, versioning).await;
-        let versioning = versioning_guard.deref();
-        let mut compaction_group_ids =
-            get_compaction_group_ids(&versioning.current_version).collect_vec();
+        let mut compaction_group_ids = self.compaction_group_ids().await;
         compaction_group_ids.shuffle(&mut thread_rng());
 
         let mut normal_groups = vec![];
         for cg_id in compaction_group_ids {
-            if versioning.write_limit.contains_key(&cg_id) {
-                let enable_emergency_picker = match self
-                    .compaction_group_manager
-                    .read()
-                    .await
-                    .try_get_compaction_group_config(cg_id)
-                {
-                    Some(config) => config.compaction_config.enable_emergency_picker,
-                    None => {
-                        unreachable!("compaction-group {} not exist", cg_id)
-                    }
-                };
-
-                if enable_emergency_picker {
-                    if normal_groups.is_empty() {
-                        return (vec![cg_id], TaskType::Emergency);
-                    } else {
-                        break;
-                    }
-                }
-            }
             if let Some(pick_type) = self.compaction_state.auto_pick_type(cg_id) {
                 if pick_type == TaskType::Dynamic {
                     normal_groups.push(cg_id);
@@ -3436,10 +3413,6 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
         compact_task::TaskType::Tombstone,
         Box::<TombstoneCompactionSelector>::default(),
     );
-    compaction_selectors.insert(
-        compact_task::TaskType::Emergency,
-        Box::<EmergencySelector>::default(),
-    );
     compaction_selectors
 }
 
@@ -3448,7 +3421,6 @@ use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::HummockVersion;
 use tokio::sync::mpsc::error::SendError;
 
-use super::compaction::selector::EmergencySelector;
 use super::compaction::CompactionSelector;
 use crate::controller::SqlMetaStore;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
