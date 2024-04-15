@@ -33,7 +33,7 @@ use risingwave_pb::hummock::{CompactTask, CompactionConfig, LevelType};
 pub use selector::CompactionSelector;
 
 use self::selector::{EmergencySelector, LocalSelectorStatistic};
-use super::is_write_stop;
+use super::check_cg_write_limit;
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
 use crate::hummock::compaction::picker::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
@@ -114,7 +114,7 @@ impl CompactStatus {
             return Some(task);
         } else {
             let compaction_group_config = &group.compaction_config;
-            if is_write_stop(levels, compaction_group_config.clone())
+            if check_cg_write_limit(levels, compaction_group_config.clone()).is_write_stop()
                 && compaction_group_config.enable_emergency_picker
             {
                 let mut emergency_selector = Box::<EmergencySelector>::default();

@@ -261,8 +261,40 @@ impl HummockManager {
     }
 }
 
-pub fn is_write_stop(levels: &Levels, compaction_config: Arc<CompactionConfig>) -> bool {
+pub fn check_cg_write_limit(
+    levels: &Levels,
+    compaction_config: Arc<CompactionConfig>,
+) -> WriteLimitType {
     let threshold = compaction_config.level0_stop_write_threshold_sub_level_number as usize;
     let l0_sub_level_number = levels.l0.as_ref().unwrap().sub_levels.len();
-    threshold < l0_sub_level_number
+    if threshold < l0_sub_level_number {
+        return WriteLimitType::WriteStop(l0_sub_level_number, threshold);
+    }
+
+    WriteLimitType::Unlimited
+}
+
+pub enum WriteLimitType {
+    Unlimited,
+
+    // (l0_level_count, threshold)
+    WriteStop(usize, usize),
+}
+
+impl WriteLimitType {
+    pub fn as_str(&self) -> String {
+        match self {
+            Self::Unlimited => "Unlimited".to_string(),
+            Self::WriteStop(l0_level_count, threshold) => {
+                format!(
+                    "WriteStop(l0_level_count: {}, threshold: {}) too many L0 sub levels",
+                    l0_level_count, threshold
+                )
+            }
+        }
+    }
+
+    pub fn is_write_stop(&self) -> bool {
+        matches!(self, Self::WriteStop(_, _))
+    }
 }

@@ -113,8 +113,8 @@ pub mod sequence;
 mod utils;
 mod worker;
 
-pub use compaction::is_write_stop;
 use compaction::*;
+pub use compaction::{check_cg_write_limit, WriteLimitType};
 pub(crate) use utils::*;
 
 type Snapshot = ArcSwap<HummockSnapshot>;
