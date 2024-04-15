@@ -199,10 +199,10 @@ describe pg_matviews;
 schemaname character varying false NULL
 matviewname character varying false NULL
 matviewowner integer false NULL
+tablespace character varying false NULL
+hasindexes boolean false NULL
+ispopulated boolean false NULL
 definition character varying false NULL
-matviewid integer false NULL
-matviewtimezone character varying false NULL
-matviewgraph character varying false NULL
 table description pg_matviews NULL NULL
 
 query TTTT
@@ -211,7 +211,7 @@ show columns from pg_catalog.pg_matviews;
 schemaname character varying false NULL
 matviewname character varying false NULL
 matviewowner integer false NULL
+tablespace character varying false NULL
+hasindexes boolean false NULL
+ispopulated boolean false NULL
 definition character varying false NULL
-matviewid integer false NULL
-matviewtimezone character varying false NULL
-matviewgraph character varying false NULL

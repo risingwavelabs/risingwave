@@ -48,8 +48,8 @@ impl SplitMetaData for PubsubSplit {
         format!("{}-{}", self.subscription, self.index).into()
     }
 
-    fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
-        self.start_offset = Some(start_offset);
+    fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
+        self.start_offset = Some(last_seen_offset);
         Ok(())
     }
 }

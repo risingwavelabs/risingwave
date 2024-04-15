@@ -67,25 +67,22 @@ enum SqlCmd {
 }
 
 impl SqlCmd {
-    // We won't kill during insert/update/delete/alter since the atomicity is not guaranteed.
-    // Notice that `create table as` is also not atomic in our system.
-    // TODO: For `SqlCmd::Alter`, since table fragment and catalog commit for table schema change
-    // are not transactional, we can't kill during `alter table add/drop columns` for now, will
-    // remove it until transactional commit of table fragment and catalog is supported.
-    fn ignore_kill(&self) -> bool {
+    fn allow_kill(&self) -> bool {
         matches!(
             self,
-            SqlCmd::Dml
-                | SqlCmd::Flush
-                | SqlCmd::Alter
-                | SqlCmd::Create {
-                    is_create_table_as: true,
-                    ..
-                }
-                | SqlCmd::CreateSink {
-                    is_sink_into_table: true,
-                }
+            SqlCmd::Create {
+                // `create table as` is also not atomic in our system.
+                is_create_table_as: false,
+                ..
+            } | SqlCmd::CreateSink {
+                is_sink_into_table: false,
+            } | SqlCmd::CreateMaterializedView { .. }
+                | SqlCmd::Drop
         )
+        // We won't kill during insert/update/delete/alter since the atomicity is not guaranteed.
+        // TODO: For `SqlCmd::Alter`, since table fragment and catalog commit for table schema change
+        // are not transactional, we can't kill during `alter table add/drop columns` for now, will
+        // remove it until transactional commit of table fragment and catalog is supported.
     }
 }
 
@@ -282,7 +279,7 @@ pub async fn run_slt_task(
                 background_ddl_enabled = background_ddl_setting;
             };
 
-            if cmd.ignore_kill() {
+            if !cmd.allow_kill() {
                 for i in 0usize.. {
                     let delay = Duration::from_secs(1 << i);
                     if let Err(err) = tester

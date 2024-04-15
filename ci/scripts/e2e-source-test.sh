@@ -9,9 +9,9 @@ source ci/scripts/common.sh
 #   $1: subject name
 #   $2: schema file path
 function register_schema_registry() {
-    curl -X POST http://message_queue:8081/subjects/$1/versions \
+    curl -X POST http://message_queue:8081/subjects/"$1"/versions \
         -H ‘Content-Type: application/vnd.schemaregistry.v1+json’ \
-        --data-binary @<(jq -n --arg schema “$(cat $2)” ‘{schemaType: “PROTOBUF”, schema: $schema}’)
+        --data-binary @<(jq -n --arg schema “$(cat "$2")” ‘{schemaType: “PROTOBUF”, schema: "$schema"}’)
 }
 
 # prepare environment
@@ -59,7 +59,7 @@ psql < ./e2e_test/source/cdc/postgres_cdc.sql
 
 echo "--- starting risingwave cluster"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make ci-start ci-1cn-1fe-with-recovery
+risedev ci-start ci-1cn-1fe-with-recovery
 
 echo "--- mongodb cdc test"
 # install the mongo shell
@@ -93,9 +93,9 @@ sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.share_stream.slt'
 
 # create a share source and check whether heartbeat message is received
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.create_source_job.slt'
-table_id=`psql -U root -h localhost -p 4566 -d dev -t -c "select id from rw_internal_tables where name like '%mysql_source%';" | xargs`;
-table_count=`psql -U root -h localhost -p 4566 -d dev -t -c "select count(*) from rw_table(${table_id}, public);" | xargs`;
-if [ $table_count -eq 0 ]; then
+table_id=$(psql -U root -h localhost -p 4566 -d dev -t -c "select id from rw_internal_tables where name like '%mysql_source%';" | xargs);
+table_count=$(psql -U root -h localhost -p 4566 -d dev -t -c "select count(*) from rw_table(${table_id}, public);" | xargs);
+if [ "$table_count" -eq 0 ]; then
     echo "ERROR: internal table of cdc share source is empty!"
     exit 1
 fi
@@ -107,7 +107,7 @@ sleep 10
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check.slt'
 
 # kill cluster
-cargo make kill
+risedev kill
 echo "> cluster killed "
 
 echo "--- mysql & postgres recovery check"
@@ -130,7 +130,7 @@ echo "> inserted new rows into postgres"
 unset RISINGWAVE_CI
 export RUST_LOG="events::stream::message::chunk=trace,risingwave_stream=debug,risingwave_batch=info,risingwave_storage=info" \
 
-cargo make dev ci-1cn-1fe-with-recovery
+risedev dev ci-1cn-1fe-with-recovery
 echo "> wait for cluster recovery finish"
 sleep 20
 echo "> check mviews after cluster recovery"
@@ -141,12 +141,12 @@ sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check_new_rows.slt'
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc_share_stream_drop.slt'
 
 echo "--- Kill cluster"
-cargo make ci-kill
+risedev ci-kill
 
 echo "--- e2e, ci-1cn-1fe, protobuf schema registry"
 export RISINGWAVE_CI=true
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make ci-start ci-1cn-1fe
+risedev ci-start ci-1cn-1fe
 python3 -m pip install requests protobuf confluent-kafka
 python3 e2e_test/schema_registry/pb.py "message_queue:29092" "http://message_queue:8081" "sr_pb_test" 20 user
 echo "make sure google/protobuf/source_context.proto is NOT in schema registry"
@@ -157,11 +157,11 @@ sqllogictest -p 4566 -d dev './e2e_test/schema_registry/pb.slt'
 sqllogictest -p 4566 -d dev './e2e_test/schema_registry/alter_sr.slt'
 
 echo "--- Kill cluster"
-cargo make ci-kill
+risedev ci-kill
 
 echo "--- e2e, ci-kafka-plus-pubsub, kafka and pubsub source"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make ci-start ci-pubsub
+risedev ci-start ci-pubsub
 ./scripts/source/prepare_ci_kafka.sh
 cargo run --bin prepare_ci_pubsub
 sqllogictest -p 4566 -d dev './e2e_test/source/basic/*.slt'
@@ -178,5 +178,5 @@ echo "--- e2e, kafka alter source again"
 sqllogictest -p 4566 -d dev './e2e_test/source/basic/alter/kafka_after_new_data_2.slt'
 
 echo "--- Run CH-benCHmark"
-./risedev slt -p 4566 -d dev './e2e_test/ch_benchmark/batch/ch_benchmark.slt'
-./risedev slt -p 4566 -d dev './e2e_test/ch_benchmark/streaming/*.slt'
+risedev slt -p 4566 -d dev './e2e_test/ch_benchmark/batch/ch_benchmark.slt'
+risedev slt -p 4566 -d dev './e2e_test/ch_benchmark/streaming/*.slt'

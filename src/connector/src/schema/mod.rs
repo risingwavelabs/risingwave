@@ -30,7 +30,7 @@ const NAME_STRATEGY_KEY: &str = "schema.registry.name.strategy";
 #[derive(Debug, thiserror::Error, thiserror_ext::Macro)]
 #[error("Invalid option: {message}")]
 pub struct InvalidOptionError {
-    message: String,
+    pub message: String,
     // #[backtrace]
     // source: Option<risingwave_common::error::BoxedError>,
 }

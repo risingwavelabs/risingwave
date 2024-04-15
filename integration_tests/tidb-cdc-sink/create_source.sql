@@ -56,6 +56,34 @@ create table datatype (
       scan.startup.mode='earliest'
 ) FORMAT CANAL ENCODE JSON;
 
+CREATE TABLE tidb_cdc_types (
+    id integer PRIMARY KEY,
+    c_boolean boolean,
+    c_bit boolean,
+    c_tinyint smallint,
+    c_smallint smallint,
+    c_mediumint integer,
+    c_integer integer,
+    c_bigint bigint,
+    c_decimal decimal,
+    c_float real,
+    c_double double,
+    c_char_255 varchar,
+    c_varchar_10000 varchar,
+    c_binary_255 bytea,
+    c_varbinary_10000 bytea,
+    c_date date,
+    c_time time,
+    c_datetime timestamp,
+    c_timestamp timestamp,
+    c_json jsonb
+) WITH (
+      connector='kafka',
+      topic='ticdc_test_tidb_cdc_types',
+      properties.bootstrap.server='kafka:9092',
+      scan.startup.mode='earliest'
+) FORMAT CANAL ENCODE JSON;
+
 create table tidb_sink_datatypes (
   id integer PRIMARY KEY,
   c_boolean boolean,

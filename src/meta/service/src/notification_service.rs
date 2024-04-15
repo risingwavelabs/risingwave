@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use itertools::Itertools;
-use risingwave_meta::manager::MetadataManager;
+use risingwave_meta::manager::{MetadataManager, SessionParamsManagerImpl};
 use risingwave_meta::MetaResult;
 use risingwave_pb::backup_service::MetaBackupManifestId;
 use risingwave_pb::catalog::Table;
@@ -23,7 +24,8 @@ use risingwave_pb::hummock::WriteLimits;
 use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::{
-    FragmentParallelUnitMapping, MetaSnapshot, SubscribeRequest, SubscribeType,
+    FragmentParallelUnitMapping, GetSessionParamsResponse, MetaSnapshot, SubscribeRequest,
+    SubscribeType,
 };
 use risingwave_pb::user::UserInfo;
 use tokio::sync::mpsc;
@@ -246,6 +248,16 @@ impl NotificationServiceImpl {
 
         let hummock_snapshot = Some(self.hummock_manager.latest_snapshot());
 
+        let session_params = match self.env.session_params_manager_impl_ref() {
+            SessionParamsManagerImpl::Kv(manager) => manager.get_params().await,
+            SessionParamsManagerImpl::Sql(controller) => controller.get_params().await,
+        };
+
+        let session_params = Some(GetSessionParamsResponse {
+            params: serde_json::to_string(&session_params)
+                .context("failed to encode session params")?,
+        });
+
         Ok(MetaSnapshot {
             databases,
             schemas,
@@ -267,6 +279,7 @@ impl NotificationServiceImpl {
                 parallel_unit_mapping_version,
                 worker_node_version,
             }),
+            session_params,
             ..Default::default()
         })
     }
