@@ -365,6 +365,7 @@ impl SinkWriter for SnowflakeSinkWriter {
         if is_checkpoint {
             // finalize current streaming upload, plus notify snowflake to sink
             // the corresponding data to snowflake pipe.
+            // note: if no data needs to be committed, then `commit` is simply a no-op.
             self.commit().await?;
         }
         Ok(())
