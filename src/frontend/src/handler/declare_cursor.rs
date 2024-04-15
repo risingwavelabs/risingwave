@@ -15,15 +15,10 @@
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::util::epoch::Epoch;
-use risingwave_sqlparser::ast::{
-    DeclareCursorStatement, Ident, ObjectName, Query, Since, Statement,
-};
+use risingwave_sqlparser::ast::{DeclareCursorStatement, ObjectName, Query, Since, Statement};
 
 use super::query::{gen_batch_plan_by_statement, gen_batch_plan_fragmenter};
-use super::util::{
-    convert_epoch_to_logstore_i64, convert_unix_millis_to_logstore_i64,
-    gen_query_from_logstore_ge_rw_timestamp, gen_query_from_table_name,
-};
+use super::util::{convert_epoch_to_logstore_i64, convert_unix_millis_to_logstore_i64};
 use super::RwPgResponse;
 use crate::error::{ErrorCode, Result};
 use crate::handler::query::create_stream;
@@ -64,7 +59,7 @@ async fn handle_declare_subscription_cursor(
     let subscription =
         session.get_subscription_by_name(schema_name, &cursor_from_subscription_name)?;
     // Start the first query of cursor, which includes querying the table and querying the subscription's logstore
-    let (start_rw_timestamp, is_snapshot) = match rw_timestamp {
+    let (start_rw_timestamp, from_snapshot) = match rw_timestamp {
         Some(risingwave_sqlparser::ast::Since::TimestampMsNum(start_rw_timestamp)) => {
             check_cursor_unix_millis(start_rw_timestamp, subscription.get_retention_seconds()?)?;
             let start_rw_timestamp = convert_unix_millis_to_logstore_i64(start_rw_timestamp);
@@ -102,9 +97,9 @@ async fn handle_declare_subscription_cursor(
         .add_subscription_cursor(
             cursor_name.clone(),
             start_rw_timestamp,
-            is_snapshot,
-            sub_name,
-            subscription.get_retention_seconds()?,
+            from_snapshot,
+            subscription,
+            &handle_args,
         )
         .await?;
 
