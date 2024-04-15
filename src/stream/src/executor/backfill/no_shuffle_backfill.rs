@@ -34,7 +34,8 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
     compute_bounds, construct_initial_finished_state, create_builder, create_limiter, get_new_pos,
-    mapping_chunk, mapping_message, mark_chunk, owned_row_iter, METADATA_STATE_LEN,
+    mapping_chunk, mapping_message, mark_chunk, owned_row_iter, BackfillRateLimiter,
+    METADATA_STATE_LEN,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -218,6 +219,7 @@ where
         if !is_finished {
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
             let mut pending_barrier: Option<Barrier> = None;
+            let mut rate_limiter = rate_limit.and_then(create_limiter);
 
             let backfill_snapshot_read_row_count_metric = self
                 .metrics
@@ -246,13 +248,13 @@ where
 
                 {
                     let left_upstream = upstream.by_ref().map(Either::Left);
-
+                    let paused = paused || matches!(rate_limit, Some(0));
                     let right_snapshot = pin!(Self::make_snapshot_stream(
                         &self.upstream_table,
                         snapshot_read_epoch,
                         current_pos.clone(),
                         paused,
-                        rate_limit,
+                        &rate_limiter,
                     )
                     .map(Either::Right));
 
@@ -470,18 +472,26 @@ where
                         Mutation::Throttle(actor_to_apply) => {
                             let new_rate_limit_entry = actor_to_apply.get(&self.actor_id);
                             if let Some(new_rate_limit) = new_rate_limit_entry {
-                                rate_limit = new_rate_limit.as_ref().map(|x| *x as _);
-                                tracing::info!(
-                                    id = self.actor_id,
-                                    new_rate_limit = ?self.rate_limit,
-                                    "actor rate limit changed",
-                                );
-                                assert!(builder.is_empty());
-                                builder = create_builder(
-                                    rate_limit,
-                                    self.chunk_size,
-                                    self.upstream_table.schema().data_types(),
-                                );
+                                let new_rate_limit = new_rate_limit.as_ref().map(|x| *x as _);
+                                if new_rate_limit != rate_limit {
+                                    rate_limit = new_rate_limit;
+                                    tracing::info!(
+                                        id = self.actor_id,
+                                        new_rate_limit = ?self.rate_limit,
+                                        "actor rate limit changed",
+                                    );
+                                    // The builder is emptied above via `DataChunkBuilder::consume_all`.
+                                    assert!(
+                                        builder.is_empty(),
+                                        "builder should already be emptied"
+                                    );
+                                    builder = create_builder(
+                                        rate_limit,
+                                        self.chunk_size,
+                                        self.upstream_table.schema().data_types(),
+                                    );
+                                    rate_limiter = new_rate_limit.and_then(create_limiter);
+                                }
                             }
                         }
                         _ => (),
@@ -636,32 +646,23 @@ where
     }
 
     #[try_stream(ok = Option<OwnedRow>, error = StreamExecutorError)]
-    async fn make_snapshot_stream(
-        upstream_table: &StorageTable<S>,
+    async fn make_snapshot_stream<'a>(
+        upstream_table: &'a StorageTable<S>,
         epoch: u64,
         current_pos: Option<OwnedRow>,
         paused: bool,
-        rate_limit: Option<usize>,
+        rate_limiter: &'a Option<BackfillRateLimiter>,
     ) {
-        if paused
-            || (if let Some(rate_limit) = rate_limit
-                && rate_limit == 0
-            {
-                true
-            } else {
-                false
-            })
-        {
+        if paused {
             #[for_await]
             for _ in tokio_stream::pending() {
                 yield None;
             }
         } else {
             // Checked the rate limit is not zero.
-            let limiter = rate_limit.and_then(create_limiter);
             #[for_await]
             for r in Self::snapshot_read(upstream_table, epoch, current_pos) {
-                if let Some(rate_limit) = &limiter {
+                if let Some(rate_limit) = &rate_limiter {
                     rate_limit.until_ready().await;
                 }
                 yield r?;
