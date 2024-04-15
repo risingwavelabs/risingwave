@@ -106,7 +106,7 @@ impl QueryCursor {
 enum State {
     InitLogStoreQuery {
         // The rw_timestamp used to initiate the query to read from subscription logstore.
-        rw_timestamp: i64,
+        seek_timestamp: i64,
 
         // If specified, the expected_timestamp must be an exact match for the next rw_timestamp.
         expected_timestamp: Option<i64>,
@@ -171,7 +171,7 @@ impl SubscriptionCursor {
             }
         } else {
             State::InitLogStoreQuery {
-                rw_timestamp: start_timestamp,
+                seek_timestamp: start_timestamp,
                 expected_timestamp: None,
             }
         };
@@ -193,16 +193,15 @@ impl SubscriptionCursor {
         loop {
             match &mut self.state {
                 State::InitLogStoreQuery {
-                    rw_timestamp,
+                    seek_timestamp,
                     expected_timestamp,
                 } => {
                     let from_snapshot = false;
-                    let rw_timestamp = *rw_timestamp;
 
                     // Initiate a new batch query to continue fetching
                     let (mut row_stream, pg_descs) = Self::initiate_query(
                         from_snapshot,
-                        rw_timestamp,
+                        *seek_timestamp,
                         &self.subscription,
                         handle_args.clone(),
                     )
@@ -214,10 +213,22 @@ impl SubscriptionCursor {
                     let mut remaining_rows = VecDeque::new();
                     Self::try_refill_remaining_rows(&mut row_stream, &mut remaining_rows).await?;
 
+                    // Get the rw_timestamp in the first row returned by the query if any.
+                    // new_row_rw_timestamp == None means the query returns empty result.
+                    let new_row_rw_timestamp: Option<i64> = remaining_rows.front().map(|row| {
+                        std::str::from_utf8(row.index(0).as_ref().unwrap())
+                            .unwrap()
+                            .parse()
+                            .unwrap()
+                    });
+
                     // Check expected_timestamp against the rw_timestamp of the first row.
+                    // Return an error if there is no new row or there is a mismatch.
                     if let Some(expected_timestamp) = expected_timestamp {
                         let expected_timestamp = *expected_timestamp;
-                        if !Self::check_expected_timestamp(&remaining_rows, rw_timestamp) {
+                        if new_row_rw_timestamp.is_none()
+                            || new_row_rw_timestamp.unwrap() != expected_timestamp
+                        {
                             // Transistion to Invalid state and return and error
                             self.state = State::Invalid;
                             return Err(ErrorCode::CatalogError(
@@ -235,14 +246,14 @@ impl SubscriptionCursor {
                     // This happens when reaching EOF of logstore. This check cannot be moved before the
                     // expected_timestamp check to ensure that an error is returned on empty result when
                     // expected_timstamp is set.
-                    if remaining_rows.is_empty() {
+                    if new_row_rw_timestamp.is_none() {
                         return Ok((None, pg_descs));
                     }
 
                     // Transition to the Fetch state
                     self.state = State::Fetch {
                         from_snapshot,
-                        rw_timestamp,
+                        rw_timestamp: new_row_rw_timestamp.unwrap(),
                         row_stream,
                         pg_descs,
                         remaining_rows,
@@ -267,7 +278,7 @@ impl SubscriptionCursor {
                         if from_snapshot {
                             // 1a. The rw_timestamp in the table is all the same, so don't need to check.
                             return Ok((
-                                Some(Row::new(build_row_with_snapshot(new_row))),
+                                Some(Row::new(Self::build_row_with_snapshot(new_row))),
                                 pg_descs.clone(),
                             ));
                         }
@@ -284,13 +295,16 @@ impl SubscriptionCursor {
                             // Initiate a new batch query to avoid query timeout and pinning version for too long.
                             // expected_timestamp shouold be set to ensure there is no data missing in the next query.
                             self.state = State::InitLogStoreQuery {
-                                rw_timestamp: new_row_rw_timestamp,
+                                seek_timestamp: new_row_rw_timestamp,
                                 expected_timestamp: Some(new_row_rw_timestamp),
                             };
                         } else {
                             // 1c. The rw_timestamp of this row is equal to self.rw_timestamp, return row
                             return Ok((
-                                Some(Row::new(build_row_with_logstore(new_row, rw_timestamp)?)),
+                                Some(Row::new(Self::build_row_with_logstore(
+                                    new_row,
+                                    rw_timestamp,
+                                )?)),
                                 pg_descs.clone(),
                             ));
                         }
@@ -299,7 +313,7 @@ impl SubscriptionCursor {
                         // Initiate a new batch query using the rw_timestamp + 1.
                         // expected_timestamp don't need to be set as the next rw_timestamp is unknown.
                         self.state = State::InitLogStoreQuery {
-                            rw_timestamp: rw_timestamp + 1,
+                            seek_timestamp: rw_timestamp + 1,
                             expected_timestamp: None,
                         };
                     }
@@ -363,7 +377,7 @@ impl SubscriptionCursor {
             )))
         };
         let (row_stream, pg_descs) = create_stream_for_cursor(handle_args, query_stmt).await?;
-        Ok((row_stream, build_desc(pg_descs, from_snapshot)))
+        Ok((row_stream, Self::build_desc(pg_descs, from_snapshot)))
     }
 
     async fn try_refill_remaining_rows(
@@ -380,74 +394,60 @@ impl SubscriptionCursor {
         Ok(())
     }
 
-    // Returns true if the check succeeds.
-    fn check_expected_timestamp(remaining_rows: &VecDeque<Row>, expected_timestamp: i64) -> bool {
-        if remaining_rows.is_empty() {
-            return false;
+    pub fn build_row_with_snapshot(row: Vec<Option<Bytes>>) -> Vec<Option<Bytes>> {
+        let mut new_row = vec![None, Some(Bytes::from(1i16.to_string()))];
+        new_row.extend(row);
+        new_row
+    }
+
+    pub fn build_row_with_logstore(
+        mut row: Vec<Option<Bytes>>,
+        rw_timestamp: i64,
+    ) -> Result<Vec<Option<Bytes>>> {
+        let mut new_row = vec![Some(Bytes::from(
+            convert_logstore_i64_to_unix_millis(rw_timestamp).to_string(),
+        ))];
+        // need remove kv_log_store_epoch
+        new_row.extend(row.drain(1..row.len()).collect_vec());
+        Ok(new_row)
+    }
+
+    pub fn build_desc(
+        mut descs: Vec<PgFieldDescriptor>,
+        from_snapshot: bool,
+    ) -> Vec<PgFieldDescriptor> {
+        let mut new_descs = vec![
+            PgFieldDescriptor::new(
+                "rw_timestamp".to_owned(),
+                DataType::Int64.to_oid(),
+                DataType::Int64.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "op".to_owned(),
+                DataType::Int16.to_oid(),
+                DataType::Int16.type_len(),
+            ),
+        ];
+        // need remove kv_log_store_epoch and kv_log_store_row_op
+        if from_snapshot {
+            new_descs.extend(descs)
+        } else {
+            assert_eq!(
+                descs.get(0).unwrap().get_name(),
+                KV_LOG_STORE_EPOCH,
+                "Cursor query logstore: first column must be {}",
+                KV_LOG_STORE_EPOCH
+            );
+            assert_eq!(
+                descs.get(1).unwrap().get_name(),
+                KV_LOG_STORE_ROW_OP,
+                "Cursor query logstore: first column must be {}",
+                KV_LOG_STORE_ROW_OP
+            );
+            new_descs.extend(descs.drain(2..descs.len()));
         }
-
-        let rw_timestamp: i64 =
-            std::str::from_utf8(remaining_rows.front().unwrap().index(0).as_ref().unwrap())
-                .unwrap()
-                .parse()
-                .unwrap();
-        rw_timestamp == expected_timestamp
+        new_descs
     }
-}
-
-pub fn build_row_with_snapshot(row: Vec<Option<Bytes>>) -> Vec<Option<Bytes>> {
-    let mut new_row = vec![None, Some(Bytes::from(1i16.to_string()))];
-    new_row.extend(row);
-    new_row
-}
-
-pub fn build_row_with_logstore(
-    mut row: Vec<Option<Bytes>>,
-    rw_timestamp: i64,
-) -> Result<Vec<Option<Bytes>>> {
-    let mut new_row = vec![Some(Bytes::from(
-        convert_logstore_i64_to_unix_millis(rw_timestamp).to_string(),
-    ))];
-    // need remove kv_log_store_epoch
-    new_row.extend(row.drain(1..row.len()).collect_vec());
-    Ok(new_row)
-}
-
-pub fn build_desc(
-    mut descs: Vec<PgFieldDescriptor>,
-    from_snapshot: bool,
-) -> Vec<PgFieldDescriptor> {
-    let mut new_descs = vec![
-        PgFieldDescriptor::new(
-            "rw_timestamp".to_owned(),
-            DataType::Int64.to_oid(),
-            DataType::Int64.type_len(),
-        ),
-        PgFieldDescriptor::new(
-            "op".to_owned(),
-            DataType::Int16.to_oid(),
-            DataType::Int16.type_len(),
-        ),
-    ];
-    // need remove kv_log_store_epoch and kv_log_store_row_op
-    if from_snapshot {
-        new_descs.extend(descs)
-    } else {
-        assert_eq!(
-            descs.get(0).unwrap().get_name(),
-            KV_LOG_STORE_EPOCH,
-            "Cursor query logstore: first column must be {}",
-            KV_LOG_STORE_EPOCH
-        );
-        assert_eq!(
-            descs.get(1).unwrap().get_name(),
-            KV_LOG_STORE_ROW_OP,
-            "Cursor query logstore: first column must be {}",
-            KV_LOG_STORE_ROW_OP
-        );
-        new_descs.extend(descs.drain(2..descs.len()));
-    }
-    new_descs
 }
 
 #[derive(Default)]
