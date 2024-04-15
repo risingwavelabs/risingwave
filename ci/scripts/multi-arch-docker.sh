@@ -62,14 +62,14 @@ echo "--- multi arch image create "
 if [[ "${#BUILDKITE_COMMIT}" = 40 ]]; then
   # If the commit is 40 characters long, it's probably a SHA.
   TAG="git-${BUILDKITE_COMMIT}"
-  pushGchr ${TAG}
+  pushGchr "${TAG}"
 fi
 
 if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
   # If this is a schedule build, tag the image with the date.
   TAG="nightly-${date}"
-  pushGchr ${TAG}
-  pushDockerhub ${TAG}
+  pushGchr "${TAG}"
+  pushDockerhub "${TAG}"
   TAG="latest"
   pushGchr ${TAG}
 fi
@@ -77,14 +77,14 @@ fi
 if [[ -n "${IMAGE_TAG+x}" ]]; then
   # Tag the image with the $IMAGE_TAG.
   TAG="${IMAGE_TAG}"
-  pushGchr ${TAG}
+  pushGchr "${TAG}"
 fi
 
 if [[ -n "${BUILDKITE_TAG}" ]]; then
   # If there's a tag, we tag the image.
   TAG="${BUILDKITE_TAG}"
-  pushGchr ${TAG}
-  pushDockerhub ${TAG}
+  pushGchr "${TAG}"
+  pushDockerhub "${TAG}"
 
   TAG="latest"
   pushDockerhub ${TAG}
