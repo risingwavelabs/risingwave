@@ -15,12 +15,18 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 
 use super::RwPgResponse;
-use crate::error::Result;
+use crate::error::{ErrorCode, Result};
 use crate::handler::HandlerArgs;
 use crate::session::SessionImpl;
 
 pub(super) async fn handle_recover(handler_args: HandlerArgs) -> Result<RwPgResponse> {
-    // Notify the meta client to recover the data.
+    // Only permit recovery for super users.
+    if handler_args.session.is_super_user() {
+        return Err(ErrorCode::PermissionDenied(
+            "only superusers can trigger adhoc recovery".to_string(),
+        )
+        .into());
+    }
     do_recover(&handler_args.session).await?;
     Ok(PgResponse::empty_result(StatementType::RECOVER))
 }
