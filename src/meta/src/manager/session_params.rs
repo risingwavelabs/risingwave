@@ -48,13 +48,13 @@ impl SessionParamsManager {
         let params = if cluster_first_launch {
             init_params
         } else if let Some(params) =
-            <SessionConfig as SessionParamsModel>::get(&meta_store, init_params).await?
+            <SessionConfig as SessionParamsModel>::get(&meta_store, init_params.clone()).await?
         {
             params
         } else {
-            return Err(MetaError::system_params(
-                "cluster is not newly created but no session parameters can be found",
-            ));
+            tracing::warn!("Cluster is not newly created but no session parameters can be found. \
+            Possibly caused by upgrading from a version where system wide session parameter was not supported");
+            init_params
         };
 
         info!(?params, "session parameters");
