@@ -452,23 +452,37 @@ mod phase1 {
         null_matched: &'a K::Bitmap,
         chunk: StreamChunk,
     ) {
-        // Append-only temporal join
-        if A {
-            let mut builder = StreamChunkBuilder::new(chunk_size, full_schema);
-            let keys = K::build_many(left_join_keys, chunk.data_chunk());
-            let to_fetch_keys = chunk
-                .visibility()
-                .iter()
-                .zip_eq_debug(keys.iter())
-                .filter_map(|(vis, key)| if vis { Some(key) } else { None });
-            right_table
-                .fetch_or_promote_keys(to_fetch_keys, epoch)
-                .await?;
-            for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.into_iter()) {
-                let Some((op, left_row)) = r else {
-                    continue;
-                };
-                let mut matched = false;
+        let mut builder = StreamChunkBuilder::new(chunk_size, full_schema);
+        let keys = K::build_many(left_join_keys, chunk.data_chunk());
+        let memo_table = memo_table.as_mut().unwrap();
+        let to_fetch_keys = chunk
+            .visibility()
+            .iter()
+            .zip_eq_debug(keys.iter())
+            .zip_eq_debug(chunk.ops())
+            .filter_map(|((vis, key), op)| {
+                if vis {
+                    match op {
+                        Op::Insert | Op::UpdateInsert => Some(key),
+                        Op::Delete | Op::UpdateDelete => None,
+                    }
+                } else {
+                    None
+                }
+            });
+        right_table
+            .fetch_or_promote_keys(to_fetch_keys, epoch)
+            .await?;
+
+        for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.into_iter()) {
+            let Some((op, left_row)) = r else {
+                continue;
+            };
+
+            let mut matched = false;
+
+            if A {
+                // Append-only temporal join
                 if key.null_bitmap().is_subset(null_matched)
                     && let join_entry = right_table.force_peek(&key)
                     && !join_entry.is_empty()
@@ -482,44 +496,10 @@ mod phase1 {
                         }
                     }
                 }
-                if let Some(chunk) = E::match_end(&mut builder, op, left_row, right_size, matched) {
-                    yield chunk;
-                }
-            }
-            if let Some(chunk) = builder.take() {
-                yield chunk;
-            }
-        } else {
-            // Non-append-only temporal join
-            let mut builder = StreamChunkBuilder::new(chunk_size, full_schema);
-            let keys = K::build_many(left_join_keys, chunk.data_chunk());
-            let memo_table = memo_table.as_mut().unwrap();
-            let to_fetch_keys = chunk
-                .visibility()
-                .iter()
-                .zip_eq_debug(keys.iter())
-                .zip_eq_debug(chunk.ops())
-                .filter_map(|((vis, key), op)| {
-                    if vis {
-                        match op {
-                            Op::Insert | Op::UpdateInsert => Some(key),
-                            Op::Delete | Op::UpdateDelete => None,
-                        }
-                    } else {
-                        None
-                    }
-                });
-            right_table
-                .fetch_or_promote_keys(to_fetch_keys, epoch)
-                .await?;
-            for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.into_iter()) {
-                let Some((op, left_row)) = r else {
-                    continue;
-                };
-
+            } else {
+                // Non-append-only temporal join
                 match op {
                     Op::Insert | Op::UpdateInsert => {
-                        let mut matched = false;
                         if key.null_bitmap().is_subset(null_matched)
                             && let join_entry = right_table.force_peek(&key)
                             && !join_entry.is_empty()
@@ -541,15 +521,9 @@ mod phase1 {
                                 }
                             }
                         }
-                        if let Some(chunk) =
-                            E::match_end(&mut builder, Op::Insert, left_row, right_size, matched)
-                        {
-                            yield chunk;
-                        }
                     }
                     Op::Delete | Op::UpdateDelete => {
                         let mut memo_rows_to_delete = vec![];
-                        let mut matched = false;
                         if key.null_bitmap().is_subset(null_matched) {
                             let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
                                 &(Bound::Unbounded, Bound::Unbounded);
@@ -577,17 +551,25 @@ mod phase1 {
                             // Delete from memo table
                             memo_table.delete(memo_row);
                         }
-                        if let Some(chunk) =
-                            E::match_end(&mut builder, Op::Delete, left_row, right_size, matched)
-                        {
-                            yield chunk;
-                        }
                     }
                 }
             }
-            if let Some(chunk) = builder.take() {
+            if let Some(chunk) = E::match_end(
+                &mut builder,
+                match op {
+                    Op::Insert | Op::UpdateInsert => Op::Insert,
+                    Op::Delete | Op::UpdateDelete => Op::Delete,
+                },
+                left_row,
+                right_size,
+                matched,
+            ) {
                 yield chunk;
             }
+        }
+
+        if let Some(chunk) = builder.take() {
+            yield chunk;
         }
     }
 }
