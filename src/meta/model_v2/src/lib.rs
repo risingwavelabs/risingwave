@@ -43,6 +43,7 @@ pub mod index;
 pub mod object;
 pub mod object_dependency;
 pub mod schema;
+pub mod session_parameter;
 pub mod sink;
 pub mod source;
 pub mod streaming_job;
