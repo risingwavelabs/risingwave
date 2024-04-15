@@ -262,14 +262,14 @@ impl SnowflakeSinkWriter {
 
     /// write data to the current streaming uploader for this epoch.
     async fn streaming_upload(&mut self, data: Bytes) -> Result<()> {
-        debug_assert!(
-            self.streaming_uploader.is_some(),
-            "expect streaming uploader to be properly initialized"
-        );
-        self
-            .streaming_uploader
-            .as_mut()
-            .unwrap()
+        let Some(uploader) = self.streaming_uploader.as_mut() else {
+            return Err(SinkError::Snowflake(format!(
+                "expect streaming uploader to be properly initialized when performing streaming upload for epoch {}",
+                self.epoch
+                ))
+            );
+        };
+        uploader
             .write_bytes(data)
             .await
             .map_err(|err| {
