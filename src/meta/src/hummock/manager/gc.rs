@@ -14,6 +14,7 @@
 
 use std::cmp;
 use std::collections::HashSet;
+use std::ops::Bound::{Excluded, Included};
 use std::ops::DerefMut;
 use std::time::Duration;
 
@@ -53,6 +54,7 @@ impl HummockManager {
         let mut versioning_guard = write_lock!(self, versioning).await;
         for object_id in object_ids {
             versioning_guard.objects_to_delete.remove(object_id);
+            println!("object removed");
         }
         for stale_objects in versioning_guard.checkpoint.stale_objects.values_mut() {
             stale_objects.id.retain(|id| !object_ids.contains(id));
@@ -118,20 +120,38 @@ impl HummockManager {
     ) -> usize {
         let tracked_object_ids: HashSet<HummockSstableObjectId> = {
             let versioning_guard = read_lock!(self, versioning).await;
-            let versioning: &Versioning = &*versioning_guard;
+            let versioning: &Versioning = &versioning_guard;
+
+            // object ids in checkpoint version
             let mut tracked_object_ids = versioning.checkpoint.version.get_object_ids();
-            for delta in versioning_guard.hummock_version_deltas.values() {
+            // add object ids added between checkpoint version and current version
+            for (_, delta) in versioning.hummock_version_deltas.range((
+                Excluded(versioning.checkpoint.version.id),
+                Included(versioning.current_version.id),
+            )) {
                 tracked_object_ids.extend(delta.newly_added_object_ids());
             }
+            // add stale object ids before the checkpoint version
+            let min_pinned_version_id = versioning.min_pinned_version_id();
+            tracked_object_ids.extend(
+                versioning
+                    .checkpoint
+                    .stale_objects
+                    .iter()
+                    .filter(|(version_id, _)| **version_id >= min_pinned_version_id)
+                    .flat_map(|(_, objects)| objects.id.iter())
+                    .cloned(),
+            );
             tracked_object_ids
         };
         let to_delete = object_ids
             .iter()
-            .filter(|object_id| !tracked_object_ids.contains(object_id));
+            .filter(|object_id| !tracked_object_ids.contains(object_id))
+            .collect_vec();
         let mut versioning_guard = write_lock!(self, versioning).await;
         versioning_guard.objects_to_delete.extend(to_delete.clone());
         drop(versioning_guard);
-        to_delete.count()
+        to_delete.len()
     }
 
     /// Starts a full GC.

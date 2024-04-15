@@ -609,7 +609,10 @@ impl HummockManager {
         };
 
         versioning_guard.objects_to_delete.clear();
-        versioning_guard.mark_objects_for_deletion();
+        // Not delete stale objects when archive is enabled
+        if !self.env.opts.enable_hummock_data_archive {
+            versioning_guard.mark_objects_for_deletion();
+        }
 
         self.initial_compaction_group_config_after_load(versioning_guard)
             .await?;
@@ -1981,6 +1984,7 @@ impl HummockManager {
     pub async fn check_state_consistency(&self) {
         let mut compaction_guard = write_lock!(self, compaction).await;
         let mut versioning_guard = write_lock!(self, versioning).await;
+        let objects_to_delete = versioning_guard.objects_to_delete.clone();
         // We don't check `checkpoint` because it's allowed to update its in memory state without
         // persisting to object store.
         let get_state =
@@ -2018,6 +2022,7 @@ impl HummockManager {
             mem_state, loaded_state,
             "hummock in-mem state is inconsistent with meta store state",
         );
+        versioning_guard.objects_to_delete = objects_to_delete;
     }
 
     /// Gets current version without pinning it.

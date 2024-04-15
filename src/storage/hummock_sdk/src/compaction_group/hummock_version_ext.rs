@@ -157,7 +157,6 @@ impl HummockVersion {
         })
     }
 
-    /// This function does NOT dedup.
     pub fn get_object_ids(&self) -> HashSet<HummockSstableObjectId> {
         self.get_combined_levels()
             .flat_map(|level| {

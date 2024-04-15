@@ -232,16 +232,17 @@ mod tests {
         assert_eq!(vacuum.vacuum_object().await.unwrap().len(), 0);
         hummock_manager.pin_version(context_id).await.unwrap();
         let sst_infos = add_test_tables(hummock_manager.as_ref(), context_id).await;
-        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 0);
+        assert_eq!(vacuum.vacuum_metadata().await.unwrap(), 0);
         hummock_manager.create_version_checkpoint(1).await.unwrap();
-        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 6);
-        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 0);
+        assert_eq!(vacuum.vacuum_metadata().await.unwrap(), 6);
+        assert_eq!(vacuum.vacuum_metadata().await.unwrap(), 0);
 
         assert!(hummock_manager.get_objects_to_delete().await.is_empty());
         hummock_manager
             .unpin_version_before(context_id, HummockVersionId::MAX)
             .await
             .unwrap();
+        hummock_manager.create_version_checkpoint(0).await.unwrap();
         assert!(!hummock_manager.get_objects_to_delete().await.is_empty());
         // No SST deletion is scheduled because no available worker.
         assert_eq!(vacuum.vacuum_object().await.unwrap().len(), 0);
