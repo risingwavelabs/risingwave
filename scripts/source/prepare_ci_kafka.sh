@@ -47,7 +47,7 @@ done
 wait
 
 echo "Fulfill kafka topics"
-python3 -m pip install requests fastavro confluent_kafka jsonschema
+python3 -m pip install --break-system-packages requests fastavro confluent_kafka jsonschema
 for filename in $kafka_data_files; do
     ([ -e "$filename" ]
     base=$(basename "$filename")
