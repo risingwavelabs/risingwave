@@ -57,6 +57,7 @@ use crate::barrier::notifier::BarrierInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::state::BarrierManagerState;
+use crate::error::MetaErrorInner;
 use crate::hummock::{CommitEpochInfo, HummockManagerRef, NewTableFragmentInfo};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
@@ -789,6 +790,31 @@ impl GlobalBarrierManager {
                 .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Failover(
                     err.clone(),
                 )));
+            let latest_snapshot = self.context.hummock_manager.latest_snapshot();
+            let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recovery from the committed epoch
+            let span = tracing::info_span!(
+                "failure_recovery",
+                error = %err.as_report(),
+                prev_epoch = prev_epoch.value().0
+            );
+
+            // No need to clean dirty tables for barrier recovery,
+            // The foreground stream job should cleanup their own tables.
+            self.recovery(None).instrument(span).await;
+            self.context.set_status(BarrierManagerStatus::Running);
+        } else {
+            panic!("failed to execute barrier: {}", err.as_report());
+        }
+    }
+
+    async fn adhoc_recovery(&mut self) {
+        let err = MetaErrorInner::AdhocRecovery.into();
+        self.context.tracker.lock().await.abort_all(&err);
+        self.checkpoint_control.clear_on_err(&err).await;
+
+        if self.enable_recovery {
+            self.context
+                .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Adhoc));
             let latest_snapshot = self.context.hummock_manager.latest_snapshot();
             let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recovery from the committed epoch
             let span = tracing::info_span!(
