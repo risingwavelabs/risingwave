@@ -1366,7 +1366,7 @@ impl DdlController {
         // 1. Resolve the upstream fragments, extend the fragment graph to a complete graph that
         // contains all information needed for building the actor graph.
 
-        let upstream_root_fragments = self
+        let (upstream_root_fragments, existing_actor_location) = self
             .metadata_manager
             .get_upstream_root_fragments(fragment_graph.dependent_table_ids())
             .await?;
@@ -1384,6 +1384,7 @@ impl DdlController {
         let complete_graph = CompleteStreamFragmentGraph::with_upstreams(
             fragment_graph,
             upstream_root_fragments,
+            existing_actor_location,
             stream_job.into(),
         )?;
 
