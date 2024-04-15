@@ -16,6 +16,7 @@
 
 #[cfg_attr(coverage, coverage(off))]
 fn main() {
+    // Since we decide to record watermark in every state-table to replace delete-range, this test is not need again. We keep it because we may need delete-range in some day for other features.
     use clap::Parser;
 
     let opts = risingwave_compaction_test::CompactionTestOpts::parse();

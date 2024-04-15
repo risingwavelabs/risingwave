@@ -62,4 +62,7 @@ pub enum TraceError {
 
     #[error("failed to flush")]
     FlushFailed,
+
+    #[error("failed to try_flush")]
+    TryFlushFailed,
 }

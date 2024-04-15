@@ -30,6 +30,7 @@
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 #![feature(is_sorted)]
 #![feature(impl_trait_in_assoc_type)]
+#![feature(const_option)]
 
 pub mod backup_restore;
 pub mod barrier;
@@ -58,4 +59,7 @@ pub enum MetaStoreBackend {
         credentials: Option<(String, String)>,
     },
     Mem,
+    Sql {
+        endpoint: String,
+    },
 }

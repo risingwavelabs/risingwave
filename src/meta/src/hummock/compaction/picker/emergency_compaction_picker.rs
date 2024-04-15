@@ -15,24 +15,32 @@
 use std::sync::Arc;
 
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::CompactionConfig;
+use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
 use super::{
     CompactionInput, CompactionPicker, CompactionTaskValidator, LevelCompactionPicker,
     LocalPickerStatistic, TierCompactionPicker,
 };
+use crate::hummock::compaction::picker::intra_compaction_picker::WholeLevelCompactionPicker;
+use crate::hummock::compaction::CompactionDeveloperConfig;
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct EmergencyCompactionPicker {
     target_level: usize,
     config: Arc<CompactionConfig>,
+    developer_config: Arc<CompactionDeveloperConfig>,
 }
 
 impl EmergencyCompactionPicker {
-    pub fn new(target_level: usize, config: Arc<CompactionConfig>) -> Self {
+    pub fn new(
+        target_level: usize,
+        config: Arc<CompactionConfig>,
+        developer_config: Arc<CompactionDeveloperConfig>,
+    ) -> Self {
         Self {
             target_level,
             config,
+            developer_config,
         }
     }
 
@@ -43,19 +51,65 @@ impl EmergencyCompactionPicker {
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         let unused_validator = Arc::new(CompactionTaskValidator::unused());
-
-        let mut base_level_compaction_picker = LevelCompactionPicker::new_with_validator(
-            self.target_level,
-            self.config.clone(),
-            unused_validator.clone(),
-        );
-
-        if let Some(ret) =
-            base_level_compaction_picker.pick_compaction(levels, level_handlers, stats)
+        let l0 = levels.l0.as_ref().unwrap();
+        let overlapping_count = l0
+            .sub_levels
+            .iter()
+            .filter(|level| level.level_type == LevelType::Overlapping as i32)
+            .count();
+        let no_overlap_count = l0
+            .sub_levels
+            .iter()
+            .filter(|level| {
+                level.level_type == LevelType::Nonoverlapping as i32
+                    && level.vnode_partition_count == 0
+            })
+            .count();
+        let partitioned_count = l0
+            .sub_levels
+            .iter()
+            .filter(|level| {
+                level.level_type == LevelType::Nonoverlapping as i32
+                    && level.vnode_partition_count > 0
+            })
+            .count();
+        // We trigger `EmergencyCompactionPicker` only when some unexpected condition cause the number of l0 levels increase and the origin strategy
+        // can not compact those data to lower level. But if most of these levels are overlapping level, it is dangerous to compact small data of non-overlapping sub level
+        // to base level, it will cost a lot of compactor resource because of large write-amplification.
+        if (self.config.split_weight_by_vnode == 0 && no_overlap_count > overlapping_count)
+            || (self.config.split_weight_by_vnode > 0
+                && partitioned_count > no_overlap_count
+                && partitioned_count > overlapping_count)
         {
-            return Some(ret);
-        }
+            let mut base_level_compaction_picker = LevelCompactionPicker::new_with_validator(
+                self.target_level,
+                self.config.clone(),
+                unused_validator.clone(),
+                self.developer_config.clone(),
+            );
 
+            if let Some(ret) =
+                base_level_compaction_picker.pick_compaction(levels, level_handlers, stats)
+            {
+                return Some(ret);
+            }
+        }
+        if self.config.split_weight_by_vnode > 0
+            && no_overlap_count > partitioned_count
+            && no_overlap_count > overlapping_count
+        {
+            let intral_level_compaction_picker =
+                WholeLevelCompactionPicker::new(self.config.clone(), unused_validator.clone());
+
+            if let Some(ret) = intral_level_compaction_picker.pick_whole_level(
+                levels.l0.as_ref().unwrap(),
+                &level_handlers[0],
+                self.config.split_weight_by_vnode,
+                stats,
+            ) {
+                return Some(ret);
+            }
+        }
         let mut tier_compaction_picker =
             TierCompactionPicker::new_with_validator(self.config.clone(), unused_validator);
 

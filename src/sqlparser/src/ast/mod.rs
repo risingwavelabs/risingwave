@@ -26,6 +26,7 @@ use alloc::{
     vec::Vec,
 };
 use core::fmt;
+use core::fmt::Display;
 
 use itertools::Itertools;
 #[cfg(feature = "serde")]
@@ -52,10 +53,11 @@ pub use self::value::{
     Value,
 };
 pub use crate::ast::ddl::{
-    AlterIndexOperation, AlterSinkOperation, AlterSourceOperation, AlterViewOperation,
+    AlterIndexOperation, AlterSinkOperation, AlterSourceOperation, AlterSubscriptionOperation,
+    AlterViewOperation,
 };
 use crate::keywords::Keyword;
-use crate::parser::{Parser, ParserError};
+use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError};
 
 pub struct DisplaySeparated<'a, T>
 where
@@ -165,6 +167,10 @@ impl Ident {
             _ => self.value.to_lowercase(),
         }
     }
+
+    pub fn quote_style(&self) -> Option<char> {
+        self.quote_style
+    }
 }
 
 impl From<&str> for Ident {
@@ -254,6 +260,30 @@ impl fmt::Display for Array {
     }
 }
 
+/// An escape character, to represent '' or a single character.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct EscapeChar(Option<char>);
+
+impl EscapeChar {
+    pub fn escape(ch: char) -> Self {
+        Self(Some(ch))
+    }
+
+    pub fn empty() -> Self {
+        Self(None)
+    }
+}
+
+impl fmt::Display for EscapeChar {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            Some(ch) => write!(f, "{}", ch),
+            None => f.write_str(""),
+        }
+    }
+}
+
 /// An SQL expression of any type.
 ///
 /// The parser does not distinguish between expressions of different types
@@ -327,12 +357,26 @@ pub enum Expr {
         low: Box<Expr>,
         high: Box<Expr>,
     },
+    /// LIKE
+    Like {
+        negated: bool,
+        expr: Box<Expr>,
+        pattern: Box<Expr>,
+        escape_char: Option<EscapeChar>,
+    },
+    /// ILIKE (case-insensitive LIKE)
+    ILike {
+        negated: bool,
+        expr: Box<Expr>,
+        pattern: Box<Expr>,
+        escape_char: Option<EscapeChar>,
+    },
     /// `<expr> [ NOT ] SIMILAR TO <pat> ESCAPE <esc_text>`
     SimilarTo {
-        expr: Box<Expr>,
         negated: bool,
-        pat: Box<Expr>,
-        esc_text: Option<Box<Expr>>,
+        expr: Box<Expr>,
+        pattern: Box<Expr>,
+        escape_char: Option<EscapeChar>,
     },
     /// Binary operation e.g. `1 + 1` or `foo > bar`
     BinaryOp {
@@ -533,24 +577,72 @@ impl fmt::Display for Expr {
                 low,
                 high
             ),
-            Expr::SimilarTo {
-                expr,
+            Expr::Like {
                 negated,
-                pat,
-                esc_text,
-            } => {
-                write!(
+                expr,
+                pattern,
+                escape_char,
+            } => match escape_char {
+                Some(ch) => write!(
+                    f,
+                    "{} {}LIKE {} ESCAPE '{}'",
+                    expr,
+                    if *negated { "NOT " } else { "" },
+                    pattern,
+                    ch
+                ),
+                _ => write!(
+                    f,
+                    "{} {}LIKE {}",
+                    expr,
+                    if *negated { "NOT " } else { "" },
+                    pattern
+                ),
+            },
+            Expr::ILike {
+                negated,
+                expr,
+                pattern,
+                escape_char,
+            } => match escape_char {
+                Some(ch) => write!(
+                    f,
+                    "{} {}ILIKE {} ESCAPE '{}'",
+                    expr,
+                    if *negated { "NOT " } else { "" },
+                    pattern,
+                    ch
+                ),
+                _ => write!(
+                    f,
+                    "{} {}ILIKE {}",
+                    expr,
+                    if *negated { "NOT " } else { "" },
+                    pattern
+                ),
+            },
+            Expr::SimilarTo {
+                negated,
+                expr,
+                pattern,
+                escape_char,
+            } => match escape_char {
+                Some(ch) => write!(
+                    f,
+                    "{} {}SIMILAR TO {} ESCAPE '{}'",
+                    expr,
+                    if *negated { "NOT " } else { "" },
+                    pattern,
+                    ch
+                ),
+                _ => write!(
                     f,
                     "{} {}SIMILAR TO {}",
                     expr,
                     if *negated { "NOT " } else { "" },
-                    pat,
-                )?;
-                if let Some(et) = esc_text {
-                    write!(f, "ESCAPE {}", et)?;
-                }
-                Ok(())
-            }
+                    pattern
+                ),
+            },
             Expr::BinaryOp { left, op, right } => write!(f, "{} {} {}", left, op, right),
             Expr::SomeOp(expr) => write!(f, "SOME({})", expr),
             Expr::AllOp(expr) => write!(f, "ALL({})", expr),
@@ -814,10 +906,10 @@ impl fmt::Display for WindowFrameUnits {
 pub enum WindowFrameBound {
     /// `CURRENT ROW`
     CurrentRow,
-    /// `<N> PRECEDING` or `UNBOUNDED PRECEDING`
-    Preceding(Option<u64>),
-    /// `<N> FOLLOWING` or `UNBOUNDED FOLLOWING`.
-    Following(Option<u64>),
+    /// `<offset> PRECEDING` or `UNBOUNDED PRECEDING`
+    Preceding(Option<Box<Expr>>),
+    /// `<offset> FOLLOWING` or `UNBOUNDED FOLLOWING`.
+    Following(Option<Box<Expr>>),
 }
 
 impl fmt::Display for WindowFrameBound {
@@ -882,6 +974,7 @@ pub enum ShowObject {
     MaterializedView { schema: Option<Ident> },
     Source { schema: Option<Ident> },
     Sink { schema: Option<Ident> },
+    Subscription { schema: Option<Ident> },
     Columns { table: ObjectName },
     Connection { schema: Option<Ident> },
     Function { schema: Option<Ident> },
@@ -931,6 +1024,7 @@ impl fmt::Display for ShowObject {
             }
             ShowObject::Jobs => write!(f, "JOBS"),
             ShowObject::ProcessList => write!(f, "PROCESSLIST"),
+            ShowObject::Subscription { schema } => write!(f, "SUBSCRIPTIONS{}", fmt_schema(schema)),
         }
     }
 }
@@ -945,6 +1039,7 @@ pub enum ShowCreateType {
     Source,
     Sink,
     Function,
+    Subscription,
 }
 
 impl fmt::Display for ShowCreateType {
@@ -957,6 +1052,7 @@ impl fmt::Display for ShowCreateType {
             ShowCreateType::Source => f.write_str("SOURCE"),
             ShowCreateType::Sink => f.write_str("SINK"),
             ShowCreateType::Function => f.write_str("FUNCTION"),
+            ShowCreateType::Subscription => f.write_str("SUBSCRIPTION"),
         }
     }
 }
@@ -1117,6 +1213,8 @@ pub enum Statement {
         name: ObjectName,
         /// Optional schema
         columns: Vec<ColumnDef>,
+        // The wildchar position in columns defined in sql. Only exist when using external schema.
+        wildcard_idx: Option<usize>,
         constraints: Vec<TableConstraint>,
         with_options: Vec<SqlOption>,
         /// Optional schema of the external source with which the table is created
@@ -1125,12 +1223,16 @@ pub enum Statement {
         source_watermarks: Vec<SourceWatermark>,
         /// Append only table.
         append_only: bool,
+        /// On conflict behavior
+        on_conflict: Option<OnConflict>,
+        /// with_version_column behind on conflict
+        with_version_column: Option<String>,
         /// `AS ( query )`
         query: Option<Box<Query>>,
         /// `FROM cdc_source TABLE database_name.table_name`
         cdc_table_info: Option<CdcTableInfo>,
         /// `INCLUDE a AS b INCLUDE c`
-        include_column_options: Vec<(Ident, Option<Ident>)>,
+        include_column_options: IncludeOption,
     },
     /// CREATE INDEX
     CreateIndex {
@@ -1151,6 +1253,10 @@ pub enum Statement {
     CreateSink {
         stmt: CreateSinkStatement,
     },
+    /// CREATE SUBSCRIPTION
+    CreateSubscription {
+        stmt: CreateSubscriptionStatement,
+    },
     /// CREATE CONNECTION
     CreateConnection {
         stmt: CreateConnectionStatement,
@@ -1166,6 +1272,7 @@ pub enum Statement {
         returns: Option<CreateFunctionReturns>,
         /// Optional parameters.
         params: CreateFunctionBody,
+        with_options: CreateFunctionWithOptions,
     },
     /// CREATE AGGREGATE
     ///
@@ -1213,6 +1320,10 @@ pub enum Statement {
         /// Sink name
         name: ObjectName,
         operation: AlterSinkOperation,
+    },
+    AlterSubscription {
+        name: ObjectName,
+        operation: AlterSubscriptionOperation,
     },
     /// ALTER SOURCE
     AlterSource {
@@ -1386,6 +1497,21 @@ pub enum Statement {
         param: Ident,
         value: SetVariableValue,
     },
+    /// DECLARE CURSOR
+    DeclareCursor {
+        cursor_name: ObjectName,
+        query: Box<Query>,
+    },
+    /// FETCH FROM CURSOR
+    FetchCursor {
+        cursor_name: ObjectName,
+        /// Number of rows to fetch. `None` means `FETCH ALL`.
+        count: Option<i32>,
+    },
+    /// CLOSE CURSOR
+    CloseCursor {
+        cursor_name: Option<ObjectName>,
+    },
     /// FLUSH the current barrier.
     ///
     /// Note: RisingWave specific statement.
@@ -1534,6 +1660,7 @@ impl fmt::Display for Statement {
                 args,
                 returns,
                 params,
+                with_options,
             } => {
                 write!(
                     f,
@@ -1548,6 +1675,7 @@ impl fmt::Display for Statement {
                     write!(f, " {}", return_type)?;
                 }
                 write!(f, "{params}")?;
+                write!(f, "{with_options}")?;
                 Ok(())
             }
             Statement::CreateAggregate {
@@ -1606,6 +1734,7 @@ impl fmt::Display for Statement {
             Statement::CreateTable {
                 name,
                 columns,
+                wildcard_idx,
                 constraints,
                 with_options,
                 or_replace,
@@ -1614,6 +1743,8 @@ impl fmt::Display for Statement {
                 source_schema,
                 source_watermarks,
                 append_only,
+                on_conflict,
+                with_version_column,
                 query,
                 cdc_table_info,
                 include_column_options,
@@ -1634,7 +1765,7 @@ impl fmt::Display for Statement {
                     name = name,
                 )?;
                 if !columns.is_empty() || !constraints.is_empty() {
-                    write!(f, " {}", fmt_create_items(columns, constraints, source_watermarks)?)?;
+                    write!(f, " {}", fmt_create_items(columns, constraints, source_watermarks, *wildcard_idx)?)?;
                 } else if query.is_none() {
                     // PostgreSQL allows `CREATE TABLE t ();`, but requires empty parens
                     write!(f, " ()")?;
@@ -1642,14 +1773,30 @@ impl fmt::Display for Statement {
                 if *append_only {
                     write!(f, " APPEND ONLY")?;
                 }
+
+
+                if let Some(on_conflict_behavior) = on_conflict {
+                    write!(f, " ON CONFLICT {}", on_conflict_behavior)?;
+                }
+                if let Some(version_column) = with_version_column {
+                    write!(f, " WITH VERSION COLUMN({})", version_column)?;
+                }
                 if !include_column_options.is_empty() { // (Ident, Option<Ident>)
                     write!(f, "{}", display_comma_separated(
-                        include_column_options.iter().map(|(a, b)| {
-                            if let Some(b) = b {
-                                format!("INCLUDE {} AS {}", a, b)
-                            } else {
-                                format!("INCLUDE {}", a)
-                            }
+                        include_column_options.iter().map(|option_item: &IncludeOptionItem| {
+                            format!("INCLUDE {}{}{}",
+                            option_item.column_type,
+                                    if let Some(inner_field) = &option_item.inner_field {
+                                        format!(" {}", inner_field)
+                                    } else {
+                                        "".into()
+                                    }
+                                    , if let Some(alias) = &option_item.column_alias {
+                                        format!(" AS {}", alias)
+                                    } else {
+                                        "".into()
+                                    }
+                                )
                         }).collect_vec().as_slice()
                     ))?;
                 }
@@ -1703,6 +1850,7 @@ impl fmt::Display for Statement {
                 stmt,
             ),
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
+            Statement::CreateSubscription { stmt } => write!(f, "CREATE SUBSCRIPTION {}", stmt,),
             Statement::CreateConnection { stmt } => write!(f, "CREATE CONNECTION {}", stmt,),
             Statement::AlterDatabase { name, operation } => {
                 write!(f, "ALTER DATABASE {} {}", name, operation)
@@ -1721,6 +1869,9 @@ impl fmt::Display for Statement {
             }
             Statement::AlterSink { name, operation } => {
                 write!(f, "ALTER SINK {} {}", name, operation)
+            }
+            Statement::AlterSubscription { name, operation } => {
+                write!(f, "ALTER SUBSCRIPTION {} {}", name, operation)
             }
             Statement::AlterSource { name, operation } => {
                 write!(f, "ALTER SOURCE {} {}", name, operation)
@@ -1918,6 +2069,23 @@ impl fmt::Display for Statement {
                     f,
                     "{param} = {value}",
                 )
+            }
+            Statement::DeclareCursor { cursor_name, query } => {
+                write!(f, "DECLARE {} CURSOR FOR {}", cursor_name, query)
+            },
+            Statement::FetchCursor { cursor_name , count} => {
+                if let Some(count) = count {
+                    write!(f, "FETCH {} FROM {}", count, cursor_name)
+                } else {
+                    write!(f, "FETCH NEXT FROM {}", cursor_name)
+                }
+            },
+            Statement::CloseCursor { cursor_name } => {
+                if let Some(name) = cursor_name {
+                    write!(f, "CLOSE {}", name)
+                } else {
+                    write!(f, "CLOSE ALL")
+                }
             }
             Statement::Flush => {
                 write!(f, "FLUSH")
@@ -2257,6 +2425,8 @@ impl fmt::Display for FunctionArg {
 pub struct Function {
     pub name: ObjectName,
     pub args: Vec<FunctionArg>,
+    /// whether the last argument is variadic, e.g. `foo(a, b, variadic c)`
+    pub variadic: bool,
     pub over: Option<WindowSpec>,
     // aggregate functions may specify eg `COUNT(DISTINCT x)`
     pub distinct: bool,
@@ -2271,6 +2441,7 @@ impl Function {
         Self {
             name,
             args: vec![],
+            variadic: false,
             over: None,
             distinct: false,
             order_by: vec![],
@@ -2284,17 +2455,22 @@ impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{}({}{}{}{})",
+            "{}({}",
             self.name,
             if self.distinct { "DISTINCT " } else { "" },
-            display_comma_separated(&self.args),
-            if !self.order_by.is_empty() {
-                " ORDER BY "
-            } else {
-                ""
-            },
-            display_comma_separated(&self.order_by),
         )?;
+        if self.variadic {
+            for arg in &self.args[0..self.args.len() - 1] {
+                write!(f, "{}, ", arg)?;
+            }
+            write!(f, "VARIADIC {}", self.args.last().unwrap())?;
+        } else {
+            write!(f, "{}", display_comma_separated(&self.args))?;
+        }
+        if !self.order_by.is_empty() {
+            write!(f, " ORDER BY {}", display_comma_separated(&self.order_by))?;
+        }
+        write!(f, ")")?;
         if let Some(o) = &self.over {
             write!(f, " OVER ({})", o)?;
         }
@@ -2318,6 +2494,7 @@ pub enum ObjectType {
     Database,
     User,
     Connection,
+    Subscription,
 }
 
 impl fmt::Display for ObjectType {
@@ -2333,6 +2510,7 @@ impl fmt::Display for ObjectType {
             ObjectType::Database => "DATABASE",
             ObjectType::User => "USER",
             ObjectType::Connection => "CONNECTION",
+            ObjectType::Subscription => "SUBSCRIPTION",
         })
     }
 }
@@ -2359,9 +2537,11 @@ impl ParseTo for ObjectType {
             ObjectType::User
         } else if parser.parse_keyword(Keyword::CONNECTION) {
             ObjectType::Connection
+        } else if parser.parse_keyword(Keyword::SUBSCRIPTION) {
+            ObjectType::Subscription
         } else {
             return parser.expected(
-                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SCHEMA, DATABASE, USER or CONNECTION after DROP",
+                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SUBSCRIPTION, SCHEMA, DATABASE, USER or CONNECTION after DROP",
                 parser.peek_token(),
             );
         };
@@ -2394,6 +2574,24 @@ impl fmt::Display for EmitMode {
         f.write_str(match self {
             EmitMode::Immediately => "IMMEDIATELY",
             EmitMode::OnWindowClose => "ON WINDOW CLOSE",
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum OnConflict {
+    OverWrite,
+    Ignore,
+    DoUpdateIfNotNull,
+}
+
+impl fmt::Display for OnConflict {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            OnConflict::OverWrite => "OVERWRITE",
+            OnConflict::Ignore => "IGNORE",
+            OnConflict::DoUpdateIfNotNull => "DO UPDATE IF NOT NULL",
         })
     }
 }
@@ -2631,6 +2829,24 @@ impl fmt::Display for FunctionDefinition {
     }
 }
 
+impl FunctionDefinition {
+    /// Returns the function definition as a string slice.
+    pub fn as_str(&self) -> &str {
+        match self {
+            FunctionDefinition::SingleQuotedDef(s) => s,
+            FunctionDefinition::DoubleDollarDef(s) => s,
+        }
+    }
+
+    /// Returns the function definition as a string.
+    pub fn into_string(self) -> String {
+        match self {
+            FunctionDefinition::SingleQuotedDef(s) => s,
+            FunctionDefinition::DoubleDollarDef(s) => s,
+        }
+    }
+}
+
 /// Return types of a function.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -2707,6 +2923,57 @@ impl fmt::Display for CreateFunctionBody {
         Ok(())
     }
 }
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CreateFunctionWithOptions {
+    /// Always retry on network errors.
+    pub always_retry_on_network_error: Option<bool>,
+}
+
+/// TODO(kwannoel): Generate from the struct definition instead.
+impl CreateFunctionWithOptions {
+    fn is_empty(&self) -> bool {
+        self.always_retry_on_network_error.is_none()
+    }
+}
+
+/// TODO(kwannoel): Generate from the struct definition instead.
+impl TryFrom<Vec<SqlOption>> for CreateFunctionWithOptions {
+    type Error = ParserError;
+
+    fn try_from(with_options: Vec<SqlOption>) -> Result<Self, Self::Error> {
+        let mut always_retry_on_network_error = None;
+        for option in with_options {
+            if option.name.to_string().to_lowercase() == "always_retry_on_network_error" {
+                always_retry_on_network_error = Some(option.value == Value::Boolean(true));
+            } else {
+                return Err(ParserError::ParserError(format!(
+                    "Unsupported option: {}",
+                    option.name
+                )));
+            }
+        }
+        Ok(Self {
+            always_retry_on_network_error,
+        })
+    }
+}
+
+impl Display for CreateFunctionWithOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_empty() {
+            return Ok(());
+        }
+        let mut options = vec![];
+        if let Some(always_retry_on_network_error) = self.always_retry_on_network_error {
+            options.push(format!(
+                "ALWAYS_RETRY_NETWORK_ERRORS = {}",
+                always_retry_on_network_error
+            ));
+        }
+        write!(f, " WITH ( {} )", display_comma_separated(&options))
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -2775,6 +3042,30 @@ impl fmt::Display for SetVariableValueSingle {
         match self {
             Ident(ident) => write!(f, "{}", ident),
             Literal(literal) => write!(f, "{}", literal),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum AsOf {
+    ProcessTime,
+    // the number of seconds that have elapsed since the Unix epoch, which is January 1, 1970 at 00:00:00 Coordinated Universal Time (UTC).
+    TimestampNum(i64),
+    TimestampString(String),
+    VersionNum(i64),
+    VersionString(String),
+}
+
+impl fmt::Display for AsOf {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use AsOf::*;
+        match self {
+            ProcessTime => write!(f, " FOR SYSTEM_TIME AS OF PROCTIME()"),
+            TimestampNum(ts) => write!(f, " FOR SYSTEM_TIME AS OF {}", ts),
+            TimestampString(ts) => write!(f, " FOR SYSTEM_TIME AS OF '{}'", ts),
+            VersionNum(v) => write!(f, " FOR SYSTEM_VERSION AS OF {}", v),
+            VersionString(v) => write!(f, " FOR SYSTEM_VERSION AS OF '{}'", v),
         }
     }
 }
@@ -2906,5 +3197,51 @@ mod tests {
             ))))),
         };
         assert_eq!("NOT true IS NOT FALSE", format!("{}", unary_op));
+    }
+
+    #[test]
+    fn test_create_function_display() {
+        let create_function = Statement::CreateFunction {
+            temporary: false,
+            or_replace: false,
+            name: ObjectName(vec![Ident::new_unchecked("foo")]),
+            args: Some(vec![OperateFunctionArg::unnamed(DataType::Int)]),
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
+            params: CreateFunctionBody {
+                language: Some(Ident::new_unchecked("python")),
+                behavior: Some(FunctionBehavior::Immutable),
+                as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
+                return_: None,
+                using: None,
+            },
+            with_options: CreateFunctionWithOptions {
+                always_retry_on_network_error: None,
+            },
+        };
+        assert_eq!(
+            "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1'",
+            format!("{}", create_function)
+        );
+        let create_function = Statement::CreateFunction {
+            temporary: false,
+            or_replace: false,
+            name: ObjectName(vec![Ident::new_unchecked("foo")]),
+            args: Some(vec![OperateFunctionArg::unnamed(DataType::Int)]),
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
+            params: CreateFunctionBody {
+                language: Some(Ident::new_unchecked("python")),
+                behavior: Some(FunctionBehavior::Immutable),
+                as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
+                return_: None,
+                using: None,
+            },
+            with_options: CreateFunctionWithOptions {
+                always_retry_on_network_error: Some(true),
+            },
+        };
+        assert_eq!(
+            "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1' WITH ( ALWAYS_RETRY_NETWORK_ERRORS = true )",
+            format!("{}", create_function)
+        );
     }
 }

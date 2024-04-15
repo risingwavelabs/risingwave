@@ -17,13 +17,13 @@ use std::fmt;
 use std::sync::Arc;
 
 use parse_display::Display;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
 
 use super::iter_util::ZipEqDebug;
 use crate::array::{Array, DataChunk};
 use crate::catalog::{FieldDisplay, Schema};
 use crate::dispatch_array_variants;
-use crate::estimate_size::EstimateSize;
 use crate::row::Row;
 use crate::types::{DefaultOrdered, ToDatumRef};
 
@@ -312,7 +312,7 @@ pub struct HeapElem {
     chunk: DataChunk,
     chunk_idx: usize,
     elem_idx: usize,
-    /// DataChunk can be encoded to accelerate the comparison.
+    /// `DataChunk` can be encoded to accelerate the comparison.
     /// Use `risingwave_common::util::encoding_for_comparison::encode_chunk`
     /// to perform encoding, otherwise the comparison will be performed
     /// column by column.
@@ -510,9 +510,7 @@ pub fn partial_cmp_datum_iter(
 ) -> Option<Ordering> {
     let mut order_types_iter = order_types.into_iter();
     lhs.into_iter().partial_cmp_by(rhs, |x, y| {
-        let Some(order_type) = order_types_iter.next() else {
-            return None;
-        };
+        let order_type = order_types_iter.next()?;
         partial_cmp_datum(x, y, order_type)
     })
 }

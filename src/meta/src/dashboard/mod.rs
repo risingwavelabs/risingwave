@@ -13,27 +13,23 @@
 // limitations under the License.
 
 mod prometheus;
-mod proxy;
 
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::Path as FilePath;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
-use axum::body::{boxed, Body};
+use anyhow::{anyhow, Context as _, Result};
 use axum::extract::{Extension, Path};
 use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, get_service};
+use axum::routing::get;
 use axum::Router;
-use hyper::Request;
-use parking_lot::Mutex;
 use risingwave_rpc_client::ComputeClientPool;
-use tower::{ServiceBuilder, ServiceExt};
+use tokio::net::TcpListener;
+use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
+use tower_http::compression::CompressionLayer;
 use tower_http::cors::{self, CorsLayer};
-use tower_http::services::ServeDir;
 
 use crate::manager::diagnose::DiagnoseCommandRef;
 use crate::manager::MetadataManager;
@@ -45,8 +41,7 @@ pub struct DashboardService {
     pub prometheus_selector: String,
     pub metadata_manager: MetadataManager,
     pub compute_clients: ComputeClientPool,
-    pub ui_path: Option<String>,
-    pub diagnose_command: Option<DiagnoseCommandRef>,
+    pub diagnose_command: DiagnoseCommandRef,
     pub trace_state: otlp_embedded::StateRef,
 }
 
@@ -55,15 +50,17 @@ pub type Service = Arc<DashboardService>;
 pub(super) mod handlers {
     use anyhow::Context;
     use axum::Json;
+    use futures::future::join_all;
     use itertools::Itertools;
-    use risingwave_common::bail;
     use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::{Sink, Source, Table, View};
     use risingwave_pb::common::{WorkerNode, WorkerType};
-    use risingwave_pb::meta::{ActorLocation, PbTableFragments};
+    use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
+    use risingwave_pb::meta::PbTableFragments;
     use risingwave_pb::monitor_service::{
-        HeapProfilingResponse, ListHeapProfilingResponse, StackTraceResponse,
+        GetBackPressureResponse, HeapProfilingResponse, ListHeapProfilingResponse,
+        StackTraceResponse,
     };
     use serde_json::json;
     use thiserror_ext::AsReport;
@@ -172,30 +169,6 @@ pub(super) mod handlers {
         Ok(Json(views))
     }
 
-    pub async fn list_actors(
-        Extension(srv): Extension<Service>,
-    ) -> Result<Json<Vec<ActorLocation>>> {
-        let mut node_actors = srv
-            .metadata_manager
-            .all_node_actors(true)
-            .await
-            .map_err(err)?;
-        let nodes = srv
-            .metadata_manager
-            .list_active_streaming_compute_nodes()
-            .await
-            .map_err(err)?;
-        let actors = nodes
-            .into_iter()
-            .map(|node| ActorLocation {
-                node: Some(node.clone()),
-                actors: node_actors.remove(&node.id).unwrap_or_default(),
-            })
-            .collect::<Vec<_>>();
-
-        Ok(Json(actors))
-    }
-
     pub async fn list_fragments(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<PbTableFragments>>> {
@@ -221,6 +194,21 @@ pub(super) mod handlers {
         Ok(Json(table_fragments))
     }
 
+    pub async fn list_object_dependencies(
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<Vec<PbObjectDependencies>>> {
+        let object_dependencies = match &srv.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_object_dependencies().await,
+            MetadataManager::V2(mgr) => mgr
+                .catalog_controller
+                .list_object_dependencies()
+                .await
+                .map_err(err)?,
+        };
+
+        Ok(Json(object_dependencies))
+    }
+
     async fn dump_await_tree_inner(
         worker_nodes: impl IntoIterator<Item = &WorkerNode>,
         compute_clients: &ComputeClientPool,
@@ -231,6 +219,7 @@ pub(super) mod handlers {
             a.actor_traces.extend(b.actor_traces);
             a.rpc_traces.extend(b.rpc_traces);
             a.compaction_task_traces.extend(b.compaction_task_traces);
+            a.inflight_barrier_traces.extend(b.inflight_barrier_traces);
         }
 
         for worker_node in worker_nodes {
@@ -311,10 +300,6 @@ pub(super) mod handlers {
         Path((worker_id, file_path)): Path<(WorkerId, String)>,
         Extension(srv): Extension<Service>,
     ) -> Result<Response> {
-        if srv.ui_path.is_none() {
-            bail!("Should provide ui_path");
-        }
-
         let file_path =
             String::from_utf8(base64_url::decode(&file_path).map_err(err)?).map_err(err)?;
 
@@ -346,26 +331,53 @@ pub(super) mod handlers {
         let response = Response::builder()
             .header("Content-Type", "application/octet-stream")
             .header("Content-Disposition", collapsed_file_name)
-            .body(boxed(collapsed_str));
+            .body(collapsed_str.into());
 
         response.map_err(err)
     }
 
     pub async fn diagnose(Extension(srv): Extension<Service>) -> Result<String> {
-        let report = if let Some(cmd) = &srv.diagnose_command {
-            cmd.report().await
-        } else {
-            "Not supported in sql-backend".to_string()
-        };
+        Ok(srv.diagnose_command.report().await)
+    }
 
-        Ok(report)
+    pub async fn get_embedded_back_pressures(
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<GetBackPressureResponse>> {
+        let worker_nodes = srv
+            .metadata_manager
+            .list_active_streaming_compute_nodes()
+            .await
+            .map_err(err)?;
+
+        let mut futures = Vec::new();
+
+        for worker_node in worker_nodes {
+            let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+            let client = Arc::new(client);
+            let fut = async move {
+                let result = client.get_back_pressure().await.map_err(err)?;
+                Ok::<_, DashboardError>(result)
+            };
+            futures.push(fut);
+        }
+        let results = join_all(futures).await;
+
+        let mut all = GetBackPressureResponse::default();
+
+        for result in results {
+            let result = result
+                .map_err(|_| anyhow!("Failed to get back pressure"))
+                .map_err(err)?;
+            all.back_pressure_infos.extend(result.back_pressure_infos);
+        }
+
+        Ok(all.into())
     }
 }
 
 impl DashboardService {
     pub async fn serve(self) -> Result<()> {
         use handlers::*;
-        let ui_path = self.ui_path.clone();
         let srv = Arc::new(self);
 
         let cors_layer = CorsLayer::new()
@@ -374,7 +386,6 @@ impl DashboardService {
 
         let api_router = Router::new()
             .route("/clusters/:ty", get(list_clusters))
-            .route("/actors", get(list_actors))
             .route("/fragments2", get(list_fragments))
             .route("/views", get(list_views))
             .route("/materialized_views", get(list_materialized_views))
@@ -383,10 +394,15 @@ impl DashboardService {
             .route("/internal_tables", get(list_internal_tables))
             .route("/sources", get(list_sources))
             .route("/sinks", get(list_sinks))
+            .route("/object_dependencies", get(list_object_dependencies))
             .route("/metrics/cluster", get(prometheus::list_prometheus_cluster))
             .route(
-                "/metrics/actor/back_pressures",
-                get(prometheus::list_prometheus_actor_back_pressure),
+                "/metrics/fragment/prometheus_back_pressures",
+                get(prometheus::list_prometheus_fragment_back_pressure),
+            )
+            .route(
+                "/metrics/fragment/embedded_back_pressures",
+                get(get_embedded_back_pressures),
             )
             .route("/monitor/await_tree/:worker_id", get(dump_await_tree))
             .route("/monitor/await_tree/", get(dump_await_tree_all))
@@ -405,37 +421,21 @@ impl DashboardService {
             .layer(cors_layer);
 
         let trace_ui_router = otlp_embedded::ui_app(srv.trace_state.clone(), "/trace/");
-
-        let dashboard_router = if let Some(ui_path) = ui_path {
-            get_service(ServeDir::new(ui_path))
-                .handle_error(|e| async move { match e {} })
-                .boxed_clone()
-        } else {
-            let cache = Arc::new(Mutex::new(HashMap::new()));
-            tower::service_fn(move |req: Request<Body>| {
-                let cache = cache.clone();
-                async move {
-                    proxy::proxy(req, cache).await.or_else(|err| {
-                        Ok((
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            format!("Unhandled internal error: {}", err),
-                        )
-                            .into_response())
-                    })
-                }
-            })
-            .boxed_clone()
-        };
+        let dashboard_router = risingwave_meta_dashboard::router();
 
         let app = Router::new()
             .fallback_service(dashboard_router)
             .nest("/api", api_router)
-            .nest("/trace", trace_ui_router);
+            .nest("/trace", trace_ui_router)
+            .layer(CompressionLayer::new());
 
-        axum::Server::bind(&srv.dashboard_addr)
-            .serve(app.into_make_service())
+        let listener = TcpListener::bind(&srv.dashboard_addr)
             .await
-            .map_err(|err| anyhow!(err))?;
+            .context("failed to bind dashboard address")?;
+        axum::serve(listener, app)
+            .await
+            .context("failed to serve dashboard service")?;
+
         Ok(())
     }
 }

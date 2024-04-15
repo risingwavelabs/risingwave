@@ -14,6 +14,8 @@
 
 use std::collections::HashMap;
 
+use anyhow::Context;
+use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
@@ -28,6 +30,7 @@ use risingwave_pb::hummock::{
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
+use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::EventLog;
@@ -62,6 +65,8 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_actor_states(&self) -> Result<Vec<ActorState>>;
 
+    async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>>;
+
     async fn unpin_snapshot(&self) -> Result<()>;
 
     async fn unpin_snapshot_before(&self, epoch: u64) -> Result<()>;
@@ -75,6 +80,10 @@ pub trait FrontendMetaClient: Send + Sync {
         param: String,
         value: Option<String>,
     ) -> Result<Option<SystemParamsReader>>;
+
+    async fn get_session_params(&self) -> Result<SessionConfig>;
+
+    async fn set_session_param(&self, param: String, value: Option<String>) -> Result<String>;
 
     async fn list_ddl_progress(&self) -> Result<Vec<DdlProgress>>;
 
@@ -151,6 +160,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.list_actor_states().await
     }
 
+    async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>> {
+        self.0.list_object_dependencies().await
+    }
+
     async fn unpin_snapshot(&self) -> Result<()> {
         self.0.unpin_snapshot().await
     }
@@ -174,6 +187,17 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         value: Option<String>,
     ) -> Result<Option<SystemParamsReader>> {
         self.0.set_system_param(param, value).await
+    }
+
+    async fn get_session_params(&self) -> Result<SessionConfig> {
+        let session_config: SessionConfig =
+            serde_json::from_str(&self.0.get_session_params().await?)
+                .context("failed to parse session config")?;
+        Ok(session_config)
+    }
+
+    async fn set_session_param(&self, param: String, value: Option<String>) -> Result<String> {
+        self.0.set_session_param(param, value).await
     }
 
     async fn list_ddl_progress(&self) -> Result<Vec<DdlProgress>> {

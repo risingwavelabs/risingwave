@@ -288,7 +288,7 @@ async fn test_failpoints_user_read_err() {
     while ui.is_valid() {
         let key = ui.key();
         let val = ui.value();
-        assert_eq!(key, &iterator_test_bytes_key_of(i));
+        assert_eq!(key, iterator_test_bytes_key_of(i).to_ref());
         assert_eq!(val, iterator_test_value_of(i).as_slice());
         i += 1;
         let result = ui.next().await;
@@ -400,7 +400,7 @@ async fn test_failpoints_compactor_iterator_recreate() {
 
     let table = sstable_store.sstable(&info, &mut stats).await.unwrap();
     let mut sstable_iter = SstableStreamIterator::new(
-        table.value().meta.block_metas.clone(),
+        table.meta.block_metas.clone(),
         info,
         HashSet::from_iter(std::iter::once(0)),
         0,

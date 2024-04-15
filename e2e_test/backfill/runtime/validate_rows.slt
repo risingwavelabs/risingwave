@@ -1,4 +1,0 @@
-query I
-select count(*) from m1;
-----
-1000000

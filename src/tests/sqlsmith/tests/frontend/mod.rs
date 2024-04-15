@@ -28,6 +28,7 @@ use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlsmith::{
     is_permissible_error, mview_sql_gen, parse_create_table_statements, parse_sql, sql_gen, Table,
 };
+use thiserror_ext::AsReport;
 use tokio::runtime::Runtime;
 
 type Result<T> = std::result::Result<T, Failed>;
@@ -48,7 +49,7 @@ async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: Arc<str>) -> Re
     let result = handler::handle(session.clone(), stmt, sql, vec![])
         .await
         .map(|_| ())
-        .map_err(|e| format!("Error Reason:\n{}", e).into());
+        .map_err(|e| format!("Error Reason:\n{}", e.as_report()).into());
     validate_result(result)
 }
 
@@ -183,20 +184,26 @@ fn run_batch_query(
     let mut binder = Binder::new(&session);
     let bound = binder
         .bind(stmt)
-        .map_err(|e| Failed::from(format!("Failed to bind:\nReason:\n{}", e)))?;
+        .map_err(|e| Failed::from(format!("Failed to bind:\nReason:\n{}", e.as_report())))?;
     let mut planner = Planner::new(context);
-    let mut logical_plan = planner
-        .plan(bound)
-        .map_err(|e| Failed::from(format!("Failed to generate logical plan:\nReason:\n{}", e)))?;
-    let batch_plan = logical_plan
-        .gen_batch_plan()
-        .map_err(|e| Failed::from(format!("Failed to generate batch plan:\nReason:\n{}", e)))?;
+    let mut logical_plan = planner.plan(bound).map_err(|e| {
+        Failed::from(format!(
+            "Failed to generate logical plan:\nReason:\n{}",
+            e.as_report()
+        ))
+    })?;
+    let batch_plan = logical_plan.gen_batch_plan().map_err(|e| {
+        Failed::from(format!(
+            "Failed to generate batch plan:\nReason:\n{}",
+            e.as_report()
+        ))
+    })?;
     logical_plan
         .gen_batch_distributed_plan(batch_plan)
         .map_err(|e| {
             Failed::from(format!(
                 "Failed to generate batch distributed plan:\nReason:\n{}",
-                e
+                e.as_report()
             ))
         })?;
     Ok(())

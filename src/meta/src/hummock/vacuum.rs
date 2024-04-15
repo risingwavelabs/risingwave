@@ -20,6 +20,7 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::VacuumTask;
+use thiserror_ext::AsReport;
 
 use super::CompactorManagerRef;
 use crate::backup_restore::BackupManagerRef;
@@ -33,7 +34,7 @@ pub struct VacuumManager {
     env: MetaSrvEnv,
     hummock_manager: HummockManagerRef,
     backup_manager: BackupManagerRef,
-    /// Use the CompactorManager to dispatch VacuumTask.
+    /// Use the `CompactorManager` to dispatch `VacuumTask`.
     compactor_manager: CompactorManagerRef,
     /// SST object ids which have been dispatched to vacuum nodes but are not replied yet.
     pending_object_ids: parking_lot::RwLock<HashSet<HummockSstableObjectId>>,
@@ -148,9 +149,9 @@ impl VacuumManager {
                 }
                 Err(err) => {
                     tracing::warn!(
-                        "Failed to send vacuum task to worker {}: {:#?}",
+                        error = %err.as_report(),
+                        "Failed to send vacuum task to worker {}",
                         compactor.context_id(),
-                        err
                     );
                     self.compactor_manager
                         .remove_compactor(compactor.context_id());

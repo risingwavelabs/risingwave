@@ -15,11 +15,14 @@
 use std::fmt::{Debug, Formatter};
 use std::num::NonZeroU32;
 
+use futures::StreamExt;
+use futures_async_stream::try_stream;
 use governor::clock::MonotonicClock;
 use governor::{Quota, RateLimiter};
-use risingwave_common::catalog::Schema;
 
-use super::*;
+use super::{
+    ActorContextRef, BoxedMessageStream, Execute, Executor, Message, Mutation, StreamExecutorError,
+};
 
 /// Flow Control Executor is used to control the rate of the input executor.
 ///
@@ -31,27 +34,16 @@ use super::*;
 ///
 /// It is used to throttle problematic MVs that are consuming too much resources.
 pub struct FlowControlExecutor {
-    input: BoxedExecutor,
+    input: Executor,
     actor_ctx: ActorContextRef,
-    identity: String,
     rate_limit: Option<u32>,
 }
 
 impl FlowControlExecutor {
-    pub fn new(
-        input: Box<dyn Executor>,
-        actor_ctx: ActorContextRef,
-        rate_limit: Option<u32>,
-    ) -> Self {
-        let identity = if rate_limit.is_some() {
-            format!("{} (flow controlled)", input.identity())
-        } else {
-            input.identity().to_owned()
-        };
+    pub fn new(input: Executor, actor_ctx: ActorContextRef, rate_limit: Option<u32>) -> Self {
         Self {
             input,
             actor_ctx,
-            identity,
             rate_limit,
         }
     }
@@ -65,7 +57,7 @@ impl FlowControlExecutor {
         };
         let mut rate_limiter = self.rate_limit.map(get_rate_limiter);
         if self.rate_limit.is_some() {
-            tracing::info!(id = self.actor_ctx.id, rate_limit = ?self.rate_limit, "actor starts with rate limit",);
+            tracing::info!(rate_limit = ?self.rate_limit, "actor starts with rate limit");
         }
 
         #[for_await]
@@ -103,11 +95,7 @@ impl FlowControlExecutor {
                             if let Some(limit) = actor_to_apply.get(&self.actor_ctx.id) {
                                 self.rate_limit = *limit;
                                 rate_limiter = self.rate_limit.map(get_rate_limiter);
-                                tracing::info!(
-                                    id = self.actor_ctx.id,
-                                    new_rate_limit = ?self.rate_limit,
-                                    "actor rate limit changed",
-                                );
+                                tracing::info!(new_rate_limit = ?self.rate_limit, "actor rate limit changed");
                             }
                         }
                     }
@@ -128,20 +116,8 @@ impl Debug for FlowControlExecutor {
     }
 }
 
-impl Executor for FlowControlExecutor {
+impl Execute for FlowControlExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        self.input.schema()
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        self.input.pk_indices()
-    }
-
-    fn identity(&self) -> &str {
-        &self.identity
     }
 }

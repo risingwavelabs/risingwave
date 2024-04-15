@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use aws_sdk_s3::types::Object;
 use bytes::Bytes;
@@ -23,31 +23,29 @@ use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
 use futures::Stream;
 use itertools::Itertools;
-use parking_lot::Mutex;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{ErrorSuppressor, RwError};
-use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::source::ConnectorSplit;
-use risingwave_rpc_client::ConnectorClient;
 use serde::de::DeserializeOwned;
 
 use super::cdc::DebeziumCdcMeta;
 use super::datagen::DatagenMeta;
-use super::filesystem::FsSplit;
 use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
 use super::kinesis::KinesisMeta;
 use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
 use super::{GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
+use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 pub(crate) use crate::source::common::CommonSplitReader;
 use crate::source::filesystem::FsPageItem;
 use crate::source::monitor::EnumeratorMetrics;
+use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc};
 use crate::with_options::WithOptions;
 use crate::{
     dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
@@ -68,12 +66,16 @@ pub trait TryFromHashmap: Sized + UnknownFields {
 /// Each instance should add a `#[derive(with_options::WithOptions)]` marker.
 pub trait SourceProperties: TryFromHashmap + Clone + WithOptions {
     const SOURCE_NAME: &'static str;
-    type Split: SplitMetaData + TryFrom<SplitImpl, Error = anyhow::Error> + Into<SplitImpl>;
+    type Split: SplitMetaData
+        + TryFrom<SplitImpl, Error = crate::error::ConnectorError>
+        + Into<SplitImpl>;
     type SplitEnumerator: SplitEnumerator<Properties = Self, Split = Self::Split>;
     type SplitReader: SplitReader<Split = Self::Split, Properties = Self>;
 
+    /// Load additional info from `PbSource`. Currently only used by CDC.
     fn init_from_pb_source(&mut self, _source: &PbSource) {}
 
+    /// Load additional info from `ExternalTableDesc`. Currently only used by CDC.
     fn init_from_pb_cdc_table_desc(&mut self, _table_desc: &ExternalTableDesc) {}
 }
 
@@ -84,16 +86,16 @@ pub trait UnknownFields {
 
 impl<P: DeserializeOwned + UnknownFields> TryFromHashmap for P {
     fn try_from_hashmap(props: HashMap<String, String>, deny_unknown_fields: bool) -> Result<Self> {
-        let json_value = serde_json::to_value(props).map_err(|e| anyhow!(e))?;
-        let res = serde_json::from_value::<P>(json_value).map_err(|e| anyhow!(e.to_string()))?;
+        let json_value = serde_json::to_value(props)?;
+        let res = serde_json::from_value::<P>(json_value)?;
 
         if !deny_unknown_fields || res.unknown_fields().is_empty() {
             Ok(res)
         } else {
-            Err(anyhow!(
+            bail!(
                 "Unknown fields in the WITH clause: {:?}",
                 res.unknown_fields()
-            ))
+            )
         }
     }
 }
@@ -132,12 +134,15 @@ pub struct SourceCtrlOpts {
     // comes from developer::stream_chunk_size in stream scenario and developer::batch_chunk_size
     // in batch scenario
     pub chunk_size: usize,
+    /// Rate limit of source
+    pub rate_limit: Option<u32>,
 }
 
 impl Default for SourceCtrlOpts {
     fn default() -> Self {
         Self {
             chunk_size: MAX_CHUNK_SIZE,
+            rate_limit: None,
         }
     }
 }
@@ -146,101 +151,45 @@ impl Default for SourceCtrlOpts {
 pub struct SourceEnumeratorContext {
     pub info: SourceEnumeratorInfo,
     pub metrics: Arc<EnumeratorMetrics>,
-    pub connector_client: Option<ConnectorClient>,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct SourceEnumeratorInfo {
     pub source_id: u32,
 }
 
 #[derive(Debug, Default)]
 pub struct SourceContext {
-    pub connector_client: Option<ConnectorClient>,
-    pub source_info: SourceInfo,
-    pub metrics: Arc<SourceMetrics>,
-    pub source_ctrl_opts: SourceCtrlOpts,
-    pub connector_props: ConnectorProperties,
-    error_suppressor: Option<Arc<Mutex<ErrorSuppressor>>>,
-}
-impl SourceContext {
-    pub fn new(
-        actor_id: u32,
-        table_id: TableId,
-        fragment_id: u32,
-        metrics: Arc<SourceMetrics>,
-        source_ctrl_opts: SourceCtrlOpts,
-        connector_client: Option<ConnectorClient>,
-        connector_props: ConnectorProperties,
-    ) -> Self {
-        Self {
-            connector_client,
-            source_info: SourceInfo {
-                actor_id,
-                source_id: table_id,
-                fragment_id,
-            },
-            metrics,
-            source_ctrl_opts,
-            error_suppressor: None,
-            connector_props,
-        }
-    }
-
-    pub fn new_with_suppressor(
-        actor_id: u32,
-        table_id: TableId,
-        fragment_id: u32,
-        metrics: Arc<SourceMetrics>,
-        source_ctrl_opts: SourceCtrlOpts,
-        connector_client: Option<ConnectorClient>,
-        error_suppressor: Arc<Mutex<ErrorSuppressor>>,
-        connector_props: ConnectorProperties,
-    ) -> Self {
-        let mut ctx = Self::new(
-            actor_id,
-            table_id,
-            fragment_id,
-            metrics,
-            source_ctrl_opts,
-            connector_client,
-            connector_props,
-        );
-        ctx.error_suppressor = Some(error_suppressor);
-        ctx
-    }
-
-    pub(crate) fn report_user_source_error(&self, e: RwError) {
-        if self.source_info.fragment_id == u32::MAX {
-            return;
-        }
-        let mut err_str = e.inner().to_string();
-        if let Some(suppressor) = &self.error_suppressor
-            && suppressor.lock().suppress_error(&err_str)
-        {
-            err_str = format!(
-                "error msg suppressed (due to per-actor error limit: {})",
-                suppressor.lock().max()
-            );
-        }
-        GLOBAL_ERROR_METRICS.user_source_error.report([
-            "SourceError".to_owned(),
-            // TODO(jon-chuang): add the error msg truncator to truncate these
-            err_str,
-            // Let's be a bit more specific for SourceExecutor
-            "SourceExecutor".to_owned(),
-            self.source_info.fragment_id.to_string(),
-            self.source_info.source_id.table_id.to_string(),
-        ]);
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub struct SourceInfo {
     pub actor_id: u32,
     pub source_id: TableId,
     // There should be a 1-1 mapping between `source_id` & `fragment_id`
     pub fragment_id: u32,
+    pub source_name: String,
+    pub metrics: Arc<SourceMetrics>,
+    pub source_ctrl_opts: SourceCtrlOpts,
+    pub connector_props: ConnectorProperties,
+}
+
+impl SourceContext {
+    pub fn new(
+        actor_id: u32,
+        source_id: TableId,
+        fragment_id: u32,
+        metrics: Arc<SourceMetrics>,
+        source_ctrl_opts: SourceCtrlOpts,
+        connector_props: ConnectorProperties,
+        source_name: String,
+    ) -> Self {
+        Self {
+            actor_id,
+            source_id,
+            fragment_id,
+            source_name,
+            metrics,
+            source_ctrl_opts,
+            connector_props,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -248,6 +197,7 @@ pub enum SourceFormat {
     #[default]
     Invalid,
     Native,
+    None,
     Debezium,
     DebeziumMongo,
     Maxwell,
@@ -261,6 +211,7 @@ pub enum SourceEncode {
     #[default]
     Invalid,
     Native,
+    None,
     Avro,
     Csv,
     Protobuf,
@@ -304,8 +255,8 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
         };
         return Ok(SourceStruct::new(format, encode));
     }
-    let source_format = info.get_format().map_err(|e| anyhow!("{e:?}"))?;
-    let source_encode = info.get_row_encode().map_err(|e| anyhow!("{e:?}"))?;
+    let source_format = info.get_format()?;
+    let source_encode = info.get_row_encode()?;
     let (format, encode) = match (source_format, source_encode) {
         (PbFormatType::Plain, PbEncodeType::Json) => (SourceFormat::Plain, SourceEncode::Json),
         (PbFormatType::Plain, PbEncodeType::Protobuf) => {
@@ -321,6 +272,7 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
         (PbFormatType::Native, PbEncodeType::Native) => {
             (SourceFormat::Native, SourceEncode::Native)
         }
+        (PbFormatType::None, PbEncodeType::None) => (SourceFormat::None, SourceEncode::None),
         (PbFormatType::Debezium, PbEncodeType::Avro) => {
             (SourceFormat::Debezium, SourceEncode::Avro)
         }
@@ -331,41 +283,22 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
         }
         (PbFormatType::Plain, PbEncodeType::Bytes) => (SourceFormat::Plain, SourceEncode::Bytes),
         (format, encode) => {
-            return Err(anyhow!(
+            bail!(
                 "Unsupported combination of format {:?} and encode {:?}",
                 format,
                 encode
-            ));
+            );
         }
     };
     Ok(SourceStruct::new(format, encode))
 }
 
-pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
+pub type BoxSourceStream = BoxStream<'static, crate::error::ConnectorResult<Vec<SourceMessage>>>;
 
-pub trait SourceWithStateStream =
-    Stream<Item = Result<StreamChunkWithState, RwError>> + Send + 'static;
-pub type BoxSourceWithStateStream = BoxStream<'static, Result<StreamChunkWithState, RwError>>;
-pub type BoxTryStream<M> = BoxStream<'static, Result<M, RwError>>;
-
-/// [`StreamChunkWithState`] returns stream chunk together with offset for each split. In the
-/// current design, one connector source can have multiple split reader. The keys are unique
-/// `split_id` and values are the latest offset for each split.
-#[derive(Clone, Debug, PartialEq)]
-pub struct StreamChunkWithState {
-    pub chunk: StreamChunk,
-    pub split_offset_mapping: Option<HashMap<SplitId, String>>,
-}
-
-/// The `split_offset_mapping` field is unused for the table source, so we implement `From` for it.
-impl From<StreamChunk> for StreamChunkWithState {
-    fn from(chunk: StreamChunk) -> Self {
-        Self {
-            chunk,
-            split_offset_mapping: None,
-        }
-    }
-}
+pub trait ChunkSourceStream =
+    Stream<Item = crate::error::ConnectorResult<StreamChunk>> + Send + 'static;
+pub type BoxChunkSourceStream = BoxStream<'static, crate::error::ConnectorResult<StreamChunk>>;
+pub type BoxTryStream<M> = BoxStream<'static, crate::error::ConnectorResult<M>>;
 
 /// [`SplitReader`] is a new abstraction of the external connector read interface which is
 /// responsible for parsing, it is used to read messages from the outside and transform them into a
@@ -381,9 +314,9 @@ pub trait SplitReader: Sized + Send {
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         columns: Option<Vec<Column>>,
-    ) -> Result<Self>;
+    ) -> crate::error::ConnectorResult<Self>;
 
-    fn into_stream(self) -> BoxSourceWithStateStream;
+    fn into_stream(self) -> BoxChunkSourceStream;
 }
 
 for_all_sources!(impl_connector_properties);
@@ -395,17 +328,6 @@ impl Default for ConnectorProperties {
 }
 
 impl ConnectorProperties {
-    pub fn is_new_fs_connector_b_tree_map(with_properties: &BTreeMap<String, String>) -> bool {
-        with_properties
-            .get(UPSTREAM_SOURCE_KEY)
-            .map(|s| {
-                s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR)
-                    || s.eq_ignore_ascii_case(POSIX_FS_CONNECTOR)
-                    || s.eq_ignore_ascii_case(GCS_CONNECTOR)
-            })
-            .unwrap_or(false)
-    }
-
     pub fn is_new_fs_connector_hash_map(with_properties: &HashMap<String, String>) -> bool {
         with_properties
             .get(UPSTREAM_SOURCE_KEY)
@@ -437,7 +359,7 @@ impl ConnectorProperties {
             PropType,
             PropType::try_from_hashmap(with_properties, deny_unknown_fields)
                 .map(ConnectorProperties::from),
-            |other| Err(anyhow!("connector '{}' is not supported", other))
+            |other| bail!("connector '{}' is not supported", other)
         )
     }
 
@@ -446,16 +368,20 @@ impl ConnectorProperties {
         matches!(self, ConnectorProperties::Kinesis(_))
     }
 
+    /// Load additional info from `PbSource`. Currently only used by CDC.
     pub fn init_from_pb_source(&mut self, source: &PbSource) {
         dispatch_source_prop!(self, prop, prop.init_from_pb_source(source))
     }
 
+    /// Load additional info from `ExternalTableDesc`. Currently only used by CDC.
     pub fn init_from_pb_cdc_table_desc(&mut self, cdc_table_desc: &ExternalTableDesc) {
         dispatch_source_prop!(self, prop, prop.init_from_pb_cdc_table_desc(cdc_table_desc))
     }
 
     pub fn support_multiple_splits(&self) -> bool {
         matches!(self, ConnectorProperties::Kafka(_))
+            || matches!(self, ConnectorProperties::OpendalS3(_))
+            || matches!(self, ConnectorProperties::Gcs(_))
     }
 }
 
@@ -473,7 +399,7 @@ impl From<&SplitImpl> for ConnectorSplit {
 }
 
 impl TryFrom<&ConnectorSplit> for SplitImpl {
-    type Error = anyhow::Error;
+    type Error = crate::error::ConnectorError;
 
     fn try_from(split: &ConnectorSplit) -> std::result::Result<Self, Self::Error> {
         match_source_name_str!(
@@ -485,26 +411,8 @@ impl TryFrom<&ConnectorSplit> for SplitImpl {
                 )
                 .map(Into::into)
             },
-            |other| Err(anyhow!("connector '{}' is not supported", other))
+            |other| bail!("connector '{}' is not supported", other)
         )
-    }
-}
-
-// for the `FsSourceExecutor`
-impl SplitImpl {
-    #[allow(clippy::result_unit_err)]
-    pub fn into_fs(self) -> Result<FsSplit, ()> {
-        match self {
-            Self::S3(split) => Ok(split),
-            _ => Err(()),
-        }
-    }
-
-    pub fn as_fs(&self) -> Option<&FsSplit> {
-        match self {
-            Self::S3(split) => Some(split),
-            _ => None,
-        }
     }
 }
 
@@ -514,8 +422,26 @@ impl SplitImpl {
             split_type.to_lowercase().as_str(),
             PropType,
             <PropType as SourceProperties>::Split::restore_from_json(value).map(Into::into),
-            |other| Err(anyhow!("connector '{}' is not supported", other))
+            |other| bail!("connector '{}' is not supported", other)
         )
+    }
+
+    pub fn is_cdc_split(&self) -> bool {
+        matches!(
+            self,
+            MysqlCdc(_) | PostgresCdc(_) | MongodbCdc(_) | CitusCdc(_)
+        )
+    }
+
+    /// Get the current split offset.
+    pub fn get_cdc_split_offset(&self) -> String {
+        match self {
+            MysqlCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            PostgresCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            MongodbCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            CitusCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            _ => unreachable!("get_cdc_split_offset() is only for cdc split"),
+        }
     }
 }
 
@@ -543,12 +469,12 @@ impl SplitMetaData for SplitImpl {
         Self::restore_from_json_inner(&split_type, inner_value.into())
     }
 
-    fn update_with_offset(&mut self, start_offset: String) -> Result<()> {
+    fn update_offset(&mut self, last_seen_offset: String) -> Result<()> {
         dispatch_split_impl!(
             self,
             inner,
             IgnoreType,
-            inner.update_with_offset(start_offset)
+            inner.update_offset(last_seen_offset)
         )
     }
 }
@@ -560,9 +486,9 @@ impl SplitImpl {
         })
     }
 
-    pub fn update_in_place(&mut self, start_offset: String) -> Result<()> {
+    pub fn update_in_place(&mut self, last_seen_offset: String) -> Result<()> {
         dispatch_split_impl!(self, inner, IgnoreType, {
-            inner.update_with_offset(start_offset)?
+            inner.update_offset(last_seen_offset)?
         });
         Ok(())
     }
@@ -578,6 +504,7 @@ pub type DataType = risingwave_common::types::DataType;
 pub struct Column {
     pub name: String,
     pub data_type: DataType,
+    /// This field is only used by datagen.
     pub is_visible: bool,
 }
 
@@ -630,9 +557,10 @@ pub trait SplitMetaData: Sized {
         Self::restore_from_json(JsonbVal::value_deserialize(bytes).unwrap())
     }
 
+    /// Encode the whole split metadata to a JSON object
     fn encode_to_json(&self) -> JsonbVal;
     fn restore_from_json(value: JsonbVal) -> Result<Self>;
-    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()>;
+    fn update_offset(&mut self, last_seen_offset: String) -> crate::error::ConnectorResult<()>;
 }
 
 /// [`ConnectorState`] maintains the consuming splits' info. In specific split readers,
@@ -658,7 +586,7 @@ mod tests {
     use nexmark::event::EventType;
 
     use super::*;
-    use crate::source::cdc::{DebeziumCdcSplit, MySqlCdcSplit};
+    use crate::source::cdc::{DebeziumCdcSplit, Mysql};
     use crate::source::kafka::KafkaSplit;
 
     #[test]
@@ -676,8 +604,7 @@ mod tests {
     #[test]
     fn test_cdc_split_state() -> Result<()> {
         let offset_str = "{\"sourcePartition\":{\"server\":\"RW_CDC_mydb.products\"},\"sourceOffset\":{\"transaction_id\":null,\"ts_sec\":1670407377,\"file\":\"binlog.000001\",\"pos\":98587,\"row\":2,\"server_id\":1,\"event\":2}}";
-        let mysql_split = MySqlCdcSplit::new(1001, offset_str.to_string());
-        let split = DebeziumCdcSplit::new(Some(mysql_split), None);
+        let split = DebeziumCdcSplit::<Mysql>::new(1001, Some(offset_str.to_string()), None);
         let split_impl = SplitImpl::MysqlCdc(split);
         let encoded_split = split_impl.encode_to_bytes();
         let restored_split_impl = SplitImpl::restore_from_bytes(encoded_split.as_ref())?;
@@ -733,8 +660,11 @@ mod tests {
 
         let props = ConnectorProperties::extract(props, true).unwrap();
         if let ConnectorProperties::Kafka(k) = props {
-            assert!(k.common.broker_rewrite_map.is_some());
-            println!("{:?}", k.common.broker_rewrite_map);
+            let hashmap: HashMap<String, String> = hashmap! {
+                "b-1:9092".to_string() => "dns-1".to_string(),
+                "b-2:9092".to_string() => "dns-2".to_string(),
+            };
+            assert_eq!(k.privatelink_common.broker_rewrite_map, Some(hashmap));
         } else {
             panic!("extract kafka config failed");
         }
@@ -743,7 +673,6 @@ mod tests {
     #[test]
     fn test_extract_cdc_properties() {
         let user_props_mysql: HashMap<String, String> = convert_args!(hashmap!(
-            "connector_node_addr" => "localhost",
             "connector" => "mysql-cdc",
             "database.hostname" => "127.0.0.1",
             "database.port" => "3306",
@@ -754,7 +683,6 @@ mod tests {
         ));
 
         let user_props_postgres: HashMap<String, String> = convert_args!(hashmap!(
-            "connector_node_addr" => "localhost",
             "connector" => "postgres-cdc",
             "database.hostname" => "127.0.0.1",
             "database.port" => "5432",
@@ -767,10 +695,6 @@ mod tests {
 
         let conn_props = ConnectorProperties::extract(user_props_mysql, true).unwrap();
         if let ConnectorProperties::MysqlCdc(c) = conn_props {
-            assert_eq!(
-                c.properties.get("connector_node_addr").unwrap(),
-                "localhost"
-            );
             assert_eq!(c.properties.get("database.hostname").unwrap(), "127.0.0.1");
             assert_eq!(c.properties.get("database.port").unwrap(), "3306");
             assert_eq!(c.properties.get("database.user").unwrap(), "root");
@@ -783,10 +707,6 @@ mod tests {
 
         let conn_props = ConnectorProperties::extract(user_props_postgres, true).unwrap();
         if let ConnectorProperties::PostgresCdc(c) = conn_props {
-            assert_eq!(
-                c.properties.get("connector_node_addr").unwrap(),
-                "localhost"
-            );
             assert_eq!(c.properties.get("database.hostname").unwrap(), "127.0.0.1");
             assert_eq!(c.properties.get("database.port").unwrap(), "5432");
             assert_eq!(c.properties.get("database.user").unwrap(), "root");

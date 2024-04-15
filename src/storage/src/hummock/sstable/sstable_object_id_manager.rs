@@ -26,6 +26,7 @@ use risingwave_pb::hummock::GetNewSstIdsRequest;
 use risingwave_pb::meta::heartbeat_request::extra_info::Info;
 use risingwave_rpc_client::{ExtraInfoSource, GrpcCompactorProxyClient, HummockMetaClient};
 use sync_point::sync_point;
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 
 use crate::hummock::{HummockError, HummockResult};
@@ -284,8 +285,8 @@ impl GetObjectId for SharedComapctorObjectIdManager {
                     Ok(start_id)
                 }
                 Err(e) => Err(HummockError::other(format!(
-                    "Fail to get new sst id, {}",
-                    e
+                    "Fail to get new sst id: {}",
+                    e.as_report()
                 ))),
             }
         }

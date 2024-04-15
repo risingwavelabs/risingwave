@@ -19,7 +19,7 @@ ignored = ["workspace-hack", "workspace-config", "task_stats_alloc"]
 normal = ["workspace-hack", "workspace-config", "task_stats_alloc"]
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
+clap = { workspace = true }
 prometheus = { version = "0.13" }
 risingwave_common = { workspace = true }
 risingwave_compactor = { workspace = true }
@@ -46,30 +46,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 workspace-config = { path = "../utils/workspace-config" }
 workspace-hack = { path = "../workspace-hack" }
 
-[target.'cfg(enable_task_local_alloc)'.dependencies]
-task_stats_alloc = { path = "../utils/task_stats_alloc" }
-
 [lib]
-test = false
-
-[[bin]]
-name = "frontend"
-path = "src/bin/frontend_node.rs"
-test = false
-
-[[bin]]
-name = "meta-node"
-path = "src/bin/meta_node.rs"
-test = false
-
-[[bin]]
-name = "compute-node"
-path = "src/bin/compute_node.rs"
-test = false
-
-[[bin]]
-name = "compactor"
-path = "src/bin/compactor.rs"
 test = false
 
 [[bin]]

@@ -13,8 +13,6 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::ErrorCode::PermissionDenied;
-use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
@@ -22,6 +20,8 @@ use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::CatalogError;
+use crate::error::ErrorCode::PermissionDenied;
+use crate::error::Result;
 use crate::handler::HandlerArgs;
 
 pub async fn handle_drop_index(

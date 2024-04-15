@@ -13,23 +13,32 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::pin::pin;
+use std::time::Duration;
 
+use futures::future::{select, Either};
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_meta_model_v2::SourceId;
 use risingwave_pb::catalog::{PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, State};
-use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerType};
+use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
-use risingwave_pb::meta::table_fragments::{Fragment, PbFragment};
-use risingwave_pb::stream_plan::{PbDispatchStrategy, PbStreamActor};
+use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, PbFragment};
+use risingwave_pb::stream_plan::{PbDispatchStrategy, PbStreamActor, StreamActor};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use tokio::time::sleep;
+use tracing::warn;
 
+use crate::barrier::Reschedule;
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, WorkerExtraInfo};
 use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, StreamingClusterInfo, WorkerId,
+    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, LocalNotification,
+    StreamingClusterInfo, WorkerId,
 };
-use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments};
+use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, TableParallelism};
 use crate::stream::SplitAssignment;
+use crate::telemetry::MetaTelemetryJobDesc;
 use crate::MetaResult;
 
 #[derive(Clone)]
@@ -49,6 +58,142 @@ pub struct MetadataManagerV1 {
 pub struct MetadataManagerV2 {
     pub cluster_controller: ClusterControllerRef,
     pub catalog_controller: CatalogControllerRef,
+}
+
+#[derive(Debug)]
+pub(crate) enum ActiveStreamingWorkerChange {
+    Add(WorkerNode),
+    Remove(WorkerNode),
+    Update(WorkerNode),
+}
+
+pub struct ActiveStreamingWorkerNodes {
+    worker_nodes: HashMap<WorkerId, WorkerNode>,
+    rx: UnboundedReceiver<LocalNotification>,
+}
+
+impl ActiveStreamingWorkerNodes {
+    pub(crate) fn uninitialized() -> Self {
+        Self {
+            worker_nodes: Default::default(),
+            rx: unbounded_channel().1,
+        }
+    }
+
+    /// Return an uninitialized one as a place holder for future initialized
+    pub(crate) async fn new_snapshot(meta_manager: MetadataManager) -> MetaResult<Self> {
+        let (nodes, rx) = meta_manager
+            .subscribe_active_streaming_compute_nodes()
+            .await?;
+        Ok(Self {
+            worker_nodes: nodes.into_iter().map(|node| (node.id, node)).collect(),
+            rx,
+        })
+    }
+
+    pub(crate) fn current(&self) -> &HashMap<WorkerId, WorkerNode> {
+        &self.worker_nodes
+    }
+
+    pub(crate) async fn wait_changed(
+        &mut self,
+        verbose_internal: Duration,
+        verbose_fn: impl Fn(&Self),
+    ) -> ActiveStreamingWorkerChange {
+        loop {
+            if let Either::Left((change, _)) =
+                select(pin!(self.changed()), pin!(sleep(verbose_internal))).await
+            {
+                break change;
+            }
+            verbose_fn(self)
+        }
+    }
+
+    pub(crate) async fn changed(&mut self) -> ActiveStreamingWorkerChange {
+        let ret = loop {
+            let notification = self
+                .rx
+                .recv()
+                .await
+                .expect("notification stopped or uninitialized");
+            match notification {
+                LocalNotification::WorkerNodeDeleted(worker) => {
+                    let is_streaming_compute_node = worker.r#type == WorkerType::ComputeNode as i32
+                        && worker.property.as_ref().unwrap().is_streaming;
+                    let Some(prev_worker) = self.worker_nodes.remove(&worker.id) else {
+                        if is_streaming_compute_node {
+                            warn!(
+                                ?worker,
+                                "notify to delete an non-existing streaming compute worker"
+                            );
+                        }
+                        continue;
+                    };
+                    if !is_streaming_compute_node {
+                        warn!(
+                            ?worker,
+                            ?prev_worker,
+                            "deleted worker has a different recent type"
+                        );
+                    }
+                    if worker.state == State::Starting as i32 {
+                        warn!(
+                            id = worker.id,
+                            host = ?worker.host,
+                            state = worker.state,
+                            "a starting streaming worker is deleted"
+                        );
+                    }
+                    break ActiveStreamingWorkerChange::Remove(prev_worker);
+                }
+                LocalNotification::WorkerNodeActivated(worker) => {
+                    if worker.r#type != WorkerType::ComputeNode as i32
+                        || !worker.property.as_ref().unwrap().is_streaming
+                    {
+                        if let Some(prev_worker) = self.worker_nodes.remove(&worker.id) {
+                            warn!(
+                                ?worker,
+                                ?prev_worker,
+                                "the type of a streaming worker is changed"
+                            );
+                            break ActiveStreamingWorkerChange::Remove(prev_worker);
+                        } else {
+                            continue;
+                        }
+                    }
+                    assert_eq!(
+                        worker.state,
+                        State::Running as i32,
+                        "not started worker added: {:?}",
+                        worker
+                    );
+                    if let Some(prev_worker) = self.worker_nodes.insert(worker.id, worker.clone()) {
+                        assert_eq!(prev_worker.host, worker.host);
+                        assert_eq!(prev_worker.r#type, worker.r#type);
+                        warn!(
+                            ?prev_worker,
+                            ?worker,
+                            eq = prev_worker == worker,
+                            "notify to update an existing active worker"
+                        );
+                        if prev_worker == worker {
+                            continue;
+                        } else {
+                            break ActiveStreamingWorkerChange::Update(worker);
+                        }
+                    } else {
+                        break ActiveStreamingWorkerChange::Add(worker);
+                    }
+                }
+                _ => {
+                    continue;
+                }
+            }
+        };
+
+        ret
+    }
 }
 
 impl MetadataManager {
@@ -72,6 +217,20 @@ impl MetadataManager {
             cluster_controller,
             catalog_controller,
         })
+    }
+
+    pub fn as_v1_ref(&self) -> &MetadataManagerV1 {
+        match self {
+            MetadataManager::V1(mgr) => mgr,
+            MetadataManager::V2(_) => panic!("expect v1, found v2"),
+        }
+    }
+
+    pub fn as_v2_ref(&self) -> &MetadataManagerV2 {
+        match self {
+            MetadataManager::V1(_) => panic!("expect v2, found v1"),
+            MetadataManager::V2(mgr) => mgr,
+        }
     }
 
     pub async fn get_worker_by_id(&self, worker_id: WorkerId) -> MetaResult<Option<PbWorkerNode>> {
@@ -156,6 +315,22 @@ impl MetadataManager {
         }
     }
 
+    pub async fn subscribe_active_streaming_compute_nodes(
+        &self,
+    ) -> MetaResult<(Vec<WorkerNode>, UnboundedReceiver<LocalNotification>)> {
+        match self {
+            MetadataManager::V1(mgr) => Ok(mgr
+                .cluster_manager
+                .subscribe_active_streaming_compute_nodes()
+                .await),
+            MetadataManager::V2(mgr) => {
+                mgr.cluster_controller
+                    .subscribe_active_streaming_compute_nodes()
+                    .await
+            }
+        }
+    }
+
     pub async fn list_active_streaming_compute_nodes(&self) -> MetaResult<Vec<PbWorkerNode>> {
         match self {
             MetadataManager::V1(mgr) => Ok(mgr
@@ -168,10 +343,96 @@ impl MetadataManager {
         }
     }
 
+    pub async fn list_background_creating_jobs(&self) -> MetaResult<Vec<TableId>> {
+        match self {
+            MetadataManager::V1(mgr) => {
+                let tables = mgr.catalog_manager.list_creating_background_mvs().await;
+                Ok(tables
+                    .into_iter()
+                    .map(|table| TableId::from(table.id))
+                    .collect())
+            }
+            MetadataManager::V2(mgr) => {
+                let tables = mgr
+                    .catalog_controller
+                    .list_background_creating_mviews()
+                    .await?;
+
+                Ok(tables
+                    .into_iter()
+                    .map(|table| TableId::from(table.table_id as u32))
+                    .collect())
+            }
+        }
+    }
+
     pub async fn list_sources(&self) -> MetaResult<Vec<PbSource>> {
         match self {
             MetadataManager::V1(mgr) => Ok(mgr.catalog_manager.list_sources().await),
             MetadataManager::V2(mgr) => mgr.catalog_controller.list_sources().await,
+        }
+    }
+
+    pub async fn pre_apply_reschedules(
+        &self,
+        created_actors: HashMap<FragmentId, HashMap<ActorId, (StreamActor, ActorStatus)>>,
+    ) -> HashMap<FragmentId, HashSet<ActorId>> {
+        match self {
+            MetadataManager::V1(mgr) => {
+                mgr.fragment_manager
+                    .pre_apply_reschedules(created_actors)
+                    .await
+            }
+
+            // V2 doesn't need to pre apply reschedules.
+            MetadataManager::V2(_) => HashMap::new(),
+        }
+    }
+
+    pub async fn post_apply_reschedules(
+        &self,
+        reschedules: HashMap<FragmentId, Reschedule>,
+        table_parallelism_assignment: HashMap<TableId, TableParallelism>,
+    ) -> MetaResult<()> {
+        match self {
+            MetadataManager::V1(mgr) => {
+                mgr.fragment_manager
+                    .post_apply_reschedules(reschedules, table_parallelism_assignment)
+                    .await
+            }
+            MetadataManager::V2(mgr) => {
+                // temp convert u32 to i32
+                let reschedules = reschedules.into_iter().map(|(k, v)| (k as _, v)).collect();
+
+                mgr.catalog_controller
+                    .post_apply_reschedules(reschedules, table_parallelism_assignment)
+                    .await
+            }
+        }
+    }
+
+    pub async fn running_fragment_parallelisms(
+        &self,
+        id_filter: Option<HashSet<FragmentId>>,
+    ) -> MetaResult<HashMap<FragmentId, usize>> {
+        match self {
+            MetadataManager::V1(mgr) => Ok(mgr
+                .fragment_manager
+                .running_fragment_parallelisms(id_filter)
+                .await
+                .into_iter()
+                .map(|(k, v)| (k as FragmentId, v))
+                .collect()),
+            MetadataManager::V2(mgr) => {
+                let id_filter = id_filter.map(|ids| ids.into_iter().map(|id| id as _).collect());
+                Ok(mgr
+                    .catalog_controller
+                    .running_fragment_parallelisms(id_filter)
+                    .await?
+                    .into_iter()
+                    .map(|(k, v)| (k as FragmentId, v))
+                    .collect())
+            }
         }
     }
 
@@ -186,7 +447,7 @@ impl MetadataManager {
     /// In other words, it's the `MView` fragment if it exists, otherwise it's the `Source` fragment.
     ///
     /// ## What do we expect to get for different creating streaming job
-    /// - MV/Sink/Index should have MV upstream fragments for upstream MV/Tables, and Source upstream fragments for upstream backfill-able sources.
+    /// - MV/Sink/Index should have MV upstream fragments for upstream MV/Tables, and Source upstream fragments for upstream shared sources.
     /// - CDC Table has a Source upstream fragment.
     /// - Sources and other Tables shouldn't have an upstream fragment.
     pub async fn get_upstream_root_fragments(
@@ -372,6 +633,38 @@ impl MetadataManager {
         }
     }
 
+    pub async fn get_running_actors_and_upstream_actors_of_fragment(
+        &self,
+        id: FragmentId,
+    ) -> MetaResult<HashSet<(ActorId, Vec<ActorId>)>> {
+        match self {
+            MetadataManager::V1(mgr) => {
+                mgr.fragment_manager
+                    .get_running_actors_and_upstream_of_fragment(id)
+                    .await
+            }
+            MetadataManager::V2(mgr) => {
+                let actor_ids = mgr
+                    .catalog_controller
+                    .get_running_actors_and_upstream_of_fragment(id as _)
+                    .await?;
+                Ok(actor_ids
+                    .into_iter()
+                    .map(|(id, actors)| {
+                        (
+                            id as ActorId,
+                            actors
+                                .into_inner()
+                                .into_iter()
+                                .flat_map(|(_, ids)| ids.into_iter().map(|id| id as ActorId))
+                                .collect(),
+                        )
+                    })
+                    .collect())
+            }
+        }
+    }
+
     pub async fn get_job_fragments_by_ids(
         &self,
         ids: &[TableId],
@@ -419,16 +712,37 @@ impl MetadataManager {
         }
     }
 
-    pub async fn drop_streaming_job_by_ids(&self, table_ids: &HashSet<TableId>) -> MetaResult<()> {
-        match self {
-            MetadataManager::V1(mgr) => {
-                mgr.fragment_manager
-                    .drop_table_fragments_vec(table_ids)
-                    .await
+    pub async fn worker_actor_count(&self) -> MetaResult<HashMap<WorkerId, usize>> {
+        match &self {
+            MetadataManager::V1(mgr) => Ok(mgr.fragment_manager.node_actor_count().await),
+            MetadataManager::V2(mgr) => {
+                let actor_cnt = mgr.catalog_controller.worker_actor_count().await?;
+                Ok(actor_cnt
+                    .into_iter()
+                    .map(|(id, cnt)| (id as WorkerId, cnt))
+                    .collect())
             }
-            MetadataManager::V2(_) => {
-                // Do nothing. Need to refine drop and cancel process.
-                Ok(())
+        }
+    }
+
+    pub async fn count_streaming_job(&self) -> MetaResult<usize> {
+        match self {
+            MetadataManager::V1(mgr) => Ok(mgr.fragment_manager.count_streaming_job().await),
+            MetadataManager::V2(mgr) => mgr
+                .catalog_controller
+                .list_streaming_job_states()
+                .await
+                .map(|x| x.len()),
+        }
+    }
+
+    pub async fn list_stream_job_desc(&self) -> MetaResult<Vec<MetaTelemetryJobDesc>> {
+        match self {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_stream_job_for_telemetry().await,
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
+                    .list_stream_job_desc_for_telemetry()
+                    .await
             }
         }
     }

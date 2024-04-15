@@ -67,10 +67,6 @@ use risingwave_expr::function;
 /// select array_remove(ARRAY[array[1],array[2],array[3],array[2],null], array[true]);
 /// ```
 #[function("array_remove(anyarray, any) -> anyarray")]
-fn array_remove(array: Option<ListRef<'_>>, elem: Option<ScalarRefImpl<'_>>) -> Option<ListValue> {
-    let array = array?;
-    Some(ListValue::from_datum_iter(
-        &array.data_type(),
-        array.iter().filter(|x| x != &elem),
-    ))
+fn array_remove(array: ListRef<'_>, elem: Option<ScalarRefImpl<'_>>) -> ListValue {
+    ListValue::from_datum_iter(&array.data_type(), array.iter().filter(|x| x != &elem))
 }

@@ -23,6 +23,7 @@ use futures::executor::block_on;
 use petgraph::dot::{Config, Dot};
 use petgraph::Graph;
 use pgwire::pg_server::SessionId;
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
 use risingwave_pb::batch_plan::{TaskId as TaskIdPb, TaskOutputId as TaskOutputIdPb};
 use risingwave_pb::common::HostAddress;
@@ -40,7 +41,6 @@ use crate::scheduler::distributed::stage::StageEvent::ScheduledRoot;
 use crate::scheduler::distributed::StageEvent::Scheduled;
 use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
-use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::{ExecutionContextRef, ReadSnapshot, SchedulerError, SchedulerResult};
 
 /// Message sent to a `QueryRunner` to control its execution.
@@ -71,8 +71,10 @@ pub struct QueryExecution {
     query: Arc<Query>,
     state: RwLock<QueryState>,
     shutdown_tx: Sender<QueryMessage>,
-    /// Identified by process_id, secret_key. Query in the same session should have same key.
+    /// Identified by `process_id`, `secret_key`. Query in the same session should have same key.
     pub session_id: SessionId,
+    /// Permit to execute the query. Once query finishes execution, this is dropped.
+    pub permit: Option<tokio::sync::OwnedSemaphorePermit>,
 }
 
 struct QueryRunner {
@@ -94,7 +96,11 @@ struct QueryRunner {
 
 impl QueryExecution {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(query: Query, session_id: SessionId) -> Self {
+    pub fn new(
+        query: Query,
+        session_id: SessionId,
+        permit: Option<tokio::sync::OwnedSemaphorePermit>,
+    ) -> Self {
         let query = Arc::new(query);
         let (sender, receiver) = channel(100);
         let state = QueryState::Pending {
@@ -106,6 +112,7 @@ impl QueryExecution {
             state: RwLock::new(state),
             shutdown_tx: sender,
             session_id,
+            permit,
         }
     }
 
@@ -463,11 +470,12 @@ pub(crate) mod tests {
     use std::sync::{Arc, RwLock};
 
     use fixedbitset::FixedBitSet;
-    use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
-    use risingwave_common::catalog::{
-        ColumnCatalog, ColumnDesc, ConflictBehavior, DEFAULT_SUPER_USER_ID,
+    use risingwave_batch::worker_manager::worker_node_manager::{
+        WorkerNodeManager, WorkerNodeSelector,
     };
-    use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
+    use risingwave_common::catalog::{
+        ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, DEFAULT_SUPER_USER_ID,
+    };
     use risingwave_common::hash::ParallelUnitMapping;
     use risingwave_common::types::DataType;
     use risingwave_pb::common::worker_node::Property;
@@ -477,7 +485,7 @@ pub(crate) mod tests {
 
     use crate::catalog::catalog_service::CatalogReader;
     use crate::catalog::root_catalog::Catalog;
-    use crate::catalog::table_catalog::{CreateType, TableType};
+    use crate::catalog::table_catalog::TableType;
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
         generic, BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalScan, ToBatch,
@@ -486,7 +494,6 @@ pub(crate) mod tests {
     use crate::optimizer::{OptimizerContext, PlanRef};
     use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
-    use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeSelector};
     use crate::scheduler::{
         DistributedQueryMetrics, ExecutionContext, HummockSnapshotManager, QueryExecutionInfo,
         ReadSnapshot,
@@ -494,7 +501,7 @@ pub(crate) mod tests {
     use crate::session::SessionImpl;
     use crate::test_utils::MockFrontendMetaClient;
     use crate::utils::Condition;
-    use crate::{TableCatalog, WithOptions};
+    use crate::TableCatalog;
 
     #[tokio::test]
     async fn test_query_should_not_hang_with_empty_worker() {
@@ -509,7 +516,7 @@ pub(crate) mod tests {
         let query = create_query().await;
         let query_id = query.query_id().clone();
         let pinned_snapshot = hummock_snapshot_manager.acquire();
-        let query_execution = Arc::new(QueryExecution::new(query, (0, 0)));
+        let query_execution = Arc::new(QueryExecution::new(query, (0, 0), None));
         let query_execution_info = Arc::new(RwLock::new(QueryExecutionInfo::new_from_map(
             HashMap::from([(query_id, query_execution.clone())]),
         )));
@@ -545,6 +552,7 @@ pub(crate) mod tests {
             id: table_id,
             associated_source_id: None,
             name: "test".to_string(),
+            dependent_relations: vec![],
             columns: vec![
                 ColumnCatalog {
                     column_desc: ColumnDesc::new_atomic(DataType::Int32, "a", 0),
@@ -565,14 +573,7 @@ pub(crate) mod tests {
             distribution_key: vec![],
             append_only: false,
             owner: DEFAULT_SUPER_USER_ID,
-            properties: WithOptions::new(
-                [(
-                    PROPERTIES_RETENTION_SECOND_KEY.into(),
-                    TABLE_OPTION_DUMMY_RETENTION_SECOND.to_string(),
-                )]
-                .into_iter()
-                .collect(),
-            ),
+            retention_seconds: None,
             fragment_id: 0,        // FIXME
             dml_fragment_id: None, // FIXME
             vnode_col_index: None,
@@ -580,6 +581,7 @@ pub(crate) mod tests {
             value_indices: vec![0, 1, 2],
             definition: "".to_string(),
             conflict_behavior: ConflictBehavior::NoCheck,
+            version_column_index: None,
             read_prefix_len_hint: 0,
             version: None,
             watermark_columns: FixedBitSet::with_capacity(3),
@@ -599,7 +601,7 @@ pub(crate) mod tests {
             table_catalog.into(),
             vec![],
             ctx,
-            false,
+            None,
             Cardinality::unknown(),
         )
         .to_batch()

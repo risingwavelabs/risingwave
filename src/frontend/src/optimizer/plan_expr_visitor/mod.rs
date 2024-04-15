@@ -14,6 +14,8 @@
 
 mod expr_counter;
 mod input_ref_counter;
+pub mod strong;
 
 pub(crate) use expr_counter::CseExprCounter;
 pub(crate) use input_ref_counter::InputRefCounter;
+pub(crate) use strong::Strong;

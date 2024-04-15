@@ -16,6 +16,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_common::config::ObjectStoreConfig;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{
     InMemObjectStore, MonitoredObjectStore, ObjectError, ObjectStoreImpl, ObjectStoreRef,
@@ -191,6 +192,7 @@ pub async fn unused() -> ObjectStoreMetaSnapshotStorage {
         Arc::new(ObjectStoreImpl::InMem(MonitoredObjectStore::new(
             InMemObjectStore::new(),
             Arc::new(ObjectStoreMetrics::unused()),
+            ObjectStoreConfig::default(),
         ))),
     )
     .await

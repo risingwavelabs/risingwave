@@ -27,7 +27,7 @@ use risingwave_pb::hummock::{
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-use crate::manager::MetaSrvEnv;
+use crate::manager::{MetaSrvEnv, MetaStoreImpl};
 use crate::model::{MetadataModel, MetadataModelError};
 use crate::MetaResult;
 
@@ -122,7 +122,7 @@ pub struct CompactorManagerInner {
     pub heartbeat_expired_seconds: u64,
     task_heartbeats: HashMap<HummockCompactionTaskId, TaskHeartbeat>,
 
-    /// The outer lock is a RwLock, so we should still be able to modify each compactor
+    /// The outer lock is a `RwLock`, so we should still be able to modify each compactor
     pub compactor_map: HashMap<HummockContextId, Arc<Compactor>>,
 }
 
@@ -131,9 +131,9 @@ impl CompactorManagerInner {
         use risingwave_meta_model_v2::compaction_task;
         use sea_orm::EntityTrait;
         // Retrieve the existing task assignments from metastore.
-        let task_assignment: Vec<CompactTaskAssignment> = match env.sql_meta_store() {
-            None => CompactTaskAssignment::list(env.meta_store()).await?,
-            Some(sql_meta_store) => compaction_task::Entity::find()
+        let task_assignment: Vec<CompactTaskAssignment> = match env.meta_store() {
+            MetaStoreImpl::Kv(meta_store) => CompactTaskAssignment::list(meta_store).await?,
+            MetaStoreImpl::Sql(sql_meta_store) => compaction_task::Entity::find()
                 .all(&sql_meta_store.conn)
                 .await
                 .map_err(MetadataModelError::from)?

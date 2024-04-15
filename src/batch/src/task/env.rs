@@ -14,12 +14,12 @@
 
 use std::sync::Arc;
 
-use risingwave_common::config::BatchConfig;
+use risingwave_common::config::{BatchConfig, MetricLevel};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::worker_util::WorkerNodeId;
 use risingwave_connector::source::monitor::SourceMetrics;
+use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_rpc_client::ComputeClientPoolRef;
-use risingwave_source::dml_manager::DmlManagerRef;
 use risingwave_storage::StateStoreImpl;
 
 use crate::monitor::{BatchExecutorMetrics, BatchManagerMetrics, BatchTaskMetrics};
@@ -58,6 +58,8 @@ pub struct BatchEnvironment {
 
     /// Metrics for source.
     source_metrics: Arc<SourceMetrics>,
+
+    metric_level: MetricLevel,
 }
 
 impl BatchEnvironment {
@@ -73,6 +75,7 @@ impl BatchEnvironment {
         client_pool: ComputeClientPoolRef,
         dml_manager: DmlManagerRef,
         source_metrics: Arc<SourceMetrics>,
+        metric_level: MetricLevel,
     ) -> Self {
         BatchEnvironment {
             server_addr,
@@ -85,14 +88,15 @@ impl BatchEnvironment {
             client_pool,
             dml_manager,
             source_metrics,
+            metric_level,
         }
     }
 
     // Create an instance for testing purpose.
     #[cfg(test)]
     pub fn for_test() -> Self {
+        use risingwave_dml::dml_manager::DmlManager;
         use risingwave_rpc_client::ComputeClientPool;
-        use risingwave_source::dml_manager::DmlManager;
         use risingwave_storage::monitor::MonitoredStorageMetrics;
 
         BatchEnvironment {
@@ -111,6 +115,7 @@ impl BatchEnvironment {
             dml_manager: Arc::new(DmlManager::for_test()),
             source_metrics: Arc::new(SourceMetrics::default()),
             executor_metrics: Arc::new(BatchExecutorMetrics::for_test()),
+            metric_level: MetricLevel::Debug,
         }
     }
 
@@ -156,5 +161,9 @@ impl BatchEnvironment {
 
     pub fn source_metrics(&self) -> Arc<SourceMetrics> {
         self.source_metrics.clone()
+    }
+
+    pub fn metric_level(&self) -> MetricLevel {
+        self.metric_level
     }
 }

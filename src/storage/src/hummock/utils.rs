@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use risingwave_common::cache::CachePriority;
+use foyer::memory::CacheContext;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, EmptySliceRef, FullKey, TableKey, UserKey,
@@ -387,7 +387,7 @@ pub(crate) async fn do_insert_sanity_check(
     let read_options = ReadOptions {
         retention_seconds: table_option.retention_seconds,
         table_id,
-        cache_policy: CachePolicy::Fill(CachePriority::High),
+        cache_policy: CachePolicy::Fill(CacheContext::Default),
         ..Default::default()
     };
     let stored_value = inner.get(key.clone(), epoch, read_options).await?;
@@ -419,7 +419,7 @@ pub(crate) async fn do_delete_sanity_check(
     let read_options = ReadOptions {
         retention_seconds: table_option.retention_seconds,
         table_id,
-        cache_policy: CachePolicy::Fill(CachePriority::High),
+        cache_policy: CachePolicy::Fill(CacheContext::Default),
         ..Default::default()
     };
     match inner.get(key.clone(), epoch, read_options).await? {
@@ -461,7 +461,7 @@ pub(crate) async fn do_update_sanity_check(
     let read_options = ReadOptions {
         retention_seconds: table_option.retention_seconds,
         table_id,
-        cache_policy: CachePolicy::Fill(CachePriority::High),
+        cache_policy: CachePolicy::Fill(CacheContext::Default),
         ..Default::default()
     };
 
@@ -497,7 +497,7 @@ pub fn cmp_delete_range_left_bounds(a: Bound<&Bytes>, b: Bound<&Bytes>) -> Order
     }
 }
 
-fn validate_delete_range(left: &Bound<Bytes>, right: &Bound<Bytes>) -> bool {
+pub(crate) fn validate_delete_range(left: &Bound<Bytes>, right: &Bound<Bytes>) -> bool {
     match (left, right) {
         // only right bound of delete range can be `Unbounded`
         (Unbounded, _) => unreachable!(),
@@ -509,6 +509,7 @@ fn validate_delete_range(left: &Bound<Bytes>, right: &Bound<Bytes>) -> bool {
     }
 }
 
+#[expect(dead_code)]
 pub(crate) fn filter_with_delete_range<'a>(
     kv_iter: impl Iterator<Item = (TableKey<Bytes>, KeyOp)> + 'a,
     mut delete_ranges_iter: impl Iterator<Item = &'a (Bound<Bytes>, Bound<Bytes>)> + 'a,
@@ -578,7 +579,7 @@ pub(crate) async fn wait_for_epoch(
     }
     loop {
         match tokio::time::timeout(Duration::from_secs(30), receiver.changed()).await {
-            Err(elapsed) => {
+            Err(_) => {
                 // The reason that we need to retry here is batch scan in
                 // chain/rearrange_chain is waiting for an
                 // uncommitted epoch carried by the CreateMV barrier, which
@@ -589,9 +590,8 @@ pub(crate) async fn wait_for_epoch(
                 // CN with the same distribution as the upstream MV.
                 // See #3845 for more details.
                 tracing::warn!(
-                    "wait_epoch {:?} timeout when waiting for version update elapsed {:?}s",
-                    wait_epoch,
-                    elapsed
+                    epoch = wait_epoch,
+                    "wait_epoch timeout when waiting for version update",
                 );
                 continue;
             }

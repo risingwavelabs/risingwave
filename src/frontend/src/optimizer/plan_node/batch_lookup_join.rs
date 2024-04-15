@@ -14,7 +14,6 @@
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnId, TableDesc};
-use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{DistributedLookupJoinNode, LocalLookupJoinNode};
 
@@ -22,6 +21,7 @@ use super::batch::prelude::*;
 use super::generic::{self, GenericPlanRef};
 use super::utils::{childless_record, Distill};
 use super::ExprRewritable;
+use crate::error::Result;
 use crate::expr::{Expr, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::IndicesDisplay;

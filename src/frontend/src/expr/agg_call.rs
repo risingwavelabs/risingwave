@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_expr::aggregate::AggKind;
 
 use super::{infer_type, Expr, ExprImpl, Literal, OrderBy};
+use crate::error::Result;
 use crate::utils::Condition;
 
 #[derive(Clone, Eq, PartialEq, Hash)]

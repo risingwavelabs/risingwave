@@ -12,40 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_meta::manager::MetaStoreImpl;
 use risingwave_meta_model_v2::prelude::Cluster;
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoService;
 use risingwave_pb::meta::{GetTelemetryInfoRequest, TelemetryInfoResponse};
 use sea_orm::EntityTrait;
 use tonic::{Request, Response, Status};
 
-use crate::controller::SqlMetaStore;
 use crate::model::ClusterId;
-use crate::storage::MetaStoreRef;
 use crate::MetaResult;
 
 pub struct TelemetryInfoServiceImpl {
-    meta_store: MetaStoreRef,
-    sql_meta_store: Option<SqlMetaStore>,
+    meta_store_impl: MetaStoreImpl,
 }
 
 impl TelemetryInfoServiceImpl {
-    pub fn new(meta_store: MetaStoreRef, sql_meta_store: Option<SqlMetaStore>) -> Self {
-        Self {
-            meta_store,
-            sql_meta_store,
-        }
+    pub fn new(meta_store_impl: MetaStoreImpl) -> Self {
+        Self { meta_store_impl }
     }
 
     async fn get_tracking_id(&self) -> MetaResult<Option<ClusterId>> {
-        if let Some(store) = &self.sql_meta_store {
-            let cluster = Cluster::find().one(&store.conn).await?;
-            return Ok(cluster.map(|c| c.cluster_id.to_string().into()));
-        }
-
-        Ok(ClusterId::from_meta_store(&self.meta_store)
-            .await
-            .ok()
-            .flatten())
+        let cluster_id = match &self.meta_store_impl {
+            MetaStoreImpl::Kv(meta_store) => {
+                ClusterId::from_meta_store(meta_store).await.ok().flatten()
+            }
+            MetaStoreImpl::Sql(sql_meta_store) => {
+                let cluster = Cluster::find().one(&sql_meta_store.conn).await?;
+                cluster.map(|c| c.cluster_id.to_string().into())
+            }
+        };
+        Ok(cluster_id)
     }
 }
 

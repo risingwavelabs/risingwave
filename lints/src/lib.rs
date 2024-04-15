@@ -14,6 +14,7 @@
 
 #![feature(rustc_private)]
 #![feature(let_chains)]
+#![feature(lazy_cell)]
 #![warn(unused_extern_crates)]
 
 extern crate rustc_ast;
@@ -32,10 +33,39 @@ dylint_linting::dylint_library!();
 #[allow(clippy::no_mangle_with_rust_abi)]
 #[no_mangle]
 pub fn register_lints(_sess: &rustc_session::Session, lint_store: &mut rustc_lint::LintStore) {
+    // -- Begin lint registration --
+
+    // Preparation steps.
     lint_store.register_early_pass(|| {
         Box::<utils::format_args_collector::FormatArgsCollector>::default()
     });
 
+    // Actual lints.
     lint_store.register_lints(&[format_error::FORMAT_ERROR]);
     lint_store.register_late_pass(|_| Box::<format_error::FormatError>::default());
+
+    // --  End lint registration  --
+
+    // Register lints into groups.
+    // Note: use `rw_` instead of `rw::` to avoid "error[E0602]: unknown lint tool: `rw`".
+    register_group(lint_store, "rw_all", |_| true);
+    register_group(lint_store, "rw_warnings", |l| {
+        l.default_level >= rustc_lint::Level::Warn
+    });
+}
+
+fn register_group(
+    lint_store: &mut rustc_lint::LintStore,
+    name: &'static str,
+    filter_predicate: impl Fn(&rustc_lint::Lint) -> bool,
+) {
+    let lints = lint_store
+        .get_lints()
+        .iter()
+        .filter(|l| l.name.starts_with("rw::"))
+        .filter(|l| filter_predicate(l))
+        .map(|l| rustc_lint::LintId::of(l))
+        .collect();
+
+    lint_store.register_group(true, name, None, lints);
 }

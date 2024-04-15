@@ -21,14 +21,16 @@ use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::catalog::{
-    PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
+    PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbSubscription,
+    PbTable, PbView,
 };
 use risingwave_pb::hummock::HummockVersionStats;
 
 use super::function_catalog::FunctionCatalog;
 use super::source_catalog::SourceCatalog;
+use super::subscription_catalog::SubscriptionCatalog;
 use super::view_catalog::ViewCatalog;
-use super::{CatalogError, CatalogResult, ConnectionId, SinkId, SourceId, ViewId};
+use super::{CatalogError, CatalogResult, ConnectionId, SinkId, SourceId, SubscriptionId, ViewId};
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
@@ -42,7 +44,7 @@ use crate::expr::{Expr, ExprImpl};
 #[derive(Copy, Clone)]
 pub enum SchemaPath<'a> {
     Name(&'a str),
-    /// (search_path, user_name).
+    /// (`search_path`, `user_name`).
     Path(&'a SearchPath, &'a str),
 }
 
@@ -141,23 +143,19 @@ impl Catalog {
             .unwrap()
             .create_schema(proto);
 
-        if let Some(sys_tables) = get_sys_tables_in_schema(proto.name.as_str()) {
-            sys_tables.into_iter().for_each(|sys_table| {
-                self.get_database_mut(proto.database_id)
-                    .unwrap()
-                    .get_schema_mut(proto.id)
-                    .unwrap()
-                    .create_sys_table(sys_table);
-            });
+        for sys_table in get_sys_tables_in_schema(proto.name.as_str()) {
+            self.get_database_mut(proto.database_id)
+                .unwrap()
+                .get_schema_mut(proto.id)
+                .unwrap()
+                .create_sys_table(sys_table);
         }
-        if let Some(sys_views) = get_sys_views_in_schema(proto.name.as_str()) {
-            sys_views.into_iter().for_each(|sys_view| {
-                self.get_database_mut(proto.database_id)
-                    .unwrap()
-                    .get_schema_mut(proto.id)
-                    .unwrap()
-                    .create_sys_view(sys_view);
-            });
+        for sys_view in get_sys_views_in_schema(proto.name.as_str()) {
+            self.get_database_mut(proto.database_id)
+                .unwrap()
+                .get_schema_mut(proto.id)
+                .unwrap()
+                .create_sys_view(sys_view);
         }
     }
 
@@ -193,6 +191,14 @@ impl Catalog {
             .get_schema_mut(proto.schema_id)
             .unwrap()
             .create_sink(proto);
+    }
+
+    pub fn create_subscription(&mut self, proto: &PbSubscription) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .create_subscription(proto);
     }
 
     pub fn create_view(&mut self, proto: &PbView) {
@@ -301,7 +307,7 @@ impl Catalog {
         let old_database_name = self.db_name_by_id.get(&id).unwrap().to_owned();
         if old_database_name != name {
             let mut database = self.database_by_name.remove(&old_database_name).unwrap();
-            database.name = name.clone();
+            database.name.clone_from(&name);
             database.owner = proto.owner;
             self.database_by_name.insert(name.clone(), database);
             self.db_name_by_id.insert(id, name);
@@ -386,6 +392,38 @@ impl Catalog {
                 })
                 .unwrap()
                 .drop_sink(proto.id);
+        }
+    }
+
+    pub fn drop_subscription(
+        &mut self,
+        db_id: DatabaseId,
+        schema_id: SchemaId,
+        subscription_id: SubscriptionId,
+    ) {
+        self.get_database_mut(db_id)
+            .unwrap()
+            .get_schema_mut(schema_id)
+            .unwrap()
+            .drop_subscription(subscription_id);
+    }
+
+    pub fn update_subscription(&mut self, proto: &PbSubscription) {
+        let database = self.get_database_mut(proto.database_id).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        if schema.get_subscription_by_id(&proto.id).is_some() {
+            schema.update_subscription(proto);
+        } else {
+            // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
+            schema.create_subscription(proto);
+            database
+                .iter_schemas_mut()
+                .find(|schema| {
+                    schema.id() != proto.schema_id
+                        && schema.get_subscription_by_id(&proto.id).is_some()
+                })
+                .unwrap()
+                .drop_subscription(proto.id);
         }
     }
 
@@ -686,6 +724,21 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("sink", sink_name.to_string()))
     }
 
+    pub fn get_subscription_by_name<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        subscription_name: &str,
+    ) -> CatalogResult<(&Arc<SubscriptionCatalog>, &'a str)> {
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_subscription_by_name(subscription_name))
+            })?
+            .ok_or_else(|| CatalogError::NotFound("subscription", subscription_name.to_string()))
+    }
+
     pub fn get_index_by_name<'a>(
         &self,
         db_name: &str,
@@ -852,6 +905,11 @@ impl Catalog {
             Err(CatalogError::Duplicated("sink", relation_name.to_string()))
         } else if schema.get_view_by_name(relation_name).is_some() {
             Err(CatalogError::Duplicated("view", relation_name.to_string()))
+        } else if schema.get_subscription_by_name(relation_name).is_some() {
+            Err(CatalogError::Duplicated(
+                "subscription",
+                relation_name.to_string(),
+            ))
         } else {
             Ok(())
         }

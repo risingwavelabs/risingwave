@@ -31,12 +31,11 @@ use crate::table_function::BoxedTableFunction;
 use crate::ExprError;
 
 /// The global registry of all function signatures.
-pub static FUNCTION_REGISTRY: LazyLock<FunctionRegistry> = LazyLock::new(|| unsafe {
-    // SAFETY: this function is called after all `#[ctor]` functions are called.
+pub static FUNCTION_REGISTRY: LazyLock<FunctionRegistry> = LazyLock::new(|| {
     let mut map = FunctionRegistry::default();
-    tracing::info!("found {} functions", FUNCTION_REGISTRY_INIT.len());
-    for sig in FUNCTION_REGISTRY_INIT.drain(..) {
-        map.insert(sig);
+    tracing::info!("found {} functions", FUNCTIONS.len());
+    for f in FUNCTIONS {
+        map.insert(f());
     }
     map
 });
@@ -459,22 +458,6 @@ pub enum FuncBuilder {
     Udf,
 }
 
-/// Register a function into global registry.
-///
-/// # Safety
-///
-/// This function must be called sequentially.
-///
-/// It is designed to be used by `#[function]` macro.
-/// Users SHOULD NOT call this function.
-#[doc(hidden)]
-pub unsafe fn _register(sig: FuncSign) {
-    FUNCTION_REGISTRY_INIT.push(sig)
-}
-
-/// The global registry of function signatures on initialization.
-///
-/// `#[function]` macro will generate a `#[ctor]` function to register the signature into this
-/// vector. The calls are guaranteed to be sequential. The vector will be drained and moved into
-/// `FUNCTION_REGISTRY` on the first access of `FUNCTION_REGISTRY`.
-static mut FUNCTION_REGISTRY_INIT: Vec<FuncSign> = Vec::new();
+/// A static distributed slice of functions defined by `#[function]`.
+#[linkme::distributed_slice]
+pub static FUNCTIONS: [fn() -> FuncSign];

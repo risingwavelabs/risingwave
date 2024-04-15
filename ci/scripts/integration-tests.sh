@@ -38,13 +38,13 @@ echo "--- case: ${case}, format: ${format}"
 
 if [[ -n "${RW_IMAGE_TAG+x}" ]]; then
   export RW_IMAGE="ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_TAG}"
-  echo Docker image: $RW_IMAGE
+  echo Docker image: "$RW_IMAGE"
 fi
 
 if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
   # Use ghcr nightly image for scheduled build. If not specified, we use dockerhub's 'risingwavelabs/risingwave'.
   export RW_IMAGE="ghcr.io/risingwavelabs/risingwave:nightly-$(date '+%Y%m%d')"
-  echo Docker image: $RW_IMAGE
+  echo Docker image: "$RW_IMAGE"
 fi
 
 if [ "${case}" == "client-library" ]; then
@@ -56,6 +56,11 @@ fi
 echo "--- install postgresql"
 sudo yum install -y postgresql15
 
+echo "--- install poetry"
+curl -sSL https://install.python-poetry.org | POETRY_VERSION=1.8.0 python3 -
+
+
+
 echo "--- download rwctest-key"
 aws secretsmanager get-secret-value --secret-id "gcp-buildkite-rwctest-key" --region us-east-2 --query "SecretString" --output text >gcp-rwctest.json
 
@@ -63,7 +68,7 @@ cd integration_tests/scripts
 
 echo "--- rewrite docker compose for protobuf"
 if [ "${format}" == "protobuf" ]; then
-  python3 gen_pb_compose.py ${case} ${format}
+  python3 gen_pb_compose.py "${case}" "${format}"
 fi
 
 echo "--- set vm.max_map_count=2000000 for doris"
@@ -71,25 +76,18 @@ max_map_count_original_value=$(sysctl -n vm.max_map_count)
 sudo sysctl -w vm.max_map_count=2000000
 
 echo "--- run Demos"
-python3 run_demos.py --case ${case} --format ${format}
+python3 run_demos.py --case "${case}" --format "${format}"
 
 echo "--- run docker ps"
 docker ps
 
 echo "--- check if the ingestion is successful"
 # extract the type of upstream source,e.g. mysql,postgres,etc
-upstream=$(echo ${case} | cut -d'-' -f 1)
-if [ "${upstream}" == "mysql" ]; then
-  echo "install mysql"
-  sudo rpm -Uvh https://dev.mysql.com/get/mysql80-community-release-el9-1.noarch.rpm
-  sudo dnf -y install mysql-community-server
-fi
-
-export PGPASSWORD=123456
-python3 check_data.py ${case} ${upstream}
+upstream=$(echo "${case}" | cut -d'-' -f 1)
+python3 check_data.py "${case}" "${upstream}"
 
 echo "--- clean Demos"
-python3 clean_demos.py --case ${case}
+python3 clean_demos.py --case "${case}"
 
 echo "--- reset vm.max_map_count={$max_map_count_original_value}"
-sudo sysctl -w vm.max_map_count=$max_map_count_original_value
+sudo sysctl -w vm.max_map_count="$max_map_count_original_value"

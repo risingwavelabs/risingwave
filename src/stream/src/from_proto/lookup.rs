@@ -30,8 +30,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        stream_manager: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let lookup = node;
 
         let [stream, arrangement]: [_; 2] = params.input.try_into().unwrap();
@@ -70,9 +69,9 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             table_desc,
         );
 
-        Ok(Box::new(LookupExecutor::new(LookupExecutorParams {
+        let exec = LookupExecutor::new(LookupExecutorParams {
             ctx: params.actor_context,
-            info: params.info,
+            info: params.info.clone(),
             arrangement,
             stream,
             arrangement_col_descs,
@@ -82,8 +81,9 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             arrange_join_key_indices: lookup.arrange_key.iter().map(|x| *x as usize).collect(),
             column_mapping: lookup.column_mapping.iter().map(|x| *x as usize).collect(),
             storage_table,
-            watermark_epoch: stream_manager.get_watermark_epoch(),
+            watermark_epoch: params.watermark_epoch,
             chunk_size: params.env.config().developer.chunk_size,
-        })))
+        });
+        Ok((params.info, exec).into())
     }
 }

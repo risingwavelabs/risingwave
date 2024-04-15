@@ -234,7 +234,7 @@ public class JDBCSinkTest {
                     rs.getObject(5, LocalDateTime.class));
             assertEquals(
                     OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC),
-                    rs.getObject(6, OffsetDateTime.class));
+                    rs.getObject(6, OffsetDateTime.class).toInstant().atOffset(ZoneOffset.UTC));
             assertEquals(
                     "{\"key\": \"password\", \"value\": \"Singularity123123123123\"}",
                     rs.getString(7));
@@ -282,7 +282,7 @@ public class JDBCSinkTest {
     @Test
     public void testMySQL() throws SQLException {
         MySQLContainer mysql =
-                new MySQLContainer<>("mysql:8")
+                new MySQLContainer<>("mysql:8.0")
                         .withDatabaseName("test")
                         .withUsername("postgres")
                         .withPassword("password")

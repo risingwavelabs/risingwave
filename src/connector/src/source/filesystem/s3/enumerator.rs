@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use aws_sdk_s3::client::Client;
 
 use crate::aws_utils::{default_conn_config, s3_client};
-use crate::common::AwsAuthProps;
+use crate::connector_common::AwsAuthProps;
 use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::s3::S3Properties;
 use crate::source::{FsListInner, SourceEnumeratorContextRef, SplitEnumerator};
@@ -75,7 +75,7 @@ impl SplitEnumerator for S3SplitEnumerator {
     async fn new(
         properties: Self::Properties,
         _context: SourceEnumeratorContextRef,
-    ) -> anyhow::Result<Self> {
+    ) -> crate::error::ConnectorResult<Self> {
         let config = AwsAuthProps::from(&properties);
         let sdk_config = config.build_config().await?;
         let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
@@ -98,7 +98,7 @@ impl SplitEnumerator for S3SplitEnumerator {
         })
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<Self::Split>> {
+    async fn list_splits(&mut self) -> crate::error::ConnectorResult<Vec<Self::Split>> {
         let mut objects = Vec::new();
         loop {
             let (files, has_finished) = self.get_next_page::<FsSplit>().await?;

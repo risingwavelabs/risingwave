@@ -18,10 +18,11 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use either::Either;
-use futures::pin_mut;
 use futures::stream::{self, StreamExt};
+use futures::{pin_mut, TryStreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::{ColumnId, Schema, TableId};
+use risingwave_common::array::StreamChunk;
+use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{ScalarRef, ScalarRefImpl};
@@ -29,20 +30,19 @@ use risingwave_connector::source::filesystem::opendal_source::{
     OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
 };
 use risingwave_connector::source::filesystem::OpendalFsSplit;
+use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{
-    BoxSourceWithStateStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
-    StreamChunkWithState,
+    BoxChunkSourceStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
 };
-use risingwave_connector::ConnectorParams;
-use risingwave_source::source_desc::SourceDesc;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 
+use super::{get_split_offset_col_idx, SourceStateTableHandler};
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, Mutation, PkIndicesRef, SourceStateTableHandler, StreamExecutorError,
+    expect_first_barrier, get_split_offset_mapping_from_chunk, prune_additional_cols,
+    ActorContextRef, BoxedMessageStream, Execute, Executor, Message, Mutation, StreamExecutorError,
     StreamExecutorResult, StreamSourceCore,
 };
 
@@ -52,40 +52,31 @@ type SplitBatch = Option<Vec<SplitImpl>>;
 
 pub struct FsFetchExecutor<S: StateStore, Src: OpendalSource> {
     actor_ctx: ActorContextRef,
-    info: ExecutorInfo,
 
     /// Streaming source for external
     stream_source_core: Option<StreamSourceCore<S>>,
 
     /// Upstream list executor.
-    upstream: Option<BoxedExecutor>,
+    upstream: Option<Executor>,
 
     // control options for connector level
     source_ctrl_opts: SourceCtrlOpts,
-
-    // config for the connector node
-    connector_params: ConnectorParams,
 
     _marker: PhantomData<Src>,
 }
 
 impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
-        info: ExecutorInfo,
         stream_source_core: StreamSourceCore<S>,
-        upstream: BoxedExecutor,
+        upstream: Executor,
         source_ctrl_opts: SourceCtrlOpts,
-        connector_params: ConnectorParams,
     ) -> Self {
         Self {
             actor_ctx,
-            info,
             stream_source_core: Some(stream_source_core),
             upstream: Some(upstream),
             source_ctrl_opts,
-            connector_params,
             _marker: PhantomData,
         }
     }
@@ -96,12 +87,12 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         column_ids: Vec<ColumnId>,
         source_ctx: SourceContext,
         source_desc: &SourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
     ) -> StreamExecutorResult<()> {
         let mut batch = Vec::with_capacity(SPLIT_BATCH_SIZE);
-        'vnodes: for vnode in state_store_handler.state_store.vnodes().iter_vnodes() {
+        'vnodes: for vnode in state_store_handler.state_table.vnodes().iter_vnodes() {
             let table_iter = state_store_handler
-                .state_store
+                .state_table
                 .iter_with_vnode(
                     vnode,
                     &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
@@ -147,7 +138,8 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             *splits_on_fetch += batch.len();
             let batch_reader =
                 Self::build_batched_stream_reader(column_ids, source_ctx, source_desc, Some(batch))
-                    .await?;
+                    .await?
+                    .map_err(StreamExecutorError::connector_error);
             stream.replace_data_stream(batch_reader);
         }
 
@@ -159,24 +151,28 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         source_ctx: SourceContext,
         source_desc: &SourceDesc,
         batch: SplitBatch,
-    ) -> StreamExecutorResult<BoxSourceWithStateStream> {
+    ) -> StreamExecutorResult<BoxChunkSourceStream> {
         source_desc
             .source
-            .stream_reader(batch, column_ids, Arc::new(source_ctx))
+            .to_stream(batch, column_ids, Arc::new(source_ctx))
             .await
             .map_err(StreamExecutorError::connector_error)
     }
 
-    fn build_source_ctx(&self, source_desc: &SourceDesc, source_id: TableId) -> SourceContext {
-        SourceContext::new_with_suppressor(
+    fn build_source_ctx(
+        &self,
+        source_desc: &SourceDesc,
+        source_id: TableId,
+        source_name: &str,
+    ) -> SourceContext {
+        SourceContext::new(
             self.actor_ctx.id,
             source_id,
             self.actor_ctx.fragment_id,
             source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
-            self.connector_params.connector_client.clone(),
-            self.actor_ctx.error_suppressor.clone(),
             source_desc.source.config.clone(),
+            source_name.to_owned(),
         )
     }
 
@@ -195,14 +191,17 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
+        let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
+        else {
+            unreachable!("Partition and offset columns must be set.");
+        };
+
         // Initialize state table.
         state_store_handler.init_epoch(barrier.epoch);
 
         let mut splits_on_fetch: usize = 0;
-        let mut stream = StreamReaderWithPause::<true, StreamChunkWithState>::new(
-            upstream,
-            stream::pending().boxed(),
-        );
+        let mut stream =
+            StreamReaderWithPause::<true, StreamChunk>::new(upstream, stream::pending().boxed());
 
         if barrier.is_pause_on_startup() {
             stream.pause_stream();
@@ -213,9 +212,9 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         // Hence we try building a reader first.
         Self::replace_with_new_batch_reader(
             &mut splits_on_fetch,
-            &state_store_handler,
+            &state_store_handler, // move into the function
             core.column_ids.clone(),
-            self.build_source_ctx(&source_desc, core.source_id),
+            self.build_source_ctx(&source_desc, core.source_id, &core.source_name),
             &source_desc,
             &mut stream,
         )
@@ -244,7 +243,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     }
 
                                     state_store_handler
-                                        .state_store
+                                        .state_table
                                         .commit(barrier.epoch)
                                         .await?;
 
@@ -254,7 +253,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         // if _cache_may_stale, we must rebuild the stream to adjust vnode mappings
                                         let (_prev_vnode_bitmap, cache_may_stale) =
                                             state_store_handler
-                                                .state_store
+                                                .state_table
                                                 .update_vnode_bitmap(vnode_bitmap);
 
                                         if cache_may_stale {
@@ -267,7 +266,11 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                             &mut splits_on_fetch,
                                             &state_store_handler,
                                             core.column_ids.clone(),
-                                            self.build_source_ctx(&source_desc, core.source_id),
+                                            self.build_source_ctx(
+                                                &source_desc,
+                                                core.source_id,
+                                                &core.source_name,
+                                            ),
                                             &source_desc,
                                             &mut stream,
                                         )
@@ -278,7 +281,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     yield msg;
                                 }
                                 // Receiving file assignments from upstream list executor,
-                                // store into state table and try building a new reader.
+                                // store into state table.
                                 Message::Chunk(chunk) => {
                                     let file_assignment = chunk
                                         .data_chunk()
@@ -293,19 +296,17 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                             )
                                         })
                                         .collect();
-                                    state_store_handler.take_snapshot(file_assignment).await?;
-                                    state_store_handler.state_store.try_flush().await?;
+                                    state_store_handler.set_states(file_assignment).await?;
+                                    state_store_handler.state_table.try_flush().await?;
                                 }
                                 _ => unreachable!(),
                             }
                         }
                         // StreamChunk from FsSourceReader, and the reader reads only one file.
-                        // If the file read out, replace with a new file reader.
-                        Either::Right(StreamChunkWithState {
-                            chunk,
-                            split_offset_mapping,
-                        }) => {
-                            let mapping = split_offset_mapping.unwrap();
+                        Either::Right(chunk) => {
+                            let mapping =
+                                get_split_offset_mapping_from_chunk(&chunk, split_idx, offset_idx)
+                                    .unwrap();
                             debug_assert_eq!(mapping.len(), 1);
                             if let Some((split_id, offset)) = mapping.into_iter().next() {
                                 let row = state_store_handler
@@ -331,6 +332,12 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 }
                             }
 
+                            let chunk = prune_additional_cols(
+                                &chunk,
+                                split_idx,
+                                offset_idx,
+                                &source_desc.columns,
+                            );
                             yield Message::Chunk(chunk);
                         }
                     }
@@ -340,21 +347,9 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
     }
 }
 
-impl<S: StateStore, Src: OpendalSource> Executor for FsFetchExecutor<S, Src> {
+impl<S: StateStore, Src: OpendalSource> Execute for FsFetchExecutor<S, Src> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }
 
@@ -364,7 +359,6 @@ impl<S: StateStore, Src: OpendalSource> Debug for FsFetchExecutor<S, Src> {
             f.debug_struct("FsFetchExecutor")
                 .field("source_id", &core.source_id)
                 .field("column_ids", &core.column_ids)
-                .field("pk_indices", &self.info.pk_indices)
                 .finish()
         } else {
             f.debug_struct("FsFetchExecutor").finish()

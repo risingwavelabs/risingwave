@@ -22,6 +22,7 @@ use crate::session::AuthContext;
 // Only for local mode.
 define_context! {
     pub(super) CATALOG_READER: crate::catalog::CatalogReader,
+    pub(super) USER_INFO_READER: crate::user::user_service::UserInfoReader,
     pub(super) AUTH_CONTEXT: Arc<AuthContext>,
     pub(super) DB_NAME: String,
     pub(super) SEARCH_PATH: SearchPath,

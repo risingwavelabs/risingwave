@@ -14,13 +14,13 @@
 
 use std::collections::HashMap;
 
-use anyhow::anyhow;
-use aws_sdk_kinesis::error::DisplayErrorContext;
+use anyhow::{anyhow, Context};
 use aws_sdk_kinesis::operation::put_record::PutRecordOutput;
 use aws_sdk_kinesis::primitives::Blob;
 use aws_sdk_kinesis::Client as KinesisClient;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -29,7 +29,7 @@ use with_options::WithOptions;
 
 use super::catalog::SinkFormatDesc;
 use super::SinkParam;
-use crate::common::KinesisCommon;
+use crate::connector_common::KinesisCommon;
 use crate::dispatch_sink_formatter_str_key_impl;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::formatter::SinkFormatterImpl;
@@ -76,8 +76,12 @@ impl Sink for KinesisSink {
 
     const SINK_NAME: &'static str = KINESIS_SINK;
 
-    fn default_sink_decouple(desc: &SinkDesc) -> bool {
-        desc.sink_type.is_append_only()
+    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+        match user_specified {
+            SinkDecouple::Default => Ok(desc.sink_type.is_append_only()),
+            SinkDecouple::Disable => Ok(false),
+            SinkDecouple::Enable => Ok(true),
+        }
     }
 
     async fn validate(&self) -> Result<()> {
@@ -106,10 +110,8 @@ impl Sink for KinesisSink {
             .stream_name(&self.config.common.stream_name)
             .send()
             .await
-            .map_err(|e| {
-                tracing::warn!("failed to list shards: {}", DisplayErrorContext(&e));
-                SinkError::Kinesis(anyhow!("failed to list shards: {}", DisplayErrorContext(e)))
-            })?;
+            .context("failed to list shards")
+            .map_err(SinkError::Kinesis)?;
         Ok(())
     }
 
@@ -176,7 +178,7 @@ impl KinesisSinkWriter {
             .common
             .build_client()
             .await
-            .map_err(SinkError::Kinesis)?;
+            .map_err(|err| SinkError::Kinesis(anyhow!(err)))?;
         Ok(Self {
             config: config.clone(),
             formatter,
@@ -201,18 +203,8 @@ impl KinesisSinkPayloadWriter {
             },
         )
         .await
-        .map_err(|e| {
-            tracing::warn!(
-                "failed to put record: {} to {}",
-                DisplayErrorContext(&e),
-                self.config.common.stream_name
-            );
-            SinkError::Kinesis(anyhow!(
-                "failed to put record: {} to {}",
-                DisplayErrorContext(e),
-                self.config.common.stream_name
-            ))
-        })
+        .with_context(|| format!("failed to put record to {}", self.config.common.stream_name))
+        .map_err(SinkError::Kinesis)
     }
 }
 

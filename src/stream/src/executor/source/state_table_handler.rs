@@ -12,14 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+cfg_if::cfg_if! {
+    if #[cfg(test)] {
+        use risingwave_common::catalog::{DatabaseId, SchemaId};
+        use risingwave_pb::catalog::table::TableType;
+        use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
+        use risingwave_pb::data::data_type::TypeName;
+        use risingwave_pb::data::DataType;
+        use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc};
+    }
+}
+
 use std::collections::HashSet;
 use std::ops::{Bound, Deref};
 use std::sync::Arc;
 
 use futures::{pin_mut, StreamExt};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{DatabaseId, SchemaId};
-use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{JsonbVal, ScalarImpl, ScalarRef, ScalarRefImpl};
@@ -27,12 +36,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::{bail, row};
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
 use risingwave_hummock_sdk::key::next_key;
-use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::PbTable;
-use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
-use risingwave_pb::data::data_type::TypeName;
-use risingwave_pb::data::DataType;
-use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
@@ -43,18 +47,13 @@ use crate::executor::StreamExecutorResult;
 const COMPLETE_SPLIT_PREFIX: &str = "SsGLdzRDqBuKzMf9bDap";
 
 pub struct SourceStateTableHandler<S: StateStore> {
-    pub state_store: StateTable<S>,
+    pub state_table: StateTable<S>,
 }
 
 impl<S: StateStore> SourceStateTableHandler<S> {
     pub async fn from_table_catalog(table_catalog: &PbTable, store: S) -> Self {
-        // The state of source should not be cleaned up by retention_seconds
-        assert!(!table_catalog
-            .properties
-            .contains_key(&String::from(PROPERTIES_RETENTION_SECOND_KEY)));
-
         Self {
-            state_store: StateTable::from_table_catalog(table_catalog, store, None).await,
+            state_table: StateTable::from_table_catalog(table_catalog, store, None).await,
         }
     }
 
@@ -63,18 +62,13 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         store: S,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
-        // The state of source should not be cleaned up by retention_seconds
-        assert!(!table_catalog
-            .properties
-            .contains_key(&String::from(PROPERTIES_RETENTION_SECOND_KEY)));
-
         Self {
-            state_store: StateTable::from_table_catalog(table_catalog, store, vnodes).await,
+            state_table: StateTable::from_table_catalog(table_catalog, store, vnodes).await,
         }
     }
 
     pub fn init_epoch(&mut self, epoch: EpochPair) {
-        self.state_store.init_epoch(epoch);
+        self.state_table.init_epoch(epoch);
     }
 
     fn string_to_scalar(rhs: impl Into<String>) -> ScalarImpl {
@@ -82,13 +76,13 @@ impl<S: StateStore> SourceStateTableHandler<S> {
     }
 
     pub(crate) async fn get(&self, key: SplitId) -> StreamExecutorResult<Option<OwnedRow>> {
-        self.state_store
+        self.state_table
             .get_row(row::once(Some(Self::string_to_scalar(key.deref()))))
             .await
             .map_err(StreamExecutorError::from)
     }
 
-    // this method should only be used by `FsSourceExecutor
+    /// this method should only be used by [`FsSourceExecutor`](super::FsSourceExecutor)
     pub(crate) async fn get_all_completed(&self) -> StreamExecutorResult<HashSet<SplitId>> {
         let start = Bound::Excluded(row::once(Some(Self::string_to_scalar(
             COMPLETE_SPLIT_PREFIX,
@@ -100,7 +94,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
 
         // all source executor has vnode id zero
         let iter = self
-            .state_store
+            .state_table
             .iter_with_vnode(VirtualNode::ZERO, &(start, end), PrefetchOptions::default())
             .await?;
 
@@ -111,7 +105,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
             if let Some(ScalarRefImpl::Jsonb(jsonb_ref)) = row.datum_at(1) {
                 let split = SplitImpl::restore_from_json(jsonb_ref.to_owned_scalar())?;
                 let fs = split
-                    .as_fs()
+                    .as_s3()
                     .unwrap_or_else(|| panic!("split {:?} is not fs", split));
                 if fs.offset == fs.size {
                     let split_id = split.id();
@@ -132,18 +126,18 @@ impl<S: StateStore> SourceStateTableHandler<S> {
             Some(ScalarImpl::Jsonb(value)),
         ];
         if let Some(prev_row) = self.get(key).await? {
-            self.state_store.delete(prev_row);
+            self.state_table.delete(prev_row);
         }
-        self.state_store.insert(row);
+        self.state_table.insert(row);
         Ok(())
     }
 
     /// set all complete
-    /// can only used by `FsSourceExecutor`
-    pub(crate) async fn set_all_complete<SS>(&mut self, states: Vec<SS>) -> StreamExecutorResult<()>
-    where
-        SS: SplitMetaData,
-    {
+    /// can only used by [`FsSourceExecutor`](super::FsSourceExecutor)
+    pub(crate) async fn set_all_complete(
+        &mut self,
+        states: Vec<SplitImpl>,
+    ) -> StreamExecutorResult<()> {
         if states.is_empty() {
             // TODO should be a clear Error Code
             bail!("states require not null");
@@ -163,10 +157,10 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         ];
         match self.get(key).await? {
             Some(prev_row) => {
-                self.state_store.update(prev_row, row);
+                self.state_table.update(prev_row, row);
             }
             None => {
-                self.state_store.insert(row);
+                self.state_table.insert(row);
             }
         }
         Ok(())
@@ -174,36 +168,24 @@ impl<S: StateStore> SourceStateTableHandler<S> {
 
     pub async fn delete(&mut self, key: SplitId) -> StreamExecutorResult<()> {
         if let Some(prev_row) = self.get(key).await? {
-            self.state_store.delete(prev_row);
+            self.state_table.delete(prev_row);
         }
 
         Ok(())
     }
 
-    /// This function provides the ability to persist the source state
-    /// and needs to be invoked by the ``SourceReader`` to call it,
-    /// and will return the error when the dependent ``StateStore`` handles the error.
-    /// The caller should ensure that the passed parameters are not empty.
-    pub async fn take_snapshot<SS>(&mut self, states: Vec<SS>) -> StreamExecutorResult<()>
+    pub async fn set_states<SS>(&mut self, states: Vec<SS>) -> StreamExecutorResult<()>
     where
         SS: SplitMetaData,
     {
-        if states.is_empty() {
-            // TODO should be a clear Error Code
-            bail!("states require not null");
-        } else {
-            for split_impl in states {
-                self.set(split_impl.id(), split_impl.encode_to_json())
-                    .await?;
-            }
+        for split_impl in states {
+            self.set(split_impl.id(), split_impl.encode_to_json())
+                .await?;
         }
         Ok(())
     }
 
-    pub async fn trim_state<SS>(&mut self, to_trim: &[SS]) -> StreamExecutorResult<()>
-    where
-        SS: SplitMetaData,
-    {
+    pub async fn trim_state(&mut self, to_trim: &[SplitImpl]) -> StreamExecutorResult<()> {
         for split in to_trim {
             tracing::info!("trimming source state for split {}", split.id());
             self.delete(split.id()).await?;
@@ -228,8 +210,9 @@ impl<S: StateStore> SourceStateTableHandler<S> {
     }
 }
 
-// align with schema defined in `LogicalSource::infer_internal_table_catalog`. The function is used
-// for test purpose and should not be used in production.
+/// align with schema defined in `LogicalSource::infer_internal_table_catalog`. The function is used
+/// for test purpose and should not be used in production.
+#[cfg(test)]
 pub fn default_source_internal_table(id: u32) -> PbTable {
     let make_column = |column_type: TypeName, column_id: i32| -> ColumnCatalog {
         ColumnCatalog {
@@ -274,7 +257,7 @@ pub(crate) mod tests {
 
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{Datum, ScalarImpl};
-    use risingwave_common::util::epoch::EpochPair;
+    use risingwave_common::util::epoch::{test_epoch, EpochPair};
     use risingwave_connector::source::kafka::KafkaSplit;
     use risingwave_storage::memory::MemoryStateStore;
     use serde_json::Value;
@@ -294,9 +277,9 @@ pub(crate) mod tests {
             .into();
         let b: Datum = Some(ScalarImpl::Jsonb(b));
 
-        let init_epoch_num = 100100;
+        let init_epoch_num = test_epoch(1);
         let init_epoch = EpochPair::new_test_epoch(init_epoch_num);
-        let next_epoch = EpochPair::new_test_epoch(init_epoch_num + 1);
+        let next_epoch = EpochPair::new_test_epoch(init_epoch_num + test_epoch(1));
 
         state_table.init_epoch(init_epoch);
         state_table.insert(OwnedRow::new(vec![a.clone(), b.clone()]));
@@ -319,17 +302,17 @@ pub(crate) mod tests {
         let serialized = split_impl.encode_to_bytes();
         let serialized_json = split_impl.encode_to_json();
 
-        let epoch_1 = EpochPair::new_test_epoch(1);
-        let epoch_2 = EpochPair::new_test_epoch(2);
-        let epoch_3 = EpochPair::new_test_epoch(3);
+        let epoch_1 = EpochPair::new_test_epoch(test_epoch(1));
+        let epoch_2 = EpochPair::new_test_epoch(test_epoch(2));
+        let epoch_3 = EpochPair::new_test_epoch(test_epoch(3));
 
         state_table_handler.init_epoch(epoch_1);
         state_table_handler
-            .take_snapshot(vec![split_impl.clone()])
+            .set_states(vec![split_impl.clone()])
             .await?;
-        state_table_handler.state_store.commit(epoch_2).await?;
+        state_table_handler.state_table.commit(epoch_2).await?;
 
-        state_table_handler.state_store.commit(epoch_3).await?;
+        state_table_handler.state_table.commit(epoch_3).await?;
 
         match state_table_handler
             .try_recover_from_state_store(&split_impl)

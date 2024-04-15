@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod eowc;
+mod frame_finder;
 mod general;
 mod over_partition;
 

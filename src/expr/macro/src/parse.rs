@@ -124,7 +124,7 @@ impl From<&syn::Signature> for UserFunctionAttr {
             write: sig.inputs.iter().any(arg_is_write),
             context: sig.inputs.iter().any(arg_is_context),
             retract: last_arg_is_retract(sig),
-            arg_option: args_contain_option(sig),
+            args_option: sig.inputs.iter().map(arg_is_option).collect(),
             first_mut_ref_arg: first_mut_ref_arg(sig),
             return_type_kind,
             iterator_item_kind,
@@ -224,23 +224,18 @@ fn last_arg_is_retract(sig: &syn::Signature) -> bool {
     pat.ident.to_string().contains("retract")
 }
 
-/// Check if any argument is `Option`.
-fn args_contain_option(sig: &syn::Signature) -> bool {
-    for arg in &sig.inputs {
-        let syn::FnArg::Typed(arg) = arg else {
-            continue;
-        };
-        let syn::Type::Path(path) = arg.ty.as_ref() else {
-            continue;
-        };
-        let Some(seg) = path.path.segments.last() else {
-            continue;
-        };
-        if seg.ident == "Option" {
-            return true;
-        }
-    }
-    false
+/// Check if the argument is `Option`.
+fn arg_is_option(arg: &syn::FnArg) -> bool {
+    let syn::FnArg::Typed(arg) = arg else {
+        return false;
+    };
+    let syn::Type::Path(path) = arg.ty.as_ref() else {
+        return false;
+    };
+    let Some(seg) = path.path.segments.last() else {
+        return false;
+    };
+    seg.ident == "Option"
 }
 
 /// Returns `T` if the first argument (except `self`) is `&mut T`.
@@ -285,9 +280,7 @@ fn strip_outer_type<'a>(ty: &'a syn::Type, type_: &str) -> Option<&'a syn::Type>
     let syn::Type::Path(path) = ty else {
         return None;
     };
-    let Some(seg) = path.path.segments.last() else {
-        return None;
-    };
+    let seg = path.path.segments.last()?;
     if seg.ident != type_ {
         return None;
     }

@@ -29,8 +29,8 @@ use anyhow::{anyhow, bail, Result};
 pub use resolve_id::*;
 use risingwave_frontend::handler::util::SourceSchemaCompatExt;
 use risingwave_frontend::handler::{
-    create_index, create_mv, create_schema, create_source, create_table, create_view, drop_table,
-    explain, variable, HandlerArgs,
+    close_cursor, create_index, create_mv, create_schema, create_source, create_table, create_view,
+    declare_cursor, drop_table, explain, fetch_cursor, variable, HandlerArgs,
 };
 use risingwave_frontend::session::SessionImpl;
 use risingwave_frontend::test_utils::{create_proto_file, get_explain_output, LocalFrontend};
@@ -67,6 +67,8 @@ pub enum TestType {
     BatchPlanProto,
     /// Batch plan for local execution `.gen_batch_local_plan()`
     BatchLocalPlan,
+    /// Batch plan for local execution `.gen_batch_distributed_plan()`
+    BatchDistributedPlan,
 
     /// Create MV plan `.gen_create_mv_plan()`
     StreamPlan,
@@ -201,6 +203,9 @@ pub struct TestCaseResult {
     /// Batch plan for local execution `.gen_batch_local_plan()`
     pub batch_local_plan: Option<String>,
 
+    /// Batch plan for distributed execution `.gen_batch_distributed_plan()`
+    pub batch_distributed_plan: Option<String>,
+
     /// Generate sink plan
     pub sink_plan: Option<String>,
 
@@ -295,9 +300,11 @@ impl TestCase {
 
         let mut result = result.unwrap_or_default();
         result.input = self.input.clone();
-        result.create_source = self.create_source().clone();
-        result.create_table_with_connector = self.create_table_with_connector().clone();
-        result.with_config_map = self.with_config_map().clone();
+        result.create_source.clone_from(self.create_source());
+        result
+            .create_table_with_connector
+            .clone_from(self.create_table_with_connector());
+        result.with_config_map.clone_from(self.with_config_map());
 
         Ok(result)
     }
@@ -423,8 +430,11 @@ impl TestCase {
                     source_schema,
                     source_watermarks,
                     append_only,
+                    on_conflict,
+                    with_version_column,
                     cdc_table_info,
                     include_column_options,
+                    wildcard_idx,
                     ..
                 } => {
                     let source_schema = source_schema.map(|schema| schema.into_v2_with_warning());
@@ -433,11 +443,14 @@ impl TestCase {
                         handler_args,
                         name,
                         columns,
+                        wildcard_idx,
                         constraints,
                         if_not_exists,
                         source_schema,
                         source_watermarks,
                         append_only,
+                        on_conflict,
+                        with_version_column,
                         cdc_table_info,
                         include_column_options,
                     )
@@ -558,6 +571,16 @@ impl TestCase {
                 } => {
                     create_schema::handle_create_schema(handler_args, schema_name, if_not_exists)
                         .await?;
+                }
+                Statement::DeclareCursor { cursor_name, query } => {
+                    declare_cursor::handle_declare_cursor(handler_args, cursor_name, *query)
+                        .await?;
+                }
+                Statement::FetchCursor { cursor_name, count } => {
+                    fetch_cursor::handle_fetch_cursor(handler_args, cursor_name, count).await?;
+                }
+                Statement::CloseCursor { cursor_name } => {
+                    close_cursor::handle_close_cursor(handler_args, cursor_name).await?;
                 }
                 _ => return Err(anyhow!("Unsupported statement type")),
             }
@@ -709,6 +732,36 @@ impl TestCase {
             }
         }
 
+        'distributed_batch: {
+            if self
+                .expected_outputs
+                .contains(&TestType::BatchDistributedPlan)
+                || self.expected_outputs.contains(&TestType::BatchError)
+            {
+                let batch_plan = match logical_plan.gen_batch_plan() {
+                    Ok(batch_plan) => match logical_plan.gen_batch_distributed_plan(batch_plan) {
+                        Ok(batch_plan) => batch_plan,
+                        Err(err) => {
+                            ret.batch_error = Some(err.to_report_string_pretty());
+                            break 'distributed_batch;
+                        }
+                    },
+                    Err(err) => {
+                        ret.batch_error = Some(err.to_report_string_pretty());
+                        break 'distributed_batch;
+                    }
+                };
+
+                // Only generate batch_plan if it is specified in test case
+                if self
+                    .expected_outputs
+                    .contains(&TestType::BatchDistributedPlan)
+                {
+                    ret.batch_distributed_plan = Some(explain_plan(&batch_plan));
+                }
+            }
+        }
+
         {
             // stream
             for (
@@ -796,6 +849,7 @@ impl TestCase {
                     format_desc,
                     false,
                     None,
+                    None,
                 ) {
                     Ok(sink_plan) => {
                         ret.sink_plan = Some(explain_plan(&sink_plan.into()));
@@ -876,17 +930,17 @@ pub async fn run_test_file(file_path: &Path, file_content: &str) -> Result<()> {
 
     let mut failed_num = 0;
     let cases: Vec<TestCase> = serde_yaml::from_str(file_content).map_err(|e| {
-        if let Some(loc) = e.location() {
-            anyhow!(
-                "failed to parse yaml: {}, at {}:{}:{}",
-                e.as_report(),
+        let context = if let Some(loc) = e.location() {
+            format!(
+                "failed to parse yaml at {}:{}:{}",
                 file_path.display(),
                 loc.line(),
                 loc.column()
             )
         } else {
-            anyhow!("failed to parse yaml: {}", e.as_report())
-        }
+            "failed to parse yaml".to_owned()
+        };
+        anyhow::anyhow!(e).context(context)
     })?;
     let cases = resolve_testcase_id(cases).expect("failed to resolve");
     let mut outputs = vec![];
@@ -906,7 +960,7 @@ pub async fn run_test_file(file_path: &Path, file_content: &str) -> Result<()> {
                     "Test #{i} (id: {}) failed, SQL:\n{}\nError: {}",
                     c.id().clone().unwrap_or_else(|| "<none>".to_string()),
                     c.sql(),
-                    e
+                    e.as_report()
                 );
                 failed_num += 1;
             }

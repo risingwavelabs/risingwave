@@ -16,13 +16,13 @@ use std::cell::RefCell;
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::bail_not_implemented;
-use risingwave_common::error::Result;
 
 use super::utils::{childless_record, Distill};
 use super::{
     generic, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeUnary,
     PredicatePushdown, ToBatch, ToStream,
 };
+use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{

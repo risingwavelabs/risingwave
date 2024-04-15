@@ -15,9 +15,9 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::TryStreamExt;
+use futures::{Stream, TryStreamExt};
 use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::config::ObjectStoreConfig;
+use risingwave_common::config::{EvictionConfig, MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
@@ -33,24 +33,35 @@ use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::store::version::HummockVersionReader;
 use risingwave_storage::hummock::store::HummockStorageIterator;
 use risingwave_storage::hummock::{
-    get_committed_read_version_tuple, CachePolicy, FileCache, SstableStore,
+    get_committed_read_version_tuple, CachePolicy, FileCache, SstableStore, SstableStoreConfig,
 };
-use risingwave_storage::monitor::HummockStateStoreMetrics;
+use risingwave_storage::monitor::{global_hummock_state_store_metrics, HummockStateStoreMetrics};
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
-use risingwave_storage::store::{ReadOptions, StateStoreReadIterStream, StreamTypeOfIter};
+use risingwave_storage::store::{ReadOptions, StateStoreIterExt};
+use risingwave_storage::table::KeyedRow;
 use rw_futures_util::select_all;
 use tokio::sync::mpsc::unbounded_channel;
 
-type SelectAllIterStream = impl StateStoreReadIterStream + Unpin;
+type SelectAllIterStream = impl Stream<Item = StorageResult<KeyedRow<Bytes>>> + Unpin;
+type SingleIterStream = impl Stream<Item = StorageResult<KeyedRow<Bytes>>>;
 
-fn select_all_vnode_stream(
-    streams: Vec<StreamTypeOfIter<HummockStorageIterator>>,
-) -> SelectAllIterStream {
+fn select_all_vnode_stream(streams: Vec<SingleIterStream>) -> SelectAllIterStream {
     select_all(streams.into_iter().map(Box::pin))
 }
 
-pub struct HummockJavaBindingIterator {
+fn to_deserialized_stream(
+    iter: HummockStorageIterator,
     row_serde: EitherSerde,
+) -> SingleIterStream {
+    iter.into_stream(move |(key, value)| {
+        Ok(KeyedRow::new(
+            key.user_key.table_key.copy_into(),
+            row_serde.deserialize(value).map(OwnedRow::new)?,
+        ))
+    })
+}
+
+pub struct HummockJavaBindingIterator {
     stream: SelectAllIterStream,
 }
 
@@ -66,23 +77,51 @@ impl HummockJavaBindingIterator {
             )
             .await,
         );
-        let sstable_store = Arc::new(SstableStore::new(
-            object_store,
-            read_plan.data_dir,
-            1 << 10,
-            1 << 10,
-            0,
-            1 << 10,
-            16,
-            FileCache::none(),
-            FileCache::none(),
-            None,
-        ));
+        let sstable_store = Arc::new(SstableStore::new(SstableStoreConfig {
+            store: object_store,
+            path: read_plan.data_dir,
+            block_cache_capacity: 1 << 10,
+            block_cache_shard_num: 2,
+            block_cache_eviction: EvictionConfig::for_test(),
+            meta_cache_capacity: 1 << 10,
+            meta_cache_shard_num: 2,
+            meta_cache_eviction: EvictionConfig::for_test(),
+            prefetch_buffer_capacity: 1 << 10,
+            max_prefetch_block_number: 16,
+            data_file_cache: FileCache::none(),
+            meta_file_cache: FileCache::none(),
+            recent_filter: None,
+            state_store_metrics: Arc::new(global_hummock_state_store_metrics(
+                MetricLevel::Disabled,
+            )),
+        }));
         let reader = HummockVersionReader::new(
             sstable_store,
             Arc::new(HummockStateStoreMetrics::unused()),
             0,
         );
+
+        let table = read_plan.table_catalog.unwrap();
+        let versioned = table.version.is_some();
+        let table_columns = table
+            .columns
+            .into_iter()
+            .map(|c| ColumnDesc::from(c.column_desc.unwrap()));
+
+        // Decide which serializer to use based on whether the table is versioned or not.
+        let row_serde: EitherSerde = if versioned {
+            ColumnAwareSerde::new(
+                Arc::from_iter(0..table_columns.len()),
+                Arc::from_iter(table_columns),
+            )
+            .into()
+        } else {
+            BasicSerde::new(
+                Arc::from_iter(0..table_columns.len()),
+                Arc::from_iter(table_columns),
+            )
+            .into()
+        };
 
         let mut streams = Vec::with_capacity(read_plan.vnode_ids.len());
         let key_range = read_plan.key_range.unwrap();
@@ -101,7 +140,7 @@ impl HummockJavaBindingIterator {
                 key_range,
                 read_plan.epoch,
             );
-            let stream = reader
+            let iter = reader
                 .iter(
                     key_range,
                     read_plan.epoch,
@@ -113,45 +152,16 @@ impl HummockJavaBindingIterator {
                     read_version_tuple,
                 )
                 .await?;
-            streams.push(stream);
+            streams.push(to_deserialized_stream(iter, row_serde.clone()));
         }
 
         let stream = select_all_vnode_stream(streams);
 
-        let table = read_plan.table_catalog.unwrap();
-        let versioned = table.version.is_some();
-        let table_columns = table
-            .columns
-            .into_iter()
-            .map(|c| ColumnDesc::from(c.column_desc.unwrap()));
-
-        // Decide which serializer to use based on whether the table is versioned or not.
-        let row_serde = if versioned {
-            ColumnAwareSerde::new(
-                Arc::from_iter(0..table_columns.len()),
-                Arc::from_iter(table_columns),
-            )
-            .into()
-        } else {
-            BasicSerde::new(
-                Arc::from_iter(0..table_columns.len()),
-                Arc::from_iter(table_columns),
-            )
-            .into()
-        };
-
-        Ok(Self { row_serde, stream })
+        Ok(Self { stream })
     }
 
-    pub async fn next(&mut self) -> StorageResult<Option<(Bytes, OwnedRow)>> {
-        let item = self.stream.try_next().await?;
-        Ok(match item {
-            Some((key, value)) => Some((
-                key.user_key.table_key.0,
-                OwnedRow::new(self.row_serde.deserialize(&value)?),
-            )),
-            None => None,
-        })
+    pub async fn next(&mut self) -> StorageResult<Option<KeyedRow<Bytes>>> {
+        self.stream.try_next().await
     }
 }
 

@@ -43,10 +43,20 @@
 #![feature(negative_impls)]
 #![feature(bound_map)]
 #![feature(array_methods)]
-#![feature(btree_cursors)]
+#![feature(register_tool)]
+#![register_tool(rw)]
 
-#[cfg_attr(not(test), expect(unused_extern_crates))]
+#[cfg_attr(not(test), allow(unused_extern_crates))]
 extern crate self as risingwave_common;
+
+// Re-export all macros from `risingwave_error` crate for code compatibility,
+// since they were previously defined and exported from `risingwave_common`.
+#[macro_use]
+extern crate risingwave_error;
+pub use risingwave_error::common::{
+    bail_no_function, bail_not_implemented, no_function, not_implemented,
+};
+pub use risingwave_error::macros::*;
 
 #[macro_use]
 pub mod jemalloc;
@@ -63,13 +73,16 @@ pub mod cast;
 pub mod catalog;
 pub mod config;
 pub mod constants;
-pub mod estimate_size;
 pub mod field_generator;
 pub mod hash;
 pub mod log;
 pub mod memory;
-pub mod metrics;
-pub mod monitor;
+pub use risingwave_common_metrics as metrics;
+pub use risingwave_common_metrics::{
+    monitor, register_guarded_gauge_vec_with_registry,
+    register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
+    register_guarded_int_gauge_vec_with_registry,
+};
 pub mod opts;
 pub mod range;
 pub mod row;
@@ -80,7 +93,6 @@ pub mod test_utils;
 pub mod transaction;
 pub mod types;
 pub mod vnode_mapping;
-
 pub mod test_prelude {
     pub use super::array::{DataChunkTestExt, StreamChunkTestExt};
     pub use super::catalog::test_utils::ColumnDescTestExt;
@@ -91,11 +103,11 @@ pub const RW_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Placeholder for unknown git sha.
 pub const UNKNOWN_GIT_SHA: &str = "unknown";
 
-// The single source of truth of the pg parameters, Used in ConfigMap and current_cluster_version.
+// The single source of truth of the pg parameters, Used in SessionConfig and current_cluster_version.
 // The version of PostgreSQL that Risingwave claims to be.
-pub const PG_VERSION: &str = "9.5.0";
+pub const PG_VERSION: &str = "13.14.0";
 /// The version of PostgreSQL that Risingwave claims to be.
-pub const SERVER_VERSION_NUM: i32 = 90500;
+pub const SERVER_VERSION_NUM: i32 = 130014;
 /// Shows the server-side character set encoding. At present, this parameter can be shown but not set, because the encoding is determined at database creation time. It is also the default value of `client_encoding`.
 pub const SERVER_ENCODING: &str = "UTF8";
 /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-STANDARD-CONFORMING-STRINGS>

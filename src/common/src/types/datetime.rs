@@ -23,13 +23,13 @@ use std::str::FromStr;
 use bytes::{Bytes, BytesMut};
 use chrono::{Datelike, Days, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday};
 use postgres_types::{accepts, to_sql_checked, IsNull, ToSql, Type};
+use risingwave_common_estimate_size::ZeroHeapSize;
 use thiserror::Error;
 
 use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use super::{CheckedAdd, DataType, Interval};
 use crate::array::{ArrayError, ArrayResult};
-use crate::estimate_size::ZeroHeapSize;
 
 /// The same as `NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce()`.
 /// Minus this magic number to store the number of days since 1970-01-01.
@@ -328,17 +328,15 @@ impl ToText for Date {
     /// ```
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
         let (ce, year) = self.0.year_ce();
-        if ce {
-            write!(f, "{}", self.0)
-        } else {
-            write!(
-                f,
-                "{:04}-{:02}-{:02} BC",
-                year,
-                self.0.month(),
-                self.0.day()
-            )
-        }
+        let suffix = if ce { "" } else { " BC" };
+        write!(
+            f,
+            "{:04}-{:02}-{:02}{}",
+            year,
+            self.0.month(),
+            self.0.day(),
+            suffix
+        )
     }
 
     fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
@@ -364,7 +362,17 @@ impl ToText for Time {
 
 impl ToText for Timestamp {
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        let (ce, year) = self.0.year_ce();
+        let suffix = if ce { "" } else { " BC" };
+        write!(
+            f,
+            "{:04}-{:02}-{:02} {}{}",
+            year,
+            self.0.month(),
+            self.0.day(),
+            self.0.time(),
+            suffix
+        )
     }
 
     fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
@@ -534,6 +542,12 @@ impl Timestamp {
 
     pub fn get_timestamp_nanos(&self) -> i64 {
         self.0.timestamp_nanos_opt().unwrap()
+    }
+
+    pub fn with_millis(timestamp_millis: i64) -> Result<Self> {
+        let secs = timestamp_millis.div_euclid(1_000);
+        let nsecs = timestamp_millis.rem_euclid(1_000) * 1_000_000;
+        Self::with_secs_nsecs(secs, nsecs as u32)
     }
 
     pub fn with_micros(timestamp_micros: i64) -> Result<Self> {

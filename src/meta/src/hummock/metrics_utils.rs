@@ -18,9 +18,12 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use itertools::{enumerate, Itertools};
+use prometheus::core::{AtomicU64, GenericCounter};
+use prometheus::IntGauge;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     object_size_map, BranchedSstInfo,
 };
+use risingwave_hummock_sdk::table_stats::PbTableStatsMap;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
@@ -31,17 +34,86 @@ use risingwave_pb::hummock::{
     CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionStats, LevelType,
 };
 
-use super::compaction::get_compression_algorithm;
 use super::compaction::selector::DynamicLevelSelectorCore;
+use super::compaction::{get_compression_algorithm, CompactionDeveloperConfig};
 use crate::hummock::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::compaction::CompactStatus;
 use crate::rpc::metrics::MetaMetrics;
 
-pub fn trigger_version_stat(
+pub struct LocalTableMetrics {
+    total_key_count: IntGauge,
+    total_key_size: IntGauge,
+    total_value_size: IntGauge,
+    write_throughput: GenericCounter<AtomicU64>,
+    cal_count: usize,
+    write_size: u64,
+}
+
+const MIN_FLUSH_COUNT: usize = 16;
+const MIN_FLUSH_DATA_SIZE: u64 = 128 * 1024 * 1024;
+
+impl LocalTableMetrics {
+    pub fn inc_write_throughput(&mut self, val: u64) {
+        self.write_size += val;
+        self.cal_count += 1;
+        if self.write_size > MIN_FLUSH_DATA_SIZE || self.cal_count > MIN_FLUSH_COUNT {
+            self.write_throughput.inc_by(self.write_size / 1024 / 1024);
+            self.write_size = 0;
+            self.cal_count = 0;
+        }
+    }
+}
+
+pub fn get_or_create_local_table_stat<'a>(
     metrics: &MetaMetrics,
-    current_version: &HummockVersion,
+    table_id: u32,
+    local_metrics: &'a mut HashMap<u32, LocalTableMetrics>,
+) -> &'a mut LocalTableMetrics {
+    local_metrics.entry(table_id).or_insert_with(|| {
+        let table_label = format!("{}", table_id);
+        LocalTableMetrics {
+            total_key_count: metrics
+                .version_stats
+                .with_label_values(&[&table_label, "total_key_count"]),
+            total_key_size: metrics
+                .version_stats
+                .with_label_values(&[&table_label, "total_key_size"]),
+            total_value_size: metrics
+                .version_stats
+                .with_label_values(&[&table_label, "total_value_size"]),
+            write_throughput: metrics
+                .table_write_throughput
+                .with_label_values(&[&table_label]),
+            cal_count: 0,
+            write_size: 0,
+        }
+    })
+}
+
+pub fn trigger_local_table_stat(
+    metrics: &MetaMetrics,
+    local_metrics: &mut HashMap<u32, LocalTableMetrics>,
     version_stats: &HummockVersionStats,
+    table_stats_change: &PbTableStatsMap,
 ) {
+    for (table_id, stats) in table_stats_change {
+        if stats.total_key_size == 0 && stats.total_value_size == 0 && stats.total_key_count == 0 {
+            continue;
+        }
+        let table_metrics = get_or_create_local_table_stat(metrics, *table_id, local_metrics);
+        if let Some(table_stats) = version_stats.table_stats.get(table_id) {
+            table_metrics
+                .total_key_count
+                .set(table_stats.total_key_count);
+            table_metrics
+                .total_value_size
+                .set(table_stats.total_value_size);
+            table_metrics.total_key_size.set(table_stats.total_key_size);
+        }
+    }
+}
+
+pub fn trigger_version_stat(metrics: &MetaMetrics, current_version: &HummockVersion) {
     metrics
         .max_committed_epoch
         .set(current_version.max_committed_epoch as i64);
@@ -50,22 +122,6 @@ pub fn trigger_version_stat(
         .set(current_version.estimated_encode_len() as i64);
     metrics.safe_epoch.set(current_version.safe_epoch as i64);
     metrics.current_version_id.set(current_version.id as i64);
-    metrics.version_stats.reset();
-    for (table_id, stats) in &version_stats.table_stats {
-        let table_id = format!("{}", table_id);
-        metrics
-            .version_stats
-            .with_label_values(&[&table_id, "total_key_count"])
-            .set(stats.total_key_count);
-        metrics
-            .version_stats
-            .with_label_values(&[&table_id, "total_key_size"])
-            .set(stats.total_key_size);
-        metrics
-            .version_stats
-            .with_label_values(&[&table_id, "total_value_size"])
-            .set(stats.total_value_size);
-    }
 }
 
 pub fn trigger_mv_stat(
@@ -435,7 +491,11 @@ pub fn trigger_lsm_stat(
 ) {
     let group_label = compaction_group_id.to_string();
     // compact_pending_bytes
-    let dynamic_level_core = DynamicLevelSelectorCore::new(compaction_config.clone());
+    // we don't actually generate a compaction task here so developer config can be ignored.
+    let dynamic_level_core = DynamicLevelSelectorCore::new(
+        compaction_config.clone(),
+        Arc::new(CompactionDeveloperConfig::default()),
+    );
     let ctx = dynamic_level_core.calculate_level_base_size(levels);
     {
         let compact_pending_bytes_needed =

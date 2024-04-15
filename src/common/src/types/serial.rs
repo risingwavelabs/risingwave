@@ -17,14 +17,20 @@ use std::hash::Hash;
 
 use bytes::BytesMut;
 use postgres_types::{accepts, to_sql_checked, IsNull, ToSql, Type};
+use risingwave_common_estimate_size::ZeroHeapSize;
 use serde::{Serialize, Serializer};
 
-use crate::estimate_size::ZeroHeapSize;
 use crate::util::row_id::RowId;
 
 // Serial is an alias for i64
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
 pub struct Serial(i64);
+
+impl From<Serial> for i64 {
+    fn from(value: Serial) -> i64 {
+        value.0
+    }
+}
 
 impl From<i64> for Serial {
     fn from(value: i64) -> Self {

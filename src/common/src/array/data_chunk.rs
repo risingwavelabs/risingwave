@@ -23,13 +23,13 @@ use either::Either;
 use itertools::Itertools;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::PbDataChunk;
 
 use super::{Array, ArrayImpl, ArrayRef, ArrayResult, StructArray};
 use crate::array::data_chunk_iter::RowRef;
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::estimate_size::EstimateSize;
 use crate::field_generator::{FieldGeneratorImpl, VarcharProperty};
 use crate::hash::HashCode;
 use crate::row::Row;
@@ -344,18 +344,20 @@ impl DataChunk {
         Ok(outputs)
     }
 
-    /// Compute hash values for each row.
+    /// Compute hash values for each row. The number of the returning `HashCodes` is `self.capacity()`.
+    /// When `skip_invisible_row` is true, the `HashCode` for the invisible rows is arbitrary.
     pub fn get_hash_values<H: BuildHasher>(
         &self,
         column_idxes: &[usize],
         hasher_builder: H,
     ) -> Vec<HashCode<H>> {
-        let mut states = Vec::with_capacity(self.capacity());
-        states.resize_with(self.capacity(), || hasher_builder.build_hasher());
+        let len = self.capacity();
+        let mut states = Vec::with_capacity(len);
+        states.resize_with(len, || hasher_builder.build_hasher());
         // Compute hash for the specified columns.
         for column_idx in column_idxes {
             let array = self.column_at(*column_idx);
-            array.hash_vec(&mut states[..]);
+            array.hash_vec(&mut states[..], self.visibility());
         }
         finalize_hashers(&states[..])
             .into_iter()

@@ -16,12 +16,12 @@ use std::ops::Range;
 
 use anyhow::Context;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::aggregate::{
     AggStateDyn, AggregateFunction, AggregateState, BoxedAggregateFunction,
 };

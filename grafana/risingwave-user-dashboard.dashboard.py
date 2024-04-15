@@ -31,26 +31,26 @@ panels = Panels(datasource)
 logging.basicConfig(level=logging.WARN)
 
 
-def section_actor_info(panels):
-    excluded_cols = ["Time", "Value", "__name__", f"{COMPONENT_LABEL}", f"{NODE_LABEL}"]
+def section_actor_info(outer_panels):
+    panels = outer_panels.sub_panel()
     return [
-        panels.row("Actor/Table Id Info"),
-        panels.table_info(
-            "Actor Id Info",
-            "Mapping from actor id to fragment id",
-            [panels.table_target(f"{metric('actor_info')}")],
-            excluded_cols,
-        ),
-        panels.table_info(
-            "Materialized View Info",
-            "Mapping from materialized view table id to it's internal table ids",
+        outer_panels.row_collapsed(
+            "Actor/Table Id Info",
             [
-                panels.table_target(
-                    f"group({metric('table_info')}) by (materialized_view_id, table_id, table_name, table_type)"
-                )
+                panels.table_info(
+                    "Actor Info",
+                    "Information about actors",
+                    [panels.table_target(f"group({metric('actor_info')}) by (actor_id, fragment_id, compute_node)")],
+                    ["actor_id", "fragment_id", "compute_node"],
+                ),
+                panels.table_info(
+                    "State Table Info",
+                    "Information about state tables. Column `materialized_view_id` is the id of the materialized view that this state table belongs to.",
+                    [panels.table_target(f"group({metric('table_info')}) by (table_id, table_name, table_type, materialized_view_id, fragment_id, compaction_group_id)")],
+                    ["table_id", "table_name", "table_type", "materialized_view_id", "fragment_id", "compaction_group_id"],
+                ),
             ],
-            excluded_cols,
-        ),
+        )
     ]
 
 
@@ -60,22 +60,22 @@ def section_overview(panels):
     return [
         panels.row("Overview"),
         panels.timeseries_rowsps(
-            "Aggregated Source Throughput(rows/s)",
+            "Source Throughput(rows/s)",
             "The figure shows the number of rows read by each source per second.",
             [
                 panels.target(
-                    f"sum(rate({metric('stream_source_output_rows_counts')}[$__rate_interval])) by (source_name)",
-                    "{{source_name}}",
+                    f"sum(rate({metric('stream_source_output_rows_counts')}[$__rate_interval])) by (source_id, source_name, fragment_id)",
+                    "{{source_id}} {{source_name}} (fragment {{fragment_id}})",
                 ),
             ],
         ),
         panels.timeseries_bytesps(
-            "Aggregated Source Throughput(MB/s)",
+            "Source Throughput(MB/s)",
             "The figure shows the number of bytes read by each source per second.",
             [
                 panels.target(
-                    f"(sum by (source_id)(rate({metric('partition_input_bytes')}[$__rate_interval])))/(1000*1000)",
-                    "source_id {{source_id}}",
+                    f"(sum by (source_id, source_name, fragment_id)(rate({metric('source_partition_input_bytes')}[$__rate_interval])))/(1000*1000)",
+                    "{{source_id}} {{source_name}} (fragment {{fragment_id}})",
                 )
             ],
         ),
@@ -183,12 +183,16 @@ def section_overview(panels):
             "Errors in the system group by type",
             [
                 panels.target(
-                    f"sum({metric('user_compute_error_count')}) by (error_type, error_msg, fragment_id, executor_name)",
-                    "compute error {{error_type}}: {{error_msg}} ({{executor_name}}: fragment_id={{fragment_id}})",
+                    f"sum({metric('user_compute_error')}) by (error_type, executor_name, fragment_id)",
+                    "{{error_type}} @ {{executor_name}} (fragment_id={{fragment_id}})",
                 ),
                 panels.target(
-                    f"sum({metric('user_source_error_count')}) by (error_type, error_msg, fragment_id, table_id, executor_name)",
-                    "parse error {{error_type}}: {{error_msg}} ({{executor_name}}: table_id={{table_id}}, fragment_id={{fragment_id}})",
+                    f"sum({metric('user_source_error')}) by (error_type, source_id, source_name, fragment_id)",
+                    "{{error_type}} @ {{source_name}} (source_id={{source_id}} fragment_id={{fragment_id}})",
+                ),
+                panels.target(
+                    f"sum({metric('user_sink_error')}) by (error_type, sink_id, sink_name, fragment_id)",
+                    "{{error_type}} @ {{sink_name}} (sink_id={{sink_id}} fragment_id={{fragment_id}})",
                 ),
                 panels.target(
                     f"{metric('source_status_is_up')} == 0",
@@ -686,6 +690,16 @@ def section_streaming(outer_panels):
                     ],
                 ),
                 panels.timeseries_rowsps(
+                    "Source Backfill Throughput(rows/s)",
+                    "The figure shows the number of rows read by each source per second.",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('stream_source_backfill_rows_counts')}[$__rate_interval])) by (source_id, source_name, fragment_id)",
+                            "{{source_id}} {{source_name}} (fragment {{fragment_id}})",
+                        ),
+                    ],
+                ),
+                panels.timeseries_rowsps(
                     "Materialized View Throughput(rows/s)",
                     "The figure shows the number of rows written into each materialized executor actor per second.",
                     [
@@ -965,6 +979,7 @@ dashboard = Dashboard(
     sharedCrosshair=True,
     templating=templating,
     version=dashboard_version,
+    refresh="",
     panels=[
         *section_actor_info(panels),
         *section_overview(panels),

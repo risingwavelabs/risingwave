@@ -39,7 +39,9 @@ use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
 use crate::hummock::manager::{commit_multi_var, create_trx_wrapper, read_lock, write_lock};
-use crate::hummock::metrics_utils::{trigger_safepoint_stat, trigger_write_stop_stats};
+use crate::hummock::metrics_utils::{
+    trigger_safepoint_stat, trigger_write_stop_stats, LocalTableMetrics,
+};
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::HummockManager;
 use crate::model::{VarTransaction, VarTransactionWrapper};
@@ -55,15 +57,12 @@ pub struct HummockVersionSafePoint {
 
 impl Drop for HummockVersionSafePoint {
     fn drop(&mut self) {
-        if let Err(e) = self
+        if self
             .event_sender
             .send(HummockManagerEvent::DropSafePoint(self.id))
+            .is_err()
         {
-            tracing::debug!(
-                "failed to drop hummock version safe point {}. {}",
-                self.id,
-                e
-            );
+            tracing::debug!("failed to drop hummock version safe point {}", self.id);
         }
     }
 }
@@ -97,6 +96,7 @@ pub struct Versioning {
     /// Stats for latest hummock version.
     pub version_stats: HummockVersionStats,
     pub checkpoint: HummockVersionCheckpoint,
+    pub local_metrics: HashMap<u32, LocalTableMetrics>,
 }
 
 impl Versioning {
@@ -294,13 +294,13 @@ impl HummockManager {
         let mut versioning = write_lock!(self, versioning).await;
         let new_stats = rebuild_table_stats(&versioning.current_version);
         let mut version_stats = create_trx_wrapper!(
-            self.sql_meta_store(),
+            self.meta_store_ref(),
             VarTransactionWrapper,
             VarTransaction::new(&mut versioning.version_stats)
         );
         // version_stats.hummock_version_id is always 0 in meta store.
         version_stats.table_stats = new_stats.table_stats;
-        commit_multi_var!(self.env.meta_store(), self.sql_meta_store(), version_stats)?;
+        commit_multi_var!(self.meta_store_ref(), version_stats)?;
         Ok(())
     }
 }

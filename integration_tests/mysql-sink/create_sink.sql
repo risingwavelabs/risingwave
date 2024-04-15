@@ -17,3 +17,14 @@ FROM
         type = 'upsert',
         primary_key = 'id'
     );
+
+CREATE SINK mysql_data_all_types_sink
+FROM
+    mysql_all_types WITH (
+        connector = 'jdbc',
+        jdbc.url = 'jdbc:mysql://mysql:3306/mydb?user=root&password=123456',
+        table.name = 'mysql_all_types',
+        type='append-only',
+        force_append_only = 'true',
+        primary_key = 'id'
+    );

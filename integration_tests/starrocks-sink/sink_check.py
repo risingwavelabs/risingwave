@@ -1,7 +1,7 @@
 import subprocess
 import sys
 
-relations = ['demo.demo_bhv_table', 'demo.upsert_table']
+relations = ['demo.demo_primary_table','demo.demo_duplicate_table','demo.demo_aggregate_table','demo.demo_unique_table', 'demo.upsert_table']
 
 failed_cases = []
 for rel in relations:

@@ -26,8 +26,7 @@ impl ExecutorBuilder for ExpandExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         _store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let column_subsets = node
             .column_subsets
@@ -40,6 +39,6 @@ impl ExecutorBuilder for ExpandExecutorBuilder {
                     .collect_vec()
             })
             .collect_vec();
-        Ok(ExpandExecutor::new(params.info, input, column_subsets).boxed())
+        Ok((params.info, ExpandExecutor::new(input, column_subsets)).into())
     }
 }

@@ -24,6 +24,7 @@ use risingwave_hummock_sdk::version_checkpoint_path;
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::hummock::PbHummockVersionCheckpoint;
+use thiserror_ext::AsReport;
 
 use crate::backup_restore::restore_impl::v1::{LoaderV1, WriterModelV1ToMetaStoreV1};
 use crate::backup_restore::restore_impl::v2::{LoaderV2, WriterModelV2ToMetaStoreV2};
@@ -34,7 +35,7 @@ use crate::backup_restore::utils::{get_backup_store, get_meta_store, MetaStoreBa
 #[derive(clap::Args, Debug, Clone)]
 pub struct RestoreOpts {
     /// Id of snapshot used to restore. Available snapshots can be found in
-    /// <storage_directory>/manifest.json.
+    /// <`storage_directory>/manifest.json`.
     #[clap(long)]
     pub meta_snapshot_id: u64,
     /// Type of meta store to restore.
@@ -175,13 +176,14 @@ async fn dispatch<L: Loader<S>, W: Writer<S>, S: Metadata>(
     if opts.dry_run {
         return Ok(());
     }
+    let hummock_version = target_snapshot.metadata.hummock_version_ref().clone();
+    writer.write(target_snapshot).await?;
     restore_hummock_version(
         &opts.hummock_storage_url,
         &opts.hummock_storage_directory,
-        target_snapshot.metadata.hummock_version_ref(),
+        &hummock_version,
     )
     .await?;
-    writer.write(target_snapshot).await?;
     Ok(())
 }
 
@@ -193,7 +195,7 @@ pub async fn restore(opts: RestoreOpts) -> BackupResult<()> {
             tracing::info!("command succeeded");
         }
         Err(e) => {
-            tracing::warn!("command failed: {}", e);
+            tracing::warn!(error = %e.as_report(), "command failed");
         }
     }
     result
@@ -239,9 +241,10 @@ mod tests {
 
     fn get_system_params() -> SystemParams {
         SystemParams {
-            state_store: Some("state_store".to_string()),
-            data_directory: Some("data_directory".to_string()),
-            wasm_storage_url: Some("wasm_storage_url".to_string()),
+            state_store: Some("state_store".into()),
+            data_directory: Some("data_directory".into()),
+            backup_storage_url: Some("backup_storage_url".into()),
+            backup_storage_directory: Some("backup_storage_directory".into()),
             ..SystemConfig::default().into_init_system_params()
         }
     }

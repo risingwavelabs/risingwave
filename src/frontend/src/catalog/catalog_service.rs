@@ -18,11 +18,10 @@ use anyhow::anyhow;
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId};
-use risingwave_common::error::Result;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::{
-    PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
-    PbView,
+    PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
+    PbSubscription, PbTable, PbView,
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
@@ -36,6 +35,7 @@ use tokio::sync::watch::Receiver;
 
 use super::root_catalog::Catalog;
 use super::{DatabaseId, TableId};
+use crate::error::Result;
 use crate::user::UserId;
 
 pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;
@@ -117,6 +117,12 @@ pub trait CatalogWriter: Send + Sync {
         affected_table_change: Option<PbReplaceTablePlan>,
     ) -> Result<()>;
 
+    async fn create_subscription(
+        &self,
+        subscription: PbSubscription,
+        graph: StreamFragmentGraph,
+    ) -> Result<()>;
+
     async fn create_function(&self, function: PbFunction) -> Result<()>;
 
     async fn create_connection(
@@ -150,6 +156,8 @@ pub trait CatalogWriter: Send + Sync {
         affected_table_change: Option<PbReplaceTablePlan>,
     ) -> Result<()>;
 
+    async fn drop_subscription(&self, subscription_id: u32, cascade: bool) -> Result<()>;
+
     async fn drop_database(&self, database_id: u32) -> Result<()>;
 
     async fn drop_schema(&self, schema_id: u32) -> Result<()>;
@@ -168,6 +176,12 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn alter_sink_name(&self, sink_id: u32, sink_name: &str) -> Result<()>;
 
+    async fn alter_subscription_name(
+        &self,
+        subscription_id: u32,
+        subscription_name: &str,
+    ) -> Result<()>;
+
     async fn alter_source_name(&self, source_id: u32, source_name: &str) -> Result<()>;
 
     async fn alter_schema_name(&self, schema_id: u32, schema_name: &str) -> Result<()>;
@@ -178,8 +192,12 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn alter_source_with_sr(&self, source: PbSource) -> Result<()>;
 
-    async fn alter_parallelism(&self, table_id: u32, parallelism: PbTableParallelism)
-        -> Result<()>;
+    async fn alter_parallelism(
+        &self,
+        table_id: u32,
+        parallelism: PbTableParallelism,
+        deferred: bool,
+    ) -> Result<()>;
 
     async fn alter_set_schema(
         &self,
@@ -321,6 +339,18 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
+    async fn create_subscription(
+        &self,
+        subscription: PbSubscription,
+        graph: StreamFragmentGraph,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .create_subscription(subscription, graph)
+            .await?;
+        self.wait_version(version).await
+    }
+
     async fn create_function(&self, function: PbFunction) -> Result<()> {
         let version = self.meta_client.create_function(function).await?;
         self.wait_version(version).await
@@ -396,6 +426,14 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
+    async fn drop_subscription(&self, subscription_id: u32, cascade: bool) -> Result<()> {
+        let version = self
+            .meta_client
+            .drop_subscription(subscription_id, cascade)
+            .await?;
+        self.wait_version(version).await
+    }
+
     async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<()> {
         let version = self.meta_client.drop_index(index_id, cascade).await?;
         self.wait_version(version).await
@@ -453,6 +491,21 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
+    async fn alter_subscription_name(
+        &self,
+        subscription_id: u32,
+        subscription_name: &str,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_name(
+                alter_name_request::Object::SubscriptionId(subscription_id),
+                subscription_name,
+            )
+            .await?;
+        self.wait_version(version).await
+    }
+
     async fn alter_source_name(&self, source_id: u32, source_name: &str) -> Result<()> {
         let version = self
             .meta_client
@@ -506,9 +559,10 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         table_id: u32,
         parallelism: PbTableParallelism,
+        deferred: bool,
     ) -> Result<()> {
         self.meta_client
-            .alter_parallelism(table_id, parallelism)
+            .alter_parallelism(table_id, parallelism, deferred)
             .await
             .map_err(|e| anyhow!(e))?;
 

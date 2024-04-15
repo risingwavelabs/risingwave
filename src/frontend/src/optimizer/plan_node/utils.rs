@@ -20,21 +20,24 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, Str, StrAssocArr, XmlNode};
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ConflictBehavior, Field, FieldDisplay, Schema, OBJECT_ID_PLACEHOLDER,
+    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Field, FieldDisplay, Schema,
+    OBJECT_ID_PLACEHOLDER,
+};
+use risingwave_common::constants::log_store::v2::{
+    KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, VNODE_COLUMN_INDEX,
 };
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
-use crate::catalog::table_catalog::{CreateType, TableType};
+use crate::catalog::table_catalog::TableType;
 use crate::catalog::{ColumnId, TableCatalog, TableId};
-use crate::optimizer::property::Cardinality;
-use crate::utils::WithOptions;
+use crate::optimizer::property::{Cardinality, Order, RequiredDist};
+use crate::utils::{Condition, IndexSet};
 
 #[derive(Default)]
 pub struct TableCatalogBuilder {
     /// All columns in this table
     columns: Vec<ColumnCatalog>,
     pk: Vec<ColumnOrder>,
-    properties: WithOptions,
     value_indices: Option<Vec<usize>>,
     vnode_col_idx: Option<usize>,
     column_names: HashMap<String, i32>,
@@ -46,14 +49,6 @@ pub struct TableCatalogBuilder {
 /// For DRY, mainly used for construct internal table catalog in stateful streaming executors.
 /// Be careful of the order of add column.
 impl TableCatalogBuilder {
-    // TODO: Add more fields if internal table is more configurable.
-    pub fn new(properties: WithOptions) -> Self {
-        Self {
-            properties,
-            ..Default::default()
-        }
-    }
-
     /// Add a column from Field info, return the column index of the table
     pub fn add_column(&mut self, field: &Field) -> usize {
         let column_idx = self.columns.len();
@@ -150,6 +145,7 @@ impl TableCatalogBuilder {
             id: TableId::placeholder(),
             associated_source_id: None,
             name: String::new(),
+            dependent_relations: vec![],
             columns: self.columns.clone(),
             pk: self.pk,
             stream_key: vec![],
@@ -159,7 +155,6 @@ impl TableCatalogBuilder {
             table_type: TableType::Internal,
             append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-            properties: self.properties,
             fragment_id: OBJECT_ID_PLACEHOLDER,
             dml_fragment_id: None,
             vnode_col_index: self.vnode_col_idx,
@@ -169,6 +164,7 @@ impl TableCatalogBuilder {
                 .unwrap_or_else(|| (0..self.columns.len()).collect_vec()),
             definition: "".into(),
             conflict_behavior: ConflictBehavior::NoCheck,
+            version_column_index: None,
             read_prefix_len_hint,
             version: None, // the internal table is not versioned and can't be schema changed
             watermark_columns,
@@ -184,6 +180,7 @@ impl TableCatalogBuilder {
             incoming_sinks: vec![],
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
+            retention_seconds: None,
         }
     }
 
@@ -288,6 +285,23 @@ impl<'a> IndicesDisplay<'a> {
     }
 }
 
+pub(crate) fn sum_affected_row(dml: PlanRef) -> Result<PlanRef> {
+    let dml = RequiredDist::single().enforce_if_not_satisfies(dml, &Order::any())?;
+    // Accumulate the affected rows.
+    let sum_agg = PlanAggCall {
+        agg_kind: AggKind::Sum,
+        return_type: DataType::Int64,
+        inputs: vec![InputRef::new(0, DataType::Int64)],
+        distinct: false,
+        order_by: vec![],
+        filter: Condition::true_cond(),
+        direct_args: vec![],
+    };
+    let agg = Agg::new(vec![sum_agg], IndexSet::empty(), dml);
+    let batch_agg = BatchSimpleAgg::new(agg);
+    Ok(batch_agg.into())
+}
+
 /// Call `debug_struct` on the given formatter to create a debug struct builder.
 /// If a property list is provided, properties in it will be added to the struct name according to
 /// the condition of that property.
@@ -308,6 +322,61 @@ macro_rules! plan_node_name {
     };
 }
 pub(crate) use plan_node_name;
+use risingwave_common::types::DataType;
+use risingwave_expr::aggregate::AggKind;
 
-use super::generic::{self, GenericPlanRef};
+use super::generic::{self, GenericPlanRef, PhysicalPlanRef};
 use super::pretty_config;
+use crate::error::Result;
+use crate::expr::InputRef;
+use crate::optimizer::plan_node::generic::Agg;
+use crate::optimizer::plan_node::{BatchSimpleAgg, PlanAggCall};
+use crate::PlanRef;
+
+pub fn infer_kv_log_store_table_catalog_inner(
+    input: &PlanRef,
+    columns: &[ColumnCatalog],
+) -> TableCatalog {
+    let mut table_catalog_builder = TableCatalogBuilder::default();
+
+    let mut value_indices =
+        Vec::with_capacity(KV_LOG_STORE_PREDEFINED_COLUMNS.len() + columns.len());
+
+    for (name, data_type) in KV_LOG_STORE_PREDEFINED_COLUMNS {
+        let indice = table_catalog_builder.add_column(&Field::with_name(data_type, name));
+        value_indices.push(indice);
+    }
+
+    table_catalog_builder.set_vnode_col_idx(VNODE_COLUMN_INDEX);
+
+    for (i, ordering) in PK_ORDERING.iter().enumerate() {
+        table_catalog_builder.add_order_column(i, *ordering);
+    }
+
+    let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
+
+    let payload_indices = table_catalog_builder.extend_columns(
+        &columns
+            .iter()
+            .map(|column| {
+                // make payload hidden column visible in kv log store batch query
+                let mut column = column.clone();
+                column.is_hidden = false;
+                column
+            })
+            .collect_vec(),
+    );
+
+    value_indices.extend(payload_indices);
+    table_catalog_builder.set_value_indices(value_indices);
+
+    // Modify distribution key indices based on the pre-defined columns.
+    let dist_key = input
+        .distribution()
+        .dist_column_indices()
+        .iter()
+        .map(|idx| idx + KV_LOG_STORE_PREDEFINED_COLUMNS.len())
+        .collect_vec();
+
+    table_catalog_builder.build(dist_key, read_prefix_len_hint)
+}

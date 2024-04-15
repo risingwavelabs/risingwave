@@ -12,18 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cell::RefCell;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
+use either::Either;
 use parse_display::Display;
-use risingwave_common::catalog::Field;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::TableAlias;
 
+use crate::error::{ErrorCode, Result};
+
 type LiteResult<T> = std::result::Result<T, ErrorCode>;
 
+use super::statement::RewriteExprsRecursive;
+use super::BoundSetExpr;
 use crate::binder::{BoundQuery, ShareId, COLUMN_GROUP_PREFIX};
 
 #[derive(Debug, Clone)]
@@ -56,6 +61,7 @@ pub enum Clause {
     Filter,
     From,
     GeneratedColumn,
+    Insert,
 }
 
 /// A `BindContext` that is only visible if the `LATERAL` keyword
@@ -63,6 +69,68 @@ pub enum Clause {
 pub struct LateralBindContext {
     pub is_visible: bool,
     pub context: BindContext,
+}
+
+/// For recursive CTE, we may need to store it in `cte_to_relation` first,
+/// and then bind it *step by step*.
+///
+/// note: the below sql example is to illustrate when we get the
+/// corresponding binding state when handling a recursive CTE like this.
+///
+/// ```sql
+/// WITH RECURSIVE t(n) AS (
+/// # -------------^ => Init
+///     VALUES (1)
+/// # ----------^ => BaseResolved (after binding the base term)
+///   UNION ALL
+///     SELECT n+1 FROM t WHERE n < 100
+/// # ------------------^ => Bound (we know exactly what the entire cte looks like)
+/// )
+/// SELECT sum(n) FROM t;
+/// ```
+#[derive(Default, Debug, Clone)]
+pub enum BindingCteState {
+    /// We know nothing about the CTE before resolving the body.
+    #[default]
+    Init,
+    /// We know the schema form after the base term resolved.
+    BaseResolved { schema: Schema },
+    /// We get the whole bound result of the (recursive) CTE.
+    Bound {
+        query: Either<BoundQuery, RecursiveUnion>,
+    },
+}
+
+/// the entire `RecursiveUnion` represents a *bound* recursive cte.
+/// reference: <https://github.com/risingwavelabs/risingwave/pull/15522/files#r1524367781>
+#[derive(Debug, Clone)]
+pub struct RecursiveUnion {
+    /// currently this *must* be true,
+    /// otherwise binding will fail.
+    pub all: bool,
+    /// lhs part of the `UNION ALL` operator
+    pub base: Box<BoundSetExpr>,
+    /// rhs part of the `UNION ALL` operator
+    pub recursive: Box<BoundSetExpr>,
+    /// the aligned schema for this union
+    /// will be the *same* schema as recursive's
+    /// this is just for a better readability
+    pub schema: Schema,
+}
+
+impl RewriteExprsRecursive for RecursiveUnion {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
+        // rewrite `base` and `recursive` separately
+        self.base.rewrite_exprs_recursive(rewriter);
+        self.recursive.rewrite_exprs_recursive(rewriter);
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct BindingCte {
+    pub share_id: ShareId,
+    pub state: BindingCteState,
+    pub alias: TableAlias,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -77,9 +145,9 @@ pub struct BindContext {
     pub clause: Option<Clause>,
     // The `BindContext`'s data on its column groups
     pub column_group_context: ColumnGroupContext,
-    /// Map the cte's name to its Relation::Subquery.
-    /// The `ShareId` of the value is used to help the planner identify the share plan.
-    pub cte_to_relation: HashMap<String, Rc<(ShareId, BoundQuery, TableAlias)>>,
+    /// Map the cte's name to its binding state.
+    /// The `ShareId` in `BindingCte` of the value is used to help the planner identify the share plan.
+    pub cte_to_relation: HashMap<String, Rc<RefCell<BindingCte>>>,
     /// Current lambda functions's arguments
     pub lambda_args: Option<HashMap<String, (usize, DataType)>>,
 }

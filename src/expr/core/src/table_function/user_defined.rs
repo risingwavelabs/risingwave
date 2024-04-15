@@ -14,17 +14,20 @@
 
 use std::sync::Arc;
 
+use anyhow::Context;
 use arrow_array::RecordBatch;
 use arrow_schema::{Field, Fields, Schema, SchemaRef};
-use arrow_udf_wasm::Runtime as WasmRuntime;
+use arrow_udf_js::{CallMode as JsCallMode, Runtime as JsRuntime};
+#[cfg(feature = "embedded-python-udf")]
+use arrow_udf_python::{CallMode as PythonCallMode, Runtime as PythonRuntime};
 use cfg_or_panic::cfg_or_panic;
 use futures_util::stream;
 use risingwave_common::array::{ArrayError, DataChunk, I32Array};
 use risingwave_common::bail;
-use risingwave_udf::ArrowFlightUdfClient;
 use thiserror_ext::AsReport;
 
 use super::*;
+use crate::expr::expr_udf::UdfImpl;
 
 #[derive(Debug)]
 pub struct UserDefinedTableFunction {
@@ -36,12 +39,6 @@ pub struct UserDefinedTableFunction {
     identifier: String,
     #[allow(dead_code)]
     chunk_size: usize,
-}
-
-#[derive(Debug)]
-enum UdfImpl {
-    External(Arc<ArrowFlightUdfClient>),
-    Wasm(Arc<WasmRuntime>),
 }
 
 #[async_trait::async_trait]
@@ -67,6 +64,17 @@ impl UdfImpl {
                     .call_stream(identifier, stream::once(async { input }))
                     .await?
                 {
+                    yield res?;
+                }
+            }
+            UdfImpl::JavaScript(runtime) => {
+                for res in runtime.call_table_function(identifier, &input, 1024)? {
+                    yield res?;
+                }
+            }
+            #[cfg(feature = "embedded-python-udf")]
+            UdfImpl::Python(runtime) => {
+                for res in runtime.call_table_function(identifier, &input, 1024)? {
                     yield res?;
                 }
             }
@@ -177,28 +185,58 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
             .try_collect::<_, Fields, _>()?,
     ));
 
+    let identifier = udtf.get_identifier()?;
+    let return_type = DataType::from(prost.get_return_type()?);
+
     let client = match udtf.language.as_str() {
-        "wasm" => {
-            // Use `block_in_place` as an escape hatch to run async code here in sync context.
-            // Calling `block_on` directly will panic.
-            UdfImpl::Wasm(tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(
-                    crate::expr::expr_udf::get_or_create_wasm_runtime(&udtf.link),
-                )
-            })?)
+        "wasm" | "rust" => {
+            let compressed_wasm_binary = udtf.get_compressed_binary()?;
+            let wasm_binary = zstd::stream::decode_all(compressed_wasm_binary.as_slice())
+                .context("failed to decompress wasm binary")?;
+            let runtime = crate::expr::expr_udf::get_or_create_wasm_runtime(&wasm_binary)?;
+            UdfImpl::Wasm(runtime)
+        }
+        "javascript" => {
+            let mut rt = JsRuntime::new()?;
+            let body = format!(
+                "export function* {}({}) {{ {} }}",
+                identifier,
+                udtf.arg_names.join(","),
+                udtf.get_body()?
+            );
+            rt.add_function(
+                identifier,
+                arrow_schema::DataType::try_from(&return_type)?,
+                JsCallMode::CalledOnNullInput,
+                &body,
+            )?;
+            UdfImpl::JavaScript(rt)
+        }
+        #[cfg(feature = "embedded-python-udf")]
+        "python" if udtf.body.is_some() => {
+            let mut rt = PythonRuntime::builder().sandboxed(true).build()?;
+            let body = udtf.get_body()?;
+            rt.add_function(
+                identifier,
+                arrow_schema::DataType::try_from(&return_type)?,
+                PythonCallMode::CalledOnNullInput,
+                body,
+            )?;
+            UdfImpl::Python(rt)
         }
         // connect to UDF service
-        _ => UdfImpl::External(crate::expr::expr_udf::get_or_create_flight_client(
-            &udtf.link,
-        )?),
+        _ => {
+            let link = udtf.get_link()?;
+            UdfImpl::External(crate::expr::expr_udf::get_or_create_flight_client(link)?)
+        }
     };
 
     Ok(UserDefinedTableFunction {
         children: prost.args.iter().map(expr_build_from_prost).try_collect()?,
-        return_type: prost.return_type.as_ref().expect("no return type").into(),
+        return_type,
         arg_schema,
         client,
-        identifier: udtf.identifier.clone(),
+        identifier: identifier.clone(),
         chunk_size,
     }
     .boxed())

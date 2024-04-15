@@ -14,16 +14,14 @@
 
 use std::sync::{Arc, LazyLock};
 
-use anyhow::anyhow;
 use prost_reflect::{DescriptorPool, DynamicMessage, ReflectMessage};
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::RwError;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::DataType;
+use thiserror_ext::AsReport;
 
 use super::{Access, AccessResult};
 use crate::parser::from_protobuf_value;
-use crate::parser::unified::AccessError;
+use crate::parser::unified::{uncategorized, AccessError};
 
 pub struct ProtobufAccess {
     message: DynamicMessage,
@@ -46,18 +44,16 @@ impl Access for ProtobufAccess {
             .message
             .descriptor()
             .get_field_by_name(path[0])
-            .ok_or_else(|| {
-                let err_msg = format!("protobuf schema don't have field {}", path[0]);
+            .ok_or_else(|| uncategorized!("protobuf schema don't have field {}", path[0]))
+            .inspect_err(|e| {
                 static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
                     LazyLock::new(LogSuppresser::default);
                 if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                    tracing::error!(suppressed_count, err_msg);
+                    tracing::error!(suppressed_count, "{}", e.as_report());
                 }
-                RwError::from(ProtocolError(err_msg))
-            })
-            .map_err(|e| AccessError::Other(anyhow!(e)))?;
+            })?;
         let value = self.message.get_field(&field_desc);
+
         from_protobuf_value(&field_desc, &value, &self.descriptor_pool)
-            .map_err(|e| AccessError::Other(anyhow!(e)))
     }
 }

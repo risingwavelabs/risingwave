@@ -29,6 +29,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_expr::{build_function, ExprError, Result};
+use thiserror_ext::AsReport;
 
 pub struct IcebergTransform {
     child: BoxedExpression,
@@ -93,23 +94,29 @@ fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<Bo
     let input_type = IcelakeDataType::try_from(ArrowDataType::try_from(children[1].return_type())?)
         .map_err(|err| ExprError::InvalidParam {
             name: "input type in iceberg_transform",
-            reason: format!("Failed to convert input type to icelake type, got error: {err}",)
-                .into(),
+            reason: format!(
+                "Failed to convert input type to icelake type, got error: {}",
+                err.as_report()
+            )
+            .into(),
         })?;
     let expect_res_type = transform_type.result_type(&input_type).map_err(
         |err| ExprError::InvalidParam {
             name: "input type in iceberg_transform",
             reason: format!(
                 "Failed to get result type for transform type {:?} and input type {:?}, got error: {}",
-                transform_type, input_type, err
+                transform_type, input_type, err.as_report()
             )
             .into()
         })?;
     let actual_res_type = IcelakeDataType::try_from(ArrowDataType::try_from(return_type.clone())?)
         .map_err(|err| ExprError::InvalidParam {
             name: "return type in iceberg_transform",
-            reason: format!("Failed to convert return type to icelake type, got error: {err}",)
-                .into(),
+            reason: format!(
+                "Failed to convert return type to icelake type, got error: {}",
+                err.as_report()
+            )
+            .into(),
         })?;
     ensure!(
         expect_res_type == actual_res_type,

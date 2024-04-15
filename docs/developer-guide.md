@@ -75,6 +75,7 @@ RiseDev is the development mode of RisingWave. To develop RisingWave, you need t
 * PostgreSQL (psql) (>= 14.1)
 * Tmux (>= v3.2a)
 * LLVM 16 (For macOS only, to workaround some bugs in macOS toolchain. See https://github.com/risingwavelabs/risingwave/issues/6205)
+* Python (>= 3.12) (Optional, only required by `embedded-python-udf` feature)
 
 To install the dependencies on macOS, run:
 
@@ -95,6 +96,31 @@ Then you'll be able to compile and start RiseDev!
 > [!NOTE]
 >
 > `.cargo/config.toml` contains `rustflags` configurations like `-Clink-arg` and `-Ctarget-feature`. Since it will be [merged](https://doc.rust-lang.org/cargo/reference/config.html#hierarchical-structure) with `$HOME/.cargo/config.toml`, check the config files and make sure they don't conflict if you have global `rustflags` configurations for e.g. linker there.
+
+> [!INFO]
+>
+> If you want to build RisingWave with `embedded-python-udf` feature, you need to install Python 3.12.
+>
+> To install Python 3.12 on macOS, run:
+>
+> ```shell
+> brew install python@3.12
+> ```
+>
+> To install Python 3.12 on Debian-based Linux systems, run:
+>
+> ```shell
+> sudo apt install software-properties-common
+> sudo add-apt-repository ppa:deadsnakes/ppa
+> sudo apt-get update
+> sudo apt-get install python3.12 python3.12-dev
+> ```
+>
+> If the default `python3` version is not 3.12, please set the `PYO3_PYTHON` environment variable:
+>
+> ```shell
+> export PYO3_PYTHON=python3.12
+> ```
 
 ## Start and monitor a dev cluster
 

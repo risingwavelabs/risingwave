@@ -17,9 +17,9 @@ use std::ops::Range;
 
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::BitmapBuilder;
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::aggregate::{
     AggStateDyn, AggregateFunction, AggregateState, BoxedAggregateFunction,
 };

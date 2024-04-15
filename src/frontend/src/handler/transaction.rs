@@ -13,14 +13,13 @@
 // limitations under the License.
 
 use pgwire::pg_response::StatementType;
-use pgwire::types::Row;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::error::Result;
+use risingwave_common::types::Fields;
 use risingwave_sqlparser::ast::{TransactionAccessMode, TransactionMode, Value};
 
-use super::{HandlerArgs, RwPgResponse};
+use super::{HandlerArgs, RwPgResponse, RwPgResponseBuilderExt};
+use crate::error::Result;
 use crate::session::transaction::AccessMode;
-use crate::utils::infer_stmt_row_desc::infer_show_variable;
 
 macro_rules! not_impl {
     ($body:expr) => {
@@ -36,6 +35,8 @@ pub async fn handle_begin(
 ) -> Result<RwPgResponse> {
     let HandlerArgs { session, .. } = handler_args;
 
+    let mut builder = RwPgResponse::builder(stmt_type);
+
     let access_mode = {
         let mut access_mode = None;
         for mode in modes {
@@ -43,7 +44,14 @@ pub async fn handle_begin(
                 TransactionMode::AccessMode(mode) => {
                     let _ = access_mode.replace(mode);
                 }
-                TransactionMode::IsolationLevel(_) => not_impl!("ISOLATION LEVEL"),
+                TransactionMode::IsolationLevel(_) => {
+                    // Note: This is for compatibility with some external drivers (like postgres_fdw) that
+                    // always start a transaction with an Isolation Level.
+                    const MESSAGE: &str = "\
+                        Transaction with given Isolation Level is not supported yet.\n\
+                        For compatibility, this statement will proceed with RepeatableRead.";
+                    builder = builder.notice(MESSAGE);
+                }
             }
         }
 
@@ -57,18 +65,16 @@ pub async fn handle_begin(
                 const MESSAGE: &str = "\
                     Read-write transaction is not supported yet. Please specify `READ ONLY` to start a read-only transaction.\n\
                     For compatibility, this statement will still succeed but no transaction is actually started.";
-
-                return Ok(RwPgResponse::builder(stmt_type).notice(MESSAGE).into());
+                builder = builder.notice(MESSAGE);
+                return Ok(builder.into());
             }
         }
     };
 
     session.txn_begin_explicit(access_mode);
-
-    Ok(RwPgResponse::empty_result(stmt_type))
+    Ok(builder.into())
 }
 
-#[expect(clippy::unused_async)]
 pub async fn handle_commit(
     handler_args: HandlerArgs,
     stmt_type: StatementType,
@@ -81,11 +87,11 @@ pub async fn handle_commit(
     }
 
     session.txn_commit_explicit();
+    session.drop_all_cursors().await;
 
     Ok(RwPgResponse::empty_result(stmt_type))
 }
 
-#[expect(clippy::unused_async)]
 pub async fn handle_rollback(
     handler_args: HandlerArgs,
     stmt_type: StatementType,
@@ -98,6 +104,7 @@ pub async fn handle_rollback(
     }
 
     session.txn_rollback_explicit();
+    session.drop_all_cursors().await;
 
     Ok(RwPgResponse::empty_result(stmt_type))
 }
@@ -118,16 +125,20 @@ pub async fn handle_set(
         .into())
 }
 
+#[derive(Fields)]
+#[fields(style = "Title Case")]
+struct ShowVariableRow {
+    name: String,
+}
+
 pub fn handle_show_isolation_level(handler_args: HandlerArgs) -> Result<RwPgResponse> {
     let config_reader = handler_args.session.config();
 
-    let parameter_name = "transaction_isolation";
-    let row_desc = infer_show_variable(parameter_name);
-    let rows = vec![Row::new(vec![Some(
-        config_reader.get(parameter_name)?.into(),
-    )])];
+    let rows = [ShowVariableRow {
+        name: config_reader.get("transaction_isolation")?,
+    }];
 
     Ok(RwPgResponse::builder(StatementType::SHOW_VARIABLE)
-        .values(rows.into(), row_desc)
+        .rows(rows)
         .into())
 }

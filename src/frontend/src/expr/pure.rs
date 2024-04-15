@@ -60,10 +60,13 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::Extract
             | expr_node::Type::DatePart
             | expr_node::Type::TumbleStart
-            | expr_node::Type::ToTimestamp
+            | expr_node::Type::SecToTimestamptz
             | expr_node::Type::AtTimeZone
             | expr_node::Type::DateTrunc
-            | expr_node::Type::ToTimestamp1
+            | expr_node::Type::MakeDate
+            | expr_node::Type::MakeTime
+            | expr_node::Type::MakeTimestamp
+            | expr_node::Type::CharToTimestamptz
             | expr_node::Type::CharToDate
             | expr_node::Type::CastWithTimeZone
             | expr_node::Type::AddWithTimeZone
@@ -82,12 +85,14 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::Ltrim
             | expr_node::Type::Rtrim
             | expr_node::Type::Case
+            | expr_node::Type::ConstantLookup
             | expr_node::Type::RoundDigit
             | expr_node::Type::Round
             | expr_node::Type::Ascii
             | expr_node::Type::Translate
             | expr_node::Type::Coalesce
             | expr_node::Type::ConcatWs
+            | expr_node::Type::ConcatWsVariadic
             | expr_node::Type::Abs
             | expr_node::Type::SplitPart
             | expr_node::Type::Ceil
@@ -98,6 +103,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::CharLength
             | expr_node::Type::Repeat
             | expr_node::Type::ConcatOp
+            | expr_node::Type::Concat
+            | expr_node::Type::ConcatVariadic
             | expr_node::Type::BoolOut
             | expr_node::Type::OctetLength
             | expr_node::Type::BitLength
@@ -177,7 +184,9 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::JsonbAccess
             | expr_node::Type::JsonbAccessStr
             | expr_node::Type::JsonbExtractPath
+            | expr_node::Type::JsonbExtractPathVariadic
             | expr_node::Type::JsonbExtractPathText
+            | expr_node::Type::JsonbExtractPathTextVariadic
             | expr_node::Type::JsonbTypeof
             | expr_node::Type::JsonbArrayLength
             | expr_node::Type::JsonbObject
@@ -190,7 +199,9 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::JsonbExistsAll
             | expr_node::Type::JsonbStripNulls
             | expr_node::Type::JsonbBuildArray
+            | expr_node::Type::JsonbBuildArrayVariadic
             | expr_node::Type::JsonbBuildObject
+            | expr_node::Type::JsonbBuildObjectVariadic
             | expr_node::Type::JsonbPathExists
             | expr_node::Type::JsonbPathMatch
             | expr_node::Type::JsonbPathQueryArray
@@ -215,10 +226,13 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::Sha256
             | expr_node::Type::Sha384
             | expr_node::Type::Sha512
+            | expr_node::Type::Decrypt
+            | expr_node::Type::Encrypt
             | expr_node::Type::Tand
             | expr_node::Type::ArrayPositions
             | expr_node::Type::StringToArray
             | expr_node::Type::Format
+            | expr_node::Type::FormatVariadic
             | expr_node::Type::PgwireSend
             | expr_node::Type::PgwireRecv
             | expr_node::Type::ArrayTransform
@@ -244,6 +258,10 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::PgGetIndexdef
             | expr_node::Type::ColDescription
             | expr_node::Type::PgGetViewdef
+            | expr_node::Type::PgGetUserbyid
+            | expr_node::Type::PgIndexesSize
+            | expr_node::Type::PgRelationSize
+            | expr_node::Type::PgGetSerialSequence
             | expr_node::Type::MakeTimestamptz => self.impure = true,
         }
     }

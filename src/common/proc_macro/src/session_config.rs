@@ -40,7 +40,9 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
     let mut get_match_branches = vec![];
     let mut reset_match_branches = vec![];
     let mut show_all_list = vec![];
+    let mut list_all_list = vec![];
     let mut alias_to_entry_name_branches = vec![];
+    let mut entry_name_flags = vec![];
 
     for field in fields {
         let field_ident = field.ident.expect_or_abort("Field need to be named");
@@ -136,14 +138,21 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
             quote! {}
         };
 
+        // An easy way to check if the type is bool and use a different parse function.
+        let parse = if quote!(#ty).to_string() == "bool" {
+            quote!(risingwave_common::cast::str_to_bool)
+        } else {
+            quote!(<#ty as ::std::str::FromStr>::from_str)
+        };
+
         struct_impl_set.push(quote! {
             #[doc = #set_func_doc]
             pub fn #set_func_name(
                 &mut self,
                 val: &str,
                 reporter: &mut impl ConfigReporter
-            ) -> SessionConfigResult<()> {
-                let val_t = <#ty as ::std::str::FromStr>::from_str(val).map_err(|e| {
+            ) -> SessionConfigResult<String> {
+                let val_t = #parse(val).map_err(|e| {
                     SessionConfigError::InvalidValue {
                         entry: #entry_name,
                         value: val.to_string(),
@@ -151,8 +160,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
                     }
                 })?;
 
-                self.#set_t_func_name(val_t, reporter)?;
-                Ok(())
+                self.#set_t_func_name(val_t, reporter).map(|val| val.to_string())
             }
 
             #[doc = #set_t_func_doc]
@@ -160,12 +168,12 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
                 &mut self,
                 val: #ty,
                 reporter: &mut impl ConfigReporter
-            ) -> SessionConfigResult<()> {
+            ) -> SessionConfigResult<#ty> {
                 #check_hook
                 #report_hook
 
-                self.#field_ident = val;
-                Ok(())
+                self.#field_ident = val.clone();
+                Ok(val)
             }
 
         });
@@ -174,10 +182,11 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
         struct_impl_reset.push(quote! {
 
         #[allow(clippy::useless_conversion)]
-        pub fn #reset_func_name(&mut self, reporter: &mut impl ConfigReporter) {
+        pub fn #reset_func_name(&mut self, reporter: &mut impl ConfigReporter) -> String {
                 let val = #default;
                 #report_hook
                 self.#field_ident = val.into();
+                self.#field_ident.to_string()
             }
         });
 
@@ -217,20 +226,42 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
             #entry_name => Ok(self.#reset_func_name(reporter)),
         });
 
-        if !flags.contains(&"NO_SHOW_ALL") {
-            show_all_list.push(quote! {
-                VariableInfo {
-                    name: #entry_name.to_string(),
-                    setting: self.#field_ident.to_string(),
-                    description : #description.to_string(),
-                },
+        let var_info = quote! {
+            VariableInfo {
+                name: #entry_name.to_string(),
+                setting: self.#field_ident.to_string(),
+                description : #description.to_string(),
+            },
+        };
+        list_all_list.push(var_info.clone());
 
-            });
+        let no_show_all = flags.contains(&"NO_SHOW_ALL");
+        let no_show_all_flag: TokenStream = no_show_all.to_string().parse().unwrap();
+        if !no_show_all {
+            show_all_list.push(var_info);
         }
+
+        let no_alter_sys_flag: TokenStream =
+            flags.contains(&"NO_ALTER_SYS").to_string().parse().unwrap();
+
+        entry_name_flags.push(
+            quote! {
+                (#entry_name, ParamFlags {no_show_all: #no_show_all_flag, no_alter_sys: #no_alter_sys_flag})
+            }
+        );
     }
 
     let struct_ident = input.ident;
     quote! {
+        use std::collections::HashMap;
+        use std::sync::LazyLock;
+        static PARAM_NAME_FLAGS: LazyLock<HashMap<&'static str, ParamFlags>> = LazyLock::new(|| HashMap::from([#(#entry_name_flags, )*]));
+
+        struct ParamFlags {
+            no_show_all: bool,
+            no_alter_sys: bool,
+        }
+
         impl Default for #struct_ident {
             #[allow(clippy::useless_conversion)]
             fn default() -> Self {
@@ -245,11 +276,11 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
                 Default::default()
             }
 
-            fn alias_to_entry_name(key_name: &str) -> &str {
+            pub fn alias_to_entry_name(key_name: &str) -> String {
                 match key_name {
                     #(#alias_to_entry_name_branches)*
                     _ => key_name,
-                }
+                }.to_ascii_lowercase()
             }
 
             #(#struct_impl_get)*
@@ -259,9 +290,9 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
             #(#struct_impl_reset)*
 
             /// Set a parameter given it's name and value string.
-            pub fn set(&mut self, key_name: &str, value: String, reporter: &mut impl ConfigReporter) -> SessionConfigResult<()> {
+            pub fn set(&mut self, key_name: &str, value: String, reporter: &mut impl ConfigReporter) -> SessionConfigResult<String> {
                 let key_name = Self::alias_to_entry_name(key_name);
-                match key_name.to_ascii_lowercase().as_ref() {
+                match key_name.as_ref() {
                     #(#set_match_branches)*
                     _ => Err(SessionConfigError::UnrecognizedEntry(key_name.to_string())),
                 }
@@ -270,26 +301,46 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
             /// Get a parameter by it's name.
             pub fn get(&self, key_name: &str) -> SessionConfigResult<String> {
                 let key_name = Self::alias_to_entry_name(key_name);
-                match key_name.to_ascii_lowercase().as_ref() {
+                match key_name.as_ref() {
                     #(#get_match_branches)*
                     _ => Err(SessionConfigError::UnrecognizedEntry(key_name.to_string())),
                 }
             }
 
             /// Reset a parameter by it's name.
-            pub fn reset(&mut self, key_name: &str, reporter: &mut impl ConfigReporter) -> SessionConfigResult<()> {
+            pub fn reset(&mut self, key_name: &str, reporter: &mut impl ConfigReporter) -> SessionConfigResult<String> {
                 let key_name = Self::alias_to_entry_name(key_name);
-                match key_name.to_ascii_lowercase().as_ref() {
+                match key_name.as_ref() {
                     #(#reset_match_branches)*
                     _ => Err(SessionConfigError::UnrecognizedEntry(key_name.to_string())),
                 }
             }
 
-            /// Show all parameters.
+            /// Show all parameters except those specified `NO_SHOW_ALL`.
             pub fn show_all(&self) -> Vec<VariableInfo> {
                 vec![
                     #(#show_all_list)*
                 ]
+            }
+
+            /// List all parameters
+            pub fn list_all(&self) -> Vec<VariableInfo> {
+                vec![
+                    #(#list_all_list)*
+                ]
+            }
+
+            /// Check if `SessionConfig` has a parameter.
+            pub fn contains_param(key_name: &str) -> bool {
+                let key_name = Self::alias_to_entry_name(key_name);
+                PARAM_NAME_FLAGS.contains_key(key_name.as_str())
+            }
+
+            /// Check if `SessionConfig` has a parameter.
+            pub fn check_no_alter_sys(key_name: &str) -> SessionConfigResult<bool> {
+                let key_name = Self::alias_to_entry_name(key_name);
+                let flags = PARAM_NAME_FLAGS.get(key_name.as_str()).ok_or_else(|| SessionConfigError::UnrecognizedEntry(key_name.to_string()))?;
+                Ok(flags.no_alter_sys)
             }
         }
     }

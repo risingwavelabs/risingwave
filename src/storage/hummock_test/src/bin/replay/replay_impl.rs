@@ -33,28 +33,28 @@ use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
 use risingwave_storage::hummock::store::LocalHummockStorage;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::store::{
-    LocalStateStore, StateStoreIterItemStream, StateStoreRead, SyncResult,
+    to_owned_item, LocalStateStore, StateStoreIterExt, StateStoreRead, SyncResult,
 };
-use risingwave_storage::{StateStore, StateStoreReadIterStream};
+use risingwave_storage::{StateStore, StateStoreIter, StateStoreReadIter};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 pub(crate) struct GlobalReplayIter<S>
 where
-    S: StateStoreReadIterStream,
+    S: StateStoreReadIter,
 {
     inner: S,
 }
 
 impl<S> GlobalReplayIter<S>
 where
-    S: StateStoreReadIterStream,
+    S: StateStoreReadIter,
 {
     pub(crate) fn new(inner: S) -> Self {
         Self { inner }
     }
 
     pub(crate) fn into_stream(self) -> impl Stream<Item = Result<ReplayItem>> {
-        self.inner.map(|item_res| {
+        self.inner.into_stream(to_owned_item).map(|item_res| {
             item_res
                 .map(|(key, value)| (key.user_key.table_key.0.into(), value.into()))
                 .map_err(|_| TraceError::IterFailed("iter failed to retrieve item".to_string()))
@@ -67,8 +67,9 @@ pub(crate) struct LocalReplayIter {
 }
 
 impl LocalReplayIter {
-    pub(crate) async fn new(stream: impl StateStoreIterItemStream) -> Self {
-        let inner = stream
+    pub(crate) async fn new(iter: impl StateStoreIter) -> Self {
+        let inner = iter
+            .into_stream(to_owned_item)
             .map_ok(|value| (value.0.user_key.table_key.0.into(), value.1.into()))
             .try_collect::<Vec<_>>()
             .await
@@ -115,7 +116,6 @@ impl ReplayRead for GlobalReplayImpl {
             .iter(key_range, epoch, read_options.into())
             .await
             .unwrap();
-        let iter = iter.boxed();
         let stream = GlobalReplayIter::new(iter).into_stream().boxed();
         Ok(stream)
     }
@@ -186,12 +186,8 @@ impl ReplayStateStore for GlobalReplayImpl {
         Ok(())
     }
 
-    async fn clear_shared_buffer(&self) -> Result<()> {
-        self.store
-            .clear_shared_buffer()
-            .await
-            .map_err(|_| TraceError::ClearSharedBufferFailed)?;
-        Ok(())
+    async fn clear_shared_buffer(&self, prev_epoch: u64) {
+        self.store.clear_shared_buffer(prev_epoch).await
     }
 }
 pub(crate) struct LocalReplayImpl(LocalHummockStorage);
@@ -213,22 +209,19 @@ impl LocalReplay for LocalReplayImpl {
         self.0.epoch()
     }
 
-    async fn flush(
-        &mut self,
-        delete_ranges: Vec<(Bound<TracedBytes>, Bound<TracedBytes>)>,
-    ) -> Result<usize> {
-        let delete_ranges = delete_ranges
-            .into_iter()
-            .map(|(start, end)| (start.map(TracedBytes::into), end.map(TracedBytes::into)))
-            .collect();
-        self.0
-            .flush(delete_ranges)
-            .await
-            .map_err(|_| TraceError::FlushFailed)
+    async fn flush(&mut self) -> Result<usize> {
+        self.0.flush().await.map_err(|_| TraceError::FlushFailed)
     }
 
     fn is_dirty(&self) -> bool {
         self.0.is_dirty()
+    }
+
+    async fn try_flush(&mut self) -> Result<()> {
+        self.0
+            .try_flush()
+            .await
+            .map_err(|_| TraceError::TryFlushFailed)
     }
 }
 
@@ -248,7 +241,6 @@ impl LocalReplayRead for LocalReplayImpl {
             .await
             .unwrap();
 
-        let iter = iter.boxed();
         let stream = LocalReplayIter::new(iter).await.into_stream().boxed();
         Ok(stream)
     }

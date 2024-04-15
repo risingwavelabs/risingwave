@@ -50,8 +50,7 @@ impl StreamDedup {
 
     pub fn infer_internal_table_catalog(&self) -> TableCatalog {
         let schema = self.core.schema();
-        let mut builder =
-            TableCatalogBuilder::new(self.base.ctx().with_options().internal_table_subset());
+        let mut builder = TableCatalogBuilder::default();
 
         schema.fields().iter().for_each(|field| {
             builder.add_column(field);

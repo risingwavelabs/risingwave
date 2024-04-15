@@ -23,6 +23,42 @@ use super::*;
 impl FunctionAttr {
     /// Expands the wildcard in function arguments or return type.
     pub fn expand(&self) -> Vec<Self> {
+        // handle variadic argument
+        if self
+            .args
+            .last()
+            .is_some_and(|arg| arg.starts_with("variadic"))
+        {
+            // expand:  foo(a, b, variadic anyarray)
+            // to:      foo(a, b, ...)
+            //        + foo_variadic(a, b, anyarray)
+            let mut attrs = Vec::new();
+            attrs.extend(
+                FunctionAttr {
+                    args: {
+                        let mut args = self.args.clone();
+                        *args.last_mut().unwrap() = "...".to_string();
+                        args
+                    },
+                    ..self.clone()
+                }
+                .expand(),
+            );
+            attrs.extend(
+                FunctionAttr {
+                    name: format!("{}_variadic", self.name),
+                    args: {
+                        let mut args = self.args.clone();
+                        let last = args.last_mut().unwrap();
+                        *last = last.strip_prefix("variadic ").unwrap().into();
+                        args
+                    },
+                    ..self.clone()
+                }
+                .expand(),
+            );
+            return attrs;
+        }
         let args = self.args.iter().map(|ty| types::expand_type_wildcard(ty));
         let ret = types::expand_type_wildcard(&self.ret);
         // multi_cartesian_product should emit an empty set if the input is empty.
@@ -126,12 +162,12 @@ impl FunctionAttr {
         let deprecated = self.deprecated;
 
         Ok(quote! {
-            #[risingwave_expr::codegen::ctor]
-            fn #ctor_name() {
+            #[risingwave_expr::codegen::linkme::distributed_slice(risingwave_expr::sig::FUNCTIONS)]
+            fn #ctor_name() -> risingwave_expr::sig::FuncSign {
                 use risingwave_common::types::{DataType, DataTypeName};
-                use risingwave_expr::sig::{_register, FuncSign, SigDataType, FuncBuilder};
+                use risingwave_expr::sig::{FuncSign, SigDataType, FuncBuilder};
 
-                unsafe { _register(FuncSign {
+                FuncSign {
                     name: risingwave_pb::expr::expr_node::Type::#pb_type.into(),
                     inputs_type: vec![#(#args),*],
                     variadic: #variadic,
@@ -139,7 +175,7 @@ impl FunctionAttr {
                     build: FuncBuilder::Scalar(#build_fn),
                     type_infer: #type_infer_fn,
                     deprecated: #deprecated,
-                }) };
+                }
             }
         })
     }
@@ -314,8 +350,8 @@ impl FunctionAttr {
         // inputs: [ Option<impl ScalarRef> ]
         let mut output = quote! { #fn_name #generic(
             #(#non_prebuilt_inputs,)*
-            #prebuilt_arg
             #variadic_args
+            #prebuilt_arg
             #context
             #writer
         ) #await_ };
@@ -341,10 +377,28 @@ impl FunctionAttr {
         };
         // if user function accepts non-option arguments, we assume the function
         // returns null on null input, so we need to unwrap the inputs before calling.
-        if !user_fn.arg_option {
+        if self.prebuild.is_some() {
             output = quote! {
                 match (#(#inputs,)*) {
                     (#(Some(#inputs),)*) => #output,
+                    _ => None,
+                }
+            };
+        } else {
+            #[allow(clippy::disallowed_methods)] // allow zip
+            let some_inputs = inputs
+                .iter()
+                .zip(user_fn.args_option.iter())
+                .map(|(input, opt)| {
+                    if *opt {
+                        quote! { #input }
+                    } else {
+                        quote! { Some(#input) }
+                    }
+                });
+            output = quote! {
+                match (#(#inputs,)*) {
+                    (#(#some_inputs,)*) => #output,
                     _ => None,
                 }
             };
@@ -483,6 +537,7 @@ impl FunctionAttr {
                 let context = Context {
                     return_type,
                     arg_types: children.iter().map(|c| c.return_type()).collect(),
+                    variadic: #variadic,
                 };
 
                 #[derive(Debug)]
@@ -597,12 +652,12 @@ impl FunctionAttr {
         let deprecated = self.deprecated;
 
         Ok(quote! {
-            #[risingwave_expr::codegen::ctor]
-            fn #ctor_name() {
+            #[risingwave_expr::codegen::linkme::distributed_slice(risingwave_expr::sig::FUNCTIONS)]
+            fn #ctor_name() -> risingwave_expr::sig::FuncSign {
                 use risingwave_common::types::{DataType, DataTypeName};
-                use risingwave_expr::sig::{_register, FuncSign, SigDataType, FuncBuilder};
+                use risingwave_expr::sig::{FuncSign, SigDataType, FuncBuilder};
 
-                unsafe { _register(FuncSign {
+                FuncSign {
                     name: risingwave_expr::aggregate::AggKind::#pb_type.into(),
                     inputs_type: vec![#(#args),*],
                     variadic: false,
@@ -615,7 +670,7 @@ impl FunctionAttr {
                     },
                     type_infer: #type_infer_fn,
                     deprecated: #deprecated,
-                }) };
+                }
             }
         })
     }
@@ -728,7 +783,7 @@ impl FunctionAttr {
             ReturnTypeKind::Result => quote! { Some(#next_state?) },
             ReturnTypeKind::ResultOption => quote! { #next_state? },
         };
-        if !user_fn.accumulate().arg_option {
+        if user_fn.accumulate().args_option.iter().all(|b| !b) {
             match self.args.len() {
                 0 => {
                     next_state = quote! {
@@ -823,7 +878,7 @@ impl FunctionAttr {
                 use risingwave_common::types::*;
                 use risingwave_common::bail;
                 use risingwave_common::buffer::Bitmap;
-                use risingwave_common::estimate_size::EstimateSize;
+                use risingwave_common_estimate_size::EstimateSize;
 
                 use risingwave_expr::expr::Context;
                 use risingwave_expr::Result;
@@ -833,6 +888,7 @@ impl FunctionAttr {
                 let context = Context {
                     return_type: agg.return_type.clone(),
                     arg_types: agg.args.arg_types().to_owned(),
+                    variadic: false,
                 };
 
                 struct Agg {
@@ -928,12 +984,12 @@ impl FunctionAttr {
         let deprecated = self.deprecated;
 
         Ok(quote! {
-            #[risingwave_expr::codegen::ctor]
-            fn #ctor_name() {
+            #[risingwave_expr::codegen::linkme::distributed_slice(risingwave_expr::sig::FUNCTIONS)]
+            fn #ctor_name() -> risingwave_expr::sig::FuncSign {
                 use risingwave_common::types::{DataType, DataTypeName};
-                use risingwave_expr::sig::{_register, FuncSign, SigDataType, FuncBuilder};
+                use risingwave_expr::sig::{FuncSign, SigDataType, FuncBuilder};
 
-                unsafe { _register(FuncSign {
+                FuncSign {
                     name: risingwave_pb::expr::table_function::Type::#pb_type.into(),
                     inputs_type: vec![#(#args),*],
                     variadic: false,
@@ -941,7 +997,7 @@ impl FunctionAttr {
                     build: FuncBuilder::Table(#build_fn),
                     type_infer: #type_infer_fn,
                     deprecated: #deprecated,
-                }) };
+                }
             }
         })
     }

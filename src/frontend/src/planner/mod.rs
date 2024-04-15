@@ -14,9 +14,8 @@
 
 use std::collections::HashMap;
 
-use risingwave_common::error::Result;
-
 use crate::binder::{BoundStatement, ShareId};
+use crate::error::Result;
 use crate::optimizer::{OptimizerContextRef, PlanRoot};
 
 mod delete;

@@ -19,12 +19,12 @@ use std::sync::Arc;
 use bytes::Bytes;
 use pgwire::types::Format;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{CreateSink, Query, Statement};
 
 use super::query::BoundResult;
 use super::{handle, query, HandlerArgs, RwPgResponse};
+use crate::error::Result;
 use crate::session::SessionImpl;
 
 /// Except for Query,Insert,Delete,Update statement, we store other statement as `PureStatement`.

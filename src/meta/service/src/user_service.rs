@@ -151,6 +151,7 @@ impl UserService for UserServiceImpl {
                 let id = self
                     .env
                     .id_gen_manager()
+                    .as_kv()
                     .generate::<{ IdCategory::User }>()
                     .await? as u32;
                 let mut user = req.get_user()?.clone();
@@ -274,7 +275,7 @@ impl UserService for UserServiceImpl {
                     .revoke_privilege(
                         user_ids,
                         &privileges,
-                        Some(req.granted_by as _),
+                        req.granted_by as _,
                         req.revoke_by as _,
                         req.revoke_grant_option,
                         req.cascade,

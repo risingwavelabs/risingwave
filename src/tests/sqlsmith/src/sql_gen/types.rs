@@ -267,9 +267,7 @@ pub(crate) static BINARY_INEQUALITY_OP_TABLE: LazyLock<
         .filter_map(|func| {
             let lhs = func.inputs_type[0].as_exact().clone();
             let rhs = func.inputs_type[1].as_exact().clone();
-            let Some(op) = expr_type_to_inequality_op(func.name.as_scalar()) else {
-                return None;
-            };
+            let op = expr_type_to_inequality_op(func.name.as_scalar())?;
             Some(((lhs, rhs), op))
         })
         .for_each(|(args, op)| funcs.entry(args).or_default().push(op));

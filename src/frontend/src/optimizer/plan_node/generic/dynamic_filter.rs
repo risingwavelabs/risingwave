@@ -157,8 +157,7 @@ pub fn infer_left_internal_table_catalog(
         }
     }
 
-    let mut internal_table_catalog_builder =
-        TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
+    let mut internal_table_catalog_builder = TableCatalogBuilder::default();
 
     schema.fields().iter().for_each(|field| {
         internal_table_catalog_builder.add_column(field);
@@ -180,8 +179,7 @@ pub fn infer_right_internal_table_catalog(input: impl stream::StreamPlanRef) -> 
         Vec::<usize>::new()
     );
 
-    let mut internal_table_catalog_builder =
-        TableCatalogBuilder::new(input.ctx().with_options().internal_table_subset());
+    let mut internal_table_catalog_builder = TableCatalogBuilder::default();
 
     schema.fields().iter().for_each(|field| {
         internal_table_catalog_builder.add_column(field);

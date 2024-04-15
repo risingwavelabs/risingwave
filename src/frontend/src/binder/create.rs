@@ -14,8 +14,8 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, Field};
-use risingwave_common::error::Result;
 
+use crate::error::Result;
 use crate::Binder;
 
 impl Binder {

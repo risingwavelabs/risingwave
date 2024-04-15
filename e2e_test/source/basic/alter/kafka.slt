@@ -57,6 +57,10 @@ alter source s1 add column v2 varchar;
 statement ok
 alter source s2 add column v4 int;
 
+# alter table with conn
+statement error try to use ALTER TABLE instead
+alter source t add column v0 int;
+
 statement ok
 create materialized view mv3 as select * from s1;
 

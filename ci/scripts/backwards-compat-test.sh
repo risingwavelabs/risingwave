@@ -37,6 +37,8 @@ source backwards-compat-tests/scripts/utils.sh
 ################################### Main
 
 configure_rw() {
+VERSION="$1"
+
 echo "--- Setting up cluster config"
 cat <<EOF > risedev-profiles.user.yml
 full-without-monitoring:
@@ -61,12 +63,14 @@ ENABLE_KAFKA=true
 # Fetch risingwave binary from release.
 ENABLE_BUILD_RUST=false
 
-# Ensure it will link the all-in-one binary from our release.
-ENABLE_ALL_IN_ONE=true
-
 # Use target/debug for simplicity.
 ENABLE_RELEASE_PROFILE=false
 EOF
+
+# See https://github.com/risingwavelabs/risingwave/pull/15448
+if version_le "${VERSION:-}" "1.8.0" ; then
+  echo "ENABLE_ALL_IN_ONE=true" >> risedev-components.user.env
+fi
 }
 
 configure_rw_build() {
@@ -94,9 +98,6 @@ ENABLE_KAFKA=true
 # Make sure that it builds
 ENABLE_BUILD_RUST=true
 
-# Ensure it will link the all-in-one binary from our release.
-ENABLE_ALL_IN_ONE=true
-
 # Use target/debug for simplicity.
 ENABLE_RELEASE_PROFILE=false
 EOF
@@ -110,26 +111,26 @@ setup_old_cluster() {
   echo "--- Get RisingWave binary for $OLD_VERSION"
   OLD_URL=https://github.com/risingwavelabs/risingwave/releases/download/v${OLD_VERSION}/risingwave-v${OLD_VERSION}-x86_64-unknown-linux.tar.gz
   set +e
-  wget $OLD_URL
+  wget "$OLD_URL"
   if [[ "$?" -ne 0 ]]; then
     set -e
-    echo "Failed to download ${OLD_VERSION} from github releases, build from source later during ./risedev d"
+    echo "Failed to download ${OLD_VERSION} from github releases, build from source later during \`risedev d\`"
     configure_rw_build
   else
     set -e
-    tar -xvf risingwave-v${OLD_VERSION}-x86_64-unknown-linux.tar.gz
+    tar -xvf risingwave-v"${OLD_VERSION}"-x86_64-unknown-linux.tar.gz
     mv risingwave target/debug/risingwave
 
     echo "--- Start cluster on tag $OLD_VERSION"
     git config --global --add safe.directory /risingwave
-    configure_rw
+    configure_rw "$OLD_VERSION"
   fi
 }
 
 setup_new_cluster() {
   echo "--- Setup Risingwave @ $RW_COMMIT"
   git checkout -
-  download_and_prepare_rw $profile common
+  download_and_prepare_rw "$profile" common
   # Make sure we always start w/o old config
   rm -r .risingwave/config
 }
@@ -144,7 +145,10 @@ main() {
   seed_old_cluster "$OLD_VERSION"
 
   setup_new_cluster
-  configure_rw
+  # Assume we use the latest version, so we just set to some large number.
+  # The current $NEW_VERSION as of this change is 1.7.0, so we can't use that.
+  # See: https://github.com/risingwavelabs/risingwave/pull/15448
+  configure_rw "99.99.99"
   validate_new_cluster "$NEW_VERSION"
 }
 

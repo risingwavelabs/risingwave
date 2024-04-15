@@ -17,11 +17,14 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use parking_lot::RwLock;
-use risingwave_common::error::Result;
-use risingwave_common::session_config::{ConfigMap, SearchPath};
+use risingwave_common::session_config::{SearchPath, SessionConfig};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::ast::{
+    Expr as AstExpr, FunctionArg, FunctionArgExpr, SelectItem, SetExpr, Statement,
+};
+
+use crate::error::Result;
 
 mod bind_context;
 mod bind_param;
@@ -49,7 +52,6 @@ pub use relation::{
     BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
     BoundWindowTableFunction, Relation, ResolveQualifiedNameError, WindowTableFunctionKind,
 };
-use risingwave_common::error::ErrorCode;
 pub use select::{BoundDistinct, BoundSelect};
 pub use set_expr::*;
 pub use statement::BoundStatement;
@@ -57,8 +59,10 @@ pub use update::BoundUpdate;
 pub use values::BoundValues;
 
 use crate::catalog::catalog_service::CatalogReadGuard;
+use crate::catalog::function_catalog::FunctionCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogResult, TableId, ViewId};
+use crate::error::ErrorCode;
 use crate::expr::ExprImpl;
 use crate::session::{AuthContext, SessionImpl};
 
@@ -103,7 +107,7 @@ pub struct Binder {
     /// and so on.
     next_share_id: ShareId,
 
-    session_config: Arc<RwLock<ConfigMap>>,
+    session_config: Arc<RwLock<SessionConfig>>,
 
     search_path: SearchPath,
     /// The type of binding statement.
@@ -148,6 +152,10 @@ impl UdfContext {
         self.udf_global_counter += 1;
     }
 
+    pub fn decr_global_count(&mut self) {
+        self.udf_global_counter -= 1;
+    }
+
     pub fn _is_empty(&self) -> bool {
         self.udf_param_context.is_empty()
     }
@@ -167,6 +175,84 @@ impl UdfContext {
 
     pub fn get_context(&self) -> HashMap<String, ExprImpl> {
         self.udf_param_context.clone()
+    }
+
+    /// A common utility function to extract sql udf
+    /// expression out from the input `ast`
+    pub fn extract_udf_expression(ast: Vec<Statement>) -> Result<AstExpr> {
+        if ast.len() != 1 {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "the query for sql udf should contain only one statement".to_string(),
+            )
+            .into());
+        }
+
+        // Extract the expression out
+        let Statement::Query(query) = ast[0].clone() else {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "invalid function definition, please recheck the syntax".to_string(),
+            )
+            .into());
+        };
+
+        let SetExpr::Select(select) = query.body else {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "missing `select` body for sql udf expression, please recheck the syntax"
+                    .to_string(),
+            )
+            .into());
+        };
+
+        if select.projection.len() != 1 {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "`projection` should contain only one `SelectItem`".to_string(),
+            )
+            .into());
+        }
+
+        let SelectItem::UnnamedExpr(expr) = select.projection[0].clone() else {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "expect `UnnamedExpr` for `projection`".to_string(),
+            )
+            .into());
+        };
+
+        Ok(expr)
+    }
+
+    /// Create the sql udf context
+    /// used per `bind_function` for sql udf & semantic check at definition time
+    pub fn create_udf_context(
+        args: &[FunctionArg],
+        catalog: &Arc<FunctionCatalog>,
+    ) -> Result<HashMap<String, AstExpr>> {
+        let mut ret: HashMap<String, AstExpr> = HashMap::new();
+        for (i, current_arg) in args.iter().enumerate() {
+            match current_arg {
+                FunctionArg::Unnamed(arg) => {
+                    let FunctionArgExpr::Expr(e) = arg else {
+                        return Err(ErrorCode::InvalidInputSyntax(
+                            "expect `FunctionArgExpr` for unnamed argument".to_string(),
+                        )
+                        .into());
+                    };
+                    if catalog.arg_names[i].is_empty() {
+                        ret.insert(format!("${}", i + 1), e.clone());
+                    } else {
+                        // The index mapping here is accurate
+                        // So that we could directly use the index
+                        ret.insert(catalog.arg_names[i].clone(), e.clone());
+                    }
+                }
+                _ => {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "expect unnamed argument when creating sql udf context".to_string(),
+                    )
+                    .into())
+                }
+            }
+        }
+        Ok(ret)
     }
 }
 
@@ -336,7 +422,9 @@ impl Binder {
 
     fn push_context(&mut self) {
         let new_context = std::mem::take(&mut self.context);
-        self.context.cte_to_relation = new_context.cte_to_relation.clone();
+        self.context
+            .cte_to_relation
+            .clone_from(&new_context.cte_to_relation);
         let new_lateral_contexts = std::mem::take(&mut self.lateral_contexts);
         self.upper_subquery_contexts
             .push((new_context, new_lateral_contexts));
@@ -354,7 +442,9 @@ impl Binder {
 
     fn push_lateral_context(&mut self) {
         let new_context = std::mem::take(&mut self.context);
-        self.context.cte_to_relation = new_context.cte_to_relation.clone();
+        self.context
+            .cte_to_relation
+            .clone_from(&new_context.cte_to_relation);
         self.lateral_contexts.push(LateralBindContext {
             is_visible: false,
             context: new_context,
@@ -415,6 +505,10 @@ impl Binder {
     pub fn set_clause(&mut self, clause: Option<Clause>) {
         self.context.clause = clause;
     }
+
+    pub fn udf_context_mut(&mut self) -> &mut UdfContext {
+        &mut self.udf_context
+    }
 }
 
 /// The column name stored in [`BindContext`] for a column without an alias.
@@ -439,5 +533,194 @@ pub mod test_utils {
     #[cfg(test)]
     pub fn mock_binder_with_param_types(param_types: Vec<Option<DataType>>) -> Binder {
         Binder::new_with_param_types(&SessionImpl::mock(), param_types)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use expect_test::expect;
+
+    use super::test_utils::*;
+
+    #[tokio::test]
+    async fn test_rcte() {
+        let stmt = risingwave_sqlparser::parser::Parser::parse_sql(
+            "WITH RECURSIVE t1 AS (SELECT 1 AS a UNION ALL SELECT a + 1 FROM t1 WHERE a < 10) SELECT * FROM t1",
+        ).unwrap().into_iter().next().unwrap();
+        let mut binder = mock_binder();
+        let bound = binder.bind(stmt).unwrap();
+
+        let expected = expect![[r#"
+            Query(
+                BoundQuery {
+                    body: Select(
+                        BoundSelect {
+                            distinct: All,
+                            select_items: [
+                                InputRef(
+                                    InputRef {
+                                        index: 0,
+                                        data_type: Int32,
+                                    },
+                                ),
+                            ],
+                            aliases: [
+                                Some(
+                                    "a",
+                                ),
+                            ],
+                            from: Some(
+                                Share(
+                                    BoundShare {
+                                        share_id: 0,
+                                        input: Right(
+                                            RecursiveUnion {
+                                                all: true,
+                                                base: Select(
+                                                    BoundSelect {
+                                                        distinct: All,
+                                                        select_items: [
+                                                            Literal(
+                                                                Literal {
+                                                                    data: Some(
+                                                                        Int32(
+                                                                            1,
+                                                                        ),
+                                                                    ),
+                                                                    data_type: Some(
+                                                                        Int32,
+                                                                    ),
+                                                                },
+                                                            ),
+                                                        ],
+                                                        aliases: [
+                                                            Some(
+                                                                "a",
+                                                            ),
+                                                        ],
+                                                        from: None,
+                                                        where_clause: None,
+                                                        group_by: GroupKey(
+                                                            [],
+                                                        ),
+                                                        having: None,
+                                                        schema: Schema {
+                                                            fields: [
+                                                                a:Int32,
+                                                            ],
+                                                        },
+                                                    },
+                                                ),
+                                                recursive: Select(
+                                                    BoundSelect {
+                                                        distinct: All,
+                                                        select_items: [
+                                                            FunctionCall(
+                                                                FunctionCall {
+                                                                    func_type: Add,
+                                                                    return_type: Int32,
+                                                                    inputs: [
+                                                                        InputRef(
+                                                                            InputRef {
+                                                                                index: 0,
+                                                                                data_type: Int32,
+                                                                            },
+                                                                        ),
+                                                                        Literal(
+                                                                            Literal {
+                                                                                data: Some(
+                                                                                    Int32(
+                                                                                        1,
+                                                                                    ),
+                                                                                ),
+                                                                                data_type: Some(
+                                                                                    Int32,
+                                                                                ),
+                                                                            },
+                                                                        ),
+                                                                    ],
+                                                                },
+                                                            ),
+                                                        ],
+                                                        aliases: [
+                                                            None,
+                                                        ],
+                                                        from: Some(
+                                                            BackCteRef(
+                                                                BoundBackCteRef {
+                                                                    share_id: 0,
+                                                                },
+                                                            ),
+                                                        ),
+                                                        where_clause: Some(
+                                                            FunctionCall(
+                                                                FunctionCall {
+                                                                    func_type: LessThan,
+                                                                    return_type: Boolean,
+                                                                    inputs: [
+                                                                        InputRef(
+                                                                            InputRef {
+                                                                                index: 0,
+                                                                                data_type: Int32,
+                                                                            },
+                                                                        ),
+                                                                        Literal(
+                                                                            Literal {
+                                                                                data: Some(
+                                                                                    Int32(
+                                                                                        10,
+                                                                                    ),
+                                                                                ),
+                                                                                data_type: Some(
+                                                                                    Int32,
+                                                                                ),
+                                                                            },
+                                                                        ),
+                                                                    ],
+                                                                },
+                                                            ),
+                                                        ),
+                                                        group_by: GroupKey(
+                                                            [],
+                                                        ),
+                                                        having: None,
+                                                        schema: Schema {
+                                                            fields: [
+                                                                ?column?:Int32,
+                                                            ],
+                                                        },
+                                                    },
+                                                ),
+                                                schema: Schema {
+                                                    fields: [
+                                                        a:Int32,
+                                                    ],
+                                                },
+                                            },
+                                        ),
+                                    },
+                                ),
+                            ),
+                            where_clause: None,
+                            group_by: GroupKey(
+                                [],
+                            ),
+                            having: None,
+                            schema: Schema {
+                                fields: [
+                                    a:Int32,
+                                ],
+                            },
+                        },
+                    ),
+                    order: [],
+                    limit: None,
+                    offset: None,
+                    with_ties: false,
+                    extra_order_exprs: [],
+                },
+            )"#]];
+
+        expected.assert_eq(&format!("{:#?}", bound));
     }
 }

@@ -665,31 +665,25 @@ pub struct LruCache<K: LruKey, T: LruValue> {
 const DEFAULT_OBJECT_POOL_SIZE: usize = 1024;
 
 impl<K: LruKey, T: LruValue> LruCache<K, T> {
-    pub fn new(num_shard_bits: usize, capacity: usize, high_priority_ratio: usize) -> Self {
-        Self::new_inner(num_shard_bits, capacity, high_priority_ratio, None)
+    pub fn new(num_shards: usize, capacity: usize, high_priority_ratio: usize) -> Self {
+        Self::new_inner(num_shards, capacity, high_priority_ratio, None)
     }
 
     pub fn with_event_listener(
-        num_shard_bits: usize,
+        num_shards: usize,
         capacity: usize,
         high_priority_ratio: usize,
         listener: Arc<dyn LruCacheEventListener<K = K, T = T>>,
     ) -> Self {
-        Self::new_inner(
-            num_shard_bits,
-            capacity,
-            high_priority_ratio,
-            Some(listener),
-        )
+        Self::new_inner(num_shards, capacity, high_priority_ratio, Some(listener))
     }
 
     fn new_inner(
-        num_shard_bits: usize,
+        num_shards: usize,
         capacity: usize,
         high_priority_ratio: usize,
         listener: Option<Arc<dyn LruCacheEventListener<K = K, T = T>>>,
     ) -> Self {
-        let num_shards = 1 << num_shard_bits;
         let mut shards = Vec::with_capacity(num_shards);
         let per_shard = capacity / num_shards;
         let mut shard_usages = Vec::with_capacity(num_shards);
@@ -994,12 +988,6 @@ pub enum LookupResult<K: LruKey, T: LruValue> {
 unsafe impl<K: LruKey, T: LruValue> Send for CacheableEntry<K, T> {}
 unsafe impl<K: LruKey, T: LruValue> Sync for CacheableEntry<K, T> {}
 
-impl<K: LruKey, T: LruValue> CacheableEntry<K, T> {
-    pub fn value(&self) -> &T {
-        unsafe { (*self.handle).get_value() }
-    }
-}
-
 impl<K: LruKey, T: LruValue> Deref for CacheableEntry<K, T> {
     type Target = T;
 
@@ -1061,7 +1049,7 @@ mod tests {
 
     #[test]
     fn test_cache_shard() {
-        let cache = Arc::new(LruCache::<(u64, u64), Block>::new(2, 256, 0));
+        let cache = Arc::new(LruCache::<(u64, u64), Block>::new(4, 256, 0));
         assert_eq!(cache.shard(0), 0);
         assert_eq!(cache.shard(1), 1);
         assert_eq!(cache.shard(10), 2);
@@ -1080,7 +1068,7 @@ mod tests {
             block_offset.hash(&mut hasher);
             let h = hasher.finish();
             if let Some(block) = cache.lookup(h, &(sst, block_offset)) {
-                assert_eq!(block.value().offset, block_offset);
+                assert_eq!(block.offset, block_offset);
                 drop(block);
                 continue;
             }
@@ -1361,7 +1349,7 @@ mod tests {
 
     #[test]
     fn test_write_request_pending() {
-        let cache = Arc::new(LruCache::new(0, 5, 0));
+        let cache = Arc::new(LruCache::new(1, 5, 0));
         {
             let mut shard = cache.shards[0].lock();
             insert(&mut shard, "a", "v1");
@@ -1382,7 +1370,7 @@ mod tests {
                 cache.insert("b".to_string(), 0, 1, "v2".to_string(), CachePriority::Low);
                 recv.try_recv().unwrap();
                 assert!(
-                    matches!(cache.lookup_for_request(0, "b".to_string()), LookupResult::Cached(v) if v.value().eq("v2"))
+                    matches!(cache.lookup_for_request(0, "b".to_string()), LookupResult::Cached(v) if v.eq("v2"))
                 );
             }
             _ => panic!(),
@@ -1406,7 +1394,7 @@ mod tests {
     #[test]
     fn test_event_listener() {
         let listener = Arc::new(TestLruCacheEventListener::default());
-        let cache = Arc::new(LruCache::with_event_listener(0, 2, 0, listener.clone()));
+        let cache = Arc::new(LruCache::with_event_listener(1, 2, 0, listener.clone()));
 
         // full-fill cache
         let h = cache.insert(
@@ -1501,7 +1489,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_future_cancel() {
-        let cache: Arc<LruCache<u64, u64>> = Arc::new(LruCache::new(0, 5, 0));
+        let cache: Arc<LruCache<u64, u64>> = Arc::new(LruCache::new(1, 5, 0));
         // do not need sender because this receiver will be cancelled.
         let (_, recv) = channel::<()>();
         let polled = Arc::new(AtomicBool::new(false));

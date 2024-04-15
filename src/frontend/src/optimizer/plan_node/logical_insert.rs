@@ -14,7 +14,6 @@
 
 use pretty_xmlish::XmlNode;
 use risingwave_common::catalog::TableVersionId;
-use risingwave_common::error::Result;
 
 use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
@@ -23,6 +22,7 @@ use super::{
     LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
+use crate::error::Result;
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{

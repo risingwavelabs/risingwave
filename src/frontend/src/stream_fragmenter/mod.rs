@@ -22,7 +22,6 @@ use std::rc::Rc;
 
 use educe::Educe;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::Result;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag, NoOpNode,
@@ -30,6 +29,7 @@ use risingwave_pb::stream_plan::{
 };
 
 use self::rewrite::build_delta_join_without_arrange;
+use crate::error::Result;
 use crate::optimizer::plan_node::reorganize_elements_id;
 use crate::optimizer::PlanRef;
 use crate::scheduler::SchedulerResult;
@@ -264,9 +264,9 @@ fn build_fragment(
 
             if let Some(source) = node.source_inner.as_ref()
                 && let Some(source_info) = source.info.as_ref()
-                && source_info.cdc_source_job
+                && source_info.is_shared()
+                && !source_info.is_distributed
             {
-                tracing::debug!("mark cdc source job as singleton");
                 current_fragment.requires_singleton = true;
             }
         }
@@ -280,6 +280,10 @@ fn build_fragment(
         }
 
         NodeBody::Sink(_) => current_fragment.fragment_type_mask |= FragmentTypeFlag::Sink as u32,
+
+        NodeBody::Subscription(_) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::Subscription as u32
+        }
 
         NodeBody::TopN(_) => current_fragment.requires_singleton = true,
 
@@ -308,6 +312,13 @@ fn build_fragment(
             current_fragment
                 .upstream_table_ids
                 .push(node.upstream_source_id);
+        }
+        NodeBody::SourceBackfill(node) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::SourceScan as u32;
+            // memorize upstream source id for later use
+            let source_id = node.upstream_source_id;
+            state.dependent_table_ids.insert(source_id.into());
+            current_fragment.upstream_table_ids.push(source_id);
         }
 
         NodeBody::Now(_) => {

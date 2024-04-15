@@ -15,14 +15,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use base64::engine::general_purpose;
 use base64::Engine;
 use bytes::{BufMut, Bytes, BytesMut};
-use hyper::body::Body;
-use hyper::{body, Client, Request};
-use hyper_tls::HttpsConnector;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
@@ -31,6 +28,7 @@ use serde::Deserialize;
 use serde_derive::Serialize;
 use serde_json::Value;
 use serde_with::serde_as;
+use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
 use super::doris_starrocks_connector::{
@@ -38,7 +36,7 @@ use super::doris_starrocks_connector::{
     POOL_IDLE_TIMEOUT,
 };
 use super::{Result, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
-use crate::sink::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
+use crate::sink::encoder::{JsonEncoder, RowEncoder};
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Sink, SinkParam, SinkWriter, SinkWriterParam};
 
@@ -170,7 +168,7 @@ impl DorisSink {
                 Ok(doris_data_type.contains("DATETIME"))
             }
             risingwave_common::types::DataType::Timestamptz => Err(SinkError::Doris(
-                "doris can not support Timestamptz".to_string(),
+                "TIMESTAMP WITH TIMEZONE is not supported for Doris sink as Doris doesn't store time values with timezone information. Please convert to TIMESTAMP first.".to_string(),
             )),
             risingwave_common::types::DataType::Interval => Err(SinkError::Doris(
                 "doris can not support Interval".to_string(),
@@ -180,7 +178,7 @@ impl DorisSink {
             risingwave_common::types::DataType::Bytea => {
                 Err(SinkError::Doris("doris can not support Bytea".to_string()))
             }
-            risingwave_common::types::DataType::Jsonb => Ok(doris_data_type.contains("JSONB")),
+            risingwave_common::types::DataType::Jsonb => Ok(doris_data_type.contains("JSON")),
             risingwave_common::types::DataType::Serial => Ok(doris_data_type.contains("BIGINT")),
             risingwave_common::types::DataType::Int256 => {
                 Err(SinkError::Doris("doris can not support Int256".to_string()))
@@ -285,7 +283,7 @@ impl DorisSinkWriter {
             config.common.database.clone(),
             config.common.table.clone(),
             header,
-        );
+        )?;
         Ok(Self {
             config,
             schema: schema.clone(),
@@ -293,12 +291,7 @@ impl DorisSinkWriter {
             inserter_inner_builder: doris_insert_builder,
             is_append_only,
             client: None,
-            row_encoder: JsonEncoder::new_with_doris(
-                schema,
-                None,
-                TimestampHandlingMode::String,
-                decimal_map,
-            ),
+            row_encoder: JsonEncoder::new_with_doris(schema, None, decimal_map),
         })
     }
 
@@ -326,8 +319,9 @@ impl DorisSinkWriter {
                         DORIS_DELETE_SIGN.to_string(),
                         Value::String("0".to_string()),
                     );
-                    let row_json_string = serde_json::to_string(&row_json_value)
-                        .map_err(|e| SinkError::Doris(format!("Json derialize error {:?}", e)))?;
+                    let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
+                        SinkError::Doris(format!("Json derialize error: {}", e.as_report()))
+                    })?;
                     self.client
                         .as_mut()
                         .ok_or_else(|| {
@@ -342,8 +336,9 @@ impl DorisSinkWriter {
                         DORIS_DELETE_SIGN.to_string(),
                         Value::String("1".to_string()),
                     );
-                    let row_json_string = serde_json::to_string(&row_json_value)
-                        .map_err(|e| SinkError::Doris(format!("Json derialize error {:?}", e)))?;
+                    let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
+                        SinkError::Doris(format!("Json derialize error: {}", e.as_report()))
+                    })?;
                     self.client
                         .as_mut()
                         .ok_or_else(|| {
@@ -359,8 +354,9 @@ impl DorisSinkWriter {
                         DORIS_DELETE_SIGN.to_string(),
                         Value::String("0".to_string()),
                     );
-                    let row_json_string = serde_json::to_string(&row_json_value)
-                        .map_err(|e| SinkError::Doris(format!("Json derialize error {:?}", e)))?;
+                    let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
+                        SinkError::Doris(format!("Json derialize error: {}", e.as_report()))
+                    })?;
                     self.client
                         .as_mut()
                         .ok_or_else(|| {
@@ -432,14 +428,14 @@ impl DorisSchemaClient {
 
     pub async fn get_schema_from_doris(&self) -> Result<DorisSchema> {
         let uri = format!("{}/api/{}/{}/_schema", self.url, self.db, self.table);
-        let builder = Request::get(uri);
 
-        let connector = HttpsConnector::new();
-        let client = Client::builder()
+        let client = reqwest::Client::builder()
             .pool_idle_timeout(POOL_IDLE_TIMEOUT)
-            .build(connector);
+            .build()
+            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
 
-        let request = builder
+        let response = client
+            .get(uri)
             .header(
                 "Authorization",
                 format!(
@@ -447,36 +443,26 @@ impl DorisSchemaClient {
                     general_purpose::STANDARD.encode(format!("{}:{}", self.user, self.password))
                 ),
             )
-            .body(Body::empty())
-            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
-
-        let response = client
-            .request(request)
+            .send()
             .await
             .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
 
-        let raw_bytes = String::from_utf8(match body::to_bytes(response.into_body()).await {
-            Ok(bytes) => bytes.to_vec(),
-            Err(err) => return Err(SinkError::DorisStarrocksConnect(err.into())),
-        })
-        .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
-
-        let json_map: HashMap<String, Value> = serde_json::from_str(&raw_bytes)
+        let json: Value = response
+            .json()
+            .await
             .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
-        let json_data = if json_map.contains_key("code") && json_map.contains_key("msg") {
-            let data = json_map.get("data").ok_or_else(|| {
-                SinkError::DorisStarrocksConnect(anyhow::anyhow!("Can't find data"))
-            })?;
-            data.to_string()
+        let json_data = if json.get("code").is_some() && json.get("msg").is_some() {
+            json.get("data")
+                .ok_or_else(|| {
+                    SinkError::DorisStarrocksConnect(anyhow::anyhow!("Can't find data"))
+                })?
+                .clone()
         } else {
-            raw_bytes
+            json
         };
-        let schema: DorisSchema = serde_json::from_str(&json_data).map_err(|err| {
-            SinkError::DorisStarrocksConnect(anyhow::anyhow!(
-                "Can't get schema from json {:?}",
-                err
-            ))
-        })?;
+        let schema: DorisSchema = serde_json::from_value(json_data)
+            .context("Can't get schema from json")
+            .map_err(SinkError::DorisStarrocksConnect)?;
         Ok(schema)
     }
 }
@@ -497,11 +483,9 @@ pub struct DorisField {
     aggregation_type: String,
 }
 impl DorisField {
-    pub fn get_decimal_pre_scale(&self) -> Option<(u8, u8)> {
+    pub fn get_decimal_pre_scale(&self) -> Option<u8> {
         if self.r#type.contains("DECIMAL") {
-            let a = self.precision.clone().unwrap().parse::<u8>().unwrap();
-            let b = self.scale.clone().unwrap().parse::<u8>().unwrap();
-            Some((a, b))
+            Some(self.scale.clone().unwrap().parse::<u8>().unwrap())
         } else {
             None
         }

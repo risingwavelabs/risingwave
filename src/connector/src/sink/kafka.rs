@@ -26,14 +26,16 @@ use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use strum_macros::{Display, EnumString};
+use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
 use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam};
-use crate::common::{KafkaCommon, RdKafkaPropertiesCommon};
+use crate::connector_common::{KafkaCommon, KafkaPrivateLinkCommon, RdKafkaPropertiesCommon};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
@@ -232,6 +234,9 @@ pub struct KafkaConfig {
 
     #[serde(flatten)]
     pub rdkafka_properties_producer: RdKafkaPropertiesProducer,
+
+    #[serde(flatten)]
+    pub privatelink_common: KafkaPrivateLinkCommon,
 }
 
 impl KafkaConfig {
@@ -261,6 +266,7 @@ impl From<KafkaConfig> for KafkaProperties {
             common: val.common,
             rdkafka_properties_common: val.rdkafka_properties_common,
             rdkafka_properties_consumer: Default::default(),
+            privatelink_common: val.privatelink_common,
             unknown_fields: Default::default(),
         }
     }
@@ -301,8 +307,12 @@ impl Sink for KafkaSink {
 
     const SINK_NAME: &'static str = KAFKA_SINK;
 
-    fn default_sink_decouple(desc: &SinkDesc) -> bool {
-        desc.sink_type.is_append_only()
+    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+        match user_specified {
+            SinkDecouple::Default => Ok(desc.sink_type.is_append_only()),
+            SinkDecouple::Disable => Ok(false),
+            SinkDecouple::Enable => Ok(true),
+        }
     }
 
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
@@ -403,7 +413,7 @@ impl KafkaSinkWriter {
 
             // Create the producer context, will be used to create the producer
             let producer_ctx = PrivateLinkProducerContext::new(
-                config.common.broker_rewrite_map.clone(),
+                config.privatelink_common.broker_rewrite_map.clone(),
                 // fixme: enable kafka native metrics for sink
                 None,
                 None,
@@ -474,10 +484,10 @@ impl<'w> KafkaPayloadWriter<'w> {
                 // We can retry for another round after sleeping for sometime
                 Err((e, rec)) => {
                     tracing::warn!(
-                        "producing message (key {:?}) to topic {} failed, err {:?}.",
+                        error = %e.as_report(),
+                        "producing message (key {:?}) to topic {} failed",
                         rec.key.map(|k| k.to_bytes()),
                         rec.topic,
-                        e
                     );
                     record = rec;
                     match e {
@@ -656,12 +666,20 @@ mod test {
             "properties.sasl.password".to_string() => "test".to_string(),
             "properties.retry.max".to_string() => "20".to_string(),
             "properties.retry.interval".to_string() => "500ms".to_string(),
+            // PrivateLink
+            "broker.rewrite.endpoints".to_string() => "{\"broker1\": \"10.0.0.1:8001\"}".to_string(),
         };
         let config = KafkaConfig::from_hashmap(properties).unwrap();
         assert_eq!(config.common.brokers, "localhost:9092");
         assert_eq!(config.common.topic, "test");
         assert_eq!(config.max_retry_num, 20);
         assert_eq!(config.retry_interval, Duration::from_millis(500));
+
+        // PrivateLink fields
+        let hashmap: HashMap<String, String> = hashmap! {
+            "broker1".to_string() => "10.0.0.1:8001".to_string()
+        };
+        assert_eq!(config.privatelink_common.broker_rewrite_map, Some(hashmap));
 
         // Optional fields eliminated.
         let properties: HashMap<String, String> = hashmap! {

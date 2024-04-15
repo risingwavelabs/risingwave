@@ -15,7 +15,6 @@
 //
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
 use super::generic::{
@@ -26,6 +25,7 @@ use super::{
     ColPrunable, Logical, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
     PredicatePushdown, ToBatch, ToStream,
 };
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CorrelatedId, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
@@ -46,7 +46,7 @@ pub struct LogicalApply {
     join_type: JoinType,
 
     /// Id of the Apply operator.
-    /// So correlated_input_ref can refer the Apply operator exactly by correlated_id.
+    /// So `correlated_input_ref` can refer the Apply operator exactly by `correlated_id`.
     correlated_id: CorrelatedId,
     /// The indices of `CorrelatedInputRef`s in `right`.
     correlated_indices: Vec<usize>,

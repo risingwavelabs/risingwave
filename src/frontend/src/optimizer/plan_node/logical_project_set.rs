@@ -14,7 +14,6 @@
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::utils::impl_distill_by_unit;
@@ -23,6 +22,7 @@ use super::{
     LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet,
     ToBatch, ToStream,
 };
+use crate::error::Result;
 use crate::expr::{
     collect_input_refs, Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef,
     TableFunction,

@@ -12,16 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::meta_addr::MetaAddressStrategyParseError;
+use risingwave_error::tonic::TonicStatusWrapperExt as _;
 use thiserror::Error;
+use thiserror_ext::Construct;
 
 pub type Result<T, E = RpcError> = std::result::Result<T, E>;
 
 // Re-export these types as they're commonly used together with `RpcError`.
 pub use risingwave_error::tonic::{ToTonicStatus, TonicStatusWrapper};
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Construct)]
 pub enum RpcError {
     #[error(transparent)]
     TransportError(Box<tonic::transport::Error>),
@@ -49,17 +50,23 @@ impl From<tonic::transport::Error> for RpcError {
     }
 }
 
-impl From<tonic::Status> for RpcError {
-    fn from(s: tonic::Status) -> Self {
-        RpcError::GrpcStatus(Box::new(TonicStatusWrapper::new(s)))
-    }
+/// Intentionally not implemented to enforce using `RpcError::from_xxx_status`, so that
+/// the service name can always be included in the error message.
+impl !From<tonic::Status> for RpcError {}
+
+macro_rules! impl_from_status {
+    ($($service:ident),* $(,)?) => {
+        paste::paste! {
+            impl RpcError {
+                $(
+                    #[doc = "Convert a gRPC status from " $service " service into an [`RpcError`]."]
+                    pub fn [<from_ $service _status>](s: tonic::Status) -> Self {
+                        Self::grpc_status(s.with_client_side_service_name(stringify!($service)))
+                    }
+                )*
+            }
+        }
+    };
 }
 
-impl From<RpcError> for RwError {
-    fn from(r: RpcError) -> Self {
-        match r {
-            RpcError::GrpcStatus(status) => TonicStatusWrapper::into(*status),
-            _ => ErrorCode::RpcError(r.into()).into(),
-        }
-    }
-}
+impl_from_status!(stream, batch, meta, compute, compactor, connector);

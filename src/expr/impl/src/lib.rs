@@ -32,6 +32,7 @@
 #![feature(test)]
 #![feature(iter_array_chunks)]
 #![feature(result_flattening)]
+#![feature(used_with_arg)]
 
 mod aggregate;
 mod scalar;

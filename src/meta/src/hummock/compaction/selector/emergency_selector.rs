@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
@@ -21,7 +22,9 @@ use risingwave_pb::hummock::hummock_version::Levels;
 
 use super::{CompactionSelector, DynamicLevelSelectorCore, LocalSelectorStatistic};
 use crate::hummock::compaction::picker::{EmergencyCompactionPicker, LocalPickerStatistic};
-use crate::hummock::compaction::{create_compaction_task, CompactionTask};
+use crate::hummock::compaction::{
+    create_compaction_task, CompactionDeveloperConfig, CompactionTask,
+};
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
 
@@ -37,11 +40,18 @@ impl CompactionSelector for EmergencySelector {
         level_handlers: &mut [LevelHandler],
         selector_stats: &mut LocalSelectorStatistic,
         _table_id_to_options: HashMap<u32, TableOption>,
+        developer_config: Arc<CompactionDeveloperConfig>,
     ) -> Option<CompactionTask> {
-        let dynamic_level_core = DynamicLevelSelectorCore::new(group.compaction_config.clone());
+        let dynamic_level_core = DynamicLevelSelectorCore::new(
+            group.compaction_config.clone(),
+            developer_config.clone(),
+        );
         let ctx = dynamic_level_core.calculate_level_base_size(levels);
-        let picker =
-            EmergencyCompactionPicker::new(ctx.base_level, group.compaction_config.clone());
+        let picker = EmergencyCompactionPicker::new(
+            ctx.base_level,
+            group.compaction_config.clone(),
+            developer_config,
+        );
 
         let mut stats = LocalPickerStatistic::default();
         if let Some(compaction_input) = picker.pick_compaction(levels, level_handlers, &mut stats) {

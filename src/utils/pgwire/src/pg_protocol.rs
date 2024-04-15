@@ -295,6 +295,8 @@ where
             let elapsed = start.elapsed();
 
             // Always log if an error occurs.
+            // Note: all messages will be processed through this code path, making it the
+            //       only necessary place to log errors.
             if let Err(error) = &result {
                 tracing::error!(error = %error.as_report(), "error when process message");
             }
@@ -385,9 +387,10 @@ where
         }
 
         match msg {
+            FeMessage::Gss => self.process_gss_msg().await?,
             FeMessage::Ssl => self.process_ssl_msg().await?,
             FeMessage::Startup(msg) => self.process_startup_msg(msg)?,
-            FeMessage::Password(msg) => self.process_password_msg(msg)?,
+            FeMessage::Password(msg) => self.process_password_msg(msg).await?,
             FeMessage::Query(query_msg) => self.process_query_msg(query_msg.get_sql()).await?,
             FeMessage::CancelQuery(m) => self.process_cancel_msg(m)?,
             FeMessage::Terminate => self.process_terminate(),
@@ -454,11 +457,17 @@ where
         ))
     }
 
+    async fn process_gss_msg(&mut self) -> PsqlResult<()> {
+        // We don't support GSSAPI, so we just say no gracefully.
+        self.stream.write(&BeMessage::EncryptionResponseNo).await?;
+        Ok(())
+    }
+
     async fn process_ssl_msg(&mut self) -> PsqlResult<()> {
         if let Some(context) = self.tls_context.as_ref() {
             // If got and ssl context, say yes for ssl connection.
             // Construct ssl stream and replace with current one.
-            self.stream.write(&BeMessage::EncryptionResponseYes).await?;
+            self.stream.write(&BeMessage::EncryptionResponseSsl).await?;
             let ssl_stream = self.stream.ssl(context).await?;
             self.stream = Conn::Ssl(ssl_stream);
         } else {
@@ -508,7 +517,7 @@ where
                     })?;
                 self.ready_for_query()?;
             }
-            UserAuthenticator::ClearText(_) => {
+            UserAuthenticator::ClearText(_) | UserAuthenticator::OAuth(_) => {
                 self.stream
                     .write_no_flush(&BeMessage::AuthenticationCleartextPassword)?;
             }
@@ -523,11 +532,9 @@ where
         Ok(())
     }
 
-    fn process_password_msg(&mut self, msg: FePasswordMessage) -> PsqlResult<()> {
+    async fn process_password_msg(&mut self, msg: FePasswordMessage) -> PsqlResult<()> {
         let authenticator = self.session.as_ref().unwrap().user_authenticator();
-        if !authenticator.authenticate(&msg.password) {
-            return Err(PsqlError::PasswordError);
-        }
+        authenticator.authenticate(&msg.password).await?;
         self.stream.write_no_flush(&BeMessage::AuthenticationOk)?;
         self.stream
             .write_parameter_status_msg_no_flush(&ParameterStatus::default())?;
@@ -563,9 +570,8 @@ where
         session: Arc<SM::Session>,
     ) -> PsqlResult<()> {
         // Parse sql.
-        let stmts = Parser::parse_sql(&sql)
-            .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))
-            .map_err(|err| PsqlError::SimpleQueryError(err.into()))?;
+        let stmts =
+            Parser::parse_sql(&sql).map_err(|err| PsqlError::SimpleQueryError(err.into()))?;
         if stmts.is_empty() {
             self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         }
@@ -684,7 +690,6 @@ where
 
         let stmt = {
             let stmts = Parser::parse_sql(sql)
-                .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))
                 .map_err(|err| PsqlError::ExtendedPrepareError(err.into()))?;
 
             if stmts.len() > 1 {
@@ -1039,7 +1044,7 @@ where
         let ssl = openssl::ssl::Ssl::new(ssl_ctx).unwrap();
         let mut stream = tokio_openssl::SslStream::new(ssl, stream).unwrap();
         if let Err(e) = Pin::new(&mut stream).accept().await {
-            tracing::warn!("Unable to set up an ssl connection, reason: {}", e);
+            tracing::warn!(error = %e.as_report(), "Unable to set up an ssl connection");
             let _ = stream.shutdown().await;
             return Err(e.into());
         }
@@ -1081,7 +1086,7 @@ where
             Conn::Unencrypted(s) => s.write_no_flush(message),
             Conn::Ssl(s) => s.write_no_flush(message),
         }
-        .inspect_err(|error| tracing::error!(%error, "flush error"))
+        .inspect_err(|error| tracing::error!(error = %error.as_report(), "flush error"))
     }
 
     async fn write(&mut self, message: &BeMessage<'_>) -> io::Result<()> {
@@ -1096,7 +1101,7 @@ where
             Conn::Unencrypted(s) => s.flush().await,
             Conn::Ssl(s) => s.flush().await,
         }
-        .inspect_err(|error| tracing::error!(%error, "flush error"))
+        .inspect_err(|error| tracing::error!(error = %error.as_report(), "flush error"))
     }
 
     async fn ssl(&mut self, ssl_ctx: &SslContextRef) -> PsqlResult<PgStream<SslStream<S>>> {

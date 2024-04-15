@@ -17,26 +17,28 @@ use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::ops::Bound::{Excluded, Included, Unbounded};
-use std::ops::{Bound, RangeBounds};
+use std::ops::RangeBounds;
+use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::{pin_mut, StreamExt};
+use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::estimate_size::{EstimateSize, KvSize};
 use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common_estimate_size::{EstimateSize, KvSize};
 use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, FullKey, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::table_watermark::WatermarkDirection;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 use tracing::error;
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::iterator::{FromRustIterator, RustIteratorBuilder};
 use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchId};
 use crate::hummock::utils::{
-    cmp_delete_range_left_bounds, do_delete_sanity_check, do_insert_sanity_check,
-    do_update_sanity_check, filter_with_delete_range, ENABLE_SANITY_CHECK,
+    do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check, ENABLE_SANITY_CHECK,
 };
 use crate::hummock::value::HummockValue;
 use crate::row_serde::value_serde::ValueRowSerde;
@@ -50,7 +52,7 @@ pub type ImmId = SharedBufferBatchId;
 pub enum KeyOp {
     Insert(Bytes),
     Delete(Bytes),
-    /// (old_value, new_value)
+    /// (`old_value`, `new_value`)
     Update((Bytes, Bytes)),
 }
 
@@ -348,7 +350,7 @@ impl KeyOp {
 #[try_stream(ok = StateStoreIterItem, error = StorageError)]
 pub(crate) async fn merge_stream<'a>(
     mem_table_iter: impl Iterator<Item = (&'a TableKey<Bytes>, &'a KeyOp)> + 'a,
-    inner_stream: impl StateStoreReadIterStream,
+    inner_stream: impl Stream<Item = StorageResult<StateStoreIterItem>> + 'static,
     table_id: TableId,
     epoch: u64,
 ) {
@@ -434,6 +436,7 @@ pub struct MemtableLocalStateStore<S: StateStoreWrite + StateStoreRead> {
     table_id: TableId,
     op_consistency_level: OpConsistencyLevel,
     table_option: TableOption,
+    vnodes: Arc<Bitmap>,
 }
 
 impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
@@ -445,6 +448,7 @@ impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
             table_id: option.table_id,
             op_consistency_level: option.op_consistency_level,
             table_option: option.table_option,
+            vnodes: option.vnodes,
         }
     }
 
@@ -454,7 +458,7 @@ impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
 }
 
 impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalStateStore<S> {
-    type IterStream<'a> = impl StateStoreIterItemStream + 'a;
+    type Iter<'a> = impl StateStoreIter + 'a;
 
     #[allow(clippy::unused_async)]
     async fn may_exist(
@@ -484,18 +488,18 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
         &self,
         key_range: TableKeyRange,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
+    ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_ {
         async move {
-            let stream = self
+            let iter = self
                 .inner
                 .iter(key_range.clone(), self.epoch(), read_options)
                 .await?;
-            Ok(merge_stream(
+            Ok(FromStreamStateStoreIter::new(Box::pin(merge_stream(
                 self.mem_table.iter(key_range),
-                stream,
+                iter.into_stream(to_owned_item),
                 self.table_id,
                 self.epoch(),
-            ))
+            ))))
         }
     }
 
@@ -516,17 +520,10 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
         Ok(self.mem_table.delete(key, old_val)?)
     }
 
-    async fn flush(
-        &mut self,
-        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-    ) -> StorageResult<usize> {
-        debug_assert!(delete_ranges
-            .iter()
-            .map(|(key, _)| key)
-            .is_sorted_by(|a, b| Some(cmp_delete_range_left_bounds(a.as_ref(), b.as_ref()))));
+    async fn flush(&mut self) -> StorageResult<usize> {
         let buffer = self.mem_table.drain().into_parts();
         let mut kv_pairs = Vec::with_capacity(buffer.len());
-        for (key, key_op) in filter_with_delete_range(buffer.into_iter(), delete_ranges.iter()) {
+        for (key, key_op) in buffer {
             match key_op {
                 // Currently, some executors do not strictly comply with these semantics. As
                 // a workaround you may call disable the check by initializing the
@@ -581,7 +578,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
         }
         self.inner.ingest_batch(
             kv_pairs,
-            delete_ranges,
+            vec![],
             WriteOptions {
                 epoch: self.epoch(),
                 table_id: self.table_id,
@@ -601,14 +598,18 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
     async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
         assert!(
             self.epoch.replace(options.epoch.curr).is_none(),
-            "local state store of table id {:?} is init for more than once",
+            "epoch in local state store of table id {:?} is init for more than once",
             self.table_id
         );
+
         Ok(())
     }
 
     fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
         assert!(!self.is_dirty());
+        if let Some(value_checker) = opts.switch_op_consistency_level {
+            self.mem_table.op_consistency_level.update(&value_checker);
+        }
         let prev_epoch = self
             .epoch
             .replace(next_epoch)
@@ -649,13 +650,17 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                     table_id: self.table_id,
                 },
             ) {
-                error!(err = ?e, "failed to write delete ranges of table watermark");
+                error!(error = %e.as_report(), "failed to write delete ranges of table watermark");
             }
         }
     }
 
     async fn try_flush(&mut self) -> StorageResult<()> {
         Ok(())
+    }
+
+    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
+        std::mem::replace(&mut self.vnodes, vnodes)
     }
 }
 
@@ -667,6 +672,7 @@ mod tests {
     use rand::{thread_rng, Rng};
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::{test_epoch, EpochExt};
     use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
     use risingwave_hummock_sdk::EpochWithGap;
 
@@ -888,7 +894,7 @@ mod tests {
         }
 
         const TEST_TABLE_ID: TableId = TableId::new(233);
-        const TEST_EPOCH: u64 = 10;
+        const TEST_EPOCH: u64 = test_epoch(10);
 
         async fn check_data(
             iter: &mut MemTableHummockIterator<'_>,
@@ -929,7 +935,7 @@ mod tests {
         check_data(&mut iter, &ordered_test_data).await;
 
         // Test seek with a later epoch, the first key is not skipped
-        let later_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH + 1);
+        let later_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH.next_epoch());
         let seek_idx = 500;
         iter.seek(FullKey {
             user_key: UserKey {
@@ -943,7 +949,7 @@ mod tests {
         check_data(&mut iter, &ordered_test_data[seek_idx..]).await;
 
         // Test seek with a earlier epoch, the first key is skipped
-        let early_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH - 1);
+        let early_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH.prev_epoch());
         let seek_idx = 500;
         iter.seek(FullKey {
             user_key: UserKey {

@@ -18,16 +18,11 @@ use bytes::Bytes;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::FunctionId;
-use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::get_or_create_wasm_runtime;
-use risingwave_object_store::object::{build_remote_object_store, ObjectStoreConfig};
 use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 use risingwave_pb::catalog::Function;
-use risingwave_sqlparser::ast::{
-    CreateFunctionBody, FunctionDefinition, ObjectName, OperateFunctionArg,
-};
-use risingwave_storage::monitor::ObjectStoreMetrics;
+use risingwave_sqlparser::ast::{CreateFunctionBody, ObjectName, OperateFunctionArg};
 use risingwave_udf::ArrowFlightUdfClient;
 
 use super::*;
@@ -42,6 +37,7 @@ pub async fn handle_create_function(
     args: Option<Vec<OperateFunctionArg>>,
     returns: Option<CreateFunctionReturns>,
     params: CreateFunctionBody,
+    with_options: CreateFunctionWithOptions,
 ) -> Result<RwPgResponse> {
     if or_replace {
         bail_not_implemented!("CREATE OR REPLACE FUNCTION");
@@ -54,7 +50,7 @@ pub async fn handle_create_function(
         Some(lang) => {
             let lang = lang.real_value().to_lowercase();
             match &*lang {
-                "python" | "java" | "wasm" => lang,
+                "python" | "java" | "wasm" | "rust" | "javascript" => lang,
                 _ => {
                     return Err(ErrorCode::InvalidParameterValue(format!(
                         "language {} is not supported",
@@ -96,12 +92,10 @@ pub async fn handle_create_function(
         }
     };
 
-    let Some(using) = params.using else {
-        return Err(ErrorCode::InvalidParameterValue("USING must be specified".to_string()).into());
-    };
-
+    let mut arg_names = vec![];
     let mut arg_types = vec![];
     for arg in args.unwrap_or_default() {
+        arg_names.push(arg.name.map_or("".to_string(), |n| n.real_value()));
         arg_types.push(bind_data_type(&arg.data_type)?);
     }
 
@@ -124,28 +118,38 @@ pub async fn handle_create_function(
         return Err(CatalogError::Duplicated("function", name).into());
     }
 
-    let link;
     let identifier;
+    let mut link = None;
+    let mut body = None;
+    let mut compressed_binary = None;
 
     match language.as_str() {
+        "python" if params.using.is_none() => {
+            identifier = function_name.to_string();
+            body = Some(
+                params
+                    .as_
+                    .ok_or_else(|| ErrorCode::InvalidParameterValue("AS must be specified".into()))?
+                    .into_string(),
+            );
+        }
         "python" | "java" | "" => {
-            let CreateFunctionUsing::Link(l) = using else {
+            let Some(CreateFunctionUsing::Link(l)) = params.using else {
                 return Err(ErrorCode::InvalidParameterValue(
                     "USING LINK must be specified".to_string(),
                 )
                 .into());
             };
-            let Some(FunctionDefinition::SingleQuotedDef(id)) = params.as_ else {
+            let Some(as_) = params.as_ else {
                 return Err(
                     ErrorCode::InvalidParameterValue("AS must be specified".to_string()).into(),
                 );
             };
-            identifier = id;
-            link = l;
+            identifier = as_.into_string();
 
             // check UDF server
             {
-                let client = ArrowFlightUdfClient::connect(&link)
+                let client = ArrowFlightUdfClient::connect(&l)
                     .await
                     .map_err(|e| anyhow!(e))?;
                 /// A helper function to create a unnamed field from data type.
@@ -171,43 +175,91 @@ pub async fn handle_create_function(
                     .await
                     .context("failed to check UDF signature")?;
             }
+            link = Some(l);
         }
-        "wasm" => {
-            identifier = wasm_identifier(
+        "javascript" => {
+            identifier = function_name.to_string();
+            body = Some(
+                params
+                    .as_
+                    .ok_or_else(|| ErrorCode::InvalidParameterValue("AS must be specified".into()))?
+                    .into_string(),
+            );
+        }
+        "rust" => {
+            if params.using.is_some() {
+                return Err(ErrorCode::InvalidParameterValue(
+                    "USING is not supported for rust function".to_string(),
+                )
+                .into());
+            }
+            let identifier_v1 = wasm_identifier_v1(
                 &function_name,
                 &arg_types,
                 &return_type,
                 matches!(kind, Kind::Table(_)),
             );
+            // if the function returns a struct, users need to add `#[function]` macro by themselves.
+            // otherwise, we add it automatically. the code should start with `fn ...`.
+            let function_macro = if return_type.is_struct() {
+                String::new()
+            } else {
+                format!("#[function(\"{}\")]", identifier_v1)
+            };
+            let script = params
+                .as_
+                .ok_or_else(|| ErrorCode::InvalidParameterValue("AS must be specified".into()))?
+                .into_string();
+            let script = format!(
+                "use arrow_udf::{{function, types::*}};\n{}\n{}",
+                function_macro, script
+            );
+            body = Some(script.clone());
 
-            link = match using {
-                CreateFunctionUsing::Link(link) => {
-                    let runtime = get_or_create_wasm_runtime(&link).await?;
-                    check_wasm_function(&runtime, &identifier)?;
-                    link
-                }
+            let wasm_binary = tokio::task::spawn_blocking(move || {
+                let mut opts = arrow_udf_wasm::build::BuildOpts::default();
+                opts.script = script;
+                // use a fixed tempdir to reuse the build cache
+                opts.tempdir = Some(std::env::temp_dir().join("risingwave-rust-udf"));
+
+                arrow_udf_wasm::build::build_with(&opts)
+            })
+            .await?
+            .context("failed to build rust function")?;
+
+            let runtime = get_or_create_wasm_runtime(&wasm_binary)?;
+            identifier = find_wasm_identifier_v2(&runtime, &identifier_v1)?;
+
+            compressed_binary = Some(zstd::stream::encode_all(wasm_binary.as_slice(), 0)?);
+        }
+        "wasm" => {
+            let Some(using) = params.using else {
+                return Err(ErrorCode::InvalidParameterValue(
+                    "USING must be specified".to_string(),
+                )
+                .into());
+            };
+            let wasm_binary = match using {
+                CreateFunctionUsing::Link(link) => download_binary_from_link(&link).await?,
                 CreateFunctionUsing::Base64(encoded) => {
                     // decode wasm binary from base64
                     use base64::prelude::{Engine, BASE64_STANDARD};
-                    let wasm_binary = BASE64_STANDARD
+                    BASE64_STANDARD
                         .decode(encoded)
-                        .context("invalid base64 encoding")?;
-
-                    let runtime = arrow_udf_wasm::Runtime::new(&wasm_binary)?;
-                    check_wasm_function(&runtime, &identifier)?;
-
-                    let system_params = session.env().meta_client().get_system_params().await?;
-                    let object_name = format!("{:?}.wasm", md5::compute(&wasm_binary));
-                    upload_wasm_binary(
-                        system_params.wasm_storage_url(),
-                        &object_name,
-                        wasm_binary.into(),
-                    )
-                    .await?;
-
-                    format!("{}/{}", system_params.wasm_storage_url(), object_name)
+                        .context("invalid base64 encoding")?
+                        .into()
                 }
             };
+            let runtime = get_or_create_wasm_runtime(&wasm_binary)?;
+            let identifier_v1 = wasm_identifier_v1(
+                &function_name,
+                &arg_types,
+                &return_type,
+                matches!(kind, Kind::Table(_)),
+            );
+            identifier = find_wasm_identifier_v2(&runtime, &identifier_v1)?;
+
+            compressed_binary = Some(zstd::stream::encode_all(wasm_binary.as_ref(), 0)?);
         }
         _ => unreachable!("invalid language: {language}"),
     };
@@ -218,13 +270,18 @@ pub async fn handle_create_function(
         database_id,
         name: function_name,
         kind: Some(kind),
+        arg_names,
         arg_types: arg_types.into_iter().map(|t| t.into()).collect(),
         return_type: Some(return_type.into()),
         language,
-        identifier,
-        body: None,
+        identifier: Some(identifier),
         link,
+        body,
+        compressed_binary,
         owner: session.user_id(),
+        always_retry_on_network_error: with_options
+            .always_retry_on_network_error
+            .unwrap_or_default(),
     };
 
     let catalog_writer = session.catalog_writer()?;
@@ -233,42 +290,87 @@ pub async fn handle_create_function(
     Ok(PgResponse::empty_result(StatementType::CREATE_FUNCTION))
 }
 
-/// Upload wasm binary to object store.
-async fn upload_wasm_binary(
-    wasm_storage_url: &str,
-    object_name: &str,
-    wasm_binary: Bytes,
-) -> Result<()> {
-    // Note: it will panic if the url is invalid. We did a validation on meta startup.
-    let object_store = build_remote_object_store(
-        wasm_storage_url,
-        Arc::new(ObjectStoreMetrics::unused()),
-        "Wasm Engine",
-        ObjectStoreConfig::default(),
-    )
-    .await;
-    object_store
-        .upload(object_name, wasm_binary)
-        .await
-        .context("failed to upload wasm binary to object store")?;
-    Ok(())
-}
-
-/// Check if the function exists in the wasm binary.
-fn check_wasm_function(runtime: &arrow_udf_wasm::Runtime, identifier: &str) -> Result<()> {
-    if !runtime.functions().contains(&identifier) {
-        return Err(ErrorCode::InvalidParameterValue(format!(
-            "function not found in wasm binary: \"{}\"\nHINT: available functions:\n  {}",
-            identifier,
-            runtime.functions().join("\n  ")
-        ))
-        .into());
+/// Download wasm binary from a link.
+#[allow(clippy::unused_async)]
+async fn download_binary_from_link(link: &str) -> Result<Bytes> {
+    // currently only local file system is supported
+    if let Some(path) = link.strip_prefix("fs://") {
+        let content =
+            std::fs::read(path).context("failed to read wasm binary from local file system")?;
+        Ok(content.into())
+    } else {
+        Err(ErrorCode::InvalidParameterValue("only 'fs://' is supported".to_string()).into())
     }
-    Ok(())
 }
 
-/// Generate the function identifier in wasm binary.
-fn wasm_identifier(name: &str, args: &[DataType], ret: &DataType, table_function: bool) -> String {
+/// Convert a v0.1 function identifier to v0.2 format.
+///
+/// In arrow-udf v0.1 format, struct type is inline in the identifier. e.g.
+///
+/// ```text
+/// keyvalue(varchar,varchar)->struct<key:varchar,value:varchar>
+/// ```
+///
+/// However, since arrow-udf v0.2, struct type is no longer inline.
+/// The above identifier is divided into a function and a type.
+///
+/// ```text
+/// keyvalue(varchar,varchar)->struct KeyValue
+/// KeyValue=key:varchar,value:varchar
+/// ```
+///
+/// For compatibility, we should call `find_wasm_identifier_v2` to
+/// convert v0.1 identifiers to v0.2 format before looking up the function.
+fn find_wasm_identifier_v2(
+    runtime: &arrow_udf_wasm::Runtime,
+    inlined_signature: &str,
+) -> Result<String> {
+    // Inline types in function signature.
+    //
+    // # Example
+    //
+    // ```text
+    // types = { "KeyValue": "key:varchar,value:varchar" }
+    // input = "keyvalue(varchar, varchar) -> struct KeyValue"
+    // output = "keyvalue(varchar, varchar) -> struct<key:varchar,value:varchar>"
+    // ```
+    let inline_types = |s: &str| -> String {
+        let mut inlined = s.to_string();
+        // iteratively replace `struct Xxx` with `struct<...>` until no replacement is made.
+        loop {
+            let replaced = inlined.clone();
+            for (k, v) in runtime.types() {
+                inlined = inlined.replace(&format!("struct {k}"), &format!("struct<{v}>"));
+            }
+            if replaced == inlined {
+                return inlined;
+            }
+        }
+    };
+    // Function signature in arrow-udf is case sensitive.
+    // However, SQL identifiers are usually case insensitive and stored in lowercase.
+    // So we should convert the signature to lowercase before comparison.
+    let identifier = runtime
+        .functions()
+        .find(|f| inline_types(f).to_lowercase() == inlined_signature)
+        .ok_or_else(|| {
+            ErrorCode::InvalidParameterValue(format!(
+                "function not found in wasm binary: \"{}\"\nHINT: available functions:\n  {}\navailable types:\n  {}",
+                inlined_signature,
+                runtime.functions().join("\n  "),
+                runtime.types().map(|(k, v)| format!("{k}: {v}")).join("\n  "),
+            ))
+        })?;
+    Ok(identifier.into())
+}
+
+/// Generate a function identifier in v0.1 format from the function signature.
+fn wasm_identifier_v1(
+    name: &str,
+    args: &[DataType],
+    ret: &DataType,
+    table_function: bool,
+) -> String {
     format!(
         "{}({}){}{}",
         name,

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(madsim)]
+pub mod sim;
 use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 use std::time::Duration;
@@ -35,8 +37,14 @@ pub use s3::*;
 pub mod error;
 pub mod object_metrics;
 
+mod prefix;
+
 pub use error::*;
 use object_metrics::ObjectStoreMetrics;
+use thiserror_ext::AsReport;
+
+#[cfg(madsim)]
+use self::sim::SimObjectStore;
 
 pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
 pub type ObjectStreamingUploader = MonitoredStreamingUploader;
@@ -112,32 +120,28 @@ pub trait ObjectStore: Send + Sync {
     /// specified in the request is not found, it will be considered as successfully deleted.
     async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()>;
 
-    fn monitored(self, metrics: Arc<ObjectStoreMetrics>) -> MonitoredObjectStore<Self>
+    fn monitored(
+        self,
+        metrics: Arc<ObjectStoreMetrics>,
+        config: ObjectStoreConfig,
+    ) -> MonitoredObjectStore<Self>
     where
         Self: Sized,
     {
-        MonitoredObjectStore::new(self, metrics)
+        MonitoredObjectStore::new(self, metrics, config)
     }
 
     async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter>;
 
     fn store_media_type(&self) -> &'static str;
-
-    fn recv_buffer_size(&self) -> usize {
-        // 2MB
-        1 << 21
-    }
-
-    fn config(&self) -> Option<&ObjectStoreConfig> {
-        // TODO: remove option
-        None
-    }
 }
 
 pub enum ObjectStoreImpl {
     InMem(MonitoredObjectStore<InMemObjectStore>),
     Opendal(MonitoredObjectStore<OpendalObjectStore>),
     S3(MonitoredObjectStore<S3ObjectStore>),
+    #[cfg(madsim)]
+    Sim(MonitoredObjectStore<SimObjectStore>),
 }
 
 macro_rules! dispatch_async {
@@ -164,7 +168,12 @@ macro_rules! object_store_impl_method_body {
                 ObjectStoreImpl::S3(s3) => {
                     $dispatch_macro!(s3, $method_name, path $(, $args)*)
                 },
+                #[cfg(madsim)]
+                ObjectStoreImpl::Sim(in_mem) => {
+                    $dispatch_macro!(in_mem, $method_name, path $(, $args)*)
+                },
             }
+
         }
     };
 }
@@ -178,6 +187,7 @@ macro_rules! object_store_impl_method_body_slice {
     ($object_store:expr, $method_name:ident, $dispatch_macro:ident, $paths:expr $(, $args:expr)*) => {
         {
             let paths_rem = partition_object_store_paths($paths);
+
             match $object_store {
                 ObjectStoreImpl::InMem(in_mem) => {
                     $dispatch_macro!(in_mem, $method_name, &paths_rem $(, $args)*)
@@ -187,6 +197,10 @@ macro_rules! object_store_impl_method_body_slice {
                 },
                 ObjectStoreImpl::S3(s3) => {
                     $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*)
+                },
+                #[cfg(madsim)]
+                ObjectStoreImpl::Sim(in_mem) => {
+                    $dispatch_macro!(in_mem, $method_name, &paths_rem $(, $args)*)
                 },
             }
         }
@@ -246,6 +260,8 @@ impl ObjectStoreImpl {
             ObjectStoreImpl::InMem(store) => store.inner.get_object_prefix(obj_id),
             ObjectStoreImpl::Opendal(store) => store.inner.get_object_prefix(obj_id),
             ObjectStoreImpl::S3(store) => store.inner.get_object_prefix(obj_id),
+            #[cfg(madsim)]
+            ObjectStoreImpl::Sim(store) => store.inner.get_object_prefix(obj_id),
         }
     }
 
@@ -256,14 +272,8 @@ impl ObjectStoreImpl {
                 store.inner.op.info().native_capability().write_can_multi
             }
             ObjectStoreImpl::S3(_) => true,
-        }
-    }
-
-    pub fn recv_buffer_size(&self) -> usize {
-        match self {
-            ObjectStoreImpl::InMem(store) => store.recv_buffer_size(),
-            ObjectStoreImpl::Opendal(store) => store.recv_buffer_size(),
-            ObjectStoreImpl::S3(store) => store.recv_buffer_size(),
+            #[cfg(madsim)]
+            ObjectStoreImpl::Sim(_) => true,
         }
     }
 }
@@ -274,7 +284,7 @@ fn try_update_failure_metric<T>(
     operation_type: &'static str,
 ) {
     if let Err(e) = &result {
-        tracing::error!("{:?} failed because of: {:?}", operation_type, e);
+        tracing::error!(error = %e.as_report(), "{} failed", operation_type);
         metrics
             .failure_count
             .with_label_values(&[operation_type])
@@ -401,8 +411,6 @@ pub struct MonitoredStreamingReader {
     streaming_read_timeout: Option<Duration>,
 }
 
-unsafe impl Sync for MonitoredStreamingReader {}
-
 impl MonitoredStreamingReader {
     pub fn new(
         media_type: &'static str,
@@ -502,29 +510,22 @@ pub struct MonitoredObjectStore<OS: ObjectStore> {
 ///   - start `operation_latency` timer
 ///   - `failure-count`
 impl<OS: ObjectStore> MonitoredObjectStore<OS> {
-    pub fn new(store: OS, object_store_metrics: Arc<ObjectStoreMetrics>) -> Self {
-        if let Some(config) = store.config() {
-            Self {
-                object_store_metrics,
-                streaming_read_timeout: Some(Duration::from_millis(
-                    config.object_store_streaming_read_timeout_ms,
-                )),
-                streaming_upload_timeout: Some(Duration::from_millis(
-                    config.object_store_streaming_upload_timeout_ms,
-                )),
-                read_timeout: Some(Duration::from_millis(config.object_store_read_timeout_ms)),
-                upload_timeout: Some(Duration::from_millis(config.object_store_upload_timeout_ms)),
-                inner: store,
-            }
-        } else {
-            Self {
-                inner: store,
-                object_store_metrics,
-                streaming_read_timeout: None,
-                streaming_upload_timeout: None,
-                read_timeout: None,
-                upload_timeout: None,
-            }
+    pub fn new(
+        store: OS,
+        object_store_metrics: Arc<ObjectStoreMetrics>,
+        config: ObjectStoreConfig,
+    ) -> Self {
+        Self {
+            object_store_metrics,
+            streaming_read_timeout: Some(Duration::from_millis(
+                config.object_store_streaming_read_timeout_ms,
+            )),
+            streaming_upload_timeout: Some(Duration::from_millis(
+                config.object_store_streaming_upload_timeout_ms,
+            )),
+            read_timeout: Some(Duration::from_millis(config.object_store_read_timeout_ms)),
+            upload_timeout: Some(Duration::from_millis(config.object_store_upload_timeout_ms)),
+            inner: store,
         }
     }
 
@@ -776,10 +777,6 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
         res
     }
-
-    fn recv_buffer_size(&self) -> usize {
-        self.inner.recv_buffer_size()
-    }
 }
 
 /// Creates a new [`ObjectStore`] from the given `url`. Credentials are configured via environment
@@ -793,24 +790,41 @@ pub async fn build_remote_object_store(
     ident: &str,
     config: ObjectStoreConfig,
 ) -> ObjectStoreImpl {
+    tracing::debug!(config=?config, "object store {ident}");
     match url {
-        s3 if s3.starts_with("s3://") => ObjectStoreImpl::S3(
-            S3ObjectStore::new_with_config(
-                s3.strip_prefix("s3://").unwrap().to_string(),
-                metrics.clone(),
-                config,
-            )
-            .await
-            .monitored(metrics),
-        ),
+        s3 if s3.starts_with("s3://") => {
+            if config.s3.developer.use_opendal {
+                let bucket = s3.strip_prefix("s3://").unwrap();
+                tracing::info!("Using OpenDAL to access s3, bucket is {}", bucket);
+                ObjectStoreImpl::Opendal(
+                    OpendalObjectStore::new_s3_engine(bucket.to_string(), config.clone())
+                        .unwrap()
+                        .monitored(metrics, config),
+                )
+            } else {
+                ObjectStoreImpl::S3(
+                    S3ObjectStore::new_with_config(
+                        s3.strip_prefix("s3://").unwrap().to_string(),
+                        metrics.clone(),
+                        config.clone(),
+                    )
+                    .await
+                    .monitored(metrics, config),
+                )
+            }
+        }
         #[cfg(feature = "hdfs-backend")]
         hdfs if hdfs.starts_with("hdfs://") => {
             let hdfs = hdfs.strip_prefix("hdfs://").unwrap();
             let (namenode, root) = hdfs.split_once('@').unwrap_or((hdfs, ""));
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_hdfs_engine(namenode.to_string(), root.to_string())
-                    .unwrap()
-                    .monitored(metrics),
+                OpendalObjectStore::new_hdfs_engine(
+                    namenode.to_string(),
+                    root.to_string(),
+                    config.clone(),
+                )
+                .unwrap()
+                .monitored(metrics, config),
             )
         }
         gcs if gcs.starts_with("gcs://") => {
@@ -819,7 +833,7 @@ pub async fn build_remote_object_store(
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_gcs_engine(bucket.to_string(), root.to_string())
                     .unwrap()
-                    .monitored(metrics),
+                    .monitored(metrics, config),
             )
         }
         obs if obs.starts_with("obs://") => {
@@ -828,7 +842,7 @@ pub async fn build_remote_object_store(
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_obs_engine(bucket.to_string(), root.to_string())
                     .unwrap()
-                    .monitored(metrics),
+                    .monitored(metrics, config),
             )
         }
 
@@ -838,7 +852,7 @@ pub async fn build_remote_object_store(
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_oss_engine(bucket.to_string(), root.to_string())
                     .unwrap()
-                    .monitored(metrics),
+                    .monitored(metrics, config),
             )
         }
         webhdfs if webhdfs.starts_with("webhdfs://") => {
@@ -847,7 +861,7 @@ pub async fn build_remote_object_store(
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_webhdfs_engine(namenode.to_string(), root.to_string())
                     .unwrap()
-                    .monitored(metrics),
+                    .monitored(metrics, config),
             )
         }
         azblob if azblob.starts_with("azblob://") => {
@@ -856,15 +870,15 @@ pub async fn build_remote_object_store(
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_azblob_engine(container_name.to_string(), root.to_string())
                     .unwrap()
-                    .monitored(metrics),
+                    .monitored(metrics, config),
             )
         }
         fs if fs.starts_with("fs://") => {
             let fs = fs.strip_prefix("fs://").unwrap();
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_fs_engine(fs.to_string())
+                OpendalObjectStore::new_fs_engine(fs.to_string(), config.clone())
                     .unwrap()
-                    .monitored(metrics),
+                    .monitored(metrics, config),
             )
         }
 
@@ -875,9 +889,9 @@ pub async fn build_remote_object_store(
             panic!("Passing s3-compatible is not supported, please modify the environment variable and pass in s3.");
         }
         minio if minio.starts_with("minio://") => ObjectStoreImpl::S3(
-            S3ObjectStore::with_minio(minio, metrics.clone())
+            S3ObjectStore::with_minio(minio, metrics.clone(), config.clone())
                 .await
-                .monitored(metrics),
+                .monitored(metrics, config),
         ),
         "memory" => {
             if ident == "Meta Backup" {
@@ -885,7 +899,7 @@ pub async fn build_remote_object_store(
             } else {
                 tracing::warn!("You're using in-memory remote object store for {}. This should never be used in benchmarks and production environment.", ident);
             }
-            ObjectStoreImpl::InMem(InMemObjectStore::new().monitored(metrics))
+            ObjectStoreImpl::InMem(InMemObjectStore::new().monitored(metrics, config))
         }
         "memory-shared" => {
             if ident == "Meta Backup" {
@@ -893,7 +907,11 @@ pub async fn build_remote_object_store(
             } else {
                 tracing::warn!("You're using shared in-memory remote object store for {}. This should never be used in benchmarks and production environment.", ident);
             }
-            ObjectStoreImpl::InMem(InMemObjectStore::shared().monitored(metrics))
+            ObjectStoreImpl::InMem(InMemObjectStore::shared().monitored(metrics, config))
+        }
+        #[cfg(madsim)]
+        sim if sim.starts_with("sim://") => {
+            ObjectStoreImpl::Sim(SimObjectStore::new(url).monitored(metrics, config))
         }
         other => {
             unimplemented!(

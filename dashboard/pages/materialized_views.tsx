@@ -20,7 +20,7 @@ import {
   Relations,
   streamingJobColumns,
 } from "../components/Relations"
-import { getMaterializedViews } from "./api/streaming"
+import { getMaterializedViews } from "../lib/api/streaming"
 
 export default function MaterializedViews() {
   return Relations("Materialized Views", getMaterializedViews, [

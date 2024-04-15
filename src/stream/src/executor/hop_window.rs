@@ -23,13 +23,12 @@ use risingwave_expr::expr::NonStrictExpression;
 use risingwave_expr::ExprError;
 
 use super::error::StreamExecutorError;
-use super::{ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message};
+use super::{ActorContextRef, Execute, Executor, Message};
 use crate::common::StreamChunkBuilder;
 
 pub struct HopWindowExecutor {
     _ctx: ActorContextRef,
-    pub info: ExecutorInfo,
-    pub input: BoxedExecutor,
+    pub input: Executor,
     pub time_col_idx: usize,
     pub window_slide: Interval,
     pub window_size: Interval,
@@ -43,8 +42,7 @@ impl HopWindowExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        info: ExecutorInfo,
-        input: BoxedExecutor,
+        input: Executor,
         time_col_idx: usize,
         window_slide: Interval,
         window_size: Interval,
@@ -55,7 +53,6 @@ impl HopWindowExecutor {
     ) -> Self {
         HopWindowExecutor {
             _ctx: ctx,
-            info,
             input,
             time_col_idx,
             window_slide,
@@ -68,21 +65,9 @@ impl HopWindowExecutor {
     }
 }
 
-impl Executor for HopWindowExecutor {
+impl Execute for HopWindowExecutor {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &risingwave_common::catalog::Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }
 
@@ -253,12 +238,13 @@ mod tests {
     use risingwave_expr::expr::test_utils::make_hop_window_expression;
     use risingwave_expr::expr::NonStrictExpression;
 
+    use super::*;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{ActorContext, Executor, ExecutorInfo, StreamChunk};
+    use crate::executor::{ActorContext, Execute, StreamChunk};
 
     const CHUNK_SIZE: usize = 256;
 
-    fn create_executor(output_indices: Vec<usize>) -> Box<dyn Executor> {
+    fn create_executor(output_indices: Vec<usize>) -> Box<dyn Execute> {
         let field1 = Field::unnamed(DataType::Int64);
         let field2 = Field::unnamed(DataType::Int64);
         let field3 = Field::with_name(DataType::Timestamp, "created_at");
@@ -278,7 +264,7 @@ mod tests {
                 .replace('^', "2022-02-02T"),
         );
         let input =
-            MockSource::with_chunks(schema.clone(), pk_indices.clone(), vec![chunk]).boxed();
+            MockSource::with_chunks(vec![chunk]).into_executor(schema.clone(), pk_indices.clone());
         let window_slide = Interval::from_minutes(15);
         let window_size = Interval::from_minutes(30);
         let window_offset = Interval::from_minutes(0);
@@ -291,14 +277,8 @@ mod tests {
         )
         .unwrap();
 
-        super::HopWindowExecutor::new(
-            ActorContext::create(123),
-            ExecutorInfo {
-                // TODO: the schema is incorrect, but it seems useless here.
-                schema,
-                pk_indices,
-                identity: "HopWindowExecutor".to_string(),
-            },
+        HopWindowExecutor::new(
+            ActorContext::for_test(123),
             input,
             2,
             window_slide,

@@ -27,8 +27,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         _store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let upstreams = node.get_upstream_actor_id();
         let upstream_fragment_id = node.get_upstream_fragment_id();
 
@@ -36,8 +35,8 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             .iter()
             .map(|&upstream_actor_id| {
                 new_input(
-                    &stream.context,
-                    stream.streaming_metrics.clone(),
+                    &params.shared_context,
+                    params.executor_stats.clone(),
                     params.actor_context.id,
                     params.fragment_id,
                     upstream_actor_id,
@@ -57,30 +56,29 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             DispatcherType::NoShuffle => true,
         };
 
-        if always_single_input {
-            Ok(ReceiverExecutor::new(
+        let exec = if always_single_input {
+            ReceiverExecutor::new(
                 params.actor_context,
-                params.info,
                 params.fragment_id,
                 upstream_fragment_id,
                 inputs.into_iter().exactly_one().unwrap(),
-                stream.context.clone(),
+                params.shared_context.clone(),
                 params.operator_id,
-                stream.streaming_metrics.clone(),
+                params.executor_stats.clone(),
             )
-            .boxed())
+            .boxed()
         } else {
-            Ok(MergeExecutor::new(
+            MergeExecutor::new(
                 params.actor_context,
-                params.info,
                 params.fragment_id,
                 upstream_fragment_id,
                 inputs,
-                stream.context.clone(),
+                params.shared_context.clone(),
                 params.operator_id,
-                stream.streaming_metrics.clone(),
+                params.executor_stats.clone(),
             )
-            .boxed())
-        }
+            .boxed()
+        };
+        Ok((params.info, exec).into())
     }
 }

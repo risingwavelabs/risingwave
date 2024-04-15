@@ -22,8 +22,8 @@ use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Format;
 use postgres_types::FromSql;
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_sqlparser::ast::{SetExpr, Statement};
@@ -32,6 +32,7 @@ use super::extended_handle::{PortalResult, PrepareStatement, PreparedResult};
 use super::{PgResponseStream, RwPgResponse};
 use crate::binder::{Binder, BoundStatement};
 use crate::catalog::TableId;
+use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::flush::do_flush;
 use crate::handler::privilege::resolve_privileges;
 use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
@@ -43,7 +44,6 @@ use crate::optimizer::{
 };
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
-use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::{
     BatchPlanFragmenter, DistributedQueryStream, ExecutionContext, ExecutionContextRef,
     LocalQueryExecution, LocalQueryStream,
@@ -253,7 +253,7 @@ fn determine_query_mode(batch_plan: PlanRef) -> QueryMode {
     }
 }
 
-struct BatchPlanFragmenterResult {
+pub struct BatchPlanFragmenterResult {
     pub(crate) plan_fragmenter: BatchPlanFragmenter,
     pub(crate) query_mode: QueryMode,
     pub(crate) schema: Schema,
@@ -261,7 +261,7 @@ struct BatchPlanFragmenterResult {
     pub(crate) _dependent_relations: Vec<TableId>,
 }
 
-fn gen_batch_plan_fragmenter(
+pub fn gen_batch_plan_fragmenter(
     session: &SessionImpl,
     plan_result: BatchQueryPlanResult,
 ) -> Result<BatchPlanFragmenterResult> {
@@ -298,11 +298,11 @@ fn gen_batch_plan_fragmenter(
     })
 }
 
-async fn execute(
+pub async fn create_stream(
     session: Arc<SessionImpl>,
     plan_fragmenter_result: BatchPlanFragmenterResult,
     formats: Vec<Format>,
-) -> Result<RwPgResponse> {
+) -> Result<(PgResponseStream, Vec<PgFieldDescriptor>)> {
     let BatchPlanFragmenterResult {
         plan_fragmenter,
         query_mode,
@@ -326,7 +326,6 @@ async fn execute(
         _ => {}
     }
 
-    let query_start_time = Instant::now();
     let query = plan_fragmenter.generate_complete_query().await?;
     tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
 
@@ -337,10 +336,7 @@ async fn execute(
         .collect::<Vec<PgFieldDescriptor>>();
     let column_types = schema.fields().iter().map(|f| f.data_type()).collect_vec();
 
-    // Used in counting row count.
-    let first_field_format = formats.first().copied().unwrap_or(Format::Text);
-
-    let mut row_stream = match query_mode {
+    let row_stream = match query_mode {
         QueryMode::Auto => unreachable!(),
         QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
             local_execute(session.clone(), query, can_timeout_cancel).await?,
@@ -358,6 +354,23 @@ async fn execute(
             ))
         }
     };
+
+    Ok((row_stream, pg_descs))
+}
+
+async fn execute(
+    session: Arc<SessionImpl>,
+    plan_fragmenter_result: BatchPlanFragmenterResult,
+    formats: Vec<Format>,
+) -> Result<RwPgResponse> {
+    // Used in counting row count.
+    let first_field_format = formats.first().copied().unwrap_or(Format::Text);
+    let query_mode = plan_fragmenter_result.query_mode;
+    let stmt_type = plan_fragmenter_result.stmt_type;
+
+    let query_start_time = Instant::now();
+    let (mut row_stream, pg_descs) =
+        create_stream(session.clone(), plan_fragmenter_result, formats).await?;
 
     let row_cnt: Option<i32> = match stmt_type {
         StatementType::SELECT

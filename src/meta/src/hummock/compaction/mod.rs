@@ -21,7 +21,6 @@ use risingwave_pb::hummock::compact_task::{self, TaskType};
 
 mod picker;
 pub mod selector;
-
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
@@ -38,7 +37,9 @@ use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlap
 use crate::hummock::compaction::picker::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
+use crate::MetaOpts;
 
+#[derive(Clone)]
 pub struct CompactStatus {
     pub compaction_group_id: CompactionGroupId,
     pub level_handlers: Vec<LevelHandler>,
@@ -57,15 +58,6 @@ impl PartialEq for CompactStatus {
     fn eq(&self, other: &Self) -> bool {
         self.level_handlers.eq(&other.level_handlers)
             && self.compaction_group_id == other.compaction_group_id
-    }
-}
-
-impl Clone for CompactStatus {
-    fn clone(&self) -> Self {
-        Self {
-            compaction_group_id: self.compaction_group_id,
-            level_handlers: self.level_handlers.clone(),
-        }
     }
 }
 
@@ -104,6 +96,7 @@ impl CompactStatus {
         stats: &mut LocalSelectorStatistic,
         selector: &mut Box<dyn CompactionSelector>,
         table_id_to_options: HashMap<u32, TableOption>,
+        developer_config: Arc<CompactionDeveloperConfig>,
     ) -> Option<CompactionTask> {
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
@@ -115,6 +108,7 @@ impl CompactStatus {
             &mut self.level_handlers,
             stats,
             table_id_to_options,
+            developer_config,
         )
     }
 
@@ -214,5 +208,31 @@ pub fn get_compression_algorithm(
     } else {
         let idx = level - base_level + 1;
         compaction_config.compression_algorithm[idx].clone()
+    }
+}
+
+pub struct CompactionDeveloperConfig {
+    /// l0 picker whether to select trivial move task
+    pub enable_trivial_move: bool,
+
+    /// l0 multi level picker whether to check the overlap accuracy between sub levels
+    pub enable_check_task_level_overlap: bool,
+}
+
+impl CompactionDeveloperConfig {
+    pub fn new_from_meta_opts(opts: &MetaOpts) -> Self {
+        Self {
+            enable_trivial_move: opts.enable_trivial_move,
+            enable_check_task_level_overlap: opts.enable_check_task_level_overlap,
+        }
+    }
+}
+
+impl Default for CompactionDeveloperConfig {
+    fn default() -> Self {
+        Self {
+            enable_trivial_move: true,
+            enable_check_task_level_overlap: true,
+        }
     }
 }

@@ -24,22 +24,21 @@ logging.basicConfig(level=logging.WARN)
 
 def section_actor_info(outer_panels):
     panels = outer_panels.sub_panel()
-    excluded_cols = ["Time", "Value", "__name__", f"{COMPONENT_LABEL}", f"{NODE_LABEL}"]
     return [
         outer_panels.row_collapsed(
             "Actor/Table Id Info",
             [
                 panels.table_info(
-                    "Actor Id Info",
-                    "Mapping from actor id to fragment id",
-                    [panels.table_target(f"{metric('actor_info')}")],
-                    excluded_cols,
+                    "Actor Info",
+                    "Information about actors",
+                    [panels.table_target(f"group({metric('actor_info')}) by (actor_id, fragment_id, compute_node)")],
+                    ["actor_id", "fragment_id", "compute_node"],
                 ),
                 panels.table_info(
-                    "Materialized View Info",
-                    "Mapping from materialized view table id to it's internal table ids",
-                    [panels.table_target(f"{metric('table_info')}")],
-                    excluded_cols,
+                    "State Table Info",
+                    "Information about state tables. Column `materialized_view_id` is the id of the materialized view that this state table belongs to.",
+                    [panels.table_target(f"group({metric('table_info')}) by (table_id, table_name, table_type, materialized_view_id, fragment_id, compaction_group_id)")],
+                    ["table_id", "table_name", "table_type", "materialized_view_id", "fragment_id", "compaction_group_id"],
                 ),
             ],
         )
@@ -679,14 +678,53 @@ def section_streaming(outer_panels):
         outer_panels.row_collapsed(
             "Streaming",
             [
+                panels.timeseries_count(
+                    "Barrier Number",
+                    "The number of barriers that have been ingested but not completely processed. This metric reflects the "
+                    "current level of congestion within the system.",
+                    [
+                        panels.target(f"{metric('all_barrier_nums')}", "all_barrier"),
+                        panels.target(
+                            f"{metric('in_flight_barrier_nums')}", "in_flight_barrier"
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Barrier Latency",
+                    "The time that the data between two consecutive barriers gets fully processed, i.e. the computation "
+                    "results are made durable into materialized views or sink to external systems. This metric shows to users "
+                    "the freshness of materialized views.",
+                    quantile(
+                        lambda quantile, legend: panels.target(
+                            f"histogram_quantile({quantile}, sum(rate({metric('meta_barrier_duration_seconds_bucket')}[$__rate_interval])) by (le))",
+                            f"barrier_latency_p{legend}",
+                        ),
+                        [50, 90, 99, 999, "max"],
+                    )
+                    + [
+                        panels.target(
+                            f"rate({metric('meta_barrier_duration_seconds_sum')}[$__rate_interval]) / rate({metric('meta_barrier_duration_seconds_count')}[$__rate_interval])",
+                            "barrier_latency_avg",
+                        ),
+                    ],
+                ),
+                panels.timeseries(
+                    "Barrier pending time (secs)",
+                    "The duration from the last committed barrier's epoch time to the current time. This metric reflects the "
+                    "data freshness of the system. During this time, no new data has been committed.",
+                    [
+                        panels.target(
+                            f"timestamp({metric('last_committed_barrier_time')}) - {metric('last_committed_barrier_time')}", "barrier_pending_time"
+                        )
+                    ],
+                ),
                 panels.timeseries_rowsps(
                     "Source Throughput(rows/s)",
                     "The figure shows the number of rows read by each source per second.",
                     [
                         panels.target(
-                            f"rate({metric('stream_source_output_rows_counts')}[$__rate_interval])",
-                            "source={{source_name}} actor={{actor_id}} @ {{%s}}"
-                            % NODE_LABEL,
+                            f"sum(rate({metric('stream_source_output_rows_counts')}[$__rate_interval])) by (source_id, source_name, fragment_id)",
+                            "{{source_id}} {{source_name}} (fragment {{fragment_id}})",
                         ),
                     ],
                 ),
@@ -697,7 +735,7 @@ def section_streaming(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('source_partition_input_count')}[$__rate_interval])",
-                            "actor={{actor_id}} source={{source_id}} partition={{partition}}",
+                            "actor={{actor_id}} source={{source_id}} partition={{partition}} fragmend_id={{fragment_id}}",
                         )
                     ],
                 ),
@@ -706,8 +744,8 @@ def section_streaming(outer_panels):
                     "The figure shows the number of bytes read by each source per second.",
                     [
                         panels.target(
-                            f"(sum by (source_id)(rate({metric('source_partition_input_bytes')}[$__rate_interval])))/(1000*1000)",
-                            "source={{source_id}}",
+                            f"(sum by (source_id, source_name, fragment_id)(rate({metric('source_partition_input_bytes')}[$__rate_interval])))/(1000*1000)",
+                            "{{source_id}} {{source_name}} (fragment {{fragment_id}})",
                         )
                     ],
                 ),
@@ -718,21 +756,18 @@ def section_streaming(outer_panels):
                     [
                         panels.target(
                             f"(rate({metric('source_partition_input_bytes')}[$__rate_interval]))/(1000*1000)",
-                            "actor={{actor_id}} source={{source_id}} partition={{partition}}",
+                            "actor={{actor_id}} source={{source_id}} partition={{partition}} fragmend_id={{fragment_id}}",
                         )
                     ],
                 ),
                 panels.timeseries_rowsps(
-                    "Source Throughput(rows) per barrier",
-                    "RisingWave ingests barriers periodically to trigger computation and checkpoints. The frequency of "
-                    "barrier can be set by barrier_interval_ms. This metric shows how many rows are ingested between two "
-                    "consecutive barriers.",
+                    "Source Backfill Throughput(rows/s)",
+                    "The figure shows the number of rows read by each source per second.",
                     [
                         panels.target(
-                            f"rate({metric('stream_source_rows_per_barrier_counts')}[$__rate_interval])",
-                            "actor={{actor_id}} source={{source_id}} @ {{%s}}"
-                            % NODE_LABEL,
-                        )
+                            f"sum(rate({metric('stream_source_backfill_rows_counts')}[$__rate_interval])) by (source_id, source_name, fragment_id)",
+                            "{{source_id}} {{source_name}} (fragment {{fragment_id}})",
+                        ),
                     ],
                 ),
                 panels.timeseries_count(
@@ -762,11 +797,7 @@ def section_streaming(outer_panels):
                     "Kafka Consumer Lag Size by source_id, partition and actor_id",
                     [
                         panels.target(
-                            f"{metric('source_kafka_high_watermark')}",
-                            "source={{source_id}} partition={{partition}}",
-                        ),
-                        panels.target(
-                            f"{metric('source_latest_message_id')}",
+                            f"clamp_min({metric('source_kafka_high_watermark')} - on(source_id, partition) group_right() {metric('source_latest_message_id')}, 0)",
                             "source={{source_id}} partition={{partition}} actor_id={{actor_id}}",
                         ),
                     ],
@@ -833,17 +864,6 @@ def section_streaming(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_count(
-                    "Barrier Number",
-                    "The number of barriers that have been ingested but not completely processed. This metric reflects the "
-                    "current level of congestion within the system.",
-                    [
-                        panels.target(f"{metric('all_barrier_nums')}", "all_barrier"),
-                        panels.target(
-                            f"{metric('in_flight_barrier_nums')}", "in_flight_barrier"
-                        ),
-                    ],
-                ),
                 panels.timeseries_latency(
                     "Barrier Send Latency",
                     "The duration between the time point when the scheduled barrier needs to be sent and the time point when "
@@ -860,25 +880,6 @@ def section_streaming(outer_panels):
                         panels.target(
                             f"rate({metric('meta_barrier_send_duration_seconds_sum')}[$__rate_interval]) / rate({metric('meta_barrier_send_duration_seconds_count')}[$__rate_interval])",
                             "barrier_send_latency_avg",
-                        ),
-                    ],
-                ),
-                panels.timeseries_latency(
-                    "Barrier Latency",
-                    "The time that the data between two consecutive barriers gets fully processed, i.e. the computation "
-                    "results are made durable into materialized views or sink to external systems. This metric shows to users "
-                    "the freshness of materialized views.",
-                    quantile(
-                        lambda quantile, legend: panels.target(
-                            f"histogram_quantile({quantile}, sum(rate({metric('meta_barrier_duration_seconds_bucket')}[$__rate_interval])) by (le))",
-                            f"barrier_latency_p{legend}",
-                        ),
-                        [50, 90, 99, 999, "max"],
-                    )
-                    + [
-                        panels.target(
-                            f"rate({metric('meta_barrier_duration_seconds_sum')}[$__rate_interval]) / rate({metric('meta_barrier_duration_seconds_count')}[$__rate_interval])",
-                            "barrier_latency_avg",
                         ),
                     ],
                 ),
@@ -988,6 +989,16 @@ def section_streaming_cdc(outer_panels):
                                 f"lag p{legend}" + " - {{table_name}}",
                             ),
                             [50, 99, "max"],
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "CDC Source Errors",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('cdc_source_error')}) by (connector_name, source_id, error_msg)",
+                            "{{connector_name}}: {{error_msg}} ({{source_id}})",
                         ),
                     ],
                 ),
@@ -1220,7 +1231,7 @@ def section_streaming_actors(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('stream_join_actor_input_waiting_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id)",
+                            f"avg(rate({metric('stream_join_actor_input_waiting_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id)",
                             "fragment {{fragment_id}}",
                         ),
                         panels.target_hidden(
@@ -1234,7 +1245,7 @@ def section_streaming_actors(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('stream_join_match_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id)",
+                            f"avg(rate({metric('stream_join_match_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id,side)",
                             "fragment {{fragment_id}} {{side}}",
                         ),
                         panels.target_hidden(
@@ -1659,53 +1670,31 @@ def section_streaming_errors(outer_panels):
             [
                 panels.timeseries_count(
                     "Compute Errors by Type",
-                    "",
+                    "Errors that happened during computation. Check the logs for detailed error message.",
                     [
                         panels.target(
-                            f"sum({metric('user_compute_error_count')}) by (error_type, error_msg, fragment_id, executor_name)",
-                            "{{error_type}}: {{error_msg}} ({{executor_name}}: fragment_id={{fragment_id}})",
-                        ),
-                        panels.target(
-                            f"sum({metric('user_compute_error')}) by (error_type, error_msg, fragment_id, executor_name)",
-                            "{{error_type}}: {{error_msg}} ({{executor_name}}: fragment_id={{fragment_id}})",
+                            f"sum({metric('user_compute_error')}) by (error_type, executor_name, fragment_id)",
+                            "{{error_type}} @ {{executor_name}} (fragment_id={{fragment_id}})",
                         ),
                     ],
                 ),
                 panels.timeseries_count(
                     "Source Errors by Type",
-                    "",
+                    "Errors that happened during source data ingestion. Check the logs for detailed error message.",
                     [
                         panels.target(
-                            f"sum({metric('user_source_error_count')}) by (error_type, error_msg, fragment_id, table_id, executor_name)",
-                            "{{error_type}}: {{error_msg}} ({{executor_name}}: table_id={{table_id}}, fragment_id={{fragment_id}})",
-                        ),
-                        panels.target(
-                            f"sum({metric('user_source_error')}) by (error_type, error_msg, fragment_id, table_id, executor_name)",
-                            "{{error_type}}: {{error_msg}} ({{executor_name}}: table_id={{table_id}}, fragment_id={{fragment_id}})",
+                            f"sum({metric('user_source_error')}) by (error_type, source_id, source_name, fragment_id)",
+                            "{{error_type}} @ {{source_name}} (source_id={{source_id}} fragment_id={{fragment_id}})",
                         ),
                     ],
                 ),
                 panels.timeseries_count(
-                    "Source Reader Errors by Type",
-                    "",
+                    "Sink Errors by Type",
+                    "Errors that happened during data sink out. Check the logs for detailed error message.",
                     [
                         panels.target(
-                            f"sum({metric('user_source_reader_error_count')}) by (error_type, error_msg, actor_id, source_id, executor_name)",
-                            "{{error_type}}: {{error_msg}} ({{executor_name}}: actor_id={{actor_id}}, source_id={{source_id}})",
-                        ),
-                        panels.target(
-                            f"sum({metric('user_source_reader_error')}) by (error_type, error_msg, actor_id, source_id, executor_name)",
-                            "{{error_type}}: {{error_msg}} ({{executor_name}}: actor_id={{actor_id}}, source_id={{source_id}})",
-                        ),
-                    ],
-                ),
-                panels.timeseries_count(
-                    "Sink by Connector",
-                    "",
-                    [
-                        panels.target(
-                            f"sum({metric('user_sink_error')}) by (connector_name, executor_id, error_msg)",
-                            "{{connector_name}}: {{error_msg}} ({{executor_id}})",
+                            f"sum({metric('user_sink_error')}) by (error_type, sink_id, sink_name, fragment_id)",
+                            "{{error_type}} @ {{sink_name}} (sink_id={{sink_id}} fragment_id={{fragment_id}})",
                         ),
                     ],
                 ),
@@ -1745,7 +1734,11 @@ def section_batch(outer_panels):
                     "All memory usage of batch executors in bytes",
                     [
                         panels.target(
-                            f"{metric('batch_total_mem')}",
+                            f"{metric('compute_batch_total_mem')}",
+                            "",
+                        ),
+                        panels.target(
+                            f"{metric('frontend_batch_total_mem')}",
                             "",
                         ),
                     ],
@@ -1940,17 +1933,17 @@ def section_hummock_read(outer_panels):
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Cache Miss Rate",
+                    "Cache Miss Ratio",
                     "",
                     [
                         panels.target(
                             f"(sum(rate({table_metric('state_store_sst_store_block_request_counts', meta_miss_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)) / (sum(rate({table_metric('state_store_sst_store_block_request_counts', meta_total_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id))",
-                            "meta cache miss rate - {{table_id}} @ {{%s}} @ {{%s}}"
+                            "meta cache miss ratio - {{table_id}} @ {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                         panels.target(
                             f"(sum(rate({table_metric('state_store_sst_store_block_request_counts', data_miss_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)) / (sum(rate({table_metric('state_store_sst_store_block_request_counts', data_total_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id))",
-                            "block cache miss rate - {{table_id}} @ {{%s}} @ {{%s}}"
+                            "block cache miss ratio - {{table_id}} @ {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
@@ -2246,13 +2239,21 @@ def section_hummock_write(outer_panels):
                             lambda quantile, legend: panels.target(
                                 f"histogram_quantile({quantile}, sum(rate({metric('state_store_sync_duration_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
                                 f"p{legend}"
-                                + " - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                                + " Sync duration - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                             ),
                             [50, 99, "max"],
                         ),
                         panels.target(
                             f"sum by(le, {COMPONENT_LABEL}, {NODE_LABEL}) (rate({metric('state_store_sync_duration_sum')}[$__rate_interval])) / sum by(le, {COMPONENT_LABEL}, {NODE_LABEL}) (rate({metric('state_store_sync_duration_count')}[$__rate_interval]))",
-                            "avg - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            "avg Sync duration - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('state_store_uploader_upload_task_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
+                                f"p{legend}"
+                                + " upload task duration - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                                ),
+                            [50, 99, "max"],
                         ),
                     ],
                 ),
@@ -2282,6 +2283,16 @@ def section_hummock_write(outer_panels):
                             "Uploader spill tasks - {{uploader_stage}} @ {{%s}}"
                             % NODE_LABEL,
                         ),
+                        panels.target(
+                            f"sum({metric('state_store_uploader_uploading_task_count')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "uploading task count - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                        panels.target(
+                            f"sum({metric('state_store_uploader_syncing_epoch_count')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "syncing epoch count - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
                     ],
                 ),
                 panels.timeseries_bytes(
@@ -2416,6 +2427,39 @@ def section_hummock_write(outer_panels):
                         panels.target(
                             f"sum by(le, {COMPONENT_LABEL}, {NODE_LABEL}) (rate({metric('state_store_sync_size_sum')}[$__rate_interval])) / sum by(le, {COMPONENT_LABEL}, {NODE_LABEL}) (rate({metric('state_store_sync_size_count')}[$__rate_interval]))",
                             "avg - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Event handler pending event number",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('state_store_event_handler_pending_event')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "{{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Event handle latency",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('state_store_event_handler_latency_bucket')}[$__rate_interval])) by (le, event_type, {COMPONENT_LABEL}, {NODE_LABEL}))",
+                                f"p{legend}"
+                                + " {{event_type}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                                ),
+                            [50, 99, "max"],
+                        ),
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('state_store_uploader_wait_poll_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
+                                f"p{legend}"
+                                + " finished_task_wait_poll {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                                ),
+                            [50, 99, "max"],
                         ),
                     ],
                 ),
@@ -2674,9 +2718,9 @@ def section_hummock_manager(outer_panels):
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('hummock_manager_lock_time_bucket')}[$__rate_interval])) by (le, lock_name, lock_type))",
+                                f"histogram_quantile({quantile}, sum(rate({metric('hummock_manager_lock_time_bucket')}[$__rate_interval])) by (le, method, lock_name, lock_type))",
                                 f"Lock Time p{legend}"
-                                + " - {{lock_type}} @ {{lock_name}}",
+                                + " - {{method}} @ {{lock_type}} @ {{lock_name}}",
                             ),
                             [50, 99, "max"],
                         ),
@@ -3253,12 +3297,26 @@ def section_grpc_hummock_meta_client(outer_panels):
     ]
 
 
-def section_kafka_native_metrics(outer_panels):
+def section_kafka_metrics(outer_panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "Kafka Native Metrics",
+            "Kafka Metrics",
             [
+                panels.timeseries_count(
+                    "Kafka high watermark and source latest message",
+                    "Kafka high watermark by source and partition and source latest message by partition, source and actor",
+                    [
+                        panels.target(
+                            f"{metric('source_kafka_high_watermark')}",
+                            "high watermark: source={{source_id}} partition={{partition}}",
+                        ),
+                        panels.target(
+                            f"{metric('source_latest_message_id')}",
+                            "latest msg: source={{source_id}} partition={{partition}} actor_id={{actor_id}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_count(
                     "Message Count in Producer Queue",
                     "Current number of messages in producer queues",
@@ -3649,6 +3707,26 @@ def section_memory_manager(outer_panels):
                     ],
                 ),
                 panels.timeseries_memory(
+                    "The resident memory of jemalloc",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('jemalloc_resident_bytes')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_memory(
+                    "The metadata memory of jemalloc",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('jemalloc_metadata_bytes')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_memory(
                     "The allocated memory of jvm",
                     "",
                     [
@@ -4032,12 +4110,20 @@ def section_udf(outer_panels):
                             "udf_failure_count - {{%s}}" % NODE_LABEL,
                         ),
                         panels.target(
-                            f"sum(rate({metric('udf_success_count')}[$__rate_interval])) by (link, name)",
-                            "udf_success_count - {{link}} {{name}}",
+                            f"sum(rate({metric('udf_retry_count')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "udf_retry_count - {{%s}}" % NODE_LABEL,
                         ),
                         panels.target(
-                            f"sum(rate({metric('udf_failure_count')}[$__rate_interval])) by (link, name)",
-                            "udf_failure_count - {{link}} {{name}}",
+                            f"sum(rate({metric('udf_success_count')}[$__rate_interval])) by (link, name, fragment_id)",
+                            "udf_success_count - {{link}} {{name}} {{fragment_id}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('udf_failure_count')}[$__rate_interval])) by (link, name, fragment_id)",
+                            "udf_failure_count - {{link}} {{name}} {{fragment_id}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('udf_retry_count')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "udf_retry_count - {{%s}}" % NODE_LABEL,
                         ),
                     ],
                 ),
@@ -4046,8 +4132,8 @@ def section_udf(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(irate({metric('udf_input_chunk_rows_sum')}[$__rate_interval])) by (link, name) / sum(irate({metric('udf_input_chunk_rows_count')}[$__rate_interval])) by (link, name)",
-                            "udf_input_chunk_rows_avg - {{link}} {{name}}",
+                            f"sum(irate({metric('udf_input_chunk_rows_sum')}[$__rate_interval])) by (link, name, fragment_id) / sum(irate({metric('udf_input_chunk_rows_count')}[$__rate_interval])) by (link, name, fragment_id)",
+                            "udf_input_chunk_rows_avg - {{link}} {{name}} {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -4068,8 +4154,16 @@ def section_udf(outer_panels):
                             "udf_latency_p99 - {{%s}}" % NODE_LABEL,
                         ),
                         panels.target(
-                            f"sum(irate({metric('udf_latency_sum')}[$__rate_interval])) / sum(irate({metric('udf_latency_count')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            f"sum(irate({metric('udf_latency_sum')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL}) / sum(irate({metric('udf_latency_count')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
                             "udf_latency_avg - {{%s}}" % NODE_LABEL,
+                        ),
+                        panels.target(
+                            f"histogram_quantile(0.99, sum(irate({metric('udf_latency_bucket')}[$__rate_interval])) by (le, link, name, fragment_id))",
+                            "udf_latency_p99_by_name - {{link}} {{name}} {{fragment_id}}",
+                        ),
+                        panels.target(
+                            f"sum(irate({metric('udf_latency_sum')}[$__rate_interval])) by (link, name, fragment_id) / sum(irate({metric('udf_latency_count')}[$__rate_interval])) by (link, name, fragment_id)",
+                            "udf_latency_avg_by_name - {{link}} {{name}} {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -4082,8 +4176,8 @@ def section_udf(outer_panels):
                             "udf_throughput_rows - {{%s}}" % NODE_LABEL,
                         ),
                         panels.target(
-                            f"sum(rate({metric('udf_input_rows')}[$__rate_interval])) by (link, name)",
-                            "udf_throughput_rows - {{link}} {{name}}",
+                            f"sum(rate({metric('udf_input_rows')}[$__rate_interval])) by (link, name, fragment_id)",
+                            "udf_throughput_rows - {{link}} {{name}} {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -4096,8 +4190,8 @@ def section_udf(outer_panels):
                             "udf_throughput_bytes - {{%s}}" % NODE_LABEL,
                         ),
                         panels.target(
-                            f"sum(rate({metric('udf_input_bytes')}[$__rate_interval])) by (link, name) / (1024*1024)",
-                            "udf_throughput_bytes - {{link}} {{name}}",
+                            f"sum(rate({metric('udf_input_bytes')}[$__rate_interval])) by (link, name, fragment_id) / (1024*1024)",
+                            "udf_throughput_bytes - {{link}} {{name}} {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -4255,6 +4349,7 @@ dashboard = Dashboard(
     sharedCrosshair=True,
     templating=templating,
     version=dashboard_version,
+    refresh="",
     panels=[
         *section_actor_info(panels),
         *section_cluster_node(panels),
@@ -4282,7 +4377,7 @@ dashboard = Dashboard(
         *section_memory_manager(panels),
         *section_connector_node(panels),
         *section_sink_metrics(panels),
-        *section_kafka_native_metrics(panels),
+        *section_kafka_metrics(panels),
         *section_network_connection(panels),
         *section_iceberg_metrics(panels),
         *section_udf(panels),

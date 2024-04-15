@@ -28,6 +28,7 @@ use itertools::Itertools;
 use parse_display::{Display, FromStr};
 use paste::paste;
 use postgres_types::{FromSql, IsNull, ToSql, Type};
+use risingwave_common_estimate_size::{EstimateSize, ZeroHeapSize};
 use risingwave_pb::data::data_type::PbTypeName;
 use risingwave_pb::data::PbDataType;
 use serde::{Deserialize, Serialize, Serializer};
@@ -40,7 +41,6 @@ use crate::array::{
 pub use crate::array::{ListRef, ListValue, StructRef, StructValue};
 use crate::cast::{str_to_bool, str_to_bytea};
 use crate::error::BoxedError;
-use crate::estimate_size::EstimateSize;
 use crate::{
     dispatch_data_types, dispatch_scalar_ref_variants, dispatch_scalar_variants,
     for_all_scalar_variants, for_all_type_pairs,
@@ -175,6 +175,8 @@ impl std::str::FromStr for Box<DataType> {
     }
 }
 
+impl ZeroHeapSize for DataType {}
+
 impl DataTypeName {
     pub fn is_scalar(&self) -> bool {
         match self {
@@ -293,6 +295,36 @@ impl From<DataTypeName> for PbTypeName {
     }
 }
 
+/// Convenient macros to generate match arms for [`DataType`](crate::types::DataType).
+pub mod data_types {
+    /// Numeric [`DataType`](crate::types::DataType)s supported to be `offset` of `RANGE` frame.
+    #[macro_export]
+    macro_rules! range_frame_numeric {
+        () => {
+            DataType::Int16
+                | DataType::Int32
+                | DataType::Int64
+                | DataType::Float32
+                | DataType::Float64
+                | DataType::Decimal
+        };
+    }
+    pub use range_frame_numeric;
+
+    /// Date/time [`DataType`](crate::types::DataType)s supported to be `offset` of `RANGE` frame.
+    #[macro_export]
+    macro_rules! range_frame_datetime {
+        () => {
+            DataType::Date
+                | DataType::Time
+                | DataType::Timestamp
+                | DataType::Timestamptz
+                | DataType::Interval
+        };
+    }
+    pub use range_frame_datetime;
+}
+
 impl DataType {
     pub fn create_array_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         use crate::array::*;
@@ -374,7 +406,7 @@ impl DataType {
         matches!(self, DataType::Int16 | DataType::Int32 | DataType::Int64)
     }
 
-    /// Returns the output type of window function on a given input type.
+    /// Returns the output type of time window function on a given input type.
     pub fn window_of(input: &DataType) -> Option<DataType> {
         match input {
             DataType::Timestamptz => Some(DataType::Timestamptz),
@@ -570,10 +602,24 @@ pub trait ToOwnedDatum {
     fn to_owned_datum(self) -> Datum;
 }
 
-impl ToOwnedDatum for DatumRef<'_> {
+impl ToOwnedDatum for &Datum {
     #[inline(always)]
     fn to_owned_datum(self) -> Datum {
-        self.map(ScalarRefImpl::into_scalar_impl)
+        self.clone()
+    }
+}
+
+impl<T: Into<ScalarImpl>> ToOwnedDatum for T {
+    #[inline(always)]
+    fn to_owned_datum(self) -> Datum {
+        Some(self.into())
+    }
+}
+
+impl<T: Into<ScalarImpl>> ToOwnedDatum for Option<T> {
+    #[inline(always)]
+    fn to_owned_datum(self) -> Datum {
+        self.map(Into::into)
     }
 }
 
@@ -680,6 +726,8 @@ macro_rules! impl_convert {
 
             paste! {
                 impl ScalarImpl {
+                    /// # Panics
+                    /// If the scalar is not of the expected type.
                     pub fn [<as_ $suffix_name>](&self) -> &$scalar {
                         match self {
                             Self::$variant_name(ref scalar) => scalar,
@@ -687,6 +735,8 @@ macro_rules! impl_convert {
                         }
                     }
 
+                    /// # Panics
+                    /// If the scalar is not of the expected type.
                     pub fn [<into_ $suffix_name>](self) -> $scalar {
                         match self {
                             Self::$variant_name(scalar) => scalar,
@@ -696,7 +746,8 @@ macro_rules! impl_convert {
                 }
 
                 impl <'scalar> ScalarRefImpl<'scalar> {
-                    // Note that this conversion consume self.
+                    /// # Panics
+                    /// If the scalar is not of the expected type.
                     pub fn [<into_ $suffix_name>](self) -> $scalar_ref {
                         match self {
                             Self::$variant_name(inner) => inner,
@@ -762,6 +813,36 @@ impl From<&[u8]> for ScalarImpl {
 impl From<JsonbRef<'_>> for ScalarImpl {
     fn from(jsonb: JsonbRef<'_>) -> Self {
         Self::Jsonb(jsonb.to_owned_scalar())
+    }
+}
+
+impl<T: PrimitiveArrayItemType> From<Vec<T>> for ScalarImpl {
+    fn from(v: Vec<T>) -> Self {
+        Self::List(v.into_iter().collect())
+    }
+}
+
+impl<T: PrimitiveArrayItemType> From<Vec<Option<T>>> for ScalarImpl {
+    fn from(v: Vec<Option<T>>) -> Self {
+        Self::List(v.into_iter().collect())
+    }
+}
+
+impl From<Vec<String>> for ScalarImpl {
+    fn from(v: Vec<String>) -> Self {
+        Self::List(v.iter().map(|s| s.as_str()).collect())
+    }
+}
+
+impl From<Vec<u8>> for ScalarImpl {
+    fn from(v: Vec<u8>) -> Self {
+        Self::Bytea(v.into())
+    }
+}
+
+impl From<Bytes> for ScalarImpl {
+    fn from(v: Bytes) -> Self {
+        Self::Bytea(v.as_ref().into())
     }
 }
 

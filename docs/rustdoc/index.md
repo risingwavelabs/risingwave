@@ -30,9 +30,9 @@ There's also a [Dash](https://kapeli.com/dash) docset feed containing all crate 
   - [risingwave_hummock_sdk](risingwave_hummock_sdk/index.html)
   - [risingwave_object_store](risingwave_object_store/index.html)
 
-### Source and Connector
+### DML and Connectors (Source and Sink)
 
-- [risingwave_source](risingwave_source/index.html)
+- [risingwave_dml](risingwave_dml/index.html)
 - [risingwave_connector](risingwave_connector/index.html)
 
 ### Common

@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ConnectionId, DatabaseId, SchemaId, TableId, UserId,
+    ColumnCatalog, ConnectionId, CreateType, DatabaseId, SchemaId, TableId, UserId,
 };
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::stream_plan::PbSinkDesc;
@@ -67,6 +67,12 @@ pub struct SinkDesc {
 
     /// Id of the target table for sink into table.
     pub target_table: Option<TableId>,
+
+    /// See the same name field in `SinkWriterParam`.
+    pub extra_partition_col_idx: Option<usize>,
+
+    /// Whether the sink job should run in foreground or background.
+    pub create_type: CreateType,
 }
 
 impl SinkDesc {
@@ -101,6 +107,7 @@ impl SinkDesc {
             target_table: self.target_table,
             created_at_cluster_version: None,
             initialized_at_cluster_version: None,
+            create_type: CreateType::Foreground,
         }
     }
 
@@ -123,6 +130,7 @@ impl SinkDesc {
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
             target_table: self.target_table.map(|table_id| table_id.table_id()),
+            extra_partition_col_idx: self.extra_partition_col_idx.map(|idx| idx as u64),
         }
     }
 }

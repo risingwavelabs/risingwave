@@ -14,17 +14,17 @@
 
 use std::sync::Arc;
 
+use either::Either;
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{is_system_schema, Field};
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
-use risingwave_sqlparser::ast::{Statement, TableAlias};
+use risingwave_connector::WithPropertiesExt;
+use risingwave_sqlparser::ast::{AsOf, Statement, TableAlias};
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 
 use super::BoundShare;
-use crate::binder::relation::BoundSubquery;
 use crate::binder::{Binder, Relation};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
@@ -32,13 +32,14 @@ use crate::catalog::system_catalog::SystemTableCatalog;
 use crate::catalog::table_catalog::{TableCatalog, TableType};
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::catalog::{CatalogError, IndexCatalog, TableId};
+use crate::error::{ErrorCode, Result, RwError};
 
 #[derive(Debug, Clone)]
 pub struct BoundBaseTable {
     pub table_id: TableId,
     pub table_catalog: Arc<TableCatalog>,
     pub table_indexes: Vec<Arc<IndexCatalog>>,
-    pub for_system_time_as_of_proctime: bool,
+    pub as_of: Option<AsOf>,
 }
 
 #[derive(Debug, Clone)]
@@ -50,11 +51,16 @@ pub struct BoundSystemTable {
 #[derive(Debug, Clone)]
 pub struct BoundSource {
     pub catalog: SourceCatalog,
+    pub as_of: Option<AsOf>,
 }
 
-impl From<&SourceCatalog> for BoundSource {
-    fn from(s: &SourceCatalog) -> Self {
-        Self { catalog: s.clone() }
+impl BoundSource {
+    pub fn is_shareable_cdc_connector(&self) -> bool {
+        self.catalog.with_properties.is_shareable_cdc_connector()
+    }
+
+    pub fn is_shared(&self) -> bool {
+        self.catalog.info.is_shared()
     }
 }
 
@@ -65,7 +71,7 @@ impl Binder {
         schema_name: Option<&str>,
         table_name: &str,
         alias: Option<TableAlias>,
-        for_system_time_as_of_proctime: bool,
+        as_of: Option<AsOf>,
     ) -> Result<Relation> {
         // define some helper functions converting catalog to bound relation
         let resolve_sys_table_relation = |sys_table_catalog: &Arc<SystemTableCatalog>| {
@@ -117,16 +123,12 @@ impl Binder {
                         self.catalog
                             .get_table_by_name(&self.db_name, schema_path, table_name)
                     {
-                        self.resolve_table_relation(
-                            table_catalog.clone(),
-                            schema_name,
-                            for_system_time_as_of_proctime,
-                        )?
+                        self.resolve_table_relation(table_catalog.clone(), schema_name, as_of)?
                     } else if let Ok((source_catalog, _)) =
                         self.catalog
                             .get_source_by_name(&self.db_name, schema_path, table_name)
                     {
-                        self.resolve_source_relation(&source_catalog.clone())
+                        self.resolve_source_relation(&source_catalog.clone(), as_of)
                     } else if let Ok((view_catalog, _)) =
                         self.catalog
                             .get_view_by_name(&self.db_name, schema_path, table_name)
@@ -164,14 +166,13 @@ impl Binder {
                                     return self.resolve_table_relation(
                                         table_catalog.clone(),
                                         &schema_name.clone(),
-                                        for_system_time_as_of_proctime,
+                                        as_of,
                                     );
                                 } else if let Some(source_catalog) =
                                     schema.get_source_by_name(table_name)
                                 {
-                                    return Ok(
-                                        self.resolve_source_relation(&source_catalog.clone())
-                                    );
+                                    return Ok(self
+                                        .resolve_source_relation(&source_catalog.clone(), as_of));
                                 } else if let Some(view_catalog) =
                                     schema.get_view_by_name(table_name)
                                 {
@@ -194,7 +195,7 @@ impl Binder {
         &mut self,
         table_catalog: Arc<TableCatalog>,
         schema_name: &str,
-        for_system_time_as_of_proctime: bool,
+        as_of: Option<AsOf>,
     ) -> Result<(Relation, Vec<(bool, Field)>)> {
         let table_id = table_catalog.id();
         let columns = table_catalog
@@ -209,7 +210,7 @@ impl Binder {
             table_id,
             table_catalog,
             table_indexes,
-            for_system_time_as_of_proctime,
+            as_of,
         };
 
         Ok::<_, RwError>((Relation::BaseTable(Box::new(table)), columns))
@@ -218,10 +219,14 @@ impl Binder {
     fn resolve_source_relation(
         &mut self,
         source_catalog: &SourceCatalog,
+        as_of: Option<AsOf>,
     ) -> (Relation, Vec<(bool, Field)>) {
         self.included_relations.insert(source_catalog.id.into());
         (
-            Relation::Source(Box::new(source_catalog.into())),
+            Relation::Source(Box::new(BoundSource {
+                catalog: source_catalog.clone(),
+                as_of,
+            })),
             source_catalog
                 .columns
                 .iter()
@@ -273,10 +278,7 @@ impl Binder {
                 share_id
             }
         };
-        let input = Relation::Subquery(Box::new(BoundSubquery {
-            query,
-            lateral: false,
-        }));
+        let input = Either::Left(query);
         Ok((
             Relation::Share(Box::new(BoundShare { share_id, input })),
             columns.iter().map(|c| (false, c.clone())).collect_vec(),
@@ -327,7 +329,7 @@ impl Binder {
             table_id,
             table_catalog,
             table_indexes,
-            for_system_time_as_of_proctime: false,
+            as_of: None,
         })
     }
 

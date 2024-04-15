@@ -4,7 +4,7 @@ from time import sleep
 
 sleep(30)
 
-relations = ['demo.demo_bhv_table']
+relations = ['demo.demo_bhv_table', 'demo.cassandra_types']
 
 dbs = ['cassandra', 'scylladb']
 failed_cases = []

@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use itertools::Itertools;
+use thiserror_ext::AsReport;
 use tracing::*;
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -89,7 +90,7 @@ fn main() -> Result<()> {
         let path = match entry {
             Ok(path) => path,
             Err(e) => {
-                error!("{:?}", e);
+                error!("{}", e.as_report());
                 continue;
             }
         };

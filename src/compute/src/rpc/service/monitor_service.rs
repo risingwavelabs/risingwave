@@ -15,39 +15,37 @@
 use std::ffi::CString;
 use std::fs;
 use std::path::Path;
-use std::sync::Arc;
 use std::time::Duration;
 
 use itertools::Itertools;
-use risingwave_common::config::ServerConfig;
+use prometheus::core::Collector;
+use risingwave_common::config::{MetricLevel, ServerConfig};
 use risingwave_common_heap_profiling::{AUTO_DUMP_SUFFIX, COLLAPSED_SUFFIX, MANUALLY_DUMP_SUFFIX};
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
-    AnalyzeHeapRequest, AnalyzeHeapResponse, HeapProfilingRequest, HeapProfilingResponse,
-    ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
-    StackTraceRequest, StackTraceResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, BackPressureInfo, GetBackPressureRequest,
+    GetBackPressureResponse, HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
+    ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, StackTraceRequest,
+    StackTraceResponse,
 };
 use risingwave_rpc_client::error::ToTonicStatus;
+use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
+use risingwave_stream::executor::monitor::global_streaming_metrics;
+use risingwave_stream::task::await_tree_key::{Actor, BarrierAwait};
 use risingwave_stream::task::LocalStreamManager;
 use thiserror_ext::AsReport;
 use tonic::{Code, Request, Response, Status};
 
 #[derive(Clone)]
 pub struct MonitorServiceImpl {
-    stream_mgr: Arc<LocalStreamManager>,
-    grpc_await_tree_reg: Option<AwaitTreeRegistryRef>,
+    stream_mgr: LocalStreamManager,
     server_config: ServerConfig,
 }
 
 impl MonitorServiceImpl {
-    pub fn new(
-        stream_mgr: Arc<LocalStreamManager>,
-        grpc_await_tree_reg: Option<AwaitTreeRegistryRef>,
-        server_config: ServerConfig,
-    ) -> Self {
+    pub fn new(stream_mgr: LocalStreamManager, server_config: ServerConfig) -> Self {
         Self {
             stream_mgr,
-            grpc_await_tree_reg,
             server_config,
         }
     }
@@ -62,19 +60,40 @@ impl MonitorService for MonitorServiceImpl {
     ) -> Result<Response<StackTraceResponse>, Status> {
         let _req = request.into_inner();
 
-        let actor_traces = self
-            .stream_mgr
-            .get_actor_traces()
-            .await
-            .into_iter()
-            .map(|(k, v)| (k, v.to_string()))
-            .collect();
+        let actor_traces = if let Some(reg) = self.stream_mgr.await_tree_reg() {
+            reg.collect::<Actor>()
+                .into_iter()
+                .map(|(k, v)| (k.0, v.to_string()))
+                .collect()
+        } else {
+            Default::default()
+        };
 
-        let rpc_traces = if let Some(m) = &self.grpc_await_tree_reg {
-            m.lock()
-                .await
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
+        let barrier_traces = if let Some(reg) = self.stream_mgr.await_tree_reg() {
+            reg.collect::<BarrierAwait>()
+                .into_iter()
+                .map(|(k, v)| (k.prev_epoch, v.to_string()))
+                .collect()
+        } else {
+            Default::default()
+        };
+
+        let rpc_traces = if let Some(reg) = self.stream_mgr.await_tree_reg() {
+            reg.collect::<GrpcCall>()
+                .into_iter()
+                .map(|(k, v)| (k.desc, v.to_string()))
+                .collect()
+        } else {
+            Default::default()
+        };
+
+        let compaction_task_traces = if let Some(hummock) =
+            self.stream_mgr.env.state_store().as_hummock()
+            && let Some(m) = hummock.compaction_await_tree_reg()
+        {
+            m.collect::<Compaction>()
+                .into_iter()
+                .map(|(k, v)| (format!("{k:?}"), v.to_string()))
                 .collect()
         } else {
             Default::default()
@@ -83,7 +102,8 @@ impl MonitorService for MonitorServiceImpl {
         Ok(Response::new(StackTraceResponse {
             actor_traces,
             rpc_traces,
-            compaction_task_traces: Default::default(),
+            compaction_task_traces,
+            inflight_barrier_traces: barrier_traces,
         }))
     }
 
@@ -230,6 +250,39 @@ impl MonitorService for MonitorServiceImpl {
         let file = fs::read(Path::new(&collapsed_path_str))?;
         Ok(Response::new(AnalyzeHeapResponse { result: file }))
     }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_back_pressure(
+        &self,
+        _request: Request<GetBackPressureRequest>,
+    ) -> Result<Response<GetBackPressureResponse>, Status> {
+        let metric_family = global_streaming_metrics(MetricLevel::Info)
+            .actor_output_buffer_blocking_duration_ns
+            .collect();
+        let metrics = metric_family.get(0).unwrap().get_metric();
+        let mut back_pressure_infos: Vec<BackPressureInfo> = Vec::new();
+        for label_pairs in metrics {
+            let mut back_pressure_info = BackPressureInfo::default();
+            for label_pair in label_pairs.get_label() {
+                if label_pair.get_name() == "actor_id" {
+                    back_pressure_info.actor_id = label_pair.get_value().parse::<u32>().unwrap();
+                }
+                if label_pair.get_name() == "fragment_id" {
+                    back_pressure_info.fragment_id = label_pair.get_value().parse::<u32>().unwrap();
+                }
+                if label_pair.get_name() == "downstream_fragment_id" {
+                    back_pressure_info.downstream_fragment_id =
+                        label_pair.get_value().parse::<u32>().unwrap();
+                }
+            }
+            back_pressure_info.value = label_pairs.get_counter().get_value();
+            back_pressure_infos.push(back_pressure_info);
+        }
+
+        Ok(Response::new(GetBackPressureResponse {
+            back_pressure_infos,
+        }))
+    }
 }
 
 pub use grpc_middleware::*;
@@ -242,12 +295,17 @@ pub mod grpc_middleware {
     use either::Either;
     use futures::Future;
     use hyper::Body;
-    use tokio::sync::Mutex;
     use tonic::transport::NamedService;
     use tower::{Layer, Service};
 
     /// Manages the await-trees of `gRPC` requests that are currently served by the compute node.
-    pub type AwaitTreeRegistryRef = Arc<Mutex<await_tree::Registry<String>>>;
+    pub type AwaitTreeRegistryRef = await_tree::Registry;
+
+    /// Await-tree key type for gRPC calls.
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    pub struct GrpcCall {
+        pub desc: String,
+    }
 
     #[derive(Clone)]
     pub struct AwaitTreeMiddlewareLayer {
@@ -311,14 +369,15 @@ pub mod grpc_middleware {
             let mut inner = std::mem::replace(&mut self.inner, clone);
 
             let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-            let key = if let Some(authority) = req.uri().authority() {
+            let desc = if let Some(authority) = req.uri().authority() {
                 format!("{authority} - {id}")
             } else {
                 format!("?? - {id}")
             };
+            let key = GrpcCall { desc };
 
             Either::Right(async move {
-                let root = registry.lock().await.register(key, req.uri().path());
+                let root = registry.register(key, req.uri().path());
 
                 root.instrument(inner.call(req)).await
             })

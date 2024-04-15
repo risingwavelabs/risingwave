@@ -172,6 +172,7 @@ macro_rules! for_all_metadata_models {
             { risingwave_pb::catalog::Table },
             { risingwave_pb::catalog::Index },
             { risingwave_pb::catalog::Sink },
+            { risingwave_pb::catalog::Subscription },
             { risingwave_pb::catalog::Source },
             { risingwave_pb::catalog::View },
             { crate::model::stream::TableFragments },

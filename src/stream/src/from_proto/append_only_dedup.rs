@@ -20,8 +20,8 @@ use risingwave_storage::StateStore;
 use super::ExecutorBuilder;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
-use crate::executor::{AppendOnlyDedupExecutor, BoxedExecutor};
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
+use crate::executor::{AppendOnlyDedupExecutor, Executor};
+use crate::task::ExecutorParams;
 
 pub struct AppendOnlyDedupExecutorBuilder;
 
@@ -32,19 +32,19 @@ impl ExecutorBuilder for AppendOnlyDedupExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let table = node.get_state_table()?;
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let state_table = StateTable::from_table_catalog(table, store, vnodes).await;
-        Ok(Box::new(AppendOnlyDedupExecutor::new(
-            input,
-            state_table,
-            params.info,
+        let exec = AppendOnlyDedupExecutor::new(
             params.actor_context,
-            stream.get_watermark_epoch(),
-            stream.streaming_metrics.clone(),
-        )))
+            input,
+            params.info.pk_indices.clone(), /* TODO(rc): should change to use `dedup_column_indices`, but need to check backward compatibility */
+            state_table,
+            params.watermark_epoch,
+            params.executor_stats.clone(),
+        );
+        Ok((params.info, exec).into())
     }
 }

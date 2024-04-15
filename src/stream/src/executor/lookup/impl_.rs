@@ -17,11 +17,11 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::RowRef;
 use risingwave_common::catalog::{ColumnDesc, Schema};
-use risingwave_common::estimate_size::VecWithKvSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common_estimate_size::collections::EstimatedVec;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -31,8 +31,8 @@ use risingwave_storage::StateStore;
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
 use crate::cache::cache_may_stale;
 use crate::common::metrics::MetricsInfo;
-use crate::common::JoinStreamChunkBuilder;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
+use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor::lookup::LookupExecutor;
@@ -46,11 +46,11 @@ pub struct LookupExecutorParams<S: StateStore> {
 
     /// The side for arrangement. Currently, it should be a
     /// `MaterializeExecutor`.
-    pub arrangement: Box<dyn Executor>,
+    pub arrangement: Executor,
 
     /// The side for stream. It can be any stream, but it will generally be a
     /// `MaterializeExecutor`.
-    pub stream: Box<dyn Executor>,
+    pub stream: Executor,
 
     /// Should be the same as [`ColumnDesc`] in the arrangement.
     ///
@@ -198,7 +198,6 @@ impl<S: StateStore> LookupExecutor<S> {
 
         Self {
             ctx,
-            info,
             chunk_data_types,
             last_barrier: None,
             stream_executor: Some(stream),
@@ -371,7 +370,7 @@ impl<S: StateStore> LookupExecutor<S> {
 
         tracing::debug!(target: "events::stream::lookup::lookup_row", "{:?}", lookup_row);
 
-        let mut all_rows = VecWithKvSize::new();
+        let mut all_rows = EstimatedVec::new();
         // Drop the stream.
         {
             let all_data_iter = match self.arrangement.use_current_epoch {

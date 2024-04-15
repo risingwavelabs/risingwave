@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use aws_sdk_ec2::error::DisplayErrorContext;
 use risingwave_common::error::BoxedError;
+use risingwave_common::session_config::SessionConfigError;
+use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::{RpcError, ToTonicStatus};
@@ -88,6 +89,20 @@ pub enum MetaErrorInner {
     #[error("SystemParams error: {0}")]
     SystemParams(String),
 
+    #[error("SessionParams error: {0}")]
+    SessionConfig(
+        #[from]
+        #[backtrace]
+        SessionConfigError,
+    ),
+
+    #[error(transparent)]
+    Connector(
+        #[from]
+        #[backtrace]
+        ConnectorError,
+    ),
+
     #[error("Sink error: {0}")]
     Sink(
         #[from]
@@ -95,7 +110,7 @@ pub enum MetaErrorInner {
         SinkError,
     ),
 
-    #[error("AWS SDK error: {}", DisplayErrorContext(& * *.0))]
+    #[error("AWS SDK error: {0}")]
     Aws(#[source] BoxedError),
 
     #[error(transparent)]
@@ -117,6 +132,10 @@ impl MetaError {
 
     pub fn is_fragment_not_found(&self) -> bool {
         matches!(self.inner(), MetaErrorInner::FragmentNotFound(..))
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self.inner(), MetaErrorInner::Cancelled(..))
     }
 
     pub fn catalog_duplicated<T: Into<String>>(relation: &'static str, name: T) -> Self {

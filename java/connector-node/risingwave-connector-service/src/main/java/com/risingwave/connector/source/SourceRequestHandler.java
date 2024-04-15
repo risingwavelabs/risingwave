@@ -36,7 +36,7 @@ public class SourceRequestHandler {
                         request.getStartOffset(),
                         request.getPropertiesMap(),
                         request.getSnapshotDone(),
-                        request.getCommonParam().getIsMultiTableShared());
+                        request.getIsSourceJob());
         handler.startSource(
                 (ServerCallStreamObserver<ConnectorServiceProto.GetEventStreamResponse>)
                         responseObserver);

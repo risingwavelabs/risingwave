@@ -61,6 +61,7 @@ pub struct MetaNodeConfig {
     pub user_managed: bool,
 
     pub provide_etcd_backend: Option<Vec<EtcdConfig>>,
+    pub provide_sqlite_backend: Option<Vec<SqliteConfig>>,
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
 
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
@@ -140,6 +141,10 @@ pub struct MinioConfig {
     pub hummock_bucket: String,
 
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
+
+    // For rate limiting minio in a test environment.
+    pub api_requests_max: usize,
+    pub api_requests_deadline: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -167,6 +172,17 @@ pub struct EtcdConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
+pub struct SqliteConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub file: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct PrometheusConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
@@ -180,6 +196,8 @@ pub struct PrometheusConfig {
     pub remote_write: bool,
     pub remote_write_region: String,
     pub remote_write_url: String,
+
+    pub scrape_interval: String,
 
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
@@ -217,6 +235,7 @@ pub struct TempoConfig {
     pub address: String,
     pub port: u16,
     pub otlp_port: u16,
+    pub max_bytes_per_trace: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -324,6 +343,7 @@ pub enum ServiceConfig {
     Compactor(CompactorConfig),
     Minio(MinioConfig),
     Etcd(EtcdConfig),
+    Sqlite(SqliteConfig),
     Prometheus(PrometheusConfig),
     Grafana(GrafanaConfig),
     Tempo(TempoConfig),
@@ -345,6 +365,7 @@ impl ServiceConfig {
             Self::Compactor(c) => &c.id,
             Self::Minio(c) => &c.id,
             Self::Etcd(c) => &c.id,
+            Self::Sqlite(c) => &c.id,
             Self::Prometheus(c) => &c.id,
             Self::Grafana(c) => &c.id,
             Self::Tempo(c) => &c.id,

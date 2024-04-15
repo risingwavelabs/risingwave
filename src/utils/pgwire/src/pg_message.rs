@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::ffi::CStr;
 use std::io::{Error, ErrorKind, IoSlice, Result, Write};
 
+use anyhow::anyhow;
 use byteorder::{BigEndian, ByteOrder, NetworkEndian};
 /// Part of code learned from <https://github.com/zenithdb/zenith/blob/main/zenith_utils/src/pq_proto.rs>.
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -31,6 +32,7 @@ use crate::types::Row;
 #[derive(Debug)]
 pub enum FeMessage {
     Ssl,
+    Gss,
     Startup(FeStartupMessage),
     Query(FeQueryMessage),
     Parse(FeParseMessage),
@@ -58,7 +60,7 @@ impl FeStartupMessage {
             Ok(v) => Ok(v.trim_end_matches('\0')),
             Err(err) => Err(Error::new(
                 ErrorKind::InvalidInput,
-                format!("Input end error: {}", err),
+                anyhow!(err).context("Input end error"),
             )),
         }?;
         let mut map = HashMap::new();
@@ -242,12 +244,12 @@ impl FeQueryMessage {
             Ok(cstr) => cstr.to_str().map_err(|err| {
                 Error::new(
                     ErrorKind::InvalidInput,
-                    format!("Invalid UTF-8 sequence: {}", err),
+                    anyhow!(err).context("Invalid UTF-8 sequence"),
                 )
             }),
             Err(err) => Err(Error::new(
                 ErrorKind::InvalidInput,
-                format!("Input end error: {}", err),
+                anyhow!(err).context("Input end error"),
             )),
         }
     }
@@ -337,6 +339,7 @@ impl FeStartupMessage {
             196608 => Ok(FeMessage::Startup(FeStartupMessage::build_with_payload(
                 &payload,
             )?)),
+            80877104 => Ok(FeMessage::Gss),
             80877103 => Ok(FeMessage::Ssl),
             // Cancel request code.
             80877102 => FeCancelMessage::parse(Bytes::from(payload)),
@@ -381,7 +384,8 @@ pub enum BeMessage<'a> {
     CommandComplete(BeCommandCompleteMessage),
     NoticeResponse(&'a str),
     // Single byte - used in response to SSLRequest/GSSENCRequest.
-    EncryptionResponseYes,
+    EncryptionResponseSsl,
+    EncryptionResponseGss,
     EncryptionResponseNo,
     EmptyQueryResponse,
     ParseComplete,
@@ -636,8 +640,12 @@ impl<'a> BeMessage<'a> {
                 write_body(buf, |_| Ok(())).unwrap();
             }
 
-            BeMessage::EncryptionResponseYes => {
+            BeMessage::EncryptionResponseSsl => {
                 buf.put_u8(b'S');
+            }
+
+            BeMessage::EncryptionResponseGss => {
+                buf.put_u8(b'G');
             }
 
             BeMessage::EncryptionResponseNo => {

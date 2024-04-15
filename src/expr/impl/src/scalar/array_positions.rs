@@ -66,10 +66,7 @@ use risingwave_expr::{function, ExprError, Result};
 /// 2
 /// ```
 #[function("array_position(anyarray, any) -> int4")]
-fn array_position(
-    array: Option<ListRef<'_>>,
-    element: Option<ScalarRefImpl<'_>>,
-) -> Result<Option<i32>> {
+fn array_position(array: ListRef<'_>, element: Option<ScalarRefImpl<'_>>) -> Result<Option<i32>> {
     array_position_common(array, element, 0)
 }
 
@@ -98,7 +95,7 @@ fn array_position(
 /// ```
 #[function("array_position(anyarray, any, int4) -> int4")]
 fn array_position_start(
-    array: Option<ListRef<'_>>,
+    array: ListRef<'_>,
     element: Option<ScalarRefImpl<'_>>,
     start: Option<i32>,
 ) -> Result<Option<i32>> {
@@ -115,16 +112,15 @@ fn array_position_start(
 }
 
 fn array_position_common(
-    array: Option<ListRef<'_>>,
+    array: ListRef<'_>,
     element: Option<ScalarRefImpl<'_>>,
     skip: usize,
 ) -> Result<Option<i32>> {
-    let Some(left) = array else { return Ok(None) };
-    if i32::try_from(left.len()).is_err() {
+    if i32::try_from(array.len()).is_err() {
         return Err(ExprError::CastOutOfRange("invalid array length"));
     }
 
-    Ok(left
+    Ok(array
         .iter()
         .skip(skip)
         .position(|item| item == element)

@@ -18,7 +18,10 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+use risingwave_common::config::{EvictionConfig, MetricLevel, ObjectStoreConfig};
+use risingwave_common::hash::VirtualNode;
+use risingwave_common::util::epoch::test_epoch;
+use risingwave_hummock_sdk::key::{prefix_slice_with_vnode, FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockSstableObjectId};
 use risingwave_object_store::object::{
     InMemObjectStore, ObjectStore, ObjectStoreImpl, ObjectStoreRef,
@@ -32,10 +35,10 @@ use crate::hummock::test_utils::{
     gen_test_sstable, gen_test_sstable_info, gen_test_sstable_with_range_tombstone,
 };
 use crate::hummock::{
-    DeleteRangeTombstone, FileCache, HummockValue, SstableBuilderOptions, SstableIterator,
-    SstableIteratorType, SstableStoreRef, TableHolder,
+    FileCache, HummockValue, SstableBuilderOptions, SstableIterator, SstableIteratorType,
+    SstableStoreConfig, SstableStoreRef, TableHolder,
 };
-use crate::monitor::ObjectStoreMetrics;
+use crate::monitor::{global_hummock_state_store_metrics, ObjectStoreMetrics};
 
 /// `assert_eq` two `Vec<u8>` with human-readable format.
 #[macro_export]
@@ -53,28 +56,37 @@ pub const TEST_KEYS_COUNT: usize = 10;
 
 pub fn mock_sstable_store() -> SstableStoreRef {
     mock_sstable_store_with_object_store(Arc::new(ObjectStoreImpl::InMem(
-        InMemObjectStore::new().monitored(Arc::new(ObjectStoreMetrics::unused())),
+        InMemObjectStore::new().monitored(
+            Arc::new(ObjectStoreMetrics::unused()),
+            ObjectStoreConfig::default(),
+        ),
     )))
 }
 
 pub fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableStoreRef {
     let path = "test".to_string();
-    Arc::new(SstableStore::new(
+    Arc::new(SstableStore::new(SstableStoreConfig {
         store,
         path,
-        64 << 20,
-        64 << 20,
-        0,
-        64 << 20,
-        16,
-        FileCache::none(),
-        FileCache::none(),
-        None,
-    ))
+        block_cache_capacity: 64 << 20,
+        block_cache_shard_num: 2,
+        block_cache_eviction: EvictionConfig::for_test(),
+        meta_cache_capacity: 64 << 20,
+        meta_cache_shard_num: 2,
+        meta_cache_eviction: EvictionConfig::for_test(),
+        prefetch_buffer_capacity: 64 << 20,
+        max_prefetch_block_number: 16,
+
+        data_file_cache: FileCache::none(),
+        meta_file_cache: FileCache::none(),
+        recent_filter: None,
+        state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
+    }))
 }
 
+// Generate test table key with vnode 0
 pub fn iterator_test_table_key_of(idx: usize) -> Vec<u8> {
-    format!("key_test_{:05}", idx).as_bytes().to_vec()
+    prefix_slice_with_vnode(VirtualNode::ZERO, format!("key_test_{:05}", idx).as_bytes()).to_vec()
 }
 
 pub fn iterator_test_user_key_of(idx: usize) -> UserKey<Vec<u8>> {
@@ -92,7 +104,7 @@ pub fn iterator_test_bytes_user_key_of(idx: usize) -> UserKey<Bytes> {
 pub fn iterator_test_key_of(idx: usize) -> FullKey<Vec<u8>> {
     FullKey {
         user_key: iterator_test_user_key_of(idx),
-        epoch_with_gap: EpochWithGap::new_from_epoch(233),
+        epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(233)),
     }
 }
 
@@ -111,7 +123,7 @@ pub fn iterator_test_key_of_epoch(idx: usize, epoch: HummockEpoch) -> FullKey<Ve
 
 /// Generates keys like `{table_id=0}key_test_00002` with epoch `epoch` .
 pub fn iterator_test_bytes_key_of_epoch(idx: usize, epoch: HummockEpoch) -> FullKey<Bytes> {
-    iterator_test_key_of_epoch(idx, epoch).into_bytes()
+    iterator_test_key_of_epoch(idx, test_epoch(epoch)).into_bytes()
 }
 
 /// The value of an index, like `value_test_00002` without value meta
@@ -187,7 +199,7 @@ pub async fn gen_iterator_test_sstable_from_kv_pair(
         object_id,
         kv_pairs
             .into_iter()
-            .map(|kv| (iterator_test_key_of_epoch(kv.0, kv.1), kv.2)),
+            .map(|kv| (iterator_test_key_of_epoch(kv.0, test_epoch(kv.1)), kv.2)),
         sstable_store,
     )
     .await
@@ -197,29 +209,14 @@ pub async fn gen_iterator_test_sstable_from_kv_pair(
 pub async fn gen_iterator_test_sstable_with_range_tombstones(
     object_id: HummockSstableObjectId,
     kv_pairs: Vec<(usize, u64, HummockValue<Vec<u8>>)>,
-    delete_ranges: Vec<(usize, usize, u64)>,
     sstable_store: SstableStoreRef,
 ) -> SstableInfo {
-    let range_tombstones = delete_ranges
-        .into_iter()
-        .map(|(start, end, epoch)| {
-            DeleteRangeTombstone::new(
-                TableId::default(),
-                iterator_test_table_key_of(start),
-                false,
-                iterator_test_table_key_of(end),
-                false,
-                epoch,
-            )
-        })
-        .collect_vec();
     gen_test_sstable_with_range_tombstone(
         default_builder_opt_for_test(),
         object_id,
         kv_pairs
             .into_iter()
-            .map(|kv| (iterator_test_key_of_epoch(kv.0, kv.1), kv.2)),
-        range_tombstones,
+            .map(|kv| (iterator_test_key_of_epoch(kv.0, test_epoch(kv.1)), kv.2)),
         sstable_store,
     )
     .await
@@ -262,7 +259,7 @@ pub async fn gen_iterator_test_sstable_with_incr_epoch(
         object_id,
         (0..total).map(|i| {
             (
-                iterator_test_key_of_epoch(idx_mapping(i), epoch_base + i as u64),
+                iterator_test_key_of_epoch(idx_mapping(i), test_epoch(epoch_base + i as u64)),
                 HummockValue::put(iterator_test_value_of(idx_mapping(i))),
             )
         }),

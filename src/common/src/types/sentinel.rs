@@ -13,8 +13,7 @@
 // limitations under the License.
 
 use enum_as_inner::EnumAsInner;
-
-use crate::estimate_size::EstimateSize;
+use risingwave_common_estimate_size::EstimateSize;
 
 /// [`Sentinelled<T>`] wraps type `T` to provide smallest (smaller than any normal `T` value) and largest
 /// (larger than ant normal `T` value) sentinel value for `T`.
@@ -53,6 +52,21 @@ impl<T> Sentinelled<T> {
             (_, Largest) => std::cmp::Ordering::Less,
             (Normal(a), Normal(b)) => cmp_fn(a, b),
         }
+    }
+
+    pub fn map<U>(self, map_fn: impl FnOnce(T) -> U) -> Sentinelled<U> {
+        use Sentinelled::*;
+        match self {
+            Smallest => Smallest,
+            Normal(inner) => Normal(map_fn(inner)),
+            Largest => Largest,
+        }
+    }
+}
+
+impl<T> From<T> for Sentinelled<T> {
+    fn from(inner: T) -> Self {
+        Self::Normal(inner)
     }
 }
 

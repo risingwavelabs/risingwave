@@ -17,13 +17,14 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use itertools::Itertools;
-use risingwave_common::catalog::{TableId, NON_RESERVED_SYS_CATALOG_ID};
+use risingwave_common::catalog::{TableId, SYS_CATALOG_START_ID};
 use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::subscribe_compaction_event_request::Event as RequestEvent;
 use risingwave_pb::hummock::*;
+use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status, Streaming};
 
 use crate::hummock::compaction::selector::ManualCompactionOption;
@@ -243,7 +244,7 @@ impl HummockManagerService for HummockServiceImpl {
         }
 
         // get internal_table_id by metadata_manger
-        if request.table_id >= NON_RESERVED_SYS_CATALOG_ID as u32 {
+        if request.table_id < SYS_CATALOG_START_ID as u32 {
             // We need to make sure to use the correct table_id to filter sst
             let table_id = TableId::new(request.table_id);
             if let Ok(table_fragment) = self
@@ -258,7 +259,7 @@ impl HummockManagerService for HummockServiceImpl {
         assert!(option
             .internal_table_id
             .iter()
-            .all(|table_id| *table_id >= (NON_RESERVED_SYS_CATALOG_ID as u32)),);
+            .all(|table_id| *table_id < SYS_CATALOG_START_ID as u32),);
 
         tracing::info!(
             "Try trigger_manual_compaction compaction_group_id {} option {:?}",
@@ -308,7 +309,7 @@ impl HummockManagerService for HummockServiceImpl {
                     tracing::info!("Full GC results {} SSTs to delete", number);
                 }
                 Err(e) => {
-                    tracing::warn!("Full GC SST failed: {:#?}", e);
+                    tracing::warn!(error = %e.as_report(),  "Full GC SST failed");
                 }
             }
         });

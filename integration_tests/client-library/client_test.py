@@ -24,12 +24,23 @@ def check_nodejs():
         check=True)
 
 
+def check_php():
+    subprocess.run(
+        ["docker", "compose", "exec", "php", "bash", "-c", "cd /php-client && phpunit tests/RWClientTest.php"],
+        check=True)
+
+
+def check_ruby():
+    subprocess.run(["docker", "compose", "exec", "ruby", "bash", "-c", "cd /ruby-client && ruby test/crud_test.rb"],
+                   check=True)
+
+
 subprocess.run(["docker", "compose", "up", "-d"], check=True)
 sleep(10)
 
 failed_cases = []
 
-for client in ['go', 'python', 'java', 'nodejs']:
+for client in ['go', 'python', 'java', 'nodejs', 'php', 'ruby']:
     print(f"--- {client} client test")
     try:
         if client == 'go':
@@ -40,6 +51,10 @@ for client in ['go', 'python', 'java', 'nodejs']:
             check_java()
         elif client == 'nodejs':
             check_nodejs()
+        elif client == 'php':
+            check_php()
+        elif client == 'ruby':
+            check_ruby()
     except Exception as e:
         print(e)
         failed_cases.append(f"{client} client failed")
@@ -48,4 +63,5 @@ if len(failed_cases) != 0:
     print(f"--- client check failed for case\n{failed_cases}")
     sys.exit(1)
 
+print("--- docker compose down")
 subprocess.run(["docker", "compose", "down", "--remove-orphans", "-v"], check=True)

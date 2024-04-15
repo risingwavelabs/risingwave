@@ -113,7 +113,7 @@ pub struct FragmentManager {
 }
 
 pub struct ActorInfos {
-    /// node_id => actor_ids
+    /// `node_id` => `actor_ids`
     pub actor_maps: HashMap<WorkerId, Vec<ActorId>>,
 
     /// all reachable barrier inject actors
@@ -124,7 +124,7 @@ pub type FragmentManagerRef = Arc<FragmentManager>;
 
 impl FragmentManager {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let table_fragments = TableFragments::list(env.meta_store()).await?;
+        let table_fragments = TableFragments::list(env.meta_store().as_kv()).await?;
 
         // `expr_context` of `StreamActor` is introduced in 1.6.0.
         // To ensure compatibility, we fill it for table fragments that were created with older versions.
@@ -133,7 +133,7 @@ impl FragmentManager {
             .map(|tf| (tf.table_id(), tf.fill_expr_context()))
             .collect();
 
-        let table_revision = TableRevision::get(env.meta_store()).await?;
+        let table_revision = TableRevision::get(env.meta_store().as_kv()).await?;
 
         Ok(Self {
             env,
@@ -439,8 +439,8 @@ impl FragmentManager {
                                 if m.upstream_fragment_id == merge_update.upstream_fragment_id {
                                     m.upstream_fragment_id =
                                         merge_update.new_upstream_fragment_id.unwrap();
-                                    m.upstream_actor_id =
-                                        merge_update.added_upstream_actor_id.clone();
+                                    m.upstream_actor_id
+                                        .clone_from(&merge_update.added_upstream_actor_id);
                                 }
                                 upstream_actor_ids.extend(m.upstream_actor_id.clone());
                             }
@@ -547,7 +547,10 @@ impl FragmentManager {
     /// tables.
     /// If table fragments already deleted, this should just be noop,
     /// the delete function (`table_fragments.remove`) will not return an error.
-    pub async fn drop_table_fragments_vec(&self, table_ids: &HashSet<TableId>) -> MetaResult<()> {
+    pub async fn drop_table_fragments_vec(
+        &self,
+        table_ids: &HashSet<TableId>,
+    ) -> MetaResult<Vec<u32>> {
         let mut guard = self.core.write().await;
         let current_revision = guard.table_revision;
 
@@ -559,9 +562,11 @@ impl FragmentManager {
 
         let mut dirty_sink_into_table_upstream_fragment_id = HashSet::new();
         let mut table_fragments = BTreeMapTransaction::new(map);
+        let mut table_ids_to_unregister_from_hummock = vec![];
         for table_fragment in &to_delete_table_fragments {
+            table_ids_to_unregister_from_hummock.extend(table_fragment.all_table_ids());
             table_fragments.remove(table_fragment.table_id());
-            let backfill_actor_ids = table_fragment.backfill_actor_ids();
+            let to_remove_actor_ids: HashSet<_> = table_fragment.actor_ids().into_iter().collect();
             let dependent_table_ids = table_fragment.dependent_table_ids();
             for (dependent_table_id, _) in dependent_table_ids {
                 if table_ids.contains(&dependent_table_id) {
@@ -581,12 +586,11 @@ impl FragmentManager {
                 dependent_table
                     .fragments
                     .values_mut()
-                    .filter(|f| (f.get_fragment_type_mask() & FragmentTypeFlag::Mview as u32) != 0)
                     .flat_map(|f| &mut f.actors)
                     .for_each(|a| {
                         a.dispatcher.retain_mut(|d| {
                             d.downstream_actor_id
-                                .retain(|x| !backfill_actor_ids.contains(x));
+                                .retain(|x| !to_remove_actor_ids.contains(x));
                             !d.downstream_actor_id.is_empty()
                         })
                     });
@@ -635,7 +639,7 @@ impl FragmentManager {
             }
         }
 
-        Ok(())
+        Ok(table_ids_to_unregister_from_hummock)
     }
 
     // When dropping sink into a table, there could be an unexpected meta reboot. At this time, the sink’s catalog might have been deleted,
@@ -859,6 +863,22 @@ impl FragmentManager {
         actor_maps
     }
 
+    pub async fn node_actor_count(&self) -> HashMap<WorkerId, usize> {
+        let mut actor_count = HashMap::new();
+
+        let map = &self.core.read().await.table_fragments;
+        for fragments in map.values() {
+            for actor_status in fragments.actor_status.values() {
+                if let Some(pu) = &actor_status.parallel_unit {
+                    let e = actor_count.entry(pu.worker_node_id).or_insert(0);
+                    *e += 1;
+                }
+            }
+        }
+
+        actor_count
+    }
+
     // edit the `rate_limit` of the `Source` node in given `source_id`'s fragments
     // return the actor_ids to be applied
     pub async fn update_source_rate_limit_by_source_id(
@@ -1001,6 +1021,30 @@ impl FragmentManager {
                     .filter(|a| table_fragment.actor_status[a].state == ActorState::Running as i32)
                     .collect();
                 return Ok(running_actor_ids);
+            }
+        }
+
+        bail!("fragment not found: {}", fragment_id)
+    }
+
+    /// Get the actor ids, and each actor's upstream actor ids of the fragment with `fragment_id` with `Running` status.
+    pub async fn get_running_actors_and_upstream_of_fragment(
+        &self,
+        fragment_id: FragmentId,
+    ) -> MetaResult<HashSet<(ActorId, Vec<ActorId>)>> {
+        let map = &self.core.read().await.table_fragments;
+
+        for table_fragment in map.values() {
+            if let Some(fragment) = table_fragment.fragments.get(&fragment_id) {
+                let running_actors = fragment
+                    .actors
+                    .iter()
+                    .filter(|a| {
+                        table_fragment.actor_status[&a.actor_id].state == ActorState::Running as i32
+                    })
+                    .map(|a| (a.actor_id, a.upstream_actor_id.clone()))
+                    .collect();
+                return Ok(running_actors);
             }
         }
 
@@ -1317,7 +1361,9 @@ impl FragmentManager {
 
         for (table_id, parallelism) in table_parallelism_assignment {
             if let Some(mut table) = table_fragments.get_mut(table_id) {
-                table.assigned_parallelism = parallelism;
+                if table.assigned_parallelism != parallelism {
+                    table.assigned_parallelism = parallelism;
+                }
             }
         }
 
@@ -1489,5 +1535,9 @@ impl FragmentManager {
             .read()
             .await
             .running_fragment_parallelisms(id_filter)
+    }
+
+    pub async fn count_streaming_job(&self) -> usize {
+        self.core.read().await.table_fragments().len()
     }
 }

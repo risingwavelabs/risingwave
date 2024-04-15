@@ -28,6 +28,7 @@ use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::backup_service::{BackupJobStatus, MetaBackupManifestId};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 
 use crate::backup_restore::meta_snapshot_builder;
@@ -87,8 +88,12 @@ impl BackupManager {
         store_dir: &str,
     ) -> MetaResult<Arc<Self>> {
         let store_config = (store_url.to_string(), store_dir.to_string());
-        let store =
-            create_snapshot_store(&store_config, metrics.object_store_metric.clone()).await?;
+        let store = create_snapshot_store(
+            &store_config,
+            metrics.object_store_metric.clone(),
+            &env.opts.object_store_config,
+        )
+        .await?;
         tracing::info!(
             "backup manager initialized: url={}, dir={}",
             store_config.0,
@@ -134,10 +139,10 @@ impl BackupManager {
         if let Err(e) = self.set_store(new_config.clone()).await {
             // Retry is driven by periodic system params notification.
             tracing::warn!(
-                "failed to apply new backup config: url={}, dir={}, {:#?}",
-                new_config.0,
-                new_config.1,
-                e
+                url = &new_config.0,
+                dir = &new_config.1,
+                error = %e.as_report(),
+                "failed to apply new backup config",
             );
         }
     }
@@ -160,8 +165,12 @@ impl BackupManager {
     }
 
     pub async fn set_store(&self, config: StoreConfig) -> MetaResult<()> {
-        let new_store =
-            create_snapshot_store(&config, self.meta_metrics.object_store_metric.clone()).await?;
+        let new_store = create_snapshot_store(
+            &config,
+            self.meta_metrics.object_store_metric.clone(),
+            &self.env.opts.object_store_config,
+        )
+        .await?;
         tracing::info!(
             "new backup config is applied: url={}, dir={}",
             config.0,
@@ -269,7 +278,7 @@ impl BackupManager {
             }
             BackupJobResult::Failed(e) => {
                 self.metrics.job_latency_failure.observe(job_latency);
-                let message = format!("failed backup job {}: {}", job_id, e);
+                let message = format!("failed backup job {}: {}", job_id, e.as_report());
                 tracing::warn!(message);
                 self.latest_job_info
                     .store(Arc::new((job_id, BackupJobStatus::Failed, message)));
@@ -337,7 +346,7 @@ impl BackupWorker {
         let backup_manager_clone = self.backup_manager.clone();
         let job = async move {
             let mut snapshot_builder = meta_snapshot_builder::MetaSnapshotV1Builder::new(
-                backup_manager_clone.env.meta_store_ref(),
+                backup_manager_clone.env.meta_store().as_kv().clone(),
             );
             // Reuse job id as snapshot id.
             let hummock_manager = backup_manager_clone.hummock_manager.clone();
@@ -367,13 +376,14 @@ impl BackupWorker {
 async fn create_snapshot_store(
     config: &StoreConfig,
     metric: Arc<ObjectStoreMetrics>,
+    object_store_config: &ObjectStoreConfig,
 ) -> MetaResult<ObjectStoreMetaSnapshotStorage> {
     let object_store = Arc::new(
         build_remote_object_store(
             &config.0,
             metric,
             "Meta Backup",
-            ObjectStoreConfig::default(),
+            object_store_config.clone(),
         )
         .await,
     );

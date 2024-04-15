@@ -9,7 +9,7 @@
 
 <div align="center">
 
-### 🌊Stream Processing Redefined.
+### 🌊 Reimagine stream processing.
 
 </div>
 
@@ -41,12 +41,6 @@
     <img alt="Slack" src="https://badgen.net/badge/Slack/Join%20RisingWave/0abd59?icon=slack" />
   </a>
   <a
-    href="https://hub.docker.com/r/risingwavelabs/risingwave"
-    target="_blank"
-  >
-    <img alt="Docker" src="https://img.shields.io/docker/pulls/risingwavelabs/risingwave" />
-  </a>
-  <a
     href="https://twitter.com/risingwavelabs"
     target="_blank"
   >
@@ -60,68 +54,61 @@
   </a>
 </div>
 
-RisingWave is a distributed SQL streaming database engineered to provide the <i><b>simplest</b></i> and <i><b>most cost-efficient</b></i> approach for <b>processing</b> and <b>managing</b> streaming data with utmost reliability.
+RisingWave is a Postgres-compatible streaming database engineered to provide the <i><b>simplest</b></i> and <i><b>most cost-efficient</b></i> approach for <b>processing</b>, <b>analyzing</b>, and <b>managing</b> real-time event streaming data.
 
 
 ![RisingWave](https://github.com/risingwavelabs/risingwave-docs/blob/main/docs/images/new_archi_grey.png)
 
-## Try it out in 5 minutes
-**Docker**
+## Try it out in 60 seconds
+
+Install RisingWave standalone mode:
+```shell
+curl https://risingwave.com/sh | sh
 ```
-docker run -it --pull=always -p 4566:4566 -p 5691:5691 risingwavelabs/risingwave:latest playground
-```
-**Mac**
-```
-brew tap risingwavelabs/risingwave
-brew install risingwave
-risingwave playground
-```
-**Ubuntu**
-```
-wget https://github.com/risingwavelabs/risingwave/releases/download/v1.5.0/risingwave-v1.5.0-x86_64-unknown-linux-all-in-one.tar.gz
-tar xvf risingwave-v1.5.0-x86_64-unknown-linux-all-in-one.tar.gz
-./risingwave playground
-```
-Now connect to RisingWave using `psql`:
-```
-psql -h localhost -p 4566 -d dev -U root
-```
-Learn more at [Quick Start](https://docs.risingwave.com/docs/current/get-started/).
+
+Then follow the prompts to start and connect to RisingWave.
+
+To learn about other installation options, such as using a Docker image, see [Quick Start](https://docs.risingwave.com/docs/current/get-started/).
 
 ## Production deployments
 
-For **single-node Docker deployments**, please refer to [Docker Compose](https://docs.risingwave.com/docs/current/risingwave-trial/?method=docker-compose).
+[**RisingWave Cloud**](https://cloud.risingwave.com) offers the easiest way to run RisingWave in production, with a _forever-free_ developer tier.
 
-For **Kubernetes deployments**, please refer to [Kubernetes with Helm](https://docs.risingwave.com/docs/current/risingwave-k8s-helm/) or [Kubernetes with Operator](https://docs.risingwave.com/docs/current/risingwave-kubernetes/).
+For **Docker deployment**, please refer to [Docker Compose](https://docs.risingwave.com/docs/current/risingwave-docker-compose/).
 
-**RisingWave Cloud** the easiest way to run a fully-fledged RisingWave cluster. Try it out for free at: [cloud.risingwave.com](https://cloud.risingwave.com).
+For **Kubernetes deployment**, please refer to [Kubernetes with Helm](https://docs.risingwave.com/docs/current/risingwave-k8s-helm/) or [Kubernetes with Operator](https://docs.risingwave.com/docs/current/risingwave-kubernetes/).
+
+## Why RisingWave for real-time materialized views?
+
+RisingWave specializes in providing **incrementally updated, consistent materialized views** — a persistent data structure that represents the results of event stream processing. Compared to materialized views, dynamic tables, and live tables in other database and data warehouse systems, RisingWave's materialized view stands out in several key aspects:
+* Highly cost-efficient - up to 95% cost savings compared to state-of-the-art solutions
+* Synchronous refresh without compromising consistency
+* Extensive SQL support including joins, deletes, and updates
+* High concurrency in query serving
+* Instant fault tolerance
+* Transparent dynamic scaling
+* Speedy bootstrapping and backfilling
+
+RisingWave's extensive CDC support further enables users to seamlessly offload event-driven workloads such as materialized views and triggers from operational databases (e.g., [PostgreSQL](https://docs.risingwave.com/docs/current/ingest-from-postgres-cdc/)) to RisingWave.
 
 
 ## Why RisingWave for stream processing?
 
-RisingWave provides users with a comprehensive set of frequently used stream processing features, including exactly-once consistency, [time window functions](https://docs.risingwave.com/docs/current/sql-function-time-window/), [watermarks](https://docs.risingwave.com/docs/current/watermarks/), and more. It specializes in providing **incrementally updated, consistent materialized views** — a persistent data structure that represents the results of stream processing. RisingWave significantly reduces the complexity of building stream processing applications by allowing developers to express intricate stream processing logic through cascaded materialized views. Furthermore, it allows users to persist data directly within the system, eliminating the need to deliver results to external databases for storage and query serving.
+RisingWave provides users with a comprehensive set of frequently used stream processing features, including exactly-once consistency, [time window functions](https://docs.risingwave.com/docs/current/sql-function-time-window/), [watermarks](https://docs.risingwave.com/docs/current/watermarks/), and more. RisingWave significantly reduces the complexity of building stream processing applications by allowing developers to express intricate stream processing logic through cascaded materialized views. Furthermore, it allows users to persist data directly within the system, eliminating the need to deliver results to external databases for storage and query serving.
 
 ![Real-time Data Pipelines without or with RisingWave](https://github.com/risingwavelabs/risingwave/assets/100685635/414afbb7-5187-410f-9ba4-9a640c8c6306)
 
 Compared to existing stream processing systems like [Apache Flink](https://flink.apache.org/), [Apache Spark Streaming](https://spark.apache.org/docs/latest/streaming-programming-guide.html), and [ksqlDB](https://ksqldb.io/), RisingWave stands out in two primary dimensions: **Ease-of-use** and **cost efficiency**, thanks to its **[PostgreSQL](https://www.postgresql.org/)-style interaction experience** and  **[Snowflake](https://snowflake.com/)-like architectural design** (i.e., decoupled storage and compute).
 
-### Ease-of-use
+|  | RisingWave 🌊 | Traditional stream processing systems |
+| :---:        | :---:          | :---:         |
+| Learning curve 🎢   | PostgreSQL-style experience  | System-specific concepts   |
+| Integration 🔗    | PostgreSQL ecosystem       | System-specific ecosystem      |
+| Complex queries (e.g., joins) 💡  | Highly efficient  | Inefficient   |
+| Failure recovery 🚨     | Instant       |  Minutes or even hours     |
+| Dynamic scaling 🚀     | Transparent       |  Stop-the-world     |
+| Bootstrapping and Backfilling ⏪     | Accelerated via dynamic scaling     | Slow     |
 
-* **Simple to learn**
-  * RisingWave speaks PostgreSQL-style SQL, enabling users to dive into stream processing in much the same way as operating a PostgreSQL database.
-* **Simple to develop**
-  * RisingWave operates as a relational database, allowing users to decompose stream processing logic into smaller, manageable, stacked materialized views, rather than dealing with extensive computational programs.
-* **Simple to integrate**
-  * With integrations to a diverse range of cloud systems and the PostgreSQL ecosystem, RisingWave boasts a rich and expansive ecosystem, making it straightforward to incorporate into existing infrastructures.
-
-### Cost efficiency
-
-* **Highly efficient in complex queries**
-  * RisingWave persists internal states in remote storage systems such as S3, and users can confidently and efficiently perform complex streaming queries (for example, joining dozens of data streams) in a production environment, without worrying about state size.
-* **Transparent dynamic scaling**
-  * RisingWave's state management mechanism enables near-instantaneous dynamic scaling without any service interruptions.
-* **Instant failure recovery**
-  * RisingWave's state management mechanism also allows it to recover from failure in seconds, not minutes or hours.
 
 ### RisingWave as a database
 RisingWave is fundamentally a database that **extends beyond basic streaming data processing capabilities**.  It excels in **the effective management of streaming data**, making it a trusted choice for data persistence and powering online applications. RisingWave offers an extensive range of database capabilities, which include:
@@ -135,17 +122,15 @@ RisingWave is fundamentally a database that **extends beyond basic streaming dat
 * Schema change
 * Processing of semi-structured data
 
-
-## RisingWave's limitations
-RisingWave isn’t a panacea for all data engineering hurdles. It has its own set of limitations:
-* **No programmable interfaces**
-  * RisingWave does not provide low-level APIs in languages like Java and Scala, and does not allow users to manage internal states manually (unless you want to hack!). _For coding in Java, Python, and other languages, please consider using RisingWave's [User-Defined Functions (UDF)](https://docs.risingwave.com/docs/current/user-defined-functions/)_.
-* **No support for transaction processing**
-  * RisingWave isn’t cut out for transactional workloads, thus it’s not a viable substitute for operational databases dedicated to transaction processing. _However, it supports [read-only transactions](https://docs.risingwave.com/docs/current/transactions/#read-only-transactions), ensuring data freshness and consistency. It also comprehends the transactional semantics of upstream database [Change Data Capture (CDC)](https://docs.risingwave.com/docs/current/transactions/#transactions-within-a-cdc-table)_.
-
-
 ## In-production use cases
-Like other stream processing systems, the primary use cases of RisingWave include monitoring, alerting, real-time dashboard reporting, streaming ETL (Extract, Transform, Load), machine learning feature engineering, and more. It has already been adopted in fields such as financial trading, manufacturing, new media, logistics, gaming, and more. Check out [customer stories](https://www.risingwave.com/use-cases/).
+Within your data stack, RisingWave can assist with:
+
+* Processing and transforming event streaming data in real time
+* Offloading event-driven queries (e.g., materialized views, triggers) from operational databases
+* Performing real-time ETL (Extract, Transform, Load)
+* Supporting real-time feature stores
+
+Read more at [use cases](https://risingwave.com/use-cases/). RisingWave is extensively utilized in real-time applications such as monitoring, alerting, dashboard reporting, machine learning, among others. It has already been adopted in fields such as financial trading, manufacturing, new media, logistics, gaming, and more. Check out [customer stories](https://risingwave.com/resources/?filter=customer-stories).
 
 ## Community
 

@@ -32,14 +32,13 @@ mkdir ./connector-node
 tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
 echo "--- starting risingwave cluster"
-mkdir -p .risingwave/log
-cargo make ci-start ci-deltalake-test
+risedev ci-start ci-sink-test
 sleep 1
 
 # prepare minio deltalake sink
 echo "--- preparing deltalake"
 .risingwave/bin/mcli -C .risingwave/config/mcli mb hummock-minio/deltalake
-wget https://ci-deps-dist.s3.amazonaws.com/spark-3.3.1-bin-hadoop3.tgz
+wget https://rw-ci-deps-dist.s3.amazonaws.com/spark-3.3.1-bin-hadoop3.tgz
 tar -xf spark-3.3.1-bin-hadoop3.tgz --no-same-owner
 DEPENDENCIES=io.delta:delta-core_2.12:2.2.0,org.apache.hadoop:hadoop-aws:3.3.2
 spark-3.3.1-bin-hadoop3/bin/spark-sql --packages $DEPENDENCIES \
@@ -49,7 +48,7 @@ spark-3.3.1-bin-hadoop3/bin/spark-sql --packages $DEPENDENCIES \
     --conf 'spark.hadoop.fs.s3a.secret.key=hummockadmin' \
     --conf 'spark.hadoop.fs.s3a.endpoint=http://127.0.0.1:9301' \
     --conf 'spark.hadoop.fs.s3a.path.style.access=true' \
-    --S --e 'create table delta.`s3a://deltalake/deltalake-test`(v1 int, v2 short, v3 long, v4 float, v5 double, v6 string, v7 date, v8 Timestamp, v9 boolean) using delta;'
+    --S --e 'create table delta.`s3a://deltalake/deltalake-test`(v1 int, v2 short, v3 long, v4 float, v5 double, v6 string, v7 date, v8 Timestamp, v9 boolean, v10 decimal) using delta;'
 
 
 echo "--- testing sinks"
@@ -68,7 +67,7 @@ spark-3.3.1-bin-hadoop3/bin/spark-sql --packages $DEPENDENCIES \
 
 # check sink destination using shell
 if cat ./spark-output/*.csv | sort | awk -F "," '{
-    exit !($1 == 1 && $2 == 1 && $3 == 1 && $4 == 1.1 && $5 == 1.2 && $6 == "test" && $7 == "2013-01-01" && $8 == "2013-01-01T01:01:01.000Z" && $9 == "false"); }'; then
+    exit !($1 == 1 && $2 == 1 && $3 == 1 && $4 == 1.1 && $5 == 1.2 && $6 == "test" && $7 == "2013-01-01" && $8 == "2013-01-01T01:01:01.000Z" && $9 == "false" && $10 == 1); }'; then
   echo "DeltaLake sink check passed"
 else
   cat ./spark-output/*.csv
@@ -77,4 +76,4 @@ else
 fi
 
 echo "--- Kill cluster"
-cargo make ci-kill
+risedev ci-kill

@@ -18,16 +18,15 @@ use std::sync::LazyLock;
 
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_meta_model_v2::hummock_sequence;
+use risingwave_meta_model_v2::hummock_sequence::{
+    COMPACTION_GROUP_ID, COMPACTION_TASK_ID, META_BACKUP_ID, SSTABLE_OBJECT_ID,
+};
+use risingwave_meta_model_v2::prelude::HummockSequence;
 use sea_orm::{ActiveModelTrait, ActiveValue, DatabaseConnection, EntityTrait, TransactionTrait};
 use tokio::sync::Mutex;
 
 use crate::hummock::error::Result;
 use crate::manager::{IdCategory, MetaSrvEnv};
-
-const COMPACTION_TASK_ID: &str = "compaction_task";
-const COMPACTION_GROUP_ID: &str = "compaction_group";
-const SSTABLE_OBJECT_ID: &str = "sstable_object";
-const META_BACKUP_ID: &str = "meta_backup";
 
 static SEQ_INIT: LazyLock<HashMap<String, i64>> = LazyLock::new(|| {
     maplit::hashmap! {
@@ -71,7 +70,7 @@ impl SequenceGenerator {
                     name: ActiveValue::set(ident.into()),
                     seq: ActiveValue::set(init.checked_add(num as _).unwrap().try_into().unwrap()),
                 };
-                active_model.insert(&txn).await?;
+                HummockSequence::insert(active_model).exec(&txn).await?;
                 init
             }
             Some(model) => {
@@ -97,6 +96,7 @@ pub async fn next_compaction_task_id(env: &MetaSrvEnv) -> Result<u64> {
     match env.hummock_seq.clone() {
         None => env
             .id_gen_manager()
+            .as_kv()
             .generate::<{ IdCategory::HummockCompactionTask }>()
             .await
             .map_err(Into::into),
@@ -108,6 +108,7 @@ pub async fn next_meta_backup_id(env: &MetaSrvEnv) -> Result<u64> {
     match env.hummock_seq.clone() {
         None => env
             .id_gen_manager()
+            .as_kv()
             .generate::<{ IdCategory::Backup }>()
             .await
             .map_err(Into::into),
@@ -119,6 +120,7 @@ pub async fn next_compaction_group_id(env: &MetaSrvEnv) -> Result<u64> {
     match env.hummock_seq.clone() {
         None => env
             .id_gen_manager()
+            .as_kv()
             .generate::<{ IdCategory::CompactionGroup }>()
             .await
             .map_err(Into::into),
@@ -136,6 +138,7 @@ pub async fn next_sstable_object_id(
     match env.hummock_seq.clone() {
         None => env
             .id_gen_manager()
+            .as_kv()
             .generate_interval::<{ IdCategory::HummockSstableId }>(num as u64)
             .await
             .map_err(Into::into),

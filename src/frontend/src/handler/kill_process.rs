@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::{ErrorCode, Result};
 
+use crate::error::{ErrorCode, Result};
 use crate::handler::{HandlerArgs, RwPgResponse};
 
 pub(super) async fn handle_kill(

@@ -14,6 +14,7 @@
 
 #![expect(dead_code)]
 #![allow(clippy::derive_partial_eq_without_eq)]
+#![feature(array_chunks)]
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
@@ -33,13 +34,12 @@
 #![feature(error_generic_member_access)]
 #![feature(register_tool)]
 #![register_tool(rw)]
-#![allow(rw::format_error)] // TODO(error-handling): need further refactoring
+#![recursion_limit = "256"]
 
 use std::time::Duration;
 
 use duration_str::parse_std;
 use risingwave_pb::connector_service::SinkPayloadFormat;
-use risingwave_rpc_client::ConnectorClient;
 use serde::de;
 
 pub mod aws_utils;
@@ -51,28 +51,25 @@ pub mod schema;
 pub mod sink;
 pub mod source;
 
-pub mod common;
+pub mod connector_common;
 
 pub use paste::paste;
+pub use risingwave_jni_core::{call_method, call_static_method, jvm_runtime};
 
 mod with_options;
+pub use with_options::WithPropertiesExt;
 
 #[cfg(test)]
 mod with_options_test;
 
 #[derive(Clone, Debug, Default)]
 pub struct ConnectorParams {
-    pub connector_client: Option<ConnectorClient>,
     pub sink_payload_format: SinkPayloadFormat,
 }
 
 impl ConnectorParams {
-    pub fn new(
-        connector_client: Option<ConnectorClient>,
-        sink_payload_format: SinkPayloadFormat,
-    ) -> Self {
+    pub fn new(sink_payload_format: SinkPayloadFormat) -> Self {
         Self {
-            connector_client,
             sink_payload_format,
         }
     }
@@ -89,6 +86,43 @@ where
             &"integer greater than or equal to 0",
         )
     })
+}
+
+pub(crate) fn deserialize_optional_u64_from_string<'de, D>(
+    deserializer: D,
+) -> Result<Option<u64>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let s: String = de::Deserialize::deserialize(deserializer)?;
+    if s.is_empty() {
+        Ok(None)
+    } else {
+        s.parse()
+            .map_err(|_| {
+                de::Error::invalid_value(
+                    de::Unexpected::Str(&s),
+                    &"integer greater than or equal to 0",
+                )
+            })
+            .map(Some)
+    }
+}
+
+pub(crate) fn deserialize_optional_string_seq_from_string<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<Vec<String>>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let s: Option<String> = de::Deserialize::deserialize(deserializer)?;
+    if let Some(s) = s {
+        let s = s.to_ascii_lowercase();
+        let s = s.split(',').map(|s| s.trim().to_owned()).collect();
+        Ok(Some(s))
+    } else {
+        Ok(None)
+    }
 }
 
 pub(crate) fn deserialize_bool_from_string<'de, D>(deserializer: D) -> Result<bool, D::Error>

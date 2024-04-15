@@ -29,6 +29,8 @@ pub trait Description {
 
 pub(super) type BoxedRule = Box<dyn Rule>;
 
+mod logical_filter_expression_simplify_rule;
+pub use logical_filter_expression_simplify_rule::*;
 mod over_window_merge_rule;
 pub use over_window_merge_rule::*;
 mod project_join_merge_rule;
@@ -154,8 +156,10 @@ mod apply_hop_window_transpose_rule;
 pub use apply_hop_window_transpose_rule::*;
 mod agg_call_merge_rule;
 pub use agg_call_merge_rule::*;
+mod pull_up_correlated_predicate_agg_rule;
 mod values_extract_project_rule;
 pub use batch::batch_push_limit_to_scan_rule::*;
+pub use pull_up_correlated_predicate_agg_rule::*;
 pub use values_extract_project_rule::*;
 
 #[macro_export]
@@ -202,6 +206,7 @@ macro_rules! for_all_rules {
             , { AlwaysFalseFilterRule }
             , { BushyTreeJoinOrderingRule }
             , { StreamProjectMergeRule }
+            , { LogicalFilterExpressionSimplifyRule }
             , { JoinProjectTransposeRule }
             , { LimitPushDownRule }
             , { PullUpHopRule }
@@ -227,6 +232,7 @@ macro_rules! for_all_rules {
             , { AggCallMergeRule }
             , { ValuesExtractProjectRule }
             , { BatchPushLimitToScanRule }
+            , { PullUpCorrelatedPredicateAggRule }
         }
     };
 }

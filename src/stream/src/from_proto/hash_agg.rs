@@ -35,7 +35,7 @@ pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
 }
 
 impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcherArgs<S> {
-    type Output = StreamResult<BoxedExecutor>;
+    type Output = StreamResult<Box<dyn Execute>>;
 
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
         Ok(HashAggExecutor::<K, S>::new(self.args)?.boxed())
@@ -55,8 +55,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let group_key_indices = node
             .get_group_key()
             .iter()
@@ -94,22 +93,22 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             build_distinct_dedup_table_from_proto(node.get_distinct_dedup_tables(), store, vnodes)
                 .await;
 
-        HashAggExecutorDispatcherArgs {
+        let exec = HashAggExecutorDispatcherArgs {
             args: AggExecutorArgs {
                 version: node.version(),
 
                 input,
                 actor_ctx: params.actor_context,
-                info: params.info,
+                info: params.info.clone(),
 
-                extreme_cache_size: stream.config.developer.unsafe_extreme_cache_size,
+                extreme_cache_size: params.env.config().developer.unsafe_extreme_cache_size,
 
                 agg_calls,
                 row_count_index: node.get_row_count_index() as usize,
                 storages,
                 intermediate_state_table,
                 distinct_dedup_tables,
-                watermark_epoch: stream.get_watermark_epoch(),
+                watermark_epoch: params.watermark_epoch,
                 extra: HashAggExecutorExtraArgs {
                     group_key_indices,
                     chunk_size: params.env.config().developer.chunk_size,
@@ -123,6 +122,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             },
             group_key_types,
         }
-        .dispatch()
+        .dispatch()?;
+        Ok((params.info, exec).into())
     }
 }

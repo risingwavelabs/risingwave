@@ -20,13 +20,12 @@ use std::ops::{Bound, Deref, DerefMut};
 use std::sync::Arc;
 
 use anyhow::Context;
-use futures::future::try_join;
+use futures::future::{join, try_join};
 use futures::StreamExt;
 use futures_async_stream::for_await;
 pub(super) use join_entry_state::JoinEntryState;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row;
@@ -35,6 +34,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
@@ -450,8 +450,20 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             let (table_iter, degree_table_iter) =
                 try_join(table_iter_fut, degree_table_iter_fut).await?;
 
-            #[for_await]
-            for (row, degree) in table_iter.zip(degree_table_iter) {
+            let mut pinned_table_iter = std::pin::pin!(table_iter);
+            let mut pinned_degree_table_iter = std::pin::pin!(degree_table_iter);
+            loop {
+                // Iterate on both iterators and ensure they have same size. Basically `zip_eq()`.
+                let (row, degree) =
+                    join(pinned_table_iter.next(), pinned_degree_table_iter.next()).await;
+                let (row, degree) = match (row, degree) {
+                    (None, None) => break,
+                    (None, Some(_)) | (Some(_), None) => {
+                        panic!("mismatched row and degree table of join key: {:?}", &key)
+                    }
+                    (Some(r), Some(d)) => (r, d),
+                };
+
                 let row = row?;
                 let degree_row = degree?;
                 let pk1 = row.key();

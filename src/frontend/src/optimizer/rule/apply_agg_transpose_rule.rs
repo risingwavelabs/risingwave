@@ -140,9 +140,49 @@ impl Rule for ApplyAggTransposeRule {
                 // convert count(*) to count(1).
                 let pos_of_constant_column = node.schema().len() - 1;
                 agg_calls.iter_mut().for_each(|agg_call| {
-                    if agg_call.agg_kind == AggKind::Count && agg_call.inputs.is_empty() {
-                        let input_ref = InputRef::new(pos_of_constant_column, DataType::Int32);
-                        agg_call.inputs.push(input_ref);
+                    match agg_call.agg_kind {
+                        AggKind::Count if agg_call.inputs.is_empty() => {
+                            let input_ref = InputRef::new(pos_of_constant_column, DataType::Int32);
+                            agg_call.inputs.push(input_ref);
+                        }
+                        AggKind::ArrayAgg
+                        | AggKind::JsonbAgg
+                        | AggKind::JsonbObjectAgg => {
+                            let input_ref = InputRef::new(pos_of_constant_column, DataType::Int32);
+                            let cond = FunctionCall::new(ExprType::IsNotNull, vec![input_ref.into()]).unwrap();
+                            agg_call.filter.conjunctions.push(cond.into());
+                        }
+                        AggKind::Count
+                        | AggKind::Sum
+                        | AggKind::Sum0
+                        | AggKind::Avg
+                        | AggKind::Min
+                        | AggKind::Max
+                        | AggKind::BitAnd
+                        | AggKind::BitOr
+                        | AggKind::BitXor
+                        | AggKind::BoolAnd
+                        | AggKind::BoolOr
+                        | AggKind::StringAgg
+                        // not in PostgreSQL
+                        | AggKind::ApproxCountDistinct
+                        | AggKind::FirstValue
+                        | AggKind::LastValue
+                        | AggKind::InternalLastSeenValue
+                        // All statistical aggregates only consider non-null inputs.
+                        | AggKind::VarPop
+                        | AggKind::VarSamp
+                        | AggKind::StddevPop
+                        | AggKind::StddevSamp
+                        // All ordered-set aggregates ignore null values in their aggregated input.
+                        | AggKind::PercentileCont
+                        | AggKind::PercentileDisc
+                        | AggKind::Mode
+                        // `grouping` has no *aggregate* input and unreachable when `is_scalar_agg`.
+                        | AggKind::Grouping
+                        => {
+                            // no-op when `agg(0 rows) == agg(1 row of nulls)`
+                        }
                     }
                 });
             }

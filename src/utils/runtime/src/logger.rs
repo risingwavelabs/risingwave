@@ -202,8 +202,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         // Configure levels for external crates.
         filter = filter
             .with_target("foyer", Level::WARN)
-            .with_target("aws_sdk_ec2", Level::INFO)
-            .with_target("aws_sdk_s3", Level::INFO)
+            .with_target("aws", Level::INFO)
             .with_target("aws_config", Level::WARN)
             .with_target("aws_endpoint", Level::WARN)
             .with_target("aws_credential_types::cache::lazy_caching", Level::WARN)
@@ -217,6 +216,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target("sled", Level::INFO)
             .with_target("cranelift", Level::INFO)
             .with_target("wasmtime", Level::INFO)
+            .with_target("sqlx", Level::WARN)
             // Expose hyper connection socket addr log.
             .with_target("hyper::client::connect::http", Level::DEBUG);
 
@@ -274,7 +274,10 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                 .compact()
                 .with_filter(FilterFn::new(|metadata| metadata.is_event())) // filter-out all span-related info
                 .boxed(),
-            Deployment::Cloud => fmt_layer.json().boxed(),
+            Deployment::Cloud => fmt_layer
+                .json()
+                .map_event_format(|e| e.with_current_span(false)) // avoid duplication as there's a span list field
+                .boxed(),
             Deployment::Other => fmt_layer.boxed(),
         };
 
@@ -392,8 +395,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
     if let Some(endpoint) = settings.tracing_endpoint {
         println!("opentelemetry tracing will be exported to `{endpoint}` if enabled");
 
-        use opentelemetry::{sdk, KeyValue};
+        use opentelemetry::KeyValue;
         use opentelemetry_otlp::WithExportConfig;
+        use opentelemetry_sdk as sdk;
         use opentelemetry_semantic_conventions::resource;
 
         let id = format!(
@@ -435,7 +439,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                     KeyValue::new(resource::SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
                     KeyValue::new(resource::PROCESS_PID, std::process::id().to_string()),
                 ])))
-                .install_batch(opentelemetry::runtime::Tokio)
+                .install_batch(sdk::runtime::Tokio)
                 .unwrap()
         };
 

@@ -22,9 +22,9 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
 use risingwave_meta_model_v2::{
-    actor, actor_dispatcher, fragment, object, sink, streaming_job, ActorId, ConnectorSplits,
-    ExprContext, FragmentId, FragmentVnodeMapping, I32Array, JobStatus, ObjectId, SinkId, SourceId,
-    StreamNode, TableId, VnodeBitmap, WorkerId,
+    actor, actor_dispatcher, fragment, object, sink, streaming_job, ActorId, ActorUpstreamActors,
+    ConnectorSplits, ExprContext, FragmentId, FragmentVnodeMapping, I32Array, JobStatus, ObjectId,
+    SinkId, SourceId, StreamNode, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
 };
 use risingwave_pb::common::PbParallelUnit;
 use risingwave_pb::meta::subscribe_response::{
@@ -39,8 +39,7 @@ use risingwave_pb::meta::{
 use risingwave_pb::source::PbConnectorSplits;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    PbDispatchStrategy, PbFragmentTypeFlag, PbStreamActor, PbStreamContext, PbStreamNode,
-    StreamSource,
+    PbDispatchStrategy, PbFragmentTypeFlag, PbStreamActor, PbStreamContext,
 };
 use sea_orm::sea_query::{Expr, Value};
 use sea_orm::ActiveValue::Set;
@@ -51,10 +50,10 @@ use sea_orm::{
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::utils::{
-    get_actor_dispatchers, get_parallel_unit_mapping, FragmentDesc, PartialActorLocation,
-    PartialFragmentStateTables,
+    get_actor_dispatchers, FragmentDesc, PartialActorLocation, PartialFragmentStateTables,
 };
 use crate::manager::{ActorInfos, LocalNotification};
+use crate::model::TableParallelism;
 use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
 
@@ -75,7 +74,7 @@ impl CatalogControllerInner {
         Ok(fragment_mappings.into_iter().map(|(fragment_id, mapping)| {
             FragmentParallelUnitMapping {
                 fragment_id: fragment_id as _,
-                mapping: Some(mapping.into_inner()),
+                mapping: Some(mapping.to_protobuf()),
             }
         }))
     }
@@ -229,7 +228,7 @@ impl CatalogController {
                 expr_context: pb_expr_context,
             } = actor;
 
-            let splits = pb_actor_splits.get(&actor_id).cloned().map(ConnectorSplits);
+            let splits = pb_actor_splits.get(&actor_id).map(ConnectorSplits::from);
             let status = pb_actor_status.get(&actor_id).cloned().ok_or_else(|| {
                 anyhow::anyhow!(
                     "actor {} in fragment {} has no actor_status",
@@ -238,12 +237,11 @@ impl CatalogController {
                 )
             })?;
 
-            let parallel_unit_id = status
+            let (worker_id, parallel_unit_id) = status
                 .parallel_unit
                 .as_ref()
-                .map(|parallel_unit| parallel_unit.id)
-                .expect("no parallel unit id found in actor_status")
-                as _;
+                .map(|pu| (pu.worker_node_id as WorkerId, pu.id as i32))
+                .expect("no parallel unit id found in actor_status");
 
             assert_eq!(
                 pb_upstream_actor_id
@@ -264,9 +262,10 @@ impl CatalogController {
                 status: status.get_state().unwrap().into(),
                 splits,
                 parallel_unit_id,
+                worker_id,
                 upstream_actor_ids: upstream_actors.into(),
-                vnode_bitmap: pb_vnode_bitmap.map(VnodeBitmap),
-                expr_context: ExprContext(pb_expr_context),
+                vnode_bitmap: pb_vnode_bitmap.as_ref().map(VnodeBitmap::from),
+                expr_context: ExprContext::from(&pb_expr_context),
             });
             actor_dispatchers.insert(
                 actor_id as ActorId,
@@ -279,9 +278,12 @@ impl CatalogController {
 
         let upstream_fragment_id = pb_upstream_fragment_ids.into();
 
-        let vnode_mapping = pb_vnode_mapping.map(FragmentVnodeMapping).unwrap();
+        let vnode_mapping = pb_vnode_mapping
+            .as_ref()
+            .map(FragmentVnodeMapping::from)
+            .unwrap();
 
-        let stream_node = StreamNode(stream_node);
+        let stream_node = StreamNode::from(&stream_node);
 
         let distribution_type = PbFragmentDistributionType::try_from(pb_distribution_type)
             .unwrap()
@@ -311,7 +313,7 @@ impl CatalogController {
             Vec<actor::Model>,
             HashMap<ActorId, Vec<actor_dispatcher::Model>>,
         )>,
-        parallel_units_map: &HashMap<u32, PbParallelUnit>,
+        parallelism: StreamingParallelism,
     ) -> MetaResult<PbTableFragments> {
         let mut pb_fragments = HashMap::new();
         let mut pb_actor_splits = HashMap::new();
@@ -319,7 +321,7 @@ impl CatalogController {
 
         for (fragment, actors, actor_dispatcher) in fragments {
             let (fragment, fragment_actor_status, fragment_actor_splits) =
-                Self::compose_fragment(fragment, actors, actor_dispatcher, parallel_units_map)?;
+                Self::compose_fragment(fragment, actors, actor_dispatcher)?;
 
             pb_fragments.insert(fragment.fragment_id, fragment);
 
@@ -334,8 +336,14 @@ impl CatalogController {
             actor_status: pb_actor_status,
             actor_splits: pb_actor_splits,
             ctx: Some(ctx.unwrap_or_default()),
-            // TODO(peng): fix this for model v2
-            parallelism: None,
+            parallelism: Some(
+                match parallelism {
+                    StreamingParallelism::Custom => TableParallelism::Custom,
+                    StreamingParallelism::Adaptive => TableParallelism::Adaptive,
+                    StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n as _),
+                }
+                .into(),
+            ),
         };
 
         Ok(table_fragments)
@@ -346,7 +354,6 @@ impl CatalogController {
         fragment: fragment::Model,
         actors: Vec<actor::Model>,
         mut actor_dispatcher: HashMap<ActorId, Vec<actor_dispatcher::Model>>,
-        parallel_units_map: &HashMap<u32, PbParallelUnit>,
     ) -> MetaResult<(
         PbFragment,
         HashMap<u32, PbActorStatus>,
@@ -363,7 +370,7 @@ impl CatalogController {
             upstream_fragment_id,
         } = fragment;
 
-        let stream_node_template = stream_node.into_inner();
+        let stream_node_template = stream_node.to_protobuf();
 
         let mut pb_actors = vec![];
 
@@ -385,6 +392,7 @@ impl CatalogController {
                 fragment_id,
                 status,
                 parallel_unit_id,
+                worker_id,
                 splits,
                 upstream_actor_ids,
                 vnode_bitmap,
@@ -409,8 +417,8 @@ impl CatalogController {
                 Some(nodes)
             };
 
-            let pb_vnode_bitmap = vnode_bitmap.map(|vnode_bitmap| vnode_bitmap.into_inner());
-            let pb_expr_context = Some(expr_context.into_inner());
+            let pb_vnode_bitmap = vnode_bitmap.map(|vnode_bitmap| vnode_bitmap.to_protobuf());
+            let pb_expr_context = Some(expr_context.to_protobuf());
 
             let pb_upstream_actor_id = upstream_fragment_actors
                 .values()
@@ -428,18 +436,16 @@ impl CatalogController {
             pb_actor_status.insert(
                 actor_id as _,
                 PbActorStatus {
-                    parallel_unit: Some(
-                        parallel_units_map
-                            .get(&(parallel_unit_id as _))
-                            .unwrap()
-                            .clone(),
-                    ),
+                    parallel_unit: Some(PbParallelUnit {
+                        id: parallel_unit_id as _,
+                        worker_node_id: worker_id as _,
+                    }),
                     state: PbActorState::from(status) as _,
                 },
             );
 
             if let Some(splits) = splits {
-                pb_actor_splits.insert(actor_id as _, splits.into_inner());
+                pb_actor_splits.insert(actor_id as _, splits.to_protobuf());
             }
 
             pb_actors.push(PbStreamActor {
@@ -455,7 +461,7 @@ impl CatalogController {
         }
 
         let pb_upstream_fragment_ids = upstream_fragment_id.into_u32_array();
-        let pb_vnode_mapping = vnode_mapping.into_inner();
+        let pb_vnode_mapping = vnode_mapping.to_protobuf();
         let pb_state_table_ids = state_table_ids.into_u32_array();
         let pb_distribution_type = PbFragmentDistributionType::from(distribution_type) as _;
         let pb_fragment = PbFragment {
@@ -577,6 +583,23 @@ impl CatalogController {
         Ok(upstream_job_counts)
     }
 
+    pub async fn get_fragment_job_id(
+        &self,
+        fragment_ids: Vec<FragmentId>,
+    ) -> MetaResult<Vec<ObjectId>> {
+        let inner = self.inner.read().await;
+
+        let object_ids: Vec<ObjectId> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::JobId)
+            .filter(fragment::Column::FragmentId.is_in(fragment_ids))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        Ok(object_ids)
+    }
+
     pub async fn get_job_fragments_by_id(&self, job_id: ObjectId) -> MetaResult<PbTableFragments> {
         let inner = self.inner.read().await;
         let fragment_actors = Fragment::find()
@@ -608,23 +631,25 @@ impl CatalogController {
             fragment_info.push((fragment, actors, dispatcher_info));
         }
 
-        let parallel_units_map = get_parallel_unit_mapping(&inner.db).await?;
         Self::compose_table_fragments(
             job_id as _,
             job_info.job_status.into(),
             job_info.timezone.map(|tz| PbStreamContext { timezone: tz }),
             fragment_info,
-            &parallel_units_map,
+            job_info.parallelism.clone(),
         )
     }
 
-    pub async fn list_streaming_job_states(&self) -> MetaResult<Vec<(ObjectId, JobStatus)>> {
+    pub async fn list_streaming_job_states(
+        &self,
+    ) -> MetaResult<Vec<(ObjectId, JobStatus, StreamingParallelism)>> {
         let inner = self.inner.read().await;
-        let job_states: Vec<(ObjectId, JobStatus)> = StreamingJob::find()
+        let job_states: Vec<(ObjectId, JobStatus, StreamingParallelism)> = StreamingJob::find()
             .select_only()
             .columns([
                 streaming_job::Column::JobId,
                 streaming_job::Column::JobStatus,
+                streaming_job::Column::Parallelism,
             ])
             .into_tuple()
             .all(&inner.db)
@@ -679,11 +704,27 @@ impl CatalogController {
         Ok(count > 0)
     }
 
+    pub async fn worker_actor_count(&self) -> MetaResult<HashMap<WorkerId, usize>> {
+        let inner = self.inner.read().await;
+        let actor_cnt: Vec<(WorkerId, i64)> = Actor::find()
+            .select_only()
+            .column(actor::Column::WorkerId)
+            .column_as(actor::Column::ActorId.count(), "count")
+            .group_by(actor::Column::WorkerId)
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        Ok(actor_cnt
+            .into_iter()
+            .map(|(worker_id, count)| (worker_id, count as usize))
+            .collect())
+    }
+
     // TODO: This function is too heavy, we should avoid using it and implement others on demand.
     pub async fn table_fragments(&self) -> MetaResult<BTreeMap<ObjectId, PbTableFragments>> {
         let inner = self.inner.read().await;
         let jobs = StreamingJob::find().all(&inner.db).await?;
-        let parallel_units_map = get_parallel_unit_mapping(&inner.db).await?;
         let mut table_fragments = BTreeMap::new();
         for job in jobs {
             let fragment_actors = Fragment::find()
@@ -716,7 +757,7 @@ impl CatalogController {
                     job.job_status.into(),
                     job.timezone.map(|tz| PbStreamContext { timezone: tz }),
                     fragment_info,
-                    &parallel_units_map,
+                    job.parallelism.clone(),
                 )?,
             );
         }
@@ -816,15 +857,12 @@ impl CatalogController {
 
     /// Used in [`crate::barrier::GlobalBarrierManager`], load all running actor that need to be sent or
     /// collected
-    pub async fn load_all_actors(
-        &self,
-        parallel_units_map: &HashMap<u32, PbParallelUnit>,
-    ) -> MetaResult<ActorInfos> {
+    pub async fn load_all_actors(&self) -> MetaResult<ActorInfos> {
         let inner = self.inner.read().await;
-        let actor_info: Vec<(ActorId, i32, i32)> = Actor::find()
+        let actor_info: Vec<(ActorId, WorkerId, i32)> = Actor::find()
             .select_only()
             .column(actor::Column::ActorId)
-            .column(actor::Column::ParallelUnitId)
+            .column(actor::Column::WorkerId)
             .column(fragment::Column::FragmentTypeMask)
             .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
             .filter(actor::Column::Status.eq(ActorStatus::Running))
@@ -835,19 +873,14 @@ impl CatalogController {
         let mut actor_maps = HashMap::new();
         let mut barrier_inject_actor_maps = HashMap::new();
 
-        for (actor_id, parallel_unit_id, type_mask) in actor_info {
-            // FIXME: since worker might have gone, it's not safe to unwrap here.
-            let worker_id = parallel_units_map
-                .get(&(parallel_unit_id as _))
-                .unwrap()
-                .worker_node_id;
+        for (actor_id, worker_id, type_mask) in actor_info {
             actor_maps
-                .entry(worker_id)
+                .entry(worker_id as _)
                 .or_insert_with(Vec::new)
                 .push(actor_id as _);
             if Self::is_injectable(type_mask as _) {
                 barrier_inject_actor_maps
-                    .entry(worker_id)
+                    .entry(worker_id as _)
                     .or_insert_with(Vec::new)
                     .push(actor_id as _);
             }
@@ -859,21 +892,25 @@ impl CatalogController {
         })
     }
 
-    pub async fn migrate_actors(&self, plan: HashMap<i32, i32>) -> MetaResult<()> {
+    pub async fn migrate_actors(&self, plan: HashMap<i32, PbParallelUnit>) -> MetaResult<()> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
         for (from_pu_id, to_pu_id) in &plan {
             Actor::update_many()
                 .col_expr(
                     actor::Column::ParallelUnitId,
-                    Expr::value(Value::Int(Some(*to_pu_id))),
+                    Expr::value(Value::Int(Some(to_pu_id.id as i32))),
+                )
+                .col_expr(
+                    actor::Column::WorkerId,
+                    Expr::value(Value::Int(Some(to_pu_id.worker_node_id as WorkerId))),
                 )
                 .filter(actor::Column::ParallelUnitId.eq(*from_pu_id))
                 .exec(&txn)
                 .await?;
         }
 
-        let mut fragment_mapping: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
+        let fragment_mapping: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
             .select_only()
             .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
             .join(JoinType::InnerJoin, fragment::Relation::Actor.def())
@@ -882,15 +919,17 @@ impl CatalogController {
             .all(&txn)
             .await?;
         // TODO: we'd better not store vnode mapping in fragment table and derive it from actors.
-        for (fragment_id, vnode_mapping) in &mut fragment_mapping {
-            vnode_mapping.0.data.iter_mut().for_each(|id| {
+
+        for (fragment_id, vnode_mapping) in &fragment_mapping {
+            let mut pb_vnode_mapping = vnode_mapping.to_protobuf();
+            pb_vnode_mapping.data.iter_mut().for_each(|id| {
                 if let Some(new_id) = plan.get(&(*id as i32)) {
-                    *id = *new_id as u32;
+                    *id = new_id.id;
                 }
             });
             fragment::ActiveModel {
                 fragment_id: Set(*fragment_id),
-                vnode_mapping: Set(vnode_mapping.clone()),
+                vnode_mapping: Set(FragmentVnodeMapping::from(&pb_vnode_mapping)),
                 ..Default::default()
             }
             .update(&txn)
@@ -905,7 +944,7 @@ impl CatalogController {
                 .into_iter()
                 .map(|(fragment_id, mapping)| PbFragmentParallelUnitMapping {
                     fragment_id: fragment_id as _,
-                    mapping: Some(mapping.into_inner()),
+                    mapping: Some(mapping.to_protobuf()),
                 })
                 .collect(),
         )
@@ -931,7 +970,6 @@ impl CatalogController {
         include_inactive: bool,
     ) -> MetaResult<HashMap<WorkerId, Vec<PbStreamActor>>> {
         let inner = self.inner.read().await;
-        let parallel_units_map = get_parallel_unit_mapping(&inner.db).await?;
         let fragment_actors = if include_inactive {
             Fragment::find()
                 .find_with_related(Actor)
@@ -964,7 +1002,7 @@ impl CatalogController {
             }
 
             let (table_fragments, actor_status, _) =
-                Self::compose_fragment(fragment, actors, dispatcher_info, &parallel_units_map)?;
+                Self::compose_fragment(fragment, actors, dispatcher_info)?;
             for actor in table_fragments.actors {
                 let node_id = actor_status[&actor.actor_id]
                     .get_parallel_unit()
@@ -985,10 +1023,9 @@ impl CatalogController {
         job_ids: Vec<ObjectId>,
     ) -> MetaResult<BTreeMap<WorkerId, Vec<ActorId>>> {
         let inner = self.inner.read().await;
-        let parallel_units_map = get_parallel_unit_mapping(&inner.db).await?;
-        let actor_pu: Vec<(ActorId, i32)> = Actor::find()
+        let actor_workers: Vec<(ActorId, WorkerId)> = Actor::find()
             .select_only()
-            .columns([actor::Column::ActorId, actor::Column::ParallelUnitId])
+            .columns([actor::Column::ActorId, actor::Column::WorkerId])
             .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
             .filter(fragment::Column::JobId.is_in(job_ids))
             .into_tuple()
@@ -996,11 +1033,7 @@ impl CatalogController {
             .await?;
 
         let mut worker_actors = BTreeMap::new();
-        for (actor_id, pu_id) in actor_pu {
-            let worker_id = parallel_units_map
-                .get(&(pu_id as _))
-                .unwrap()
-                .worker_node_id as WorkerId;
+        for (actor_id, worker_id) in actor_workers {
             worker_actors
                 .entry(worker_id)
                 .or_insert_with(Vec::new)
@@ -1024,13 +1057,13 @@ impl CatalogController {
                     .ok_or_else(|| MetaError::catalog_id_not_found("actor_id", actor_id))?;
 
                 let mut actor_splits = actor_splits
-                    .map(|splits| splits.0.splits)
+                    .map(|splits| splits.to_protobuf().splits)
                     .unwrap_or_default();
                 actor_splits.extend(splits.iter().map(Into::into));
 
                 Actor::update(actor::ActiveModel {
                     actor_id: Set(*actor_id as _),
-                    splits: Set(Some(ConnectorSplits(PbConnectorSplits {
+                    splits: Set(Some(ConnectorSplits::from(&PbConnectorSplits {
                         splits: actor_splits,
                     }))),
                     ..Default::default()
@@ -1053,6 +1086,24 @@ impl CatalogController {
         let actors: Vec<ActorId> = Actor::find()
             .select_only()
             .column(actor::Column::ActorId)
+            .filter(actor::Column::FragmentId.eq(fragment_id))
+            .filter(actor::Column::Status.eq(ActorStatus::Running))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        Ok(actors)
+    }
+
+    /// Get the actor ids, and each actor's upstream actor ids of the fragment with `fragment_id` with `Running` status.
+    pub async fn get_running_actors_and_upstream_of_fragment(
+        &self,
+        fragment_id: FragmentId,
+    ) -> MetaResult<Vec<(ActorId, ActorUpstreamActors)>> {
+        let inner = self.inner.read().await;
+        let actors: Vec<(ActorId, ActorUpstreamActors)> = Actor::find()
+            .select_only()
+            .column(actor::Column::ActorId)
+            .column(actor::Column::UpstreamActorIds)
             .filter(actor::Column::FragmentId.eq(fragment_id))
             .filter(actor::Column::Status.eq(ActorStatus::Running))
             .into_tuple()
@@ -1095,7 +1146,6 @@ impl CatalogController {
             }
         }
 
-        let parallel_units_map = get_parallel_unit_mapping(&inner.db).await?;
         let mut root_fragments = HashMap::new();
         for (_, fragment) in fragments {
             let actors = fragment.find_related(Actor).all(&inner.db).await?;
@@ -1107,7 +1157,7 @@ impl CatalogController {
 
             root_fragments.insert(
                 fragment.job_id,
-                Self::compose_fragment(fragment, actors, actor_dispatchers, &parallel_units_map)?.0,
+                Self::compose_fragment(fragment, actors, actor_dispatchers)?.0,
             );
         }
 
@@ -1135,7 +1185,6 @@ impl CatalogController {
             .collect();
 
         let inner = self.inner.read().await;
-        let parallel_units_map = get_parallel_unit_mapping(&inner.db).await?;
         let mut chain_fragments = vec![];
         for (fragment_id, dispatch_strategy) in downstream_dispatches {
             let mut fragment_actors = Fragment::find_by_id(fragment_id)
@@ -1152,29 +1201,11 @@ impl CatalogController {
                 actors.iter().map(|actor| actor.actor_id).collect(),
             )
             .await?;
-            let fragment =
-                Self::compose_fragment(fragment, actors, actor_dispatchers, &parallel_units_map)?.0;
+            let fragment = Self::compose_fragment(fragment, actors, actor_dispatchers)?.0;
             chain_fragments.push((dispatch_strategy, fragment));
         }
 
         Ok(chain_fragments)
-    }
-
-    /// Find the external stream source info inside the stream node, if any.
-    fn find_stream_source(stream_node: &PbStreamNode) -> Option<&StreamSource> {
-        if let Some(NodeBody::Source(source)) = &stream_node.node_body {
-            if let Some(inner) = &source.source_inner {
-                return Some(inner);
-            }
-        }
-
-        for child in &stream_node.input {
-            if let Some(source) = Self::find_stream_source(child) {
-                return Some(source);
-            }
-        }
-
-        None
     }
 
     pub async fn load_source_fragment_ids(
@@ -1195,9 +1226,9 @@ impl CatalogController {
 
         let mut source_fragment_ids = HashMap::new();
         for (fragment_id, _, stream_node) in fragments {
-            if let Some(source) = Self::find_stream_source(stream_node.inner_ref()) {
+            if let Some(source_id) = stream_node.to_protobuf().find_stream_source() {
                 source_fragment_ids
-                    .entry(source.source_id as SourceId)
+                    .entry(source_id as SourceId)
                     .or_insert_with(BTreeSet::new)
                     .insert(fragment_id);
             }
@@ -1205,31 +1236,33 @@ impl CatalogController {
         Ok(source_fragment_ids)
     }
 
-    pub async fn get_stream_source_fragment_ids(
+    pub async fn load_backfill_fragment_ids(
         &self,
-        job_id: ObjectId,
-    ) -> MetaResult<HashMap<SourceId, BTreeSet<FragmentId>>> {
+    ) -> MetaResult<HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>> {
         let inner = self.inner.read().await;
-        let mut fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+        let mut fragments: Vec<(FragmentId, I32Array, i32, StreamNode)> = Fragment::find()
             .select_only()
             .columns([
                 fragment::Column::FragmentId,
+                fragment::Column::UpstreamFragmentId,
                 fragment::Column::FragmentTypeMask,
                 fragment::Column::StreamNode,
             ])
-            .filter(fragment::Column::JobId.eq(job_id))
             .into_tuple()
             .all(&inner.db)
             .await?;
-        fragments.retain(|(_, mask, _)| *mask & PbFragmentTypeFlag::Source as i32 != 0);
+        fragments.retain(|(_, _, mask, _)| *mask & PbFragmentTypeFlag::SourceScan as i32 != 0);
 
         let mut source_fragment_ids = HashMap::new();
-        for (fragment_id, _, stream_node) in fragments {
-            if let Some(source) = Self::find_stream_source(stream_node.inner_ref()) {
+        for (fragment_id, upstream_fragment_id, _, stream_node) in fragments {
+            if let Some(source_id) = stream_node.to_protobuf().find_source_backfill() {
+                if upstream_fragment_id.inner_ref().len() != 1 {
+                    bail!("SourceBackfill should have only one upstream fragment, found {} for fragment {}", upstream_fragment_id.inner_ref().len(), fragment_id);
+                }
                 source_fragment_ids
-                    .entry(source.source_id as SourceId)
+                    .entry(source_id as SourceId)
                     .or_insert_with(BTreeSet::new)
-                    .insert(fragment_id);
+                    .insert((fragment_id, upstream_fragment_id.inner_ref()[0]));
             }
         }
         Ok(source_fragment_ids)
@@ -1260,7 +1293,6 @@ impl CatalogController {
         }
         assert_eq!(fragments.len(), 1);
 
-        let parallel_units_map = get_parallel_unit_mapping(&inner.db).await?;
         let fragment = fragments.pop().unwrap();
         let actor_with_dispatchers = fragment
             .find_related(Actor)
@@ -1274,7 +1306,40 @@ impl CatalogController {
             actors.push(actor);
         }
 
-        Ok(Self::compose_fragment(fragment, actors, actor_dispatchers, &parallel_units_map)?.0)
+        Ok(Self::compose_fragment(fragment, actors, actor_dispatchers)?.0)
+    }
+
+    /// Get the actor count of `Materialize` or `Sink` fragment of the specified table.
+    pub async fn get_actual_job_fragment_parallelism(
+        &self,
+        job_id: ObjectId,
+    ) -> MetaResult<Option<usize>> {
+        let inner = self.inner.read().await;
+        let mut fragments: Vec<(FragmentId, i32, i64)> = Fragment::find()
+            .join(JoinType::InnerJoin, fragment::Relation::Actor.def())
+            .select_only()
+            .columns([
+                fragment::Column::FragmentId,
+                fragment::Column::FragmentTypeMask,
+            ])
+            .column_as(actor::Column::ActorId.count(), "count")
+            .filter(fragment::Column::JobId.eq(job_id))
+            .group_by(fragment::Column::FragmentId)
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        fragments.retain(|(_, mask, _)| {
+            *mask & PbFragmentTypeFlag::Mview as i32 != 0
+                || *mask & PbFragmentTypeFlag::Sink as i32 != 0
+        });
+
+        Ok(fragments
+            .into_iter()
+            .at_most_one()
+            .ok()
+            .flatten()
+            .map(|(_, _, count)| count as usize))
     }
 }
 
@@ -1321,7 +1386,7 @@ mod tests {
         (0..count)
             .map(|parallel_unit_id| ParallelUnit {
                 id: parallel_unit_id,
-                ..Default::default()
+                worker_node_id: 0,
             })
             .collect_vec()
     }
@@ -1458,13 +1523,13 @@ mod tests {
         actors: Vec<PbStreamActor>,
         upstream_actor_ids: &HashMap<ActorId, BTreeMap<FragmentId, Vec<ActorId>>>,
     ) {
-        let stream_node_template = fragment.stream_node.clone();
+        let stream_node_template = fragment.stream_node.to_protobuf();
 
         for PbStreamActor {
             nodes, actor_id, ..
         } in actors
         {
-            let mut template_node = stream_node_template.clone().into_inner();
+            let mut template_node = stream_node_template.clone();
             let nodes = nodes.unwrap();
             let actor_upstream_actor_ids =
                 upstream_actor_ids.get(&(actor_id as _)).cloned().unwrap();
@@ -1498,20 +1563,15 @@ mod tests {
             })
             .collect();
 
-        let parallel_units_map = parallel_units
-            .iter()
-            .map(|parallel_unit| (parallel_unit.id, parallel_unit.clone()))
-            .collect();
-
         let actors = (0..actor_count)
             .map(|actor_id| {
                 let parallel_unit_id = actor_id as ParallelUnitId;
 
                 let vnode_bitmap = actor_vnode_bitmaps
                     .remove(&parallel_unit_id)
-                    .map(|m| VnodeBitmap(m.to_protobuf()));
+                    .map(|m| VnodeBitmap::from(&m.to_protobuf()));
 
-                let actor_splits = Some(ConnectorSplits(PbConnectorSplits {
+                let actor_splits = Some(ConnectorSplits::from(&PbConnectorSplits {
                     splits: vec![PbConnectorSplit {
                         split_type: "dummy".to_string(),
                         ..Default::default()
@@ -1527,9 +1587,10 @@ mod tests {
                     status: ActorStatus::Running,
                     splits: actor_splits,
                     parallel_unit_id: parallel_unit_id as i32,
+                    worker_id: 0,
                     upstream_actor_ids: ActorUpstreamActors(actor_upstream_actor_ids),
                     vnode_bitmap,
-                    expr_context: ExprContext(PbExprContext {
+                    expr_context: ExprContext::from(&PbExprContext {
                         time_zone: String::from("America/New_York"),
                     }),
                 }
@@ -1567,8 +1628,8 @@ mod tests {
             job_id: TEST_JOB_ID,
             fragment_type_mask: 0,
             distribution_type: DistributionType::Hash,
-            stream_node: StreamNode(stream_node),
-            vnode_mapping: FragmentVnodeMapping(parallel_unit_mapping.to_protobuf()),
+            stream_node: StreamNode::from(&stream_node),
+            vnode_mapping: FragmentVnodeMapping::from(&parallel_unit_mapping.to_protobuf()),
             state_table_ids: I32Array(vec![TEST_STATE_TABLE_ID]),
             upstream_fragment_id: I32Array::default(),
         };
@@ -1577,7 +1638,6 @@ mod tests {
             fragment.clone(),
             actors.clone(),
             actor_dispatchers.clone(),
-            &parallel_units_map,
         )
         .unwrap();
 
@@ -1614,6 +1674,7 @@ mod tests {
                 status,
                 splits,
                 parallel_unit_id,
+                worker_id: _,
                 upstream_actor_ids,
                 vnode_bitmap,
                 expr_context,
@@ -1653,10 +1714,8 @@ mod tests {
 
             assert_eq!(actor_dispatcher, pb_dispatcher);
             assert_eq!(
-                vnode_bitmap,
-                pb_vnode_bitmap
-                    .as_ref()
-                    .map(|bitmap| VnodeBitmap(bitmap.clone()))
+                vnode_bitmap.map(|bitmap| bitmap.to_protobuf()),
+                pb_vnode_bitmap,
             );
 
             assert_eq!(mview_definition, "");
@@ -1677,13 +1736,10 @@ mod tests {
 
             assert_eq!(
                 splits,
-                pb_actor_splits
-                    .get(&pb_actor_id)
-                    .cloned()
-                    .map(ConnectorSplits)
+                pb_actor_splits.get(&pb_actor_id).map(ConnectorSplits::from)
             );
 
-            assert_eq!(Some(expr_context.into_inner()), pb_expr_context);
+            assert_eq!(Some(expr_context.to_protobuf()), pb_expr_context);
         }
     }
 
@@ -1705,8 +1761,8 @@ mod tests {
             PbFragmentDistributionType::from(fragment.distribution_type) as i32
         );
         assert_eq!(
-            pb_vnode_mapping.map(FragmentVnodeMapping).unwrap(),
-            fragment.vnode_mapping
+            pb_vnode_mapping.unwrap(),
+            fragment.vnode_mapping.to_protobuf()
         );
 
         assert_eq!(

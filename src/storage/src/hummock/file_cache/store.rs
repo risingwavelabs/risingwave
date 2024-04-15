@@ -43,7 +43,7 @@ pub mod preclude {
 
 pub type Result<T> = core::result::Result<T, FileCacheError>;
 
-pub type EvictionConfig = foyer::intrusive::eviction::lfu::LfuConfig;
+pub type FileCacheEvictionConfig = foyer::intrusive::eviction::lfu::LfuConfig;
 pub type DeviceConfig = foyer::storage::device::fs::FsDeviceConfig;
 
 pub type FileCacheResult<T> = foyer::storage::error::Result<T>;
@@ -74,7 +74,6 @@ where
     pub lfu_window_to_cache_size_ratio: usize,
     pub lfu_tiny_lru_capacity_ratio: f64,
     pub insert_rate_limit: usize,
-    pub ring_buffer_capacity: usize,
     pub catalog_bits: usize,
     pub admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>>,
     pub reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
@@ -100,7 +99,6 @@ where
             lfu_window_to_cache_size_ratio: self.lfu_window_to_cache_size_ratio,
             lfu_tiny_lru_capacity_ratio: self.lfu_tiny_lru_capacity_ratio,
             insert_rate_limit: self.insert_rate_limit,
-            ring_buffer_capacity: self.ring_buffer_capacity,
             catalog_bits: self.catalog_bits,
             admissions: self.admissions.clone(),
             reinsertions: self.reinsertions.clone(),
@@ -279,7 +277,6 @@ where
                 catalog_bits: config.catalog_bits,
                 admissions,
                 reinsertions: config.reinsertions,
-                flusher_buffer_size: 131072, // TODO: make it configurable
                 flushers: config.flushers,
                 reclaimers: config.reclaimers,
                 clean_region_threshold: config.reclaimers + config.reclaimers / 2,
@@ -455,7 +452,7 @@ impl Value for CachedBlock {
 
     fn serialized_len(&self) -> usize {
         1 /* type */ + match self {
-            CachedBlock::Loaded { block } => block.raw_data().len(),
+            CachedBlock::Loaded { block } => block.raw().len(),
             CachedBlock::Fetched { bytes, uncompressed_capacity: _ } => 8 + bytes.len(),
         }
     }
@@ -506,7 +503,7 @@ impl std::io::Read for CachedBlockCursor {
                 if self.pos < 1 {
                     self.pos += copy([0], &mut buf);
                 }
-                self.pos += copy(&block.raw_data()[self.pos - 1..], &mut buf);
+                self.pos += copy(&block.raw()[self.pos - 1..], &mut buf);
             }
             CachedBlock::Fetched {
                 bytes,
@@ -541,7 +538,7 @@ impl Value for Box<Block> {
     type Cursor = BoxBlockCursor;
 
     fn serialized_len(&self) -> usize {
-        self.raw_data().len()
+        self.raw().len()
     }
 
     fn read(buf: &[u8]) -> CodingResult<Self> {
@@ -571,7 +568,7 @@ impl BoxBlockCursor {
 impl std::io::Read for BoxBlockCursor {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let pos = self.pos;
-        self.pos += copy(&self.inner.raw_data()[self.pos..], buf);
+        self.pos += copy(&self.inner.raw()[self.pos..], buf);
         let n = self.pos - pos;
         Ok(n)
     }
@@ -676,12 +673,13 @@ impl Cursor for CachedSstableCursor {
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::TableId;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::key::FullKey;
 
     use super::*;
     use crate::hummock::{BlockBuilder, BlockBuilderOptions, BlockMeta, CompressionAlgorithm};
 
-    pub fn construct_full_key_struct(
+    pub fn construct_full_key_struct_for_test(
         table_id: u32,
         table_key: &[u8],
         epoch: u64,
@@ -696,18 +694,25 @@ mod tests {
         };
 
         let mut builder = BlockBuilder::new(options);
-        builder.add_for_test(construct_full_key_struct(0, b"k1", 1), b"v01");
-        builder.add_for_test(construct_full_key_struct(0, b"k2", 2), b"v02");
-        builder.add_for_test(construct_full_key_struct(0, b"k3", 3), b"v03");
-        builder.add_for_test(construct_full_key_struct(0, b"k4", 4), b"v04");
+        builder.add_for_test(
+            construct_full_key_struct_for_test(0, b"k1", test_epoch(1)),
+            b"v01",
+        );
+        builder.add_for_test(
+            construct_full_key_struct_for_test(0, b"k2", test_epoch(2)),
+            b"v02",
+        );
+        builder.add_for_test(
+            construct_full_key_struct_for_test(0, b"k3", test_epoch(3)),
+            b"v03",
+        );
+        builder.add_for_test(
+            construct_full_key_struct_for_test(0, b"k4", test_epoch(4)),
+            b"v04",
+        );
 
-        Box::new(
-            Block::decode(
-                builder.build().to_vec().into(),
-                builder.uncompressed_block_size(),
-            )
-            .unwrap(),
-        )
+        let uncompress = builder.uncompressed_block_size();
+        Box::new(Block::decode(builder.build().to_vec().into(), uncompress).unwrap())
     }
 
     fn sstable_for_test() -> Sstable {
@@ -748,7 +753,7 @@ mod tests {
             std::io::copy(&mut cursor, &mut buf).unwrap();
             let target = cursor.into_inner();
             let block = Box::<Block>::read(&buf[..]).unwrap();
-            assert_eq!(target.raw_data(), block.raw_data());
+            assert_eq!(target.raw(), block.raw());
         }
 
         {
@@ -779,7 +784,7 @@ mod tests {
                 CachedBlock::Loaded { block } => block,
                 CachedBlock::Fetched { .. } => panic!(),
             };
-            assert_eq!(target.raw_data(), block.raw_data());
+            assert_eq!(target.raw(), block.raw());
         }
 
         {
