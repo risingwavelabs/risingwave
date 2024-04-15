@@ -654,16 +654,16 @@ impl GlobalBarrierManager {
                     }
                 }
 
-                // Checkpoint frequency changes.
                 notification = local_notification_rx.recv() => {
                     let notification = notification.unwrap();
-                    // Handle barrier interval and checkpoint frequency changes
                     match notification {
+                        // Handle barrier interval and checkpoint frequency changes.
                         LocalNotification::SystemParamsChange(p) => {
                             self.scheduled_barriers.set_min_interval(Duration::from_millis(p.barrier_interval_ms() as u64));
                             self.scheduled_barriers
                                 .set_checkpoint_frequency(p.checkpoint_frequency() as usize)
                         },
+                        // Handle adhoc recovery triggered by user.
                         LocalNotification::AdhocRecovery => {
                             self.adhoc_recovery().await;
                         }

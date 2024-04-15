@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_meta::manager::MetadataManager;
+use risingwave_meta::manager::{LocalNotification, MetadataManager};
 use risingwave_meta::model;
 use risingwave_meta::model::ActorId;
 use risingwave_meta::stream::ThrottleConfig;
@@ -417,6 +417,10 @@ impl StreamManagerService for StreamServiceImpl {
         &self,
         _request: Request<RecoverRequest>,
     ) -> Result<Response<RecoverResponse>, Status> {
-        todo!()
+        self.env
+            .notification_manager()
+            .notify_local_subscribers(LocalNotification::AdhocRecovery)
+            .await;
+        Ok(Response::new(RecoverResponse {}))
     }
 }
