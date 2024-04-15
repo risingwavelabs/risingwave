@@ -81,6 +81,7 @@ impl<T> UpstreamTableReader<T> {
 }
 
 impl UpstreamTableReader<ExternalStorageTable> {
+    /// Continuously read the rows from the upstream table until reaching the end of the table
     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
     pub async fn snapshot_read_full_table(&self, args: SnapshotReadArgs, limit: u32) {
         let mut read_args = args;

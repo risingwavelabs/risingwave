@@ -46,7 +46,7 @@ use crate::executor::backfill::utils::{
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, Barrier, BoxedMessageStream, Execute, Executor, Message,
+    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, Message,
     StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::CreateMviewProgress;
@@ -68,7 +68,6 @@ pub struct CdcBackfillExecutor<S: StateStore> {
     output_indices: Vec<usize>,
 
     /// State table of the `CdcBackfill` executor
-    // state_table: StateTable<S>,
     state_impl: CdcBackfillState<S>,
 
     progress: Option<CreateMviewProgress>,
@@ -113,7 +112,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             metrics,
             chunk_size,
             disable_backfill,
-            snapshot_interval: 1,
+            // TODO: make this option configuable in the WITH clause
+            snapshot_interval: 5,
         }
     }
 
@@ -267,14 +267,14 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                 let mut has_snapshot_read = false;
                 let mut snapshot_read_row_cnt: usize = 0;
-                let args = SnapshotReadArgs::new(
+                let read_args = SnapshotReadArgs::new(
                     current_pk_pos.clone(),
                     self.chunk_size,
                     pk_in_output_indices.clone(),
                 );
 
                 let right_snapshot = pin!(upstream_table_reader
-                    .snapshot_read(args, snapshot_read_limit as u32)
+                    .snapshot_read_full_table(read_args, snapshot_read_limit as u32)
                     .map(Either::Right));
 
                 let (right_snapshot, valve) = pausable(right_snapshot);
@@ -338,20 +338,10 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         .await?;
                                     state_impl.commit_state(barrier.epoch).await?;
 
-                                    // snapshot_read_epoch = barrier.epoch.prev;
-                                    // if let Some(progress) = self.progress.as_mut() {
-                                    //     progress.update(
-                                    //         barrier.epoch.curr,
-                                    //         snapshot_read_epoch,
-                                    //         total_snapshot_row_count,
-                                    //     );
-                                    // }
-
                                     // when processing a barrier, check whether can start a new snapshot
                                     // if the number of barriers reaches the snapshot interval
                                     if can_start_new_snapshot {
                                         pending_barrier = Some(barrier);
-                                        has_snapshot_read = snapshot_read_row_cnt > 0;
                                         // Break the for loop and prepare to start a new snapshot
                                         break;
                                     } else {
@@ -403,45 +393,40 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                         Either::Right(msg) => {
                             match msg? {
                                 None => {
-                                    if snapshot_read_row_cnt < snapshot_read_limit {
-                                        tracing::info!(
-                                            upstream_table_id,
-                                            ?last_binlog_offset,
-                                            ?current_pk_pos,
-                                            "snapshot read stream ends"
-                                        );
-                                        // If the snapshot read stream ends with less than `limit` rows,
-                                        // it means all historical data has been loaded.
-                                        // We should not mark the chunk anymore,
-                                        // otherwise, we will ignore some rows in the buffer.
-                                        // Here we choose to never mark the chunk.
-                                        // Consume with the renaming stream buffer chunk without mark.
-                                        for chunk in upstream_chunk_buffer.drain(..) {
-                                            yield Message::Chunk(mapping_chunk(
-                                                chunk,
-                                                &self.output_indices,
-                                            ));
-                                        }
-
-                                        state_impl
-                                            .mutate_state(
-                                                current_pk_pos.clone(),
-                                                last_binlog_offset.clone(),
-                                                total_snapshot_row_count,
-                                                true,
-                                            )
-                                            .await?;
-
-                                        // backfill has finished
-                                        break 'backfill_loop;
-                                    } else {
-                                        // TODO:
-                                        // break the for loop to reconstruct a new snapshot with pk offset
-                                        // to ensure we load all historical data
-                                        break;
+                                    tracing::info!(
+                                        upstream_table_id,
+                                        ?last_binlog_offset,
+                                        ?current_pk_pos,
+                                        "snapshot read stream ends"
+                                    );
+                                    // If the snapshot read stream ends with less than `limit` rows,
+                                    // it means all historical data has been loaded.
+                                    // We should not mark the chunk anymore,
+                                    // otherwise, we will ignore some rows in the buffer.
+                                    // Here we choose to never mark the chunk.
+                                    // Consume with the renaming stream buffer chunk without mark.
+                                    for chunk in upstream_chunk_buffer.drain(..) {
+                                        yield Message::Chunk(mapping_chunk(
+                                            chunk,
+                                            &self.output_indices,
+                                        ));
                                     }
+
+                                    state_impl
+                                        .mutate_state(
+                                            current_pk_pos.clone(),
+                                            last_binlog_offset.clone(),
+                                            total_snapshot_row_count,
+                                            true,
+                                        )
+                                        .await?;
+
+                                    // backfill has finished
+                                    break 'backfill_loop;
                                 }
                                 Some(chunk) => {
+                                    has_snapshot_read = true;
+
                                     // Raise the current position.
                                     // As snapshot read streams are ordered by pk, so we can
                                     // just use the last row to update `current_pos`.
@@ -456,8 +441,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     let chunk_cardinality = chunk.cardinality() as u64;
                                     cur_barrier_snapshot_processed_rows += chunk_cardinality;
                                     total_snapshot_row_count += chunk_cardinality;
-                                    // count the number of rows in the snapshot
-                                    snapshot_read_row_cnt += chunk_cardinality as usize;
                                     yield Message::Chunk(mapping_chunk(
                                         chunk,
                                         &self.output_indices,
@@ -468,11 +451,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     }
                 }
 
-                // ensure the snapshot stream is consumed once in the snapshot interval
-                // otherwise, reconstruct a snapshot stream with same pk offset may return an
+                assert!(pending_barrier.is_some(), "pending_barrier must exist");
+                // Before start a new snapshot, we should ensure the snapshot stream is
+                // consumed once in the period of snapshot interval. Because if we
+                // reconstruct a snapshot stream with same pk offset, it will return an
                 // empty stream (don't know the cause)
                 if !has_snapshot_read {
-                    // pin_mut!(backfill_stream);
                     let (_, mut snapshot_stream) = backfill_stream.into_inner();
                     if let Some(msg) = snapshot_stream.next().await {
                         let Either::Right(msg) = msg else {
@@ -506,7 +490,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     .await?;
 
                                 // commit state because we have received a barrier message
-                                let barrier = pending_barrier.expect("pending_barrier must exist");
+                                let barrier = pending_barrier.unwrap();
                                 state_impl.commit_state(barrier.epoch).await?;
                                 yield Message::Barrier(barrier);
                                 // end of backfill loop, since backfill has finished
@@ -514,8 +498,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                             }
                             Some(chunk) => {
                                 // Raise the current pk position.
-                                // Because snapshot streams are ordered by pk, so we can
-                                // use the last row to update `current_pk_pos`.
                                 current_pk_pos = Some(get_new_pos(&chunk, &pk_in_output_indices));
 
                                 let row_count = chunk.cardinality() as u64;
@@ -577,7 +559,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     cur_barrier_upstream_processed_rows,
                 );
 
-                let barrier = pending_barrier.expect("pending_barrier must exist");
+                let barrier = pending_barrier.unwrap();
                 yield Message::Barrier(barrier);
             }
         } else if self.disable_backfill {
