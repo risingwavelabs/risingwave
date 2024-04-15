@@ -89,6 +89,7 @@ macro_rules! for_all_sinks {
                 { Nats, $crate::sink::nats::NatsSink },
                 { Jdbc, $crate::sink::remote::JdbcSink },
                 { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
+                { Opensearch, $crate::sink::remote::OpensearchSink },
                 { Cassandra, $crate::sink::remote::CassandraSink },
                 { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },

@@ -26,14 +26,7 @@ import io.grpc.Status;
 import java.io.IOException;
 import java.util.Map;
 import org.apache.http.HttpHost;
-import org.apache.http.auth.AuthScope;
-import org.apache.http.auth.UsernamePasswordCredentials;
-import org.apache.http.client.CredentialsProvider;
-import org.apache.http.impl.client.BasicCredentialsProvider;
 import org.elasticsearch.client.RequestOptions;
-import org.elasticsearch.client.RestClient;
-import org.elasticsearch.client.RestClientBuilder;
-import org.elasticsearch.client.RestHighLevelClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -89,21 +82,19 @@ public class EsSinkFactory implements SinkFactory {
             }
         }
 
+        RestHighLevelClientAdapter client;
         // 2. check connection
-        RestClientBuilder builder = RestClient.builder(host);
-        if (config.getPassword() != null && config.getUsername() != null) {
-            final CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
-            credentialsProvider.setCredentials(
-                    AuthScope.ANY,
-                    new UsernamePasswordCredentials(config.getUsername(), config.getPassword()));
-            builder.setHttpClientConfigCallback(
-                    httpClientBuilder ->
-                            httpClientBuilder.setDefaultCredentialsProvider(credentialsProvider));
-        }
-        RestHighLevelClient client = new RestHighLevelClient(builder);
-        // Test connection
         try {
-            boolean isConnected = client.ping(RequestOptions.DEFAULT);
+            boolean isConnected;
+            if (config.getConnector().equals("elasticsearch")) {
+                client = new ElasticRestHighLevelClientAdapter(host, config);
+                isConnected = client.ping(RequestOptions.DEFAULT);
+            } else if (config.getConnector().equals("opensearch")) {
+                client = new OpensearchRestHighLevelClientAdapter(host, config);
+                isConnected = client.ping(org.opensearch.client.RequestOptions.DEFAULT);
+            } else {
+                throw new RuntimeException("Sink type must be elasticsearch or opensearch");
+            }
             if (!isConnected) {
                 throw Status.INVALID_ARGUMENT
                         .withDescription("Cannot connect to " + config.getUrl())

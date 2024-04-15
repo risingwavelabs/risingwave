@@ -25,5 +25,11 @@ import org.elasticsearch.action.bulk.BulkResponse;
  * {@link BulkRequestConsumerFactory} is used to bridge incompatible Elasticsearch Java API calls
  * across different Elasticsearch versions.
  */
-interface BulkRequestConsumerFactory
+interface ElasticBulkRequestConsumerFactory
         extends BiConsumer<BulkRequest, ActionListener<BulkResponse>> {}
+
+interface OpenSearchBulkRequestConsumerFactory
+        extends BiConsumer<
+                org.opensearch.action.bulk.BulkRequest,
+                org.opensearch.core.action.ActionListener<
+                        org.opensearch.action.bulk.BulkResponse>> {}

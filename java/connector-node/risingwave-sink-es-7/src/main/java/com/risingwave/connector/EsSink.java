@@ -25,24 +25,8 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import org.apache.http.HttpHost;
-import org.apache.http.auth.AuthScope;
-import org.apache.http.auth.UsernamePasswordCredentials;
-import org.apache.http.client.CredentialsProvider;
-import org.apache.http.impl.client.BasicCredentialsProvider;
-import org.elasticsearch.action.bulk.BackoffPolicy;
-import org.elasticsearch.action.bulk.BulkProcessor;
-import org.elasticsearch.action.bulk.BulkRequest;
-import org.elasticsearch.action.bulk.BulkResponse;
 import org.elasticsearch.action.delete.DeleteRequest;
 import org.elasticsearch.action.update.UpdateRequest;
-import org.elasticsearch.client.RequestOptions;
-import org.elasticsearch.client.RestClient;
-import org.elasticsearch.client.RestClientBuilder;
-import org.elasticsearch.client.RestHighLevelClient;
-import org.elasticsearch.client.RestHighLevelClientBuilder;
-import org.elasticsearch.common.unit.ByteSizeUnit;
-import org.elasticsearch.common.unit.ByteSizeValue;
-import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.xcontent.XContentType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,8 +49,8 @@ public class EsSink extends SinkWriterBase {
     private static final String ERROR_REPORT_TEMPLATE = "Error message %s";
 
     private final EsSinkConfig config;
-    private BulkProcessor bulkProcessor;
-    private final RestHighLevelClient client;
+    private BulkProcessorAdapter bulkProcessor;
+    private final RestHighLevelClientAdapter client;
 
     // Used to handle the return message of ES and throw errors
     private final RequestTracker requestTracker;
@@ -167,113 +151,18 @@ public class EsSink extends SinkWriterBase {
         this.requestTracker = new RequestTracker();
 
         // ApiCompatibilityMode is enabled to ensure the client can talk to newer version es sever.
-        this.client =
-                new RestHighLevelClientBuilder(
-                                configureRestClientBuilder(RestClient.builder(host), config)
-                                        .build())
-                        .setApiCompatibilityMode(true)
-                        .build();
-        // Test connection
-        try {
-            boolean isConnected = this.client.ping(RequestOptions.DEFAULT);
-            if (!isConnected) {
-                throw Status.INVALID_ARGUMENT
-                        .withDescription("Cannot connect to " + config.getUrl())
-                        .asRuntimeException();
-            }
-        } catch (Exception e) {
-            throw Status.INTERNAL.withDescription(e.getMessage()).asRuntimeException();
-        }
-        this.bulkProcessor = createBulkProcessor(this.requestTracker);
-    }
-
-    private static RestClientBuilder configureRestClientBuilder(
-            RestClientBuilder builder, EsSinkConfig config) {
-        // Possible config:
-        // 1. Connection path prefix
-        // 2. Username and password
-        if (config.getPassword() != null && config.getUsername() != null) {
-            final CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
-            credentialsProvider.setCredentials(
-                    AuthScope.ANY,
-                    new UsernamePasswordCredentials(config.getUsername(), config.getPassword()));
-            builder.setHttpClientConfigCallback(
-                    httpClientBuilder ->
-                            httpClientBuilder.setDefaultCredentialsProvider(credentialsProvider));
-        }
-        // 3. Timeout
-        return builder;
-    }
-
-    private BulkProcessor.Builder applyBulkConfig(
-            RestHighLevelClient client, EsSinkConfig config, BulkProcessor.Listener listener) {
-        BulkProcessor.Builder builder =
-                BulkProcessor.builder(
-                        (BulkRequestConsumerFactory)
-                                (bulkRequest, bulkResponseActionListener) ->
-                                        client.bulkAsync(
-                                                bulkRequest,
-                                                RequestOptions.DEFAULT,
-                                                bulkResponseActionListener),
-                        listener);
-        // Possible feature: move these to config
-        // execute the bulk every 10 000 requests
-        builder.setBulkActions(1000);
-        // flush the bulk every 5mb
-        builder.setBulkSize(new ByteSizeValue(5, ByteSizeUnit.MB));
-        // flush the bulk every 5 seconds whatever the number of requests
-        builder.setFlushInterval(TimeValue.timeValueSeconds(5));
-        // Set the number of concurrent requests
-        builder.setConcurrentRequests(1);
-        // Set a custom backoff policy which will initially wait for 100ms, increase exponentially
-        // and retries up to three times.
-        builder.setBackoffPolicy(
-                BackoffPolicy.exponentialBackoff(TimeValue.timeValueMillis(100), 3));
-        return builder;
-    }
-
-    private BulkProcessor createBulkProcessor(RequestTracker requestTracker) {
-        BulkProcessor.Builder builder =
-                applyBulkConfig(this.client, this.config, new BulkListener(requestTracker));
-        return builder.build();
-    }
-
-    private class BulkListener implements BulkProcessor.Listener {
-        private final RequestTracker requestTracker;
-
-        public BulkListener(RequestTracker requestTracker) {
-            this.requestTracker = requestTracker;
-        }
-
-        /** This method is called just before bulk is executed. */
-        @Override
-        public void beforeBulk(long executionId, BulkRequest request) {
-            LOG.debug("Sending bulk of {} actions to Elasticsearch.", request.numberOfActions());
-        }
-
-        /** This method is called after bulk execution. */
-        @Override
-        public void afterBulk(long executionId, BulkRequest request, BulkResponse response) {
-            if (response.hasFailures()) {
-                String errMessage =
-                        String.format(
-                                "Bulk of %d actions failed. Failure: %s",
-                                request.numberOfActions(), response.buildFailureMessage());
-                this.requestTracker.addErrResult(errMessage);
-            } else {
-                this.requestTracker.addOkResult(request.numberOfActions());
-                LOG.debug("Sent bulk of {} actions to Elasticsearch.", request.numberOfActions());
-            }
-        }
-
-        /** This method is called when the bulk failed and raised a Throwable */
-        @Override
-        public void afterBulk(long executionId, BulkRequest request, Throwable failure) {
-            String errMessage =
-                    String.format(
-                            "Bulk of %d actions failed. Failure: %s",
-                            request.numberOfActions(), failure.getMessage());
-            this.requestTracker.addErrResult(errMessage);
+        if (config.getConnector().equals("elasticsearch")) {
+            ElasticRestHighLevelClientAdapter client =
+                    new ElasticRestHighLevelClientAdapter(host, config);
+            this.bulkProcessor = new ElasticBulkProcessorAdapter(this.requestTracker, client);
+            this.client = client;
+        } else if (config.getConnector().equals("opensearch")) {
+            OpensearchRestHighLevelClientAdapter client =
+                    new OpensearchRestHighLevelClientAdapter(host, config);
+            this.bulkProcessor = new OpensearchBulkProcessorAdapter(this.requestTracker, client);
+            this.client = client;
+        } else {
+            throw new RuntimeException("Sink type must be elasticsearch or opensearch");
         }
     }
 
@@ -359,9 +248,5 @@ public class EsSink extends SinkWriterBase {
                     .withDescription(String.format(ERROR_REPORT_TEMPLATE, e.getMessage()))
                     .asRuntimeException();
         }
-    }
-
-    public RestHighLevelClient getClient() {
-        return client;
     }
 }

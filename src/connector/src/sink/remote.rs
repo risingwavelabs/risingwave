@@ -73,6 +73,7 @@ macro_rules! def_remote_sink {
     () => {
         def_remote_sink! {
             { ElasticSearch, ElasticSearchSink, "elasticsearch" }
+            { Opensearch, OpensearchSink, "opensearch"}
             { Cassandra, CassandraSink, "cassandra" }
             { Jdbc, JdbcSink, "jdbc", |desc| {
                 desc.sink_type.is_append_only()
@@ -165,7 +166,7 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
 }
 
 async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorResult<()> {
-    if sink_name == ElasticSearchSink::SINK_NAME
+    if sink_name == ElasticSearchSink::SINK_NAME || sink_name == OpensearchSink::SINK_NAME
         && param.downstream_pk.len() > 1
         && param.properties.get(ES_OPTION_DELIMITER).is_none()
     {
@@ -190,7 +191,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
                     | DataType::Jsonb
                     | DataType::Bytea => Ok(()),
             DataType::List(list) => {
-                if (sink_name==ElasticSearchSink::SINK_NAME) | matches!(list.as_ref(), DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Float32 | DataType::Float64 | DataType::Varchar){
+                if (sink_name==ElasticSearchSink::SINK_NAME || sink_name == OpensearchSink::SINK_NAME) | matches!(list.as_ref(), DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Float32 | DataType::Float64 | DataType::Varchar){
                     Ok(())
                 } else{
                     Err(SinkError::Remote(anyhow!(
@@ -201,7 +202,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
                 }
             },
             DataType::Struct(_) => {
-                if sink_name==ElasticSearchSink::SINK_NAME{
+                if sink_name==ElasticSearchSink::SINK_NAME || sink_name == OpensearchSink::SINK_NAME{
                     Ok(())
                 }else{
                     Err(SinkError::Remote(anyhow!(
@@ -264,7 +265,7 @@ impl RemoteLogSinker {
         sink_name: &str,
     ) -> Result<Self> {
         let sink_proto = sink_param.to_proto();
-        let payload_schema = if sink_name == ElasticSearchSink::SINK_NAME {
+        let payload_schema = if sink_name == ElasticSearchSink::SINK_NAME || sink_name == OpensearchSink::SINK_NAME {
             let columns = vec![
                 ColumnDesc::unnamed(ColumnId::from(0), DataType::Varchar).to_protobuf(),
                 ColumnDesc::unnamed(ColumnId::from(1), DataType::Varchar).to_protobuf(),
