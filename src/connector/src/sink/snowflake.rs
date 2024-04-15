@@ -137,7 +137,7 @@ impl Sink for SnowflakeSink {
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
-        )
+        )?
         .into_log_sinker(writer_param.sink_metrics))
     }
 
@@ -191,7 +191,7 @@ impl SnowflakeSinkWriter {
         schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
-    ) -> Self {
+    ) -> Result<Self> {
         let http_client = SnowflakeHttpClient::new(
             config.common.account_identifier.clone(),
             config.common.user.clone(),
@@ -210,7 +210,7 @@ impl SnowflakeSinkWriter {
             config.common.aws_access_key_id.clone(),
             config.common.aws_secret_access_key.clone(),
             config.common.aws_region.clone(),
-        );
+        )?;
 
         let max_batch_row_num = config
             .common
@@ -219,7 +219,7 @@ impl SnowflakeSinkWriter {
             .parse::<u32>()
             .expect("failed to parse `snowflake.max_batch_row_num` as a `u32`");
 
-        Self {
+        Ok(Self {
             config,
             schema: schema.clone(),
             pk_indices,
@@ -239,7 +239,7 @@ impl SnowflakeSinkWriter {
             max_batch_row_num,
             // initial value of `epoch` will start from 0
             epoch: 0,
-        }
+        })
     }
 
     /// reset the `payload` and `row_counter`.

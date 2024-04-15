@@ -196,7 +196,7 @@ impl SnowflakeS3Client {
         aws_access_key_id: String,
         aws_secret_access_key: String,
         aws_region: String,
-    ) -> Self {
+    ) -> Result<Self> {
         // just use default configuration here for opendal s3 engine
         let config = ObjectStoreConfig::default();
 
@@ -211,13 +211,13 @@ impl SnowflakeS3Client {
             &aws_secret_access_key,
             &aws_region,
         )
-        .unwrap();
+        .map_err(|e| SinkError::Snowflake(format!("failed to create opendal s3 engine, error: {}", e.to_string())))?;
 
-        Self {
+        Ok(Self {
             s3_bucket,
             s3_path,
             opendal_s3_engine,
-        }
+        })
     }
 
     pub async fn sink_to_s3(&self, data: Bytes, file_suffix: String) -> Result<()> {
