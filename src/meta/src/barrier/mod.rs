@@ -658,10 +658,16 @@ impl GlobalBarrierManager {
                 notification = local_notification_rx.recv() => {
                     let notification = notification.unwrap();
                     // Handle barrier interval and checkpoint frequency changes
-                    if let LocalNotification::SystemParamsChange(p) = &notification {
-                        self.scheduled_barriers.set_min_interval(Duration::from_millis(p.barrier_interval_ms() as u64));
-                        self.scheduled_barriers
-                            .set_checkpoint_frequency(p.checkpoint_frequency() as usize)
+                    match notification {
+                        LocalNotification::SystemParamsChange(p) => {
+                            self.scheduled_barriers.set_min_interval(Duration::from_millis(p.barrier_interval_ms() as u64));
+                            self.scheduled_barriers
+                                .set_checkpoint_frequency(p.checkpoint_frequency() as usize)
+                        },
+                        LocalNotification::AdhocRecovery => {
+                            self.adhoc_recovery().await;
+                        }
+                        _ => {}
                     }
                 }
                 resp_result = self.control_stream_manager.next_response() => {
@@ -791,7 +797,7 @@ impl GlobalBarrierManager {
                     err.clone(),
                 )));
             let latest_snapshot = self.context.hummock_manager.latest_snapshot();
-            let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recovery from the committed epoch
+            let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recover from the committed epoch
             let span = tracing::info_span!(
                 "failure_recovery",
                 error = %err.as_report(),
@@ -816,7 +822,7 @@ impl GlobalBarrierManager {
             self.context
                 .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Adhoc));
             let latest_snapshot = self.context.hummock_manager.latest_snapshot();
-            let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recovery from the committed epoch
+            let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recover from the committed epoch
             let span = tracing::info_span!(
                 "failure_recovery",
                 error = %err.as_report(),
