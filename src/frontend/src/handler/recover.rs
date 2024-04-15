@@ -21,7 +21,7 @@ use crate::session::SessionImpl;
 
 pub(super) async fn handle_recover(handler_args: HandlerArgs) -> Result<RwPgResponse> {
     // Only permit recovery for super users.
-    if handler_args.session.is_super_user() {
+    if !handler_args.session.is_super_user() {
         return Err(ErrorCode::PermissionDenied(
             "only superusers can trigger adhoc recovery".to_string(),
         )
