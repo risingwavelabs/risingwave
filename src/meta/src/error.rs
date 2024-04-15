@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::error::BoxedError;
+use risingwave_common::session_config::SessionConfigError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
 use risingwave_pb::PbFieldNotFound;
@@ -87,6 +88,13 @@ pub enum MetaErrorInner {
 
     #[error("SystemParams error: {0}")]
     SystemParams(String),
+
+    #[error("SessionParams error: {0}")]
+    SessionConfig(
+        #[from]
+        #[backtrace]
+        SessionConfigError,
+    ),
 
     #[error(transparent)]
     Connector(

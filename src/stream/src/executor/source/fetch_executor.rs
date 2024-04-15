@@ -34,7 +34,6 @@ use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{
     BoxChunkSourceStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
 };
-use risingwave_connector::ConnectorParams;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
@@ -63,27 +62,21 @@ pub struct FsFetchExecutor<S: StateStore, Src: OpendalSource> {
     // control options for connector level
     source_ctrl_opts: SourceCtrlOpts,
 
-    // config for the connector node
-    connector_params: ConnectorParams,
-
     _marker: PhantomData<Src>,
 }
 
 impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
         stream_source_core: StreamSourceCore<S>,
         upstream: Executor,
         source_ctrl_opts: SourceCtrlOpts,
-        connector_params: ConnectorParams,
     ) -> Self {
         Self {
             actor_ctx,
             stream_source_core: Some(stream_source_core),
             upstream: Some(upstream),
             source_ctrl_opts,
-            connector_params,
             _marker: PhantomData,
         }
     }
@@ -97,9 +90,9 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
     ) -> StreamExecutorResult<()> {
         let mut batch = Vec::with_capacity(SPLIT_BATCH_SIZE);
-        'vnodes: for vnode in state_store_handler.state_store.vnodes().iter_vnodes() {
+        'vnodes: for vnode in state_store_handler.state_table.vnodes().iter_vnodes() {
             let table_iter = state_store_handler
-                .state_store
+                .state_table
                 .iter_with_vnode(
                     vnode,
                     &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
@@ -178,7 +171,6 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             self.actor_ctx.fragment_id,
             source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
-            self.connector_params.connector_client.clone(),
             source_desc.source.config.clone(),
             source_name.to_owned(),
         )
@@ -220,7 +212,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         // Hence we try building a reader first.
         Self::replace_with_new_batch_reader(
             &mut splits_on_fetch,
-            &state_store_handler,
+            &state_store_handler, // move into the function
             core.column_ids.clone(),
             self.build_source_ctx(&source_desc, core.source_id, &core.source_name),
             &source_desc,
@@ -251,7 +243,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     }
 
                                     state_store_handler
-                                        .state_store
+                                        .state_table
                                         .commit(barrier.epoch)
                                         .await?;
 
@@ -261,7 +253,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         // if _cache_may_stale, we must rebuild the stream to adjust vnode mappings
                                         let (_prev_vnode_bitmap, cache_may_stale) =
                                             state_store_handler
-                                                .state_store
+                                                .state_table
                                                 .update_vnode_bitmap(vnode_bitmap);
 
                                         if cache_may_stale {
@@ -305,7 +297,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         })
                                         .collect();
                                     state_store_handler.set_states(file_assignment).await?;
-                                    state_store_handler.state_store.try_flush().await?;
+                                    state_store_handler.state_table.try_flush().await?;
                                 }
                                 _ => unreachable!(),
                             }

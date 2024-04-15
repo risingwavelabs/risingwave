@@ -167,6 +167,10 @@ impl Ident {
             _ => self.value.to_lowercase(),
         }
     }
+
+    pub fn quote_style(&self) -> Option<char> {
+        self.quote_style
+    }
 }
 
 impl From<&str> for Ident {
@@ -256,6 +260,30 @@ impl fmt::Display for Array {
     }
 }
 
+/// An escape character, to represent '' or a single character.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct EscapeChar(Option<char>);
+
+impl EscapeChar {
+    pub fn escape(ch: char) -> Self {
+        Self(Some(ch))
+    }
+
+    pub fn empty() -> Self {
+        Self(None)
+    }
+}
+
+impl fmt::Display for EscapeChar {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            Some(ch) => write!(f, "{}", ch),
+            None => f.write_str(""),
+        }
+    }
+}
+
 /// An SQL expression of any type.
 ///
 /// The parser does not distinguish between expressions of different types
@@ -329,12 +357,26 @@ pub enum Expr {
         low: Box<Expr>,
         high: Box<Expr>,
     },
+    /// LIKE
+    Like {
+        negated: bool,
+        expr: Box<Expr>,
+        pattern: Box<Expr>,
+        escape_char: Option<EscapeChar>,
+    },
+    /// ILIKE (case-insensitive LIKE)
+    ILike {
+        negated: bool,
+        expr: Box<Expr>,
+        pattern: Box<Expr>,
+        escape_char: Option<EscapeChar>,
+    },
     /// `<expr> [ NOT ] SIMILAR TO <pat> ESCAPE <esc_text>`
     SimilarTo {
-        expr: Box<Expr>,
         negated: bool,
-        pat: Box<Expr>,
-        esc_text: Option<Box<Expr>>,
+        expr: Box<Expr>,
+        pattern: Box<Expr>,
+        escape_char: Option<EscapeChar>,
     },
     /// Binary operation e.g. `1 + 1` or `foo > bar`
     BinaryOp {
@@ -535,24 +577,72 @@ impl fmt::Display for Expr {
                 low,
                 high
             ),
-            Expr::SimilarTo {
-                expr,
+            Expr::Like {
                 negated,
-                pat,
-                esc_text,
-            } => {
-                write!(
+                expr,
+                pattern,
+                escape_char,
+            } => match escape_char {
+                Some(ch) => write!(
+                    f,
+                    "{} {}LIKE {} ESCAPE '{}'",
+                    expr,
+                    if *negated { "NOT " } else { "" },
+                    pattern,
+                    ch
+                ),
+                _ => write!(
+                    f,
+                    "{} {}LIKE {}",
+                    expr,
+                    if *negated { "NOT " } else { "" },
+                    pattern
+                ),
+            },
+            Expr::ILike {
+                negated,
+                expr,
+                pattern,
+                escape_char,
+            } => match escape_char {
+                Some(ch) => write!(
+                    f,
+                    "{} {}ILIKE {} ESCAPE '{}'",
+                    expr,
+                    if *negated { "NOT " } else { "" },
+                    pattern,
+                    ch
+                ),
+                _ => write!(
+                    f,
+                    "{} {}ILIKE {}",
+                    expr,
+                    if *negated { "NOT " } else { "" },
+                    pattern
+                ),
+            },
+            Expr::SimilarTo {
+                negated,
+                expr,
+                pattern,
+                escape_char,
+            } => match escape_char {
+                Some(ch) => write!(
+                    f,
+                    "{} {}SIMILAR TO {} ESCAPE '{}'",
+                    expr,
+                    if *negated { "NOT " } else { "" },
+                    pattern,
+                    ch
+                ),
+                _ => write!(
                     f,
                     "{} {}SIMILAR TO {}",
                     expr,
                     if *negated { "NOT " } else { "" },
-                    pat,
-                )?;
-                if let Some(et) = esc_text {
-                    write!(f, "ESCAPE {}", et)?;
-                }
-                Ok(())
-            }
+                    pattern
+                ),
+            },
             Expr::BinaryOp { left, op, right } => write!(f, "{} {} {}", left, op, right),
             Expr::SomeOp(expr) => write!(f, "SOME({})", expr),
             Expr::AllOp(expr) => write!(f, "ALL({})", expr),
@@ -1135,6 +1225,8 @@ pub enum Statement {
         append_only: bool,
         /// On conflict behavior
         on_conflict: Option<OnConflict>,
+        /// with_version_column behind on conflict
+        with_version_column: Option<String>,
         /// `AS ( query )`
         query: Option<Box<Query>>,
         /// `FROM cdc_source TABLE database_name.table_name`
@@ -1405,6 +1497,21 @@ pub enum Statement {
         param: Ident,
         value: SetVariableValue,
     },
+    /// DECLARE CURSOR
+    DeclareCursor {
+        cursor_name: ObjectName,
+        query: Box<Query>,
+    },
+    /// FETCH FROM CURSOR
+    FetchCursor {
+        cursor_name: ObjectName,
+        /// Number of rows to fetch. `None` means `FETCH ALL`.
+        count: Option<i32>,
+    },
+    /// CLOSE CURSOR
+    CloseCursor {
+        cursor_name: Option<ObjectName>,
+    },
     /// FLUSH the current barrier.
     ///
     /// Note: RisingWave specific statement.
@@ -1637,6 +1744,7 @@ impl fmt::Display for Statement {
                 source_watermarks,
                 append_only,
                 on_conflict,
+                with_version_column,
                 query,
                 cdc_table_info,
                 include_column_options,
@@ -1669,6 +1777,9 @@ impl fmt::Display for Statement {
 
                 if let Some(on_conflict_behavior) = on_conflict {
                     write!(f, " ON CONFLICT {}", on_conflict_behavior)?;
+                }
+                if let Some(version_column) = with_version_column {
+                    write!(f, " WITH VERSION COLUMN({})", version_column)?;
                 }
                 if !include_column_options.is_empty() { // (Ident, Option<Ident>)
                     write!(f, "{}", display_comma_separated(
@@ -1958,6 +2069,23 @@ impl fmt::Display for Statement {
                     f,
                     "{param} = {value}",
                 )
+            }
+            Statement::DeclareCursor { cursor_name, query } => {
+                write!(f, "DECLARE {} CURSOR FOR {}", cursor_name, query)
+            },
+            Statement::FetchCursor { cursor_name , count} => {
+                if let Some(count) = count {
+                    write!(f, "FETCH {} FROM {}", count, cursor_name)
+                } else {
+                    write!(f, "FETCH NEXT FROM {}", cursor_name)
+                }
+            },
+            Statement::CloseCursor { cursor_name } => {
+                if let Some(name) = cursor_name {
+                    write!(f, "CLOSE {}", name)
+                } else {
+                    write!(f, "CLOSE ALL")
+                }
             }
             Statement::Flush => {
                 write!(f, "FLUSH")

@@ -612,6 +612,7 @@ pub(crate) async fn reparse_table_for_sink(
         source_watermarks,
         append_only,
         on_conflict,
+        with_version_column,
         ..
     } = definition
     else {
@@ -631,6 +632,7 @@ pub(crate) async fn reparse_table_for_sink(
         source_watermarks,
         append_only,
         on_conflict,
+        with_version_column,
     )
     .await?;
 
@@ -779,9 +781,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Debezium => vec![Encode::Json],
                 ),
                 MqttSink::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Json],
-                    Format::Upsert => vec![Encode::Json],
-                    Format::Debezium => vec![Encode::Json],
+                    Format::Plain => vec![Encode::Json, Encode::Protobuf],
                 ),
                 PulsarSink::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Json],

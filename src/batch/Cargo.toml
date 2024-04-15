@@ -28,11 +28,12 @@ futures-util = "0.3"
 hashbrown = { workspace = true }
 hytra = "0.1.2"
 icelake = { workspace = true }
-itertools = "0.12"
+itertools = { workspace = true }
 memcomparable = "0.2"
-parking_lot = { version = "0.12", features = ["arc_lock"] }
+parking_lot = { workspace = true }
 paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
+rand = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_connector = { workspace = true }
@@ -62,15 +63,12 @@ tokio-util = { workspace = true }
 tonic = { workspace = true }
 tracing = "0.1"
 
-[target.'cfg(enable_task_local_alloc)'.dependencies]
-task_stats_alloc = { path = "../utils/task_stats_alloc" }
-
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio", "async"] }
-rand = "0.8"
+rand = { workspace = true }
 risingwave_expr_impl = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 tempfile = "3"

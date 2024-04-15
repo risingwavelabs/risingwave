@@ -32,7 +32,6 @@ use await_tree::InstrumentAwait;
 use futures::stream::BoxStream;
 use futures::StreamExt;
 pub use risingwave_common::config::ObjectStoreConfig;
-use risingwave_common::util::env_var::env_var_is_false_or;
 pub use s3::*;
 
 pub mod error;
@@ -49,8 +48,6 @@ use self::sim::SimObjectStore;
 
 pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
 pub type ObjectStreamingUploader = MonitoredStreamingUploader;
-
-const RW_USE_OPENDAL_FOR_S3: &str = "RW_USE_OPENDAL_FOR_S3";
 
 type BoxedStreamingUploader = Box<dyn StreamingUploader>;
 
@@ -413,8 +410,6 @@ pub struct MonitoredStreamingReader {
     timer: Option<HistogramTimer>,
     streaming_read_timeout: Option<Duration>,
 }
-
-unsafe impl Sync for MonitoredStreamingReader {}
 
 impl MonitoredStreamingReader {
     pub fn new(
@@ -795,10 +790,18 @@ pub async fn build_remote_object_store(
     ident: &str,
     config: ObjectStoreConfig,
 ) -> ObjectStoreImpl {
+    tracing::debug!(config=?config, "object store {ident}");
     match url {
         s3 if s3.starts_with("s3://") => {
-            // only switch to s3 sdk when `RW_USE_OPENDAL_FOR_S3` is set to false.
-            if env_var_is_false_or(RW_USE_OPENDAL_FOR_S3, false) {
+            if config.s3.developer.use_opendal {
+                let bucket = s3.strip_prefix("s3://").unwrap();
+                tracing::info!("Using OpenDAL to access s3, bucket is {}", bucket);
+                ObjectStoreImpl::Opendal(
+                    OpendalObjectStore::new_s3_engine(bucket.to_string(), config.clone())
+                        .unwrap()
+                        .monitored(metrics, config),
+                )
+            } else {
                 ObjectStoreImpl::S3(
                     S3ObjectStore::new_with_config(
                         s3.strip_prefix("s3://").unwrap().to_string(),
@@ -807,14 +810,6 @@ pub async fn build_remote_object_store(
                     )
                     .await
                     .monitored(metrics, config),
-                )
-            } else {
-                let bucket = s3.strip_prefix("s3://").unwrap();
-                tracing::info!("Using OpenDAL to access s3, bucket is {}", bucket);
-                ObjectStoreImpl::Opendal(
-                    OpendalObjectStore::new_s3_engine(bucket.to_string(), config.clone())
-                        .unwrap()
-                        .monitored(metrics, config),
                 )
             }
         }

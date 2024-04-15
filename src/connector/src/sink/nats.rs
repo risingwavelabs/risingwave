@@ -28,7 +28,7 @@ use with_options::WithOptions;
 use super::encoder::{DateHandlingMode, TimeHandlingMode, TimestamptzHandlingMode};
 use super::utils::chunk_to_json;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
-use crate::common::NatsCommon;
+use crate::connector_common::NatsCommon;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;

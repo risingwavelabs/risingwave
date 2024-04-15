@@ -45,10 +45,11 @@ pub use self::mysql::mysql_row_to_owned_row;
 use self::plain_parser::PlainParser;
 pub use self::postgres::postgres_row_to_owned_row;
 use self::simd_json_parser::DebeziumJsonAccessBuilder;
+pub use self::unified::json::TimestamptzHandling;
 use self::unified::AccessImpl;
 use self::upsert_parser::UpsertParser;
 use self::util::get_kafka_topic;
-use crate::common::AwsAuthProps;
+use crate::connector_common::AwsAuthProps;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::maxwell::MaxwellParser;
 use crate::parser::simd_json_parser::DebeziumMongoJsonAccessBuilder;
@@ -876,7 +877,7 @@ impl AccessBuilderImpl {
                 AccessBuilderImpl::Bytes(BytesAccessBuilder::new(config)?)
             }
             EncodingProperties::Json(config) => {
-                AccessBuilderImpl::Json(JsonAccessBuilder::new(config.use_schema_registry)?)
+                AccessBuilderImpl::Json(JsonAccessBuilder::new(config)?)
             }
             _ => unreachable!(),
         };
@@ -1006,6 +1007,7 @@ impl SpecificParserConfig {
         key_encoding_config: None,
         encoding_config: EncodingProperties::Json(JsonProperties {
             use_schema_registry: false,
+            timestamptz_handling: None,
         }),
         protocol_config: ProtocolProperties::Plain,
     };
@@ -1046,6 +1048,7 @@ pub struct CsvProperties {
 #[derive(Debug, Default, Clone)]
 pub struct JsonProperties {
     pub use_schema_registry: bool,
+    pub timestamptz_handling: Option<TimestamptzHandling>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -1200,10 +1203,14 @@ impl SpecificParserConfig {
                 SourceEncode::Json,
             ) => EncodingProperties::Json(JsonProperties {
                 use_schema_registry: info.use_schema_registry,
+                timestamptz_handling: TimestamptzHandling::from_options(
+                    &info.format_encode_options,
+                )?,
             }),
             (SourceFormat::DebeziumMongo, SourceEncode::Json) => {
                 EncodingProperties::Json(JsonProperties {
                     use_schema_registry: false,
+                    timestamptz_handling: None,
                 })
             }
             (SourceFormat::Plain, SourceEncode::Bytes) => {

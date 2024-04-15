@@ -51,9 +51,12 @@ use tokio::sync::oneshot::Receiver;
 use tokio::sync::{oneshot, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
+use tracing::warn;
 
 use crate::barrier::{Command, Reschedule, StreamRpcManager};
-use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv, MetadataManager, WorkerId};
+use crate::manager::{
+    IdCategory, IdGenManagerImpl, LocalNotification, MetaSrvEnv, MetadataManager, WorkerId,
+};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::serving::{
     to_deleted_fragment_parallel_unit_mapping, to_fragment_parallel_unit_mapping,
@@ -732,7 +735,7 @@ impl ScaleController {
 
             if (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0 {
                 let stream_node = fragment.actor_template.nodes.as_ref().unwrap();
-                if TableFragments::find_stream_source(stream_node).is_some() {
+                if stream_node.find_stream_source().is_some() {
                     stream_source_fragment_ids.insert(*fragment_id);
                 }
             }
@@ -1234,6 +1237,7 @@ impl ScaleController {
                 fragment_stream_source_actor_splits.insert(*fragment_id, actor_splits);
             }
         }
+        // TODO: support migrate splits for SourceBackfill
 
         // Generate fragment reschedule plan
         let mut reschedule_fragment: HashMap<FragmentId, Reschedule> =
@@ -1494,16 +1498,12 @@ impl ScaleController {
             }
 
             for created_parallel_unit_id in added_parallel_units {
-                let id = match self.env.sql_id_gen_manager_ref() {
-                    None => {
-                        self.env
-                            .id_gen_manager()
-                            .generate::<{ IdCategory::Actor }>()
-                            .await? as ActorId
+                let id = match self.env.id_gen_manager() {
+                    IdGenManagerImpl::Kv(mgr) => {
+                        mgr.generate::<{ IdCategory::Actor }>().await? as ActorId
                     }
-                    Some(id_gen) => {
-                        let id = id_gen.generate_interval::<{ IdCategory::Actor }>(1);
-
+                    IdGenManagerImpl::Sql(mgr) => {
+                        let id = mgr.generate_interval::<{ IdCategory::Actor }>(1);
                         id as ActorId
                     }
                 };
@@ -1738,6 +1738,7 @@ impl ScaleController {
         if !stream_source_actor_splits.is_empty() {
             self.source_manager
                 .apply_source_change(
+                    None,
                     None,
                     Some(stream_source_actor_splits),
                     Some(stream_source_dropped_actors),
@@ -2005,12 +2006,19 @@ impl ScaleController {
                                 ),
                             );
                         }
-                        TableParallelism::Fixed(n) => {
-                            if n > all_available_parallel_unit_ids.len() {
-                                bail!(
-                                    "Not enough ParallelUnits available for fragment {}",
-                                    fragment_id
+                        TableParallelism::Fixed(mut n) => {
+                            let available_parallelism = all_available_parallel_unit_ids.len();
+
+                            if n > available_parallelism {
+                                warn!(
+                                    "not enough parallel units available for job {} fragment {}, required {}, resetting to {}",
+                                    table_id,
+                                    fragment_id,
+                                    n,
+                                    available_parallelism,
                                 );
+
+                                n = available_parallelism;
                             }
 
                             let rebalance_result =
@@ -2772,10 +2780,10 @@ impl GlobalStreamManager {
                     streaming_parallelisms
                         .into_iter()
                         .map(|(table_id, parallelism)| {
-                            // no custom for sql backend
                             let table_parallelism = match parallelism {
                                 StreamingParallelism::Adaptive => TableParallelism::Adaptive,
                                 StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n),
+                                StreamingParallelism::Custom => TableParallelism::Custom,
                             };
 
                             (table_id as u32, table_parallelism)

@@ -89,7 +89,7 @@ macro_rules! commit_meta_with_trx {
                     $val_txn.apply_to_txn(&mut $trx).await?;
                 )*
                 // Commit to meta store
-                $manager.env.meta_store_checked().txn($trx).await?;
+                $manager.env.meta_store().as_kv().txn($trx).await?;
                 // Upon successful commit, commit the change to in-mem meta
                 $(
                     $val_txn.commit();
@@ -243,6 +243,7 @@ impl CatalogManager {
             database.id = self
                 .env
                 .id_gen_manager()
+                .as_kv()
                 .generate::<{ IdCategory::Database }>()
                 .await? as u32;
             self.create_database(&database).await?;
@@ -267,6 +268,7 @@ impl CatalogManager {
                 id: self
                     .env
                     .id_gen_manager()
+                    .as_kv()
                     .generate::<{ IdCategory::Schema }>()
                     .await? as u32,
                 database_id: database.id,
@@ -1169,7 +1171,7 @@ impl CatalogManager {
         let mut all_subscription_ids: HashSet<SubscriptionId> = HashSet::default();
         let mut all_source_ids: HashSet<SourceId> = HashSet::default();
         let mut all_view_ids: HashSet<ViewId> = HashSet::default();
-        let mut all_cdc_source_ids: HashSet<SourceId> = HashSet::default();
+        let mut all_streaming_job_source_ids: HashSet<SourceId> = HashSet::default();
 
         let relations_depend_on = |relation_id: RelationId| -> Vec<RelationInfo> {
             let tables_depend_on = tables
@@ -1453,11 +1455,10 @@ impl CatalogManager {
                         continue;
                     }
 
-                    // cdc source streaming job
                     if let Some(info) = source.info
-                        && info.cdc_source_job
+                        && info.is_shared()
                     {
-                        all_cdc_source_ids.insert(source.id);
+                        all_streaming_job_source_ids.insert(source.id);
                         let source_table_fragments = fragment_manager
                             .select_table_fragments_by_table_id(&source.id.into())
                             .await?;
@@ -1780,7 +1781,7 @@ impl CatalogManager {
             .map(|id| id.into())
             .chain(all_sink_ids.into_iter().map(|id| id.into()))
             .chain(all_subscription_ids.into_iter().map(|id| id.into()))
-            .chain(all_cdc_source_ids.into_iter().map(|id| id.into()))
+            .chain(all_streaming_job_source_ids.into_iter().map(|id| id.into()))
             .collect_vec();
 
         Ok((version, catalog_deleted_ids))
@@ -3859,7 +3860,7 @@ impl CatalogManager {
                     ..Default::default()
                 };
 
-                default_user.insert(self.env.meta_store_checked()).await?;
+                default_user.insert(self.env.meta_store().as_kv()).await?;
                 core.user_info.insert(default_user.id, default_user);
             }
         }

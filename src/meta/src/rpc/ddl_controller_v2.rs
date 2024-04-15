@@ -328,7 +328,7 @@ impl DdlController {
                     &streaming_job,
                     &stream_ctx,
                     table.get_version()?,
-                    &fragment_graph.default_parallelism(),
+                    &fragment_graph.specified_parallelism(),
                 )
                 .await? as u32;
 
@@ -400,7 +400,7 @@ impl DdlController {
         // delete vpc endpoints.
         for conn in connections {
             let _ = self
-                .delete_vpc_endpoint_v2(conn.into_inner())
+                .delete_vpc_endpoint_v2(conn.to_protobuf())
                 .await
                 .inspect_err(|err| {
                     tracing::warn!(err = ?err.as_report(), "failed to delete vpc endpoint");
@@ -469,7 +469,7 @@ impl DdlController {
                 &streaming_job,
                 &ctx,
                 table.get_version()?,
-                &fragment_graph.default_parallelism(),
+                &fragment_graph.specified_parallelism(),
             )
             .await?;
 

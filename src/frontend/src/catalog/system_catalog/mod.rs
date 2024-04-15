@@ -23,6 +23,7 @@ use async_trait::async_trait;
 use futures::future::BoxFuture;
 use itertools::Itertools;
 use parking_lot::RwLock;
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::acl::AclMode;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{
@@ -30,7 +31,7 @@ use risingwave_common::catalog::{
     MAX_SYS_CATALOG_NUM, SYS_CATALOG_START_ID,
 };
 use risingwave_common::error::BoxedError;
-use risingwave_common::session_config::ConfigMap;
+use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::types::DataType;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
@@ -40,7 +41,6 @@ use risingwave_pb::user::grant_privilege::Object;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::meta_client::FrontendMetaClient;
-use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::session::AuthContext;
 use crate::user::user_catalog::UserCatalog;
 use crate::user::user_privilege::available_prost_privilege;
@@ -110,7 +110,7 @@ pub struct SysCatalogReaderImpl {
     // Read auth context.
     auth_context: Arc<AuthContext>,
     // Read config.
-    config: Arc<RwLock<ConfigMap>>,
+    config: Arc<RwLock<SessionConfig>>,
     // Read system params.
     system_params: SystemParamsReaderRef,
 }
@@ -122,7 +122,7 @@ impl SysCatalogReaderImpl {
         worker_node_manager: WorkerNodeManagerRef,
         meta_client: Arc<dyn FrontendMetaClient>,
         auth_context: Arc<AuthContext>,
-        config: Arc<RwLock<ConfigMap>>,
+        config: Arc<RwLock<SessionConfig>>,
         system_params: SystemParamsReaderRef,
     ) -> Self {
         Self {

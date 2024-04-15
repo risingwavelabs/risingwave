@@ -20,7 +20,7 @@ use futures::{pin_mut, FutureExt, StreamExt, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::StreamChunkMut;
-use risingwave_common::array::{merge_chunk_row, Op, StreamChunk, StreamChunkCompactor};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::DataType;
@@ -36,6 +36,7 @@ use thiserror_ext::AsReport;
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{Execute, Executor, ExecutorInfo, Message, PkIndices};
+use crate::common::compact_chunk::{merge_chunk_row, StreamChunkCompactor};
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedMessageStream, MessageStream, Mutation,
 };
@@ -342,6 +343,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 .reconstructed_compacted_chunks(
                                     chunk_size,
                                     input_data_types.clone(),
+                                    sink_type != SinkType::ForceAppendOnly,
                                 )
                         } else {
                             chunks

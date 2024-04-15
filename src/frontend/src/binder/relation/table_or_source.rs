@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use either::Either;
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{is_system_schema, Field};
@@ -24,7 +25,6 @@ use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 
 use super::BoundShare;
-use crate::binder::relation::BoundSubquery;
 use crate::binder::{Binder, Relation};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
@@ -55,8 +55,12 @@ pub struct BoundSource {
 }
 
 impl BoundSource {
-    pub fn is_backfillable_cdc_connector(&self) -> bool {
-        self.catalog.with_properties.is_backfillable_cdc_connector()
+    pub fn is_shareable_cdc_connector(&self) -> bool {
+        self.catalog.with_properties.is_shareable_cdc_connector()
+    }
+
+    pub fn is_shared(&self) -> bool {
+        self.catalog.info.is_shared()
     }
 }
 
@@ -274,10 +278,7 @@ impl Binder {
                 share_id
             }
         };
-        let input = Relation::Subquery(Box::new(BoundSubquery {
-            query,
-            lateral: false,
-        }));
+        let input = Either::Left(query);
         Ok((
             Relation::Share(Box::new(BoundShare { share_id, input })),
             columns.iter().map(|c| (false, c.clone())).collect_vec(),

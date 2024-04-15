@@ -30,12 +30,10 @@ use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::source::ConnectorSplit;
-use risingwave_rpc_client::ConnectorClient;
 use serde::de::DeserializeOwned;
 
 use super::cdc::DebeziumCdcMeta;
 use super::datagen::DatagenMeta;
-use super::filesystem::FsSplit;
 use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
 use super::kinesis::KinesisMeta;
@@ -47,6 +45,7 @@ use crate::parser::ParserConfig;
 pub(crate) use crate::source::common::CommonSplitReader;
 use crate::source::filesystem::FsPageItem;
 use crate::source::monitor::EnumeratorMetrics;
+use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc};
 use crate::with_options::WithOptions;
 use crate::{
     dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
@@ -73,8 +72,10 @@ pub trait SourceProperties: TryFromHashmap + Clone + WithOptions {
     type SplitEnumerator: SplitEnumerator<Properties = Self, Split = Self::Split>;
     type SplitReader: SplitReader<Split = Self::Split, Properties = Self>;
 
+    /// Load additional info from `PbSource`. Currently only used by CDC.
     fn init_from_pb_source(&mut self, _source: &PbSource) {}
 
+    /// Load additional info from `ExternalTableDesc`. Currently only used by CDC.
     fn init_from_pb_cdc_table_desc(&mut self, _table_desc: &ExternalTableDesc) {}
 }
 
@@ -150,7 +151,6 @@ impl Default for SourceCtrlOpts {
 pub struct SourceEnumeratorContext {
     pub info: SourceEnumeratorInfo,
     pub metrics: Arc<EnumeratorMetrics>,
-    pub connector_client: Option<ConnectorClient>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -160,7 +160,6 @@ pub struct SourceEnumeratorInfo {
 
 #[derive(Debug, Default)]
 pub struct SourceContext {
-    pub connector_client: Option<ConnectorClient>,
     pub actor_id: u32,
     pub source_id: TableId,
     // There should be a 1-1 mapping between `source_id` & `fragment_id`
@@ -178,12 +177,10 @@ impl SourceContext {
         fragment_id: u32,
         metrics: Arc<SourceMetrics>,
         source_ctrl_opts: SourceCtrlOpts,
-        connector_client: Option<ConnectorClient>,
         connector_props: ConnectorProperties,
         source_name: String,
     ) -> Self {
         Self {
-            connector_client,
             actor_id,
             source_id,
             fragment_id,
@@ -371,10 +368,12 @@ impl ConnectorProperties {
         matches!(self, ConnectorProperties::Kinesis(_))
     }
 
+    /// Load additional info from `PbSource`. Currently only used by CDC.
     pub fn init_from_pb_source(&mut self, source: &PbSource) {
         dispatch_source_prop!(self, prop, prop.init_from_pb_source(source))
     }
 
+    /// Load additional info from `ExternalTableDesc`. Currently only used by CDC.
     pub fn init_from_pb_cdc_table_desc(&mut self, cdc_table_desc: &ExternalTableDesc) {
         dispatch_source_prop!(self, prop, prop.init_from_pb_cdc_table_desc(cdc_table_desc))
     }
@@ -417,24 +416,6 @@ impl TryFrom<&ConnectorSplit> for SplitImpl {
     }
 }
 
-// for the `FsSourceExecutor`
-impl SplitImpl {
-    #[allow(clippy::result_unit_err)]
-    pub fn into_fs(self) -> Result<FsSplit, ()> {
-        match self {
-            Self::S3(split) => Ok(split),
-            _ => Err(()),
-        }
-    }
-
-    pub fn as_fs(&self) -> Option<&FsSplit> {
-        match self {
-            Self::S3(split) => Some(split),
-            _ => None,
-        }
-    }
-}
-
 impl SplitImpl {
     fn restore_from_json_inner(split_type: &str, value: JsonbVal) -> Result<Self> {
         match_source_name_str!(
@@ -443,6 +424,24 @@ impl SplitImpl {
             <PropType as SourceProperties>::Split::restore_from_json(value).map(Into::into),
             |other| bail!("connector '{}' is not supported", other)
         )
+    }
+
+    pub fn is_cdc_split(&self) -> bool {
+        matches!(
+            self,
+            MysqlCdc(_) | PostgresCdc(_) | MongodbCdc(_) | CitusCdc(_)
+        )
+    }
+
+    /// Get the current split offset.
+    pub fn get_cdc_split_offset(&self) -> String {
+        match self {
+            MysqlCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            PostgresCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            MongodbCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            CitusCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            _ => unreachable!("get_cdc_split_offset() is only for cdc split"),
+        }
     }
 }
 
@@ -470,12 +469,12 @@ impl SplitMetaData for SplitImpl {
         Self::restore_from_json_inner(&split_type, inner_value.into())
     }
 
-    fn update_with_offset(&mut self, start_offset: String) -> Result<()> {
+    fn update_offset(&mut self, last_seen_offset: String) -> Result<()> {
         dispatch_split_impl!(
             self,
             inner,
             IgnoreType,
-            inner.update_with_offset(start_offset)
+            inner.update_offset(last_seen_offset)
         )
     }
 }
@@ -487,9 +486,9 @@ impl SplitImpl {
         })
     }
 
-    pub fn update_in_place(&mut self, start_offset: String) -> Result<()> {
+    pub fn update_in_place(&mut self, last_seen_offset: String) -> Result<()> {
         dispatch_split_impl!(self, inner, IgnoreType, {
-            inner.update_with_offset(start_offset)?
+            inner.update_offset(last_seen_offset)?
         });
         Ok(())
     }
@@ -558,9 +557,10 @@ pub trait SplitMetaData: Sized {
         Self::restore_from_json(JsonbVal::value_deserialize(bytes).unwrap())
     }
 
+    /// Encode the whole split metadata to a JSON object
     fn encode_to_json(&self) -> JsonbVal;
     fn restore_from_json(value: JsonbVal) -> Result<Self>;
-    fn update_with_offset(&mut self, start_offset: String) -> crate::error::ConnectorResult<()>;
+    fn update_offset(&mut self, last_seen_offset: String) -> crate::error::ConnectorResult<()>;
 }
 
 /// [`ConnectorState`] maintains the consuming splits' info. In specific split readers,
@@ -673,7 +673,6 @@ mod tests {
     #[test]
     fn test_extract_cdc_properties() {
         let user_props_mysql: HashMap<String, String> = convert_args!(hashmap!(
-            "connector_node_addr" => "localhost",
             "connector" => "mysql-cdc",
             "database.hostname" => "127.0.0.1",
             "database.port" => "3306",
@@ -684,7 +683,6 @@ mod tests {
         ));
 
         let user_props_postgres: HashMap<String, String> = convert_args!(hashmap!(
-            "connector_node_addr" => "localhost",
             "connector" => "postgres-cdc",
             "database.hostname" => "127.0.0.1",
             "database.port" => "5432",
@@ -697,10 +695,6 @@ mod tests {
 
         let conn_props = ConnectorProperties::extract(user_props_mysql, true).unwrap();
         if let ConnectorProperties::MysqlCdc(c) = conn_props {
-            assert_eq!(
-                c.properties.get("connector_node_addr").unwrap(),
-                "localhost"
-            );
             assert_eq!(c.properties.get("database.hostname").unwrap(), "127.0.0.1");
             assert_eq!(c.properties.get("database.port").unwrap(), "3306");
             assert_eq!(c.properties.get("database.user").unwrap(), "root");
@@ -713,10 +707,6 @@ mod tests {
 
         let conn_props = ConnectorProperties::extract(user_props_postgres, true).unwrap();
         if let ConnectorProperties::PostgresCdc(c) = conn_props {
-            assert_eq!(
-                c.properties.get("connector_node_addr").unwrap(),
-                "localhost"
-            );
             assert_eq!(c.properties.get("database.hostname").unwrap(), "127.0.0.1");
             assert_eq!(c.properties.get("database.port").unwrap(), "5432");
             assert_eq!(c.properties.get("database.user").unwrap(), "root");

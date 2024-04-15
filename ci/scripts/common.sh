@@ -84,8 +84,8 @@ function download_and_prepare_rw() {
 
   echo -e "\033[33mPrepare RiseDev dev cluster\033[0m"
 
-  cargo make pre-start-dev
-  cargo make --allow-private link-all-in-one-binaries
+  risedev pre-start-dev
+  risedev --allow-private link-all-in-one-binaries
 }
 
 function filter_stack_trace() {
@@ -105,11 +105,11 @@ get_latest_kafka_version() {
     local versions=$(curl -s https://downloads.apache.org/kafka/ | grep -Eo 'href="[0-9]+\.[0-9]+\.[0-9]+/"' | grep -Eo "[0-9]+\.[0-9]+\.[0-9]+")
     # Sort the version numbers and get the latest one
     local latest_version=$(echo "$versions" | sort -V | tail -n1)
-    echo $latest_version
+    echo "$latest_version"
 }
 
 get_latest_kafka_download_url() {
     local latest_version=$(get_latest_kafka_version)
     local download_url="https://downloads.apache.org/kafka/${latest_version}/kafka_2.13-${latest_version}.tgz"
-    echo $download_url
+    echo "$download_url"
 }
