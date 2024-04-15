@@ -41,6 +41,7 @@ mod prefix;
 
 pub use error::*;
 use object_metrics::ObjectStoreMetrics;
+use risingwave_common::config::default::object_store_config::UNLIMITED_MAX_TIMEOUT;
 use thiserror_ext::AsReport;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
@@ -799,7 +800,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 }
             },
             RetryCondition::new(
-                UNSET_MAX_TIMEOUT,
+                UNLIMITED_MAX_TIMEOUT,
                 operation_type,
                 self.object_store_metrics.clone(),
             ),
@@ -842,7 +843,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 }
             },
             RetryCondition::new(
-                UNSET_MAX_TIMEOUT,
+                UNLIMITED_MAX_TIMEOUT,
                 operation_type,
                 self.object_store_metrics.clone(),
             ),
@@ -885,7 +886,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 }
             },
             RetryCondition::new(
-                UNSET_MAX_TIMEOUT,
+                UNLIMITED_MAX_TIMEOUT,
                 operation_type,
                 self.object_store_metrics.clone(),
             ),
@@ -929,7 +930,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 }
             },
             RetryCondition::new(
-                UNSET_MAX_TIMEOUT,
+                UNLIMITED_MAX_TIMEOUT,
                 operation_type,
                 self.object_store_metrics.clone(),
             ),
@@ -1212,8 +1213,7 @@ impl RetryCondition {
 
     #[inline(always)]
     fn should_retry_inner(&mut self, err: &ObjectError) -> bool {
-        let should_retry = if self.max_duration_ms != UNSET_MAX_TIMEOUT
-            && self.init_instant.elapsed().as_millis() > self.max_duration_ms as u128
+        let should_retry = if self.init_instant.elapsed().as_millis() > self.max_duration_ms as u128
         {
             false
         } else {
@@ -1238,5 +1238,3 @@ impl tokio_retry::Condition<ObjectError> for RetryCondition {
         self.should_retry_inner(err)
     }
 }
-
-const UNSET_MAX_TIMEOUT: u64 = 0;

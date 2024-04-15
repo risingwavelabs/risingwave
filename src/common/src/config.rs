@@ -1730,25 +1730,26 @@ pub mod default {
         const DEFAULT_RETRY_INTERVAL_MS: u64 = 20;
         const DEFAULT_RETRY_MAX_DELAY_MS: u64 = 10 * 1000;
         const DEFAULT_RETRY_MAX_RETRY_ATTEMPTS: usize = 3;
+        pub const UNLIMITED_MAX_TIMEOUT: u64 = u64::MAX;
 
         /// DEPRECATED: This config will be deprecated in the future version, use `object_store_streaming_read_attempt_timeout_ms` instead.
         pub fn object_store_streaming_read_timeout_ms() -> u64 {
-            0
+            UNLIMITED_MAX_TIMEOUT
         }
 
         /// DEPRECATED: This config will be deprecated in the future version, use `object_store_streaming_upload_attempt_timeout_ms` instead.
         pub fn object_store_streaming_upload_timeout_ms() -> u64 {
-            0
+            UNLIMITED_MAX_TIMEOUT
         }
 
         /// DEPRECATED: This config will be deprecated in the future version, use `object_store_upload_attempt_timeout_ms` instead.
         pub fn object_store_upload_timeout_ms() -> u64 {
-            0
+            UNLIMITED_MAX_TIMEOUT
         }
 
         /// DEPRECATED: This config will be deprecated in the future version, use `object_store_read_attempt_timeout_ms` instead.
         pub fn object_store_read_timeout_ms() -> u64 {
-            0
+            UNLIMITED_MAX_TIMEOUT
         }
 
         pub fn object_store_set_atomic_write_dir() -> bool {
