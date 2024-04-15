@@ -564,7 +564,11 @@ impl FragmentManager {
         let mut table_fragments = BTreeMapTransaction::new(map);
         let mut table_ids_to_unregister_from_hummock = vec![];
         for table_fragment in &to_delete_table_fragments {
-            table_ids_to_unregister_from_hummock.extend(table_fragment.all_table_ids());
+            // Workaround to ignore dummy table fragments for replace table.
+            let all_table_ids = table_fragment.all_table_ids().collect::<HashSet<_>>();
+            if all_table_ids.contains(&table_fragment.table_id().table_id) {
+                table_ids_to_unregister_from_hummock.extend(all_table_ids);
+            }
             table_fragments.remove(table_fragment.table_id());
             let to_remove_actor_ids: HashSet<_> = table_fragment.actor_ids().into_iter().collect();
             let dependent_table_ids = table_fragment.dependent_table_ids();
