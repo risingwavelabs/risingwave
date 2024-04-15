@@ -46,7 +46,7 @@ use crate::executor::backfill::utils::{
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, Message,
+    expect_first_barrier, ActorContextRef, Barrier, BoxedMessageStream, Execute, Executor, Message,
     StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::CreateMviewProgress;
@@ -68,7 +68,8 @@ pub struct CdcBackfillExecutor<S: StateStore> {
     output_indices: Vec<usize>,
 
     /// State table of the `CdcBackfill` executor
-    state_table: StateTable<S>,
+    // state_table: StateTable<S>,
+    state_impl: CdcBackfillState<S>,
 
     progress: Option<CreateMviewProgress>,
 
@@ -94,18 +95,50 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         chunk_size: usize,
         disable_backfill: bool,
     ) -> Self {
+        let pk_in_output_indices = external_table.pk_in_output_indices().clone().unwrap();
+        let upstream_table_id = external_table.table_id().table_id;
+        let state_impl = CdcBackfillState::new(
+            upstream_table_id,
+            state_table,
+            pk_in_output_indices.len() + METADATA_STATE_LEN,
+        );
+
         Self {
             actor_ctx,
             external_table,
             upstream,
             output_indices,
-            state_table,
+            state_impl,
             progress,
             metrics,
             chunk_size,
             disable_backfill,
             snapshot_interval: 1,
         }
+    }
+
+    fn report_metrics(
+        metrics: &Arc<StreamingMetrics>,
+        upstream_table_id: u32,
+        actor_id: u32,
+        snapshot_processed_row_count: u64,
+        upstream_processed_row_count: u64,
+    ) {
+        metrics
+            .cdc_backfill_snapshot_read_row_count
+            .with_label_values(&[
+                upstream_table_id.to_string().as_str(),
+                actor_id.to_string().as_str(),
+            ])
+            .inc_by(snapshot_processed_row_count);
+
+        metrics
+            .cdc_backfill_upstream_output_row_count
+            .with_label_values(&[
+                upstream_table_id.to_string().as_str(),
+                actor_id.to_string().as_str(),
+            ])
+            .inc_by(upstream_processed_row_count);
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -132,11 +165,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
         // Check whether this parallelism has been assigned splits,
         // if not, we should bypass the backfill directly.
-        let mut state_impl = CdcBackfillState::new(
-            upstream_table_id,
-            self.state_table,
-            pk_in_output_indices.len() + METADATA_STATE_LEN,
-        );
+        let mut state_impl = self.state_impl;
 
         let mut upstream = transform_upstream(upstream, &upstream_table_schema)
             .boxed()
@@ -155,7 +184,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
         // Keep track of rows from the snapshot.
         let mut total_snapshot_row_count = state.row_count as u64;
-        let mut snapshot_read_epoch;
+        // let mut snapshot_read_epoch;
 
         let mut last_binlog_offset: Option<CdcOffset> = state
             .last_cdc_offset
@@ -236,8 +265,13 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             'backfill_loop: loop {
                 let left_upstream = upstream.by_ref().map(Either::Left);
 
+                let mut has_snapshot_read = false;
                 let mut snapshot_read_row_cnt: usize = 0;
-                let args = SnapshotReadArgs::new_for_cdc(current_pk_pos.clone(), self.chunk_size);
+                let args = SnapshotReadArgs::new(
+                    current_pk_pos.clone(),
+                    self.chunk_size,
+                    pk_in_output_indices.clone(),
+                );
 
                 let right_snapshot = pin!(upstream_table_reader
                     .snapshot_read(args, snapshot_read_limit as u32)
@@ -257,6 +291,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
                 let mut cur_barrier_upstream_processed_rows: u64 = 0;
                 let mut barrier_count: u32 = 0;
+                let mut pending_barrier = None;
 
                 #[for_await]
                 for either in &mut backfill_stream {
@@ -267,7 +302,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                 Message::Barrier(barrier) => {
                                     barrier_count += 1;
                                     let can_start_new_snapshot =
-                                        (barrier_count == self.snapshot_interval);
+                                        barrier_count == self.snapshot_interval;
 
                                     if let Some(mutation) = barrier.mutation.as_deref() {
                                         use crate::executor::Mutation;
@@ -284,137 +319,15 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         }
                                     }
 
-                                    // ensure the snapshot stream is consumed once
-                                    // otherwise, reconstruct a snapshot stream with same pk offset may return an
-                                    // empty stream (don't know the cause)
-                                    if snapshot_read_row_cnt == 0 {
-                                        pin_mut!(backfill_stream);
-                                        let (_, mut snapshot_stream) =
-                                            backfill_stream.get_pin_mut();
-                                        if let Some(msg) = snapshot_stream.next().await {
-                                            let Either::Right(msg) = msg else {
-                                                bail!(
-                                                    "BUG: snapshot_read contains upstream messages"
-                                                );
-                                            };
-                                            match msg? {
-                                                None => {
-                                                    tracing::info!(
-                                                        upstream_table_id,
-                                                        ?last_binlog_offset,
-                                                        ?current_pk_pos,
-                                                        "snapshot read stream ends"
-                                                    );
-                                                    // End of the snapshot read stream.
-                                                    // Consume the buffered upstream chunk without filtering by `binlog_low`.
-                                                    for chunk in upstream_chunk_buffer.drain(..) {
-                                                        yield Message::Chunk(mapping_chunk(
-                                                            chunk,
-                                                            &self.output_indices,
-                                                        ));
-                                                    }
+                                    Self::report_metrics(
+                                        &self.metrics,
+                                        upstream_table_id,
+                                        self.actor_ctx.id,
+                                        cur_barrier_snapshot_processed_rows,
+                                        cur_barrier_upstream_processed_rows,
+                                    );
 
-                                                    // mark backfill has finished
-                                                    state_impl
-                                                        .mutate_state(
-                                                            current_pk_pos,
-                                                            last_binlog_offset.clone(),
-                                                            total_snapshot_row_count,
-                                                            true,
-                                                        )
-                                                        .await?;
-
-                                                    // commit state because we have received a barrier message
-                                                    state_impl.commit_state(barrier.epoch).await?;
-                                                    yield Message::Barrier(barrier);
-                                                    // end of backfill loop, since backfill has finished
-                                                    break 'backfill_loop;
-                                                }
-                                                Some(chunk) => {
-                                                    // Raise the current pk position.
-                                                    // Because snapshot streams are ordered by pk, so we can
-                                                    // use the last row to update `current_pk_pos`.
-                                                    current_pk_pos = Some(get_new_pos(
-                                                        &chunk,
-                                                        &pk_in_output_indices,
-                                                    ));
-
-                                                    let row_count = chunk.cardinality() as u64;
-                                                    cur_barrier_snapshot_processed_rows +=
-                                                        row_count;
-                                                    total_snapshot_row_count += row_count;
-                                                    snapshot_read_row_cnt += row_count as usize;
-
-                                                    tracing::debug!(
-                                                        upstream_table_id,
-                                                        ?current_pk_pos,
-                                                        ?snapshot_read_row_cnt,
-                                                        "force emit a snapshot chunk"
-                                                    );
-                                                    yield Message::Chunk(mapping_chunk(
-                                                        chunk,
-                                                        &self.output_indices,
-                                                    ));
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    if can_start_new_snapshot {
-                                        // If the number of barriers reaches the snapshot interval,
-                                        // consume the buffered upstream chunks.
-                                        if let Some(current_pos) = &current_pk_pos {
-                                            for chunk in upstream_chunk_buffer.drain(..) {
-                                                cur_barrier_upstream_processed_rows +=
-                                                    chunk.cardinality() as u64;
-
-                                                // record the consumed binlog offset that will be
-                                                // persisted later
-                                                consumed_binlog_offset = get_cdc_chunk_last_offset(
-                                                    &offset_parse_func,
-                                                    &chunk,
-                                                )?;
-                                                yield Message::Chunk(mapping_chunk(
-                                                    mark_cdc_chunk(
-                                                        &offset_parse_func,
-                                                        chunk,
-                                                        current_pos,
-                                                        &pk_in_output_indices,
-                                                        &pk_order,
-                                                        last_binlog_offset.clone(),
-                                                    )?,
-                                                    &self.output_indices,
-                                                ));
-                                            }
-                                        } else {
-                                            // If no current_pos, means we did not process any snapshot yet.
-                                            // we can just ignore the upstream buffer chunk in that case.
-                                            upstream_chunk_buffer.clear();
-                                        }
-                                    }
-
-                                    self.metrics
-                                        .cdc_backfill_snapshot_read_row_count
-                                        .with_label_values(&[
-                                            upstream_table_id.to_string().as_str(),
-                                            self.actor_ctx.id.to_string().as_str(),
-                                        ])
-                                        .inc_by(cur_barrier_snapshot_processed_rows);
-
-                                    self.metrics
-                                        .cdc_backfill_upstream_output_row_count
-                                        .with_label_values(&[
-                                            upstream_table_id.to_string().as_str(),
-                                            self.actor_ctx.id.to_string().as_str(),
-                                        ])
-                                        .inc_by(cur_barrier_upstream_processed_rows);
-
-                                    // Update last seen binlog offset
-                                    if consumed_binlog_offset.is_some() {
-                                        last_binlog_offset.clone_from(&consumed_binlog_offset);
-                                    }
-
-                                    // update and persist backfill state
+                                    // update and persist current backfill progress
                                     state_impl
                                         .mutate_state(
                                             current_pk_pos.clone(),
@@ -425,19 +338,25 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         .await?;
                                     state_impl.commit_state(barrier.epoch).await?;
 
-                                    snapshot_read_epoch = barrier.epoch.prev;
-                                    if let Some(progress) = self.progress.as_mut() {
-                                        progress.update(
-                                            barrier.epoch.curr,
-                                            snapshot_read_epoch,
-                                            total_snapshot_row_count,
-                                        );
-                                    }
-                                    yield Message::Barrier(barrier);
+                                    // snapshot_read_epoch = barrier.epoch.prev;
+                                    // if let Some(progress) = self.progress.as_mut() {
+                                    //     progress.update(
+                                    //         barrier.epoch.curr,
+                                    //         snapshot_read_epoch,
+                                    //         total_snapshot_row_count,
+                                    //     );
+                                    // }
 
+                                    // when processing a barrier, check whether can start a new snapshot
+                                    // if the number of barriers reaches the snapshot interval
                                     if can_start_new_snapshot {
-                                        // Break the for loop and start a new snapshot read stream.
+                                        pending_barrier = Some(barrier);
+                                        has_snapshot_read = snapshot_read_row_cnt > 0;
+                                        // Break the for loop and prepare to start a new snapshot
                                         break;
+                                    } else {
+                                        // emit barrier and continue consume the backfill stream
+                                        yield Message::Barrier(barrier);
                                     }
                                 }
                                 Message::Chunk(chunk) => {
@@ -513,9 +432,10 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                             )
                                             .await?;
 
-                                        // exit backfill
+                                        // backfill has finished
                                         break 'backfill_loop;
                                     } else {
+                                        // TODO:
                                         // break the for loop to reconstruct a new snapshot with pk offset
                                         // to ensure we load all historical data
                                         break;
@@ -547,6 +467,118 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                         }
                     }
                 }
+
+                // ensure the snapshot stream is consumed once in the snapshot interval
+                // otherwise, reconstruct a snapshot stream with same pk offset may return an
+                // empty stream (don't know the cause)
+                if !has_snapshot_read {
+                    // pin_mut!(backfill_stream);
+                    let (_, mut snapshot_stream) = backfill_stream.into_inner();
+                    if let Some(msg) = snapshot_stream.next().await {
+                        let Either::Right(msg) = msg else {
+                            bail!("BUG: snapshot_read contains upstream messages");
+                        };
+                        match msg? {
+                            None => {
+                                tracing::info!(
+                                    upstream_table_id,
+                                    ?last_binlog_offset,
+                                    ?current_pk_pos,
+                                    "snapshot read stream ends"
+                                );
+                                // End of the snapshot read stream.
+                                // Consume the buffered upstream chunk without filtering by `binlog_low`.
+                                for chunk in upstream_chunk_buffer.drain(..) {
+                                    yield Message::Chunk(mapping_chunk(
+                                        chunk,
+                                        &self.output_indices,
+                                    ));
+                                }
+
+                                // mark backfill has finished
+                                state_impl
+                                    .mutate_state(
+                                        current_pk_pos,
+                                        last_binlog_offset.clone(),
+                                        total_snapshot_row_count,
+                                        true,
+                                    )
+                                    .await?;
+
+                                // commit state because we have received a barrier message
+                                let barrier = pending_barrier.expect("pending_barrier must exist");
+                                state_impl.commit_state(barrier.epoch).await?;
+                                yield Message::Barrier(barrier);
+                                // end of backfill loop, since backfill has finished
+                                break 'backfill_loop;
+                            }
+                            Some(chunk) => {
+                                // Raise the current pk position.
+                                // Because snapshot streams are ordered by pk, so we can
+                                // use the last row to update `current_pk_pos`.
+                                current_pk_pos = Some(get_new_pos(&chunk, &pk_in_output_indices));
+
+                                let row_count = chunk.cardinality() as u64;
+                                cur_barrier_snapshot_processed_rows += row_count;
+                                total_snapshot_row_count += row_count;
+                                snapshot_read_row_cnt += row_count as usize;
+
+                                tracing::debug!(
+                                    upstream_table_id,
+                                    ?current_pk_pos,
+                                    ?snapshot_read_row_cnt,
+                                    "force emit a snapshot chunk"
+                                );
+                                yield Message::Chunk(mapping_chunk(chunk, &self.output_indices));
+                            }
+                        }
+                    }
+                }
+
+                // If the number of barriers reaches the snapshot interval,
+                // consume the buffered upstream chunks.
+                if let Some(current_pos) = &current_pk_pos {
+                    for chunk in upstream_chunk_buffer.drain(..) {
+                        cur_barrier_upstream_processed_rows += chunk.cardinality() as u64;
+
+                        // record the consumed binlog offset that will be
+                        // persisted later
+                        consumed_binlog_offset =
+                            get_cdc_chunk_last_offset(&offset_parse_func, &chunk)?;
+
+                        yield Message::Chunk(mapping_chunk(
+                            mark_cdc_chunk(
+                                &offset_parse_func,
+                                chunk,
+                                current_pos,
+                                &pk_in_output_indices,
+                                &pk_order,
+                                last_binlog_offset.clone(),
+                            )?,
+                            &self.output_indices,
+                        ));
+                    }
+                } else {
+                    // If no current_pos, means we did not process any snapshot yet.
+                    // we can just ignore the upstream buffer chunk in that case.
+                    upstream_chunk_buffer.clear();
+                }
+
+                // Update last seen binlog offset
+                if consumed_binlog_offset.is_some() {
+                    last_binlog_offset.clone_from(&consumed_binlog_offset);
+                }
+
+                Self::report_metrics(
+                    &self.metrics,
+                    upstream_table_id,
+                    self.actor_ctx.id,
+                    cur_barrier_snapshot_processed_rows,
+                    cur_barrier_upstream_processed_rows,
+                );
+
+                let barrier = pending_barrier.expect("pending_barrier must exist");
+                yield Message::Barrier(barrier);
             }
         } else if self.disable_backfill {
             // If backfill is disabled, we just mark the backfill as finished

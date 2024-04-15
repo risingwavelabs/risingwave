@@ -23,7 +23,7 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReader};
 
 use super::external::ExternalStorageTable;
-use crate::executor::backfill::utils::iter_chunks;
+use crate::executor::backfill::utils::{get_new_pos, iter_chunks};
 use crate::executor::{StreamExecutorError, StreamExecutorResult, INVALID_EPOCH};
 
 pub trait UpstreamTableRead {
@@ -38,21 +38,27 @@ pub trait UpstreamTableRead {
     ) -> impl Future<Output = StreamExecutorResult<Option<CdcOffset>>> + Send + '_;
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct SnapshotReadArgs {
     pub epoch: u64,
     pub current_pos: Option<OwnedRow>,
     pub ordered: bool,
     pub chunk_size: usize,
+    pub pk_in_output_indices: Vec<usize>,
 }
 
 impl SnapshotReadArgs {
-    pub fn new_for_cdc(current_pos: Option<OwnedRow>, chunk_size: usize) -> Self {
+    pub fn new(
+        current_pos: Option<OwnedRow>,
+        chunk_size: usize,
+        pk_in_output_indices: Vec<usize>,
+    ) -> Self {
         Self {
             epoch: INVALID_EPOCH,
             current_pos,
             ordered: false,
             chunk_size,
+            pk_in_output_indices,
         }
     }
 }
@@ -71,6 +77,41 @@ impl<T> UpstreamTableReader<T> {
 
     pub fn new(table: T) -> Self {
         Self { inner: table }
+    }
+}
+
+impl UpstreamTableReader<ExternalStorageTable> {
+    #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
+    pub async fn snapshot_read_full_table(&self, args: SnapshotReadArgs, limit: u32) {
+        let mut read_args = args;
+
+        'read_loop: loop {
+            let mut read_count: usize = 0;
+            let chunk_stream = self.snapshot_read(read_args.clone(), limit);
+            let mut current_pk_pos = read_args.current_pos.clone().unwrap_or(OwnedRow::default());
+            #[for_await]
+            for chunk in chunk_stream {
+                let chunk = chunk?;
+
+                match chunk {
+                    Some(chunk) => {
+                        read_count += chunk.cardinality();
+                        current_pk_pos = get_new_pos(&chunk, &read_args.pk_in_output_indices);
+                        yield Some(chunk);
+                    }
+                    None => {
+                        // reach the end of the table
+                        if read_count < limit as _ {
+                            break 'read_loop;
+                        } else {
+                            // update PK position
+                            read_args.current_pos = Some(current_pk_pos);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
