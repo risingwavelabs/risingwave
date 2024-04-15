@@ -731,7 +731,7 @@ mod tests {
 
     use crate::hummock::iterator::HummockIterator;
     use crate::hummock::value::HummockValue;
-    use crate::mem_table::{KeyOp, MemTable, MemTableHummockIterator};
+    use crate::mem_table::{KeyOp, MemTable, MemTableHummockIterator, MemTableHummockRevIterator};
     use crate::store::{OpConsistencyLevel, CHECK_BYTES_EQUAL};
 
     #[tokio::test]
@@ -916,7 +916,7 @@ mod tests {
             TableKey(bytes.freeze())
         }
 
-        let ordered_test_data = (0..10000)
+        let mut ordered_test_data = (0..10000)
             .map(|i| {
                 let key_op = match rng.gen::<usize>() % 3 {
                     0 => KeyOp::Insert(Bytes::from("insert")),
@@ -949,8 +949,8 @@ mod tests {
         const TEST_TABLE_ID: TableId = TableId::new(233);
         const TEST_EPOCH: u64 = test_epoch(10);
 
-        async fn check_data(
-            iter: &mut MemTableHummockIterator<'_>,
+        async fn check_data<I: HummockIterator>(
+            iter: &mut I,
             test_data: &[(TableKey<Bytes>, KeyOp)],
         ) {
             let mut idx = 0;
@@ -1052,5 +1052,43 @@ mod tests {
         .await
         .unwrap();
         check_data(&mut iter, &[]).await;
+
+        // check reverse iterator
+        ordered_test_data.reverse();
+        let mut iter = MemTableHummockRevIterator::new(
+            &mem_table.buffer,
+            EpochWithGap::new_from_epoch(TEST_EPOCH),
+            TEST_TABLE_ID,
+        );
+
+        // Test rewind
+        iter.rewind().await.unwrap();
+        check_data(&mut iter, &ordered_test_data).await;
+
+        // Test seek with a smaller table id
+        let smaller_table_id = TableId::new(TEST_TABLE_ID.table_id() - 1);
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: smaller_table_id,
+                table_key: TableKey(&get_key(ordered_test_data.len() + 10)),
+            },
+            epoch_with_gap: EpochWithGap::new_from_epoch(TEST_EPOCH),
+        })
+        .await
+        .unwrap();
+        check_data(&mut iter, &[]).await;
+
+        // Test seek with a greater table id
+        let greater_table_id = TableId::new(TEST_TABLE_ID.table_id() + 1);
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: greater_table_id,
+                table_key: TableKey(&get_key(0)),
+            },
+            epoch_with_gap: EpochWithGap::new_from_epoch(TEST_EPOCH),
+        })
+        .await
+        .unwrap();
+        check_data(&mut iter, &ordered_test_data).await;
     }
 }

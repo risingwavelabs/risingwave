@@ -932,14 +932,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_backward_user_chaos_unbounded_unbounded() {
-        let (prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
+        let (_prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
         let repeat = 20;
         for _ in 0..repeat {
-            let mut rng = thread_rng();
-            let end_key: usize = rng.gen_range(2..=prev_key_number);
-            let end_key_bytes = key_from_num(end_key);
-            let begin_key: usize = rng.gen_range(1..=end_key);
-            let begin_key_bytes = key_from_num(begin_key);
             chaos_test_case(
                 sst.clone(),
                 Unbounded,
@@ -959,8 +954,6 @@ mod tests {
             let mut rng = thread_rng();
             let end_key: usize = rng.gen_range(2..=prev_key_number);
             let end_key_bytes = key_from_num(end_key).into_bytes();
-            let begin_key: usize = rng.gen_range(1..=end_key);
-            let begin_key_bytes = key_from_num(begin_key);
             chaos_test_case(
                 sst.clone(),
                 Unbounded,
@@ -978,6 +971,7 @@ mod tests {
         let repeat = 20;
         for _ in 0..repeat {
             let mut rng = thread_rng();
+            let end_key: usize = rng.gen_range(2..=prev_key_number);
             let begin_key: usize = rng.gen_range(1..=end_key);
             let begin_key_bytes = key_from_num(begin_key).into_bytes();
             chaos_test_case(
@@ -997,6 +991,7 @@ mod tests {
         let repeat = 20;
         for _ in 0..repeat {
             let mut rng = thread_rng();
+            let end_key: usize = rng.gen_range(2..=prev_key_number);
             let begin_key: usize = rng.gen_range(1..=end_key);
             let begin_key_bytes = key_from_num(begin_key).into_bytes();
             chaos_test_case(

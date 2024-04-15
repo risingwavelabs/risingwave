@@ -107,6 +107,7 @@ impl<S> TracedStateStore<S> {
 
 impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
     type Iter<'a> = impl StateStoreIter + 'a;
+    type RevIter<'a> = impl StateStoreIter + 'a;
 
     fn may_exist(
         &self,
@@ -150,7 +151,7 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         &self,
         key_range: TableKeyRange,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_ {
+    ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_ {
         let (l, r) = key_range.clone();
         let bytes_key_range = (l.map(|l| l.0), r.map(|r| r.0));
         let span = TraceSpan::new_iter_span(
@@ -159,7 +160,7 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
             read_options.clone().into(),
             self.storage_type,
         );
-        self.traced_iter(self.inner.iter(key_range, read_options), span)
+        self.traced_iter(self.inner.rev_iter(key_range, read_options), span)
             .map_ok(identity)
     }
 
