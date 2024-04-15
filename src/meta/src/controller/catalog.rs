@@ -959,28 +959,48 @@ impl CatalogController {
 
         let fragment_mapping = get_fragment_mappings(&txn, job_id).await?;
 
-        if let Some((streaming_job, merge_updates, table_id)) = replace_table_job_info {
-            self.finish_replace_streaming_job(
-                table_id as ObjectId,
-                streaming_job.clone(),
-                merge_updates.clone(),
-                None,
-                Some(job_id as _),
-                None,
-            )
-            .await?;
-        }
+        let replace_table_mapping_update = match replace_table_job_info {
+            Some((streaming_job, merge_updates, dummy_id)) => {
+                let incoming_sink_id = job_id;
+
+                let (relations, fragment_mapping) = Self::finish_replace_streaming_job_inner(
+                    dummy_id as ObjectId,
+                    merge_updates,
+                    None,
+                    Some(incoming_sink_id as _),
+                    None,
+                    &txn,
+                    streaming_job,
+                )
+                .await?;
+
+                Some((relations, fragment_mapping))
+            }
+            None => None,
+        };
 
         txn.commit().await?;
 
         self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
             .await;
-        let version = self
+
+        let mut version = self
             .notify_frontend(
                 NotificationOperation::Add,
                 NotificationInfo::RelationGroup(PbRelationGroup { relations }),
             )
             .await;
+
+        if let Some((relations, fragment_mapping)) = replace_table_mapping_update {
+            self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
+                .await;
+            version = self
+                .notify_frontend(
+                    NotificationOperation::Update,
+                    NotificationInfo::RelationGroup(PbRelationGroup { relations }),
+                )
+                .await;
+        }
 
         Ok(version)
     }
