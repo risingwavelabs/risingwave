@@ -24,7 +24,7 @@ use tracing::info;
 
 use crate::model::{ValTransaction, VarTransaction};
 use crate::storage::{MetaStore, MetaStoreRef, Snapshot, Transaction};
-use crate::{MetaError, MetaResult};
+use crate::MetaResult;
 
 pub type SessionParamsManagerRef = Arc<SessionParamsManager>;
 
