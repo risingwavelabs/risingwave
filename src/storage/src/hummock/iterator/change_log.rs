@@ -13,19 +13,16 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::ops::Bound;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::must_match;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
-use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType, SetSlice, TableKeyRange, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, SetSlice, TableKeyRange, UserKey, UserKeyRange};
 use risingwave_hummock_sdk::EpochWithGap;
 
 use crate::error::StorageResult;
-use crate::hummock::iterator::{
-    Forward, HummockIterator, MergeIterator, UserKeyEndBoundedIterator,
-};
+use crate::hummock::iterator::{Forward, HummockIterator, MergeIterator};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SstableIterator};
 use crate::store::{ChangeLogValue, StateStoreReadLogItem, StateStoreReadLogItemRef};
@@ -39,7 +36,7 @@ struct ChangeLogIteratorInner<
     old_value_iter: OI,
     max_epoch: u64,
     min_epoch: u64,
-    start_bound: Bound<UserKey<KeyPayloadType>>,
+    key_range: UserKeyRange,
 
     curr_key: FullKey<Vec<u8>>,
     new_value: Vec<u8>,
@@ -55,7 +52,7 @@ impl<NI: HummockIterator<Direction = Forward>, OI: HummockIterator<Direction = F
 {
     fn new(
         (min_epoch, max_epoch): (u64, u64),
-        start_bound: Bound<UserKey<KeyPayloadType>>,
+        key_range: UserKeyRange,
         new_value_iter: NI,
         old_value_iter: OI,
     ) -> Self {
@@ -64,7 +61,7 @@ impl<NI: HummockIterator<Direction = Forward>, OI: HummockIterator<Direction = F
             old_value_iter,
             min_epoch,
             max_epoch,
-            start_bound,
+            key_range,
 
             curr_key: FullKey::default(),
             new_value: vec![],
@@ -77,7 +74,7 @@ impl<NI: HummockIterator<Direction = Forward>, OI: HummockIterator<Direction = F
     /// Resets the iterating position to the beginning.
     pub async fn rewind(&mut self) -> HummockResult<()> {
         // Handle range scan
-        match &self.start_bound {
+        match &self.key_range.0 {
             Included(begin_key) => {
                 let full_key = FullKey {
                     user_key: begin_key.as_ref(),
@@ -145,22 +142,40 @@ impl<NI: HummockIterator<Direction = Forward>, OI: HummockIterator<Direction = F
         Ok(())
     }
 
+    fn user_key_out_of_range(&self, user_key: UserKey<&[u8]>) -> bool {
+        // handle range scan
+        match &self.key_range.1 {
+            Included(end_key) => user_key > end_key.as_ref(),
+            Excluded(end_key) => user_key >= end_key.as_ref(),
+            Unbounded => false,
+        }
+    }
+
     async fn advance_to_valid_key(&mut self) -> HummockResult<()> {
         self.is_current_pos_valid = false;
         loop {
             if !self.new_value_iter.is_valid() {
                 return Ok(());
             }
+
+            let key = self.new_value_iter.key();
+
             // Handle epoch visibility
-            if !self.is_valid_epoch(self.new_value_iter.key().epoch_with_gap) {
+            if !self.is_valid_epoch(key.epoch_with_gap) {
                 self.new_value_iter.next().await?;
                 continue;
             }
+
+            if self.user_key_out_of_range(key.user_key) {
+                return Ok(());
+            }
+
             break;
         }
 
         debug_assert!(self.new_value_iter.is_valid());
         debug_assert!(self.is_valid_epoch(self.new_value_iter.key().epoch_with_gap));
+        debug_assert!(!self.user_key_out_of_range(self.new_value_iter.key().user_key));
         self.is_current_pos_valid = true;
         self.curr_key.set(self.new_value_iter.key());
         match self.new_value_iter.value() {
@@ -302,10 +317,7 @@ impl<NI: HummockIterator<Direction = Forward>, OI: HummockIterator<Direction = F
 }
 
 pub struct ChangeLogIterator {
-    inner: ChangeLogIteratorInner<
-        UserKeyEndBoundedIterator<MergeIterator<SstableIterator>>,
-        MergeIterator<SstableIterator>,
-    >,
+    inner: ChangeLogIteratorInner<MergeIterator<SstableIterator>, MergeIterator<SstableIterator>>,
     initial_read: bool,
 }
 
@@ -323,9 +335,12 @@ impl ChangeLogIterator {
         };
         let start_bound = start_bound.map(make_user_key);
         let end_bound = end_bound.map(make_user_key);
-        let new_value_iter = UserKeyEndBoundedIterator::new(new_value_iter, end_bound);
-        let mut inner =
-            ChangeLogIteratorInner::new(epoch_range, start_bound, new_value_iter, old_value_iter);
+        let mut inner = ChangeLogIteratorInner::new(
+            epoch_range,
+            (start_bound, end_bound),
+            new_value_iter,
+            old_value_iter,
+        );
         inner.rewind().await?;
         Ok(Self {
             inner,
@@ -352,7 +367,6 @@ impl StateStoreIter<StateStoreReadLogItem> for ChangeLogIterator {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-    use std::ops::Bound;
     use std::ops::Bound::Unbounded;
 
     use bytes::Bytes;
@@ -387,7 +401,7 @@ mod tests {
         let old_value_iter = MemTableHummockIterator::new(&empty, epoch, table_id);
         let mut iter = ChangeLogIteratorInner::new(
             (epoch.pure_epoch(), epoch.pure_epoch()),
-            Bound::Unbounded,
+            (Unbounded, Unbounded),
             new_value_iter,
             old_value_iter,
         );
@@ -426,7 +440,7 @@ mod tests {
         let old_value_iter = MemTableHummockIterator::new(&empty, epoch, table_id);
         let mut iter = ChangeLogIteratorInner::new(
             (epoch.pure_epoch(), epoch.pure_epoch()),
-            Bound::Unbounded,
+            (Unbounded, Unbounded),
             new_value_iter,
             old_value_iter,
         );
@@ -476,7 +490,7 @@ mod tests {
             MemTableHummockIterator::new(&old_value_memtable.buffer, epoch, table_id);
         let mut iter = ChangeLogIteratorInner::new(
             (epoch.pure_epoch(), epoch.pure_epoch()),
-            Bound::Unbounded,
+            (Unbounded, Unbounded),
             new_value_iter,
             old_value_iter,
         );
@@ -624,7 +638,7 @@ mod tests {
                 let epoch_range = (logs[start_epoch_idx].0, logs[end_epoch_idx].0);
                 let mut change_log_iter = ChangeLogIteratorInner::new(
                     epoch_range,
-                    Unbounded,
+                    (Unbounded, Unbounded),
                     new_value_iter,
                     old_value_iter,
                 );
