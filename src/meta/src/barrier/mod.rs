@@ -824,7 +824,7 @@ impl GlobalBarrierManager {
             let latest_snapshot = self.context.hummock_manager.latest_snapshot();
             let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recover from the committed epoch
             let span = tracing::info_span!(
-                "failure_recovery",
+                "adhoc_recovery",
                 error = %err.as_report(),
                 prev_epoch = prev_epoch.value().0
             );
