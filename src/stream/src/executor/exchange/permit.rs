@@ -96,7 +96,7 @@ pub mod for_test {
     pub const INITIAL_PERMITS: PbPermits = PbPermits {
         records: u32::MAX / 2,
         bytes: tokio::sync::Semaphore::MAX_PERMITS as u64 / 2,
-        barriers: 1,
+        barriers: u32::MAX / 2,
     };
 }
 
@@ -128,15 +128,13 @@ impl Permits {
     ///
     /// This function is cancellation-safe except for the fairness of waking.
     async fn acquire_permits(&self, permits: &PbPermits) -> Result<(), AcquireError> {
-        self.records
-            .acquire_many(permits.records as _)
-            .await?
-            .forget();
-        self.bytes.acquire_many(permits.bytes as _).await?.forget();
-        self.barriers
-            .acquire_many(permits.barriers as _)
-            .await?
-            .forget();
+        let p1 = self.records.acquire_many(permits.records as _).await?;
+        let p2 = self.bytes.acquire_many(permits.bytes as _).await?;
+        let p3 = self.barriers.acquire_many(permits.barriers as _).await?;
+        // forget the permits together to make the function cancellation-safe
+        p1.forget();
+        p2.forget();
+        p3.forget();
         Ok(())
     }
 
