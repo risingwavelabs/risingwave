@@ -30,8 +30,8 @@ use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::declare_cursor::create_stream_for_cursor;
 use crate::handler::util::{
-    convert_logstore_i64_to_unix_millis, gen_query_from_logstore_ge_rw_timestamp,
-    gen_query_from_table_name,
+    convert_epoch_to_logstore_i64, convert_logstore_i64_to_unix_millis,
+    gen_query_from_logstore_ge_rw_timestamp, gen_query_from_table_name,
 };
 use crate::handler::HandlerArgs;
 use crate::PgResponseStream;
@@ -144,35 +144,43 @@ pub struct SubscriptionCursor {
 impl SubscriptionCursor {
     pub async fn new(
         cursor_name: String,
-        start_timestamp: i64,
-        from_snapshot: bool,
+        start_timestamp: Option<i64>,
         subscription: Arc<SubscriptionCatalog>,
         handle_args: &HandlerArgs,
     ) -> Result<Self> {
-        let state = if from_snapshot {
+        let state = if let Some(start_timestamp) = start_timestamp {
+            State::InitLogStoreQuery {
+                seek_timestamp: start_timestamp,
+                expected_timestamp: None,
+            }
+        } else {
             // The query stream needs to initiated on cursor creation to make sure
             // future fetch on the cursor starts from the snapshot when the cursor is declared.
             //
             // TODO: is this the right behavior? Should we delay the query stream initiation till the first fetch?
-            let (row_stream, pg_descs) = Self::initiate_query(
-                from_snapshot,
-                start_timestamp,
-                &subscription,
-                handle_args.clone(),
-            )
-            .await?;
+            let (row_stream, pg_descs) =
+                Self::initiate_query(None, &subscription, handle_args.clone()).await?;
+            let pinned_epoch = handle_args
+                .session
+                .get_pinned_snapshot()
+                .ok_or_else(|| {
+                    ErrorCode::InternalError("Fetch Cursor can't find snapshot epoch".to_string())
+                })?
+                .epoch_with_frontend_pinned()
+                .ok_or_else(|| {
+                    ErrorCode::InternalError(
+                        "Fetch Cursor can't support setting an epoch".to_string(),
+                    )
+                })?
+                .0;
+            let start_timestamp = convert_epoch_to_logstore_i64(pinned_epoch);
 
             State::Fetch {
-                from_snapshot,
+                from_snapshot: true,
                 rw_timestamp: start_timestamp,
                 row_stream,
                 pg_descs,
                 remaining_rows: VecDeque::new(),
-            }
-        } else {
-            State::InitLogStoreQuery {
-                seek_timestamp: start_timestamp,
-                expected_timestamp: None,
             }
         };
 
@@ -200,8 +208,7 @@ impl SubscriptionCursor {
 
                     // Initiate a new batch query to continue fetching
                     let (mut row_stream, pg_descs) = Self::initiate_query(
-                        from_snapshot,
-                        *seek_timestamp,
+                        Some(*seek_timestamp),
                         &self.subscription,
                         handle_args.clone(),
                     )
@@ -229,7 +236,7 @@ impl SubscriptionCursor {
                         if new_row_rw_timestamp.is_none()
                             || new_row_rw_timestamp.unwrap() != expected_timestamp
                         {
-                            // Transistion to Invalid state and return and error
+                            // Transition to Invalid state and return and error
                             self.state = State::Invalid;
                             return Err(ErrorCode::CatalogError(
                                 format!(
@@ -358,26 +365,28 @@ impl SubscriptionCursor {
     }
 
     async fn initiate_query(
-        from_snapshot: bool,
-        rw_timestamp: i64,
+        rw_timestamp: Option<i64>,
         subscription: &SubscriptionCatalog,
         handle_args: HandlerArgs,
     ) -> Result<(PgResponseStream, Vec<PgFieldDescriptor>)> {
-        let query_stmt = if from_snapshot {
+        let query_stmt = if let Some(rw_timestamp) = rw_timestamp {
+            Statement::Query(Box::new(gen_query_from_logstore_ge_rw_timestamp(
+                &subscription.get_log_store_name(),
+                rw_timestamp,
+            )))
+        } else {
             let subscription_from_table_name = ObjectName(vec![Ident::from(
                 subscription.subscription_from_name.as_ref(),
             )]);
             Statement::Query(Box::new(gen_query_from_table_name(
                 subscription_from_table_name,
             )))
-        } else {
-            Statement::Query(Box::new(gen_query_from_logstore_ge_rw_timestamp(
-                &subscription.get_log_store_name(),
-                rw_timestamp,
-            )))
         };
         let (row_stream, pg_descs) = create_stream_for_cursor(handle_args, query_stmt).await?;
-        Ok((row_stream, Self::build_desc(pg_descs, from_snapshot)))
+        Ok((
+            row_stream,
+            Self::build_desc(pg_descs, rw_timestamp.is_none()),
+        ))
     }
 
     async fn try_refill_remaining_rows(
@@ -459,15 +468,13 @@ impl CursorManager {
     pub async fn add_subscription_cursor(
         &self,
         cursor_name: String,
-        start_timestamp: i64,
-        from_snapshot: bool,
+        start_timestamp: Option<i64>,
         subscription: Arc<SubscriptionCatalog>,
         handle_args: &HandlerArgs,
     ) -> Result<()> {
         let cursor = SubscriptionCursor::new(
             cursor_name.clone(),
             start_timestamp,
-            from_snapshot,
             subscription,
             handle_args,
         )

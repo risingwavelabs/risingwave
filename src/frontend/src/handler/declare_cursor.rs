@@ -59,37 +59,20 @@ async fn handle_declare_subscription_cursor(
     let subscription =
         session.get_subscription_by_name(schema_name, &cursor_from_subscription_name)?;
     // Start the first query of cursor, which includes querying the table and querying the subscription's logstore
-    let (start_rw_timestamp, from_snapshot) = match rw_timestamp {
+    let start_rw_timestamp = match rw_timestamp {
         Some(risingwave_sqlparser::ast::Since::TimestampMsNum(start_rw_timestamp)) => {
             check_cursor_unix_millis(start_rw_timestamp, subscription.get_retention_seconds()?)?;
-            let start_rw_timestamp = convert_unix_millis_to_logstore_i64(start_rw_timestamp);
-            (start_rw_timestamp, false)
+            Some(convert_unix_millis_to_logstore_i64(start_rw_timestamp))
         }
         Some(risingwave_sqlparser::ast::Since::ProcessTime) => {
-            let start_rw_timestamp = convert_epoch_to_logstore_i64(Epoch::now().0);
-            (start_rw_timestamp, false)
+            Some(convert_epoch_to_logstore_i64(Epoch::now().0))
         }
         Some(risingwave_sqlparser::ast::Since::Begin) => {
             let min_unix_millis =
                 Epoch::now().as_unix_millis() - subscription.get_retention_seconds()? * 1000;
-            let start_rw_timestamp = convert_unix_millis_to_logstore_i64(min_unix_millis);
-            (start_rw_timestamp, false)
+            Some(convert_unix_millis_to_logstore_i64(min_unix_millis))
         }
-        None => {
-            let pinned_epoch = session
-                .get_pinned_snapshot()
-                .ok_or_else(|| {
-                    ErrorCode::InternalError("Fetch Cursor can't find snapshot epoch".to_string())
-                })?
-                .epoch_with_frontend_pinned()
-                .ok_or_else(|| {
-                    ErrorCode::InternalError(
-                        "Fetch Cursor can't support setting an epoch".to_string(),
-                    )
-                })?
-                .0;
-            (convert_epoch_to_logstore_i64(pinned_epoch), true)
-        }
+        None => None,
     };
     // Create cursor based on the response
     session
@@ -97,7 +80,6 @@ async fn handle_declare_subscription_cursor(
         .add_subscription_cursor(
             cursor_name.clone(),
             start_rw_timestamp,
-            from_snapshot,
             subscription,
             &handle_args,
         )
