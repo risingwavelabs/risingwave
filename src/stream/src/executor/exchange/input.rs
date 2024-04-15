@@ -187,9 +187,11 @@ impl RemoteInput {
             }
             exchange_frag_recv_size.inc_by(ack_permits.bytes);
 
-            permits_tx
-                .send(ack_permits)
-                .context("RemoteInput backward permits channel closed.")?;
+            if ack_permits != PbPermits::default() {
+                permits_tx
+                    .send(ack_permits)
+                    .context("RemoteInput backward permits channel closed")?;
+            }
 
             for mut msg in messages {
                 // Read barrier mutation from local barrier manager and attach it to the barrier message.
