@@ -118,6 +118,8 @@ enum RecoveryReason {
     Bootstrap,
     /// After failure.
     Failover(MetaError),
+    /// Manually triggered
+    Adhoc,
 }
 
 /// Status of barrier manager.
@@ -1030,6 +1032,9 @@ impl GlobalBarrierManagerContext {
             }
             BarrierManagerStatus::Recovering(RecoveryReason::Failover(e)) => {
                 Err(anyhow::anyhow!(e.clone()).context("The cluster is recovering"))?
+            }
+            BarrierManagerStatus::Recovering(RecoveryReason::Adhoc) => {
+                bail!("The cluster is recovering-adhoc")
             }
             BarrierManagerStatus::Running => Ok(()),
         }
