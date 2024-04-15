@@ -531,9 +531,12 @@ mod phase1 {
                                 memo_table.insert(right_row.clone().chain(
                                     left_row.project(memo_table_lookup_prefix).into_owned_row(),
                                 ));
-                                if let Some(chunk) =
-                                    E::append_matched_row(Op::Insert, &mut builder, left_row, right_row)
-                                {
+                                if let Some(chunk) = E::append_matched_row(
+                                    Op::Insert,
+                                    &mut builder,
+                                    left_row,
+                                    right_row,
+                                ) {
                                     yield chunk;
                                 }
                             }
