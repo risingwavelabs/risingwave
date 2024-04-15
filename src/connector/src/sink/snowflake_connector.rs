@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use bytes::Bytes;
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use reqwest::{header, Client, RequestBuilder, StatusCode};
 use risingwave_common::config::ObjectStoreConfig;
@@ -31,7 +30,7 @@ const SNOWFLAKE_REQUEST_ID: &str = "RW_SNOWFLAKE_SINK";
 const S3_INTERMEDIATE_FILE_NAME: &str = "RW_SNOWFLAKE_S3_SINK_FILE";
 
 /// The helper function to generate the *global unique* s3 file name.
-fn generate_s3_file_name(s3_path: Option<String>, suffix: String) -> String {
+pub(crate) fn generate_s3_file_name(s3_path: Option<&str>, suffix: &str) -> String {
     match s3_path {
         Some(path) => format!("{}/{}_{}", path, S3_INTERMEDIATE_FILE_NAME, suffix),
         None => format!("{}_{}", S3_INTERMEDIATE_FILE_NAME, suffix),
@@ -151,7 +150,7 @@ impl SnowflakeHttpClient {
 
     /// NOTE: this function should ONLY be called *after*
     /// uploading files to remote external staged storage, i.e., AWS S3
-    pub async fn send_request(&self, file_suffix: String) -> Result<()> {
+    pub async fn send_request(&self, file_suffix: &str) -> Result<()> {
         let builder = self.build_request_and_client();
 
         // Generate the jwt_token
@@ -163,7 +162,7 @@ impl SnowflakeHttpClient {
                 "X-Snowflake-Authorization-Token-Type".to_string(),
                 "KEYPAIR_JWT",
             )
-            .body(generate_s3_file_name(self.s3_path.clone(), file_suffix));
+            .body(generate_s3_file_name(self.s3_path.as_ref().map(|s| s.as_str()), file_suffix));
 
         let response = builder
             .send()
@@ -186,7 +185,7 @@ impl SnowflakeHttpClient {
 pub struct SnowflakeS3Client {
     s3_bucket: String,
     s3_path: Option<String>,
-    opendal_s3_engine: OpendalObjectStore,
+    pub opendal_s3_engine: OpendalObjectStore,
 }
 
 impl SnowflakeS3Client {
@@ -225,25 +224,7 @@ impl SnowflakeS3Client {
         })
     }
 
-    pub async fn sink_to_s3(&self, data: Bytes, file_suffix: String) -> Result<()> {
-        let path = generate_s3_file_name(self.s3_path.clone(), file_suffix);
-        let mut uploader = self
-            .opendal_s3_engine
-            .streaming_upload(&path)
-            .await
-            .map_err(|err| {
-                SinkError::Snowflake(format!(
-                    "failed to create the streaming uploader of opendal s3 engine, error: {}",
-                    err
-                ))
-            })?;
-        uploader.write_bytes(data).await.map_err(|err| SinkError::Snowflake(format!("failed to write bytes when streaming uploading to s3 for snowflake sink, error: {}", err)))?;
-        uploader.finish().await.map_err(|err| {
-            SinkError::Snowflake(format!(
-                "failed to finish streaming upload to s3 for snowflake sink, error: {}",
-                err
-            ))
-        })?;
-        Ok(())
+    pub fn s3_path(&self) -> Option<&str> {
+        self.s3_path.as_ref().map(|s| s.as_str())
     }
 }

@@ -17,9 +17,11 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
+use bytes::Bytes;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_object_store::object::{ObjectStore, StreamingUploader};
 use serde::Deserialize;
 use serde_json::Value;
 use serde_with::serde_as;
@@ -29,7 +31,7 @@ use with_options::WithOptions;
 use super::encoder::{
     JsonEncoder, RowEncoder, TimeHandlingMode, TimestampHandlingMode, TimestamptzHandlingMode,
 };
-use super::snowflake_connector::{SnowflakeHttpClient, SnowflakeS3Client};
+use super::snowflake_connector::{generate_s3_file_name, SnowflakeHttpClient, SnowflakeS3Client};
 use super::writer::LogSinkerOf;
 use super::{SinkError, SinkParam};
 use crate::sink::writer::SinkWriterExt;
@@ -94,11 +96,6 @@ pub struct SnowflakeCommon {
     /// The s3 region, e.g., us-east-2
     #[serde(rename = "snowflake.aws_region")]
     pub aws_region: String,
-
-    /// The configurable max row(s) to batch,
-    /// which should be *explicitly* specified by user(s)
-    #[serde(rename = "snowflake.max_batch_row_num")]
-    pub max_batch_row_num: String,
 }
 
 #[serde_as]
@@ -176,13 +173,16 @@ pub struct SnowflakeSinkWriter {
     /// the client to insert file to external storage (i.e., s3)
     s3_client: SnowflakeS3Client,
     row_encoder: JsonEncoder,
-    row_counter: u32,
-    payload: String,
-    /// the threshold for sinking to s3
-    max_batch_row_num: u32,
     /// The current epoch, used in naming the sink files
     /// mainly used for debugging purpose
     epoch: u64,
+    /// streaming uploader, i.e., opendal s3 engine
+    streaming_uploader: Option<Box<dyn StreamingUploader>>,
+    /// the *unique* file suffix for intermediate s3 files
+    file_suffix: Option<String>,
+    /// the flag that indicates whether we have at least call `streaming_upload`
+    /// once during this epoch, this is used to prevent uploading empty data.
+    has_data: bool,
 }
 
 impl SnowflakeSinkWriter {
@@ -212,13 +212,6 @@ impl SnowflakeSinkWriter {
             config.common.aws_region.clone(),
         )?;
 
-        let max_batch_row_num = config
-            .common
-            .max_batch_row_num
-            .clone()
-            .parse::<u32>()
-            .expect("failed to parse `snowflake.max_batch_row_num` as a `u32`");
-
         Ok(Self {
             config,
             schema: schema.clone(),
@@ -234,31 +227,83 @@ impl SnowflakeSinkWriter {
                 TimestamptzHandlingMode::UtcString,
                 TimeHandlingMode::String,
             ),
-            row_counter: 0,
-            payload: String::new(),
-            max_batch_row_num,
             // initial value of `epoch` will start from 0
             epoch: 0,
+            // will be initialized after the begin of each epoch
+            streaming_uploader: None,
+            file_suffix: None,
+            has_data: false,
         })
     }
 
-    /// reset the `payload` and `row_counter`.
-    /// shall *only* be called after a successful sink to s3.
-    fn reset(&mut self) {
-        self.payload.clear();
-        self.row_counter = 0;
+    /// update the streaming uploader as well as the file suffix.
+    /// note: should *only* be called when a new epoch begins.
+    async fn update_streaming_uploader(&mut self) -> Result<()> {
+        self.file_suffix = Some(self.file_suffix());
+        let path = generate_s3_file_name(self.s3_client.s3_path(), self.file_suffix.as_ref().unwrap());
+        let uploader = self
+            .s3_client
+            .opendal_s3_engine
+            .streaming_upload(&path)
+            .await
+            .map_err(|err| {
+                SinkError::Snowflake(format!(
+                    "failed to create the streaming uploader of opendal s3 engine for epoch {}, error: {}",
+                    self.epoch,
+                    err
+                ))
+            })?;
+        self.streaming_uploader = Some(uploader);
+        // we don't have data at the beginning of each epoch
+        self.has_data = false;
+        Ok(())
     }
 
-    fn at_sink_threshold(&self) -> bool {
-        self.row_counter >= self.max_batch_row_num
+    /// write data to the current streaming uploader for this epoch.
+    async fn streaming_upload(&mut self, data: Bytes) -> Result<()> {
+        debug_assert!(self.streaming_uploader.is_some(), "expect streaming uploader to be properly initialized");
+        self
+            .streaming_uploader
+            .as_mut()
+            .unwrap()
+            .write_bytes(data)
+            .await
+            .map_err(|err| {
+                SinkError::Snowflake(format!(
+                    "failed to write bytes when streaming uploading to s3 for snowflake sink, error: {}",
+                    err
+                ))
+            })?;
+        // well, at least there are some data to be uploaded
+        self.has_data = true;
+        Ok(())
     }
 
-    fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
+    /// finalize streaming upload for this epoch.
+    /// ensure all the data has been properly uploaded to intermediate s3.
+    async fn finish_streaming_upload(&mut self) -> Result<()> {
+        let uploader = std::mem::take(&mut self.streaming_uploader);
+        let Some(uploader) = uploader else {
+            return Err(SinkError::Snowflake(format!(
+                "streaming uploader is not valid when trying to finish streaming upload for epoch {}",
+                self.epoch
+                )
+            ));
+        };
+        uploader.finish().await.map_err(|err| {
+            SinkError::Snowflake(format!(
+                "failed to finish streaming upload to s3 for snowflake sink, error: {}",
+                err
+            ))
+        })?;
+        Ok(())
+    }
+
+    async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
         for (op, row) in chunk.rows() {
             assert_eq!(op, Op::Insert, "expect all `op(s)` to be `Op::Insert`");
             let row_json_string = Value::Object(self.row_encoder.encode(row)?).to_string();
-            self.payload.push_str(&row_json_string);
-            self.row_counter += 1;
+            self.streaming_upload(row_json_string.into()).await?;
         }
         Ok(())
     }
@@ -282,20 +327,14 @@ impl SnowflakeSinkWriter {
 
     /// sink `payload` to s3, then trigger corresponding `insertFiles` post request
     /// to snowflake, to finish the overall sinking pipeline.
-    async fn sink_payload(&mut self) -> Result<()> {
-        if self.payload.is_empty() {
+    async fn commit(&mut self) -> Result<()> {
+        if !self.has_data {
+            // no data needs to be committed
             return Ok(());
         }
-        let file_suffix = self.file_suffix();
-        // first sink to the external stage provided by user. (i.e., s3 bucket)
-        // note: this upload is streaming.
-        self.s3_client
-            .sink_to_s3(self.payload.clone().into(), file_suffix.clone())
-            .await?;
-        // then trigger `insertFiles` post request to snowflake
-        self.http_client.send_request(file_suffix).await?;
-        // reset `payload` & `row_counter`
-        self.reset();
+        self.finish_streaming_upload().await?;
+        // trigger `insertFiles` post request to snowflake
+        self.http_client.send_request(self.file_suffix.as_ref().unwrap().as_str()).await?;
         Ok(())
     }
 }
@@ -304,6 +343,7 @@ impl SnowflakeSinkWriter {
 impl SinkWriter for SnowflakeSinkWriter {
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
         self.update_epoch(epoch);
+        self.update_streaming_uploader().await?;
         Ok(())
     }
 
@@ -317,20 +357,15 @@ impl SinkWriter for SnowflakeSinkWriter {
 
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata> {
         if is_checkpoint {
-            // sink all the row(s) currently batched in `self.payload`
-            self.sink_payload().await?;
+            // finalize current streaming upload, plus notify snowflake to sink
+            // the corresponding data to snowflake pipe.
+            self.commit().await?;
         }
         Ok(())
     }
 
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        self.append_only(chunk)?;
-
-        // When the number of row exceeds `MAX_BATCH_ROW_NUM`
-        if self.at_sink_threshold() {
-            self.sink_payload().await?;
-        }
-
+        self.append_only(chunk).await?;
         Ok(())
     }
 }
