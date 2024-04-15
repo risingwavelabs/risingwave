@@ -68,9 +68,8 @@ use crate::controller::utils::{
 };
 use crate::controller::ObjectModel;
 use crate::manager::{Catalog, MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
-use crate::model::TableFragments;
 use crate::rpc::ddl_controller::DropMode;
-use crate::stream::{ReplaceTableContext, SourceManagerRef};
+use crate::stream::SourceManagerRef;
 use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};
 
@@ -818,7 +817,7 @@ impl CatalogController {
     pub async fn finish_streaming_job(
         &self,
         job_id: ObjectId,
-        replace_table_job_info: &Option<(StreamingJob, ReplaceTableContext, TableFragments)>,
+        replace_table_job_info: Option<(crate::manager::StreamingJob, Vec<MergeUpdate>, u32)>,
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -962,11 +961,11 @@ impl CatalogController {
 
         if let Some((streaming_job, merge_updates, table_id)) = replace_table_job_info {
             self.finish_replace_streaming_job(
-                table_id.table_id as _,
-                streaming_job,
-                merge_updates,
+                table_id as ObjectId,
+                streaming_job.clone(),
+                merge_updates.clone(),
                 None,
-                Some(stream_job_id),
+                Some(job_id as _),
                 None,
             )
             .await?;
