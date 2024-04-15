@@ -39,8 +39,8 @@ risedev ci-kill
 echo "--- run stream chunk java binding"
 RISINGWAVE_ROOT=$(git rev-parse --show-toplevel)
 
-cd ${RISINGWAVE_ROOT}/java
+cd "${RISINGWAVE_ROOT}"/java
 
-(${RISINGWAVE_ROOT}/bin/data-chunk-payload-generator) | \
+("${RISINGWAVE_ROOT}"/bin/data-chunk-payload-generator) | \
     java -cp "./java-binding-integration-test/target/dependency/*:./java-binding-integration-test/target/classes" \
     com.risingwave.java.binding.StreamChunkDemo

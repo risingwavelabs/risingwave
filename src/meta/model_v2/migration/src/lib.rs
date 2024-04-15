@@ -5,6 +5,8 @@ pub use sea_orm_migration::prelude::*;
 mod m20230908_072257_init;
 mod m20231008_020431_hummock;
 mod m20240304_074901_subscription;
+mod m20240410_082733_with_version_column_migration;
+mod m20240410_154406_session_params;
 
 pub struct Migrator;
 
@@ -15,6 +17,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20230908_072257_init::Migration),
             Box::new(m20231008_020431_hummock::Migration),
             Box::new(m20240304_074901_subscription::Migration),
+            Box::new(m20240410_082733_with_version_column_migration::Migration),
+            Box::new(m20240410_154406_session_params::Migration),
         ]
     }
 }

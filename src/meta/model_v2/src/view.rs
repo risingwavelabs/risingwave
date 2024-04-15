@@ -56,7 +56,7 @@ impl From<PbView> for ActiveModel {
             name: Set(view.name),
             properties: Set(Property(view.properties)),
             definition: Set(view.sql),
-            columns: Set(FieldArray(view.columns)),
+            columns: Set(view.columns.into()),
         }
     }
 }
