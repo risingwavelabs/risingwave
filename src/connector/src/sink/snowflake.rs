@@ -240,7 +240,8 @@ impl SnowflakeSinkWriter {
     /// note: should *only* be called when a new epoch begins.
     async fn update_streaming_uploader(&mut self) -> Result<()> {
         self.file_suffix = Some(self.file_suffix());
-        let path = generate_s3_file_name(self.s3_client.s3_path(), self.file_suffix.as_ref().unwrap());
+        let path =
+            generate_s3_file_name(self.s3_client.s3_path(), self.file_suffix.as_ref().unwrap());
         let uploader = self
             .s3_client
             .opendal_s3_engine
@@ -261,7 +262,10 @@ impl SnowflakeSinkWriter {
 
     /// write data to the current streaming uploader for this epoch.
     async fn streaming_upload(&mut self, data: Bytes) -> Result<()> {
-        debug_assert!(self.streaming_uploader.is_some(), "expect streaming uploader to be properly initialized");
+        debug_assert!(
+            self.streaming_uploader.is_some(),
+            "expect streaming uploader to be properly initialized"
+        );
         self
             .streaming_uploader
             .as_mut()
@@ -334,7 +338,9 @@ impl SnowflakeSinkWriter {
         }
         self.finish_streaming_upload().await?;
         // trigger `insertFiles` post request to snowflake
-        self.http_client.send_request(self.file_suffix.as_ref().unwrap().as_str()).await?;
+        self.http_client
+            .send_request(self.file_suffix.as_ref().unwrap().as_str())
+            .await?;
         Ok(())
     }
 }
