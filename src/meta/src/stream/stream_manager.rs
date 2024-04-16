@@ -742,7 +742,7 @@ mod tests {
 
     use futures::{Stream, TryStreamExt};
     use risingwave_common::catalog::TableId;
-    use risingwave_common::hash::ParallelUnitMapping;
+    use risingwave_common::hash::{ParallelUnitMapping, WorkerSlotId};
     use risingwave_common::system_param::reader::SystemParamsRead;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::add_worker_node_request::Property;
@@ -1049,7 +1049,7 @@ mod tests {
             let locations = {
                 let StreamingClusterInfo {
                     worker_nodes,
-                    parallel_units,
+                    parallel_units: _,
                     unschedulable_parallel_units: _,
                 }: StreamingClusterInfo = self
                     .global_stream_manager
@@ -1057,12 +1057,14 @@ mod tests {
                     .get_streaming_cluster_info()
                     .await?;
 
+                let (worker_id, _worker_node) = worker_nodes.iter().exactly_one().unwrap();
+
                 let actor_locations = fragments
                     .values()
                     .flat_map(|f| &f.actors)
                     .sorted_by(|a, b| a.actor_id.cmp(&b.actor_id))
                     .enumerate()
-                    .map(|(idx, a)| (a.actor_id, parallel_units[&(idx as u32)].clone()))
+                    .map(|(idx, a)| (a.actor_id, WorkerSlotId(*worker_id, idx as u32)))
                     .collect();
 
                 Locations {

@@ -20,7 +20,7 @@ use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::hash::{ActorId, ActorMapping, ParallelUnitId, WorkerSlotId};
+use risingwave_common::hash::{ActorId, ActorMapping, WorkerSlotId};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::plan_common::ExprContext;
