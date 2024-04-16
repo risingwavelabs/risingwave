@@ -105,17 +105,6 @@ impl SourceReader {
         }
     }
 
-    /// Postgres and Oracle connectors need to commit the offset to upstream.
-    pub fn need_commit_offset_to_upstream(&self) -> bool {
-        matches!(
-            &self.config,
-            ConnectorProperties::PostgresCdc(_)
-                | ConnectorProperties::MysqlCdc(_)
-                | ConnectorProperties::MongodbCdc(_)
-                | ConnectorProperties::CitusCdc(_)
-        )
-    }
-
     pub async fn to_stream(
         &self,
         state: ConnectorState,

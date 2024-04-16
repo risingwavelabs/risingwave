@@ -95,8 +95,6 @@ pub struct StateTableInner<
     /// Id for this table.
     table_id: TableId,
 
-    store: S,
-
     /// State store backend.
     local_store: S::Local,
 
@@ -199,10 +197,6 @@ where
             .now_or_never()
             .expect("non-replicated state store should start immediately.")
             .expect("non-replicated state store should not wait_for_epoch, and fail because of it.")
-    }
-
-    pub fn state_store(&self) -> &S {
-        &self.store
     }
 }
 
@@ -427,7 +421,6 @@ where
 
         Self {
             table_id,
-            store,
             local_store: local_state_store,
             pk_serde,
             row_serde,
@@ -609,7 +602,6 @@ where
         };
         Self {
             table_id,
-            store,
             local_store: local_state_store,
             pk_serde,
             row_serde,
