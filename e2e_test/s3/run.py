@@ -17,6 +17,8 @@ def do_test(config, N, n, prefix):
 
     # Open a cursor to execute SQL statements
     cur = conn.cursor()
+
+    # Execute a SELECT statement
     cur.execute(f'''CREATE TABLE s3_test(
         id int,
         name TEXT,

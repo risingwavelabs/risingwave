@@ -7,6 +7,7 @@ from minio import Minio
 import psycopg2
 import random
 
+
 def do_test(client, config, N,  prefix):
     conn = psycopg2.connect(
         host="localhost",
@@ -17,6 +18,8 @@ def do_test(client, config, N,  prefix):
 
     # Open a cursor to execute SQL statements
     cur = conn.cursor()
+
+    # Execute a SELECT statement
     cur.execute(f'''CREATE TABLE s3_test_jsonfile(
         id int,
         name TEXT,
