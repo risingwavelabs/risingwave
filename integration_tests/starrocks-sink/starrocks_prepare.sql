@@ -50,7 +50,7 @@ CREATE table starrocks_types(
     c_decimal decimal,
     c_real float,
     c_double_precision double,
-    c_varchar text,
+    c_varchar varchar(65533),
     c_date date,
     c_timestamp datetime,
     c_jsonb JSON,
@@ -61,11 +61,10 @@ CREATE table starrocks_types(
     c_decimal_array ARRAY<decimal>,
     c_real_array ARRAY<float>,
     c_double_precision_array ARRAY<double>,
-    c_varchar_array ARRAY<text>,
+    c_varchar_array ARRAY<varchar(65533)>,
     c_date_array ARRAY<date>,
     c_timestamp_array ARRAY<datetime>,
-    c_jsonb_array ARRAY<json>,
-    c_struct json
+    c_jsonb_array ARRAY<json>
 ) ENGINE=OLAP
 UNIQUE KEY(`types_id`)
 DISTRIBUTED BY HASH(`types_id`) BUCKETS 1
