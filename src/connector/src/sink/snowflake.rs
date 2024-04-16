@@ -79,9 +79,9 @@ pub struct SnowflakeCommon {
     pub s3_bucket: String,
 
     /// The optional s3 path to be specified
-    /// the actual file location would be `<s3_bucket>://<s3_path>/<rw_auto_gen_file_name>`
+    /// the actual file location would be `s3://<s3_bucket>/<s3_path>/<rw_auto_gen_intermediate_file_name>`
     /// if this field is specified by user(s)
-    /// otherwise it would be `<s3_bucket>://<rw_auto_gen_file_name>`
+    /// otherwise it would be `s3://<s3_bucket>/<rw_auto_gen_intermediate_file_name>`
     #[serde(rename = "snowflake.s3_path")]
     pub s3_path: Option<String>,
 
