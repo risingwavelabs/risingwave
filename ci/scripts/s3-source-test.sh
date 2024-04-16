@@ -33,7 +33,7 @@ risedev ci-start ci-1cn-1fe
 
 echo "--- Run test"
 python3 -m pip install minio psycopg2-binary opendal
-if [[ -z "$format_type" ]]; then
+if [[ -v format_type ]]; then
   python3 e2e_test/s3/"$script"
 else
   python3 e2e_test/s3/"$script" "$format_type"
