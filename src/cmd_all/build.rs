@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use thiserror_ext::AsReport;
 use vergen::EmitBuilder;
 
 fn main() {
     if let Err(e) = EmitBuilder::builder().git_sha(true).fail_on_error().emit() {
         // Leave the environment variable unset if error occurs.
-        println!("cargo:warning={}", e)
+        println!("cargo:warning={}", e.as_report())
     }
 }

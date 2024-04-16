@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
+use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use tokio::sync::mpsc::Sender;
@@ -69,7 +70,7 @@ impl BatchManager {
                 builder.worker_threads(worker_threads_num);
             }
             builder
-                .thread_name("risingwave-batch-tasks")
+                .thread_name("rw-batch")
                 .enable_all()
                 .build()
                 .unwrap()
@@ -102,6 +103,7 @@ impl BatchManager {
         context: ComputeNodeContext,
         state_reporter: StateReporter,
         tracing_context: TracingContext,
+        expr_context: ExprContext,
     ) -> Result<()> {
         trace!("Received task id: {:?}, plan: {:?}", tid, plan);
         let task = BatchTaskExecution::new(tid, plan, context, epoch, self.runtime())?;
@@ -128,7 +130,7 @@ impl BatchManager {
                 task_id,
             );
         };
-        task.async_execute(Some(state_reporter), tracing_context)
+        task.async_execute(Some(state_reporter), tracing_context, expr_context)
             .await
             .inspect_err(|_| {
                 self.cancel_task(&task_id.to_prost());
@@ -151,6 +153,9 @@ impl BatchManager {
             ComputeNodeContext::for_test(),
             StateReporter::new_with_test(),
             TracingContext::none(),
+            ExprContext {
+                time_zone: "UTC".to_string(),
+            },
         )
         .await
     }

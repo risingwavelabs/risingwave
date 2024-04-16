@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use risingwave_sqlparser::ast::AsOf;
 
 use super::{DefaultBehavior, Merge};
 use crate::optimizer::plan_node::{
@@ -39,15 +41,15 @@ impl PlanVisitor for TemporalJoinValidator {
     }
 
     fn visit_stream_table_scan(&mut self, stream_table_scan: &StreamTableScan) -> bool {
-        stream_table_scan.core().for_system_time_as_of_proctime
+        matches!(stream_table_scan.core().as_of, Some(AsOf::ProcessTime))
     }
 
     fn visit_batch_seq_scan(&mut self, batch_seq_scan: &BatchSeqScan) -> bool {
-        batch_seq_scan.core().for_system_time_as_of_proctime
+        matches!(batch_seq_scan.core().as_of, Some(AsOf::ProcessTime))
     }
 
     fn visit_logical_scan(&mut self, logical_scan: &LogicalScan) -> bool {
-        logical_scan.for_system_time_as_of_proctime()
+        matches!(logical_scan.as_of(), Some(AsOf::ProcessTime))
     }
 
     fn visit_stream_temporal_join(&mut self, stream_temporal_join: &StreamTemporalJoin) -> bool {

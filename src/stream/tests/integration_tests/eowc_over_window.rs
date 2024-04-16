@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,9 +14,7 @@
 
 use risingwave_expr::aggregate::{AggArgs, AggKind};
 use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncCall, WindowFuncKind};
-use risingwave_stream::executor::{
-    EowcOverWindowExecutor, EowcOverWindowExecutorArgs, ExecutorInfo,
-};
+use risingwave_stream::executor::{EowcOverWindowExecutor, EowcOverWindowExecutorArgs};
 
 use crate::prelude::*;
 
@@ -54,7 +52,6 @@ async fn create_executor<S: StateStore>(
         });
         Schema { fields }
     };
-    let output_pk_indices = vec![2];
 
     let state_table = StateTable::new_without_distribution_inconsistent_op(
         store,
@@ -65,17 +62,14 @@ async fn create_executor<S: StateStore>(
     )
     .await;
 
-    let (tx, source) = MockSource::channel(input_schema, input_pk_indices.clone());
+    let (tx, source) = MockSource::channel();
+    let source = source.into_executor(input_schema, input_pk_indices.clone());
     let executor = EowcOverWindowExecutor::new(EowcOverWindowExecutorArgs {
-        actor_ctx: ActorContext::create(123),
-        info: ExecutorInfo {
-            schema: output_schema,
-            pk_indices: output_pk_indices,
-            identity: "EowcOverWindowExecutor".to_string(),
-        },
+        actor_ctx: ActorContext::for_test(123),
 
-        input: source.boxed(),
+        input: source,
 
+        schema: output_schema,
         calls,
         partition_key_indices,
         order_key_index,

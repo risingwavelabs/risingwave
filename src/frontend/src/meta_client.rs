@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,8 +14,10 @@
 
 use std::collections::HashMap;
 
+use anyhow::Context;
+use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
-use risingwave_common::util::epoch::MAX_EPOCH;
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::WorkerNode;
@@ -23,11 +25,12 @@ use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
-    HummockSnapshot, HummockVersion, HummockVersionDelta,
+    HummockSnapshot,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
+use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::EventLog;
@@ -49,6 +52,8 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn wait(&self) -> Result<()>;
 
+    async fn recover(&self) -> Result<()>;
+
     async fn cancel_creating_jobs(&self, jobs: PbJobs) -> Result<Vec<u32>>;
 
     async fn list_table_fragments(
@@ -61,6 +66,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>>;
 
     async fn list_actor_states(&self) -> Result<Vec<ActorState>>;
+
+    async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>>;
 
     async fn unpin_snapshot(&self) -> Result<()>;
 
@@ -75,6 +82,10 @@ pub trait FrontendMetaClient: Send + Sync {
         param: String,
         value: Option<String>,
     ) -> Result<Option<SystemParamsReader>>;
+
+    async fn get_session_params(&self) -> Result<SessionConfig>;
+
+    async fn set_session_param(&self, param: String, value: Option<String>) -> Result<String>;
 
     async fn list_ddl_progress(&self) -> Result<Vec<DdlProgress>>;
 
@@ -128,6 +139,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.wait().await
     }
 
+    async fn recover(&self) -> Result<()> {
+        self.0.recover().await
+    }
+
     async fn cancel_creating_jobs(&self, infos: PbJobs) -> Result<Vec<u32>> {
         self.0.cancel_creating_jobs(infos).await
     }
@@ -149,6 +164,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_actor_states(&self) -> Result<Vec<ActorState>> {
         self.0.list_actor_states().await
+    }
+
+    async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>> {
+        self.0.list_object_dependencies().await
     }
 
     async fn unpin_snapshot(&self) -> Result<()> {
@@ -174,6 +193,17 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         value: Option<String>,
     ) -> Result<Option<SystemParamsReader>> {
         self.0.set_system_param(param, value).await
+    }
+
+    async fn get_session_params(&self) -> Result<SessionConfig> {
+        let session_config: SessionConfig =
+            serde_json::from_str(&self.0.get_session_params().await?)
+                .context("failed to parse session config")?;
+        Ok(session_config)
+    }
+
+    async fn set_session_param(&self, param: String, value: Option<String>) -> Result<String> {
+        self.0.set_session_param(param, value).await
     }
 
     async fn list_ddl_progress(&self) -> Result<Vec<DdlProgress>> {
@@ -224,15 +254,12 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0
             .risectl_get_checkpoint_hummock_version()
             .await
-            .map(|v| v.checkpoint_version.unwrap())
+            .map(|v| HummockVersion::from_rpc_protobuf(&v.checkpoint_version.unwrap()))
     }
 
     async fn list_version_deltas(&self) -> Result<Vec<HummockVersionDelta>> {
         // FIXME #8612: there can be lots of version deltas, so better to fetch them by pages and refactor `SysRowSeqScanExecutor` to yield multiple chunks.
-        self.0
-            .list_version_deltas(0, u32::MAX, MAX_EPOCH)
-            .await
-            .map(|v| v.version_deltas)
+        self.0.list_version_deltas(0, u32::MAX, u64::MAX).await
     }
 
     async fn list_branched_objects(&self) -> Result<Vec<BranchedObject>> {

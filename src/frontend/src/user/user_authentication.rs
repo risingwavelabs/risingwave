@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::AuthInfo;
+use risingwave_sqlparser::ast::SqlOption;
 use sha2::{Digest, Sha256};
+
+use crate::WithOptions;
 
 // SHA-256 is not supported in PostgreSQL protocol. We need to implement SCRAM-SHA-256 instead
 // if necessary.
@@ -23,6 +28,27 @@ const MD5_ENCRYPTED_PREFIX: &str = "md5";
 
 const VALID_SHA256_ENCRYPTED_LEN: usize = SHA256_ENCRYPTED_PREFIX.len() + 64;
 const VALID_MD5_ENCRYPTED_LEN: usize = MD5_ENCRYPTED_PREFIX.len() + 32;
+
+pub const OAUTH_JWKS_URL_KEY: &str = "jwks_url";
+pub const OAUTH_ISSUER_KEY: &str = "issuer";
+
+/// Build `AuthInfo` for `OAuth`.
+#[inline(always)]
+pub fn build_oauth_info(options: &Vec<SqlOption>) -> Option<AuthInfo> {
+    let metadata: HashMap<String, String> = WithOptions::try_from(options.as_slice())
+        .ok()?
+        .into_inner()
+        .into_iter()
+        .collect();
+    if !metadata.contains_key(OAUTH_JWKS_URL_KEY) || !metadata.contains_key(OAUTH_ISSUER_KEY) {
+        return None;
+    }
+    Some(AuthInfo {
+        encryption_type: EncryptionType::Oauth as i32,
+        encrypted_value: Vec::new(),
+        metadata,
+    })
+}
 
 /// Try to extract the encryption password from given password. The password is always stored
 /// encrypted in the system catalogs. The ENCRYPTED keyword has no effect, but is accepted for
@@ -53,11 +79,13 @@ pub fn encrypted_password(name: &str, password: &str) -> Option<AuthInfo> {
         Some(AuthInfo {
             encryption_type: EncryptionType::Sha256 as i32,
             encrypted_value: password.trim_start_matches(SHA256_ENCRYPTED_PREFIX).into(),
+            metadata: HashMap::new(),
         })
     } else if valid_md5_password(password) {
         Some(AuthInfo {
             encryption_type: EncryptionType::Md5 as i32,
             encrypted_value: password.trim_start_matches(MD5_ENCRYPTED_PREFIX).into(),
+            metadata: HashMap::new(),
         })
     } else {
         Some(encrypt_default(name, password))
@@ -70,6 +98,7 @@ fn encrypt_default(name: &str, password: &str) -> AuthInfo {
     AuthInfo {
         encryption_type: EncryptionType::Md5 as i32,
         encrypted_value: md5_hash(name, password),
+        metadata: HashMap::new(),
     }
 }
 
@@ -81,6 +110,7 @@ pub fn encrypted_raw_password(info: &AuthInfo) -> String {
         EncryptionType::Plaintext => "",
         EncryptionType::Sha256 => SHA256_ENCRYPTED_PREFIX,
         EncryptionType::Md5 => MD5_ENCRYPTED_PREFIX,
+        EncryptionType::Oauth => "",
     };
     format!("{}{}", prefix, encrypted_pwd)
 }
@@ -156,15 +186,18 @@ mod tests {
             Some(AuthInfo {
                 encryption_type: EncryptionType::Md5 as i32,
                 encrypted_value: md5_hash(user_name, password),
+                metadata: HashMap::new(),
             }),
             None,
             Some(AuthInfo {
                 encryption_type: EncryptionType::Md5 as i32,
                 encrypted_value: md5_hash(user_name, password),
+                metadata: HashMap::new(),
             }),
             Some(AuthInfo {
                 encryption_type: EncryptionType::Sha256 as i32,
                 encrypted_value: sha256_hash(user_name, password),
+                metadata: HashMap::new(),
             }),
         ];
         let output_passwords = input_passwords

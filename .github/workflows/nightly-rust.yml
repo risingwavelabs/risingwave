@@ -20,6 +20,7 @@ jobs:
            remove-codeql: 'true'
            remove-docker-images: 'true'
            root-reserve-mb: 2048
+           swap-size-mb: 8192
       - uses: actions/checkout@v3
         if: ${{ github.event_name == 'schedule' }}
         with:

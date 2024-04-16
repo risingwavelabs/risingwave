@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,8 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-use std::collections::HashMap;
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, FieldDisplay};
@@ -28,7 +26,7 @@ use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{ExprDisplay, ExprImpl};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::{TableCatalog, WithOptions};
+use crate::TableCatalog;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamWatermarkFilter {
@@ -114,7 +112,7 @@ impl PlanTreeNodeUnary for StreamWatermarkFilter {
 impl_plan_tree_node_for_unary! {StreamWatermarkFilter}
 
 pub fn infer_internal_table_catalog(watermark_type: DataType) -> TableCatalog {
-    let mut builder = TableCatalogBuilder::new(WithOptions::new(HashMap::default()));
+    let mut builder = TableCatalogBuilder::default();
 
     let key = Field {
         data_type: DataType::Int16,

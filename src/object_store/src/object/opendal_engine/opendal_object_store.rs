@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,10 +20,11 @@ use futures::{stream, StreamExt, TryStreamExt};
 use opendal::services::Memory;
 use opendal::{Metakey, Operator, Writer};
 use risingwave_common::range::RangeBoundsExt;
+use thiserror_ext::AsReport;
 
 use crate::object::{
-    BoxedStreamingUploader, ObjectDataStream, ObjectError, ObjectMetadata, ObjectMetadataIter,
-    ObjectRangeBounds, ObjectResult, ObjectStore, StreamingUploader,
+    prefix, BoxedStreamingUploader, ObjectDataStream, ObjectError, ObjectMetadata,
+    ObjectMetadataIter, ObjectRangeBounds, ObjectResult, ObjectStore, StreamingUploader,
 };
 
 /// Opendal object storage.
@@ -37,6 +38,8 @@ pub enum EngineType {
     Memory,
     Hdfs,
     Gcs,
+    S3,
+    Obs,
     Oss,
     Webhdfs,
     Azblob,
@@ -58,8 +61,18 @@ impl OpendalObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for OpendalObjectStore {
-    fn get_object_prefix(&self, _obj_id: u64) -> String {
-        String::default()
+    fn get_object_prefix(&self, obj_id: u64) -> String {
+        match self.engine_type {
+            EngineType::S3 => prefix::s3::get_object_prefix(obj_id),
+            EngineType::Memory => String::default(),
+            EngineType::Hdfs => String::default(),
+            EngineType::Gcs => String::default(),
+            EngineType::Obs => String::default(),
+            EngineType::Oss => String::default(),
+            EngineType::Webhdfs => String::default(),
+            EngineType::Azblob => String::default(),
+            EngineType::Fs => String::default(),
+        }
     }
 
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
@@ -73,7 +86,7 @@ impl ObjectStore for OpendalObjectStore {
 
     async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
         Ok(Box::new(
-            OpenDalStreamingUploader::new(self.op.clone(), path.to_string()).await?,
+            OpendalStreamingUploader::new(self.op.clone(), path.to_string()).await?,
         ))
     }
 
@@ -115,9 +128,9 @@ impl ObjectStore for OpendalObjectStore {
         ));
         let range: Range<u64> = (range.start as u64)..(range.end as u64);
         let reader = self.op.reader_with(path).range(range).await?;
-        let stream = reader
-            .into_stream()
-            .map(|item| item.map_err(|e| ObjectError::internal(format!("OpenDalError: {:?}", e))));
+        let stream = reader.into_stream().map(|item| {
+            item.map_err(|e| ObjectError::internal(format!("OpendalError: {}", e.as_report())))
+        });
 
         Ok(Box::pin(stream))
     }
@@ -155,8 +168,8 @@ impl ObjectStore for OpendalObjectStore {
         let object_lister = self
             .op
             .lister_with(prefix)
-            .delimiter("")
-            .metakey(Metakey::ContentLength | Metakey::ContentType)
+            .recursive(true)
+            .metakey(Metakey::ContentLength)
             .await?;
 
         let stream = stream::unfold(object_lister, |mut object_lister| async move {
@@ -188,7 +201,9 @@ impl ObjectStore for OpendalObjectStore {
         match self.engine_type {
             EngineType::Memory => "Memory",
             EngineType::Hdfs => "Hdfs",
+            EngineType::S3 => "S3",
             EngineType::Gcs => "Gcs",
+            EngineType::Obs => "Obs",
             EngineType::Oss => "Oss",
             EngineType::Webhdfs => "Webhdfs",
             EngineType::Azblob => "Azblob",
@@ -198,12 +213,16 @@ impl ObjectStore for OpendalObjectStore {
 }
 
 /// Store multiple parts in a map, and concatenate them on finish.
-pub struct OpenDalStreamingUploader {
+pub struct OpendalStreamingUploader {
     writer: Writer,
 }
-impl OpenDalStreamingUploader {
+impl OpendalStreamingUploader {
     pub async fn new(op: Operator, path: String) -> ObjectResult<Self> {
-        let writer = op.writer_with(&path).buffer(OPENDAL_BUFFER_SIZE).await?;
+        let writer = op
+            .writer_with(&path)
+            .concurrent(8)
+            .buffer(OPENDAL_BUFFER_SIZE)
+            .await?;
         Ok(Self { writer })
     }
 }
@@ -211,7 +230,7 @@ impl OpenDalStreamingUploader {
 const OPENDAL_BUFFER_SIZE: usize = 16 * 1024 * 1024;
 
 #[async_trait::async_trait]
-impl StreamingUploader for OpenDalStreamingUploader {
+impl StreamingUploader for OpendalStreamingUploader {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
         self.writer.write(data).await?;
         Ok(())
@@ -241,12 +260,13 @@ mod tests {
     use super::*;
 
     async fn list_all(prefix: &str, store: &OpendalObjectStore) -> Vec<ObjectMetadata> {
-        let mut iter = store.list(prefix).await.unwrap();
-        let mut result = vec![];
-        while let Some(r) = iter.next().await {
-            result.push(r.unwrap());
-        }
-        result
+        store
+            .list(prefix)
+            .await
+            .unwrap()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap()
     }
 
     #[tokio::test]
@@ -291,6 +311,7 @@ mod tests {
         let store = OpendalObjectStore::new_memory_engine().unwrap();
         store.upload("abc", Bytes::from("123456")).await.unwrap();
         store.upload("prefix/abc", block1).await.unwrap();
+
         store.upload("prefix/xyz", block2).await.unwrap();
 
         assert_eq!(list_all("", &store).await.len(), 3);

@@ -3,26 +3,17 @@
 
 # If we cannot extract key schema, use message key as varchar primary key
 statement ok
-CREATE TABLE upsert_avro_json_default_key ()
+CREATE TABLE upsert_avro_json_default_key ( primary key (rw_key) )
+INCLUDE KEY AS rw_key
 WITH (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
 	topic = 'upsert_avro_json')
 FORMAT UPSERT ENCODE AVRO (schema.registry = 'http://message_queue:8081');
 
-
-# key schema should be a subset of value schema
-statement error
-CREATE TABLE upsert_student_key_not_subset_of_value_avro_json ()
-WITH (
-	connector = 'kafka',
-  properties.bootstrap.server = 'message_queue:29092',
-	topic = 'upsert_student_key_not_subset_of_value_avro_json')
-FORMAT UPSERT ENCODE AVRO (schema.registry = 'http://message_queue:8081');
-
-
 statement ok
-CREATE TABLE upsert_student_avro_json ()
+CREATE TABLE upsert_student_avro_json ( primary key (rw_key) )
+INCLUDE KEY AS rw_key
 WITH (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
@@ -68,7 +59,8 @@ CREATE TABLE kafka_json_schema_plain with (
 ) FORMAT PLAIN ENCODE JSON (schema.registry = 'http://schemaregistry:8082');
 
 statement ok
-CREATE TABLE kafka_json_schema_upsert (PRIMARY KEY(id))
+CREATE TABLE kafka_json_schema_upsert (PRIMARY KEY(rw_key))
+INCLUDE KEY AS rw_key
 with (
     connector = 'kafka',
     kafka.topic = 'kafka_upsert_json_schema',
@@ -84,16 +76,16 @@ sleep 8s
 
 query II
 SELECT
- op_type, "ID", "CLASS_ID", "ITEM_ID", "ATTR_ID", "ATTR_VALUE", "ORG_ID", "UNIT_INFO", "UPD_TIME"
+ op_type, "ID", "CLASS_ID", "ITEM_ID", "ATTR_ID", "ATTR_VALUE", "ORG_ID", "UNIT_INFO", "UPD_TIME", "DEC_VAL"
 FROM
  upsert_avro_json_default_key
 ORDER BY
  "ID";
 ----
-update id1 -1 6768 6970 value9 7172 info9 2021-05-18T07:59:58.714Z
-delete id2 2 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
-delete id3 3 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
-delete id5 5 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
+update id1 -1 6768 6970 value9 7172 info9 2021-05-18T07:59:58.714Z -21474836.47
+delete id2 2 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z 99999999.99
+delete id3 3 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z 21474836.47
+delete id5 5 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z 21474836.49
 
 # query II
 # SELECT

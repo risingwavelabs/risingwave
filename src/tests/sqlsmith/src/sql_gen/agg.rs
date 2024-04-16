@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -142,6 +142,7 @@ fn make_agg_func(
     Function {
         name: ObjectName(vec![Ident::new_unchecked(func_name)]),
         args,
+        variadic: false,
         over: None,
         distinct,
         order_by,

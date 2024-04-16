@@ -28,8 +28,8 @@ shift $((OPTIND -1))
 
 git config --global --add safe.directory /risingwave
 
-download_and_prepare_rw "$profile" common
+download_and_prepare_rw "$profile" source
 
 ################ TESTS
 
-./ci/scripts/run-backfill-tests.sh
+BUILDKITE=${BUILDKITE:-} profile=$profile ./ci/scripts/run-backfill-tests.sh

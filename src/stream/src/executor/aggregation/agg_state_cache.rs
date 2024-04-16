@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,12 +15,12 @@
 //! Object-safe version of [`StateCache`] for aggregation.
 
 use risingwave_common::array::StreamChunk;
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
 use risingwave_common::util::row_serde::OrderedRowSerde;
+use risingwave_common_estimate_size::EstimateSize;
 use smallvec::SmallVec;
 
 use crate::common::cache::{StateCache, StateCacheFiller};

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,10 +27,12 @@ use risingwave_pb::compute::config_service_client::ConfigServiceClient;
 use risingwave_pb::compute::{ShowConfigRequest, ShowConfigResponse};
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_pb::monitor_service::{
-    AnalyzeHeapRequest, AnalyzeHeapResponse, HeapProfilingRequest, HeapProfilingResponse,
-    ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
-    StackTraceRequest, StackTraceResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, GetBackPressureRequest, GetBackPressureResponse,
+    HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
+    ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, StackTraceRequest,
+    StackTraceResponse,
 };
+use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
@@ -43,7 +45,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
 
-use crate::error::Result;
+use crate::error::{Result, RpcError};
 use crate::{RpcClient, RpcClientPool};
 
 #[derive(Clone)]
@@ -96,7 +98,8 @@ impl ComputeClient {
             .get_data(GetDataRequest {
                 task_output_id: Some(output_id),
             })
-            .await?
+            .await
+            .map_err(RpcError::from_compute_status)?
             .into_inner())
     }
 
@@ -147,7 +150,8 @@ impl ComputeClient {
                     up_actor_id,
                     down_actor_id
                 )
-            })?
+            })
+            .map_err(RpcError::from_compute_status)?
             .into_inner();
 
         Ok((response_stream, permits_tx))
@@ -158,6 +162,7 @@ impl ComputeClient {
         task_id: TaskId,
         plan: PlanFragment,
         epoch: BatchQueryEpoch,
+        expr_context: ExprContext,
     ) -> Result<Streaming<TaskInfoResponse>> {
         Ok(self
             .task_client
@@ -167,13 +172,21 @@ impl ComputeClient {
                 plan: Some(plan),
                 epoch: Some(epoch),
                 tracing_context: TracingContext::from_current_span().to_protobuf(),
+                expr_context: Some(expr_context),
             })
-            .await?
+            .await
+            .map_err(RpcError::from_compute_status)?
             .into_inner())
     }
 
     pub async fn execute(&self, req: ExecuteRequest) -> Result<Streaming<GetDataResponse>> {
-        Ok(self.task_client.to_owned().execute(req).await?.into_inner())
+        Ok(self
+            .task_client
+            .to_owned()
+            .execute(req)
+            .await
+            .map_err(RpcError::from_compute_status)?
+            .into_inner())
     }
 
     pub async fn cancel(&self, req: CancelTaskRequest) -> Result<CancelTaskResponse> {
@@ -181,7 +194,8 @@ impl ComputeClient {
             .task_client
             .to_owned()
             .cancel_task(req)
-            .await?
+            .await
+            .map_err(RpcError::from_compute_status)?
             .into_inner())
     }
 
@@ -190,7 +204,18 @@ impl ComputeClient {
             .monitor_client
             .to_owned()
             .stack_trace(StackTraceRequest::default())
-            .await?
+            .await
+            .map_err(RpcError::from_compute_status)?
+            .into_inner())
+    }
+
+    pub async fn get_back_pressure(&self) -> Result<GetBackPressureResponse> {
+        Ok(self
+            .monitor_client
+            .to_owned()
+            .get_back_pressure(GetBackPressureRequest::default())
+            .await
+            .map_err(RpcError::from_compute_status)?
             .into_inner())
     }
 
@@ -199,7 +224,8 @@ impl ComputeClient {
             .monitor_client
             .to_owned()
             .profiling(ProfilingRequest { sleep_s })
-            .await?
+            .await
+            .map_err(RpcError::from_compute_status)?
             .into_inner())
     }
 
@@ -208,7 +234,8 @@ impl ComputeClient {
             .monitor_client
             .to_owned()
             .heap_profiling(HeapProfilingRequest { dir })
-            .await?
+            .await
+            .map_err(RpcError::from_compute_status)?
             .into_inner())
     }
 
@@ -217,7 +244,8 @@ impl ComputeClient {
             .monitor_client
             .to_owned()
             .list_heap_profiling(ListHeapProfilingRequest {})
-            .await?
+            .await
+            .map_err(RpcError::from_compute_status)?
             .into_inner())
     }
 
@@ -226,7 +254,8 @@ impl ComputeClient {
             .monitor_client
             .to_owned()
             .analyze_heap(AnalyzeHeapRequest { path })
-            .await?
+            .await
+            .map_err(RpcError::from_compute_status)?
             .into_inner())
     }
 
@@ -235,7 +264,8 @@ impl ComputeClient {
             .config_client
             .to_owned()
             .show_config(ShowConfigRequest {})
-            .await?
+            .await
+            .map_err(RpcError::from_compute_status)?
             .into_inner())
     }
 }

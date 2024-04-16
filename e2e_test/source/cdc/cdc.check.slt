@@ -43,11 +43,6 @@ select count(*) from t1_rw;
 1
 
 query I
-select count(*) from person_rw;
-----
-3
-
-query I
 select count(*) from tt3_rw;
 ----
 2

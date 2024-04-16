@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,55 +13,40 @@
 // limitations under the License.
 
 use auto_enums::auto_enum;
-use itertools::Itertools;
-use risingwave_common::array::ListValue;
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::array::{ListValue, Utf8Array};
 use risingwave_expr::function;
 
 #[auto_enum(Iterator)]
-fn string_to_array_inner<'a>(
-    s: &'a str,
-    sep: Option<&'a str>,
-) -> impl Iterator<Item = String> + 'a {
+fn string_to_array_inner<'a>(s: &'a str, sep: Option<&'a str>) -> impl Iterator<Item = &'a str> {
     match s.is_empty() {
         true => std::iter::empty(),
         #[nested]
         _ => match sep {
-            Some(sep) if sep.is_empty() => std::iter::once(s.to_string()),
-            Some(sep) => s.split(sep).map(|x| x.to_string()),
-            None => s.chars().map(|x| x.to_string()),
+            Some(sep) if sep.is_empty() => std::iter::once(s),
+            Some(sep) => s.split(sep),
+            None => s.char_indices().map(move |(index, ch)| {
+                let len = ch.len_utf8();
+                &s[index..index + len]
+            }),
         },
     }
 }
 
 // Use cases shown in `e2e_test/batch/functions/string_to_array.slt.part`
 #[function("string_to_array(varchar, varchar) -> varchar[]")]
-pub fn string_to_array2(s: Option<&str>, sep: Option<&str>) -> Option<ListValue> {
-    Some(ListValue::new(
-        string_to_array_inner(s?, sep)
-            .map(|x| Some(ScalarImpl::Utf8(x.into())))
-            .collect_vec(),
-    ))
+pub fn string_to_array2(s: &str, sep: Option<&str>) -> ListValue {
+    ListValue::new(string_to_array_inner(s, sep).collect::<Utf8Array>().into())
 }
 
 #[function("string_to_array(varchar, varchar, varchar) -> varchar[]")]
-pub fn string_to_array3(
-    s: Option<&str>,
-    sep: Option<&str>,
-    null: Option<&str>,
-) -> Option<ListValue> {
+pub fn string_to_array3(s: &str, sep: Option<&str>, null: Option<&str>) -> ListValue {
     let Some(null) = null else {
         return string_to_array2(s, sep);
     };
-    Some(ListValue::new(
-        string_to_array_inner(s?, sep)
-            .map(|x| {
-                if x == null {
-                    None
-                } else {
-                    Some(ScalarImpl::Utf8(x.into()))
-                }
-            })
-            .collect_vec(),
-    ))
+    ListValue::new(
+        string_to_array_inner(s, sep)
+            .map(|x| if x == null { None } else { Some(x) })
+            .collect::<Utf8Array>()
+            .into(),
+    )
 }

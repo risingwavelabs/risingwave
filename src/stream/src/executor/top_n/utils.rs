@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,8 +30,8 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use super::CacheKey;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, PkIndicesRef, Watermark,
+    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, Message,
+    Watermark,
 };
 
 pub trait TopNExecutorBase: Send + 'static {
@@ -47,7 +47,8 @@ pub trait TopNExecutorBase: Send + 'static {
         epoch: EpochPair,
     ) -> impl Future<Output = StreamExecutorResult<()>> + Send;
 
-    fn info(&self) -> &ExecutorInfo;
+    /// Flush the buffered chunk to the storage backend.
+    fn try_flush_data(&mut self) -> impl Future<Output = StreamExecutorResult<()>> + Send;
 
     /// Update the vnode bitmap for the state table and manipulate the cache if necessary, only used
     /// by Group Top-N since it's distributed.
@@ -69,33 +70,17 @@ pub trait TopNExecutorBase: Send + 'static {
 
 /// The struct wraps a [`TopNExecutorBase`]
 pub struct TopNExecutorWrapper<E> {
-    pub(super) input: BoxedExecutor,
+    pub(super) input: Executor,
     pub(super) ctx: ActorContextRef,
     pub(super) inner: E,
 }
 
-impl<E> Executor for TopNExecutorWrapper<E>
+impl<E> Execute for TopNExecutorWrapper<E>
 where
     E: TopNExecutorBase,
 {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.top_n_executor_execute().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.inner.info().schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.inner.info().pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.inner.info().identity
-    }
-
-    fn info(&self) -> ExecutorInfo {
-        self.inner.info().clone()
     }
 }
 
@@ -125,7 +110,10 @@ where
                         yield Message::Watermark(output_watermark);
                     }
                 }
-                Message::Chunk(chunk) => yield Message::Chunk(self.inner.apply_chunk(chunk).await?),
+                Message::Chunk(chunk) => {
+                    yield Message::Chunk(self.inner.apply_chunk(chunk).await?);
+                    self.inner.try_flush_data().await?;
+                }
                 Message::Barrier(barrier) => {
                     self.inner.flush_data(barrier.epoch).await?;
 

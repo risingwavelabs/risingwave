@@ -4,6 +4,7 @@
 
 1. Start the cluster with `docker compose up -d` command.
 The command will start a RisingWave cluster together with a integrated trino and presto instance.
+
 2. Connect the RisingWave frontend via the psql client. Create and insert data into the RisingWave table.
 ```shell
 psql -h localhost -p 4566 -d dev -U root
@@ -16,6 +17,7 @@ INSERT 0 1
 dev=> flush;
 FLUSH
 ```
+
 3. Query RisingWave from presto or trino
 ```shell
 # Start trino client

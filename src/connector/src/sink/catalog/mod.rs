@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,11 +19,14 @@ use std::collections::{BTreeMap, HashMap};
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ConnectionId, DatabaseId, Field, Schema, SchemaId, TableId, UserId,
+    ColumnCatalog, ConnectionId, CreateType, DatabaseId, Field, Schema, SchemaId, TableId, UserId,
+    OBJECT_ID_PLACEHOLDER,
 };
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::{PbSink, PbSinkFormatDesc, PbSinkType, PbStreamJobStatus};
+use risingwave_pb::catalog::{
+    PbCreateType, PbSink, PbSinkFormatDesc, PbSinkType, PbStreamJobStatus,
+};
 
 use super::{
     SinkError, CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
@@ -43,7 +46,7 @@ impl SinkId {
     /// Sometimes the id field is filled later, we use this value for better debugging.
     pub const fn placeholder() -> Self {
         SinkId {
-            sink_id: u32::MAX - 1,
+            sink_id: OBJECT_ID_PLACEHOLDER,
         }
     }
 
@@ -204,7 +207,12 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             F::Plain => SinkFormat::AppendOnly,
             F::Upsert => SinkFormat::Upsert,
             F::Debezium => SinkFormat::Debezium,
-            f @ (F::Unspecified | F::Native | F::DebeziumMongo | F::Maxwell | F::Canal) => {
+            f @ (F::Unspecified
+            | F::Native
+            | F::DebeziumMongo
+            | F::Maxwell
+            | F::Canal
+            | F::None) => {
                 return Err(SinkError::Config(anyhow!(
                     "sink format unsupported: {}",
                     f.as_str_name()
@@ -216,7 +224,7 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             E::Protobuf => SinkEncode::Protobuf,
             E::Template => SinkEncode::Template,
             E::Avro => SinkEncode::Avro,
-            e @ (E::Unspecified | E::Native | E::Csv | E::Bytes) => {
+            e @ (E::Unspecified | E::Native | E::Csv | E::Bytes | E::None) => {
                 return Err(SinkError::Config(anyhow!(
                     "sink encode unsupported: {}",
                     e.as_str_name()
@@ -296,6 +304,12 @@ pub struct SinkCatalog {
 
     /// Name for the table info for Debezium sink
     pub sink_from_name: String,
+
+    pub target_table: Option<TableId>,
+
+    pub created_at_cluster_version: Option<String>,
+    pub initialized_at_cluster_version: Option<String>,
+    pub create_type: CreateType,
 }
 
 impl SinkCatalog {
@@ -333,6 +347,10 @@ impl SinkCatalog {
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
             stream_job_status: PbStreamJobStatus::Creating.into(),
+            target_table: self.target_table.map(|table_id| table_id.table_id()),
+            created_at_cluster_version: self.created_at_cluster_version.clone(),
+            initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
+            create_type: self.create_type.to_proto() as i32,
         }
     }
 
@@ -374,6 +392,7 @@ impl SinkCatalog {
 impl From<PbSink> for SinkCatalog {
     fn from(pb: PbSink) -> Self {
         let sink_type = pb.get_sink_type().unwrap();
+        let create_type = pb.get_create_type().unwrap_or(PbCreateType::Foreground);
         let format_desc = match pb.format_desc {
             Some(f) => f.try_into().ok(),
             None => {
@@ -421,6 +440,10 @@ impl From<PbSink> for SinkCatalog {
             initialized_at_epoch: pb.initialized_at_epoch.map(Epoch::from),
             db_name: pb.db_name,
             sink_from_name: pb.sink_from_name,
+            target_table: pb.target_table.map(TableId::new),
+            initialized_at_cluster_version: pb.initialized_at_cluster_version,
+            created_at_cluster_version: pb.created_at_cluster_version,
+            create_type: CreateType::from_proto(create_type),
         }
     }
 }

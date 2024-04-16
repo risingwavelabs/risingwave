@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,9 +15,9 @@
 use core::ops::Bound::Unbounded;
 
 use risingwave_common::catalog::TableId;
-use risingwave_common::util::epoch::MAX_EPOCH;
+use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_storage::hummock::CachePolicy;
-use risingwave_storage::store::{PrefetchOptions, ReadOptions, StateStoreReadExt};
+use risingwave_storage::store::{PrefetchOptions, ReadOptions, StateStoreIter, StateStoreRead};
 
 use crate::common::HummockServiceOpts;
 use crate::CtlContext;
@@ -31,26 +31,24 @@ pub async fn list_kv(
     let hummock = context
         .hummock_store(HummockServiceOpts::from_env(data_dir)?)
         .await?;
-    if epoch == MAX_EPOCH {
-        tracing::info!("using MAX_EPOCH as epoch");
+    if is_max_epoch(epoch) {
+        tracing::info!("using MAX EPOCH as epoch");
     }
-    let scan_result = {
-        let range = (Unbounded, Unbounded);
-        hummock
-            .scan(
-                range,
-                epoch,
-                None,
-                ReadOptions {
-                    table_id: TableId { table_id },
-                    prefetch_options: PrefetchOptions::default(),
-                    cache_policy: CachePolicy::NotFill,
-                    ..Default::default()
-                },
-            )
-            .await?
-    };
-    for (k, v) in scan_result {
+    let range = (Unbounded, Unbounded);
+    let mut scan_result = hummock
+        .iter(
+            range,
+            epoch,
+            ReadOptions {
+                table_id: TableId { table_id },
+                prefetch_options: PrefetchOptions::prefetch_for_large_range_scan(),
+                cache_policy: CachePolicy::NotFill,
+                ..Default::default()
+            },
+        )
+        .await?;
+    while let Some(item) = scan_result.try_next().await? {
+        let (k, v) = item;
         let print_string = format!("[t{}]", k.user_key.table_id.table_id());
         println!("{} {:?} => {:?}", print_string, k, v)
     }

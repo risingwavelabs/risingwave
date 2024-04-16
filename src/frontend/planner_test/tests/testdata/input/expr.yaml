@@ -40,6 +40,11 @@
     SELECT null < null;
   expected_outputs:
   - logical_plan
+- name: hex bitwise-or bin
+  sql: |
+    SELECT 0x25 | 0b110;
+  expected_outputs:
+  - logical_plan
 - name: bind is distinct from
   sql: |
     SELECT 1 IS DISTINCT FROM 2
@@ -449,3 +454,15 @@
   expected_outputs:
   - batch_plan
   - stream_error
+- name: without variadic keyword
+  sql: |
+    create table t(a varchar, b varchar);
+    select concat_ws(',', a, b) from t;
+  expected_outputs:
+  - batch_plan
+- name: with variadic keyword
+  sql: |
+    create table t(a varchar, b varchar);
+    select concat_ws(',', variadic array[a, b]) from t;
+  expected_outputs:
+  - batch_plan

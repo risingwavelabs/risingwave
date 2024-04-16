@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,9 +21,10 @@
 use risingwave_common::catalog::{
     is_row_id_column_name, is_system_schema, ROWID_PREFIX, RW_RESERVED_COLUMN_NAME_PREFIX,
 };
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_connector::sink::catalog::SinkCatalog;
 use thiserror::Error;
+
+use crate::error::{ErrorCode, Result, RwError};
 pub(crate) mod catalog_service;
 
 pub(crate) mod connection_catalog;
@@ -33,6 +34,7 @@ pub(crate) mod index_catalog;
 pub(crate) mod root_catalog;
 pub(crate) mod schema_catalog;
 pub(crate) mod source_catalog;
+pub(crate) mod subscription_catalog;
 pub(crate) mod system_catalog;
 pub(crate) mod table_catalog;
 pub(crate) mod view_catalog;
@@ -46,6 +48,7 @@ use crate::user::UserId;
 pub(crate) type ConnectionId = u32;
 pub(crate) type SourceId = u32;
 pub(crate) type SinkId = u32;
+pub(crate) type SubscriptionId = u32;
 pub(crate) type ViewId = u32;
 pub(crate) type DatabaseId = u32;
 pub(crate) type SchemaId = u32;

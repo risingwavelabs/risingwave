@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes};
-use risingwave_common::cache::CachePriority;
+use foyer::memory::CacheContext;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::TABLE_PREFIX_LEN;
@@ -61,7 +61,9 @@ async fn test_failpoints_state_store_read_upload() {
     .await
     .unwrap();
 
-    let mut local = hummock_storage.new_local(NewLocalOptions::default()).await;
+    let mut local = hummock_storage
+        .new_local(NewLocalOptions::for_test(TableId::default()))
+        .await;
 
     let anchor = gen_key_from_str(VirtualNode::ZERO, "aa");
     let mut batch1 = vec![
@@ -86,7 +88,6 @@ async fn test_failpoints_state_store_read_upload() {
     local
         .ingest_batch(
             batch1,
-            vec![],
             WriteOptions {
                 epoch: 1,
                 table_id: Default::default(),
@@ -113,7 +114,7 @@ async fn test_failpoints_state_store_read_upload() {
             1,
             ReadOptions {
                 prefix_hint: Some(Bytes::from(anchor_prefix_hint)),
-                cache_policy: CachePolicy::Fill(CachePriority::High),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -125,7 +126,6 @@ async fn test_failpoints_state_store_read_upload() {
     local
         .ingest_batch(
             batch2,
-            vec![],
             WriteOptions {
                 epoch: 3,
                 table_id: Default::default(),
@@ -167,7 +167,7 @@ async fn test_failpoints_state_store_read_upload() {
             2,
             ReadOptions {
                 prefix_hint: Some(Bytes::from(anchor_prefix_hint)),
-                cache_policy: CachePolicy::Fill(CachePriority::High),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -182,7 +182,7 @@ async fn test_failpoints_state_store_read_upload() {
             2,
             ReadOptions {
                 table_id: Default::default(),
-                cache_policy: CachePolicy::Fill(CachePriority::High),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -201,7 +201,7 @@ async fn test_failpoints_state_store_read_upload() {
             2,
             ReadOptions {
                 prefix_hint: Some(Bytes::from(bee_prefix_hint)),
-                cache_policy: CachePolicy::Fill(CachePriority::High),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -239,7 +239,7 @@ async fn test_failpoints_state_store_read_upload() {
             5,
             ReadOptions {
                 prefix_hint: Some(Bytes::from(anchor_prefix_hint)),
-                cache_policy: CachePolicy::Fill(CachePriority::High),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -256,7 +256,7 @@ async fn test_failpoints_state_store_read_upload() {
             5,
             ReadOptions {
                 prefetch_options: PrefetchOptions::default(),
-                cache_policy: CachePolicy::Fill(CachePriority::High),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )

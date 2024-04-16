@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use risingwave_common::types::DataType;
-use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::plan_common::JoinType;
 
 use crate::expr::{
@@ -44,31 +43,19 @@ impl Rule for FilterWithNowToJoinRule {
             if let Some((input_expr, cmp, now_expr)) = expr.as_now_comparison_cond() {
                 let now_expr = rewriter.rewrite_expr(now_expr);
 
-                // as a sanity check, ensure that this expression will derive a watermark
-                // on the output of the now executor
-                debug_assert_eq!(
-                    try_derive_watermark(&now_expr),
-                    WatermarkDerivation::Watermark(lhs_len)
-                );
-
-                now_filters.push(FunctionCall::new(cmp, vec![input_expr, now_expr]).unwrap());
+                // ensure that this expression will derive a watermark
+                if try_derive_watermark(&now_expr) != WatermarkDerivation::Watermark(lhs_len) {
+                    remainder.push(expr.clone());
+                } else {
+                    now_filters.push(FunctionCall::new(cmp, vec![input_expr, now_expr]).unwrap());
+                }
             } else {
                 remainder.push(expr.clone());
             }
         });
 
-        // We want to put `input_expr >/>= now_expr` before `input_expr </<= now_expr` as the former
-        // will introduce a watermark that can reduce state (since `now_expr` is monotonically
-        // increasing)
-        now_filters.sort_by_key(|l| rank_cmp(l.func_type()));
-
-        // Ignore no now filter & forbid now filters that do not create a watermark
-        if now_filters.is_empty()
-            || !matches!(
-                now_filters[0].func_type(),
-                Type::GreaterThan | Type::GreaterThanOrEqual
-            )
-        {
+        // Ignore no now filter
+        if now_filters.is_empty() {
             return None;
         }
         let mut new_plan = plan.inputs()[0].clone();
@@ -102,14 +89,6 @@ impl Rule for FilterWithNowToJoinRule {
 impl FilterWithNowToJoinRule {
     pub fn create() -> BoxedRule {
         Box::new(FilterWithNowToJoinRule {})
-    }
-}
-
-fn rank_cmp(cmp: Type) -> u8 {
-    match cmp {
-        Type::GreaterThan | Type::GreaterThanOrEqual => 0,
-        Type::LessThan | Type::LessThanOrEqual => 1,
-        _ => 2,
     }
 }
 

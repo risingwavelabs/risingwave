@@ -1562,7 +1562,7 @@ SELECT jsonb_object_agg(name, type) FROM foo;
 ERROR:  field name must not be null
 -- jsonb_object
 -- empty object, one dimension
-SELECT jsonb_object('{}');
+SELECT jsonb_object('{}'::text[]);
  jsonb_object 
 --------------
  {}
@@ -1576,27 +1576,27 @@ SELECT jsonb_object('{}', '{}');
 (1 row)
 
 -- one dimension
-SELECT jsonb_object('{a,1,b,2,3,NULL,"d e f","a b c"}');
+SELECT jsonb_object('{a,1,b,2,3,NULL,"d e f","a b c"}'::text[]);
                    jsonb_object                    
 ---------------------------------------------------
  {"3": null, "a": "1", "b": "2", "d e f": "a b c"}
 (1 row)
 
 -- same but with two dimensions
-SELECT jsonb_object('{{a,1},{b,2},{3,NULL},{"d e f","a b c"}}');
+SELECT jsonb_object('{{a,1},{b,2},{3,NULL},{"d e f","a b c"}}'::text[][]);
                    jsonb_object                    
 ---------------------------------------------------
  {"3": null, "a": "1", "b": "2", "d e f": "a b c"}
 (1 row)
 
 -- odd number error
-SELECT jsonb_object('{a,b,c}');
+SELECT jsonb_object('{a,b,c}'::text[]);
 ERROR:  array must have even number of elements
 -- one column error
-SELECT jsonb_object('{{a},{b}}');
+SELECT jsonb_object('{{a},{b}}'::text[][]);
 ERROR:  array must have two columns
 -- too many columns error
-SELECT jsonb_object('{{a,b,c},{b,c,d}}');
+SELECT jsonb_object('{{a,b,c},{b,c,d}}'::text[][]);
 ERROR:  array must have two columns
 -- too many dimensions error
 SELECT jsonb_object('{{{a,b},{c,d}},{{b,c},{d,e}}}');

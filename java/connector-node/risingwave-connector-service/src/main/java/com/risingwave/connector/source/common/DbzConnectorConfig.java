@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 package com.risingwave.connector.source.common;
 
+import com.mongodb.ConnectionString;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.ConfigurableOffsetBackingStore;
 import java.io.IOException;
@@ -30,9 +31,8 @@ import org.slf4j.LoggerFactory;
 public class DbzConnectorConfig {
     private static final Logger LOG = LoggerFactory.getLogger(DbzConnectorConfig.class);
 
-    /* Debezium private configs */
-    public static final String WAIT_FOR_CONNECTOR_EXIT_BEFORE_INTERRUPT_MS =
-            "debezium.embedded.shutdown.pause.before.interrupt.ms";
+    public static final String WAIT_FOR_STREAMING_START_BEFORE_EXIT_SECS =
+            "cdc.source.wait.streaming.before.exit.seconds";
 
     /* Common configs */
     public static final String HOST = "hostname";
@@ -55,16 +55,20 @@ public class DbzConnectorConfig {
     public static final String PG_SCHEMA_NAME = "schema.name";
 
     /* RisingWave configs */
-    public static final String CDC_SHARING_MODE = "rw.sharing.mode.enable";
-
     private static final String DBZ_CONFIG_FILE = "debezium.properties";
     private static final String MYSQL_CONFIG_FILE = "mysql.properties";
     private static final String POSTGRES_CONFIG_FILE = "postgres.properties";
+    private static final String MONGODB_CONFIG_FILE = "mongodb.properties";
 
     private static final String DBZ_PROPERTY_PREFIX = "debezium.";
 
     private static final String SNAPSHOT_MODE_KEY = "debezium.snapshot.mode";
     private static final String SNAPSHOT_MODE_BACKFILL = "rw_cdc_backfill";
+
+    public static class MongoDb {
+        public static final String MONGO_URL = "mongodb.url";
+        public static final String MONGO_COLLECTION_NAME = "collection.name";
+    }
 
     private static Map<String, String> extractDebeziumProperties(
             Map<String, String> userProperties) {
@@ -81,10 +85,9 @@ public class DbzConnectorConfig {
     }
 
     private final long sourceId;
-
     private final SourceTypeE sourceType;
-
     private final Properties resolvedDbzProps;
+    private final boolean isBackfillSource;
 
     public long getSourceId() {
         return sourceId;
@@ -98,12 +101,17 @@ public class DbzConnectorConfig {
         return resolvedDbzProps;
     }
 
+    public boolean isBackfillSource() {
+        return isBackfillSource;
+    }
+
     public DbzConnectorConfig(
             SourceTypeE source,
             long sourceId,
             String startOffset,
             Map<String, String> userProps,
-            boolean snapshotDone) {
+            boolean snapshotDone,
+            boolean isCdcSourceJob) {
 
         StringSubstitutor substitutor = new StringSubstitutor(userProps);
         var dbzProps = initiateDbConfig(DBZ_CONFIG_FILE, substitutor);
@@ -112,12 +120,13 @@ public class DbzConnectorConfig {
                         && userProps.get(SNAPSHOT_MODE_KEY).equals(SNAPSHOT_MODE_BACKFILL);
 
         LOG.info(
-                "DbzConnectorConfig: source={}, sourceId={}, startOffset={}, snapshotDone={}, isCdcBackfill={}",
+                "DbzConnectorConfig: source={}, sourceId={}, startOffset={}, snapshotDone={}, isCdcBackfill={}, isCdcSourceJob={}",
                 source,
                 sourceId,
                 startOffset,
                 snapshotDone,
-                isCdcBackfill);
+                isCdcBackfill,
+                isCdcSourceJob);
 
         if (source == SourceTypeE.MYSQL) {
             var mysqlProps = initiateDbConfig(MYSQL_CONFIG_FILE, substitutor);
@@ -150,13 +159,50 @@ public class DbzConnectorConfig {
 
             dbzProps.putAll(mysqlProps);
 
-        } else if (source == SourceTypeE.POSTGRES || source == SourceTypeE.CITUS) {
+        } else if (source == SourceTypeE.POSTGRES) {
+            var postgresProps = initiateDbConfig(POSTGRES_CONFIG_FILE, substitutor);
+
+            // disable publication auto creation if needed
+            var pubAutoCreate =
+                    Boolean.parseBoolean(
+                            userProps.getOrDefault(DbzConnectorConfig.PG_PUB_CREATE, "true"));
+            if (!pubAutoCreate) {
+                postgresProps.setProperty("publication.autocreate.mode", "disabled");
+            }
+            if (isCdcBackfill) {
+                // skip the initial snapshot for cdc backfill
+                postgresProps.setProperty("snapshot.mode", "never");
+
+                // if startOffset is specified, we should continue
+                // reading changes from the given offset
+                if (null != startOffset && !startOffset.isBlank()) {
+                    postgresProps.setProperty(
+                            ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
+                }
+
+            } else {
+                // if snapshot phase is finished and offset is specified, we will continue reading
+                // changes from the given offset
+                if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
+                    postgresProps.setProperty("snapshot.mode", "never");
+                    postgresProps.setProperty(
+                            ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
+                }
+            }
+
+            dbzProps.putAll(postgresProps);
+
+            if (isCdcSourceJob) {
+                // remove table filtering for the shared Postgres source, since we
+                // allow user to ingest tables in different schemas
+                LOG.info("Disable table filtering for the shared Postgres source");
+                dbzProps.remove("table.include.list");
+            }
+        } else if (source == SourceTypeE.CITUS) {
             var postgresProps = initiateDbConfig(POSTGRES_CONFIG_FILE, substitutor);
 
             // citus needs all_tables publication to capture all shards
-            if (source == SourceTypeE.CITUS) {
-                postgresProps.setProperty("publication.autocreate.mode", "all_tables");
-            }
+            postgresProps.setProperty("publication.autocreate.mode", "all_tables");
 
             // disable publication auto creation if needed
             var pubAutoCreate =
@@ -174,6 +220,27 @@ public class DbzConnectorConfig {
                         ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
             }
             dbzProps.putAll(postgresProps);
+        } else if (source == SourceTypeE.MONGODB) {
+            var mongodbProps = initiateDbConfig(MONGODB_CONFIG_FILE, substitutor);
+
+            // if snapshot phase is finished and offset is specified, we will continue reading
+            // changes from the given offset
+            if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
+                mongodbProps.setProperty("snapshot.mode", "never");
+                mongodbProps.setProperty(
+                        ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
+            }
+
+            var mongodbUrl = userProps.get("mongodb.url");
+            var collection = userProps.get("collection.name");
+            var connectionStr = new ConnectionString(mongodbUrl);
+            var connectorName =
+                    String.format(
+                            "MongoDB_%d:%s:%s", sourceId, connectionStr.getHosts(), collection);
+            mongodbProps.setProperty("name", connectorName);
+
+            dbzProps.putAll(mongodbProps);
+
         } else {
             throw new RuntimeException("unsupported source type: " + source);
         }
@@ -183,19 +250,10 @@ public class DbzConnectorConfig {
             dbzProps.putIfAbsent(entry.getKey(), entry.getValue());
         }
 
-        if (Utils.getCdcSourceMode(userProps) == CdcSourceMode.SHARING_MODE) {
-            adjustConfigForSharedCdcStream(dbzProps);
-        }
-
         this.sourceId = sourceId;
         this.sourceType = source;
         this.resolvedDbzProps = dbzProps;
-    }
-
-    private void adjustConfigForSharedCdcStream(Properties dbzProps) {
-        // disable table filtering for the shared cdc stream
-        LOG.info("Disable table filtering for the shared cdc stream");
-        dbzProps.remove("table.include.list");
+        this.isBackfillSource = isCdcBackfill;
     }
 
     private Properties initiateDbConfig(String fileName, StringSubstitutor substitutor) {

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ pub mod template;
 
 pub use avro::{AvroEncoder, AvroHeader};
 pub use json::JsonEncoder;
-pub use proto::ProtoEncoder;
+pub use proto::{ProtoEncoder, ProtoHeader};
 
 /// Encode a row of a relation into
 /// * an object in json
@@ -97,6 +97,12 @@ pub enum TimestampHandlingMode {
     String,
 }
 
+#[derive(Clone, Copy)]
+pub enum TimeHandlingMode {
+    Milli,
+    String,
+}
+
 #[derive(Clone, Copy, Default)]
 pub enum TimestamptzHandlingMode {
     #[default]
@@ -133,9 +139,13 @@ pub enum CustomJsonType {
     // Doris's json need date is string.
     // The internal order of the struct should follow the insertion order.
     // The decimal needs verification and calibration.
-    Doris(HashMap<String, (u8, u8)>),
-    // Bigquery's json need date is string.
-    Bigquery,
+    Doris(HashMap<String, u8>),
+    // Es's json need jsonb is struct
+    Es,
+    // starrocks' need jsonb is struct
+    StarRocks,
+    // bigquery need null array -> []
+    BigQuery,
     None,
 }
 

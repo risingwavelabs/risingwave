@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,19 +17,19 @@ use std::fmt;
 use std::sync::Arc;
 
 use parse_display::Display;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
 
 use super::iter_util::ZipEqDebug;
 use crate::array::{Array, DataChunk};
 use crate::catalog::{FieldDisplay, Schema};
 use crate::dispatch_array_variants;
-use crate::estimate_size::EstimateSize;
 use crate::row::Row;
 use crate::types::{DefaultOrdered, ToDatumRef};
 
 /// Sort direction, ascending/descending.
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Display, Default)]
-enum Direction {
+pub enum Direction {
     #[default]
     #[display("ASC")]
     Ascending,
@@ -38,7 +38,7 @@ enum Direction {
 }
 
 impl Direction {
-    pub fn from_protobuf(direction: &PbDirection) -> Self {
+    fn from_protobuf(direction: &PbDirection) -> Self {
         match direction {
             PbDirection::Ascending => Self::Ascending,
             PbDirection::Descending => Self::Descending,
@@ -46,7 +46,7 @@ impl Direction {
         }
     }
 
-    pub fn to_protobuf(self) -> PbDirection {
+    fn to_protobuf(self) -> PbDirection {
         match self {
             Self::Ascending => PbDirection::Ascending,
             Self::Descending => PbDirection::Descending,
@@ -74,7 +74,7 @@ enum NullsAre {
 }
 
 impl NullsAre {
-    pub fn from_protobuf(nulls_are: &PbNullsAre) -> Self {
+    fn from_protobuf(nulls_are: &PbNullsAre) -> Self {
         match nulls_are {
             PbNullsAre::Largest => Self::Largest,
             PbNullsAre::Smallest => Self::Smallest,
@@ -82,7 +82,7 @@ impl NullsAre {
         }
     }
 
-    pub fn to_protobuf(self) -> PbNullsAre {
+    fn to_protobuf(self) -> PbNullsAre {
         match self {
             Self::Largest => PbNullsAre::Largest,
             Self::Smallest => PbNullsAre::Smallest,
@@ -183,6 +183,10 @@ impl OrderType {
     /// Create a `DESC NULLS LAST` order type.
     pub fn descending_nulls_last() -> Self {
         Self::nulls_last(Direction::Descending)
+    }
+
+    pub fn direction(&self) -> Direction {
+        self.direction
     }
 
     pub fn is_ascending(&self) -> bool {
@@ -308,7 +312,7 @@ pub struct HeapElem {
     chunk: DataChunk,
     chunk_idx: usize,
     elem_idx: usize,
-    /// DataChunk can be encoded to accelerate the comparison.
+    /// `DataChunk` can be encoded to accelerate the comparison.
     /// Use `risingwave_common::util::encoding_for_comparison::encode_chunk`
     /// to perform encoding, otherwise the comparison will be performed
     /// column by column.
@@ -448,6 +452,10 @@ fn compare_rows_in_chunk(
         let rhs_array = rhs_data_chunk.column_at(column_order.column_index);
 
         let res = dispatch_array_variants!(&**lhs_array, lhs_inner, {
+            #[expect(
+                clippy::unnecessary_fallible_conversions,
+                reason = "FIXME: Array's `into` is not safe. We should revise it."
+            )]
             let rhs_inner = (&**rhs_array).try_into().unwrap_or_else(|_| {
                 panic!(
                     "Unmatched array types, lhs array is: {}, rhs array is: {}",
@@ -502,9 +510,7 @@ pub fn partial_cmp_datum_iter(
 ) -> Option<Ordering> {
     let mut order_types_iter = order_types.into_iter();
     lhs.into_iter().partial_cmp_by(rhs, |x, y| {
-        let Some(order_type) = order_types_iter.next() else {
-            return None;
-        };
+        let order_type = order_types_iter.next()?;
         partial_cmp_datum(x, y, order_type)
     })
 }
@@ -675,10 +681,7 @@ mod tests {
                 Some(ScalarImpl::Int32(1)),
                 Some(ScalarImpl::Float32(3.0.into())),
             ]))),
-            Some(ScalarImpl::List(ListValue::new(vec![
-                Some(ScalarImpl::Int32(1)),
-                Some(ScalarImpl::Int32(2)),
-            ]))),
+            Some(ScalarImpl::List(ListValue::from_iter([1, 2]))),
         ]);
         let row2 = OwnedRow::new(vec![
             Some(ScalarImpl::Int16(16)),
@@ -697,10 +700,7 @@ mod tests {
                 Some(ScalarImpl::Int32(1)),
                 Some(ScalarImpl::Float32(33333.0.into())), // larger than row1
             ]))),
-            Some(ScalarImpl::List(ListValue::new(vec![
-                Some(ScalarImpl::Int32(1)),
-                Some(ScalarImpl::Int32(2)),
-            ]))),
+            Some(ScalarImpl::List(ListValue::from_iter([1, 2]))),
         ]);
 
         let column_orders = (0..row1.len())

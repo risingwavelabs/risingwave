@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -159,6 +159,7 @@ impl ConfigExpander {
                 let result = match use_type.as_str() {
                     "minio" => ServiceConfig::Minio(serde_yaml::from_str(&out_str)?),
                     "etcd" => ServiceConfig::Etcd(serde_yaml::from_str(&out_str)?),
+                    "sqlite" => ServiceConfig::Sqlite(serde_yaml::from_str(&out_str)?),
                     "frontend" => ServiceConfig::Frontend(serde_yaml::from_str(&out_str)?),
                     "compactor" => ServiceConfig::Compactor(serde_yaml::from_str(&out_str)?),
                     "compute-node" => ServiceConfig::ComputeNode(serde_yaml::from_str(&out_str)?),
@@ -166,7 +167,7 @@ impl ConfigExpander {
                     "prometheus" => ServiceConfig::Prometheus(serde_yaml::from_str(&out_str)?),
                     "grafana" => ServiceConfig::Grafana(serde_yaml::from_str(&out_str)?),
                     "tempo" => ServiceConfig::Tempo(serde_yaml::from_str(&out_str)?),
-                    "opendal" => ServiceConfig::OpenDal(serde_yaml::from_str(&out_str)?),
+                    "opendal" => ServiceConfig::Opendal(serde_yaml::from_str(&out_str)?),
                     "aws-s3" => ServiceConfig::AwsS3(serde_yaml::from_str(&out_str)?),
                     "kafka" => ServiceConfig::Kafka(serde_yaml::from_str(&out_str)?),
                     "pubsub" => ServiceConfig::Pubsub(serde_yaml::from_str(&out_str)?),

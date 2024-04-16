@@ -1,30 +1,18 @@
 ---
 version: "3"
 services:
-  compactor-0:
+  risingwave-standalone:
     extends:
       file: ../../docker/docker-compose.yml
-      service: compactor-0
-  compute-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: compute-node-0
+      service: risingwave-standalone
   etcd-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: etcd-0
-  frontend-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: frontend-node-0
   grafana-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: grafana-0
-  meta-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: meta-node-0
   minio-0:
     extends:
       file: ../../docker/docker-compose.yml
@@ -40,6 +28,7 @@ services:
 
   sqlserver:
     image: mcr.microsoft.com/mssql/server:2017-latest
+    platform: linux/amd64
     environment:
       SA_PASSWORD: "YourPassword123"
       ACCEPT_EULA: "Y"
@@ -56,9 +45,12 @@ services:
       timeout: 5s
       retries: 5
     container_name: sqlserver
+    volumes:
+      - ./sqlserver_prepare.sql:/sqlserver_prepare.sql
 
   debezium:
-    image: debezium/connect:1.9
+    image: debezium-connect
+    build: .
     environment:
       BOOTSTRAP_SERVERS: message_queue:29092
       GROUP_ID: 1
@@ -79,32 +71,10 @@ services:
       sqlserver: { condition: service_healthy }
     container_name: debezium
 
-  debezium_deploy:
-    image: debezium/connect:1.9
-    depends_on:
-      debezium:
-        condition: service_healthy
-    volumes:
-      - ./sql_server/sql_dbz.sh:/sql_dbz.sh
-    entrypoint: [ bash, -c, "/sql_dbz.sh" ]
-    container_name: debezium_deploy
-    restart: on-failure
-
-  prepare_sqlserver:
-    image: mcr.microsoft.com/mssql/server:2017-latest
-    depends_on:
-      sqlserver: { condition: service_healthy }
-    volumes:
-      - ./sql_server/init.sql:/init.sql
-      - ./sql_server/run_init.sh:/run_init.sh
-    entrypoint: [ bash, -c, "/run_init.sh" ]
-    container_name: prepare_sqlserver
-    restart: on-failure
-
 volumes:
   message_queue:
     external: false
-  compute-node-0:
+  risingwave-standalone:
     external: false
   etcd-0:
     external: false

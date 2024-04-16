@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,9 +17,9 @@ use std::hash::Hash;
 
 use bytes::Buf;
 use jsonbb::{Value, ValueRef};
+use risingwave_common_estimate_size::EstimateSize;
 
 use super::{Datum, IntoOrdered, ListValue, ScalarImpl, StructRef, ToOwnedDatum, F64};
-use crate::estimate_size::EstimateSize;
 use crate::types::{DataType, Scalar, ScalarRef, StructType, StructValue};
 use crate::util::iter_util::ZipEqDebug;
 
@@ -237,9 +237,14 @@ impl<'a> JsonbRef<'a> {
         buf
     }
 
+    /// Returns a jsonb `null` value.
+    pub fn null() -> Self {
+        Self(ValueRef::Null)
+    }
+
     /// Returns true if this is a jsonb `null`.
     pub fn is_jsonb_null(&self) -> bool {
-        self.0.as_null().is_some()
+        self.0.is_null()
     }
 
     /// Returns true if this is a jsonb null, boolean, number or string.
@@ -252,12 +257,12 @@ impl<'a> JsonbRef<'a> {
 
     /// Returns true if this is a jsonb array.
     pub fn is_array(&self) -> bool {
-        matches!(self.0, ValueRef::Array(_))
+        self.0.is_array()
     }
 
     /// Returns true if this is a jsonb object.
     pub fn is_object(&self) -> bool {
-        matches!(self.0, ValueRef::Object(_))
+        self.0.is_object()
     }
 
     /// Returns the type name of this jsonb.
@@ -419,11 +424,11 @@ impl<'a> JsonbRef<'a> {
             .0
             .as_array()
             .ok_or_else(|| format!("expected JSON array, but found {self}"))?;
-        let mut elems = Vec::with_capacity(array.len());
+        let mut builder = elem_type.create_array_builder(array.len());
         for v in array.iter() {
-            elems.push(Self(v).to_datum(elem_type)?);
+            builder.append(Self(v).to_datum(elem_type)?);
         }
-        Ok(ListValue::new(elems))
+        Ok(ListValue::new(builder.finish()))
     }
 
     /// Convert the jsonb value to a struct value.

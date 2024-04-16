@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 use risingwave_pb::hummock::CompactionConfig as PbCompactionConfig;
 use sea_orm::entity::prelude::*;
-use sea_orm::FromJsonQueryResult;
 use serde::{Deserialize, Serialize};
 
 use crate::CompactionGroupId;
@@ -32,4 +31,4 @@ pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
 
-crate::derive_from_json_struct!(CompactionConfig, PbCompactionConfig);
+crate::derive_from_blob!(CompactionConfig, PbCompactionConfig);

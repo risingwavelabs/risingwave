@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,19 +14,19 @@
 
 use std::fmt::Write;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use futures_util::FutureExt;
 use itertools::Itertools;
-use risingwave_common::array::{ListRef, ListValue, StructRef, StructValue};
+use risingwave_common::array::{ArrayImpl, DataChunk, ListRef, ListValue, StructRef, StructValue};
 use risingwave_common::cast;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{Int256, IntoOrdered, JsonbRef, ToText, F64};
+use risingwave_common::types::{Int256, JsonbRef, ToText, F64};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::expr::{
-    build_func, Context, Expression, ExpressionBoxExt, InputRefExpression,
-};
+use risingwave_expr::expr::{build_func, Context, ExpressionBoxExt, InputRefExpression};
 use risingwave_expr::{function, ExprError, Result};
 use risingwave_pb::expr::expr_node::PbType;
+use thiserror_ext::AsReport;
 
 #[function("cast(varchar) -> *int")]
 #[function("cast(varchar) -> decimal")]
@@ -51,7 +51,7 @@ where
 #[function("pgwire_recv(bytea) -> int8")]
 pub fn pgwire_recv(elem: &[u8]) -> Result<i64> {
     let fixed_length =
-        <[u8; 8]>::try_from(elem).map_err(|e| ExprError::Parse(e.to_string().into()))?;
+        <[u8; 8]>::try_from(elem).map_err(|e| ExprError::Parse(e.to_report_string().into()))?;
     Ok(i64::from_be_bytes(fixed_length))
 }
 
@@ -86,6 +86,7 @@ pub fn jsonb_to_number<T: TryFrom<F64>>(v: JsonbRef<'_>) -> Result<T> {
 #[function("cast(int4) -> int2")]
 #[function("cast(int8) -> int2")]
 #[function("cast(int8) -> int4")]
+#[function("cast(serial) -> int8")]
 #[function("cast(float4) -> int2")]
 #[function("cast(float8) -> int2")]
 #[function("cast(float4) -> int4")]
@@ -202,16 +203,13 @@ fn list_cast(input: ListRef<'_>, ctx: &Context) -> Result<ListValue> {
         vec![InputRefExpression::new(ctx.arg_types[0].as_list().clone(), 0).boxed()],
     )
     .unwrap();
-    let elements = input.iter();
-    let mut values = Vec::with_capacity(elements.len());
-    for item in elements {
-        let v = cast
-            .eval_row(&OwnedRow::new(vec![item.map(|s| s.into_scalar_impl())])) // TODO: optimize
-            .now_or_never()
-            .unwrap()?;
-        values.push(v);
-    }
-    Ok(ListValue::new(values))
+    let items = Arc::new(ArrayImpl::from(input.to_owned()));
+    let len = items.len();
+    let list = cast
+        .eval(&DataChunk::new(vec![items], len))
+        .now_or_never()
+        .unwrap()?;
+    Ok(ListValue::new(Arc::try_unwrap(list).unwrap()))
 }
 
 /// Cast struct of `source_elem_type` to `target_elem_type` by casting each element.
@@ -303,45 +301,42 @@ mod tests {
         let ctx = Context {
             arg_types: vec![DataType::Varchar],
             return_type: DataType::from_str("int[]").unwrap(),
+            variadic: false,
         };
-        assert_eq!(str_to_list("{}", &ctx).unwrap(), ListValue::new(vec![]));
+        assert_eq!(
+            str_to_list("{}", &ctx).unwrap(),
+            ListValue::empty(&DataType::Varchar)
+        );
 
-        let list123 = ListValue::new(vec![
-            Some(1.to_scalar_value()),
-            Some(2.to_scalar_value()),
-            Some(3.to_scalar_value()),
-        ]);
+        let list123 = ListValue::from_iter([1, 2, 3]);
 
         // Single List
         let ctx = Context {
             arg_types: vec![DataType::Varchar],
             return_type: DataType::from_str("int[]").unwrap(),
+            variadic: false,
         };
         assert_eq!(str_to_list("{1, 2, 3}", &ctx).unwrap(), list123);
 
         // Nested List
-        let nested_list123 = ListValue::new(vec![Some(ScalarImpl::List(list123))]);
+        let nested_list123 = ListValue::from_iter([list123]);
         let ctx = Context {
             arg_types: vec![DataType::Varchar],
             return_type: DataType::from_str("int[][]").unwrap(),
+            variadic: false,
         };
         assert_eq!(str_to_list("{{1, 2, 3}}", &ctx).unwrap(), nested_list123);
 
-        let nested_list445566 = ListValue::new(vec![Some(ScalarImpl::List(ListValue::new(vec![
-            Some(44.to_scalar_value()),
-            Some(55.to_scalar_value()),
-            Some(66.to_scalar_value()),
-        ])))]);
+        let nested_list445566 = ListValue::from_iter([ListValue::from_iter([44, 55, 66])]);
 
-        let double_nested_list123_445566 = ListValue::new(vec![
-            Some(ScalarImpl::List(nested_list123.clone())),
-            Some(ScalarImpl::List(nested_list445566.clone())),
-        ]);
+        let double_nested_list123_445566 =
+            ListValue::from_iter([nested_list123.clone(), nested_list445566.clone()]);
 
         // Double nested List
         let ctx = Context {
             arg_types: vec![DataType::Varchar],
             return_type: DataType::from_str("int[][][]").unwrap(),
+            variadic: false,
         };
         assert_eq!(
             str_to_list("{{{1, 2, 3}}, {{44, 55, 66}}}", &ctx).unwrap(),
@@ -352,32 +347,18 @@ mod tests {
         let ctx = Context {
             arg_types: vec![DataType::from_str("int[][]").unwrap()],
             return_type: DataType::from_str("varchar[][]").unwrap(),
+            variadic: false,
         };
-        let double_nested_varchar_list123_445566 = ListValue::new(vec![
-            Some(ScalarImpl::List(
-                list_cast(
-                    ListRef::ValueRef {
-                        val: &nested_list123,
-                    },
-                    &ctx,
-                )
-                .unwrap(),
-            )),
-            Some(ScalarImpl::List(
-                list_cast(
-                    ListRef::ValueRef {
-                        val: &nested_list445566,
-                    },
-                    &ctx,
-                )
-                .unwrap(),
-            )),
+        let double_nested_varchar_list123_445566 = ListValue::from_iter([
+            list_cast(nested_list123.as_scalar_ref(), &ctx).unwrap(),
+            list_cast(nested_list445566.as_scalar_ref(), &ctx).unwrap(),
         ]);
 
         // Double nested Varchar List
         let ctx = Context {
             arg_types: vec![DataType::Varchar],
             return_type: DataType::from_str("varchar[][][]").unwrap(),
+            variadic: false,
         };
         assert_eq!(
             str_to_list("{{{1, 2, 3}}, {{44, 55, 66}}}", &ctx).unwrap(),
@@ -391,6 +372,7 @@ mod tests {
         let ctx = Context {
             arg_types: vec![DataType::Varchar],
             return_type: DataType::from_str("int[]").unwrap(),
+            variadic: false,
         };
         assert!(str_to_list("{{}", &ctx).is_err());
         assert!(str_to_list("{}}", &ctx).is_err());
@@ -409,6 +391,7 @@ mod tests {
                 ("a", DataType::Int32),
                 ("b", DataType::Int32),
             ])),
+            variadic: false,
         };
         assert_eq!(
             struct_cast(
@@ -444,6 +427,7 @@ mod tests {
         let ctx_str_to_int16 = Context {
             arg_types: vec![DataType::Varchar],
             return_type: DataType::Int16,
+            variadic: false,
         };
         test_str_to_int16::<I16Array, _>(|x| str_parse(x, &ctx_str_to_int16).unwrap()).await;
     }

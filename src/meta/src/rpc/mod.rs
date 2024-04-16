@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 pub mod cloud_provider;
 pub mod ddl_controller;
+mod ddl_controller_v2;
 pub mod election;
 pub mod intercept;
 pub mod metrics;

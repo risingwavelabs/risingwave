@@ -37,21 +37,15 @@ use risingwave_expr::{function, ExprError, Result};
 #[function("jsonb_populate_record(struct, jsonb) -> struct")]
 fn jsonb_populate_record(
     base: Option<StructRef<'_>>,
-    jsonb: Option<JsonbRef<'_>>,
+    jsonb: JsonbRef<'_>,
     ctx: &Context,
-) -> Result<Option<StructValue>> {
-    let Some(jsonb) = jsonb else {
-        // If jsonb is null, return null.
-        return Ok(None);
-    };
+) -> Result<StructValue> {
     let output_type = ctx.return_type.as_struct();
-    Ok(Some(
-        match base {
-            None => jsonb.to_struct(output_type),
-            Some(base) => jsonb.populate_struct(output_type, base),
-        }
-        .map_err(parse_err)?,
-    ))
+    Ok(match base {
+        None => jsonb.to_struct(output_type),
+        Some(base) => jsonb.populate_struct(output_type, base),
+    }
+    .map_err(parse_err)?)
 }
 
 /// Expands the top-level JSON array of objects to a set of rows having the composite type of the
@@ -84,23 +78,17 @@ fn jsonb_populate_record(
 #[function("jsonb_populate_recordset(struct, jsonb) -> setof struct")]
 fn jsonb_populate_recordset<'a>(
     base: Option<StructRef<'a>>,
-    jsonb: Option<JsonbRef<'a>>,
+    jsonb: JsonbRef<'a>,
     ctx: &'a Context,
-) -> Result<Option<impl Iterator<Item = Result<StructValue>> + 'a>> {
-    let Some(jsonb) = jsonb else {
-        // If jsonb is null, return null.
-        return Ok(None);
-    };
+) -> Result<impl Iterator<Item = Result<StructValue>> + 'a> {
     let output_type = ctx.return_type.as_struct();
-    Ok(Some(jsonb.array_elements().map_err(parse_err)?.map(
-        move |elem| {
-            match base {
-                None => elem.to_struct(output_type),
-                Some(base) => elem.populate_struct(output_type, base),
-            }
-            .map_err(parse_err)
-        },
-    )))
+    Ok(jsonb.array_elements().map_err(parse_err)?.map(move |elem| {
+        match base {
+            None => elem.to_struct(output_type),
+            Some(base) => elem.populate_struct(output_type, base),
+        }
+        .map_err(parse_err)
+    }))
 }
 
 /// Expands the top-level JSON object to a row having the composite type defined by an AS clause.

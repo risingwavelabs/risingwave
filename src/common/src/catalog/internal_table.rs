@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::any::type_name;
+use std::fmt::Debug;
 use std::sync::LazyLock;
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use regex::Regex;
 
@@ -40,22 +43,29 @@ pub fn valid_table_name(table_name: &str) -> bool {
     !INTERNAL_TABLE_NAME.is_match(table_name)
 }
 
-pub fn get_dist_key_in_pk_indices(dist_key_indices: &[usize], pk_indices: &[usize]) -> Vec<usize> {
-    let dist_key_in_pk_indices = dist_key_indices
+pub fn get_dist_key_in_pk_indices<I: Eq + Copy + Debug, O: TryFrom<usize>>(
+    dist_key_indices: &[I],
+    pk_indices: &[I],
+) -> anyhow::Result<Vec<O>> {
+    dist_key_indices
         .iter()
         .map(|&di| {
             pk_indices
                 .iter()
                 .position(|&pi| di == pi)
-                .unwrap_or_else(|| {
-                    panic!(
+                .ok_or_else(|| {
+                    anyhow!(
                         "distribution key {:?} must be a subset of primary key {:?}",
-                        dist_key_indices, pk_indices
+                        dist_key_indices,
+                        pk_indices
                     )
                 })
+                .map(|idx| match O::try_from(idx) {
+                    Ok(idx) => idx,
+                    Err(_) => unreachable!("failed to cast {} to {}", idx, type_name::<O>()),
+                })
         })
-        .collect_vec();
-    dist_key_in_pk_indices
+        .try_collect()
 }
 
 /// Get distribution key start index in pk, and return None if `dist_key_in_pk_indices` is not empty

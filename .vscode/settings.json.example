@@ -9,16 +9,29 @@
         "src/risedevtool/schemas/risedev.json": "risedev.yml",
         "src/risedevtool/schemas/risedev-profiles.user.json": "risedev-profiles.user.yml"
     },
-    // // ============================================================================
+
+    // Optional: check with custom lints using `cargo dylint`
+    //
+    // "rust-analyzer.check.overrideCommand": [
+    //     "cargo",
+    //     "dylint",
+    //     "--all",
+    //     "--workspace",
+    //     "--",
+    //     "--all-targets",
+    //     "--message-format=json"
+    // ],
+
+    // // ===========================================================================
     // // BEGIN SECTION: configurations for the development of deterministic testing
-    // // ============================================================================
+    // // ===========================================================================
     // "rust-analyzer.cargo.extraEnv": {
     //     "RUSTFLAGS": "--cfg tokio_unstable --cfg madsim"
     // },
     // "rust-analyzer.runnableEnv": {
     //     "RUSTFLAGS": "--cfg tokio_unstable --cfg madsim"
     // },
-    // "rust-analyzer.checkOnSave.overrideCommand": [
+    // "rust-analyzer.check.overrideCommand": [
     //     "cargo",
     //     "check",
     //     "-p",

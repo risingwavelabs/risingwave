@@ -32,3 +32,14 @@
     create table t (a int, b int);
     delete from t returning sum(a);
   binder_error: 'Bind error: should not have agg/window in the `RETURNING` list'
+- name: distributed delete
+  sql: |
+    set batch_enable_distributed_dml = true;
+    create table t (a int, b int);
+    delete from t;
+  batch_distributed_plan: |-
+    BatchSimpleAgg { aggs: [sum()] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchDelete { table: t }
+        └─BatchExchange { order: [], dist: HashShard(t.a, t.b, t._row_id) }
+          └─BatchScan { table: t, columns: [t.a, t.b, t._row_id], distribution: UpstreamHashShard(t._row_id) }

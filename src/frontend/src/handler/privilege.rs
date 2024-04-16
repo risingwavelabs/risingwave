@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,12 +13,12 @@
 // limitations under the License.
 
 use risingwave_common::acl::AclMode;
-use risingwave_common::error::ErrorCode::PermissionDenied;
-use risingwave_common::error::Result;
 use risingwave_pb::user::grant_privilege::PbObject;
 
 use crate::binder::{BoundQuery, BoundStatement, Relation};
 use crate::catalog::OwnedByUserCatalog;
+use crate::error::ErrorCode::PermissionDenied;
+use crate::error::Result;
 use crate::session::SessionImpl;
 use crate::user::UserId;
 

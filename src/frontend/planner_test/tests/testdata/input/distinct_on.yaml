@@ -23,6 +23,29 @@
     - stream_plan
     - batch_plan
 - sql: |
+    create table t1(a int, b int, c int, k int);
+    create table t2(k int);
+    select distinct on (a) * from t2 join t1 on t1.k = t2.k;
+  expected_outputs:
+    - batch_plan
+- sql: |
+    create table t1(a int, b int, c int, k int);
+    create table t2(k int);
+    select distinct on (3) * from t2 join t1 on t1.k = t2.k;
+  expected_outputs:
+    - batch_plan
+- sql: |
+    CREATE TABLE secret_one (
+      field_one character varying,
+      field_two timestamp with time zone,
+      field_three character varying,
+      field_four double precision,
+      field_five boolean
+    );
+    SELECT DISTINCT ON (window_start) * FROM  TUMBLE(secret_one, field_two, INTERVAL '1' minute);
+  expected_outputs:
+    - batch_plan
+- sql: |
     create table t (a int, b int, c int);
     select distinct on (4) * from t;
   expected_outputs:

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,9 +22,9 @@ use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_source::dml_manager::DmlManagerRef;
 
 use crate::error::{BatchError, Result};
 use crate::executor::{
@@ -32,7 +32,7 @@ use crate::executor::{
 };
 use crate::task::BatchTaskContext;
 
-/// [`UpdateExecutor`] implements table updation with values from its child executor and given
+/// [`UpdateExecutor`] implements table update with values from its child executor and given
 /// expressions.
 // Note: multiple `UPDATE`s in a single epoch, or concurrent `UPDATE`s may lead to conflicting
 // records. This is validated and filtered on the first `Materialize`.
@@ -49,6 +49,7 @@ pub struct UpdateExecutor {
     returning: bool,
     txn_id: TxnId,
     update_column_indices: Vec<usize>,
+    session_id: u32,
 }
 
 impl UpdateExecutor {
@@ -63,6 +64,7 @@ impl UpdateExecutor {
         identity: String,
         returning: bool,
         update_column_indices: Vec<usize>,
+        session_id: u32,
     ) -> Self {
         let chunk_size = chunk_size.next_multiple_of(2);
         let table_schema = child.schema().clone();
@@ -86,6 +88,7 @@ impl UpdateExecutor {
             returning,
             txn_id,
             update_column_indices,
+            session_id,
         }
     }
 }
@@ -133,8 +136,8 @@ impl UpdateExecutor {
 
         let mut builder = DataChunkBuilder::new(data_types, self.chunk_size);
 
-        let mut write_handle: risingwave_source::WriteHandle =
-            table_dml_handle.write_handle(self.txn_id)?;
+        let mut write_handle: risingwave_dml::WriteHandle =
+            table_dml_handle.write_handle(self.session_id, self.txn_id)?;
         write_handle.begin()?;
 
         // Transform the data chunk to a stream chunk, then write to the source.
@@ -150,10 +153,7 @@ impl UpdateExecutor {
             #[cfg(debug_assertions)]
             table_dml_handle.check_chunk_schema(&stream_chunk);
 
-            let cardinality = stream_chunk.cardinality();
-            write_handle.write_chunk(stream_chunk).await?;
-
-            Result::Ok(cardinality / 2)
+            write_handle.write_chunk(stream_chunk).await
         };
 
         let mut rows_updated = 0;
@@ -181,17 +181,21 @@ impl UpdateExecutor {
                 .rows()
                 .zip_eq_debug(updated_data_chunk.rows())
             {
-                let None = builder.append_one_row(row_delete) else {
-                    unreachable!("no chunk should be yielded when appending the deleted row as the chunk size is always even");
-                };
-                if let Some(chunk) = builder.append_one_row(row_insert) {
-                    rows_updated += write_txn_data(chunk).await?;
+                rows_updated += 1;
+                // If row_delete == row_insert, we don't need to do a actual update
+                if row_delete != row_insert {
+                    let None = builder.append_one_row(row_delete) else {
+                        unreachable!("no chunk should be yielded when appending the deleted row as the chunk size is always even");
+                    };
+                    if let Some(chunk) = builder.append_one_row(row_insert) {
+                        write_txn_data(chunk).await?;
+                    }
                 }
             }
         }
 
         if let Some(chunk) = builder.consume_all() {
-            rows_updated += write_txn_data(chunk).await?;
+            write_txn_data(chunk).await?;
         }
         write_handle.end().await?;
 
@@ -245,6 +249,7 @@ impl BoxedExecutorBuilder for UpdateExecutor {
             source.plan_node().get_identity().clone(),
             update_node.returning,
             update_column_indices,
+            update_node.session_id,
         )))
     }
 }
@@ -259,8 +264,8 @@ mod tests {
         schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
     };
     use risingwave_common::test_prelude::DataChunkTestExt;
+    use risingwave_dml::dml_manager::DmlManager;
     use risingwave_expr::expr::InputRefExpression;
-    use risingwave_source::dml_manager::DmlManager;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -320,6 +325,7 @@ mod tests {
             "UpdateExecutor".to_string(),
             false,
             vec![0, 1],
+            0,
         ));
 
         let handle = tokio::spawn(async move {

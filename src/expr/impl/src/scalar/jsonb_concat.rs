@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -57,8 +57,8 @@ use risingwave_expr::function;
 /// ----
 /// [null, 1]
 /// ```
-#[function("jsonb_cat(jsonb, jsonb) -> jsonb")]
-pub fn jsonb_cat(left: JsonbRef<'_>, right: JsonbRef<'_>) -> JsonbVal {
+#[function("jsonb_concat(jsonb, jsonb) -> jsonb")]
+pub fn jsonb_concat(left: JsonbRef<'_>, right: JsonbRef<'_>) -> JsonbVal {
     match (left.into(), right.into()) {
         // left and right are object based.
         // This would have left:{'a':1}, right:{'b':2} -> {'a':1,'b':2}

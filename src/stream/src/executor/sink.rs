@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,36 +16,43 @@ use std::mem;
 
 use anyhow::anyhow;
 use futures::stream::select;
-use futures::{FutureExt, StreamExt};
+use futures::{pin_mut, FutureExt, StreamExt, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::StreamChunkMut;
-use risingwave_common::array::{merge_chunk_row, Op, StreamChunk, StreamChunkCompactor};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
+use risingwave_common::types::DataType;
 use risingwave_connector::dispatch_sink;
-use risingwave_connector::sink::catalog::{SinkId, SinkType};
+use risingwave_connector::sink::catalog::SinkType;
 use risingwave_connector::sink::log_store::{
     LogReader, LogReaderExt, LogStoreFactory, LogWriter, LogWriterExt,
 };
 use risingwave_connector::sink::{
     build_sink, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam,
 };
+use thiserror_ext::AsReport;
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
-use super::{BoxedExecutor, Executor, ExecutorInfo, Message, PkIndices};
-use crate::executor::{expect_first_barrier, ActorContextRef, BoxedMessageStream};
+use super::{Execute, Executor, ExecutorInfo, Message, PkIndices};
+use crate::common::compact_chunk::{merge_chunk_row, StreamChunkCompactor};
+use crate::executor::{
+    expect_first_barrier, ActorContextRef, BoxedMessageStream, MessageStream, Mutation,
+};
+use crate::task::ActorId;
 
 pub struct SinkExecutor<F: LogStoreFactory> {
     actor_context: ActorContextRef,
     info: ExecutorInfo,
-    input: BoxedExecutor,
+    input: Executor,
     sink: SinkImpl,
     input_columns: Vec<ColumnCatalog>,
     sink_param: SinkParam,
-    log_reader: F::Reader,
-    log_writer: F::Writer,
+    log_store_factory: F,
     sink_writer_param: SinkWriterParam,
+    chunk_size: usize,
+    input_data_types: Vec<DataType>,
 }
 
 // Drop all the DELETE messages in this chunk and convert UPDATE INSERT into INSERT.
@@ -76,23 +83,34 @@ fn force_delete_only(c: StreamChunk) -> StreamChunk {
 
 impl<F: LogStoreFactory> SinkExecutor<F> {
     #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::unused_async)]
     pub async fn new(
         actor_context: ActorContextRef,
         info: ExecutorInfo,
-        input: BoxedExecutor,
+        input: Executor,
         sink_writer_param: SinkWriterParam,
         sink_param: SinkParam,
         columns: Vec<ColumnCatalog>,
         log_store_factory: F,
+        chunk_size: usize,
+        input_data_types: Vec<DataType>,
     ) -> StreamExecutorResult<Self> {
-        let (log_reader, log_writer) = log_store_factory.build().await;
-
         let sink = build_sink(sink_param.clone())?;
-        let input_schema: Schema = columns
+        let sink_input_schema: Schema = columns
             .iter()
             .map(|column| Field::from(&column.column_desc))
             .collect();
-        assert_eq!(input_schema.data_types(), info.schema.data_types());
+
+        if let Some(col_dix) = sink_writer_param.extra_partition_col_idx {
+            // Remove the partition column from the schema.
+            assert_eq!(sink_input_schema.data_types(), {
+                let mut data_type = info.schema.data_types();
+                data_type.remove(col_dix);
+                data_type
+            });
+        } else {
+            assert_eq!(sink_input_schema.data_types(), info.schema.data_types());
+        }
 
         Ok(Self {
             actor_context,
@@ -101,13 +119,17 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             sink,
             input_columns: columns,
             sink_param,
-            log_reader,
-            log_writer,
+            log_store_factory,
             sink_writer_param,
+            chunk_size,
+            input_data_types,
         })
     }
 
     fn execute_inner(self) -> BoxedMessageStream {
+        let sink_id = self.sink_param.sink_id;
+        let actor_id = self.actor_context.id;
+
         let stream_key = self.info.pk_indices.clone();
 
         let stream_key_sink_pk_mismatch = {
@@ -116,55 +138,23 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 .any(|i| !self.sink_param.downstream_pk.contains(i))
         };
 
-        let write_log_stream = Self::execute_write_log(
-            self.input,
-            stream_key,
-            self.log_writer
-                .monitored(self.sink_writer_param.sink_metrics.clone()),
-            self.sink_param.sink_id,
-            self.sink_param.sink_type,
-            self.actor_context.clone(),
-            stream_key_sink_pk_mismatch,
-        );
+        let input = self.input.execute();
 
-        dispatch_sink!(self.sink, sink, {
-            let consume_log_stream = Self::execute_consume_log(
-                sink,
-                self.log_reader,
-                self.input_columns,
-                self.sink_writer_param,
-                self.actor_context,
-                self.info,
-            );
-            select(consume_log_stream.into_stream(), write_log_stream).boxed()
-        })
-    }
+        let input_row_count = self
+            .actor_context
+            .streaming_metrics
+            .sink_input_row_count
+            .with_guarded_label_values(&[
+                &sink_id.to_string(),
+                &actor_id.to_string(),
+                &self.actor_context.fragment_id.to_string(),
+            ]);
 
-    #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_write_log(
-        input: BoxedExecutor,
-        stream_key: PkIndices,
-        mut log_writer: impl LogWriter,
-        sink_id: SinkId,
-        sink_type: SinkType,
-        actor_context: ActorContextRef,
-        stream_key_sink_pk_mismatch: bool,
-    ) {
-        let mut input = input.execute();
-
-        let barrier = expect_first_barrier(&mut input).await?;
-
-        let epoch_pair = barrier.epoch;
-
-        log_writer.init(epoch_pair).await?;
-
-        // Propagate the first barrier
-        yield Message::Barrier(barrier);
-
-        // for metrics
-        let sink_id_str = sink_id.to_string();
-        let actor_id_str = actor_context.id.to_string();
-        let fragment_id_str = actor_context.fragment_id.to_string();
+        let input = input.inspect_ok(move |msg| {
+            if let Message::Chunk(c) = msg {
+                input_row_count.inc_by(c.capacity() as u64);
+            }
+        });
 
         // When stream key is different from the user defined primary key columns for sinks. The operations could be out of order
         // stream key: a,b
@@ -191,58 +181,179 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         // delete (1,1)
         // So we do additional compaction in the sink executor per barrier.
 
-        //     1. compact all the chanes with the stream key.
-        //     2. sink all the delete events and then sink all insert evernt.
+        //     1. compact all the changes with the stream key.
+        //     2. sink all the delete events and then sink all insert events.
 
-        // after compacting with the stream key, the two event with the same used defined sink pk must have different stream key.
+        // after compacting with the stream key, the two event with the same user defined sink pk must have different stream key.
         // So the delete event is not to delete the inserted record in our internal streaming SQL semantic.
-        if stream_key_sink_pk_mismatch && sink_type != SinkType::AppendOnly {
-            let mut chunk_buffer = StreamChunkCompactor::new(stream_key.clone());
-            let mut watermark = None;
+        let need_advance_delete =
+            stream_key_sink_pk_mismatch && self.sink_param.sink_type != SinkType::AppendOnly;
+        // NOTE(st1page): reconstruct with sink pk need extra cost to buffer a barrier's data, so currently we bind it with mismatch case.
+        let re_construct_with_sink_pk = need_advance_delete
+            && self.sink_param.sink_type == SinkType::Upsert
+            && !self.sink_param.downstream_pk.is_empty();
+        let processed_input = Self::process_msg(
+            input,
+            self.sink_param.sink_type,
+            stream_key,
+            need_advance_delete,
+            re_construct_with_sink_pk,
+            self.chunk_size,
+            self.input_data_types,
+            self.sink_param.downstream_pk.clone(),
+        );
+
+        if self.sink.is_sink_into_table() {
+            processed_input.boxed()
+        } else {
+            self.log_store_factory
+                .build()
+                .map(move |(log_reader, log_writer)| {
+                    let write_log_stream = Self::execute_write_log(
+                        processed_input,
+                        log_writer.monitored(self.sink_writer_param.sink_metrics.clone()),
+                        actor_id,
+                    );
+
+                    dispatch_sink!(self.sink, sink, {
+                        let consume_log_stream = Self::execute_consume_log(
+                            sink,
+                            log_reader,
+                            self.input_columns,
+                            self.sink_param,
+                            self.sink_writer_param,
+                            self.actor_context,
+                        );
+                        // TODO: may try to remove the boxed
+                        select(consume_log_stream.into_stream(), write_log_stream).boxed()
+                    })
+                })
+                .into_stream()
+                .flatten()
+                .boxed()
+        }
+    }
+
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn execute_write_log(
+        input: impl MessageStream,
+        mut log_writer: impl LogWriter,
+        actor_id: ActorId,
+    ) {
+        pin_mut!(input);
+        let barrier = expect_first_barrier(&mut input).await?;
+
+        let epoch_pair = barrier.epoch;
+
+        log_writer
+            .init(epoch_pair, barrier.is_pause_on_startup())
+            .await?;
+
+        let mut is_paused = false;
+
+        // Propagate the first barrier
+        yield Message::Barrier(barrier);
+
+        #[for_await]
+        for msg in input {
+            match msg? {
+                Message::Watermark(w) => yield Message::Watermark(w),
+                Message::Chunk(chunk) => {
+                    assert!(!is_paused, "Should not receive any data after pause");
+                    log_writer.write_chunk(chunk.clone()).await?;
+                    yield Message::Chunk(chunk);
+                }
+                Message::Barrier(barrier) => {
+                    log_writer
+                        .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
+                        .await?;
+
+                    if let Some(mutation) = barrier.mutation.as_deref() {
+                        match mutation {
+                            Mutation::Pause => {
+                                log_writer.pause()?;
+                                is_paused = true;
+                            }
+                            Mutation::Resume => {
+                                log_writer.resume()?;
+                                is_paused = false;
+                            }
+                            _ => (),
+                        }
+                    }
+
+                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(actor_id) {
+                        log_writer.update_vnode_bitmap(vnode_bitmap).await?;
+                    }
+                    yield Message::Barrier(barrier);
+                }
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn process_msg(
+        input: impl MessageStream,
+        sink_type: SinkType,
+        stream_key: PkIndices,
+        need_advance_delete: bool,
+        re_construct_with_sink_pk: bool,
+        chunk_size: usize,
+        input_data_types: Vec<DataType>,
+        down_stream_pk: Vec<usize>,
+    ) {
+        // need to buffer chunks during one barrier
+        if need_advance_delete || re_construct_with_sink_pk {
+            let mut chunk_buffer = vec![];
+            let mut watermark: Option<super::Watermark> = None;
             #[for_await]
             for msg in input {
                 match msg? {
                     Message::Watermark(w) => watermark = Some(w),
                     Message::Chunk(c) => {
-                        actor_context
-                            .streaming_metrics
-                            .sink_input_row_count
-                            .with_label_values(&[&sink_id_str, &actor_id_str, &fragment_id_str])
-                            .inc_by(c.capacity() as u64);
-
-                        chunk_buffer.push_chunk(c);
+                        chunk_buffer.push(c);
                     }
                     Message::Barrier(barrier) => {
-                        let mut delete_chunks = vec![];
-                        let mut insert_chunks = vec![];
-                        for c in mem::replace(
-                            &mut chunk_buffer,
-                            StreamChunkCompactor::new(stream_key.clone()),
-                        )
-                        .into_compacted_chunks()
-                        {
-                            if sink_type != SinkType::ForceAppendOnly {
-                                // Force append-only by dropping UPDATE/DELETE messages. We do this when the
-                                // user forces the sink to be append-only while it is actually not based on
-                                // the frontend derivation result.
-                                delete_chunks.push(force_delete_only(c.clone()));
-                            }
-                            insert_chunks.push(force_append_only(c));
-                        }
+                        let chunks = mem::take(&mut chunk_buffer);
+                        let chunks = if need_advance_delete {
+                            let mut delete_chunks = vec![];
+                            let mut insert_chunks = vec![];
 
-                        for c in delete_chunks.into_iter().chain(insert_chunks.into_iter()) {
-                            log_writer.write_chunk(c.clone()).await?;
+                            for c in StreamChunkCompactor::new(stream_key.clone(), chunks)
+                                .into_compacted_chunks()
+                            {
+                                if sink_type != SinkType::ForceAppendOnly {
+                                    // Force append-only by dropping UPDATE/DELETE messages. We do this when the
+                                    // user forces the sink to be append-only while it is actually not based on
+                                    // the frontend derivation result.
+                                    delete_chunks.push(force_delete_only(c.clone()));
+                                }
+                                insert_chunks.push(force_append_only(c));
+                            }
+                            delete_chunks
+                                .into_iter()
+                                .chain(insert_chunks.into_iter())
+                                .collect()
+                        } else {
+                            chunks
+                        };
+                        let chunks = if re_construct_with_sink_pk {
+                            StreamChunkCompactor::new(down_stream_pk.clone(), chunks)
+                                .reconstructed_compacted_chunks(
+                                    chunk_size,
+                                    input_data_types.clone(),
+                                    sink_type != SinkType::ForceAppendOnly,
+                                )
+                        } else {
+                            chunks
+                        };
+
+                        for c in chunks {
                             yield Message::Chunk(c);
                         }
                         if let Some(w) = mem::take(&mut watermark) {
                             yield Message::Watermark(w)
-                        }
-                        log_writer
-                            .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
-                            .await?;
-                        if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(actor_context.id)
-                        {
-                            log_writer.update_vnode_bitmap(vnode_bitmap).await?;
                         }
                         yield Message::Barrier(barrier);
                     }
@@ -266,19 +377,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             chunk
                         };
 
-                        log_writer.write_chunk(chunk.clone()).await?;
-
-                        // Use original chunk instead of the reordered one as the executor output.
                         yield Message::Chunk(chunk);
                     }
                     Message::Barrier(barrier) => {
-                        log_writer
-                            .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
-                            .await?;
-                        if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(actor_context.id)
-                        {
-                            log_writer.update_vnode_bitmap(vnode_bitmap).await?;
-                        }
                         yield Message::Barrier(barrier);
                     }
                 }
@@ -290,12 +391,11 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         sink: S,
         log_reader: R,
         columns: Vec<ColumnCatalog>,
-        sink_writer_param: SinkWriterParam,
+        sink_param: SinkParam,
+        mut sink_writer_param: SinkWriterParam,
         actor_context: ActorContextRef,
-        info: ExecutorInfo,
     ) -> StreamExecutorResult<Message> {
         let metrics = sink_writer_param.sink_metrics.clone();
-        let log_sinker = sink.new_log_sinker(sink_writer_param).await?;
 
         let visible_columns = columns
             .iter()
@@ -303,7 +403,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             .filter_map(|(idx, column)| (!column.is_hidden).then_some(idx))
             .collect_vec();
 
-        let log_reader = log_reader
+        let mut log_reader = log_reader
             .transform_chunk(move |chunk| {
                 if visible_columns.len() != columns.len() {
                     // Do projection here because we may have columns that aren't visible to
@@ -315,50 +415,54 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             })
             .monitored(metrics);
 
-        if let Err(e) = log_sinker.consume_log_and_sink(log_reader).await {
-            let mut err_str = e.to_string();
-            if actor_context
-                .error_suppressor
-                .lock()
-                .suppress_error(&err_str)
-            {
-                err_str = format!(
-                    "error msg suppressed (due to per-actor error limit: {})",
-                    actor_context.error_suppressor.lock().max()
-                );
-            }
+        log_reader.init().await?;
+
+        while let Err(e) = sink
+            .new_log_sinker(sink_writer_param.clone())
+            .and_then(|log_sinker| log_sinker.consume_log_and_sink(&mut log_reader))
+            .await
+        {
             GLOBAL_ERROR_METRICS.user_sink_error.report([
-                S::SINK_NAME.to_owned(),
-                info.identity,
-                err_str,
+                "sink_executor_error".to_owned(),
+                sink_param.sink_id.to_string(),
+                sink_param.sink_name.clone(),
+                actor_context.fragment_id.to_string(),
             ]);
-            return Err(e.into());
+
+            match log_reader.rewind().await {
+                Ok((true, curr_vnode_bitmap)) => {
+                    warn!(
+                        error = %e.as_report(),
+                        executor_id = sink_writer_param.executor_id,
+                        "rewind successfully after sink error"
+                    );
+                    sink_writer_param.vnode_bitmap = curr_vnode_bitmap;
+                    Ok(())
+                }
+                Ok((false, _)) => Err(e),
+                Err(rewind_err) => {
+                    error!(
+                        error = %rewind_err.as_report(),
+                        "fail to rewind log reader"
+                    );
+                    Err(e)
+                }
+            }?;
         }
         Err(anyhow!("end of stream").into())
     }
 }
 
-impl<F: LogStoreFactory> Executor for SinkExecutor<F> {
+impl<F: LogStoreFactory> Execute for SinkExecutor<F> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }
 
 #[cfg(test)]
 mod test {
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
     use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
@@ -401,31 +505,29 @@ mod test {
             .collect();
         let pk_indices = vec![0];
 
-        let mock = MockSource::with_messages(
-            schema.clone(),
-            pk_indices.clone(),
-            vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                    " I I I
+        let source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+            Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                " I I I
                     + 3 2 1",
-                ))),
-                Message::Barrier(Barrier::new_test_barrier(2)),
-                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                    "  I I I
+            ))),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+            Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                "  I I I
                     U- 3 2 1
                     U+ 3 4 1
                      + 5 6 7",
-                ))),
-                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                    " I I I
+            ))),
+            Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                " I I I
                     - 5 6 7",
-                ))),
-            ],
-        );
+            ))),
+        ])
+        .into_executor(schema.clone(), pk_indices.clone());
 
         let sink_param = SinkParam {
             sink_id: 0.into(),
+            sink_name: "test".into(),
             properties,
             columns: columns
                 .iter()
@@ -446,18 +548,20 @@ mod test {
         };
 
         let sink_executor = SinkExecutor::new(
-            ActorContext::create(0),
+            ActorContext::for_test(0),
             info,
-            Box::new(mock),
+            source,
             SinkWriterParam::for_test(),
             sink_param,
             columns.clone(),
             BoundedInMemLogStoreFactory::new(1),
+            1024,
+            vec![DataType::Int32, DataType::Int32, DataType::Int32],
         )
         .await
         .unwrap();
 
-        let mut executor = SinkExecutor::execute(Box::new(sink_executor));
+        let mut executor = sink_executor.boxed().execute();
 
         // Barrier message.
         executor.next().await.unwrap().unwrap();
@@ -524,35 +628,34 @@ mod test {
             .map(|column| Field::from(column.column_desc.clone()))
             .collect();
 
-        let mock = MockSource::with_messages(
-            schema.clone(),
-            vec![0, 1],
-            vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                    " I I I
+        let source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+            Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                " I I I
                     + 1 1 10",
-                ))),
-                Message::Barrier(Barrier::new_test_barrier(2)),
-                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                    " I I I
+            ))),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+            Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                " I I I
                     + 1 3 30",
-                ))),
-                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                    " I I I
+            ))),
+            Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                " I I I
                     + 1 2 20
                     - 1 2 20",
-                ))),
-                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                    " I I I
-                    - 1 1 10",
-                ))),
-                Message::Barrier(Barrier::new_test_barrier(3)),
-            ],
-        );
+            ))),
+            Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                " I I I
+                    - 1 1 10
+                    + 1 1 40",
+            ))),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
+        ])
+        .into_executor(schema.clone(), vec![0, 1]);
 
         let sink_param = SinkParam {
             sink_id: 0.into(),
+            sink_name: "test".into(),
             properties,
             columns: columns
                 .iter()
@@ -573,24 +676,23 @@ mod test {
         };
 
         let sink_executor = SinkExecutor::new(
-            ActorContext::create(0),
+            ActorContext::for_test(0),
             info,
-            Box::new(mock),
+            source,
             SinkWriterParam::for_test(),
             sink_param,
             columns.clone(),
             BoundedInMemLogStoreFactory::new(1),
+            1024,
+            vec![DataType::Int64, DataType::Int64, DataType::Int64],
         )
         .await
         .unwrap();
 
-        let mut executor = SinkExecutor::execute(Box::new(sink_executor));
+        let mut executor = sink_executor.boxed().execute();
 
         // Barrier message.
         executor.next().await.unwrap().unwrap();
-
-        let chunk_msg = executor.next().await.unwrap().unwrap();
-        assert_eq!(chunk_msg.into_chunk().unwrap().cardinality(), 0);
 
         let chunk_msg = executor.next().await.unwrap().unwrap();
         assert_eq!(
@@ -605,34 +707,14 @@ mod test {
         executor.next().await.unwrap().unwrap();
 
         let chunk_msg = executor.next().await.unwrap().unwrap();
-        assert_eq!(chunk_msg.into_chunk().unwrap().cardinality(), 0);
-        let chunk_msg = executor.next().await.unwrap().unwrap();
-        assert_eq!(chunk_msg.into_chunk().unwrap().cardinality(), 0);
-
-        let chunk_msg = executor.next().await.unwrap().unwrap();
         assert_eq!(
             chunk_msg.into_chunk().unwrap().compact(),
             StreamChunk::from_pretty(
                 " I I I
-                - 1 1 10",
+                U- 1 1 10
+                U+ 1 1 40",
             )
         );
-
-        let chunk_msg = executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            chunk_msg.into_chunk().unwrap().compact(),
-            StreamChunk::from_pretty(
-                " I I I
-                + 1 3 30",
-            )
-        );
-        let chunk_msg = executor.next().await.unwrap().unwrap();
-        assert_eq!(chunk_msg.into_chunk().unwrap().cardinality(), 0);
-        let chunk_msg = executor.next().await.unwrap().unwrap();
-        assert_eq!(chunk_msg.into_chunk().unwrap().cardinality(), 0);
-
-        // Should not receive the third stream chunk message because the force-append-only sink
-        // executor will drop all DELETE messages.
 
         // The last barrier message.
         executor.next().await.unwrap().unwrap();
@@ -665,18 +747,16 @@ mod test {
             .collect();
         let pk_indices = vec![0];
 
-        let mock = MockSource::with_messages(
-            schema.clone(),
-            pk_indices.clone(),
-            vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Barrier(Barrier::new_test_barrier(2)),
-                Message::Barrier(Barrier::new_test_barrier(3)),
-            ],
-        );
+        let source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
+        ])
+        .into_executor(schema.clone(), pk_indices.clone());
 
         let sink_param = SinkParam {
             sink_id: 0.into(),
+            sink_name: "test".into(),
             properties,
             columns: columns
                 .iter()
@@ -697,35 +777,37 @@ mod test {
         };
 
         let sink_executor = SinkExecutor::new(
-            ActorContext::create(0),
+            ActorContext::for_test(0),
             info,
-            Box::new(mock),
+            source,
             SinkWriterParam::for_test(),
             sink_param,
             columns,
             BoundedInMemLogStoreFactory::new(1),
+            1024,
+            vec![DataType::Int64, DataType::Int64],
         )
         .await
         .unwrap();
 
-        let mut executor = SinkExecutor::execute(Box::new(sink_executor));
+        let mut executor = sink_executor.boxed().execute();
 
         // Barrier message.
         assert_eq!(
             executor.next().await.unwrap().unwrap(),
-            Message::Barrier(Barrier::new_test_barrier(1))
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1)))
         );
 
         // Barrier message.
         assert_eq!(
             executor.next().await.unwrap().unwrap(),
-            Message::Barrier(Barrier::new_test_barrier(2))
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2)))
         );
 
         // The last barrier message.
         assert_eq!(
             executor.next().await.unwrap().unwrap(),
-            Message::Barrier(Barrier::new_test_barrier(3))
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3)))
         );
     }
 }

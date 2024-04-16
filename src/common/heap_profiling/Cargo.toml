@@ -20,7 +20,7 @@ chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",
 ] }
-parking_lot = "0.12"
+parking_lot = { workspace = true }
 risingwave_common = { workspace = true }
 thiserror = "1"
 thiserror-ext = { workspace = true }

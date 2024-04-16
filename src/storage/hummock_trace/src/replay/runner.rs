@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -104,7 +104,7 @@ mod tests {
         let storage_type4 = StorageType::Global;
 
         let actor_1 = vec![
-            (0, Operation::NewLocalStorage(opts1, 1)),
+            (0, Operation::NewLocalStorage(opts1.clone(), 1)),
             (
                 1,
                 Operation::get(
@@ -135,7 +135,7 @@ mod tests {
         .map(|(record_id, op)| Ok(Record::new(storage_type1, record_id, op)));
 
         let actor_2 = vec![
-            (4, Operation::NewLocalStorage(opts2, 2)),
+            (4, Operation::NewLocalStorage(opts2.clone(), 2)),
             (
                 5,
                 Operation::get(
@@ -166,7 +166,7 @@ mod tests {
         .map(|(record_id, op)| Ok(Record::new(storage_type2, record_id, op)));
 
         let actor_3 = vec![
-            (8, Operation::NewLocalStorage(opts3, 3)),
+            (8, Operation::NewLocalStorage(opts3.clone(), 3)),
             (
                 9,
                 Operation::get(

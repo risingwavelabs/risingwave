@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -85,7 +85,7 @@ use risingwave_expr::function;
 fn array_to_string(array: ListRef<'_>, delimiter: &str, ctx: &Context, writer: &mut impl Write) {
     let element_data_type = ctx.arg_types[0].unnest_list();
     let mut first = true;
-    for element in array.flatten() {
+    for element in array.flatten().iter() {
         let Some(element) = element else { continue };
         if !first {
             write!(writer, "{}", delimiter).unwrap();
@@ -106,7 +106,7 @@ fn array_to_string_with_null(
 ) {
     let element_data_type = ctx.arg_types[0].unnest_list();
     let mut first = true;
-    for element in array.flatten() {
+    for element in array.flatten().iter() {
         if !first {
             write!(writer, "{}", delimiter).unwrap();
         } else {

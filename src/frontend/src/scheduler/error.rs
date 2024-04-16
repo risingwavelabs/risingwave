@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,13 +13,12 @@
 // limitations under the License.
 
 use risingwave_batch::error::BatchError;
-use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::session_config::QueryMode;
+use risingwave_connector::error::ConnectorError;
 use risingwave_rpc_client::error::RpcError;
 use thiserror::Error;
-use tonic::{Code, Status};
 
-use crate::catalog::FragmentId;
+use crate::error::{ErrorCode, RwError};
 use crate::scheduler::plan_fragmenter::QueryId;
 
 #[derive(Error, Debug)]
@@ -34,24 +33,15 @@ pub enum SchedulerError {
         RpcError,
     ),
 
-    #[error("Empty workers found")]
-    EmptyWorkerNodes,
-
-    #[error("Serving vnode mapping not found for fragment {0}")]
-    ServingVnodeMappingNotFound(FragmentId),
-
-    #[error("Streaming vnode mapping not found for fragment {0}")]
-    StreamingVnodeMappingNotFound(FragmentId),
-
     #[error("{0}")]
     TaskExecutionError(String),
 
     #[error("Task got killed because compute node running out of memory")]
     TaskRunningOutOfMemory,
 
-    /// Used when receive cancel request (ctrl-c) from user.
-    #[error("Cancelled by user")]
-    QueryCancelled,
+    /// Used when receive cancel request for some reason, such as user cancel or timeout.
+    #[error("Query cancelled: {0}")]
+    QueryCancelled(String),
 
     #[error("Reject query: the {0} query number reaches the limit: {1}")]
     QueryReachLimit(QueryMode, u64),
@@ -64,21 +54,18 @@ pub enum SchedulerError {
     ),
 
     #[error(transparent)]
+    Connector(
+        #[from]
+        #[backtrace]
+        ConnectorError,
+    ),
+
+    #[error(transparent)]
     Internal(
         #[from]
         #[backtrace]
         anyhow::Error,
     ),
-}
-
-/// Only if the code is Internal, change it to Execution Error. Otherwise convert to Rpc Error.
-impl From<tonic::Status> for SchedulerError {
-    fn from(s: Status) -> Self {
-        match s.code() {
-            Code::Internal => Self::TaskExecutionError(s.message().to_string()),
-            _ => Self::RpcError(s.into()),
-        }
-    }
 }
 
 impl From<SchedulerError> for RwError {

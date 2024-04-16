@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,21 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
 use apache_avro::schema::{DecimalSchema, RecordSchema, Schema};
 use itertools::Itertools;
+use risingwave_common::bail;
+use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{DataType, Decimal};
-use risingwave_pb::plan_common::ColumnDesc;
+use risingwave_pb::plan_common::{AdditionalColumn, ColumnDesc, ColumnDescVersion};
 
-pub fn avro_schema_to_column_descs(schema: &Schema) -> anyhow::Result<Vec<ColumnDesc>> {
+use crate::error::ConnectorResult;
+
+pub fn avro_schema_to_column_descs(schema: &Schema) -> ConnectorResult<Vec<ColumnDesc>> {
     if let Schema::Record(RecordSchema { fields, .. }) = schema {
         let mut index = 0;
         let fields = fields
             .iter()
             .map(|field| avro_field_to_column_desc(&field.name, &field.schema, &mut index))
-            .collect::<anyhow::Result<Vec<_>>>()?;
+            .collect::<ConnectorResult<Vec<_>>>()?;
         Ok(fields)
     } else {
-        anyhow::bail!("schema invalid, record type required at top level of the schema.");
+        bail!("schema invalid, record type required at top level of the schema.");
     }
 }
 
@@ -37,7 +43,7 @@ fn avro_field_to_column_desc(
     name: &str,
     schema: &Schema,
     index: &mut i32,
-) -> anyhow::Result<ColumnDesc> {
+) -> ConnectorResult<ColumnDesc> {
     let data_type = avro_type_mapping(schema)?;
     match schema {
         Schema::Record(RecordSchema {
@@ -48,7 +54,7 @@ fn avro_field_to_column_desc(
             let vec_column = fields
                 .iter()
                 .map(|f| avro_field_to_column_desc(&f.name, &f.schema, index))
-                .collect::<anyhow::Result<Vec<_>>>()?;
+                .collect::<ConnectorResult<Vec<_>>>()?;
             *index += 1;
             Ok(ColumnDesc {
                 column_type: Some(data_type.to_protobuf()),
@@ -58,6 +64,9 @@ fn avro_field_to_column_desc(
                 type_name: schema_name.to_string(),
                 generated_or_default_column: None,
                 description: None,
+                additional_column_type: 0, // deprecated
+                additional_column: Some(AdditionalColumn { column_type: None }),
+                version: ColumnDescVersion::Pr13707 as i32,
             })
         }
         _ => {
@@ -66,13 +75,15 @@ fn avro_field_to_column_desc(
                 column_type: Some(data_type.to_protobuf()),
                 column_id: *index,
                 name: name.to_owned(),
+                additional_column: Some(AdditionalColumn { column_type: None }),
+                version: ColumnDescVersion::Pr13707 as i32,
                 ..Default::default()
             })
         }
     }
 }
 
-fn avro_type_mapping(schema: &Schema) -> anyhow::Result<DataType> {
+fn avro_type_mapping(schema: &Schema) -> ConnectorResult<DataType> {
     let data_type = match schema {
         Schema::String => DataType::Varchar,
         Schema::Int => DataType::Int32,
@@ -82,15 +93,22 @@ fn avro_type_mapping(schema: &Schema) -> anyhow::Result<DataType> {
         Schema::Double => DataType::Float64,
         Schema::Decimal(DecimalSchema { precision, .. }) => {
             if *precision > Decimal::MAX_PRECISION.into() {
-                tracing::warn!(
-                    "RisingWave supports decimal precision up to {}, but got {}. Will truncate.",
-                    Decimal::MAX_PRECISION,
-                    precision
-                );
+                static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
+                    LazyLock::new(LogSuppresser::default);
+                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                    tracing::warn!(
+                        suppressed_count,
+                        "RisingWave supports decimal precision up to {}, but got {}. Will truncate.",
+                        Decimal::MAX_PRECISION,
+                        precision
+                    );
+                }
             }
             DataType::Decimal
         }
         Schema::Date => DataType::Date,
+        Schema::LocalTimestampMillis => DataType::Timestamp,
+        Schema::LocalTimestampMicros => DataType::Timestamp,
         Schema::TimestampMillis => DataType::Timestamptz,
         Schema::TimestampMicros => DataType::Timestamptz,
         Schema::Duration => DataType::Interval,
@@ -108,7 +126,7 @@ fn avro_type_mapping(schema: &Schema) -> anyhow::Result<DataType> {
             let struct_fields = fields
                 .iter()
                 .map(|f| avro_type_mapping(&f.schema))
-                .collect::<anyhow::Result<Vec<_>>>()?;
+                .collect::<ConnectorResult<Vec<_>>>()?;
             let struct_names = fields.iter().map(|f| f.name.clone()).collect_vec();
             DataType::new_struct(struct_fields, struct_names)
         }
@@ -127,12 +145,16 @@ fn avro_type_mapping(schema: &Schema) -> anyhow::Result<DataType> {
 
             avro_type_mapping(nested_schema)?
         }
-        _ => {
-            return Err(anyhow::format_err!(
-                "unsupported type in Avro: {:?}",
-                schema
-            ));
+        Schema::Ref { name } => {
+            if name.name == DBZ_VARIABLE_SCALE_DECIMAL_NAME
+                && name.namespace == Some(DBZ_VARIABLE_SCALE_DECIMAL_NAMESPACE.into())
+            {
+                DataType::Decimal
+            } else {
+                bail!("unsupported type in Avro: {:?}", schema);
+            }
         }
+        _ => bail!("unsupported type in Avro: {:?}", schema),
     };
 
     Ok(data_type)

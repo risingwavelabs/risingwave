@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -133,17 +133,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_filter_executor() {
-        use risingwave_common::array::{ArrayBuilder, ListArrayBuilder, ListRef, ListValue};
+        use risingwave_common::array::{ArrayBuilder, ListArrayBuilder, ListValue};
         use risingwave_common::types::Scalar;
 
         let mut builder = ListArrayBuilder::with_type(4, DataType::List(Box::new(DataType::Int32)));
 
         // Add 4 ListValues to ArrayBuilder
-        (1..=4).for_each(|i| {
-            builder.append(Some(ListRef::ValueRef {
-                val: &ListValue::new(vec![Some(i.to_scalar_value())]),
-            }));
-        });
+        for i in 1..=4 {
+            builder.append(Some(ListValue::from_iter([i]).as_scalar_ref()));
+        }
 
         // Use builder to obtain a single (List) column DataChunk
         let chunk = DataChunk::new(vec![builder.finish().into_ref()], 4);
@@ -181,15 +179,11 @@ mod tests {
             // Assert that values 3 and 4 are bigger than 2
             assert_eq!(
                 col1.value_at(0),
-                Some(ListRef::ValueRef {
-                    val: &ListValue::new(vec![Some(3.to_scalar_value())]),
-                })
+                Some(ListValue::from_iter([3]).as_scalar_ref())
             );
             assert_eq!(
                 col1.value_at(1),
-                Some(ListRef::ValueRef {
-                    val: &ListValue::new(vec![Some(4.to_scalar_value())]),
-                })
+                Some(ListValue::from_iter([4]).as_scalar_ref())
             );
         }
         let res = stream.next().await;

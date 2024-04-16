@@ -617,9 +617,9 @@
     └─StreamProject { exprs: [t1.a] }
       └─StreamTopN { order: [t1.a ASC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [t1.a ASC], limit: 1, offset: 0, group_key: [$expr1] }
-            └─StreamProject { exprs: [t1.a, Vnode(t1.a) as $expr1] }
-              └─StreamTableScan { table: t1, columns: [t1.a], pk: [t1.a], dist: UpstreamHashShard(t1.a) }
+          └─StreamGroupTopN { order: [t1.a ASC], limit: 1, offset: 0, group_key: [_vnode] }
+            └─StreamProject { exprs: [t1.a, Vnode(t1.a) as _vnode] }
+              └─StreamTableScan { table: t1, columns: [t1.a], stream_scan_type: ArrangementBackfill, stream_key: [t1.a], pk: [a], dist: UpstreamHashShard(t1.a) }
 - sql: |
     create table t1 (a varchar, b int, c int, d int);
     create index idx on t1(a);
@@ -740,3 +740,29 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchScan { table: people_names, columns: [people_names.first_name, people_names.last_name, people_names.info], scan_ranges: [people_names.CONCAT_OP = Utf8("John Smith")], distribution: SomeShard }
+- name: funtional index const eval
+  sql: |
+    create table a(v int);
+    explain create index b on a((1+1)*v);
+  explain_output: |
+    StreamMaterialize { columns: [MULTIPLY, v, a._row_id(hidden)], stream_key: [a._row_id], pk_columns: [MULTIPLY, a._row_id], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard($expr1) }
+      └─StreamProject { exprs: [(2:Int32 * a.v) as $expr1, a.v, a._row_id] }
+        └─StreamTableScan { table: a, columns: [v, _row_id] }
+- name: funtional index const eval
+  sql: |
+    create table a(v int);
+    create index b on a((1+1)*v);
+    select * from a where 2*v >2;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: b, columns: [b.v], scan_ranges: [b.MULTIPLY > Int32(2)], distribution: SomeShard }
+- name: funtional index with timezone
+  sql: |
+    create table t(ts timestamp);
+    create index i on t(ts::timestamp with time zone);
+    select ts::timestamptz from t where ts > now();
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [AtTimeZone(i.ts, 'UTC':Varchar) as $expr1] }
+      └─BatchScan { table: i, columns: [i.ts], scan_ranges: [i.AT_TIME_ZONE > Timestamptz(Timestamptz(1617235200000000))], distribution: SomeShard }

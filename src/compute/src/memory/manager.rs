@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,9 +17,20 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 
 use super::controller::LruWatermarkController;
+
+pub struct MemoryManagerConfig {
+    pub total_memory: usize,
+
+    pub threshold_aggressive: f64,
+    pub threshold_graceful: f64,
+    pub threshold_stable: f64,
+
+    pub metrics: Arc<StreamingMetrics>,
+}
 
 /// Compute node uses [`MemoryManager`] to limit the memory usage.
 pub struct MemoryManager {
@@ -36,16 +47,13 @@ impl MemoryManager {
     // especially when it's 0.
     const MIN_TICK_INTERVAL_MS: u32 = 10;
 
-    pub fn new(metrics: Arc<StreamingMetrics>, total_memory_bytes: usize) -> Arc<Self> {
-        let controller = Mutex::new(LruWatermarkController::new(
-            total_memory_bytes,
-            metrics.clone(),
-        ));
+    pub fn new(config: MemoryManagerConfig) -> Arc<Self> {
+        let controller = Mutex::new(LruWatermarkController::new(&config));
         tracing::info!("LRU watermark controller: {:?}", &controller);
 
         Arc::new(Self {
             watermark_epoch: Arc::new(0.into()),
-            metrics,
+            metrics: config.metrics,
             controller,
         })
     }

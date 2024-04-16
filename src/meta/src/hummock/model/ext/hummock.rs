@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,17 +13,19 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_meta_model_v2::compaction_config::CompactionConfig;
 use risingwave_meta_model_v2::compaction_status::LevelHandlers;
 use risingwave_meta_model_v2::compaction_task::CompactionTask;
 use risingwave_meta_model_v2::hummock_version_delta::FullVersionDelta;
+use risingwave_meta_model_v2::hummock_version_stats::TableStats;
 use risingwave_meta_model_v2::{
     compaction_config, compaction_status, compaction_task, hummock_pinned_snapshot,
-    hummock_pinned_version, hummock_version_delta, CompactionGroupId, CompactionTaskId,
-    HummockVersionId, WorkerId,
+    hummock_pinned_version, hummock_version_delta, hummock_version_stats, CompactionGroupId,
+    CompactionTaskId, HummockVersionId, WorkerId,
 };
 use risingwave_pb::hummock::{
-    CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionDelta,
+    CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionStats,
 };
 use sea_orm::sea_query::OnConflict;
 use sea_orm::ActiveValue::Set;
@@ -49,7 +51,7 @@ impl Transactional<Transaction> for CompactionGroup {
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         let m = compaction_config::ActiveModel {
             compaction_group_id: Set(self.group_id as _),
-            config: Set(CompactionConfig((*self.compaction_config).to_owned())),
+            config: Set(CompactionConfig::from(&(*self.compaction_config))),
         };
         compaction_config::Entity::insert(m)
             .on_conflict(
@@ -75,8 +77,8 @@ impl Transactional<Transaction> for CompactStatus {
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         let m = compaction_status::ActiveModel {
             compaction_group_id: Set(self.compaction_group_id as _),
-            status: Set(LevelHandlers(
-                self.level_handlers.iter().map_into().collect(),
+            status: Set(LevelHandlers::from(
+                self.level_handlers.iter().map_into().collect_vec(),
             )),
         };
         compaction_status::Entity::insert(m)
@@ -105,7 +107,7 @@ impl Transactional<Transaction> for CompactTaskAssignment {
         let m = compaction_task::ActiveModel {
             id: Set(task.task_id as _),
             context_id: Set(self.context_id as _),
-            task: Set(CompactionTask(task)),
+            task: Set(CompactionTask::from(&task)),
         };
         compaction_task::Entity::insert(m)
             .on_conflict(
@@ -184,6 +186,32 @@ impl Transactional<Transaction> for HummockPinnedSnapshot {
 }
 
 #[async_trait::async_trait]
+impl Transactional<Transaction> for HummockVersionStats {
+    async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
+        let m = hummock_version_stats::ActiveModel {
+            id: Set(self.hummock_version_id as _),
+            stats: Set(TableStats(self.table_stats.clone())),
+        };
+        hummock_version_stats::Entity::insert(m)
+            .on_conflict(
+                OnConflict::column(hummock_version_stats::Column::Id)
+                    .update_columns([hummock_version_stats::Column::Stats])
+                    .to_owned(),
+            )
+            .exec(trx)
+            .await?;
+        Ok(())
+    }
+
+    async fn delete_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
+        hummock_version_stats::Entity::delete_by_id(self.hummock_version_id as i64)
+            .exec(trx)
+            .await?;
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
 impl Transactional<Transaction> for HummockVersionDelta {
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         let m = hummock_version_delta::ActiveModel {
@@ -192,7 +220,7 @@ impl Transactional<Transaction> for HummockVersionDelta {
             max_committed_epoch: Set(self.max_committed_epoch as _),
             safe_epoch: Set(self.safe_epoch as _),
             trivial_move: Set(self.trivial_move),
-            full_version_delta: Set(FullVersionDelta(self.clone())),
+            full_version_delta: Set(FullVersionDelta::from(&self.to_protobuf())),
         };
         hummock_version_delta::Entity::insert(m)
             .on_conflict(
@@ -221,7 +249,7 @@ impl Transactional<Transaction> for HummockVersionDelta {
 
 impl From<compaction_config::Model> for CompactionGroup {
     fn from(value: compaction_config::Model) -> Self {
-        Self::new(value.compaction_group_id as _, value.config.0)
+        Self::new(value.compaction_group_id as _, value.config.to_protobuf())
     }
 }
 
@@ -229,7 +257,7 @@ impl From<compaction_status::Model> for CompactStatus {
     fn from(value: compaction_status::Model) -> Self {
         Self {
             compaction_group_id: value.compaction_group_id as _,
-            level_handlers: value.status.0.iter().map_into().collect(),
+            level_handlers: value.status.to_protobuf().iter().map_into().collect(),
         }
     }
 }

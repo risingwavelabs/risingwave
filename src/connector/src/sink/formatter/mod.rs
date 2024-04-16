@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,10 +28,12 @@ pub use upsert::UpsertFormatter;
 
 use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
 use super::encoder::template::TemplateEncoder;
-use super::encoder::{DateHandlingMode, KafkaConnectParams, TimestamptzHandlingMode};
+use super::encoder::{
+    DateHandlingMode, KafkaConnectParams, TimeHandlingMode, TimestamptzHandlingMode,
+};
 use super::redis::{KEY_FORMAT, VALUE_FORMAT};
 use crate::sink::encoder::{
-    AvroEncoder, AvroHeader, JsonEncoder, ProtoEncoder, TimestampHandlingMode,
+    AvroEncoder, AvroHeader, JsonEncoder, ProtoEncoder, ProtoHeader, TimestampHandlingMode,
 };
 
 /// Transforms a `StreamChunk` into a sequence of key-value pairs according a specific format,
@@ -102,6 +104,7 @@ impl SinkFormatterImpl {
                         DateHandlingMode::FromCe,
                         TimestampHandlingMode::Milli,
                         timestamptz_mode,
+                        TimeHandlingMode::Milli,
                     )
                 });
 
@@ -113,17 +116,25 @@ impl SinkFormatterImpl {
                             DateHandlingMode::FromCe,
                             TimestampHandlingMode::Milli,
                             timestamptz_mode,
+                            TimeHandlingMode::Milli,
                         );
                         let formatter = AppendOnlyFormatter::new(key_encoder, val_encoder);
                         Ok(SinkFormatterImpl::AppendOnlyJson(formatter))
                     }
                     SinkEncode::Protobuf => {
                         // By passing `None` as `aws_auth_props`, reading from `s3://` not supported yet.
-                        let descriptor =
-                            crate::schema::protobuf::fetch_descriptor(&format_desc.options, None)
-                                .await
-                                .map_err(|e| SinkError::Config(anyhow!("{e:?}")))?;
-                        let val_encoder = ProtoEncoder::new(schema, None, descriptor)?;
+                        let (descriptor, sid) = crate::schema::protobuf::fetch_descriptor(
+                            &format_desc.options,
+                            topic,
+                            None,
+                        )
+                        .await
+                        .map_err(|e| SinkError::Config(anyhow!(e)))?;
+                        let header = match sid {
+                            None => ProtoHeader::None,
+                            Some(sid) => ProtoHeader::ConfluentSchemaRegistry(sid),
+                        };
+                        let val_encoder = ProtoEncoder::new(schema, None, descriptor, header)?;
                         let formatter = AppendOnlyFormatter::new(key_encoder, val_encoder);
                         Ok(SinkFormatterImpl::AppendOnlyProto(formatter))
                     }
@@ -174,6 +185,7 @@ impl SinkFormatterImpl {
                             DateHandlingMode::FromCe,
                             TimestampHandlingMode::Milli,
                             timestamptz_mode,
+                            TimeHandlingMode::Milli,
                         );
                         let mut val_encoder = JsonEncoder::new(
                             schema,
@@ -181,6 +193,7 @@ impl SinkFormatterImpl {
                             DateHandlingMode::FromCe,
                             TimestampHandlingMode::Milli,
                             timestamptz_mode,
+                            TimeHandlingMode::Milli,
                         );
 
                         if let Some(s) = format_desc.options.get("schemas.enable") {
@@ -234,7 +247,7 @@ impl SinkFormatterImpl {
                         let (key_schema, val_schema) =
                             crate::schema::avro::fetch_schema(&format_desc.options, topic)
                                 .await
-                                .map_err(|e| SinkError::Config(anyhow!("{e:?}")))?;
+                                .map_err(|e| SinkError::Config(anyhow!(e)))?;
                         let key_encoder = AvroEncoder::new(
                             schema.clone(),
                             Some(pk_indices),

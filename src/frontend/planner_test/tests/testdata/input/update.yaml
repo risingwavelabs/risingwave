@@ -91,3 +91,10 @@
   expected_outputs:
     - logical_plan
     - batch_plan
+- name: distributed update
+  sql: |
+    set batch_enable_distributed_dml = true;
+    create table t (a int, b int);
+    update t set a = a + 1;
+  expected_outputs:
+    - batch_distributed_plan

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ pub mod compactor_manager;
 pub mod error;
 mod manager;
 pub use manager::*;
+use thiserror_ext::AsReport;
 
 mod level_handler;
 mod metrics_utils;
@@ -84,7 +85,7 @@ pub fn start_vacuum_metadata_loop(
                 }
             }
             if let Err(err) = vacuum.vacuum_metadata().await {
-                tracing::warn!("Vacuum metadata error {:#?}", err);
+                tracing::warn!(error = %err.as_report(), "Vacuum metadata error");
             }
         }
     });
@@ -111,7 +112,7 @@ pub fn start_vacuum_object_loop(
                 }
             }
             if let Err(err) = vacuum.vacuum_object().await {
-                tracing::warn!("Vacuum object error {:#?}", err);
+                tracing::warn!(error = %err.as_report(), "Vacuum object error");
             }
         }
     });
@@ -146,7 +147,7 @@ pub fn start_checkpoint_loop(
                 .create_version_checkpoint(min_delta_log_num)
                 .await
             {
-                tracing::warn!("Hummock version checkpoint error {:#?}", err);
+                tracing::warn!(error = %err.as_report(), "Hummock version checkpoint error");
             }
         }
     });

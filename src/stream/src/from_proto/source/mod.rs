@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 // limitations under the License.
 
 mod trad_source;
-pub use trad_source::SourceExecutorBuilder;
+pub use trad_source::{create_source_desc_builder, SourceExecutorBuilder};
 mod fs_fetch;
 pub use fs_fetch::FsFetchExecutorBuilder;
 

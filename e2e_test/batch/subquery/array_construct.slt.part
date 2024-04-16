@@ -1,0 +1,42 @@
+query T
+select array(select unnest || ordinality from unnest(array['c', 'a', 'b']) with ordinality order by ordinality asc);
+----
+{c1,a2,b3}
+
+query T
+select array(select unnest || ordinality from unnest(array['c', 'a', 'b']) with ordinality order by ordinality desc);
+----
+{b3,a2,c1}
+
+query T
+select array(select unnest || ordinality from unnest(array['c', 'a', 'b']) with ordinality order by unnest asc);
+----
+{a2,b3,c1}
+
+query T
+select array(select unnest || ordinality from unnest(array['c', 'a', 'b']) with ordinality order by unnest desc);
+----
+{c1,b3,a2}
+
+# Test order by a non-output column, and output column is not 0th of source table.
+query T
+select array(select ordinality from unnest(array['c', 'a', 'b']) with ordinality order by unnest desc);
+----
+{1,3,2}
+
+# Test order by a non-output column, and order column is not 0th of source table.
+query T
+select array(select unnest from unnest(array['c', 'a', 'b']) with ordinality order by ordinality desc);
+----
+{b,a,c}
+
+# Test 0 rows.
+query T
+select array_agg(n) from generate_series(1, 5, 2) as t(n) where n > 10;
+----
+NULL
+
+query T
+select array(select n from generate_series(1, 5, 2) as t(n) where n > 10);
+----
+{}

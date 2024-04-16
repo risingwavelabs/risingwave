@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -95,7 +95,7 @@ where
 
     /// The directory for checking status.
     ///
-    /// RiseDev will instruct every task to output their status to a file in temporary folder. By
+    /// `RiseDev` will instruct every task to output their status to a file in temporary folder. By
     /// checking this file, we can know whether a task has early exited.
     pub status_dir: Arc<TempDir>,
 
@@ -272,11 +272,11 @@ where
 
     pub fn tmux_run(&self, user_cmd: Command) -> anyhow::Result<Command> {
         let prefix_path = env::var("PREFIX_BIN")?;
-        let mut cmd = Command::new("tmux");
+        let mut cmd = new_tmux_command();
         cmd.arg("new-window")
             // Set target name
             .arg("-t")
-            .arg(RISEDEV_SESSION_NAME)
+            .arg(RISEDEV_NAME)
             // Switch to background window
             .arg("-d")
             // Set session name for this window

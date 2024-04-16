@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -146,8 +146,8 @@ impl RandValue for StructValue {
 }
 
 impl RandValue for ListValue {
-    fn rand_value<R: rand::Rng>(_rand: &mut R) -> Self {
-        ListValue::new(vec![])
+    fn rand_value<R: rand::Rng>(rand: &mut R) -> Self {
+        ListValue::from_iter([rand.gen::<i16>()])
     }
 }
 

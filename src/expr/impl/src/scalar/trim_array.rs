@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use risingwave_common::array::{ListRef, ListValue};
-use risingwave_common::types::ToOwnedDatum;
 use risingwave_expr::{function, ExprError, Result};
 
 /// Trims an array by removing the last n elements. If the array is multidimensional, only the first
@@ -85,10 +84,8 @@ fn trim_array(array: ListRef<'_>, n: i32) -> Result<ListValue> {
                 name: "n",
                 reason: "more than array length".into(),
             })?;
-    Ok(ListValue::new(
-        values
-            .take(len_to_retain)
-            .map(|x| x.to_owned_datum())
-            .collect(),
+    Ok(ListValue::from_datum_iter(
+        &array.data_type(),
+        values.take(len_to_retain),
     ))
 }

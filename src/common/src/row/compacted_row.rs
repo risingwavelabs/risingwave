@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use bytes::Bytes;
+use risingwave_common_estimate_size::EstimateSize;
 
 use super::{OwnedRow, Row, RowDeserializer};
-use crate::estimate_size::EstimateSize;
 use crate::types::DataType;
 use crate::util::value_encoding;
 

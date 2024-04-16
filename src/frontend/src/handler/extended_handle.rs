@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,12 +19,12 @@ use std::sync::Arc;
 use bytes::Bytes;
 use pgwire::types::Format;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{CreateSink, Query, Statement};
 
 use super::query::BoundResult;
 use super::{handle, query, HandlerArgs, RwPgResponse};
+use crate::error::Result;
 use crate::session::SessionImpl;
 
 /// Except for Query,Insert,Delete,Update statement, we store other statement as `PureStatement`.
@@ -47,6 +47,7 @@ pub struct PreparedResult {
     pub bound_result: BoundResult,
 }
 
+#[expect(clippy::enum_variant_names)]
 #[derive(Clone)]
 pub enum Portal {
     Empty,

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ use futures::future::try_join_all;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::monitor_service::ProfilingResponse;
 use risingwave_rpc_client::ComputeClientPool;
+use thiserror_ext::AsReport;
 use tokio::fs::{create_dir_all, File};
 use tokio::io::AsyncWriteExt;
 
@@ -34,7 +35,11 @@ pub async fn cpu_profile(context: &CtlContext, sleep_s: u64) -> anyhow::Result<(
 
     let clients = ComputeClientPool::default();
 
-    let profile_root_path = PathBuf::from(&std::env::var("PREFIX_PROFILING")?);
+    let profile_root_path = std::env::var("PREFIX_PROFILING").unwrap_or_else(|_| {
+        tracing::info!("PREFIX_PROFILING is not set, using current directory");
+        "./".to_string()
+    });
+    let profile_root_path = PathBuf::from(&profile_root_path);
     let dir_name = Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
     let dir_path = profile_root_path.join(dir_name);
     create_dir_all(&dir_path).await?;
@@ -64,9 +69,9 @@ pub async fn cpu_profile(context: &CtlContext, sleep_s: u64) -> anyhow::Result<(
                 }
                 Err(err) => {
                     tracing::error!(
-                        "Failed to get profiling result from {} with error {}",
-                        node_name,
-                        err.to_string()
+                        error = %err.as_report(),
+                        %node_name,
+                        "Failed to get profiling result",
                     );
                 }
             }
@@ -113,9 +118,9 @@ pub async fn heap_profile(context: &CtlContext, dir: Option<String>) -> anyhow::
 
             if let Err(err) = response {
                 tracing::error!(
-                    "Failed to dump profile on {} with error {}",
-                    node_name,
-                    err.to_string()
+                    error = %err.as_report(),
+                    %node_name,
+                    "Failed to dump profile",
                 );
             }
             Ok::<_, anyhow::Error>(())

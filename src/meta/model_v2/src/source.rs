@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ pub struct Model {
     pub row_id_index: Option<i32>,
     pub columns: ColumnCatalogArray,
     pub pk_column_ids: I32Array,
-    pub properties: Property,
+    pub with_properties: Property,
     pub definition: String,
     pub source_info: Option<StreamSourceInfo>,
     pub watermark_descs: WatermarkDescArray,
@@ -91,12 +91,12 @@ impl From<PbSource> for ActiveModel {
             source_id: Set(source.id as _),
             name: Set(source.name),
             row_id_index: Set(source.row_id_index.map(|x| x as _)),
-            columns: Set(ColumnCatalogArray(source.columns)),
+            columns: Set(ColumnCatalogArray::from(source.columns)),
             pk_column_ids: Set(I32Array(source.pk_column_ids)),
-            properties: Set(Property(source.properties)),
+            with_properties: Set(Property(source.with_properties)),
             definition: Set(source.definition),
-            source_info: Set(source.info.map(StreamSourceInfo)),
-            watermark_descs: Set(WatermarkDescArray(source.watermark_descs)),
+            source_info: Set(source.info.as_ref().map(StreamSourceInfo::from)),
+            watermark_descs: Set(WatermarkDescArray::from(source.watermark_descs)),
             optional_associated_table_id: Set(optional_associated_table_id),
             connection_id: Set(source.connection_id.map(|id| id as _)),
             version: Set(source.version as _),

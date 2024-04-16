@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,12 +13,8 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
-#[cfg(enable_task_local_alloc)]
-use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
-#[cfg(enable_task_local_alloc)]
-use std::time::Duration;
 
 use anyhow::Context;
 use futures::StreamExt;
@@ -27,11 +23,14 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::tracing::TracingContext;
+use risingwave_expr::expr_context::expr_context_scope;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
+use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use risingwave_pb::PbFieldNotFound;
+use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::task::JoinHandle;
 use tokio_metrics::TaskMonitor;
@@ -47,52 +46,6 @@ use crate::task::BatchTaskContext;
 
 // Now we will only at most have 2 status for each status channel. Running -> Failed or Finished.
 pub const TASK_STATUS_BUFFER_SIZE: usize = 2;
-
-/// A special version for batch allocation stat, passed in another task `context` C to report task
-/// mem usage 0 bytes at the end.
-#[cfg(enable_task_local_alloc)]
-pub async fn allocation_stat_for_batch<Fut, T, F, C>(
-    future: Fut,
-    interval: Duration,
-    mut report: F,
-    context: C,
-) -> T
-where
-    Fut: Future<Output = T>,
-    F: FnMut(usize),
-    C: BatchTaskContext,
-{
-    use task_stats_alloc::{TaskLocalBytesAllocated, BYTES_ALLOCATED};
-
-    BYTES_ALLOCATED
-        .scope(TaskLocalBytesAllocated::new(), async move {
-            // The guard has the same lifetime as the counter so that the counter will keep positive
-            // in the whole scope. When the scope exits, the guard is released, so the counter can
-            // reach zero eventually and then `drop` itself.
-            let _guard = Box::new(114514);
-            let monitor = async move {
-                let mut interval = tokio::time::interval(interval);
-                loop {
-                    interval.tick().await;
-                    BYTES_ALLOCATED.with(|bytes| report(bytes.val()));
-                }
-            };
-            let output = tokio::select! {
-                biased;
-                _ = monitor => unreachable!(),
-                output = future => {
-                    // NOTE: Report bytes allocated when the actor ends. We simply report 0 here,
-                    // assuming that all memory allocated by this batch task will be freed at some
-                    // time. Maybe we should introduce a better monitoring strategy for batch memory
-                    // usage.
-                    BYTES_ALLOCATED.with(|_| context.store_mem_usage(0));
-                    output
-                },
-            };
-            output
-        })
-        .await
-}
 
 /// Send batch task status (local/distributed) to frontend.
 ///
@@ -425,6 +378,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         self: Arc<Self>,
         state_tx: Option<StateReporter>,
         tracing_context: TracingContext,
+        expr_context: ExprContext,
     ) -> Result<()> {
         let mut state_tx = state_tx;
         trace!(
@@ -433,14 +387,17 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             serde_json::to_string_pretty(self.plan.get_root()?).unwrap()
         );
 
-        let exec = ExecutorBuilder::new(
-            self.plan.root.as_ref().unwrap(),
-            &self.task_id,
-            self.context.clone(),
-            self.epoch.clone(),
-            self.shutdown_rx.clone(),
+        let exec = expr_context_scope(
+            expr_context.clone(),
+            ExecutorBuilder::new(
+                self.plan.root.as_ref().unwrap(),
+                &self.task_id,
+                self.context.clone(),
+                self.epoch.clone(),
+                self.shutdown_rx.clone(),
+            )
+            .build(),
         )
-        .build()
         .await?;
 
         let sender = self.sender.clone();
@@ -455,11 +412,27 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
         // Clone `self` to make compiler happy because of the move block.
         let t_1 = self.clone();
+        let this = self.clone();
+        async fn notify_panic<C: BatchTaskContext>(
+            this: &BatchTaskExecution<C>,
+            state_tx: Option<&mut StateReporter>,
+        ) {
+            let err_str = "execution panic".into();
+            if let Err(e) = this
+                .change_state_notify(TaskStatus::Failed, state_tx, Some(err_str))
+                .await
+            {
+                warn!(
+                    error = %e.as_report(),
+                    "The status receiver in FE has closed so the status push is failed",
+                );
+            }
+        }
         // Spawn task for real execution.
         let fut = async move {
             trace!("Executing plan [{:?}]", task_id);
             let sender = sender;
-            let mut state_tx = state_tx;
+            let mut state_tx_1 = state_tx.clone();
             let batch_metrics = t_1.context.batch_metrics();
 
             let task = |task_id: TaskId| async move {
@@ -472,9 +445,11 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
                 // We should only pass a reference of sender to execution because we should only
                 // close it after task error has been set.
-                t_1.run(exec, sender, state_tx.as_mut())
-                    .instrument(span)
-                    .await;
+                expr_context_scope(
+                    expr_context,
+                    t_1.run(exec, sender, state_tx_1.as_mut()).instrument(span),
+                )
+                .await;
             };
 
             if let Some(batch_metrics) = batch_metrics {
@@ -483,63 +458,37 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     AssertUnwindSafe(TaskMonitor::instrument(&monitor, task(task_id.clone())));
                 if let Err(error) = instrumented_task.rw_catch_unwind().await {
                     error!("Batch task {:?} panic: {:?}", task_id, error);
+                    notify_panic(&this, state_tx.as_mut()).await;
                 }
                 let cumulative = monitor.cumulative();
-                let labels = &batch_metrics.task_labels();
-                let task_metrics = batch_metrics.get_task_metrics();
-                task_metrics
+                batch_metrics
                     .task_first_poll_delay
-                    .with_label_values(labels)
                     .set(cumulative.total_first_poll_delay.as_secs_f64());
-                task_metrics
+                batch_metrics
                     .task_fast_poll_duration
-                    .with_label_values(labels)
                     .set(cumulative.total_fast_poll_duration.as_secs_f64());
-                task_metrics
+                batch_metrics
                     .task_idle_duration
-                    .with_label_values(labels)
                     .set(cumulative.total_idle_duration.as_secs_f64());
-                task_metrics
+                batch_metrics
                     .task_poll_duration
-                    .with_label_values(labels)
                     .set(cumulative.total_poll_duration.as_secs_f64());
-                task_metrics
+                batch_metrics
                     .task_scheduled_duration
-                    .with_label_values(labels)
                     .set(cumulative.total_scheduled_duration.as_secs_f64());
-                task_metrics
+                batch_metrics
                     .task_slow_poll_duration
-                    .with_label_values(labels)
                     .set(cumulative.total_slow_poll_duration.as_secs_f64());
             } else if let Err(error) = AssertUnwindSafe(task(task_id.clone()))
                 .rw_catch_unwind()
                 .await
             {
                 error!("Batch task {:?} panic: {:?}", task_id, error);
+                notify_panic(&this, state_tx.as_mut()).await;
             }
         };
 
-        #[cfg(enable_task_local_alloc)]
-        {
-            // For every fired Batch Task, we will wrap it with allocation stats to report memory
-            // estimation per task to `BatchManager`.
-            let ctx1 = self.context.clone();
-            let ctx2 = self.context.clone();
-            let alloc_stat_wrap_fut = allocation_stat_for_batch(
-                fut,
-                Duration::from_millis(1000),
-                move |bytes| {
-                    ctx1.store_mem_usage(bytes);
-                },
-                ctx2,
-            );
-            self.runtime.spawn(alloc_stat_wrap_fut);
-        }
-
-        #[cfg(not(enable_task_local_alloc))]
-        {
-            self.runtime.spawn(fut);
-        }
+        self.runtime.spawn(fut);
 
         Ok(())
     }
@@ -636,7 +585,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                             ShutdownMsg::Init => {
                                 // There is no message received from shutdown channel, which means it caused
                                 // task failed.
-                                error!("Batch task failed: {:?}", e);
+                                error!(error = %e.as_report(), "Batch task failed");
                                 error = Some(e);
                                 state = TaskStatus::Failed;
                                 break;
@@ -662,8 +611,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         }
 
         let error = error.map(Arc::new);
-        *self.failure.lock() = error.clone();
-        let err_str = error.as_ref().map(|e| e.to_string());
+        self.failure.lock().clone_from(&error);
+        let err_str = error.as_ref().map(|e| e.to_report_string());
         if let Err(e) = sender.close(error).await {
             match e {
                 SenderError => {
@@ -681,8 +630,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
         if let Err(e) = self.change_state_notify(state, state_tx, err_str).await {
             warn!(
-                "The status receiver in FE has closed so the status push is failed {:}",
-                e
+                error = %e.as_report(),
+                "The status receiver in FE has closed so the status push is failed",
             );
         }
 

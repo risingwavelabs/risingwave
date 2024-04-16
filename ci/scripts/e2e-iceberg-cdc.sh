@@ -36,7 +36,7 @@ echo "--- e2e, ci-1cn-1fe, iceberg cdc"
 echo "--- starting risingwave cluster"
 
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make ci-start ci-1cn-1fe-with-recovery
+risedev ci-start ci-1cn-1fe-with-recovery
 
 # prepare minio iceberg sink
 echo "--- preparing iceberg"

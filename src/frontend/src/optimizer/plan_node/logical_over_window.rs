@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::{bail_not_implemented, not_implemented};
@@ -24,10 +23,11 @@ use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncKind};
 use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, BatchOverWindow, ColPrunable, ExprRewritable, Logical, LogicalProject,
-    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow, StreamEowcSort,
-    StreamOverWindow, ToBatch, ToStream,
+    gen_filter_and_pushdown, BatchOverWindow, ColPrunable, ExprRewritable, Logical, LogicalFilter,
+    LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow,
+    StreamEowcSort, StreamOverWindow, ToBatch, ToStream,
 };
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
     Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, WindowFunction,
 };
@@ -303,9 +303,9 @@ impl<'a> OverWindowProjectBuilder<'a> {
             let squared_input_expr = ExprImpl::from(
                 FunctionCall::new(ExprType::Multiply, vec![input.clone(), input.clone()]).unwrap(),
             );
-            self.builder.add_expr(&squared_input_expr).map_err(|err| {
-                not_implemented!("{err} inside args")
-            })?;
+            self.builder
+                .add_expr(&squared_input_expr)
+                .map_err(|err| not_implemented!("{err} inside args"))?;
         }
         for arg in &window_function.args {
             self.builder
@@ -695,21 +695,28 @@ impl PredicatePushdown for LogicalOverWindow {
         predicate: Condition,
         ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        let mut window_col = FixedBitSet::with_capacity(self.schema().len());
-        window_col.insert_range(self.core.input.schema().len()..self.schema().len());
-        let (window_pred, other_pred) = predicate.split_disjoint(&window_col);
-        gen_filter_and_pushdown(self, window_pred, other_pred, ctx)
+        if !self.core.funcs_have_same_partition_and_order() {
+            // Window function calls with different PARTITION BY and ORDER BY clauses are not split yet.
+            return LogicalFilter::create(self.clone().into(), predicate);
+        }
+
+        let all_out_cols: FixedBitSet = (0..self.schema().len()).collect();
+        let mut remain_cols: FixedBitSet = all_out_cols
+            .difference(&self.partition_key_indices().into_iter().collect())
+            .collect();
+        remain_cols.grow(self.schema().len());
+
+        let (remain_pred, pushed_pred) = predicate.split_disjoint(&remain_cols);
+        gen_filter_and_pushdown(self, remain_pred, pushed_pred, ctx)
     }
 }
 
 impl ToBatch for LogicalOverWindow {
     fn to_batch(&self) -> Result<PlanRef> {
-        if !self.core.funcs_have_same_partition_and_order() {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "All window functions must have the same PARTITION BY and ORDER BY".to_string(),
-            )
-            .into());
-        }
+        assert!(
+            self.core.funcs_have_same_partition_and_order(),
+            "must apply OverWindowSplitRule before generating physical plan"
+        );
 
         // TODO(rc): Let's not introduce too many cases at once. Later we may decide to support
         // empty PARTITION BY by simply removing the following check.
@@ -735,17 +742,15 @@ impl ToStream for LogicalOverWindow {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         use super::stream::prelude::*;
 
+        assert!(
+            self.core.funcs_have_same_partition_and_order(),
+            "must apply OverWindowSplitRule before generating physical plan"
+        );
+
         let stream_input = self.core.input.to_stream(ctx)?;
 
         if ctx.emit_on_window_close() {
             // Emit-On-Window-Close case
-
-            if !self.core.funcs_have_same_partition_and_order() {
-                return Err(ErrorCode::InvalidInputSyntax(
-                    "All window functions must have the same PARTITION BY and ORDER BY".to_string(),
-                )
-                .into());
-            }
 
             let order_by = &self.window_functions()[0].order_by;
             if order_by.len() != 1 || order_by[0].order_type != OrderType::ascending() {
@@ -787,13 +792,6 @@ impl ToStream for LogicalOverWindow {
             Ok(StreamEowcOverWindow::new(core).into())
         } else {
             // General (Emit-On-Update) case
-
-            if !self.core.funcs_have_same_partition_and_order() {
-                return Err(ErrorCode::InvalidInputSyntax(
-                    "All window functions must have the same PARTITION BY and ORDER BY".to_string(),
-                )
-                .into());
-            }
 
             // TODO(rc): Let's not introduce too many cases at once. Later we may decide to support
             // empty PARTITION BY by simply removing the following check.

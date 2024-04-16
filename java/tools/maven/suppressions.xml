@@ -30,5 +30,4 @@ under the License.
 
     <suppress files=".*" checks="javadoc"/>
     <suppress files=".*" checks="AvoidStarImport"/>
-    <suppress files=".*" checks="IllegalImport"/>
 </suppressions>

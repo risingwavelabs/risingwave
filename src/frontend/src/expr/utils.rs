@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -67,6 +67,85 @@ pub fn to_disjunctions(expr: ExprImpl) -> Vec<ExprImpl> {
 pub fn fold_boolean_constant(expr: ExprImpl) -> ExprImpl {
     let mut rewriter = BooleanConstantFolding {};
     rewriter.rewrite_expr(expr)
+}
+
+/// check `ColumnSelfEqualRewriter`'s comment below.
+pub fn column_self_eq_eliminate(expr: ExprImpl) -> ExprImpl {
+    ColumnSelfEqualRewriter::rewrite(expr)
+}
+
+/// for every `(col) == (col)`,
+/// transform to `IsNotNull(col)`
+/// since in the boolean context, `null = (...)` will always
+/// be treated as false.
+/// note: as always, only for *single column*.
+pub struct ColumnSelfEqualRewriter {}
+
+impl ColumnSelfEqualRewriter {
+    /// the exact copy from `logical_filter_expression_simplify_rule`
+    fn extract_column(expr: ExprImpl, columns: &mut Vec<ExprImpl>) {
+        match expr.clone() {
+            ExprImpl::FunctionCall(func_call) => {
+                // the functions that *never* return null will be ignored
+                if Self::is_not_null(func_call.func_type()) {
+                    return;
+                }
+                for sub_expr in func_call.inputs() {
+                    Self::extract_column(sub_expr.clone(), columns);
+                }
+            }
+            ExprImpl::InputRef(_) => {
+                if !columns.contains(&expr) {
+                    // only add the column if not exists
+                    columns.push(expr);
+                }
+            }
+            _ => (),
+        }
+    }
+
+    /// the exact copy from `logical_filter_expression_simplify_rule`
+    fn is_not_null(func_type: ExprType) -> bool {
+        func_type == ExprType::IsNull
+            || func_type == ExprType::IsNotNull
+            || func_type == ExprType::IsTrue
+            || func_type == ExprType::IsFalse
+            || func_type == ExprType::IsNotTrue
+            || func_type == ExprType::IsNotFalse
+    }
+
+    pub fn rewrite(expr: ExprImpl) -> ExprImpl {
+        let mut columns = vec![];
+        Self::extract_column(expr.clone(), &mut columns);
+        if columns.len() > 1 {
+            // leave it intact
+            return expr;
+        }
+
+        // extract the equal inputs with sanity check
+        let ExprImpl::FunctionCall(func_call) = expr.clone() else {
+            return expr;
+        };
+        if func_call.func_type() != ExprType::Equal || func_call.inputs().len() != 2 {
+            return expr;
+        }
+        assert_eq!(func_call.return_type(), DataType::Boolean);
+        let inputs = func_call.inputs();
+        let e1 = inputs[0].clone();
+        let e2 = inputs[1].clone();
+
+        if e1 == e2 {
+            if columns.is_empty() {
+                return ExprImpl::literal_bool(true);
+            }
+            let Ok(ret) = FunctionCall::new(ExprType::IsNotNull, vec![columns[0].clone()]) else {
+                return expr;
+            };
+            ret.into()
+        } else {
+            expr
+        }
+    }
 }
 
 /// Fold boolean constants in a expr
@@ -498,11 +577,23 @@ impl WatermarkAnalyzer {
                 _ => WatermarkDerivation::None,
             },
             ExprType::Subtract | ExprType::TumbleStart => {
-                match self.visit_binary_op(func_call.inputs()) {
-                    (Constant, Constant) => Constant,
-                    (Watermark(idx), Constant) => Watermark(idx),
-                    (Nondecreasing, Constant) => Nondecreasing,
-                    _ => WatermarkDerivation::None,
+                if func_call.inputs().len() == 3 {
+                    // With `offset` specified
+                    // e.g., select * from tumble(t1, start, interval, offset);
+                    assert_eq!(ExprType::TumbleStart, func_call.func_type());
+                    match self.visit_ternary_op(func_call.inputs()) {
+                        (Constant, Constant, Constant) => Constant,
+                        (Watermark(idx), Constant, Constant) => Watermark(idx),
+                        (Nondecreasing, Constant, Constant) => Nondecreasing,
+                        _ => WatermarkDerivation::None,
+                    }
+                } else {
+                    match self.visit_binary_op(func_call.inputs()) {
+                        (Constant, Constant) => Constant,
+                        (Watermark(idx), Constant) => Watermark(idx),
+                        (Nondecreasing, Constant) => Nondecreasing,
+                        _ => WatermarkDerivation::None,
+                    }
                 }
             }
             ExprType::Multiply | ExprType::Divide | ExprType::Modulus => {
@@ -577,8 +668,8 @@ impl WatermarkAnalyzer {
                 },
                 _ => unreachable!(),
             },
-            ExprType::ToTimestamp => self.visit_unary_op(func_call.inputs()),
-            ExprType::ToTimestamp1 => WatermarkDerivation::None,
+            ExprType::SecToTimestamptz => self.visit_unary_op(func_call.inputs()),
+            ExprType::CharToTimestamptz => WatermarkDerivation::None,
             ExprType::Cast => {
                 // TODO: need more derivation
                 WatermarkDerivation::None

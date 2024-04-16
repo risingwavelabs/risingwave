@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,17 +14,19 @@
 
 use std::sync::Arc;
 
-use anyhow;
 use async_trait::async_trait;
+use risingwave_common::bail;
 
 use super::source::{NatsOffset, NatsSplit};
 use super::NatsProperties;
+use crate::error::ConnectorResult;
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator, SplitId};
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct NatsSplitEnumerator {
     subject: String,
     split_id: SplitId,
+    client: async_nats::Client,
 }
 
 #[async_trait]
@@ -35,14 +37,24 @@ impl SplitEnumerator for NatsSplitEnumerator {
     async fn new(
         properties: Self::Properties,
         _context: SourceEnumeratorContextRef,
-    ) -> anyhow::Result<NatsSplitEnumerator> {
+    ) -> ConnectorResult<NatsSplitEnumerator> {
+        let client = properties.common.build_client().await?;
         Ok(Self {
             subject: properties.common.subject,
             split_id: Arc::from("0"),
+            client,
         })
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<NatsSplit>> {
+    async fn list_splits(&mut self) -> ConnectorResult<Vec<NatsSplit>> {
+        // Nats currently does not support list_splits API, if we simple return the default 0 without checking the client status, will result executor crash
+        let state = self.client.connection_state();
+        if state != async_nats::connection::State::Connected {
+            bail!(
+                "Nats connection status is not connected, current status is {:?}",
+                state
+            );
+        }
         // TODO: to simplify the logic, return 1 split for first version
         let nats_split = NatsSplit {
             subject: self.subject.clone(),

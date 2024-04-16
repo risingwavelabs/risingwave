@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
 use std::collections::{HashMap, HashSet};
 
 use risingwave_common::catalog::TableOption;
-use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
@@ -86,7 +85,7 @@ impl TtlReclaimCompactionPicker {
         for table_id in table_id_in_sst {
             match self.table_id_to_ttl.get(&table_id) {
                 Some(ttl_second_u32) => {
-                    assert!(*ttl_second_u32 != TABLE_OPTION_DUMMY_RETENTION_SECOND);
+                    assert!(*ttl_second_u32 > 0);
                     // default to zero.
                     let ttl_mill = *ttl_second_u32 as u64 * 1000;
                     let min_epoch = expire_epoch.subtract_ms(ttl_mill);
@@ -202,6 +201,8 @@ impl TtlReclaimCompactionPicker {
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+
     use itertools::Itertools;
     use risingwave_pb::hummock::compact_task;
     pub use risingwave_pb::hummock::{Level, LevelType};
@@ -213,7 +214,7 @@ mod test {
         generate_table_with_ids_and_epochs,
     };
     use crate::hummock::compaction::selector::{CompactionSelector, TtlCompactionSelector};
-    use crate::hummock::compaction::LocalSelectorStatistic;
+    use crate::hummock::compaction::{CompactionDeveloperConfig, LocalSelectorStatistic};
     use crate::hummock::model::CompactionGroup;
 
     #[test]
@@ -340,6 +341,7 @@ mod test {
                 total_file_size: 0,
                 sub_level_id: 0,
                 uncompressed_file_size: 0,
+                ..Default::default()
             },
         ];
 
@@ -378,6 +380,7 @@ mod test {
                     &mut levels_handler,
                     &mut local_stats,
                     table_id_to_options,
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -427,6 +430,7 @@ mod test {
                     &mut levels_handler,
                     &mut local_stats,
                     table_id_to_options.clone(),
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -459,6 +463,7 @@ mod test {
                     &mut levels_handler,
                     &mut local_stats,
                     table_id_to_options.clone(),
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -514,6 +519,7 @@ mod test {
                     &mut levels_handler,
                     &mut local_stats,
                     table_id_to_options,
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -554,6 +560,7 @@ mod test {
                 &mut levels_handler,
                 &mut local_stats,
                 HashMap::default(),
+                Arc::new(CompactionDeveloperConfig::default()),
             );
 
             // empty table_options does not select any files
@@ -604,7 +611,7 @@ mod test {
             );
 
             let expect_task_file_count = [1, 1, 1];
-            let expect_task_sst_id_range = vec![vec![2], vec![3], vec![4]];
+            let expect_task_sst_id_range = [vec![2], vec![3], vec![4]];
             for (index, x) in expect_task_file_count.iter().enumerate() {
                 // // pick ttl reclaim
                 let task = selector
@@ -615,6 +622,7 @@ mod test {
                         &mut levels_handler,
                         &mut local_stats,
                         table_id_to_options.clone(),
+                        Arc::new(CompactionDeveloperConfig::default()),
                     )
                     .unwrap();
 
@@ -686,7 +694,7 @@ mod test {
             );
 
             let expect_task_file_count = [1, 1];
-            let expect_task_sst_id_range = vec![vec![2], vec![3]];
+            let expect_task_sst_id_range = [vec![2], vec![3]];
             for (index, x) in expect_task_file_count.iter().enumerate() {
                 if index == expect_task_file_count.len() - 1 {
                     table_id_to_options.insert(
@@ -706,6 +714,7 @@ mod test {
                         &mut levels_handler,
                         &mut local_stats,
                         table_id_to_options.clone(),
+                        Arc::new(CompactionDeveloperConfig::default()),
                     )
                     .unwrap();
 

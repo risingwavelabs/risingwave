@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,35 +13,49 @@
 // limitations under the License.
 
 use futures::StreamExt;
-use risingwave_common::catalog::Schema;
+use risingwave_common::metrics::LabelGuardedIntCounter;
 
-use crate::executor::{BoxedMessageStream, Executor, ExecutorInfo, PkIndicesRef};
+use crate::executor::monitor::StreamingMetrics;
+use crate::executor::{BoxedMessageStream, Execute};
+use crate::task::{ActorId, FragmentId};
 
 #[derive(Default)]
-pub struct DummyExecutor {
-    pub info: ExecutorInfo,
-}
+pub struct DummyExecutor;
 
-impl DummyExecutor {
-    pub fn new(info: ExecutorInfo) -> Self {
-        Self { info }
-    }
-}
-
-impl Executor for DummyExecutor {
+impl Execute for DummyExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         futures::stream::pending().boxed()
     }
+}
 
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
+pub(crate) struct ActorInputMetrics {
+    pub(crate) actor_in_record_cnt: LabelGuardedIntCounter<3>,
+    pub(crate) actor_input_buffer_blocking_duration_ns: LabelGuardedIntCounter<3>,
+}
 
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
+impl ActorInputMetrics {
+    pub(crate) fn new(
+        metrics: &StreamingMetrics,
+        actor_id: ActorId,
+        fragment_id: FragmentId,
+        upstream_fragment_id: FragmentId,
+    ) -> Self {
+        let actor_id_str = actor_id.to_string();
+        let fragment_id_str = fragment_id.to_string();
+        let upstream_fragment_id_str = upstream_fragment_id.to_string();
+        Self {
+            actor_in_record_cnt: metrics.actor_in_record_cnt.with_guarded_label_values(&[
+                &actor_id_str,
+                &fragment_id_str,
+                &upstream_fragment_id_str,
+            ]),
+            actor_input_buffer_blocking_duration_ns: metrics
+                .actor_input_buffer_blocking_duration_ns
+                .with_guarded_label_values(&[
+                    &actor_id_str,
+                    &fragment_id_str,
+                    &upstream_fragment_id_str,
+                ]),
+        }
     }
 }

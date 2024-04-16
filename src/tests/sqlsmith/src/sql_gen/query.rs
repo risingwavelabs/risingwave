@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -264,7 +264,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         match self.rng.gen_range(0..=9) {
             0..=8 => {
                 let group_by_cols = self.gen_random_bound_columns();
-                self.bound_columns = group_by_cols.clone();
+                self.bound_columns.clone_from(&group_by_cols);
                 group_by_cols
                     .into_iter()
                     .map(|c| Expr::Identifier(Ident::new_unchecked(c.name)))

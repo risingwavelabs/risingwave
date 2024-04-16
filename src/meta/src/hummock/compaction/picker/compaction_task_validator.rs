@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -118,7 +118,6 @@ impl CompactionTaskValidationRule for TierCompactionTaskValidationRule {
             stats.skip_by_count_limit += 1;
             return false;
         }
-
         true
     }
 }
@@ -129,7 +128,8 @@ struct IntraCompactionTaskValidationRule {
 
 impl CompactionTaskValidationRule for IntraCompactionTaskValidationRule {
     fn validate(&self, input: &CompactionInput, stats: &mut LocalPickerStatistic) -> bool {
-        if input.total_file_count >= self.config.level0_max_compact_file_number
+        if (input.total_file_count >= self.config.level0_max_compact_file_number
+            && input.input_levels.len() > 1)
             || input.input_levels.len() >= MAX_COMPACT_LEVEL_COUNT
         {
             return true;

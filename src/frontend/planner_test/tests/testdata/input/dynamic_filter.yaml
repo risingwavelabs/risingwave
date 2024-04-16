@@ -87,3 +87,11 @@
   expected_outputs:
   - stream_plan
   - optimized_logical_plan_for_stream
+- name: two predicate on the same subquery
+  before:
+  - create_tables
+  sql: |
+    with cte as (select max(v2) max from t2) select * from t1 where v1 > (select max from cte) AND v1 < (select max+5 from cte);
+  expected_outputs:
+  - stream_plan
+  - optimized_logical_plan_for_stream

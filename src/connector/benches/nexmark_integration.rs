@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,14 +19,14 @@ use std::sync::LazyLock;
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use itertools::Itertools;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::{
     ByteStreamSourceParser, JsonParser, SourceParserIntoStreamExt, SpecificParserConfig,
 };
 use risingwave_connector::source::{
-    BoxSourceStream, BoxSourceWithStateStream, SourceColumnDesc, SourceMessage, SourceMeta,
-    StreamChunkWithState,
+    BoxChunkSourceStream, BoxSourceStream, SourceColumnDesc, SourceMessage, SourceMeta,
 };
 use tracing::Level;
 use tracing_subscriber::prelude::*;
@@ -90,9 +90,8 @@ fn make_parser() -> impl ByteStreamSourceParser {
     JsonParser::new(props, columns, Default::default()).unwrap()
 }
 
-fn make_stream_iter() -> impl Iterator<Item = StreamChunkWithState> {
-    let mut stream: BoxSourceWithStateStream =
-        make_parser().into_stream(make_data_stream()).boxed();
+fn make_stream_iter() -> impl Iterator<Item = StreamChunk> {
+    let mut stream: BoxChunkSourceStream = make_parser().into_stream(make_data_stream()).boxed();
 
     std::iter::from_fn(move || {
         stream

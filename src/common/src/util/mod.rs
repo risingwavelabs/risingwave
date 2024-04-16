@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,14 +21,15 @@ pub mod compress;
 pub mod deployment;
 pub mod env_var;
 pub mod epoch;
-mod future_utils;
 pub mod hash_util;
-pub mod iter_util;
+pub use rw_iter_util as iter_util;
 pub mod memcmp_encoding;
+pub mod meta_addr;
 pub mod panic;
 pub mod pretty_bytes;
 pub mod prost;
-pub mod resource_util;
+pub mod query_log;
+pub use rw_resource_util as resource_util;
 pub mod row_id;
 pub mod row_serde;
 pub mod runtime;
@@ -39,9 +40,3 @@ pub mod stream_graph_visitor;
 pub mod tracing;
 pub mod value_encoding;
 pub mod worker_util;
-
-pub use future_utils::{
-    await_future_with_monitor_error_stream, drop_either_future, pending_on_none, select_all,
-};
-#[macro_use]
-pub mod match_util;

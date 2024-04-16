@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,12 +26,12 @@ use chrono::Timelike;
 use num_traits::{CheckedAdd, CheckedNeg, CheckedSub, Zero};
 use postgres_types::{to_sql_checked, FromSql};
 use regex::Regex;
+use risingwave_common_estimate_size::ZeroHeapSize;
 use risingwave_pb::data::PbInterval;
 use rust_decimal::prelude::Decimal;
 
 use super::to_binary::ToBinary;
 use super::*;
-use crate::estimate_size::EstimateSize;
 
 /// Every interval can be represented by a `Interval`.
 ///
@@ -42,12 +42,14 @@ use crate::estimate_size::EstimateSize;
 /// One month may contain 28/31 days. One day may contain 23/25 hours.
 /// This internals is learned from PG:
 /// <https://www.postgresql.org/docs/9.1/datatype-datetime.html#:~:text=field%20is%20negative.-,Internally,-interval%20values%20are>
-#[derive(Debug, Clone, Copy, Default, EstimateSize)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Interval {
     months: i32,
     days: i32,
     usecs: i64,
 }
+
+impl ZeroHeapSize for Interval {}
 
 const USECS_PER_SEC: i64 = 1_000_000;
 const USECS_PER_DAY: i64 = 86400 * USECS_PER_SEC;
@@ -380,6 +382,11 @@ impl Interval {
     /// Checks if [`Interval`] is positive.
     pub fn is_positive(&self) -> bool {
         self > &Self::from_month_day_usec(0, 0, 0)
+    }
+
+    /// Checks if all fields of [`Interval`] are all non-negative.
+    pub fn is_never_negative(&self) -> bool {
+        self.months >= 0 && self.days >= 0 && self.usecs >= 0
     }
 
     /// Truncate the interval to the precision of milliseconds.
@@ -1049,7 +1056,7 @@ impl Interval {
     pub fn from_iso_8601(s: &str) -> ParseResult<Self> {
         // ISO pattern - PnYnMnDTnHnMnS
         static ISO_8601_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r"P([0-9]+)Y([0-9]+)M([0-9]+)DT([0-9]+)H([0-9]+)M([0-9]+(?:\.[0-9]+)?)S")
+            Regex::new(r"^P([0-9]+)Y([0-9]+)M([0-9]+)DT([0-9]+)H([0-9]+)M([0-9]+(?:\.[0-9]+)?)S$")
                 .unwrap()
         });
         // wrap into a closure to simplify error handling
@@ -1451,7 +1458,10 @@ impl Interval {
         if let Some(leading_field) = leading_field {
             Self::parse_sql_standard(s, leading_field)
         } else {
-            Self::parse_postgres(s)
+            match s.as_bytes().get(0) {
+                Some(b'P') => Self::from_iso_8601(s),
+                _ => Self::parse_postgres(s),
+            }
         }
     }
 }
@@ -1527,6 +1537,12 @@ mod tests {
         assert_eq!(
             interval,
             Interval::from_month(14) + Interval::from_days(3) + Interval::from_minutes(62)
+        );
+
+        let interval = "P1Y2M3DT0H5M0S".parse::<Interval>().unwrap();
+        assert_eq!(
+            interval,
+            Interval::from_month(14) + Interval::from_days(3) + Interval::from_minutes(5)
         );
     }
 

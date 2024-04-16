@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{Date, Decimal, Time, Timestamp, Timestamptz};
 
 use super::unified::{AccessError, AccessResult};
 use super::{ByteStreamSourceParser, CsvProperties};
+use crate::error::ConnectorResult;
 use crate::only_parse_payload;
 use crate::parser::{ParserFormat, SourceStreamChunkRowWriter};
 use crate::source::{DataType, SourceColumnDesc, SourceContext, SourceContextRef};
@@ -46,7 +45,7 @@ impl CsvParser {
         rw_columns: Vec<SourceColumnDesc>,
         csv_props: CsvProperties,
         source_ctx: SourceContextRef,
-    ) -> Result<Self> {
+    ) -> ConnectorResult<Self> {
         let CsvProperties {
             delimiter,
             has_header,
@@ -60,15 +59,14 @@ impl CsvParser {
         })
     }
 
-    fn read_row(&self, buf: &[u8]) -> Result<Vec<String>> {
+    fn read_row(&self, buf: &[u8]) -> ConnectorResult<Vec<String>> {
         let mut reader_builder = csv::ReaderBuilder::default();
         reader_builder.delimiter(self.delimiter).has_headers(false);
         let record = reader_builder
             .from_reader(buf)
             .records()
             .next()
-            .transpose()
-            .map_err(|err| RwError::from(ProtocolError(err.to_string())))?;
+            .transpose()?;
         Ok(record
             .map(|record| record.iter().map(|field| field.to_string()).collect())
             .unwrap_or_default())
@@ -105,7 +103,7 @@ impl CsvParser {
         &mut self,
         payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<()> {
+    ) -> ConnectorResult<()> {
         let mut fields = self.read_row(&payload)?;
 
         if let Some(headers) = &mut self.headers {
@@ -161,7 +159,7 @@ impl ByteStreamSourceParser for CsvParser {
         _key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<()> {
+    ) -> ConnectorResult<()> {
         only_parse_payload!(self, payload, writer)
     }
 }

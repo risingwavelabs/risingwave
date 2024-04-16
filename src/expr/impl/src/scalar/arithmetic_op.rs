@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -154,8 +154,8 @@ where
 }
 
 #[function("abs(decimal) -> decimal")]
-pub fn decimal_abs(decimal: Decimal) -> Result<Decimal> {
-    Ok(Decimal::abs(&decimal))
+pub fn decimal_abs(decimal: Decimal) -> Decimal {
+    Decimal::abs(&decimal)
 }
 
 fn err_pow_zero_negative() -> ExprError {

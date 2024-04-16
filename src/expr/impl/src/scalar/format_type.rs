@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,17 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Write;
+
 use risingwave_common::types::DataType;
 use risingwave_expr::function;
 
 #[function("format_type(int4, int4) -> varchar")]
-pub fn format_type(oid: Option<i32>, _typemod: Option<i32>) -> Option<Box<str>> {
+pub fn format_type(oid: i32, _typemod: Option<i32>, writer: &mut impl Write) {
     // since we don't support type modifier, ignore it.
-    oid.map(|i| {
-        DataType::from_oid(i)
-            .map(|dt| format!("{}", dt).into_boxed_str())
-            .unwrap_or("???".into())
-    })
+    match DataType::from_oid(oid) {
+        Ok(dt) => write!(writer, "{}", dt).unwrap(),
+        Err(_) => write!(writer, "???").unwrap(),
+    }
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use itertools::Itertools;
-use risingwave_common::error::ErrorCode::{self, ProtocolError};
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::bail;
 use simd_json::prelude::{MutableObject, ValueAsScalar, ValueObjectAccess};
 use simd_json::BorrowedValue;
 
+use crate::error::ConnectorResult;
 use crate::only_parse_payload;
 use crate::parser::canal::operators::*;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
@@ -44,7 +45,7 @@ impl CanalJsonParser {
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
         config: &JsonProperties,
-    ) -> Result<Self> {
+    ) -> ConnectorResult<Self> {
         Ok(Self {
             rw_columns,
             source_ctx,
@@ -57,29 +58,23 @@ impl CanalJsonParser {
         &self,
         mut payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<()> {
+    ) -> ConnectorResult<()> {
         let mut event: BorrowedValue<'_> =
             simd_json::to_borrowed_value(&mut payload[self.payload_start_idx..])
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+                .context("failed to parse canal json payload")?;
 
-        let is_ddl = event.get(IS_DDL).and_then(|v| v.as_bool()).ok_or_else(|| {
-            RwError::from(ProtocolError(
-                "isDdl field not found in canal json".to_owned(),
-            ))
-        })?;
+        let is_ddl = event
+            .get(IS_DDL)
+            .and_then(|v| v.as_bool())
+            .context("field `isDdl` not found in canal json")?;
         if is_ddl {
-            return Err(RwError::from(ProtocolError(
-                "received a DDL message, please set `canal.instance.filter.query.dml` to true."
-                    .to_string(),
-            )));
+            bail!("received a DDL message, please set `canal.instance.filter.query.dml` to true.");
         }
 
         let op = match event.get(OP).and_then(|v| v.as_str()) {
             Some(CANAL_INSERT_EVENT | CANAL_UPDATE_EVENT) => ChangeEventOperation::Upsert,
             Some(CANAL_DELETE_EVENT) => ChangeEventOperation::Delete,
-            _ => Err(RwError::from(ProtocolError(
-                "op field not found in canal json".to_owned(),
-            )))?,
+            _ => bail!("op field not found in canal json"),
         };
 
         let events = event
@@ -88,11 +83,7 @@ impl CanalJsonParser {
                 BorrowedValue::Array(array) => Some(array),
                 _ => None,
             })
-            .ok_or_else(|| {
-                RwError::from(ProtocolError(
-                    "'data' is missing for creating event".to_string(),
-                ))
-            })?;
+            .context("field `data` is missing for creating event")?;
 
         let mut errors = Vec::new();
         for event in events.drain(..) {
@@ -106,11 +97,12 @@ impl CanalJsonParser {
         if errors.is_empty() {
             Ok(())
         } else {
-            Err(RwError::from(ErrorCode::InternalError(format!(
+            // TODO(error-handling): multiple errors
+            bail!(
                 "failed to parse {} row(s) in a single canal json message: {}",
                 errors.len(),
-                errors.iter().join(", ")
-            ))))
+                errors.iter().format(", ")
+            );
         }
     }
 }
@@ -133,7 +125,7 @@ impl ByteStreamSourceParser for CanalJsonParser {
         _key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<()> {
+    ) -> ConnectorResult<()> {
         only_parse_payload!(self, payload, writer)
     }
 }

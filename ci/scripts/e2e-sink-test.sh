@@ -54,13 +54,14 @@ psql -h db -U postgres -d test -c "create table t5 (v1 smallint primary key, v2 
 psql -h db -U postgres -d test < ./e2e_test/sink/remote/pg_create_table.sql
 
 echo "--- starting risingwave cluster"
-cargo make ci-start ci-1cn-1fe
+risedev ci-start ci-1cn-1fe
 
 echo "--- testing common sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/append_only_sink.slt'
 sqllogictest -p 4566 -d dev './e2e_test/sink/create_sink_as.slt'
 sqllogictest -p 4566 -d dev './e2e_test/sink/blackhole_sink.slt'
 sqllogictest -p 4566 -d dev './e2e_test/sink/remote/types.slt'
+sqllogictest -p 4566 -d dev './e2e_test/sink/sink_into_table/*.slt'
 sleep 1
 
 echo "--- testing remote sinks"
@@ -108,7 +109,6 @@ else
 fi
 
 echo "--- testing elasticsearch sink"
-chmod +x ./ci/scripts/e2e-elasticsearch-sink-test.sh
 ./ci/scripts/e2e-elasticsearch-sink-test.sh
 if [ $? -eq 0 ]; then
   echo "elasticsearch sink check passed"
@@ -118,13 +118,13 @@ else
 fi
 
 echo "--- Kill cluster"
-cargo make ci-kill
+risedev ci-kill
 
 echo "--- e2e, ci-1cn-1fe, nexmark endless"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make ci-start ci-1cn-1fe
+risedev ci-start ci-1cn-1fe
 sqllogictest -p 4566 -d dev './e2e_test/source/nexmark_endless_mvs/*.slt'
 sqllogictest -p 4566 -d dev './e2e_test/source/nexmark_endless_sinks/*.slt'
 
 echo "--- Kill cluster"
-cargo make ci-kill
+risedev ci-kill

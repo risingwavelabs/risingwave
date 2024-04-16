@@ -1,0 +1,107 @@
+Clickhouse:
+  connector: "clickhouse"
+  type: "append-only"
+  force_append_only: "true"
+  clickhouse.url: "http://127.0.0.1:8123"
+  clickhouse.user: "default"
+  clickhouse.password: ""
+  clickhouse.database: "default"
+  clickhouse.table: "sink_bench"
+Redis:
+  connector: 'redis'
+  primary_key: 'v1'
+  type: 'append-only'
+  redis.url: 'redis://127.0.0.1:6379/'
+Kafka:
+  connector: 'kafka'
+  properties.bootstrap.server: '127.0.0.1:9092'
+  topic : 'counts'
+  primary_key: 'v1'
+Pulsar:
+  connector: 'pulsar'
+  pulsar.topic: 'twitter'
+  pulsar.service.url: 'pulsar://127.0.0.1:6650'
+Iceberg:
+  connector: 'iceberg'
+  type: 'append-only'
+  warehouse.path: 's3a://iceberg-data'
+  s3.endpoint: 'http://127.0.0.1:9301'
+  s3.access.key: 'hummockadmin'
+  s3.secret.key: 'hummockadmin'
+  database.name: 'demo_db'
+  s3.region: '1'
+  table.name: 'demo_db.demo_table'
+  force_append_only: 'true'
+# RemoteIceberg:
+#   connector: 'iceberg_java'
+#   type: 'append-only'
+#   force_append_only: 'true'
+#   warehouse.path: 's3://iceberg-data'
+#   s3.endpoint: 'http://127.0.0.1:9301'
+#   s3.access.key: 'hummockadmin'
+#   s3.secret.key: 'hummockadmin'
+#   database.name: 'demo_db'
+#   table.name: 'demo_table'
+Mysql:
+  connector: 'jdbc'
+  type: 'append-only'
+  force_append_only: 'true'
+  jdbc.url: 'jdbc:mysql://127.0.0.1:3306/mydb?user=username&password=123456'
+  table.name: 'bench_table'
+Postgres:
+  connector: 'jdbc'
+  type: 'append-only'
+  force_append_only: 'true'
+  jdbc.url: 'jdbc:postgresql://127.0.0.1:5432/mydb?user=postgres&password=123'
+  table.name: 'bench_table'
+DeltaLake:
+  connector: 'deltalake'
+  type: 'append-only'
+  force_append_only: 'true'
+  location: 's3a://deltalake-bench/deltalake'
+  s3.access.key: 'hummockadmin'
+  s3.secret.key: 'hummockadmin'
+  s3.endpoint: 'http://127.0.0.1:9301'
+ElasticSearch:
+  connector: 'elasticsearch'
+  index: 'test'
+  url: 'http://127.0.0.1:9200'
+  username: 'elastic'
+  password: 'risingwave'
+  delimiter: '_'
+Cassandra:
+  connector: 'cassandra'
+  type: 'append-only'
+  force_append_only: 'true'
+  cassandra.url: '127.0.0.1:9042'
+  cassandra.keyspace: 'demo'
+  cassandra.table: 'table_bench'
+  cassandra.datacenter: 'datacenter1'
+Doris:
+  connector: 'doris'
+  type: 'append-only'
+  doris.url: 'http://127.0.0.1:8030'
+  doris.user: 'users'
+  doris.password: '123456'
+  doris.database: 'demo'
+  doris.table: 'table_bench'
+  force_append_only: 'true'
+Starrocks:
+  connector: 'starrocks'
+  type: 'append-only'
+  starrocks.host: '127.0.0.1'
+  starrocks.mysqlport: '9030'
+  starrocks.httpport: '8030'
+  starrocks.user: 'users'
+  starrocks.password: '123456'
+  starrocks.database: 'demo'
+  starrocks.table: 'table_bench'
+  force_append_only: 'true'
+BigQuery:
+  connector: 'bigquery'
+  type: 'append-only'
+  bigquery.local.path: 'xxx.json'
+  bigquery.project: 'xxx'
+  bigquery.dataset: 'test_bigquery_sink'
+  bigquery.table: 'table_bench'
+  force_append_only: 'true'

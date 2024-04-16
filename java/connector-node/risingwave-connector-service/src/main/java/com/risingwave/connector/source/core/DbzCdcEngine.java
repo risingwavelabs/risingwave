@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,36 +14,45 @@
 
 package com.risingwave.connector.source.core;
 
-import com.risingwave.connector.api.source.CdcEngine;
+import static io.debezium.config.CommonConnectorConfig.TOPIC_PREFIX;
+import static io.debezium.schema.AbstractTopicNamingStrategy.*;
+
 import com.risingwave.proto.ConnectorServiceProto;
 import io.debezium.embedded.Connect;
 import io.debezium.engine.DebeziumEngine;
-import io.debezium.heartbeat.Heartbeat;
 import java.util.Properties;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 
-public class DbzCdcEngine implements CdcEngine {
+public class DbzCdcEngine implements Runnable {
     static final int DEFAULT_QUEUE_CAPACITY = 16;
 
     private final DebeziumEngine<?> engine;
-    private final DbzCdcEventConsumer consumer;
+    private final DbzChangeEventConsumer changeEventConsumer;
     private final long id;
 
     /** If config is not valid will throw exceptions */
-    public DbzCdcEngine(long id, Properties config, DebeziumEngine.CompletionCallback callback) {
-        var dbzHeartbeatPrefix = config.getProperty(Heartbeat.HEARTBEAT_TOPICS_PREFIX.name());
+    public DbzCdcEngine(
+            long sourceId,
+            Properties config,
+            DebeziumEngine.CompletionCallback completionCallback) {
+        var heartbeatTopicPrefix = config.getProperty(TOPIC_HEARTBEAT_PREFIX.name());
+        var topicPrefix = config.getProperty(TOPIC_PREFIX.name());
+        var transactionTopic = String.format("%s.%s", topicPrefix, DEFAULT_TRANSACTION_TOPIC);
         var consumer =
-                new DbzCdcEventConsumer(
-                        id, dbzHeartbeatPrefix, new ArrayBlockingQueue<>(DEFAULT_QUEUE_CAPACITY));
+                new DbzChangeEventConsumer(
+                        sourceId,
+                        heartbeatTopicPrefix,
+                        transactionTopic,
+                        new ArrayBlockingQueue<>(DEFAULT_QUEUE_CAPACITY));
 
         // Builds a debezium engine but not start it
-        this.id = id;
-        this.consumer = consumer;
+        this.id = sourceId;
+        this.changeEventConsumer = consumer;
         this.engine =
                 DebeziumEngine.create(Connect.class)
                         .using(config)
-                        .using(callback)
+                        .using(completionCallback)
                         .notifying(consumer)
                         .build();
     }
@@ -54,7 +63,6 @@ public class DbzCdcEngine implements CdcEngine {
         engine.run();
     }
 
-    @Override
     public long getId() {
         return id;
     }
@@ -63,8 +71,11 @@ public class DbzCdcEngine implements CdcEngine {
         engine.close();
     }
 
-    @Override
     public BlockingQueue<ConnectorServiceProto.GetEventStreamResponse> getOutputChannel() {
-        return consumer.getOutputChannel();
+        return changeEventConsumer.getOutputChannel();
+    }
+
+    public DbzChangeEventConsumer getChangeEventConsumer() {
+        return changeEventConsumer;
     }
 }

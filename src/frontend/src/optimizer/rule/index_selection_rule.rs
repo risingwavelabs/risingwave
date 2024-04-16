@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -95,7 +95,7 @@ impl Rule for IndexSelectionRule {
         if indexes.is_empty() {
             return None;
         }
-        if logical_scan.for_system_time_as_of_proctime() {
+        if logical_scan.as_of().is_some() {
             return None;
         }
         let primary_table_row_size = TableScanIoEstimator::estimate_row_size(logical_scan);
@@ -227,19 +227,19 @@ impl IndexSelectionRule {
 
         let index_scan = LogicalScan::create(
             index.index_table.name.clone(),
-            index.index_table.table_desc().into(),
+            index.index_table.clone(),
             vec![],
             logical_scan.ctx(),
-            false,
+            None,
             index.index_table.cardinality,
         );
 
         let primary_table_scan = LogicalScan::create(
             index.primary_table.name.clone(),
-            index.primary_table.table_desc().into(),
+            index.primary_table.clone(),
             vec![],
             logical_scan.ctx(),
-            false,
+            None,
             index.primary_table.cardinality,
         );
 
@@ -335,10 +335,10 @@ impl IndexSelectionRule {
 
         let primary_table_scan = LogicalScan::create(
             logical_scan.table_name().to_string(),
-            primary_table_desc.clone().into(),
+            logical_scan.table_catalog(),
             vec![],
             logical_scan.ctx(),
-            false,
+            None,
             logical_scan.table_cardinality(),
         );
 
@@ -560,20 +560,20 @@ impl IndexSelectionRule {
             }
         }
 
-        let primary_access = generic::Scan::new(
+        let primary_access = generic::TableScan::new(
             logical_scan.table_name().to_string(),
             primary_table_desc
                 .pk
                 .iter()
                 .map(|x| x.column_index)
                 .collect_vec(),
-            primary_table_desc.clone().into(),
+            logical_scan.table_catalog(),
             vec![],
             logical_scan.ctx(),
             Condition {
                 conjunctions: conjunctions.to_vec(),
             },
-            false,
+            None,
             logical_scan.table_cardinality(),
         );
 
@@ -602,18 +602,18 @@ impl IndexSelectionRule {
         }
 
         Some(
-            generic::Scan::new(
+            generic::TableScan::new(
                 index.index_table.name.to_string(),
                 index
                     .primary_table_pk_ref_to_index_table()
                     .iter()
                     .map(|x| x.column_index)
                     .collect_vec(),
-                index.index_table.table_desc().into(),
+                index.index_table.clone(),
                 vec![],
                 ctx,
                 new_predicate,
-                false,
+                None,
                 index.index_table.cardinality,
             )
             .into(),

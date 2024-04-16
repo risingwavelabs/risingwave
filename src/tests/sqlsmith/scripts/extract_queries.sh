@@ -14,8 +14,8 @@ OUTPUT_FILE="$2"
 SHRUNK_OUTPUT_FILE="$2".shrunk
 
 echo "--- Extracting queries"
-cat "$LOG_FILE" | rg "\[EXECUTING .*\]" | sed 's/.*\[EXECUTING .*\]: //' | sed 's/$/;/' > "$OUTPUT_FILE"
-echo "--- Extracted queries to $LOG_FILE"
+cat "$LOG_FILE" | rg "(\[EXECUTING|\[TEST)" | sed 's/.*\[EXECUTING .*\]: //' | sed 's/.*\[TEST .*\]: //' | sed 's/$/;/' > "$OUTPUT_FILE"
+echo "--- Extracted queries to $OUTPUT_FILE"
 
 echo "--- Shrinking queries"
 cargo run --bin sqlsmith-reducer -- --input-file "$OUTPUT_FILE" --output-file "$SHRUNK_OUTPUT_FILE"

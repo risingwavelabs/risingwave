@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,7 +35,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 pub struct StreamProject {
     pub base: PlanBase<Stream>,
     core: generic::Project<PlanRef>,
-    /// All the watermark derivations, (input_column_index, output_column_index). And the
+    /// All the watermark derivations, (`input_column_index`, `output_column_index`). And the
     /// derivation expression is the project's expression itself.
     watermark_derivations: Vec<(usize, usize)>,
     /// Nondecreasing expression indices. `Project` can produce watermarks for these expressions.

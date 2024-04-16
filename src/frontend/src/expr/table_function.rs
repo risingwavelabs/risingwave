@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -73,10 +73,13 @@ impl TableFunction {
                 .udtf_catalog
                 .as_ref()
                 .map(|c| UserDefinedTableFunctionPb {
+                    arg_names: c.arg_names.clone(),
                     arg_types: c.arg_types.iter().map(|t| t.to_protobuf()).collect(),
                     language: c.language.clone(),
                     link: c.link.clone(),
                     identifier: c.identifier.clone(),
+                    body: c.body.clone(),
+                    compressed_binary: c.compressed_binary.clone(),
                 }),
         }
     }

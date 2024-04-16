@@ -49,7 +49,7 @@ async fn main() -> anyhow::Result<()> {
     let file = BufReader::new(file);
 
     let publisher = topic.new_publisher(Default::default());
-    for line in file.lines().flatten() {
+    for line in file.lines().map_while(Result::ok) {
         let a = publisher
             .publish(PubsubMessage {
                 data: line.clone().into_bytes(),

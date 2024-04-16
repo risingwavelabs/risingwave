@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -40,7 +40,7 @@ pub struct SysScan {
     pub table_desc: Rc<TableDesc>,
     /// The pushed down predicates. It refers to column indexes of the table.
     pub predicate: Condition,
-    /// Help RowSeqSysScan executor use a better chunk size
+    /// Help `RowSeqSysScan` executor use a better chunk size
     pub chunk_size: Option<u32>,
     /// The cardinality of the table **without** applying the predicate.
     pub table_cardinality: Cardinality,

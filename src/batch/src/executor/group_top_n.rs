@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -197,7 +197,7 @@ impl<K: HashKey> GroupTopNExecutor<K> {
         #[for_await]
         for chunk in self.child.execute() {
             let chunk = Arc::new(chunk?);
-            let keys = K::build(self.group_key.as_slice(), &chunk)?;
+            let keys = K::build_many(self.group_key.as_slice(), &chunk);
 
             for (row_id, ((encoded_row, key), visible)) in
                 encode_chunk(&chunk, &self.column_orders)?

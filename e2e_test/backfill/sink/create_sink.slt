@@ -1,0 +1,25 @@
+statement ok
+SET RW_IMPLICIT_FLUSH=true;
+
+statement ok
+create table t (v1 int);
+
+statement ok
+SET STREAMING_RATE_LIMIT = 1000;
+
+# Should finish in 10s
+statement ok
+insert into t select * from generate_series(1, 10000);
+
+statement ok
+create sink s as select x.v1 as v1
+from t x join t y
+    on x.v1 = y.v1
+with (
+    connector='kafka',
+    properties.bootstrap.server='localhost:29092',
+    topic='s_kafka',
+    primary_key='v1',
+    allow.auto.create.topics=true,
+)
+FORMAT DEBEZIUM ENCODE JSON;

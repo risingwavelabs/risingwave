@@ -28,11 +28,12 @@ if [[ "$profile" != "ci-dev" ]] && [[ "$profile" != "ci-release" ]]; then
 fi
 
 echo "--- Rust cargo-sort check"
-cargo sort --check --workspace
+cargo sort --check --workspace --grouped
 
-echo "--- Rust cargo-hakari check"
-cargo hakari generate --diff
-cargo hakari verify
+# Disable hakari until we make sure it's useful
+# echo "--- Rust cargo-hakari check"
+# cargo hakari generate --diff
+# cargo hakari verify
 
 echo "--- Rust format check"
 cargo fmt --all -- --check
@@ -40,9 +41,9 @@ cargo fmt --all -- --check
 echo "--- Build Rust components"
 
 if [[ "$profile" == "ci-dev" ]]; then
-    RISINGWAVE_FEATURE_FLAGS="--features rw-dynamic-link --no-default-features"
+    RISINGWAVE_FEATURE_FLAGS=(--features rw-dynamic-link --no-default-features)
 else
-    RISINGWAVE_FEATURE_FLAGS="--features rw-static-link"
+    RISINGWAVE_FEATURE_FLAGS=(--features rw-static-link)
 fi
 
 cargo build \
@@ -52,7 +53,8 @@ cargo build \
     -p risingwave_sqlsmith \
     -p risingwave_compaction_test \
     -p risingwave_e2e_extended_mode_test \
-    $RISINGWAVE_FEATURE_FLAGS \
+    "${RISINGWAVE_FEATURE_FLAGS[@]}" \
+    --features embedded-python-udf \
     --profile "$profile"
 
 
@@ -69,3 +71,4 @@ rm -rf target
 
 echo "--- Show sccache stats"
 sccache --show-stats
+sccache --zero-stats

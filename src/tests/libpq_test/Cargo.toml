@@ -9,7 +9,4 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 libpq = "3.0"
-clap = { version = "4", features = ["derive"] }
-
-[lints]
-workspace = true
+clap = { workspace = true }

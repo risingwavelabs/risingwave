@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,8 +18,10 @@ use std::sync::Arc;
 
 pub use anyhow::anyhow;
 use risingwave_common::array::ArrayError;
-use risingwave_common::error::{BoxedError, ErrorCode, RwError};
+use risingwave_common::error::BoxedError;
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
+use risingwave_connector::error::ConnectorError;
+use risingwave_dml::error::DmlError;
 use risingwave_expr::ExprError;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::{RpcError, ToTonicStatus};
@@ -27,6 +29,8 @@ use risingwave_storage::error::StorageError;
 use thiserror::Error;
 use thiserror_ext::Construct;
 use tonic::Status;
+
+use crate::worker_manager::worker_node_manager::FragmentId;
 
 pub type Result<T> = std::result::Result<T, BatchError>;
 /// Batch result with shared error.
@@ -101,13 +105,37 @@ pub enum BatchError {
         BoxedError,
     ),
 
+    #[error(transparent)]
+    Dml(
+        #[from]
+        #[backtrace]
+        DmlError,
+    ),
+
+    #[error(transparent)]
+    Iceberg(
+        #[from]
+        #[backtrace]
+        icelake::Error,
+    ),
+
     // Make the ref-counted type to be a variant for easier code structuring.
+    // TODO(error-handling): replace with `thiserror_ext::Arc`
     #[error(transparent)]
     Shared(
         #[from]
         #[backtrace]
         Arc<Self>,
     ),
+
+    #[error("Empty workers found")]
+    EmptyWorkerNodes,
+
+    #[error("Serving vnode mapping not found for fragment {0}")]
+    ServingVnodeMappingNotFound(FragmentId),
+
+    #[error("Streaming vnode mapping not found for fragment {0}")]
+    StreamingVnodeMappingNotFound(FragmentId),
 }
 
 // Serialize/deserialize error.
@@ -122,26 +150,6 @@ impl From<ValueEncodingError> for BatchError {
     }
 }
 
-impl From<tonic::Status> for BatchError {
-    fn from(status: tonic::Status) -> Self {
-        // Always wrap the status into a `RpcError`.
-        Self::from(RpcError::from(status))
-    }
-}
-
-impl From<BatchError> for RwError {
-    fn from(s: BatchError) -> Self {
-        ErrorCode::BatchError(Box::new(s)).into()
-    }
-}
-
-// TODO(error-handling): remove after eliminating RwError from connector.
-impl From<RwError> for BatchError {
-    fn from(s: RwError) -> Self {
-        Self::Internal(anyhow!(s))
-    }
-}
-
 impl<'a> From<&'a BatchError> for Status {
     fn from(err: &'a BatchError) -> Self {
         err.to_status(tonic::Code::Internal, "batch")
@@ -151,5 +159,11 @@ impl<'a> From<&'a BatchError> for Status {
 impl From<BatchError> for Status {
     fn from(err: BatchError) -> Self {
         Self::from(&err)
+    }
+}
+
+impl From<ConnectorError> for BatchError {
+    fn from(value: ConnectorError) -> Self {
+        Self::Connector(value.into())
     }
 }

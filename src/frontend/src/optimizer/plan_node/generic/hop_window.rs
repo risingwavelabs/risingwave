@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,13 +17,13 @@ use std::num::NonZeroUsize;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Interval};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_expr::ExprError;
 
 use super::super::utils::IndicesDisplay;
 use super::{impl_distill_unit_from_fields, GenericPlanNode, GenericPlanRef};
+use crate::error::Result;
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, InputRefDisplay, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::batch::BatchPlanRef;
@@ -38,13 +38,13 @@ pub struct HopWindow<PlanRef> {
     pub window_slide: Interval,
     pub window_size: Interval,
     pub window_offset: Interval,
-    /// Provides mapping from input schema, window_start, window_end to output schema.
+    /// Provides mapping from input schema, `window_start`, `window_end` to output schema.
     /// For example, if we had:
-    /// input schema: | 0: trip_time | 1: trip_name |
-    /// window_start: 2
-    /// window_end: 3
-    /// output schema: | trip_name | window_start |
-    /// Then, output_indices: [1, 2]
+    /// input schema: | 0: `trip_time` | 1: `trip_name` |
+    /// `window_start`: 2
+    /// `window_end`: 3
+    /// output schema: | `trip_name` | `window_start` |
+    /// Then, `output_indices`: [1, 2]
     pub output_indices: Vec<usize>,
 }
 

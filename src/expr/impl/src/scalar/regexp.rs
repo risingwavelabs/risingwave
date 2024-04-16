@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,9 +17,9 @@
 use std::str::FromStr;
 
 use fancy_regex::{Regex, RegexBuilder};
-use risingwave_common::array::ListValue;
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::array::{ArrayBuilder, ListValue, Utf8Array, Utf8ArrayBuilder};
 use risingwave_expr::{bail, function, ExprError, Result};
+use thiserror_ext::AsReport;
 
 #[derive(Debug)]
 pub struct RegexpContext {
@@ -41,7 +41,7 @@ impl RegexpContext {
         Ok(Self {
             regex: RegexBuilder::new(&origin)
                 .build()
-                .map_err(|e| ExprError::Parse(e.to_string().into()))?,
+                .map_err(|e| ExprError::Parse(e.to_report_string().into()))?,
             global: options.global,
             replacement: make_replacement(replacement),
         })
@@ -161,9 +161,9 @@ fn regexp_match(text: &str, regex: &RegexpContext) -> Option<ListValue> {
     let list = capture
         .iter()
         .skip(if skip_first { 1 } else { 0 })
-        .map(|mat| mat.map(|m| m.as_str().into()))
-        .collect();
-    Some(ListValue::new(list))
+        .map(|mat| mat.map(|m| m.as_str()))
+        .collect::<Utf8Array>();
+    Some(ListValue::new(list.into()))
 }
 
 #[function(
@@ -462,7 +462,7 @@ fn regexp_replace(
 fn regexp_split_to_array(text: &str, regex: &RegexpContext) -> Option<ListValue> {
     let n = text.len();
     let mut start = 0;
-    let mut list: Vec<Option<ScalarImpl>> = Vec::new();
+    let mut builder = Utf8ArrayBuilder::new(0);
     let mut empty_flag = false;
 
     loop {
@@ -492,7 +492,7 @@ fn regexp_split_to_array(text: &str, regex: &RegexpContext) -> Option<ListValue>
                 start = begin;
                 break;
             }
-            list.push(Some(text[start..begin + 1].into()));
+            builder.append(Some(&text[start..begin + 1]));
             start = end + 1;
             continue;
         }
@@ -502,7 +502,7 @@ fn regexp_split_to_array(text: &str, regex: &RegexpContext) -> Option<ListValue>
             if !empty_flag {
                 // We'll push an empty string to conform with postgres
                 // If there does not exists a empty match before
-                list.push(Some("".to_string().into()));
+                builder.append(Some(""));
             }
             start = end;
             continue;
@@ -510,7 +510,7 @@ fn regexp_split_to_array(text: &str, regex: &RegexpContext) -> Option<ListValue>
 
         if begin != 0 {
             // Normal case
-            list.push(Some(text[start..begin].into()));
+            builder.append(Some(&text[start..begin]));
         }
 
         // We should update the `start` no matter `begin` is zero or not
@@ -521,12 +521,12 @@ fn regexp_split_to_array(text: &str, regex: &RegexpContext) -> Option<ListValue>
         // Push the extra text to the list
         // Note that this will implicitly push the entire text to the list
         // If there is no match, which is the expected behavior
-        list.push(Some(text[start..].into()));
+        builder.append(Some(&text[start..]));
     }
 
     if start == n && !empty_flag {
-        list.push(Some("".to_string().into()));
+        builder.append(Some(""));
     }
 
-    Some(ListValue::new(list))
+    Some(ListValue::new(builder.finish().into()))
 }

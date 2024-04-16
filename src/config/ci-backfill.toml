@@ -2,7 +2,7 @@
 telemetry_enabled = false
 
 [streaming.developer]
-stream_chunk_size = 1
+stream_chunk_size = 10
 
 [system]
 # NOTE(kwannoel): If can't reproduce it, set to a lower number.

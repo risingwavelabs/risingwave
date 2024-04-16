@@ -1,0 +1,4 @@
+{
+    "rust-analyzer.rustc.source": "discover",
+    "git.openRepositoryInParentFolders": "always",
+}

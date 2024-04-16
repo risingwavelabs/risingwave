@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 use risingwave_hummock_sdk::{HummockContextId, HummockSstableObjectId};
 use risingwave_object_store::object::ObjectError;
 use risingwave_rpc_client::error::ToTonicStatus;
+use sea_orm::DbErr;
 use thiserror::Error;
 
 use crate::model::MetadataModelError;
@@ -80,6 +81,12 @@ impl From<MetadataModelError> for Error {
             MetadataModelError::MetaStoreError(e) => e.into(),
             e => anyhow::anyhow!(e).into(),
         }
+    }
+}
+
+impl From<sea_orm::DbErr> for Error {
+    fn from(value: DbErr) -> Self {
+        MetadataModelError::from(value).into()
     }
 }
 
