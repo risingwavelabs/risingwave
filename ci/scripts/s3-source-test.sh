@@ -12,6 +12,9 @@ while getopts 'p:s:' opt; do
         s )
             script=$OPTARG
             ;;
+        t )
+            format_type=$OPTARG
+            ;;
         \? )
             echo "Invalid Option: -$OPTARG" 1>&2
             exit 1
@@ -30,7 +33,7 @@ risedev ci-start ci-1cn-1fe
 
 echo "--- Run test"
 python3 -m pip install minio psycopg2-binary opendal
-python3 e2e_test/s3/"$script"
+python3 e2e_test/s3/"$script" "$format_type"
 
 echo "--- Kill cluster"
 risedev ci-kill
