@@ -47,7 +47,7 @@ use crate::rpc::ElectionClientRef;
 
 #[derive(Clone)]
 pub struct MetaMetrics {
-    //********************************** Meta ************************************
+    // ********************************** Meta ************************************
     /// The number of workers in the cluster.
     pub worker_num: IntGaugeVec,
     /// The roles of all meta nodes in the cluster.
