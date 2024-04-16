@@ -99,7 +99,7 @@ fn jsonb_populate_recordset<'a>(
 /// # Examples
 ///
 /// // FIXME(runji): this query is blocked by parser and frontend support.
-/// ```ignore
+/// ```slt,ignore
 /// query T
 /// select * from jsonb_to_record('{"a":1,"b":[1,2,3],"c":[1,2,3],"e":"bar","r": {"a": 123, "b": "a b c"}}')
 /// as x(a int, b text, c int[], d text, r struct<a int, b text>);
@@ -119,7 +119,7 @@ fn jsonb_to_record(jsonb: JsonbRef<'_>, ctx: &Context) -> Result<StructValue> {
 /// # Examples
 ///
 /// // FIXME(runji): this query is blocked by parser and frontend support.
-/// ```ignore
+/// ```slt,ignore
 /// query IT
 /// select * from jsonb_to_recordset('[{"a":1,"b":"foo"}, {"a":"2","c":"bar"}]') as x(a int, b text);
 /// ----
