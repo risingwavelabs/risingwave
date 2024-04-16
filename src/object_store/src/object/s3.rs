@@ -632,7 +632,7 @@ impl S3ObjectStore {
     pub async fn new_with_config(
         bucket: String,
         metrics: Arc<ObjectStoreMetrics>,
-        config: ObjectStoreConfig,
+        config: Arc<ObjectStoreConfig>,
     ) -> Self {
         let sdk_config_loader = aws_config::from_env().http_client(Self::new_http_client(&config));
 
@@ -696,7 +696,7 @@ impl S3ObjectStore {
             bucket,
             part_size: S3_PART_SIZE,
             metrics,
-            config: Arc::new(config),
+            config,
         }
     }
 
@@ -704,7 +704,7 @@ impl S3ObjectStore {
     pub async fn with_minio(
         server: &str,
         metrics: Arc<ObjectStoreMetrics>,
-        s3_object_store_config: ObjectStoreConfig,
+        object_store_config: Arc<ObjectStoreConfig>,
     ) -> Self {
         let server = server.strip_prefix("minio://").unwrap();
         let (access_key_id, rest) = server.split_once(':').unwrap();
@@ -740,11 +740,11 @@ impl S3ObjectStore {
         .identity_cache(
             aws_sdk_s3::config::IdentityCache::lazy()
                 .load_timeout(Duration::from_secs(
-                    s3_object_store_config.s3.identity_resolution_timeout_s,
+                    object_store_config.s3.identity_resolution_timeout_s,
                 ))
                 .build(),
         )
-        .http_client(Self::new_http_client(&s3_object_store_config))
+        .http_client(Self::new_http_client(&object_store_config))
         .behavior_version_latest()
         .stalled_stream_protection(aws_sdk_s3::config::StalledStreamProtectionConfig::disabled());
         let config = builder
@@ -758,7 +758,7 @@ impl S3ObjectStore {
             bucket: bucket.to_string(),
             part_size: MINIO_PART_SIZE,
             metrics,
-            config: Arc::new(s3_object_store_config),
+            config: object_store_config,
         }
     }
 

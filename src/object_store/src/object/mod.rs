@@ -125,7 +125,7 @@ pub trait ObjectStore: Send + Sync {
     fn monitored(
         self,
         metrics: Arc<ObjectStoreMetrics>,
-        config: ObjectStoreConfig,
+        config: Arc<ObjectStoreConfig>,
     ) -> MonitoredObjectStore<Self>
     where
         Self: Sized,
@@ -514,12 +514,12 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     pub fn new(
         store: OS,
         object_store_metrics: Arc<ObjectStoreMetrics>,
-        config: ObjectStoreConfig,
+        config: Arc<ObjectStoreConfig>,
     ) -> Self {
         Self {
             object_store_metrics,
             inner: store,
-            config: Arc::new(config),
+            config,
         }
     }
 
@@ -951,7 +951,7 @@ pub async fn build_remote_object_store(
     url: &str,
     metrics: Arc<ObjectStoreMetrics>,
     ident: &str,
-    config: ObjectStoreConfig,
+    config: Arc<ObjectStoreConfig>,
 ) -> ObjectStoreImpl {
     tracing::debug!(config=?config, "object store {ident}");
     match url {
@@ -1117,7 +1117,7 @@ fn get_retry_strategy(
         ))
         .factor(2)
         .take(attempts)
-        .map(if true { jitter } else { |x| x })
+        .map(jitter)
 }
 
 pub type ObjectMetadataIter = BoxStream<'static, ObjectResult<ObjectMetadata>>;

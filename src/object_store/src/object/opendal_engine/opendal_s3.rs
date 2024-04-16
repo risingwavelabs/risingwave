@@ -26,7 +26,7 @@ use crate::object::ObjectResult;
 
 impl OpendalObjectStore {
     /// create opendal s3 engine.
-    pub fn new_s3_engine(bucket: String, config: ObjectStoreConfig) -> ObjectResult<Self> {
+    pub fn new_s3_engine(bucket: String, config: Arc<ObjectStoreConfig>) -> ObjectResult<Self> {
         // Create s3 builder.
         let mut builder = S3::default();
         builder.bucket(&bucket);
@@ -48,7 +48,7 @@ impl OpendalObjectStore {
         Ok(Self {
             op,
             engine_type: EngineType::S3,
-            config: Arc::new(config),
+            config,
         })
     }
 

@@ -27,7 +27,7 @@ impl OpendalObjectStore {
     pub fn new_oss_engine(
         bucket: String,
         root: String,
-        config: ObjectStoreConfig,
+        config: Arc<ObjectStoreConfig>,
     ) -> ObjectResult<Self> {
         // Create oss backend builder.
         let mut builder = Oss::default();
@@ -54,7 +54,7 @@ impl OpendalObjectStore {
         Ok(Self {
             op,
             engine_type: EngineType::Oss,
-            config: Arc::new(config),
+            config,
         })
     }
 }

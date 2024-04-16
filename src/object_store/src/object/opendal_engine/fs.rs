@@ -25,7 +25,7 @@ use crate::object::ObjectResult;
 
 impl OpendalObjectStore {
     /// create opendal fs engine.
-    pub fn new_fs_engine(root: String, config: ObjectStoreConfig) -> ObjectResult<Self> {
+    pub fn new_fs_engine(root: String, config: Arc<ObjectStoreConfig>) -> ObjectResult<Self> {
         // Create fs backend builder.
         let mut builder = Fs::default();
         builder.root(&root);
@@ -40,7 +40,7 @@ impl OpendalObjectStore {
         Ok(Self {
             op,
             engine_type: EngineType::Fs,
-            config: Arc::new(config),
+            config,
         })
     }
 }

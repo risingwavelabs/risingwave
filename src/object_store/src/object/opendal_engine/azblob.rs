@@ -28,7 +28,7 @@ impl OpendalObjectStore {
     pub fn new_azblob_engine(
         container_name: String,
         root: String,
-        config: ObjectStoreConfig,
+        config: Arc<ObjectStoreConfig>,
     ) -> ObjectResult<Self> {
         // Create azblob backend builder.
         let mut builder = Azblob::default();
@@ -46,7 +46,7 @@ impl OpendalObjectStore {
         Ok(Self {
             op,
             engine_type: EngineType::Azblob,
-            config: Arc::new(config),
+            config,
         })
     }
 }

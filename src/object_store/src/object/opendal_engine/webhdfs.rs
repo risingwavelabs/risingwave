@@ -28,7 +28,7 @@ impl OpendalObjectStore {
     pub fn new_webhdfs_engine(
         endpoint: String,
         root: String,
-        config: ObjectStoreConfig,
+        config: Arc<ObjectStoreConfig>,
     ) -> ObjectResult<Self> {
         // Create webhdfs backend builder.
         let mut builder = Webhdfs::default();
@@ -46,7 +46,7 @@ impl OpendalObjectStore {
         Ok(Self {
             op,
             engine_type: EngineType::Webhdfs,
-            config: Arc::new(config),
+            config,
         })
     }
 }

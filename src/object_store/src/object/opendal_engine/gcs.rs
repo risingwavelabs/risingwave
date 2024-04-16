@@ -27,7 +27,7 @@ impl OpendalObjectStore {
     pub fn new_gcs_engine(
         bucket: String,
         root: String,
-        config: ObjectStoreConfig,
+        config: Arc<ObjectStoreConfig>,
     ) -> ObjectResult<Self> {
         // Create gcs backend builder.
         let mut builder = Gcs::default();
@@ -48,7 +48,7 @@ impl OpendalObjectStore {
         Ok(Self {
             op,
             engine_type: EngineType::Gcs,
-            config: Arc::new(config),
+            config,
         })
     }
 }
