@@ -242,8 +242,7 @@ impl SnowflakeSinkWriter {
     /// i.e., lazily initialization of the internal `streaming_uploader`.
     async fn new_streaming_uploader(&mut self) -> Result<()> {
         let file_suffix = self.file_suffix();
-        let path =
-            generate_s3_file_name(self.s3_client.s3_path(), &file_suffix);
+        let path = generate_s3_file_name(self.s3_client.s3_path(), &file_suffix);
         let uploader = self
             .s3_client
             .opendal_s3_engine

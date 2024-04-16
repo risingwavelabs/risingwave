@@ -162,10 +162,7 @@ impl SnowflakeHttpClient {
                 "X-Snowflake-Authorization-Token-Type".to_string(),
                 "KEYPAIR_JWT",
             )
-            .body(generate_s3_file_name(
-                self.s3_path.as_deref(),
-                file_suffix,
-            ));
+            .body(generate_s3_file_name(self.s3_path.as_deref(), file_suffix));
 
         let response = builder
             .send()
