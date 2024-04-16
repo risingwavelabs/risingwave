@@ -165,7 +165,7 @@ macro_rules! __recursive_tracker {
 }
 pub use __recursive_tracker as tracker;
 
-#[cfg(test)]
+#[cfg(all(test, not(madsim)))]
 mod tests {
     use super::*;
 
