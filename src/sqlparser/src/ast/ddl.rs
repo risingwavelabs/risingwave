@@ -138,6 +138,14 @@ pub enum AlterViewOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    /// `SET STREAMING_RATE_LIMIT TO <rate_limit>`
+    SetStreamingRateLimit {
+        rate_limit: u32,
+    },
+    /// `SET ENABLE_STREAMING_RATE_LIMIT TO (true|false)`
+    SetEnableStreamingRateLimit {
+        enable: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
