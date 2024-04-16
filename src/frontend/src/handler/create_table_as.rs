@@ -33,6 +33,7 @@ pub async fn handle_create_as(
     column_defs: Vec<ColumnDef>,
     append_only: bool,
     on_conflict: Option<OnConflict>,
+    with_version_column: Option<String>,
 ) -> Result<RwPgResponse> {
     if column_defs.iter().any(|column| column.data_type.is_some()) {
         return Err(ErrorCode::InvalidInputSyntax(
@@ -106,6 +107,7 @@ pub async fn handle_create_as(
             vec![],        // No watermark should be defined in for `CREATE TABLE AS`
             append_only,
             on_conflict,
+            with_version_column,
             Some(col_id_gen.into_version()),
         )?;
         let mut graph = build_graph(plan)?;

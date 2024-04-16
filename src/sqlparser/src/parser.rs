@@ -283,6 +283,7 @@ impl Parser {
                 Keyword::CLOSE => Ok(self.parse_close_cursor()?),
                 Keyword::FLUSH => Ok(Statement::Flush),
                 Keyword::WAIT => Ok(Statement::Wait),
+                Keyword::RECOVER => Ok(Statement::Recover),
                 _ => self.expected(
                     "an SQL statement",
                     Token::Word(w).with_location(token.location),
@@ -2550,6 +2551,17 @@ impl Parser {
         })
     }
 
+    pub fn parse_with_version_column(&mut self) -> Result<Option<String>, ParserError> {
+        if self.parse_keywords(&[Keyword::WITH, Keyword::VERSION, Keyword::COLUMN]) {
+            self.expect_token(&Token::LParen)?;
+            let name = self.parse_identifier_non_reserved()?;
+            self.expect_token(&Token::RParen)?;
+            Ok(Some(name.value))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn parse_on_conflict(&mut self) -> Result<Option<OnConflict>, ParserError> {
         if self.parse_keywords(&[Keyword::ON, Keyword::CONFLICT]) {
             self.parse_handle_conflict_behavior()
@@ -2578,6 +2590,7 @@ impl Parser {
 
         let on_conflict = self.parse_on_conflict()?;
 
+        let with_version_column = self.parse_with_version_column()?;
         let include_options = self.parse_include_options()?;
 
         // PostgreSQL supports `WITH ( options )`, before `AS`
@@ -2630,6 +2643,7 @@ impl Parser {
             source_watermarks,
             append_only,
             on_conflict,
+            with_version_column,
             query,
             cdc_table_info,
             include_column_options: include_options,
