@@ -21,6 +21,7 @@ use opendal::services::Memory;
 use opendal::{Metakey, Operator, Writer};
 use risingwave_common::range::RangeBoundsExt;
 use thiserror_ext::AsReport;
+use tokio_retry::strategy::ExponentialBackoff;
 
 use crate::object::{
     prefix, BoxedStreamingUploader, ObjectDataStream, ObjectError, ObjectMetadata,
@@ -232,7 +233,9 @@ const OPENDAL_BUFFER_SIZE: usize = 16 * 1024 * 1024;
 #[async_trait::async_trait]
 impl StreamingUploader for OpendalStreamingUploader {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
-        self.writer.write(data).await?;
+        let _res = tokio_retry::Retry::spawn(ExponentialBackoff::from_millis(1), || async {
+            self.writer.write(data.clone()).await
+        });
         Ok(())
     }
 
