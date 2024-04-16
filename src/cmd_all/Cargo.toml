@@ -24,6 +24,7 @@ anyhow = "1"
 clap = { workspace = true }
 console = "0.15"
 const-str = "0.5"
+fd-lock = "4"
 home = "0.5"
 prometheus = { version = "0.13" }
 risingwave_cmd = { workspace = true }

@@ -9213,6 +9213,7 @@ dependencies = [
  "console",
  "const-str",
  "expect-test",
+ "fd-lock",
  "home",
  "madsim-tokio",
  "prometheus",

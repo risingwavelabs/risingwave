@@ -16,6 +16,7 @@
 #![cfg_attr(coverage, feature(coverage_attribute))]
 
 use std::ffi::OsString;
+use std::fs::File;
 use std::str::FromStr;
 
 use clap::error::Result as ClapResult;
@@ -120,7 +121,7 @@ impl Component {
             Self::Frontend => frontend(parse_opts(matches)),
             Self::Compactor => compactor(parse_opts(matches)),
             Self::Ctl => ctl(parse_opts(matches)),
-            Self::Playground => single_node(SingleNodeOpts::new_for_playground()),
+            Self::Playground => playground(),
             Self::Standalone => standalone(parse_opts(matches)),
             Self::SingleNode => single_node(parse_opts(matches)),
         }
@@ -220,6 +221,25 @@ fn main() {
         .unwrap();
 
     component.start(&matches);
+}
+
+/// Delegate to the single node mode with the preset `in-memory` option.
+fn playground() {
+    // Ensure that only one playground instance is running at a time.
+    let lock_file = File::create(std::env::temp_dir().join("risingwave-playground-lock")).unwrap();
+    let mut lock = fd_lock::RwLock::new(lock_file);
+    let _guard = loop {
+        match lock.try_write() {
+            Ok(guard) => break guard,
+            Err(err) if matches!(err.kind(), std::io::ErrorKind::WouldBlock) => {
+                eprintln!("ERROR: Another playground instance is running. Please exit it first.");
+                std::process::exit(1);
+            }
+            Err(_) => {} // retry on other errors, specifically `Interrupted`
+        }
+    };
+
+    single_node(SingleNodeOpts::new_for_playground());
 }
 
 fn standalone(opts: StandaloneOpts) {
