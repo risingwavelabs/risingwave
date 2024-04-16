@@ -41,6 +41,7 @@ tar xfvz apache-cassandra-4.1.3-bin.tar.gz
 cd apache-cassandra-4.1.3/bin
 export CQLSH_HOST=cassandra-server
 export CQLSH_PORT=9042
+pip3 install --break-system-packages six
 ./cqlsh -e "CREATE KEYSPACE demo WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};use demo;
 CREATE table demo_bhv_table(v1 int primary key,v2 smallint,v3 bigint,v4 float,v5 double,v6 text,v7 date,v8 timestamp,v9 boolean);"
 
@@ -55,8 +56,9 @@ if cat ./query_result.csv | awk -F "," '{
     exit !($1 == 1 && $2 == 1 && $3 == 1 && $4 == 1.1 && $5 == 1.2 && $6 == "test" && $7 == "2013-01-01" && $8 == "2013-01-01 01:01:01.000+0000" && $9 == "False\r"); }'; then
   echo "Cassandra sink check passed"
 else
-  cat ./query_result.csv
   echo "The output is not as expected."
+  echo "output:"
+  cat ./query_result.csv
   exit 1
 fi
 
