@@ -27,4 +27,5 @@ with (
 )
 FORMAT DEBEZIUM ENCODE JSON;
 
+statement ok
 SET BACKGROUND_DDL=false;
