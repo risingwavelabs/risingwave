@@ -163,7 +163,7 @@ impl SnowflakeHttpClient {
                 "KEYPAIR_JWT",
             )
             .body(generate_s3_file_name(
-                self.s3_path.as_ref().map(|s| s.as_str()),
+                self.s3_path.as_deref(),
                 file_suffix,
             ));
 
@@ -210,10 +210,10 @@ impl SnowflakeS3Client {
             &aws_secret_access_key,
             &aws_region,
         )
-        .map_err(|e| {
+        .map_err(|err| {
             SinkError::Snowflake(format!(
                 "failed to create opendal s3 engine, error: {}",
-                e.to_string()
+                err
             ))
         })?;
 
@@ -225,6 +225,6 @@ impl SnowflakeS3Client {
     }
 
     pub fn s3_path(&self) -> Option<&str> {
-        self.s3_path.as_ref().map(|s| s.as_str())
+        self.s3_path.as_deref()
     }
 }
