@@ -52,6 +52,8 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn wait(&self) -> Result<()>;
 
+    async fn recover(&self) -> Result<()>;
+
     async fn cancel_creating_jobs(&self, jobs: PbJobs) -> Result<Vec<u32>>;
 
     async fn list_table_fragments(
@@ -135,6 +137,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn wait(&self) -> Result<()> {
         self.0.wait().await
+    }
+
+    async fn recover(&self) -> Result<()> {
+        self.0.recover().await
     }
 
     async fn cancel_creating_jobs(&self, infos: PbJobs) -> Result<Vec<u32>> {

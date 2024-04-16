@@ -754,6 +754,21 @@ steps:
     timeout_in_minutes: 15
     retry: *auto-retry
 
+  - label: "deterministic fuzz test"
+    command: "ci/scripts/run-deterministic-fuzz-test.sh -p ci-dev"
+    if: build.pull_request.labels includes "ci/run-deterministic-sqlsmith-fuzzing-tests" || build.env("CI_STEPS") =~ /(^|,)deterministic-sqlsmith-fuzzing-tests?(,|$$)/
+    depends_on:
+      - "build-simulation"
+    plugins:
+      - ./ci/plugins/swapfile
+      - docker-compose#v5.1.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 15
+    retry: *auto-retry
+
   - label: "enable ci/skip-ci only in draft PRs"
     if: build.pull_request.labels includes "ci/skip-ci" && !build.pull_request.draft
     commands:

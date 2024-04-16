@@ -1055,6 +1055,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     async fn list_compact_task_progress(&self) -> RpcResult<Vec<CompactTaskProgress>> {
         unimplemented!()
     }
+
+    async fn recover(&self) -> RpcResult<()> {
+        unimplemented!()
+    }
 }
 
 #[cfg(test)]
