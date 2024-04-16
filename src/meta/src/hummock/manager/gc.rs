@@ -54,7 +54,6 @@ impl HummockManager {
         let mut versioning_guard = write_lock!(self, versioning).await;
         for object_id in object_ids {
             versioning_guard.objects_to_delete.remove(object_id);
-            println!("object removed");
         }
         for stale_objects in versioning_guard.checkpoint.stale_objects.values_mut() {
             stale_objects.id.retain(|id| !object_ids.contains(id));

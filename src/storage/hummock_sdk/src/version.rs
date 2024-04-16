@@ -199,13 +199,21 @@ impl HummockVersionDelta {
         let mut ret = HashSet::new();
         for group_deltas in self.group_deltas.values() {
             for group_delta in &group_deltas.group_deltas {
-                if let Some(DeltaType::IntraLevel(level_delta)) = &group_delta.delta_type {
-                    ret.extend(
-                        level_delta
-                            .inserted_table_infos
-                            .iter()
-                            .map(|sst| sst.object_id),
-                    );
+                if let Some(delta_type) = &group_delta.delta_type {
+                    match delta_type {
+                        DeltaType::IntraLevel(level_delta) => {
+                            ret.extend(
+                                level_delta
+                                    .inserted_table_infos
+                                    .iter()
+                                    .map(|sst| sst.object_id),
+                            );
+                        }
+                        DeltaType::GroupConstruct(_)
+                        | DeltaType::GroupDestroy(_)
+                        | DeltaType::GroupMetaChange(_)
+                        | DeltaType::GroupTableChange(_) => {}
+                    }
                 }
             }
         }
