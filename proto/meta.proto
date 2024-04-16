@@ -276,6 +276,10 @@ message ApplyThrottleResponse {
   common.Status status = 1;
 }
 
+message RecoverRequest {}
+
+message RecoverResponse {}
+
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
   rpc Pause(PauseRequest) returns (PauseResponse);
@@ -287,6 +291,7 @@ service StreamManagerService {
   rpc ListActorStates(ListActorStatesRequest) returns (ListActorStatesResponse);
   rpc ListObjectDependencies(ListObjectDependenciesRequest) returns (ListObjectDependenciesResponse);
   rpc ApplyThrottle(ApplyThrottleRequest) returns (ApplyThrottleResponse);
+  rpc Recover(RecoverRequest) returns (RecoverResponse);
 }
 
 // Below for cluster service.
@@ -398,6 +403,7 @@ message MetaSnapshot {
   repeated catalog.Subscription subscriptions = 19;
   repeated user.UserInfo users = 8;
   reserved 9; // for old parallel_unit_mapping
+  GetSessionParamsResponse session_params = 20;
   repeated common.WorkerNode nodes = 10;
   hummock.HummockSnapshot hummock_snapshot = 11;
   hummock.HummockVersion hummock_version = 12;
@@ -406,8 +412,8 @@ message MetaSnapshot {
   reserved 18; // for old serving_parallel_unit_mappings
 
   // for streaming
-  repeated FragmentWorkerMapping streaming_worker_mappings = 20;
-  repeated FragmentWorkerMapping serving_worker_mappings = 21;
+  repeated FragmentWorkerMapping streaming_worker_mappings = 21;
+  repeated FragmentWorkerMapping serving_worker_mappings = 22;
 
   SnapshotVersion version = 13;
 }
@@ -445,6 +451,7 @@ message SubscribeResponse {
     catalog.Schema schema = 5;
     catalog.Function function = 6;
     user.UserInfo user = 11;
+    SetSessionParamRequest session_param = 26;
     common.WorkerNode node = 13;
     hummock.HummockSnapshot hummock_snapshot = 14;
     hummock.HummockVersionDeltas hummock_version_deltas = 15;
@@ -456,8 +463,8 @@ message SubscribeResponse {
     catalog.Connection connection = 22;
     hummock.HummockVersionStats hummock_stats = 24;
     Recovery recovery = 25;
-    FragmentWorkerMapping streaming_worker_mapping = 26;
-    FragmentWorkerMappings serving_worker_mappings = 27;
+    FragmentWorkerMapping streaming_worker_mapping = 27;
+    FragmentWorkerMappings serving_worker_mappings = 28;
   }
 }
 
@@ -606,6 +613,28 @@ message SetSystemParamResponse {
 service SystemParamsService {
   rpc GetSystemParams(GetSystemParamsRequest) returns (GetSystemParamsResponse);
   rpc SetSystemParam(SetSystemParamRequest) returns (SetSystemParamResponse);
+}
+
+message GetSessionParamsRequest {}
+
+message GetSessionParamsResponse {
+  string params = 1;
+}
+
+message SetSessionParamRequest {
+  string param = 1;
+  // None means set to default value.
+  optional string value = 2;
+}
+
+message SetSessionParamResponse {
+  string param = 1;
+}
+
+// Used for alter system wide default parameters
+service SessionParamService {
+  rpc GetSessionParams(GetSessionParamsRequest) returns (GetSessionParamsResponse);
+  rpc SetSessionParam(SetSessionParamRequest) returns (SetSessionParamResponse);
 }
 
 message GetServingVnodeMappingsRequest {}

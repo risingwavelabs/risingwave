@@ -45,6 +45,7 @@ use risingwave_pb::batch_plan::{
 use risingwave_pb::common::{BatchQueryEpoch, HostAddress, WorkerNode};
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::task_service::{CancelTaskRequest, TaskInfoResponse};
+use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use rw_futures_util::select_all;
 use thiserror_ext::AsReport;
@@ -526,7 +527,7 @@ impl StageRunner {
                         |_| StageState::Failed,
                         QueryMessage::Stage(Failed {
                             id: self.stage.id,
-                            reason: SchedulerError::from(e),
+                            reason: RpcError::from_batch_status(e).into(),
                         }),
                     )
                     .await;

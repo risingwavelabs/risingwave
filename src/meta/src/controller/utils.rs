@@ -19,14 +19,14 @@ use itertools::Itertools;
 use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_meta_model_v2::actor::ActorStatus;
-use risingwave_meta_model_v2::fragment::{DistributionType, StreamNode};
+use risingwave_meta_model_v2::fragment::DistributionType;
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
     object_dependency, schema, sink, source, table, user, user_privilege, view, ActorId,
     DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId, PrivilegeId,
-    SchemaId, SourceId, UserId,
+    SchemaId, SourceId, StreamNode, UserId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction};
 use risingwave_pb::meta::{PbFragmentParallelUnitMapping, PbFragmentWorkerMapping};
@@ -370,7 +370,10 @@ where
                 .eq(pb_function.database_id as DatabaseId)
                 .and(object::Column::SchemaId.eq(pb_function.schema_id as SchemaId))
                 .and(function::Column::Name.eq(&pb_function.name))
-                .and(function::Column::ArgTypes.eq(DataTypeArray(pb_function.arg_types.clone()))),
+                .and(
+                    function::Column::ArgTypes
+                        .eq(DataTypeArray::from(pb_function.arg_types.clone())),
+                ),
         )
         .count(db)
         .await?;
@@ -807,7 +810,7 @@ where
         .map(|(fragment_id, mapping)| PbFragmentWorkerMapping {
             fragment_id: fragment_id as _,
             mapping: Some(
-                ParallelUnitMapping::from_protobuf(&mapping.into_inner())
+                ParallelUnitMapping::from_protobuf(&mapping.to_protobuf())
                     .to_worker(&parallel_unit_to_worker)
                     .to_protobuf(),
             ),
@@ -839,7 +842,7 @@ where
         .into_iter()
         .map(|(fragment_id, mapping)| PbFragmentParallelUnitMapping {
             fragment_id: fragment_id as _,
-            mapping: Some(mapping.into_inner()),
+            mapping: Some(mapping.to_protobuf()),
         })
         .collect())
 }

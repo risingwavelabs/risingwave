@@ -94,8 +94,8 @@ pub enum ObserverError {
 }
 
 impl From<tonic::Status> for ObserverError {
-    fn from(value: tonic::Status) -> Self {
-        Self::Rpc(value.into())
+    fn from(status: tonic::Status) -> Self {
+        Self::Rpc(RpcError::from_meta_status(status))
     }
 }
 
@@ -153,7 +153,7 @@ where
             }
             Info::HummockSnapshot(_) => true,
             Info::MetaBackupManifestId(_) => true,
-            Info::SystemParams(_) => true,
+            Info::SystemParams(_) | Info::SessionParam(_) => true,
             Info::Snapshot(_) | Info::HummockWriteLimits(_) => unreachable!(),
             Info::HummockStats(_) => true,
             Info::Recovery(_) => true,

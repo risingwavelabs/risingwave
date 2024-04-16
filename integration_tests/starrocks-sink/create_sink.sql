@@ -72,3 +72,18 @@ FROM
     starrocks.table = 'upsert_table',
     primary_key = 'user_id'
 );
+
+CREATE SINK starrocks_types_sink
+FROM
+    starrocks_types WITH (
+    connector = 'starrocks',
+    type = 'append-only',
+    starrocks.host = 'starrocks-fe',
+    starrocks.mysqlport = '9030',
+    starrocks.httpport = '8030',
+    starrocks.user = 'users',
+    starrocks.password = '123456',
+    starrocks.database = 'demo',
+    starrocks.table = 'starrocks_types',
+    force_append_only='true'
+);

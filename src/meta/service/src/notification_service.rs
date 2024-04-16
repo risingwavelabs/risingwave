@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use itertools::Itertools;
-use risingwave_meta::manager::MetadataManager;
+use risingwave_meta::manager::{MetadataManager, SessionParamsManagerImpl};
 use risingwave_meta::MetaResult;
 use risingwave_pb::backup_service::MetaBackupManifestId;
 use risingwave_pb::catalog::Table;
@@ -246,6 +247,16 @@ impl NotificationServiceImpl {
 
         let hummock_snapshot = Some(self.hummock_manager.latest_snapshot());
 
+        let session_params = match self.env.session_params_manager_impl_ref() {
+            SessionParamsManagerImpl::Kv(manager) => manager.get_params().await,
+            SessionParamsManagerImpl::Sql(controller) => controller.get_params().await,
+        };
+
+        let session_params = Some(GetSessionParamsResponse {
+            params: serde_json::to_string(&session_params)
+                .context("failed to encode session params")?,
+        });
+
         Ok(MetaSnapshot {
             databases,
             schemas,
@@ -267,6 +278,7 @@ impl NotificationServiceImpl {
             }),
             serving_worker_mappings,
             streaming_worker_mappings,
+            session_params,
             ..Default::default()
         })
     }
