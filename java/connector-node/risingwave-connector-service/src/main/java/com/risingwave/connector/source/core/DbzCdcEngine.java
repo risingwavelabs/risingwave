@@ -17,6 +17,7 @@ package com.risingwave.connector.source.core;
 import static io.debezium.config.CommonConnectorConfig.TOPIC_PREFIX;
 import static io.debezium.schema.AbstractTopicNamingStrategy.*;
 
+import com.risingwave.connector.api.source.CdcEngine;
 import com.risingwave.proto.ConnectorServiceProto;
 import io.debezium.embedded.Connect;
 import io.debezium.engine.DebeziumEngine;
@@ -24,11 +25,11 @@ import java.util.Properties;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 
-public class DbzCdcEngine implements Runnable {
+public class DbzCdcEngine implements CdcEngine {
     static final int DEFAULT_QUEUE_CAPACITY = 16;
 
     private final DebeziumEngine<?> engine;
-    private final DbzChangeEventConsumer changeEventConsumer;
+    private final DbzCdcEventConsumer consumer;
     private final long id;
 
     /** If config is not valid will throw exceptions */
@@ -40,7 +41,7 @@ public class DbzCdcEngine implements Runnable {
         var topicPrefix = config.getProperty(TOPIC_PREFIX.name());
         var transactionTopic = String.format("%s.%s", topicPrefix, DEFAULT_TRANSACTION_TOPIC);
         var consumer =
-                new DbzChangeEventConsumer(
+                new DbzCdcEventConsumer(
                         sourceId,
                         heartbeatTopicPrefix,
                         transactionTopic,
@@ -48,7 +49,7 @@ public class DbzCdcEngine implements Runnable {
 
         // Builds a debezium engine but not start it
         this.id = sourceId;
-        this.changeEventConsumer = consumer;
+        this.consumer = consumer;
         this.engine =
                 DebeziumEngine.create(Connect.class)
                         .using(config)
@@ -63,6 +64,7 @@ public class DbzCdcEngine implements Runnable {
         engine.run();
     }
 
+    @Override
     public long getId() {
         return id;
     }
@@ -71,11 +73,8 @@ public class DbzCdcEngine implements Runnable {
         engine.close();
     }
 
+    @Override
     public BlockingQueue<ConnectorServiceProto.GetEventStreamResponse> getOutputChannel() {
-        return changeEventConsumer.getOutputChannel();
-    }
-
-    public DbzChangeEventConsumer getChangeEventConsumer() {
-        return changeEventConsumer;
+        return consumer.getOutputChannel();
     }
 }

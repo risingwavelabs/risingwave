@@ -14,6 +14,7 @@
 
 package com.risingwave.connector.source.core;
 
+import com.risingwave.connector.api.source.CdcEngineRunner;
 import com.risingwave.connector.api.source.SourceHandler;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
 import com.risingwave.metrics.ConnectorNodeMetrics;
@@ -24,7 +25,7 @@ import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** handler for starting a debezium source connectors */
+/** * handler for starting a debezium source connectors */
 public class DbzSourceHandler implements SourceHandler {
     static final Logger LOG = LoggerFactory.getLogger(DbzSourceHandler.class);
 
@@ -35,11 +36,11 @@ public class DbzSourceHandler implements SourceHandler {
     }
 
     class OnReadyHandler implements Runnable {
-        private final DbzCdcEngineRunner runner;
+        private final CdcEngineRunner runner;
         private final ServerCallStreamObserver<GetEventStreamResponse> responseObserver;
 
         public OnReadyHandler(
-                DbzCdcEngineRunner runner,
+                CdcEngineRunner runner,
                 ServerCallStreamObserver<GetEventStreamResponse> responseObserver) {
             this.runner = runner;
             this.responseObserver = responseObserver;

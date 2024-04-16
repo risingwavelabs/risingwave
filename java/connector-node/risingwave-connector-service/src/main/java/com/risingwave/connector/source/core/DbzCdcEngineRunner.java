@@ -28,15 +28,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** Single-thread engine runner */
-public class DbzCdcEngineRunner {
+public class DbzCdcEngineRunner implements CdcEngineRunner {
     static final Logger LOG = LoggerFactory.getLogger(DbzCdcEngineRunner.class);
 
     private final ExecutorService executor;
     private final AtomicBoolean running = new AtomicBoolean(false);
-    private DbzCdcEngine engine;
+    private CdcEngine engine;
     private final DbzConnectorConfig config;
 
-    public static DbzCdcEngineRunner newCdcEngineRunner(
+    public static CdcEngineRunner newCdcEngineRunner(
             DbzConnectorConfig config, StreamObserver<GetEventStreamResponse> responseObserver) {
         DbzCdcEngineRunner runner = null;
         try {
@@ -69,7 +69,7 @@ public class DbzCdcEngineRunner {
         return runner;
     }
 
-    public static DbzCdcEngineRunner create(DbzConnectorConfig config, long channelPtr) {
+    public static CdcEngineRunner create(DbzConnectorConfig config, long channelPtr) {
         DbzCdcEngineRunner runner = new DbzCdcEngineRunner(config);
         try {
             var sourceId = config.getSourceId();
@@ -123,7 +123,7 @@ public class DbzCdcEngineRunner {
         this.config = config;
     }
 
-    private void withEngine(DbzCdcEngine engine) {
+    private void withEngine(CdcEngine engine) {
         this.engine = engine;
     }
 
@@ -160,16 +160,14 @@ public class DbzCdcEngineRunner {
         }
     }
 
-    public DbzCdcEngine getEngine() {
+    @Override
+    public CdcEngine getEngine() {
         return engine;
     }
 
+    @Override
     public boolean isRunning() {
         return running.get();
-    }
-
-    public DbzChangeEventConsumer getChangeEventConsumer() {
-        return engine.getChangeEventConsumer();
     }
 
     private void cleanUp() {

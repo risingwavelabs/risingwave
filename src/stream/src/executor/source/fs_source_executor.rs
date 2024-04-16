@@ -244,7 +244,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             core.split_state_store.set_all_complete(completed).await?
         }
         // commit anyway, even if no message saved
-        core.split_state_store.state_table.commit(epoch).await?;
+        core.split_state_store.state_store.commit(epoch).await?;
 
         core.updated_splits_in_epoch.clear();
         Ok(())
@@ -253,7 +253,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
         let core = &mut self.stream_source_core;
 
-        core.split_state_store.state_table.try_flush().await?;
+        core.split_state_store.state_store.try_flush().await?;
 
         Ok(())
     }
