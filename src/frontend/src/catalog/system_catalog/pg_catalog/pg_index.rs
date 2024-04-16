@@ -30,7 +30,15 @@ use risingwave_frontend_macro::system_catalog;
         NULL AS indexprs,
         NULL AS indpred,
         FALSE AS indisprimary,
-        ARRAY[]::int[] AS indclass
+        ARRAY[]::int[] AS indclass,
+        false AS indisexclusion,
+        true AS indimmediate,
+        false AS indisclustered,
+        true AS indisvalid,
+        false AS indcheckxmin,
+        true AS indisready,
+        true AS indislive,
+        false AS indisreplident
     FROM rw_catalog.rw_indexes"
 )]
 #[derive(Fields)]
@@ -51,4 +59,14 @@ struct PgIndex {
     indisprimary: bool,
     // Empty array. We only have a dummy implementation of `pg_opclass` yet.
     indclass: Vec<i32>,
+
+    // Unused columns. Kept for compatibility with PG.
+    indisexclusion: bool,
+    indimmediate: bool,
+    indisclustered: bool,
+    indisvalid: bool,
+    indcheckxmin: bool,
+    indisready: bool,
+    indislive: bool,
+    indisreplident: bool,
 }
