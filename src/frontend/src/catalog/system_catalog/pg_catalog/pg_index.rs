@@ -23,7 +23,7 @@ use risingwave_frontend_macro::system_catalog;
     "SELECT id AS indexrelid,
         primary_table_id AS indrelid,
         ARRAY_LENGTH(key_columns || include_columns)::smallint AS indnatts,
-        ARRAY_LENGTH(include_columns)::smallint AS indnkeyatts,
+        ARRAY_LENGTH(key_columns)::smallint AS indnkeyatts,
         false AS indisunique,
         key_columns || include_columns AS indkey,
         ARRAY[]::smallint[] as indoption,
