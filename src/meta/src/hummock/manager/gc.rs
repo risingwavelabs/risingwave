@@ -14,6 +14,7 @@
 
 use std::cmp;
 use std::collections::HashSet;
+use std::ops::Bound::{Excluded, Included};
 use std::ops::DerefMut;
 use std::time::Duration;
 
@@ -24,12 +25,12 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::FullScanTask;
 
 use crate::hummock::error::{Error, Result};
-use crate::hummock::manager::{
-    commit_multi_var, create_trx_wrapper, read_lock, write_lock, ResponseEvent,
-};
+use crate::hummock::manager::versioning::Versioning;
+use crate::hummock::manager::{commit_multi_var, create_trx_wrapper, read_lock, write_lock};
 use crate::hummock::HummockManager;
 use crate::manager::MetadataManager;
 use crate::model::{BTreeMapTransaction, BTreeMapTransactionWrapper, ValTransaction};
@@ -83,7 +84,7 @@ impl HummockManager {
             return Ok((0, deltas_to_delete.len()));
         }
         let mut hummock_version_deltas = create_trx_wrapper!(
-            self.sql_meta_store(),
+            self.meta_store_ref(),
             BTreeMapTransactionWrapper,
             BTreeMapTransaction::new(&mut versioning.hummock_version_deltas,)
         );
@@ -98,11 +99,7 @@ impl HummockManager {
         for delta_id in &batch {
             hummock_version_deltas.remove(*delta_id);
         }
-        commit_multi_var!(
-            self.env.meta_store(),
-            self.sql_meta_store(),
-            hummock_version_deltas
-        )?;
+        commit_multi_var!(self.meta_store_ref(), hummock_version_deltas)?;
         #[cfg(test)]
         {
             drop(versioning_guard);
@@ -122,20 +119,38 @@ impl HummockManager {
     ) -> usize {
         let tracked_object_ids: HashSet<HummockSstableObjectId> = {
             let versioning_guard = read_lock!(self, versioning).await;
-            let mut tracked_object_ids =
-                HashSet::from_iter(versioning_guard.current_version.get_object_ids());
-            for delta in versioning_guard.hummock_version_deltas.values() {
+            let versioning: &Versioning = &versioning_guard;
+
+            // object ids in current version
+            let mut tracked_object_ids = versioning.current_version.get_object_ids();
+            // add object ids removed between checkpoint version and current version
+            for (_, delta) in versioning.hummock_version_deltas.range((
+                Excluded(versioning.checkpoint.version.id),
+                Included(versioning.current_version.id),
+            )) {
                 tracked_object_ids.extend(delta.gc_object_ids.iter().cloned());
             }
+            // add stale object ids before the checkpoint version
+            let min_pinned_version_id = versioning.min_pinned_version_id();
+            tracked_object_ids.extend(
+                versioning
+                    .checkpoint
+                    .stale_objects
+                    .iter()
+                    .filter(|(version_id, _)| **version_id >= min_pinned_version_id)
+                    .flat_map(|(_, objects)| objects.id.iter())
+                    .cloned(),
+            );
             tracked_object_ids
         };
         let to_delete = object_ids
             .iter()
-            .filter(|object_id| !tracked_object_ids.contains(object_id));
+            .filter(|object_id| !tracked_object_ids.contains(object_id))
+            .collect_vec();
         let mut versioning_guard = write_lock!(self, versioning).await;
         versioning_guard.objects_to_delete.extend(to_delete.clone());
         drop(versioning_guard);
-        to_delete.count()
+        to_delete.len()
     }
 
     /// Starts a full GC.

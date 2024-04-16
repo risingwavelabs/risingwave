@@ -151,6 +151,7 @@ impl UserService for UserServiceImpl {
                 let id = self
                     .env
                     .id_gen_manager()
+                    .as_kv()
                     .generate::<{ IdCategory::User }>()
                     .await? as u32;
                 let mut user = req.get_user()?.clone();

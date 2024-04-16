@@ -42,7 +42,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
 
 use crate::hummock::compactor::{
-    merge_imms_in_memory, CompactionAwaitTreeRegRef, CompactionExecutor,
+    await_tree_key, merge_imms_in_memory, CompactionAwaitTreeRegRef, CompactionExecutor,
 };
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::LocalInstanceId;
@@ -89,8 +89,10 @@ pub(crate) fn default_spawn_merging_task(
                 LazyLock::new(|| AtomicUsize::new(0));
             let tree_root = await_tree_reg.as_ref().map(|reg| {
                 let merging_task_id = NEXT_MERGING_TASK_ID.fetch_add(1, Relaxed);
-                reg.write().register(
-                    format!("merging_task/{}", merging_task_id),
+                reg.register(
+                    await_tree_key::MergingTask {
+                        id: merging_task_id,
+                    },
                     format!(
                         "Merging Imm {:?} {:?} {:?}",
                         table_id,
@@ -674,7 +676,6 @@ impl SealedData {
 }
 
 struct SyncingData {
-    sync_epoch: HummockEpoch,
     // newer epochs come first
     epochs: Vec<HummockEpoch>,
     // TODO: may replace `TryJoinAll` with a future that will abort other join handles once
@@ -684,6 +685,12 @@ struct SyncingData {
     // newer data at the front
     uploaded: VecDeque<StagingSstableInfo>,
     table_watermarks: HashMap<TableId, TableWatermarks>,
+}
+
+impl SyncingData {
+    fn sync_epoch(&self) -> HummockEpoch {
+        *self.epochs.first().expect("non-empty")
+    }
 }
 
 pub struct SyncedData {
@@ -870,25 +877,29 @@ impl HummockUploader {
             self.max_sealed_epoch
         );
         self.max_sealed_epoch = epoch;
-        if let Some((&smallest_unsealed_epoch, _)) = self.unsealed_data.first_key_value() {
-            assert!(
-                smallest_unsealed_epoch >= epoch,
-                "some epoch {} older than epoch to seal {}",
-                smallest_unsealed_epoch,
-                epoch
-            );
-            if smallest_unsealed_epoch == epoch {
-                let (epoch, unsealed_data) = self
-                    .unsealed_data
-                    .pop_first()
-                    .expect("we have checked non-empty");
-                self.sealed_data.seal_new_epoch(epoch, unsealed_data);
+        let unsealed_data =
+            if let Some((&smallest_unsealed_epoch, _)) = self.unsealed_data.first_key_value() {
+                assert!(
+                    smallest_unsealed_epoch >= epoch,
+                    "some epoch {} older than epoch to seal {}",
+                    smallest_unsealed_epoch,
+                    epoch
+                );
+                if smallest_unsealed_epoch == epoch {
+                    let (_, unsealed_data) = self
+                        .unsealed_data
+                        .pop_first()
+                        .expect("we have checked non-empty");
+                    unsealed_data
+                } else {
+                    debug!("epoch {} to seal has no data", epoch);
+                    UnsealedEpochData::default()
+                }
             } else {
                 debug!("epoch {} to seal has no data", epoch);
-            }
-        } else {
-            debug!("epoch {} to seal has no data", epoch);
-        }
+                UnsealedEpochData::default()
+            };
+        self.sealed_data.seal_new_epoch(epoch, unsealed_data);
     }
 
     pub(crate) fn start_merge_imms(&mut self, sealed_epoch: HummockEpoch) {
@@ -981,6 +992,8 @@ impl HummockUploader {
             "after flush, imms must be empty"
         );
 
+        assert_eq!(epoch, *epochs.front().expect("non-empty epoch"));
+
         let try_join_all_upload_task = if uploading_tasks.is_empty() {
             None
         } else {
@@ -989,7 +1002,6 @@ impl HummockUploader {
 
         self.syncing_data.push_front(SyncingData {
             epochs: epochs.into_iter().collect(),
-            sync_epoch: epoch,
             uploading_tasks: try_join_all_upload_task,
             uploaded: uploaded_data,
             table_watermarks,
@@ -1109,7 +1121,7 @@ impl HummockUploader {
                 .stats
                 .uploader_syncing_epoch_count
                 .set(self.syncing_data.len() as _);
-            let epoch = syncing_data.sync_epoch;
+            let epoch = syncing_data.sync_epoch();
 
             let newly_uploaded_sstable_infos = match &result {
                 Ok(sstable_infos) => sstable_infos.clone(),
@@ -1485,7 +1497,7 @@ mod tests {
         assert!(uploader.sealed_data.spilled_data.is_empty());
         assert_eq!(1, uploader.syncing_data.len());
         let syncing_data = uploader.syncing_data.front().unwrap();
-        assert_eq!(epoch1 as HummockEpoch, syncing_data.sync_epoch);
+        assert_eq!(epoch1 as HummockEpoch, syncing_data.sync_epoch());
         assert!(syncing_data.uploaded.is_empty());
         assert!(syncing_data.uploading_tasks.is_some());
 

@@ -167,6 +167,10 @@ impl Ident {
             _ => self.value.to_lowercase(),
         }
     }
+
+    pub fn quote_style(&self) -> Option<char> {
+        self.quote_style
+    }
 }
 
 impl From<&str> for Ident {
@@ -1221,6 +1225,8 @@ pub enum Statement {
         append_only: bool,
         /// On conflict behavior
         on_conflict: Option<OnConflict>,
+        /// with_version_column behind on conflict
+        with_version_column: Option<String>,
         /// `AS ( query )`
         query: Option<Box<Query>>,
         /// `FROM cdc_source TABLE database_name.table_name`
@@ -1514,6 +1520,8 @@ pub enum Statement {
     /// WAIT for ALL running stream jobs to finish.
     /// It will block the current session the condition is met.
     Wait,
+    /// Trigger stream job recover
+    Recover,
 }
 
 impl fmt::Display for Statement {
@@ -1739,6 +1747,7 @@ impl fmt::Display for Statement {
                 source_watermarks,
                 append_only,
                 on_conflict,
+                with_version_column,
                 query,
                 cdc_table_info,
                 include_column_options,
@@ -1771,6 +1780,9 @@ impl fmt::Display for Statement {
 
                 if let Some(on_conflict_behavior) = on_conflict {
                     write!(f, " ON CONFLICT {}", on_conflict_behavior)?;
+                }
+                if let Some(version_column) = with_version_column {
+                    write!(f, " WITH VERSION COLUMN({})", version_column)?;
                 }
                 if !include_column_options.is_empty() { // (Ident, Option<Ident>)
                     write!(f, "{}", display_comma_separated(
@@ -2083,6 +2095,10 @@ impl fmt::Display for Statement {
             }
             Statement::Kill(process_id) => {
                 write!(f, "KILL {}", process_id)?;
+                Ok(())
+            }
+            Statement::Recover => {
+                write!(f, "RECOVER")?;
                 Ok(())
             }
         }

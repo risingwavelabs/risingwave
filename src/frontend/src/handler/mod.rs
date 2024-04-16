@@ -87,6 +87,7 @@ pub mod handle_privilege;
 mod kill_process;
 pub mod privilege;
 pub mod query;
+mod recover;
 pub mod show;
 mod transaction;
 pub mod util;
@@ -311,6 +312,7 @@ pub async fn handle(
             source_watermarks,
             append_only,
             on_conflict,
+            with_version_column,
             cdc_table_info,
             include_column_options,
         } => {
@@ -329,6 +331,7 @@ pub async fn handle(
                     columns,
                     append_only,
                     on_conflict,
+                    with_version_column,
                 )
                 .await;
             }
@@ -344,6 +347,7 @@ pub async fn handle(
                 source_watermarks,
                 append_only,
                 on_conflict,
+                with_version_column,
                 cdc_table_info,
                 include_column_options,
             )
@@ -515,6 +519,7 @@ pub async fn handle(
         }
         Statement::Flush => flush::handle_flush(handler_args).await,
         Statement::Wait => wait::handle_wait(handler_args).await,
+        Statement::Recover => recover::handle_recover(handler_args).await,
         Statement::SetVariable {
             local: _,
             variable,

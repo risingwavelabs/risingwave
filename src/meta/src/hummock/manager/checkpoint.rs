@@ -23,7 +23,9 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
 };
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::HummockVersionId;
-use risingwave_pb::hummock::hummock_version_checkpoint::{PbStaleObjects, StaleObjects};
+use risingwave_pb::hummock::hummock_version_checkpoint::{
+    StaleObjects as PbStaleObjects, StaleObjects,
+};
 use risingwave_pb::hummock::{PbHummockVersionArchive, PbHummockVersionCheckpoint};
 use thiserror_ext::AsReport;
 
@@ -127,39 +129,38 @@ impl HummockManager {
         }
         let mut archive: Option<PbHummockVersionArchive> = None;
         let mut stale_objects = old_checkpoint.stale_objects.clone();
-        if !self.env.opts.enable_hummock_data_archive {
-            // `object_sizes` is used to calculate size of stale objects.
-            let mut object_sizes = object_size_map(&old_checkpoint.version);
-            for (_, version_delta) in versioning
-                .hummock_version_deltas
-                .range((Excluded(old_checkpoint_id), Included(new_checkpoint_id)))
-            {
-                for group_deltas in version_delta.group_deltas.values() {
-                    let summary = summarize_group_deltas(group_deltas);
-                    object_sizes.extend(
-                        summary
-                            .insert_table_infos
-                            .iter()
-                            .map(|t| (t.object_id, t.file_size)),
-                    );
-                }
-                let removed_object_ids = version_delta.gc_object_ids.clone();
-                if removed_object_ids.is_empty() {
-                    continue;
-                }
-                let total_file_size = removed_object_ids
-                    .iter()
-                    .map(|t| object_sizes.get(t).copied().unwrap())
-                    .sum::<u64>();
-                stale_objects.insert(
-                    version_delta.id,
-                    StaleObjects {
-                        id: removed_object_ids,
-                        total_file_size,
-                    },
+        // `object_sizes` is used to calculate size of stale objects.
+        let mut object_sizes = object_size_map(&old_checkpoint.version);
+        for (_, version_delta) in versioning
+            .hummock_version_deltas
+            .range((Excluded(old_checkpoint_id), Included(new_checkpoint_id)))
+        {
+            for group_deltas in version_delta.group_deltas.values() {
+                let summary = summarize_group_deltas(group_deltas);
+                object_sizes.extend(
+                    summary
+                        .insert_table_infos
+                        .iter()
+                        .map(|t| (t.object_id, t.file_size)),
                 );
             }
-        } else {
+            let removed_object_ids = version_delta.gc_object_ids.clone();
+            if removed_object_ids.is_empty() {
+                continue;
+            }
+            let total_file_size = removed_object_ids
+                .iter()
+                .map(|t| object_sizes.get(t).copied().unwrap())
+                .sum::<u64>();
+            stale_objects.insert(
+                version_delta.id,
+                StaleObjects {
+                    id: removed_object_ids,
+                    total_file_size,
+                },
+            );
+        }
+        if self.env.opts.enable_hummock_data_archive {
             archive = Some(PbHummockVersionArchive {
                 version: Some(old_checkpoint.version.to_protobuf()),
                 version_deltas: versioning
@@ -190,7 +191,10 @@ impl HummockManager {
         let versioning = versioning_guard.deref_mut();
         assert!(new_checkpoint.version.id >= versioning.checkpoint.version.id);
         versioning.checkpoint = new_checkpoint;
-        versioning.mark_objects_for_deletion();
+        // Not delete stale objects when archive is enabled
+        if !self.env.opts.enable_hummock_data_archive {
+            versioning.mark_objects_for_deletion();
+        }
 
         let min_pinned_version_id = versioning.min_pinned_version_id();
         trigger_gc_stat(&self.metrics, &versioning.checkpoint, min_pinned_version_id);

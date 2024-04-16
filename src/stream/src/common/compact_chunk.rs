@@ -16,6 +16,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
 use std::mem;
+use std::sync::LazyLock;
 
 use itertools::Itertools;
 use prehash::{new_prehashed_map_with_capacity, Passthru, Prehashed};
@@ -23,9 +24,12 @@ use risingwave_common::array::stream_chunk::{OpRowMutRef, StreamChunkMut};
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
+use risingwave_common::log::LogSuppresser;
 use risingwave_common::row::{Project, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
+
+use crate::consistency::consistency_panic;
 
 /// A helper to compact the stream chunks by modifying the `Ops` and visibility of the chunk.
 pub struct StreamChunkCompactor {
@@ -34,21 +38,36 @@ pub struct StreamChunkCompactor {
 }
 
 struct OpRowMutRefTuple<'a> {
-    previous: Option<OpRowMutRef<'a>>,
-    latest: OpRowMutRef<'a>,
+    before_prev: Option<OpRowMutRef<'a>>,
+    prev: OpRowMutRef<'a>,
 }
 
 impl<'a> OpRowMutRefTuple<'a> {
     /// return true if no row left
-    fn push(&mut self, mut op_row: OpRowMutRef<'a>) -> bool {
-        debug_assert!(self.latest.vis());
-        match (self.latest.op(), op_row.op()) {
-            (Op::Insert, Op::Insert) => panic!("receive duplicated insert on the stream"),
-            (Op::Delete, Op::Delete) => panic!("receive duplicated delete on the stream"),
+    fn push(&mut self, mut curr: OpRowMutRef<'a>) -> bool {
+        debug_assert!(self.prev.vis());
+        match (self.prev.op(), curr.op()) {
+            (Op::Insert, Op::Insert) => {
+                consistency_panic!("receive duplicated insert on the stream");
+                // If need to tolerate inconsistency, override the previous insert.
+                // Note that because the primary key constraint has been violated, we
+                // don't mind losing some data here.
+                self.prev.set_vis(false);
+                self.prev = curr;
+            }
+            (Op::Delete, Op::Delete) => {
+                consistency_panic!("receive duplicated delete on the stream");
+                // If need to tolerate inconsistency, override the previous delete.
+                // Note that because the primary key constraint has been violated, we
+                // don't mind losing some data here.
+                self.prev.set_vis(false);
+                self.prev = curr;
+            }
             (Op::Insert, Op::Delete) => {
-                self.latest.set_vis(false);
-                op_row.set_vis(false);
-                self.latest = if let Some(prev) = self.previous.take() {
+                // Delete a row that has been inserted, just hide the two ops.
+                self.prev.set_vis(false);
+                curr.set_vis(false);
+                self.prev = if let Some(prev) = self.before_prev.take() {
                     prev
                 } else {
                     return true;
@@ -57,8 +76,11 @@ impl<'a> OpRowMutRefTuple<'a> {
             (Op::Delete, Op::Insert) => {
                 // The operation for the key must be (+, -, +) or (-, +). And the (+, -) must has
                 // been filtered.
-                debug_assert!(self.previous.is_none());
-                self.previous = Some(mem::replace(&mut self.latest, op_row));
+                debug_assert!(
+                    self.before_prev.is_none(),
+                    "should have been taken in the above match arm"
+                );
+                self.before_prev = Some(mem::replace(&mut self.prev, curr));
             }
             // `all the updateDelete` and `updateInsert` should be normalized to `delete`
             // and`insert`
@@ -68,10 +90,10 @@ impl<'a> OpRowMutRefTuple<'a> {
     }
 
     fn as_update_op(&mut self) -> Option<(&mut OpRowMutRef<'a>, &mut OpRowMutRef<'a>)> {
-        self.previous.as_mut().map(|prev| {
+        self.before_prev.as_mut().map(|prev| {
             debug_assert_eq!(prev.op(), Op::Delete);
-            debug_assert_eq!(self.latest.op(), Op::Insert);
-            (prev, &mut self.latest)
+            debug_assert_eq!(self.prev.op(), Op::Insert);
+            (prev, &mut self.prev)
         })
     }
 }
@@ -86,15 +108,18 @@ pub enum RowOp<'a> {
     /// (old_value, new_value)
     Update((RowRef<'a>, RowRef<'a>)),
 }
+static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
 
 pub struct RowOpMap<'a, 'b> {
     map: HashMap<Prehashed<Project<'b, RowRef<'a>>>, RowOp<'a>, BuildHasherDefault<Passthru>>,
+    warn_for_inconsistent_stream: bool,
 }
 
 impl<'a, 'b> RowOpMap<'a, 'b> {
-    fn with_capacity(estimate_size: usize) -> Self {
+    fn with_capacity(estimate_size: usize, warn_for_inconsistent_stream: bool) -> Self {
         Self {
             map: new_prehashed_map_with_capacity(estimate_size),
+            warn_for_inconsistent_stream,
         }
     }
 
@@ -104,19 +129,31 @@ impl<'a, 'b> RowOpMap<'a, 'b> {
             Entry::Vacant(e) => {
                 e.insert(RowOp::Insert(v));
             }
-            Entry::Occupied(mut e) => match e.get() {
-                RowOp::Delete(ref old_v) => {
-                    e.insert(RowOp::Update((*old_v, v)));
+            Entry::Occupied(mut e) => {
+                match e.get() {
+                    RowOp::Delete(ref old_v) => {
+                        e.insert(RowOp::Update((*old_v, v)));
+                    }
+                    RowOp::Insert(_) => {
+                        if self.warn_for_inconsistent_stream {
+                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                                tracing::warn!(
+                                suppressed_count, "double insert for the same pk, breaking the sink's pk constraint"
+                            );
+                            }
+                        }
+                        e.insert(RowOp::Insert(v));
+                    }
+                    RowOp::Update((ref old_v, _)) => {
+                        if self.warn_for_inconsistent_stream {
+                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                                tracing::warn!(suppressed_count, "double insert for the same pk, breaking the sink's pk constraint");
+                            }
+                        }
+                        e.insert(RowOp::Update((*old_v, v)));
+                    }
                 }
-                RowOp::Insert(_) => {
-                    tracing::warn!("double insert for the same pk");
-                    e.insert(RowOp::Insert(v));
-                }
-                RowOp::Update((ref old_v, _)) => {
-                    tracing::warn!("double insert for the same pk");
-                    e.insert(RowOp::Update((*old_v, v)));
-                }
-            },
+            }
         }
     }
 
@@ -134,7 +171,11 @@ impl<'a, 'b> RowOpMap<'a, 'b> {
                     e.insert(RowOp::Delete(*prev));
                 }
                 RowOp::Delete(_) => {
-                    tracing::warn!("double delete for the same pk");
+                    if self.warn_for_inconsistent_stream {
+                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                            tracing::warn!(suppressed_count, "double delete for the same pk");
+                        }
+                    }
                     e.insert(RowOp::Delete(v));
                 }
             },
@@ -219,8 +260,8 @@ impl StreamChunkCompactor {
                 match op_row_map.entry(Prehashed::new(key, hash)) {
                     Entry::Vacant(v) => {
                         v.insert(OpRowMutRefTuple {
-                            previous: None,
-                            latest: op_row,
+                            before_prev: None,
+                            prev: op_row,
                         });
                     }
                     Entry::Occupied(mut o) => {
@@ -251,6 +292,7 @@ impl StreamChunkCompactor {
         self,
         chunk_size: usize,
         data_types: Vec<DataType>,
+        warn_for_inconsistent_stream: bool,
     ) -> Vec<StreamChunk> {
         let (chunks, key_indices) = self.into_inner();
 
@@ -267,7 +309,7 @@ impl StreamChunkCompactor {
                 (hash_values, ops, c)
             })
             .collect_vec();
-        let mut map = RowOpMap::with_capacity(estimate_size);
+        let mut map = RowOpMap::with_capacity(estimate_size, warn_for_inconsistent_stream);
         for (hash_values, ops, c) in &chunks {
             for row in c.rows() {
                 let hash = hash_values[row.index()];
@@ -375,6 +417,7 @@ mod tests {
         let chunks = compactor.reconstructed_compacted_chunks(
             100,
             vec![DataType::Int64, DataType::Int64, DataType::Int64],
+            true,
         );
         assert_eq!(
             chunks.into_iter().next().unwrap(),

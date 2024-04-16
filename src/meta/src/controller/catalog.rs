@@ -22,7 +22,6 @@ use risingwave_common::catalog::{TableOption, DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMA
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
-use risingwave_meta_model_v2::fragment::StreamNode;
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::table::TableType;
@@ -31,7 +30,7 @@ use risingwave_meta_model_v2::{
     sink, source, streaming_job, subscription, table, user_privilege, view, ActorId,
     ActorUpstreamActors, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId,
     FunctionId, I32Array, IndexId, JobStatus, ObjectId, PrivateLinkService, Property, SchemaId,
-    SinkId, SourceId, StreamSourceInfo, StreamingParallelism, TableId, UserId,
+    SinkId, SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, TableId, UserId,
 };
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
@@ -98,16 +97,14 @@ pub struct ReleaseContext {
 }
 
 impl CatalogController {
-    pub fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let meta_store = env
-            .sql_meta_store()
-            .expect("sql meta store is not initialized");
-        Ok(Self {
+    pub fn new(env: MetaSrvEnv) -> Self {
+        let meta_store = env.meta_store().as_sql().clone();
+        Self {
             env,
             inner: RwLock::new(CatalogControllerInner {
                 db: meta_store.conn,
             }),
-        })
+        }
     }
 
     /// Used in `NotificationService::subscribe`.
@@ -765,7 +762,7 @@ impl CatalogController {
                         )
                         .col_expr(
                             fragment::Column::StreamNode,
-                            StreamNode::from_protobuf(&pb_stream_node).into(),
+                            StreamNode::from(&pb_stream_node).into(),
                         )
                         .filter(fragment::Column::FragmentId.eq(fragment_id))
                         .exec(txn)
@@ -1826,15 +1823,16 @@ impl CatalogController {
             .ok_or_else(|| MetaError::catalog_id_not_found("table", comment.table_id))?;
 
         let table = if let Some(col_idx) = comment.column_index {
-            let mut columns: ColumnCatalogArray = Table::find_by_id(comment.table_id as TableId)
+            let columns: ColumnCatalogArray = Table::find_by_id(comment.table_id as TableId)
                 .select_only()
                 .column(table::Column::Columns)
                 .into_tuple()
                 .one(&txn)
                 .await?
                 .ok_or_else(|| MetaError::catalog_id_not_found("table", comment.table_id))?;
-            let column = columns
-                .0
+            let mut pb_columns = columns.to_protobuf();
+
+            let column = pb_columns
                 .get_mut(col_idx as usize)
                 .ok_or_else(|| MetaError::catalog_id_not_found("column", col_idx))?;
             let column_desc = column.column_desc.as_mut().ok_or_else(|| {
@@ -1847,7 +1845,7 @@ impl CatalogController {
             column_desc.description = comment.description;
             table::ActiveModel {
                 table_id: Set(comment.table_id as _),
-                columns: Set(columns),
+                columns: Set(pb_columns.into()),
                 ..Default::default()
             }
             .update(&txn)
@@ -1988,7 +1986,7 @@ impl CatalogController {
                 .await?
                 .ok_or_else(|| MetaError::catalog_id_not_found("source", object_id))?;
             if let Some(source_info) = source_info
-                && source_info.into_inner().is_shared()
+                && source_info.to_protobuf().is_shared()
             {
                 to_drop_streaming_jobs.push(object_id);
             }
@@ -3056,7 +3054,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_database_func() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await);
         let pb_database = PbDatabase {
             name: "db1".to_string(),
             owner: TEST_OWNER_ID as _,
@@ -3088,7 +3086,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_schema_func() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await);
         let pb_schema = PbSchema {
             database_id: TEST_DATABASE_ID as _,
             name: "schema1".to_string(),
@@ -3121,7 +3119,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_view() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await);
         let pb_view = PbView {
             schema_id: TEST_SCHEMA_ID as _,
             database_id: TEST_DATABASE_ID as _,
@@ -3146,7 +3144,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_function() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await);
         let test_data_type = risingwave_pb::data::DataType {
             type_name: risingwave_pb::data::data_type::TypeName::Int32 as _,
             ..Default::default()
@@ -3179,8 +3177,8 @@ mod tests {
             .one(&mgr.inner.read().await.db)
             .await?
             .unwrap();
-        assert_eq!(function.return_type.0, test_data_type);
-        assert_eq!(function.arg_types.into_inner().len(), 1);
+        assert_eq!(function.return_type.to_protobuf(), test_data_type);
+        assert_eq!(function.arg_types.to_protobuf().len(), 1);
         assert_eq!(function.language, "python");
 
         mgr.drop_function(function.function_id).await?;
@@ -3194,7 +3192,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_alter_relation_rename() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await);
         let pb_source = PbSource {
             schema_id: TEST_SCHEMA_ID as _,
             database_id: TEST_DATABASE_ID as _,

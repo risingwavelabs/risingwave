@@ -11,9 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use core::fmt::Debug;
 use std::collections::{HashMap, HashSet};
-use std::time::Duration;
 
 use anyhow::anyhow;
 use clickhouse::insert::Insert;
@@ -29,6 +29,7 @@ use serde::Serialize;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 use thiserror_ext::AsReport;
+use tracing::warn;
 use with_options::WithOptions;
 
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
@@ -190,18 +191,9 @@ impl ClickHouseEngine {
     }
 }
 
-const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
-
 impl ClickHouseCommon {
     pub(crate) fn build_client(&self) -> ConnectorResult<ClickHouseClient> {
-        use hyper_tls::HttpsConnector;
-
-        let https = HttpsConnector::new();
-        let client = hyper::Client::builder()
-            .pool_idle_timeout(POOL_IDLE_TIMEOUT)
-            .build::<_, hyper::Body>(https);
-
-        let client = ClickHouseClient::with_http_client(client)
+        let client = ClickHouseClient::default() // hyper(0.14) client inside
             .with_url(&self.url)
             .with_user(&self.user)
             .with_password(&self.password)
@@ -747,27 +739,27 @@ impl ClickHouseFieldWithNull {
             ScalarRefImpl::Utf8(v) => ClickHouseField::String(v.to_string()),
             ScalarRefImpl::Bool(v) => ClickHouseField::Bool(v),
             ScalarRefImpl::Decimal(d) => {
-                if let Decimal::Normalized(d) = d {
+                let d = if let Decimal::Normalized(d) = d {
                     let scale =
                         clickhouse_schema_feature.accuracy_decimal.1 as i32 - d.scale() as i32;
-
-                    let scale = if scale < 0 {
+                    if scale < 0 {
                         d.mantissa() / 10_i128.pow(scale.unsigned_abs())
                     } else {
                         d.mantissa() * 10_i128.pow(scale as u32)
-                    };
-
-                    if clickhouse_schema_feature.accuracy_decimal.0 <= 9 {
-                        ClickHouseField::Decimal(ClickHouseDecimal::Decimal32(scale as i32))
-                    } else if clickhouse_schema_feature.accuracy_decimal.0 <= 18 {
-                        ClickHouseField::Decimal(ClickHouseDecimal::Decimal64(scale as i64))
-                    } else {
-                        ClickHouseField::Decimal(ClickHouseDecimal::Decimal128(scale))
                     }
+                } else if clickhouse_schema_feature.can_null {
+                    warn!("Inf, -Inf, Nan in RW decimal is converted into clickhouse null!");
+                    return Ok(vec![ClickHouseFieldWithNull::None]);
                 } else {
-                    return Err(SinkError::ClickHouse(
-                        "clickhouse can not support Decimal NAN,-INF and INF".to_string(),
-                    ));
+                    warn!("Inf, -Inf, Nan in RW decimal is converted into clickhouse 0!");
+                    0_i128
+                };
+                if clickhouse_schema_feature.accuracy_decimal.0 <= 9 {
+                    ClickHouseField::Decimal(ClickHouseDecimal::Decimal32(d as i32))
+                } else if clickhouse_schema_feature.accuracy_decimal.0 <= 18 {
+                    ClickHouseField::Decimal(ClickHouseDecimal::Decimal64(d as i64))
+                } else {
+                    ClickHouseField::Decimal(ClickHouseDecimal::Decimal128(d))
                 }
             }
             ScalarRefImpl::Interval(_) => {

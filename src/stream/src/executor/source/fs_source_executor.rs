@@ -38,6 +38,7 @@ use super::executor_core::StreamSourceCore;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
+use crate::executor::source_executor::apply_rate_limit;
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::*;
 
@@ -104,11 +105,33 @@ impl<S: StateStore> FsSourceExecutor<S> {
             source_desc.source.config.clone(),
             self.stream_source_core.source_name.clone(),
         );
-        source_desc
+        let stream = source_desc
             .source
             .to_stream(state, column_ids, Arc::new(source_ctx))
             .await
-            .map_err(StreamExecutorError::connector_error)
+            .map_err(StreamExecutorError::connector_error)?;
+
+        Ok(apply_rate_limit(stream, self.source_ctrl_opts.rate_limit).boxed())
+    }
+
+    async fn rebuild_stream_reader<const BIASED: bool>(
+        &mut self,
+        source_desc: &FsSourceDesc,
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
+    ) -> StreamExecutorResult<()> {
+        let target_state: Vec<SplitImpl> = self
+            .stream_source_core
+            .latest_split_info
+            .values()
+            .cloned()
+            .collect();
+        let reader = self
+            .build_stream_source_reader(source_desc, Some(target_state))
+            .await?
+            .map_err(StreamExecutorError::connector_error);
+        stream.replace_data_stream(reader);
+
+        Ok(())
     }
 
     async fn apply_split_change<const BIASED: bool>(
@@ -146,7 +169,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         for sc in rhs {
             if let Some(s) = core.updated_splits_in_epoch.get(&sc.id()) {
                 let fs = s
-                    .as_fs()
+                    .as_s3()
                     .unwrap_or_else(|| panic!("split {:?} is not fs", s));
                 // unfinished this epoch
                 if fs.offset < fs.size {
@@ -214,7 +237,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .values()
             .filter(|split| {
                 let fs = split
-                    .as_fs()
+                    .as_s3()
                     .unwrap_or_else(|| panic!("split {:?} is not fs", split));
                 fs.offset < fs.size
             })
@@ -226,7 +249,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .values()
             .filter(|split| {
                 let fs = split
-                    .as_fs()
+                    .as_s3()
                     .unwrap_or_else(|| panic!("split {:?} is not fs", split));
                 fs.offset == fs.size
             })
@@ -243,7 +266,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             core.split_state_store.set_all_complete(completed).await?
         }
         // commit anyway, even if no message saved
-        core.split_state_store.state_store.commit(epoch).await?;
+        core.split_state_store.state_table.commit(epoch).await?;
 
         core.updated_splits_in_epoch.clear();
         Ok(())
@@ -252,7 +275,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
         let core = &mut self.stream_source_core;
 
-        core.split_state_store.state_store.try_flush().await?;
+        core.split_state_store.state_table.try_flush().await?;
 
         Ok(())
     }
@@ -386,6 +409,13 @@ impl<S: StateStore> FsSourceExecutor<S> {
                                         actor_splits,
                                     )
                                     .await?;
+                                }
+                                Mutation::Throttle(actor_to_apply) => {
+                                    if let Some(throttle) = actor_to_apply.get(&self.actor_ctx.id) {
+                                        self.source_ctrl_opts.rate_limit = *throttle;
+                                        self.rebuild_stream_reader(&source_desc, &mut stream)
+                                            .await?;
+                                    }
                                 }
                                 _ => {}
                             }

@@ -19,7 +19,7 @@ anyhow = "1"
 async-recursion = "1"
 async-stream = "0.3"
 async-trait = "0.1"
-auto_enums = "0.8"
+auto_enums = { workspace = true }
 await-tree = { workspace = true }
 bytes = "1"
 cfg-if = "1"
@@ -37,18 +37,18 @@ governor = { version = "0.6", default-features = false, features = [
     "jitter",
 ] }
 hytra = "0.1.2"
-itertools = "0.12"
+itertools = { workspace = true }
 local_stats_alloc = { path = "../utils/local_stats_alloc" }
 lru = { workspace = true }
 maplit = "1.0.2"
 memcomparable = "0.2"
 multimap = "0.10"
-parking_lot = "0.12"
+parking_lot = { workspace = true }
 pin-project = "1"
 prehash = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = { workspace = true }
-rand = "0.8"
+rand = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_connector = { workspace = true }

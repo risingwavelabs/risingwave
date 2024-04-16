@@ -47,7 +47,8 @@ use risingwave_common::catalog::{
 use risingwave_common::config::{
     load_config, BatchConfig, MetaConfig, MetricLevel, StreamingConfig,
 };
-use risingwave_common::session_config::{ConfigMap, ConfigReporter, VisibilityMode};
+use risingwave_common::memory::MemoryContext;
+use risingwave_common::session_config::{ConfigReporter, SessionConfig, VisibilityMode};
 use risingwave_common::system_param::local_manager::{
     LocalSystemParamsManager, LocalSystemParamsManagerRef,
 };
@@ -130,6 +131,7 @@ pub struct FrontendEnv {
     query_manager: QueryManager,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     system_params_manager: LocalSystemParamsManagerRef,
+    session_params: Arc<RwLock<SessionConfig>>,
 
     server_addr: HostAddr,
     client_pool: ComputeClientPoolRef,
@@ -154,6 +156,9 @@ pub struct FrontendEnv {
     /// Runtime for compute intensive tasks in frontend, e.g. executors in local mode,
     /// root stage in mpp mode.
     compute_runtime: Arc<BackgroundShutdownRuntime>,
+
+    /// Memory context used for batch executors in frontend.
+    mem_context: MemoryContext,
 }
 
 /// Session map identified by `(process_id, secret_key)`
@@ -207,6 +212,7 @@ impl FrontendEnv {
             query_manager,
             hummock_snapshot_manager,
             system_params_manager,
+            session_params: Default::default(),
             server_addr,
             client_pool,
             sessions_map: Arc::new(RwLock::new(HashMap::new())),
@@ -217,6 +223,7 @@ impl FrontendEnv {
             source_metrics: Arc::new(SourceMetrics::default()),
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
             compute_runtime,
+            mem_context: MemoryContext::none(),
         }
     }
 
@@ -283,7 +290,7 @@ impl FrontendEnv {
             Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
-            compute_client_pool,
+            compute_client_pool.clone(),
             catalog_reader.clone(),
             Arc::new(GLOBAL_DISTRIBUTED_QUERY_METRICS.clone()),
             batch_config.distributed_query_limit,
@@ -300,6 +307,9 @@ impl FrontendEnv {
 
         let system_params_manager =
             Arc::new(LocalSystemParamsManager::new(system_params_reader.clone()));
+
+        // This `session_params` should be initialized during the initial notification in `observer_manager`
+        let session_params = Arc::new(RwLock::new(SessionConfig::default()));
         let frontend_observer_node = FrontendObserverNode::new(
             worker_node_manager.clone(),
             catalog,
@@ -308,6 +318,8 @@ impl FrontendEnv {
             user_info_updated_tx,
             hummock_snapshot_manager.clone(),
             system_params_manager.clone(),
+            session_params.clone(),
+            compute_client_pool,
         );
         let observer_manager =
             ObserverManager::new_with_meta_client(meta_client.clone(), frontend_observer_node)
@@ -325,6 +337,10 @@ impl FrontendEnv {
         if config.server.metrics_level > MetricLevel::Disabled {
             MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
         }
+
+        let mem_context = risingwave_common::memory::MemoryContext::root(
+            frontend_metrics.batch_total_mem.clone(),
+        );
 
         let health_srv = HealthServiceImpl::new();
         let host = opts.health_check_listener_addr.clone();
@@ -403,6 +419,7 @@ impl FrontendEnv {
                 query_manager,
                 hummock_snapshot_manager,
                 system_params_manager,
+                session_params,
                 server_addr: frontend_address,
                 client_pool,
                 frontend_metrics,
@@ -413,6 +430,7 @@ impl FrontendEnv {
                 source_metrics,
                 creating_streaming_job_tracker,
                 compute_runtime,
+                mem_context,
             },
             join_handles,
             shutdown_senders,
@@ -471,6 +489,10 @@ impl FrontendEnv {
 
     pub fn system_params_manager(&self) -> &LocalSystemParamsManagerRef {
         &self.system_params_manager
+    }
+
+    pub fn session_params_snapshot(&self) -> SessionConfig {
+        self.session_params.read_recursive().clone()
     }
 
     pub fn server_address(&self) -> &HostAddr {
@@ -534,6 +556,10 @@ impl FrontendEnv {
             false
         }
     }
+
+    pub fn mem_context(&self) -> MemoryContext {
+        self.mem_context.clone()
+    }
 }
 
 pub struct AuthContext {
@@ -558,7 +584,7 @@ pub struct SessionImpl {
     /// Used for user authentication.
     user_authenticator: UserAuthenticator,
     /// Stores the value of configurations.
-    config_map: Arc<RwLock<ConfigMap>>,
+    config_map: Arc<RwLock<SessionConfig>>,
     /// buffer the Notices to users,
     notices: RwLock<Vec<String>>,
 
@@ -611,12 +637,13 @@ impl SessionImpl {
         user_authenticator: UserAuthenticator,
         id: SessionId,
         peer_addr: AddressRef,
+        session_config: SessionConfig,
     ) -> Self {
         Self {
             env,
             auth_context,
             user_authenticator,
-            config_map: Default::default(),
+            config_map: Arc::new(RwLock::new(session_config)),
             id,
             peer_addr,
             txn: Default::default(),
@@ -675,15 +702,15 @@ impl SessionImpl {
         self.auth_context.user_id
     }
 
-    pub fn shared_config(&self) -> Arc<RwLock<ConfigMap>> {
+    pub fn shared_config(&self) -> Arc<RwLock<SessionConfig>> {
         Arc::clone(&self.config_map)
     }
 
-    pub fn config(&self) -> RwLockReadGuard<'_, ConfigMap> {
+    pub fn config(&self) -> RwLockReadGuard<'_, SessionConfig> {
         self.config_map.read()
     }
 
-    pub fn set_config(&self, key: &str, value: String) -> Result<()> {
+    pub fn set_config(&self, key: &str, value: String) -> Result<String> {
         self.config_map
             .write()
             .set(key, value, &mut ())
@@ -695,7 +722,7 @@ impl SessionImpl {
         key: &str,
         value: Option<String>,
         mut reporter: impl ConfigReporter,
-    ) -> Result<()> {
+    ) -> Result<String> {
         if let Some(value) = value {
             self.config_map
                 .write()
@@ -1037,6 +1064,9 @@ impl SessionManager for SessionManagerImpl {
             let secret_key = self.number.fetch_add(1, Ordering::Relaxed);
             // Use a trivial strategy: process_id and secret_key are equal.
             let id = (secret_key, secret_key);
+            // Read session params snapshot from frontend env.
+            let session_config = self.env.session_params_snapshot();
+
             let session_impl: Arc<SessionImpl> = SessionImpl::new(
                 self.env.clone(),
                 Arc::new(AuthContext::new(
@@ -1047,6 +1077,7 @@ impl SessionManager for SessionManagerImpl {
                 user_authenticator,
                 id,
                 peer_addr,
+                session_config,
             )
             .into();
             self.insert_session(session_impl.clone());
@@ -1209,7 +1240,7 @@ impl Session for SessionImpl {
         }
     }
 
-    fn set_config(&self, key: &str, value: String) -> std::result::Result<(), BoxedError> {
+    fn set_config(&self, key: &str, value: String) -> std::result::Result<String, BoxedError> {
         Self::set_config(self, key, value).map_err(Into::into)
     }
 

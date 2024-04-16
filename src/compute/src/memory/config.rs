@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use foyer::memory::{LfuConfig, LruConfig};
+use foyer::memory::{LfuConfig, LruConfig, S3FifoConfig};
 use risingwave_common::config::{
     CacheEvictionConfig, EvictionConfig, StorageConfig, StorageMemoryConfig,
     MAX_BLOCK_CACHE_SHARD_BITS, MAX_META_CACHE_SHARD_BITS, MIN_BUFFER_SIZE_PER_SHARD,
@@ -123,17 +123,6 @@ pub fn storage_memory_config(
             .unwrap_or(default_block_cache_capacity_mb),
     );
 
-    let data_file_cache_ring_buffer_capacity_mb = if storage_config.data_file_cache.dir.is_empty() {
-        0
-    } else {
-        storage_config.data_file_cache.ring_buffer_capacity_mb
-    };
-    let meta_file_cache_ring_buffer_capacity_mb = if storage_config.meta_file_cache.dir.is_empty() {
-        0
-    } else {
-        storage_config.meta_file_cache.ring_buffer_capacity_mb
-    };
-
     let compactor_memory_limit_mb = storage_config.compactor_memory_limit_mb.unwrap_or(
         ((non_reserved_memory_bytes as f64 * compactor_memory_proportion).ceil() as usize) >> 20,
     );
@@ -141,8 +130,6 @@ pub fn storage_memory_config(
     let total_calculated_mb = block_cache_capacity_mb
         + meta_cache_capacity_mb
         + shared_buffer_capacity_mb
-        + data_file_cache_ring_buffer_capacity_mb
-        + meta_file_cache_ring_buffer_capacity_mb
         + compactor_memory_limit_mb;
     let soft_limit_mb = (non_reserved_memory_bytes as f64
         * (storage_memory_proportion + compactor_memory_proportion).ceil())
@@ -213,6 +200,15 @@ pub fn storage_memory_config(
             cmsketch_confidence: cmsketch_confidence
                 .unwrap_or(risingwave_common::config::default::storage::cmsketch_confidence()),
         }),
+        CacheEvictionConfig::S3Fifo {
+            small_queue_capacity_ratio_in_percent,
+        } => EvictionConfig::S3Fifo(S3FifoConfig {
+            small_queue_capacity_ratio: small_queue_capacity_ratio_in_percent.unwrap_or(
+                risingwave_common::config::default::storage::small_queue_capacity_ratio_in_percent(
+                ),
+            ) as f64
+                / 100.0,
+        }),
     };
 
     let block_cache_eviction_config =
@@ -225,8 +221,6 @@ pub fn storage_memory_config(
         meta_cache_capacity_mb,
         meta_cache_shard_num,
         shared_buffer_capacity_mb,
-        data_file_cache_ring_buffer_capacity_mb,
-        meta_file_cache_ring_buffer_capacity_mb,
         compactor_memory_limit_mb,
         prefetch_buffer_capacity_mb,
         block_cache_eviction_config,
@@ -264,8 +258,6 @@ mod tests {
         assert_eq!(memory_config.block_cache_capacity_mb, 737);
         assert_eq!(memory_config.meta_cache_capacity_mb, 860);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
-        assert_eq!(memory_config.data_file_cache_ring_buffer_capacity_mb, 0);
-        assert_eq!(memory_config.meta_file_cache_ring_buffer_capacity_mb, 0);
         assert_eq!(memory_config.compactor_memory_limit_mb, 819);
 
         storage_config.data_file_cache.dir = "data".to_string();
@@ -275,8 +267,6 @@ mod tests {
         assert_eq!(memory_config.block_cache_capacity_mb, 737);
         assert_eq!(memory_config.meta_cache_capacity_mb, 860);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
-        assert_eq!(memory_config.data_file_cache_ring_buffer_capacity_mb, 256);
-        assert_eq!(memory_config.meta_file_cache_ring_buffer_capacity_mb, 256);
         assert_eq!(memory_config.compactor_memory_limit_mb, 819);
 
         storage_config.cache.block_cache_capacity_mb = Some(512);
@@ -287,8 +277,6 @@ mod tests {
         assert_eq!(memory_config.block_cache_capacity_mb, 512);
         assert_eq!(memory_config.meta_cache_capacity_mb, 128);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 1024);
-        assert_eq!(memory_config.data_file_cache_ring_buffer_capacity_mb, 256);
-        assert_eq!(memory_config.meta_file_cache_ring_buffer_capacity_mb, 256);
         assert_eq!(memory_config.compactor_memory_limit_mb, 512);
     }
 }

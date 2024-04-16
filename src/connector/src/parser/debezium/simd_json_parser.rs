@@ -20,18 +20,22 @@ use simd_json::BorrowedValue;
 
 use crate::error::ConnectorResult;
 use crate::parser::unified::debezium::MongoJsonAccess;
-use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
+use crate::parser::unified::json::{JsonAccess, JsonParseOptions, TimestamptzHandling};
 use crate::parser::unified::AccessImpl;
 use crate::parser::AccessBuilder;
 
 #[derive(Debug)]
 pub struct DebeziumJsonAccessBuilder {
     value: Option<Vec<u8>>,
+    json_parse_options: JsonParseOptions,
 }
 
 impl DebeziumJsonAccessBuilder {
-    pub fn new() -> ConnectorResult<Self> {
-        Ok(Self { value: None })
+    pub fn new(timestamptz_handling: TimestamptzHandling) -> ConnectorResult<Self> {
+        Ok(Self {
+            value: None,
+            json_parse_options: JsonParseOptions::new_for_debezium(timestamptz_handling),
+        })
     }
 }
 
@@ -51,7 +55,7 @@ impl AccessBuilder for DebeziumJsonAccessBuilder {
 
         Ok(AccessImpl::Json(JsonAccess::new_with_options(
             payload,
-            &JsonParseOptions::DEBEZIUM,
+            &self.json_parse_options,
         )))
     }
 }
@@ -59,11 +63,17 @@ impl AccessBuilder for DebeziumJsonAccessBuilder {
 #[derive(Debug)]
 pub struct DebeziumMongoJsonAccessBuilder {
     value: Option<Vec<u8>>,
+    json_parse_options: JsonParseOptions,
 }
 
 impl DebeziumMongoJsonAccessBuilder {
     pub fn new() -> anyhow::Result<Self> {
-        Ok(Self { value: None })
+        Ok(Self {
+            value: None,
+            json_parse_options: JsonParseOptions::new_for_debezium(
+                TimestamptzHandling::GuessNumberUnit,
+            ),
+        })
     }
 }
 
@@ -82,7 +92,7 @@ impl AccessBuilder for DebeziumMongoJsonAccessBuilder {
         };
 
         Ok(AccessImpl::MongoJson(MongoJsonAccess::new(
-            JsonAccess::new_with_options(payload, &JsonParseOptions::DEBEZIUM),
+            JsonAccess::new_with_options(payload, &self.json_parse_options),
         )))
     }
 }
@@ -128,6 +138,7 @@ mod tests {
             key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
+                timestamptz_handling: None,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };

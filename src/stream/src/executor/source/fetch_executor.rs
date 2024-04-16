@@ -39,6 +39,7 @@ use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 
 use super::{get_split_offset_col_idx, SourceStateTableHandler};
+use crate::executor::source_executor::apply_rate_limit;
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::{
     expect_first_barrier, get_split_offset_mapping_from_chunk, prune_additional_cols,
@@ -90,9 +91,9 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
     ) -> StreamExecutorResult<()> {
         let mut batch = Vec::with_capacity(SPLIT_BATCH_SIZE);
-        'vnodes: for vnode in state_store_handler.state_store.vnodes().iter_vnodes() {
+        'vnodes: for vnode in state_store_handler.state_table.vnodes().iter_vnodes() {
             let table_iter = state_store_handler
-                .state_store
+                .state_table
                 .iter_with_vnode(
                     vnode,
                     &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
@@ -152,11 +153,13 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         source_desc: &SourceDesc,
         batch: SplitBatch,
     ) -> StreamExecutorResult<BoxChunkSourceStream> {
-        source_desc
+        let rate_limit = source_ctx.source_ctrl_opts.rate_limit;
+        let stream = source_desc
             .source
             .to_stream(batch, column_ids, Arc::new(source_ctx))
             .await
-            .map_err(StreamExecutorError::connector_error)
+            .map_err(StreamExecutorError::connector_error)?;
+        Ok(apply_rate_limit(stream, rate_limit).boxed())
     }
 
     fn build_source_ctx(
@@ -212,7 +215,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         // Hence we try building a reader first.
         Self::replace_with_new_batch_reader(
             &mut splits_on_fetch,
-            &state_store_handler,
+            &state_store_handler, // move into the function
             core.column_ids.clone(),
             self.build_source_ctx(&source_desc, core.source_id, &core.source_name),
             &source_desc,
@@ -234,16 +237,26 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                         Either::Left(msg) => {
                             match &msg {
                                 Message::Barrier(barrier) => {
+                                    let mut need_rebuild_reader = false;
+
                                     if let Some(mutation) = barrier.mutation.as_deref() {
                                         match mutation {
                                             Mutation::Pause => stream.pause_stream(),
                                             Mutation::Resume => stream.resume_stream(),
+                                            Mutation::Throttle(actor_to_apply) => {
+                                                if let Some(throttle) =
+                                                    actor_to_apply.get(&self.actor_ctx.id)
+                                                {
+                                                    self.source_ctrl_opts.rate_limit = *throttle;
+                                                    need_rebuild_reader = true;
+                                                }
+                                            }
                                             _ => (),
                                         }
                                     }
 
                                     state_store_handler
-                                        .state_store
+                                        .state_table
                                         .commit(barrier.epoch)
                                         .await?;
 
@@ -253,7 +266,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         // if _cache_may_stale, we must rebuild the stream to adjust vnode mappings
                                         let (_prev_vnode_bitmap, cache_may_stale) =
                                             state_store_handler
-                                                .state_store
+                                                .state_table
                                                 .update_vnode_bitmap(vnode_bitmap);
 
                                         if cache_may_stale {
@@ -261,7 +274,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         }
                                     }
 
-                                    if splits_on_fetch == 0 {
+                                    if splits_on_fetch == 0 || need_rebuild_reader {
                                         Self::replace_with_new_batch_reader(
                                             &mut splits_on_fetch,
                                             &state_store_handler,
@@ -297,7 +310,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         })
                                         .collect();
                                     state_store_handler.set_states(file_assignment).await?;
-                                    state_store_handler.state_store.try_flush().await?;
+                                    state_store_handler.state_table.try_flush().await?;
                                 }
                                 _ => unreachable!(),
                             }

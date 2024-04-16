@@ -74,10 +74,12 @@ mod consistency {
     static INSANE_MODE: LazyLock<bool> =
         LazyLock::new(|| env_var_is_true("RW_UNSAFE_ENABLE_INSANE_MODE"));
 
+    /// Check if the insane mode is enabled.
     pub(crate) fn insane() -> bool {
         *INSANE_MODE
     }
 
+    /// Check if strict consistency is required.
     pub(crate) fn enable_strict_consistency() -> bool {
         let res = crate::CONFIG.try_with(|config| config.unsafe_enable_strict_consistency);
         if cfg!(test) {
@@ -88,13 +90,34 @@ mod consistency {
         }
     }
 
-    macro_rules! inconsistency_panic {
+    /// Log an error message for breaking consistency. Must only be called in non-strict mode.
+    /// The log message will be suppressed if it is called too frequently.
+    macro_rules! consistency_error {
         ($($arg:tt)*) => {
-            tracing::error!($($arg)*);
-            if crate::consistency::enable_strict_consistency() {
-                panic!("inconsistency happened, see error log for details");
+            debug_assert!(!crate::consistency::enable_strict_consistency());
+
+            use std::sync::LazyLock;
+            use risingwave_common::log::LogSuppresser;
+
+            static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
+            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                tracing::error!(suppressed_count, $($arg)*);
             }
         };
     }
-    pub(crate) use inconsistency_panic;
+    pub(crate) use consistency_error;
+
+    /// Log an error message for breaking consistency, then panic if strict consistency is required.
+    /// The log message will be suppressed if it is called too frequently.
+    macro_rules! consistency_panic {
+        ($($arg:tt)*) => {
+            if crate::consistency::enable_strict_consistency() {
+                tracing::error!($($arg)*);
+                panic!("inconsistency happened, see error log for details");
+            } else {
+                crate::consistency::consistency_error!($($arg)*);
+            }
+        };
+    }
+    pub(crate) use consistency_panic;
 }

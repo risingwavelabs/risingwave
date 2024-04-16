@@ -25,13 +25,14 @@ use parking_lot::Mutex;
 use risingwave_pb::stream_service::barrier_complete_response::{
     GroupedSstableInfo, PbCreateMviewProgress,
 };
+use risingwave_rpc_client::error::{ToTonicStatus, TonicStatusWrapper};
 use rw_futures_util::{pending_on_none, AttachedFuture};
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use tonic::Status;
+use tonic::{Code, Status};
 
 use self::managed_state::ManagedBarrierState;
 use crate::error::{IntoUnexpectedExit, StreamError, StreamResult};
@@ -102,7 +103,11 @@ impl ControlStreamHandle {
 
     fn reset_stream_with_err(&mut self, err: Status) {
         if let Some((sender, _)) = self.pair.take() {
-            warn!("control stream reset with: {:?}", err.as_report());
+            // Note: `TonicStatusWrapper` provides a better error report.
+            let err = TonicStatusWrapper::new(err);
+            warn!(error = %err.as_report(), "control stream reset with error");
+
+            let err = err.into_inner();
             if sender.send(Err(err)).is_err() {
                 warn!("failed to notify finish of control stream");
             }
@@ -111,7 +116,7 @@ impl ControlStreamHandle {
 
     fn inspect_result(&mut self, result: StreamResult<()>) {
         if let Err(e) = result {
-            self.reset_stream_with_err(Status::internal(format!("get error: {:?}", e.as_report())));
+            self.reset_stream_with_err(e.to_status_unnamed(Code::Internal));
         }
     }
 
@@ -132,10 +137,11 @@ impl ControlStreamHandle {
                 Some(Ok(request)) => {
                     return request;
                 }
-                Some(Err(e)) => self.reset_stream_with_err(Status::internal(format!(
-                    "failed to get request: {:?}",
-                    e.as_report()
-                ))),
+                Some(Err(e)) => self.reset_stream_with_err(
+                    anyhow!(TonicStatusWrapper::new(e)) // wrap the status to provide better error report
+                        .context("failed to get request")
+                        .to_status_unnamed(Code::Internal),
+                ),
                 None => self.reset_stream_with_err(Status::internal("end of stream")),
             }
         }
@@ -287,7 +293,7 @@ pub(crate) struct StreamActorManager {
     pub(super) watermark_epoch: AtomicU64Ref,
 
     /// Manages the await-trees of all actors.
-    pub(super) await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
+    pub(super) await_tree_reg: Option<await_tree::Registry>,
 
     /// Runtime for the streaming actors.
     pub(super) runtime: BackgroundShutdownRuntime,
@@ -322,10 +328,7 @@ pub(super) struct LocalBarrierWorker {
 }
 
 impl LocalBarrierWorker {
-    pub(super) fn new(
-        actor_manager: Arc<StreamActorManager>,
-        barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
-    ) -> Self {
+    pub(super) fn new(actor_manager: Arc<StreamActorManager>) -> Self {
         let (event_tx, event_rx) = unbounded_channel();
         let (failure_tx, failure_rx) = unbounded_channel();
         let shared_context = Arc::new(SharedContext::new(
@@ -342,7 +345,7 @@ impl LocalBarrierWorker {
             state: ManagedBarrierState::new(
                 actor_manager.env.state_store(),
                 actor_manager.streaming_metrics.clone(),
-                barrier_await_tree_reg,
+                actor_manager.await_tree_reg.clone(),
             ),
             control_stream_handle: ControlStreamHandle::empty(),
             actor_manager,
@@ -678,10 +681,7 @@ impl LocalBarrierWorker {
 
     /// Reset all internal states.
     pub(super) fn reset_state(&mut self) {
-        *self = Self::new(
-            self.actor_manager.clone(),
-            self.state.reset_and_take_barrier_await_tree_reg(),
-        );
+        *self = Self::new(self.actor_manager.clone());
     }
 
     /// When a [`crate::executor::StreamConsumer`] (typically [`crate::executor::DispatchExecutor`]) get a barrier, it should report
@@ -697,12 +697,14 @@ impl LocalBarrierWorker {
         let root_err = self.try_find_root_failure(err).await;
         let failed_epochs = self.state.epochs_await_on_actor(actor_id).collect_vec();
         if !failed_epochs.is_empty() {
-            self.control_stream_handle
-                .reset_stream_with_err(Status::internal(format!(
-                    "failed to collect barrier. epoch: {:?}, err: {:?}",
-                    failed_epochs,
-                    root_err.as_report()
-                )));
+            self.control_stream_handle.reset_stream_with_err(
+                anyhow!(root_err)
+                    .context(format!(
+                        "failed to collect barrier for epoch {:?}",
+                        failed_epochs
+                    ))
+                    .to_status_unnamed(Code::Internal),
+            );
         }
     }
 
@@ -744,8 +746,7 @@ impl LocalBarrierWorker {
     pub fn spawn(
         env: StreamEnvironment,
         streaming_metrics: Arc<StreamingMetrics>,
-        await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
-        barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
+        await_tree_reg: Option<await_tree::Registry>,
         watermark_epoch: AtomicU64Ref,
         actor_op_rx: UnboundedReceiver<LocalActorOperation>,
     ) -> JoinHandle<()> {
@@ -768,7 +769,7 @@ impl LocalBarrierWorker {
             await_tree_reg,
             runtime: runtime.into(),
         });
-        let worker = LocalBarrierWorker::new(actor_manager, barrier_await_tree_reg);
+        let worker = LocalBarrierWorker::new(actor_manager);
         tokio::spawn(worker.run(actor_op_rx))
     }
 }
@@ -869,7 +870,6 @@ impl LocalBarrierManager {
         let _join_handle = LocalBarrierWorker::spawn(
             StreamEnvironment::for_test(),
             Arc::new(StreamingMetrics::unused()),
-            None,
             None,
             Arc::new(AtomicU64::new(0)),
             rx,
