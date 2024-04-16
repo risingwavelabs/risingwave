@@ -412,8 +412,8 @@ message MetaSnapshot {
   reserved 18; // for old serving_parallel_unit_mappings
 
   // for streaming
-  repeated FragmentWorkerMapping streaming_worker_mappings = 20;
-  repeated FragmentWorkerMapping serving_worker_mappings = 21;
+  repeated FragmentWorkerMapping streaming_worker_mappings = 21;
+  repeated FragmentWorkerMapping serving_worker_mappings = 22;
 
   SnapshotVersion version = 13;
 }

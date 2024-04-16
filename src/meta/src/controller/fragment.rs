@@ -79,7 +79,7 @@ impl CatalogControllerInner {
         Ok(fragment_mappings
             .into_iter()
             .map(move |(fragment_id, mapping)| {
-                let worker_mapping = ParallelUnitMapping::from_protobuf(mapping.inner_ref())
+                let worker_mapping = ParallelUnitMapping::from_protobuf(&mapping.to_protobuf())
                     .to_worker(&parallel_unit_to_worker)
                     .to_protobuf();
 
@@ -958,7 +958,7 @@ impl CatalogController {
                 .map(|(fragment_id, mapping)| PbFragmentWorkerMapping {
                     fragment_id: fragment_id as _,
                     mapping: Some(
-                        ParallelUnitMapping::from_protobuf(mapping.inner_ref())
+                        ParallelUnitMapping::from_protobuf(&mapping.to_protobuf())
                             .to_worker(&parallel_unit_to_worker)
                             .to_protobuf(),
                     ),
