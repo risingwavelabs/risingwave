@@ -165,21 +165,22 @@ impl ControlStreamManager {
         Ok(())
     }
 
-    async fn next_response(&mut self) -> (WorkerId, MetaResult<StreamingControlStreamResponse>) {
-        let (worker_id, response_stream, result) =
-            pending_on_none(self.response_streams.next()).await;
+    async fn next_response(
+        &mut self,
+    ) -> Option<(WorkerId, MetaResult<StreamingControlStreamResponse>)> {
+        let (worker_id, response_stream, result) = self.response_streams.next().await?;
         if result.is_ok() {
             self.response_streams
                 .push(into_future(worker_id, response_stream));
         }
-        (worker_id, result)
+        Some((worker_id, result))
     }
 
     pub(super) async fn next_complete_barrier_response(
         &mut self,
     ) -> MetaResult<(WorkerId, u64, BarrierCompleteResponse)> {
         loop {
-            let (worker_id, result) = self.next_response().await;
+            let (worker_id, result) = pending_on_none(self.next_response()).await;
             match result {
                 Ok(resp) => match resp.response {
                     Some(streaming_control_stream_response::Response::CompleteBarrier(resp)) => {
@@ -225,8 +226,7 @@ impl ControlStreamManager {
     ) -> Vec<(WorkerId, MetaError)> {
         let mut errors = vec![(worker_id, first_err)];
         let _ = timeout(COLLECT_ERROR_TIMEOUT, async {
-            loop {
-                let (worker_id, result) = self.next_response().await;
+            while let Some((worker_id, result)) = self.next_response().await {
                 if let Err(e) = result {
                     errors.push((worker_id, e));
                 }
