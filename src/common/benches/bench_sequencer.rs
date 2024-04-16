@@ -38,6 +38,7 @@ fn coarse(loops: usize) -> Duration {
     now.elapsed()
 }
 
+#[expect(clippy::explicit_counter_loop)]
 fn primitive(loops: usize) -> Duration {
     let mut cnt = 0usize;
     let now = Instant::now();

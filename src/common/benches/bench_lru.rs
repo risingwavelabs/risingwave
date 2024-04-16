@@ -28,7 +28,7 @@ fn lru(loops: usize, evict_ratio: u64) -> (usize, Duration) {
     for i in 0..loops as u64 {
         if i % evict_ratio == 0 && i != 0 {
             lru.update_epoch(i);
-            while let Some(_) = lru.pop_lru_by_epoch(i) {
+            while lru.pop_lru_by_epoch(i).is_some() {
                 evicted += 1;
             }
         }
@@ -45,7 +45,7 @@ fn rw_lru(loops: usize, evict_ratio: u64) -> (usize, Duration) {
     for i in 0..loops as u64 {
         if i % evict_ratio == 0 {
             let sequence = SEQUENCE_GLOBAL.load(Ordering::Relaxed);
-            while let Some(_) = lru.pop_with_sequence(sequence) {
+            while lru.pop_with_sequence(sequence).is_some() {
                 evicted += 1;
             }
         }
