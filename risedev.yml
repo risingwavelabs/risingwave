@@ -239,7 +239,7 @@ profile:
       # If you want to use azblob as storage backend, configure bucket(container) name:
       - use: opendal
         engine: azblob
-        bucket: dev-azr-inc-aks-a-blob
+        bucket: test-bucket
       - use: compactor
       # - use: prometheus
       # - use: grafana
@@ -1389,3 +1389,4 @@ template:
 
     # address of redis
     address: "127.0.0.1"
+
