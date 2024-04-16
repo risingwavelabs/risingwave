@@ -49,30 +49,6 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                         .unwrap();
                     }
                 }
-        match item {
-            ServiceConfig::ComputeNode(c) => {
-                // RW_HUMMOCK_URL
-                // If the cluster is launched without a shared storage, we will skip this.
-                {
-                    let mut cmd = Command::new("compute-node");
-                    if add_hummock_backend(
-                        "dummy",
-                        c.provide_opendal.as_ref().unwrap(),
-                        c.provide_minio.as_ref().unwrap(),
-                        c.provide_aws_s3.as_ref().unwrap(),
-                        HummockInMemoryStrategy::Disallowed,
-                        &mut cmd,
-                    )
-                    .is_ok()
-                    {
-                        writeln!(
-                            env,
-                            "RW_HUMMOCK_URL=\"{}\"",
-                            cmd.get_args().nth(1).unwrap().to_str().unwrap()
-                        )
-                        .unwrap();
-                    }
-                }
 
                 // RW_META_ADDR
                 {
