@@ -798,6 +798,12 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn recover(&self) -> Result<()> {
+        let request = RecoverRequest {};
+        self.inner.recover(request).await?;
+        Ok(())
+    }
+
     pub async fn cancel_creating_jobs(&self, jobs: PbJobs) -> Result<Vec<u32>> {
         let request = CancelCreatingJobsRequest { jobs: Some(jobs) };
         let resp = self.inner.cancel_creating_jobs(request).await?;
@@ -1903,6 +1909,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_fragment_distribution, ListFragmentDistributionRequest, ListFragmentDistributionResponse }
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }
+            ,{ stream_client, recover, RecoverRequest, RecoverResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }

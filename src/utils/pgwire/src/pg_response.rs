@@ -105,6 +105,7 @@ pub enum StatementType {
     CLOSE_CURSOR,
     WAIT,
     KILL,
+    RECOVER,
 }
 
 impl std::fmt::Display for StatementType {
