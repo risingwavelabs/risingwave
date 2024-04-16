@@ -1933,17 +1933,17 @@ def section_hummock_read(outer_panels):
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Cache Miss Rate",
+                    "Cache Miss Ratio",
                     "",
                     [
                         panels.target(
                             f"(sum(rate({table_metric('state_store_sst_store_block_request_counts', meta_miss_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)) / (sum(rate({table_metric('state_store_sst_store_block_request_counts', meta_total_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id))",
-                            "meta cache miss rate - {{table_id}} @ {{%s}} @ {{%s}}"
+                            "meta cache miss ratio - {{table_id}} @ {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                         panels.target(
                             f"(sum(rate({table_metric('state_store_sst_store_block_request_counts', data_miss_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)) / (sum(rate({table_metric('state_store_sst_store_block_request_counts', data_total_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id))",
-                            "block cache miss rate - {{table_id}} @ {{%s}} @ {{%s}}"
+                            "block cache miss ratio - {{table_id}} @ {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
@@ -2718,9 +2718,9 @@ def section_hummock_manager(outer_panels):
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('hummock_manager_lock_time_bucket')}[$__rate_interval])) by (le, lock_name, lock_type))",
+                                f"histogram_quantile({quantile}, sum(rate({metric('hummock_manager_lock_time_bucket')}[$__rate_interval])) by (le, method, lock_name, lock_type))",
                                 f"Lock Time p{legend}"
-                                + " - {{lock_type}} @ {{lock_name}}",
+                                + " - {{method}} @ {{lock_type}} @ {{lock_name}}",
                             ),
                             [50, 99, "max"],
                         ),

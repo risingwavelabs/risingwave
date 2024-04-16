@@ -14,8 +14,10 @@
 
 pub mod enumerator;
 pub mod external;
+pub mod jni_source;
 pub mod source;
 pub mod split;
+
 use std::collections::HashMap;
 use std::marker::PhantomData;
 
