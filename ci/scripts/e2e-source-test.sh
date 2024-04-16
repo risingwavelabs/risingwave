@@ -25,7 +25,7 @@ done
 shift $((OPTIND -1))
 
 apt install -y nodejs npm
-npm i -g npx
+npm i -g zx
 
 download_and_prepare_rw "$profile" source
 
