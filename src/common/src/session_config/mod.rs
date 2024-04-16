@@ -241,10 +241,13 @@ pub struct SessionConfig {
     #[parameter(default = STANDARD_CONFORMING_STRINGS)]
     standard_conforming_strings: String,
 
-    /// Set streaming rate limit (rows per second) for each parallelism for mv backfilling
-    #[serde_as(as = "DisplayFromStr")]
-    #[parameter(default = ConfigNonZeroU64::default())]
-    streaming_rate_limit: ConfigNonZeroU64,
+    /// Set streaming rate limit (rows per second) for each parallelism for mv / source backfilling, source reads.
+    #[parameter(default = 1u32, flags = "SETTER")]
+    streaming_rate_limit: u32,
+
+    /// Disable streaming rate limit
+    #[parameter(default = false, flags = "SETTER")]
+    enable_streaming_rate_limit: bool,
 
     /// Cache policy for partition cache in streaming over window.
     /// Can be "full", "recent", "`recent_first_n`" or "`recent_last_n`".
@@ -296,6 +299,24 @@ fn check_bytea_output(val: &str) -> Result<(), String> {
 }
 
 impl SessionConfig {
+    pub fn set_streaming_rate_limit(
+        &mut self,
+        val: u32,
+        reporter: &mut impl ConfigReporter,
+    ) -> SessionConfigResult<u32> {
+        self.set_enable_streaming_rate_limit(true, reporter)?;
+        self.set_streaming_rate_limit_inner(val, reporter)
+    }
+
+    pub fn set_enable_streaming_rate_limit(
+        &mut self,
+        val: bool,
+        reporter: &mut impl ConfigReporter,
+    ) -> SessionConfigResult<bool> {
+        let set_val = self.set_enable_streaming_rate_limit_inner(val, reporter)?;
+        Ok(set_val)
+    }
+
     pub fn set_force_two_phase_agg(
         &mut self,
         val: bool,
