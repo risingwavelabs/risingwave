@@ -222,8 +222,8 @@ mod tests {
 
     fn get_payload() -> Vec<Vec<u8>> {
         vec![
-            br#"{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269","decimal":12345.67890}"#.to_vec(),
-            br#"{"i32":1,"f32":12345e+10,"f64":12345,"decimal":12345}"#.to_vec(),
+            br#"{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269","decimal":12345.67890,"interval":"P1Y2M3DT0H5M0S"}"#.to_vec(),
+            br#"{"i32":1,"f32":12345e+10,"f64":12345,"decimal":12345,"interval":"1 day"}"#.to_vec(),
         ]
     }
 
@@ -245,6 +245,7 @@ mod tests {
             SourceColumnDesc::simple("date", DataType::Date, 8.into()),
             SourceColumnDesc::simple("timestamp", DataType::Timestamp, 9.into()),
             SourceColumnDesc::simple("decimal", DataType::Decimal, 10.into()),
+            SourceColumnDesc::simple("interval", DataType::Interval, 11.into()),
         ];
 
         let parser = JsonParser::new(
@@ -307,6 +308,10 @@ mod tests {
                 row.datum_at(9).to_owned_datum(),
                 (Some(ScalarImpl::Decimal("12345.67890".parse().unwrap())))
             );
+            assert_eq!(
+                row.datum_at(10).to_owned_datum(),
+                (Some(ScalarImpl::Interval("P1Y2M3DT0H5M0S".parse().unwrap())))
+            );
         }
 
         {
@@ -328,6 +333,10 @@ mod tests {
             assert_eq!(
                 row.datum_at(9).to_owned_datum(),
                 (Some(ScalarImpl::Decimal(12345.into())))
+            );
+            assert_eq!(
+                row.datum_at(10).to_owned_datum(),
+                (Some(ScalarImpl::Interval("1 day".parse().unwrap())))
             );
         }
     }
