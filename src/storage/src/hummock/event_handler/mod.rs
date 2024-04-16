@@ -81,6 +81,11 @@ pub enum HummockEvent {
         opts: SealCurrentEpochOptions,
     },
 
+    UpdateVnodeBitmap {
+        instance_id: LocalInstanceId,
+        vnode_bitmap: Arc<Bitmap>,
+    },
+
     #[cfg(any(test, feature = "test"))]
     /// Flush all previous event. When all previous events has been consumed, the event handler
     /// will notify
@@ -157,6 +162,15 @@ impl HummockEvent {
 
             #[cfg(any(test, feature = "test"))]
             HummockEvent::FlushEvent(_) => "FlushEvent".to_string(),
+            HummockEvent::UpdateVnodeBitmap {
+                instance_id,
+                vnode_bitmap,
+            } => {
+                format!(
+                    "UpdateVnodeBitmap {} vnode_bitmap: {:?}",
+                    instance_id, vnode_bitmap
+                )
+            }
         }
     }
 }

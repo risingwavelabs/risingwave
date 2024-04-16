@@ -319,6 +319,8 @@ pub struct SyncResult {
     pub uncommitted_ssts: Vec<LocalSstableInfo>,
     /// The collected table watermarks written by state tables.
     pub table_watermarks: HashMap<TableId, TableWatermarks>,
+    /// The vnode bitmap of each table in the current sync
+    pub vnode_bitmap: HashMap<TableId, Bitmap>,
 }
 
 pub trait StateStore: StateStoreRead + StaticSendSync + Clone {

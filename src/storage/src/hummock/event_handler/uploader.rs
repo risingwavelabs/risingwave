@@ -29,7 +29,7 @@ use itertools::Itertools;
 use more_asserts::{assert_ge, assert_gt, assert_le};
 use prometheus::core::{AtomicU64, GenericGauge};
 use prometheus::{HistogramTimer, IntGauge};
-use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::EPOCH_LEN;
@@ -53,6 +53,7 @@ use crate::hummock::{HummockError, HummockResult, ImmutableMemtable};
 use crate::mem_table::ImmId;
 use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
+use crate::store::SealCurrentEpochOptions;
 
 pub type UploadTaskPayload = Vec<ImmutableMemtable>;
 
@@ -394,6 +395,7 @@ struct UnsealedEpochData {
     spilled_data: SpilledData,
 
     table_watermarks: HashMap<TableId, (WatermarkDirection, Vec<VnodeWatermark>, BitmapBuilder)>,
+    vnode_bitmap: HashMap<TableId, BitmapBuilder>,
 }
 
 impl UnsealedEpochData {
@@ -408,6 +410,25 @@ impl UnsealedEpochData {
                 .inc_by(task.task_info.task_size as u64);
             info!("Spill unsealed data. Task: {}", task.get_task_info());
             self.spilled_data.add_task(task);
+        }
+    }
+
+    pub(crate) fn local_seal_epoch(
+        &mut self,
+        table_id: TableId,
+        opts: SealCurrentEpochOptions,
+        vnode_bitmap: Arc<Bitmap>,
+    ) {
+        if let Some((direction, table_watermarks)) = opts.table_watermarks {
+            self.add_table_watermarks(table_id, table_watermarks, direction);
+        }
+        let bitmap = self
+            .vnode_bitmap
+            .entry(table_id)
+            .or_insert_with(|| BitmapBuilder::zeroed(VirtualNode::COUNT));
+        // TODO: can optimize with bitmap or
+        for vnode in vnode_bitmap.iter_ones() {
+            bitmap.set(vnode, true);
         }
     }
 
@@ -460,6 +481,8 @@ struct SealedData {
     // newer epochs come first
     epochs: VecDeque<HummockEpoch>,
 
+    vnode_bitmap: HashMap<TableId, BitmapBuilder>,
+
     // store the output of merge task that will be feed into `flush_imms` procedure
     merged_imms: VecDeque<ImmutableMemtable>,
 
@@ -479,6 +502,7 @@ struct SealedData {
 impl SealedData {
     fn clear(&mut self) {
         self.epochs.clear();
+        self.vnode_bitmap.clear();
 
         self.spilled_data.clear();
         self.imms_by_table_shard.clear();
@@ -524,6 +548,17 @@ impl SealedData {
                 epoch,
                 prev_max_sealed_epoch
             );
+        }
+
+        for (table_id, bitmap) in unseal_epoch_data.vnode_bitmap {
+            let vnode_bitmap = self
+                .vnode_bitmap
+                .entry(table_id)
+                .or_insert_with(|| BitmapBuilder::zeroed(VirtualNode::COUNT));
+            // TODO: can be optimized with bitmap or
+            for vnode in bitmap.finish().iter_ones() {
+                vnode_bitmap.set(vnode, true);
+            }
         }
 
         // rearrange sealed imms by table shard and in epoch descending order
@@ -678,6 +713,7 @@ impl SealedData {
 struct SyncingData {
     // newer epochs come first
     epochs: Vec<HummockEpoch>,
+    vnode_bitmap: HashMap<TableId, Bitmap>,
     // TODO: may replace `TryJoinAll` with a future that will abort other join handles once
     // one join handle failed.
     // None means there is no pending uploading tasks
@@ -696,6 +732,7 @@ impl SyncingData {
 pub struct SyncedData {
     pub staging_ssts: Vec<StagingSstableInfo>,
     pub table_watermarks: HashMap<TableId, TableWatermarks>,
+    pub vnode_bitmap: HashMap<TableId, Bitmap>,
 }
 
 // newer staging sstable info at the front
@@ -849,12 +886,12 @@ impl HummockUploader {
             .push_front(imm);
     }
 
-    pub(crate) fn add_table_watermarks(
+    pub(crate) fn local_seal_epoch(
         &mut self,
-        epoch: u64,
         table_id: TableId,
-        table_watermarks: Vec<VnodeWatermark>,
-        direction: WatermarkDirection,
+        epoch: HummockEpoch,
+        opts: SealCurrentEpochOptions,
+        vnode_bitmap: Arc<Bitmap>,
     ) {
         assert!(
             epoch > self.max_sealed_epoch,
@@ -865,7 +902,7 @@ impl HummockUploader {
         self.unsealed_data
             .entry(epoch)
             .or_default()
-            .add_table_watermarks(table_id, table_watermarks, direction);
+            .local_seal_epoch(table_id, opts, vnode_bitmap);
     }
 
     pub(crate) fn seal_epoch(&mut self, epoch: HummockEpoch) {
@@ -977,6 +1014,7 @@ impl HummockUploader {
 
         let SealedData {
             epochs,
+            vnode_bitmap,
             imms_by_table_shard,
             spilled_data:
                 SpilledData {
@@ -1002,6 +1040,10 @@ impl HummockUploader {
 
         self.syncing_data.push_front(SyncingData {
             epochs: epochs.into_iter().collect(),
+            vnode_bitmap: vnode_bitmap
+                .into_iter()
+                .map(|(table_id, bitmap)| (table_id, bitmap.finish()))
+                .collect(),
             uploading_tasks: try_join_all_upload_task,
             uploaded: uploaded_data,
             table_watermarks,
@@ -1135,6 +1177,7 @@ impl HummockUploader {
                 SyncedData {
                     staging_ssts: sstable_infos,
                     table_watermarks: syncing_data.table_watermarks,
+                    vnode_bitmap: syncing_data.vnode_bitmap,
                 }
             });
             self.add_synced_data(epoch, result);

@@ -26,6 +26,7 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericGauge};
 use prometheus::{Histogram, IntGauge};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
@@ -172,6 +173,11 @@ struct HummockEventHandlerMetrics {
     event_handler_on_recv_version_update: Histogram,
 }
 
+struct LocalInstanceInfo {
+    read_version: HummockReadVersionRef,
+    vnode_bitmap: Arc<Bitmap>,
+}
+
 pub struct HummockEventHandler {
     hummock_event_tx: HummockEventSender,
     hummock_event_rx: HummockEventReceiver,
@@ -179,7 +185,7 @@ pub struct HummockEventHandler {
     pending_sync_requests: BTreeMap<HummockEpoch, oneshot::Sender<HummockResult<SyncResult>>>,
     read_version_mapping: Arc<RwLock<ReadVersionMappingType>>,
     /// A copy of `read_version_mapping` but owned by event handler
-    local_read_version_mapping: HashMap<LocalInstanceId, HummockReadVersionRef>,
+    local_instance_mapping: HashMap<LocalInstanceId, LocalInstanceInfo>,
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
     pinned_version: Arc<ArcSwap<PinnedVersion>>,
@@ -347,7 +353,7 @@ impl HummockEventHandler {
             pinned_version: Arc::new(ArcSwap::from_pointee(pinned_version)),
             write_conflict_detector,
             read_version_mapping,
-            local_read_version_mapping: Default::default(),
+            local_instance_mapping: Default::default(),
             uploader,
             refiller,
             last_instance_id: 0,
@@ -432,9 +438,9 @@ impl HummockEventHandler {
     /// This function will be performed under the protection of the `read_version_mapping` read
     /// lock, and add write lock on each `read_version` operation
     fn for_each_read_version(&self, mut f: impl FnMut(&mut HummockReadVersion)) {
-        self.local_read_version_mapping
+        self.local_instance_mapping
             .values()
-            .for_each(|read_version: &HummockReadVersionRef| f(read_version.write().deref_mut()));
+            .for_each(|info: &LocalInstanceInfo| f(info.read_version.write().deref_mut()));
     }
 
     fn handle_data_spilled(&mut self, staging_sstable_info: StagingSstableInfo) {
@@ -591,11 +597,11 @@ impl HummockEventHandler {
         }
 
         assert!(
-            self.local_read_version_mapping.is_empty(),
+            self.local_instance_mapping.is_empty(),
             "read version mapping not empty when clear. remaining tables: {:?}",
-            self.local_read_version_mapping
+            self.local_instance_mapping
                 .values()
-                .map(|read_version| read_version.read().table_id())
+                .map(|info| info.read_version.read().table_id())
                 .collect_vec()
         );
 
@@ -769,16 +775,10 @@ impl HummockEventHandler {
 
             UploaderEvent::ImmMerged(merge_output) => {
                 // update read version for corresponding table shards
-                if let Some(read_version) = self
-                    .local_read_version_mapping
-                    .get(&merge_output.instance_id)
-                {
-                    read_version
-                        .write()
-                        .update(VersionUpdate::Staging(StagingData::MergedImmMem(
-                            merge_output.merged_imm,
-                            merge_output.imm_ids,
-                        )));
+                if let Some(info) = self.local_instance_mapping.get(&merge_output.instance_id) {
+                    info.read_version.write().update(VersionUpdate::Staging(
+                        StagingData::MergedImmMem(merge_output.merged_imm, merge_output.imm_ids),
+                    ));
                 } else {
                     warn!(
                         "handle ImmMerged: table instance not found. table {:?}, instance {}",
@@ -809,8 +809,7 @@ impl HummockEventHandler {
             }
             HummockEvent::ImmToUploader(imm) => {
                 assert!(
-                    self.local_read_version_mapping
-                        .contains_key(&imm.instance_id),
+                    self.local_instance_mapping.contains_key(&imm.instance_id),
                     "add imm from non-existing read version instance: instance_id: {}, table_id {}",
                     imm.instance_id,
                     imm.table_id,
@@ -839,16 +838,16 @@ impl HummockEventHandler {
                 table_id,
                 instance_id,
             } => {
-                assert!(
-                    self.local_read_version_mapping
-                        .contains_key(&instance_id),
-                    "seal epoch from non-existing read version instance: instance_id: {}, table_id: {}, epoch: {}",
-                    instance_id, table_id, epoch,
-                );
-                if let Some((direction, watermarks)) = opts.table_watermarks {
-                    self.uploader
-                        .add_table_watermarks(epoch, table_id, watermarks, direction)
-                }
+                let vnode_bitmap = match self.local_instance_mapping.get(&instance_id) {
+                    Some(info) => info.vnode_bitmap.clone(),
+                    None => unreachable!(
+                        "seal epoch from non-existing read version instance: instance_id: {}, table_id: {}, epoch: {}",
+                        instance_id, table_id, epoch,
+                    )
+                };
+
+                self.uploader
+                    .local_seal_epoch(table_id, epoch, opts, vnode_bitmap);
             }
 
             #[cfg(any(test, feature = "test"))]
@@ -870,7 +869,7 @@ impl HummockEventHandler {
                         table_id,
                         (**pinned_version).clone(),
                         is_replicated,
-                        vnodes,
+                        vnodes.clone(),
                     ),
                 ));
 
@@ -882,8 +881,13 @@ impl HummockEventHandler {
                 );
 
                 {
-                    self.local_read_version_mapping
-                        .insert(instance_id, basic_read_version.clone());
+                    self.local_instance_mapping.insert(
+                        instance_id,
+                        LocalInstanceInfo {
+                            read_version: basic_read_version.clone(),
+                            vnode_bitmap: vnodes,
+                        },
+                    );
                     let mut read_version_mapping_guard = self.read_version_mapping.write();
 
                     read_version_mapping_guard
@@ -918,6 +922,15 @@ impl HummockEventHandler {
             } => {
                 self.destroy_read_version(table_id, instance_id);
             }
+            HummockEvent::UpdateVnodeBitmap {
+                instance_id,
+                vnode_bitmap,
+            } => {
+                self.local_instance_mapping
+                    .get_mut(&instance_id)
+                    .expect("should exist when receiving event")
+                    .vnode_bitmap = vnode_bitmap;
+            }
         }
     }
 
@@ -928,7 +941,7 @@ impl HummockEventHandler {
                     "read version deregister: table_id: {}, instance_id: {}",
                     table_id, instance_id
                 );
-                self.local_read_version_mapping
+                self.local_instance_mapping
                     .remove(&instance_id)
                     .unwrap_or_else(|| {
                         panic!(
@@ -989,6 +1002,7 @@ fn to_sync_result(result: &HummockResult<SyncedData>) -> HummockResult<SyncResul
                     .flat_map(|staging_sstable_info| staging_sstable_info.sstable_infos().clone())
                     .collect(),
                 table_watermarks: sync_data.table_watermarks.clone(),
+                vnode_bitmap: sync_data.vnode_bitmap.clone(),
             })
         }
         Err(e) => Err(HummockError::other(format!(
