@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Track the recursion and grow the stack when necessary to enable fearless recursion.
+
 use std::cell::RefCell;
 
 // See documentation of `stacker` for the meaning of these constants.
@@ -92,7 +94,12 @@ impl Tracker {
         }
 
         let _guard = DepthGuard::new(&self.depth);
-        stacker::maybe_grow(RED_ZONE, STACK_SIZE, f)
+
+        if cfg!(madsim) {
+            f() // madsim does not support stack growth
+        } else {
+            stacker::maybe_grow(RED_ZONE, STACK_SIZE, f)
+        }
     }
 }
 
