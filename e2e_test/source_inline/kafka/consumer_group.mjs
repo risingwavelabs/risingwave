@@ -5,7 +5,6 @@
 
 const {
   mv: mv,
-  topic: topic,
   _: _command,
 } = minimist(process.argv.slice(3), {
   string: ["mv", "topic"],
@@ -83,7 +82,7 @@ if (command == "list-groups") {
 } else if (command == "list-members") {
   echo`${await list_consumer_group_members(fragment_id)}`;
 } else if (command == "list-lags") {
-  echo`${await list_consumer_group_lags(fragment_id, topic)}`;
+  echo`${await list_consumer_group_lags(fragment_id)}`;
 } else {
   throw new Error(`Invalid command: ${command}`);
 }

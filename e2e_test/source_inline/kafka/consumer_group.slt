@@ -62,7 +62,7 @@ system ok
 
 # We try to interfere by creating consumers that subscribing to the topic with the RW's group id.
 system ok
-./e2e_test/source_inline/kafka/consumer_group.mjs --mv mv --topic test_consumer_group list-groups | tr ',' '\n' | xargs -P4 -n1 -I {} sh -c "timeout 10s rpk topic consume test_consumer_group -g {}" &
+./e2e_test/source_inline/kafka/consumer_group.mjs --mv mv --topic test_consumer_group list-groups | tr ',' '\\n' | xargs -P4 -n1 -I {} sh -c "timeout 10s rpk topic consume test_consumer_group -g {}" &
 
 # Wait a while for them to subscribe to the topic.
 sleep 5s
