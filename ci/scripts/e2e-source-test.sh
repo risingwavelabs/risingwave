@@ -24,6 +24,9 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
+apt install -y nodejs npm
+npm i -g npx
+
 download_and_prepare_rw "$profile" source
 
 echo "--- Download connector node package"

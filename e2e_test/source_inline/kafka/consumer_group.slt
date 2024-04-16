@@ -41,15 +41,15 @@ b
 c
 
 
-# There are 4 consumer groups, 1 for batch query, 3 for MV. All of them are "Empty" state with 0 members, because we manually `assign` partitions to them.
+# There are 4 consumer groups, 1 for batch query (not listed below), 3 for MV.
+# All of them are "Empty" state with 0 members, because we manually `assign` partitions to them.
 # At the begginning, the MV's consumer group will not occur. They will be created after committing offset to Kafka.
 # (enable.auto.commit defaults to true, and auto.commit.interval.ms defaults to 5s)
-sleep 15s
+sleep 5s
 
 system ok
-rpk group list && (rpk group list | tail -n +2 | cut -w -f2 | xargs -n1 -I {} sh -c "rpk group describe -s {} ")
+./e2e_test/source_inline/kafka/consumer_group.mjs --mv mv --topic test_consumer_group list-members
 ----
-MEMBERS      0
 MEMBERS      0
 MEMBERS      0
 MEMBERS      0
@@ -57,9 +57,8 @@ MEMBERS      0
 
 # The lag for batch query's group is 0, and each MV parition's group is 2 (1 of 3 consumed).
 system ok
-rpk group list | tail -n +2 | cut -w -f2 | xargs -n1 -I {} sh -c "rpk group describe -t {} | grep "test_consumer_group"" | sort
+./e2e_test/source_inline/kafka/consumer_group.mjs --mv mv --topic test_consumer_group list-lags
 ----
-test_consumer_group  0
 test_consumer_group  2
 test_consumer_group  2
 test_consumer_group  2
@@ -67,16 +66,15 @@ test_consumer_group  2
 
 # We try to interfere by creating consumers that subscribing to the topic with the RW's group id.
 system ok
-rpk group list | tail -n +2 | cut -w -f2 | xargs -P4 -n1 -I {} sh -c "timeout 10s rpk topic consume test_consumer_group -g {}" &
+./e2e_test/source_inline/kafka/consumer_group.mjs --mv mv --topic test_consumer_group list-groups | xargs -P4 -n1 -I {} sh -c "timeout 10s rpk topic consume test_consumer_group -g {}" &
 
 # Wait a while for them to subscribe to the topic.
 sleep 5s
 
 # The lag is changed to 0
 system ok
-rpk group list | tail -n +2 | cut -w -f2 | xargs -n1 -I {} sh -c "rpk group describe -t {} | grep "test_consumer_group""
+./e2e_test/source_inline/kafka/consumer_group.mjs --mv mv --topic test_consumer_group list-lags
 ----
-test_consumer_group  0
 test_consumer_group  0
 test_consumer_group  0
 test_consumer_group  0
@@ -107,9 +105,8 @@ DROP SOURCE s CASCADE;
 
 # consumer groups are not deleted after MV is dropped.
 system ok
-rpk group list | tail -n +2 | cut -w -f2 | xargs -n1 -I {} sh -c "rpk group describe -s {} | grep "MEMBERS""
+./e2e_test/source_inline/kafka/consumer_group.mjs --mv mv --topic test_consumer_group list-members
 ----
-MEMBERS      0
 MEMBERS      0
 MEMBERS      0
 MEMBERS      0

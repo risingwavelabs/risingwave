@@ -10,7 +10,7 @@ according to the services started by `risdev d`.
 risedev slt 'e2e_test/source-inline/**/*.slt'
 ```
 
-To write tests, please ensure each file is self-contained and does not depend on external scripts to setup the environment.
+To write tests, please ensure each file is self-contained and does not depend on running external scripts to setup the environment.
 Use `system` command to setup instead.
 
 Refer to https://github.com/risingwavelabs/risingwave/issues/12451#issuecomment-2051861048 for more details.
