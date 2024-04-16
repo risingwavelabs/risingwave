@@ -20,6 +20,8 @@ public interface RestHighLevelClientAdapter {
     public void close() throws IOException;
 
     public boolean ping(Object options) throws IOException;
+
+    public Object search(Object searchRequest, Object options) throws IOException;
 }
 
 class ElasticRestHighLevelClientAdapter implements RestHighLevelClientAdapter {
@@ -66,14 +68,20 @@ class ElasticRestHighLevelClientAdapter implements RestHighLevelClientAdapter {
     }
 
     public org.elasticsearch.client.Cancellable bulkAsync(
-        org.elasticsearch.action.bulk.BulkRequest bulkRequest, org.elasticsearch.client.RequestOptions options, org.elasticsearch.action.ActionListener<
-        org.elasticsearch.action.bulk.BulkResponse> listener) {
+            org.elasticsearch.action.bulk.BulkRequest bulkRequest,
+            org.elasticsearch.client.RequestOptions options,
+            org.elasticsearch.action.ActionListener<org.elasticsearch.action.bulk.BulkResponse>
+                    listener) {
         org.elasticsearch.client.Cancellable cancellable =
-                esClient.bulkAsync(
-                        bulkRequest,
-                        options,
-                        listener);
+                esClient.bulkAsync(bulkRequest, options, listener);
         return cancellable;
+    }
+
+    @Override
+    public Object search(Object searchRequest, Object options) throws IOException {
+        return this.esClient.search(
+                (org.elasticsearch.action.search.SearchRequest) searchRequest,
+                (org.elasticsearch.client.RequestOptions) options);
     }
 }
 
@@ -115,12 +123,18 @@ class OpensearchRestHighLevelClientAdapter implements RestHighLevelClientAdapter
         return flag;
     }
 
-    public Cancellable bulkAsync(BulkRequest bulkRequest, RequestOptions options, ActionListener<BulkResponse> listener) {
-        Cancellable cancellable =
-                opensearchClient.bulkAsync(
-                        bulkRequest,
-                        options,
-                        listener);
+    public Cancellable bulkAsync(
+            BulkRequest bulkRequest,
+            RequestOptions options,
+            ActionListener<BulkResponse> listener) {
+        Cancellable cancellable = opensearchClient.bulkAsync(bulkRequest, options, listener);
         return cancellable;
+    }
+
+    @Override
+    public Object search(Object searchRequest, Object options) throws IOException {
+        return this.opensearchClient.search(
+                (org.opensearch.action.search.SearchRequest) searchRequest,
+                (org.opensearch.client.RequestOptions) options);
     }
 }

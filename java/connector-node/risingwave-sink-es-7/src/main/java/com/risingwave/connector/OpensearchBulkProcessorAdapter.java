@@ -1,14 +1,17 @@
 package com.risingwave.connector;
 
 import com.risingwave.connector.EsSink.RequestTracker;
+import com.risingwave.connector.api.sink.SinkRow;
 import java.util.concurrent.TimeUnit;
 import org.opensearch.action.bulk.BackoffPolicy;
 import org.opensearch.action.bulk.BulkProcessor;
 import org.opensearch.action.bulk.BulkRequest;
 import org.opensearch.action.bulk.BulkResponse;
-import org.opensearch.action.index.IndexRequest;
+import org.opensearch.action.delete.DeleteRequest;
+import org.opensearch.action.update.UpdateRequest;
 import org.opensearch.client.RequestOptions;
 import org.opensearch.common.unit.TimeValue;
+import org.opensearch.common.xcontent.XContentType;
 import org.opensearch.core.common.unit.ByteSizeUnit;
 import org.opensearch.core.common.unit.ByteSizeValue;
 import org.slf4j.Logger;
@@ -61,7 +64,7 @@ public class OpensearchBulkProcessorAdapter implements BulkProcessorAdapter {
             RequestTracker requestTracker, OpensearchRestHighLevelClientAdapter client) {
         BulkProcessor.Builder builder =
                 BulkProcessor.builder(
-                        (OpenSearchBulkRequestConsumerFactory)
+                        (OpensearchBulkRequestConsumerFactory)
                                 (bulkRequest, bulkResponseActionListener) ->
                                         client.bulkAsync(
                                                 bulkRequest,
@@ -85,11 +88,6 @@ public class OpensearchBulkProcessorAdapter implements BulkProcessorAdapter {
     }
 
     @Override
-    public void add(Object request) {
-        opensearchBulkProcessor.add((IndexRequest) request);
-    }
-
-    @Override
     public void flush() {
         opensearchBulkProcessor.flush();
     }
@@ -97,5 +95,37 @@ public class OpensearchBulkProcessorAdapter implements BulkProcessorAdapter {
     @Override
     public void awaitClose(long timeout, TimeUnit unit) throws InterruptedException {
         opensearchBulkProcessor.awaitClose(timeout, unit);
+    }
+
+    @Override
+    public void addRow(SinkRow row, String indexName, RequestTracker requestTracker) {
+        final String index = (String) row.get(0);
+        final String key = (String) row.get(1);
+        String doc = (String) row.get(2);
+
+        UpdateRequest updateRequest;
+        if (indexName != null) {
+            updateRequest = new UpdateRequest(indexName, key).doc(doc, XContentType.JSON);
+        } else {
+            updateRequest = new UpdateRequest(index, key).doc(doc, XContentType.JSON);
+        }
+        updateRequest.docAsUpsert(true);
+        requestTracker.addWriteTask();
+        this.opensearchBulkProcessor.add(updateRequest);
+    }
+
+    @Override
+    public void deleteRow(SinkRow row, String indexName, RequestTracker requestTracker) {
+        final String index = (String) row.get(0);
+        final String key = (String) row.get(1);
+
+        DeleteRequest deleteRequest;
+        if (indexName != null) {
+            deleteRequest = new DeleteRequest(indexName, key);
+        } else {
+            deleteRequest = new DeleteRequest(index, key);
+        }
+        requestTracker.addWriteTask();
+        this.opensearchBulkProcessor.add(deleteRequest);
     }
 }

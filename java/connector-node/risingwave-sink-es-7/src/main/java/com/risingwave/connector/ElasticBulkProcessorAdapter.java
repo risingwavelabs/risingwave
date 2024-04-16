@@ -1,16 +1,19 @@
 package com.risingwave.connector;
 
 import com.risingwave.connector.EsSink.RequestTracker;
+import com.risingwave.connector.api.sink.SinkRow;
 import java.util.concurrent.TimeUnit;
 import org.elasticsearch.action.bulk.BackoffPolicy;
 import org.elasticsearch.action.bulk.BulkProcessor;
 import org.elasticsearch.action.bulk.BulkRequest;
 import org.elasticsearch.action.bulk.BulkResponse;
-import org.elasticsearch.action.index.IndexRequest;
+import org.elasticsearch.action.delete.DeleteRequest;
+import org.elasticsearch.action.update.UpdateRequest;
 import org.elasticsearch.client.RequestOptions;
 import org.elasticsearch.common.unit.ByteSizeUnit;
 import org.elasticsearch.common.unit.ByteSizeValue;
 import org.elasticsearch.core.TimeValue;
+import org.elasticsearch.xcontent.XContentType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -85,11 +88,6 @@ public class ElasticBulkProcessorAdapter implements BulkProcessorAdapter {
     }
 
     @Override
-    public void add(Object request) {
-        esBulkProcessor.add((IndexRequest) request);
-    }
-
-    @Override
     public void flush() {
         esBulkProcessor.flush();
     }
@@ -97,5 +95,37 @@ public class ElasticBulkProcessorAdapter implements BulkProcessorAdapter {
     @Override
     public void awaitClose(long timeout, TimeUnit unit) throws InterruptedException {
         esBulkProcessor.awaitClose(timeout, unit);
+    }
+
+    @Override
+    public void addRow(SinkRow row, String indexName, RequestTracker requestTracker) {
+        final String index = (String) row.get(0);
+        final String key = (String) row.get(1);
+        String doc = (String) row.get(2);
+
+        UpdateRequest updateRequest;
+        if (indexName != null) {
+            updateRequest = new UpdateRequest(indexName, "_doc", key).doc(doc, XContentType.JSON);
+        } else {
+            updateRequest = new UpdateRequest(indexName, "_doc", key).doc(doc, XContentType.JSON);
+        }
+        updateRequest.docAsUpsert(true);
+        requestTracker.addWriteTask();
+        this.esBulkProcessor.add(updateRequest);
+    }
+
+    @Override
+    public void deleteRow(SinkRow row, String indexName, RequestTracker requestTracker) {
+        final String index = (String) row.get(0);
+        final String key = (String) row.get(1);
+
+        DeleteRequest deleteRequest;
+        if (indexName != null) {
+            deleteRequest = new DeleteRequest(indexName, "_doc", key);
+        } else {
+            deleteRequest = new DeleteRequest(index, "_doc", key);
+        }
+        requestTracker.addWriteTask();
+        this.esBulkProcessor.add(deleteRequest);
     }
 }

@@ -25,9 +25,6 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import org.apache.http.HttpHost;
-import org.elasticsearch.action.delete.DeleteRequest;
-import org.elasticsearch.action.update.UpdateRequest;
-import org.elasticsearch.xcontent.XContentType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -166,46 +163,15 @@ public class EsSink extends SinkWriterBase {
         }
     }
 
-    private void processUpsert(SinkRow row) throws JsonMappingException, JsonProcessingException {
-        final String index = (String) row.get(0);
-        final String key = (String) row.get(1);
-        String doc = (String) row.get(2);
-
-        UpdateRequest updateRequest;
-        if (config.getIndex() != null) {
-            updateRequest =
-                    new UpdateRequest(config.getIndex(), "_doc", key).doc(doc, XContentType.JSON);
-        } else {
-            updateRequest = new UpdateRequest(index, "_doc", key).doc(doc, XContentType.JSON);
-        }
-        updateRequest.docAsUpsert(true);
-        this.requestTracker.addWriteTask();
-        bulkProcessor.add(updateRequest);
-    }
-
-    private void processDelete(SinkRow row) throws JsonMappingException, JsonProcessingException {
-        final String index = (String) row.get(0);
-        final String key = (String) row.get(1);
-
-        DeleteRequest deleteRequest;
-        if (config.getIndex() != null) {
-            deleteRequest = new DeleteRequest(config.getIndex(), "_doc", key);
-        } else {
-            deleteRequest = new DeleteRequest(index, "_doc", key);
-        }
-        this.requestTracker.addWriteTask();
-        bulkProcessor.add(deleteRequest);
-    }
-
     private void writeRow(SinkRow row) throws JsonMappingException, JsonProcessingException {
         switch (row.getOp()) {
             case INSERT:
             case UPDATE_INSERT:
-                processUpsert(row);
+                this.bulkProcessor.addRow(row, config.getIndex(), requestTracker);
                 break;
             case DELETE:
             case UPDATE_DELETE:
-                processDelete(row);
+                this.bulkProcessor.deleteRow(row, config.getIndex(), requestTracker);
                 break;
             default:
                 throw Status.INVALID_ARGUMENT
@@ -248,5 +214,9 @@ public class EsSink extends SinkWriterBase {
                     .withDescription(String.format(ERROR_REPORT_TEMPLATE, e.getMessage()))
                     .asRuntimeException();
         }
+    }
+
+    public RestHighLevelClientAdapter getClient() {
+        return this.client;
     }
 }
