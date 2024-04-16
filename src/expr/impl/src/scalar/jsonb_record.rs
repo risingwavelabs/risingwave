@@ -33,6 +33,14 @@ use risingwave_expr::{function, ExprError, Result};
 /// )).*;
 /// ----
 /// 1 {2,"a b"} (4,"a b c")
+///
+/// query ITT
+/// select (jsonb_populate_record(
+///     row(1, null, row(4, '5'))::struct<a int, b text[], c struct<d int, e text>>,
+///     '{"b": ["2", "a b"], "c": {"e": "a b c"}, "x": "foo"}'
+/// )).*;
+/// ----
+/// 1 {2,"a b"} (4,"a b c")
 /// ```
 #[function("jsonb_populate_record(struct, jsonb) -> struct")]
 fn jsonb_populate_record(
@@ -41,11 +49,7 @@ fn jsonb_populate_record(
     ctx: &Context,
 ) -> Result<StructValue> {
     let output_type = ctx.return_type.as_struct();
-    match base {
-        None => jsonb.to_struct(output_type),
-        Some(base) => jsonb.populate_struct(output_type, base),
-    }
-    .map_err(parse_err)
+    jsonb.populate_struct(output_type, base).map_err(parse_err)
 }
 
 /// Expands the top-level JSON array of objects to a set of rows having the composite type of the
@@ -82,13 +86,10 @@ fn jsonb_populate_recordset<'a>(
     ctx: &'a Context,
 ) -> Result<impl Iterator<Item = Result<StructValue>> + 'a> {
     let output_type = ctx.return_type.as_struct();
-    Ok(jsonb.array_elements().map_err(parse_err)?.map(move |elem| {
-        match base {
-            None => elem.to_struct(output_type),
-            Some(base) => elem.populate_struct(output_type, base),
-        }
-        .map_err(parse_err)
-    }))
+    Ok(jsonb
+        .array_elements()
+        .map_err(parse_err)?
+        .map(move |elem| elem.populate_struct(output_type, base).map_err(parse_err)))
 }
 
 /// Expands the top-level JSON object to a row having the composite type defined by an AS clause.

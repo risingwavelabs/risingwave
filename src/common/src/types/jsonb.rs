@@ -454,8 +454,11 @@ impl<'a> JsonbRef<'a> {
     pub fn populate_struct(
         self,
         ty: &StructType,
-        base: StructRef<'_>,
+        base: Option<StructRef<'_>>,
     ) -> Result<StructValue, String> {
+        let Some(base) = base else {
+            return self.to_struct(ty);
+        };
         let object = self.0.as_object().ok_or_else(|| {
             format!(
                 "cannot call populate_composite on a jsonb {}",
@@ -465,7 +468,15 @@ impl<'a> JsonbRef<'a> {
         let mut fields = Vec::with_capacity(ty.len());
         for ((name, ty), base_field) in ty.iter().zip_eq_debug(base.iter_fields_ref()) {
             let datum = match object.get(name) {
-                Some(v) => Self(v).to_datum(ty)?,
+                Some(v) => match ty {
+                    // recursively populate the nested struct
+                    DataType::Struct(s) => Some(
+                        Self(v)
+                            .populate_struct(s, base_field.map(|s| s.into_struct()))?
+                            .into(),
+                    ),
+                    _ => Self(v).to_datum(ty)?,
+                },
                 None => base_field.to_owned_datum(),
             };
             fields.push(datum);
