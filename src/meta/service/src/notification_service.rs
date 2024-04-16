@@ -24,10 +24,8 @@ use risingwave_pb::hummock::WriteLimits;
 use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::{
-    FragmentParallelUnitMapping, GetSessionParamsResponse, MetaSnapshot, SubscribeRequest,
-    SubscribeType,
+    FragmentWorkerMapping, GetSessionParamsResponse, MetaSnapshot, SubscribeRequest, SubscribeType,
 };
-use risingwave_pb::meta::{FragmentWorkerMapping, MetaSnapshot, SubscribeRequest, SubscribeType};
 use risingwave_pb::user::UserInfo;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;

@@ -28,14 +28,11 @@ use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::table::TableType;
 use risingwave_meta_model_v2::{
     actor, connection, database, fragment, function, index, object, object_dependency, schema,
-    sink, source, streaming_job, subscription, table, user_privilege, view, ActorId,
-    ActorUpstreamActors, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId,
-    FunctionId, I32Array, IndexId, JobStatus, ObjectId, PrivateLinkService, Property, SchemaId,
-    SinkId, SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, TableId, UserId,
     sink, source, streaming_job, subscription, table, user_privilege, view, worker_property,
     ActorId, ActorUpstreamActors, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId,
     FragmentId, FunctionId, I32Array, IndexId, JobStatus, ObjectId, PrivateLinkService, Property,
-    SchemaId, SinkId, SourceId, StreamSourceInfo, StreamingParallelism, TableId, UserId, WorkerId,
+    SchemaId, SinkId, SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, TableId,
+    UserId, WorkerId,
 };
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
