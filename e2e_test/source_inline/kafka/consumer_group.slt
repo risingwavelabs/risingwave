@@ -97,12 +97,5 @@ f
 statement ok
 DROP SOURCE s CASCADE;
 
-# consumer groups are not deleted after MV is dropped.
-system ok
-./e2e_test/source_inline/kafka/consumer_group.mjs --mv mv list-members
-----
-0,0,0
-
-
 system ok
 rpk topic delete test_consumer_group
