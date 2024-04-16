@@ -144,9 +144,9 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                 }
                 DataType::Int256 => postgres_decimal_to_rw_int256(&row, i, name, None),
                 DataType::Varchar => {
-                    match row.columns()[i].type_() {
+                    match *row.columns()[i].type_() {
                         // Since we don't support UUID natively, adapt it to a VARCHAR column
-                        &Type::UUID => {
+                        Type::UUID => {
                             let res = row.try_get::<_, Option<uuid::Uuid>>(i);
                             match res {
                                 Ok(val) => val.map(|v| ScalarImpl::from(v.to_string())),
@@ -164,7 +164,7 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                             }
                         }
                         // support converting NUMERIC to VARCHAR implicitly
-                        &Type::NUMERIC => postgres_decimal_to_varchar(&row, i, name, None),
+                        Type::NUMERIC => postgres_decimal_to_varchar(&row, i, name, None),
                         _ => {
                             handle_data_type!(row, i, name, String)
                         }
@@ -233,9 +233,9 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                             handle_list_data_type!(row, i, name, NaiveDate, builder, Date);
                         }
                         DataType::Varchar => {
-                            match row.columns()[i].type_() {
+                            match *row.columns()[i].type_() {
                                 // Since we don't support UUID natively, adapt it to a VARCHAR column
-                                &Type::UUID => {
+                                Type::UUID => {
                                     let res = row.try_get::<_, Option<uuid::Uuid>>(i);
                                     match res {
                                         Ok(val) => {
@@ -257,7 +257,7 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                     };
                                 }
                                 // support converting NUMERIC to VARCHAR implicitly
-                                &Type::NUMERIC => {
+                                Type::NUMERIC => {
                                     let _ = postgres_decimal_to_varchar(&row, i, name, None);
                                 }
                                 _ => {
@@ -390,8 +390,8 @@ fn postgres_decimal_to_rw_int256(
     let string = postgres_decimal_to_string(row, idx, name)?;
     match Int256::from_str(string.as_str()) {
         Ok(num) => {
-            if builder.is_some() {
-                builder.unwrap().append(Some(ScalarImpl::from(num.clone())));
+            if let Some(builder) = builder {
+                builder.append(Some(ScalarImpl::from(num.clone())));
                 None
             } else {
                 Some(ScalarImpl::from(num))
@@ -421,8 +421,8 @@ fn postgres_decimal_to_varchar(
     // we use the PgNumeric type to convert the decimal to a string.
     let string = postgres_decimal_to_string(row, idx, name)?;
 
-    if builder.is_some() {
-        builder.unwrap().append(Some(ScalarImpl::from(string)));
+    if let Some(builder) = builder {
+        builder.append(Some(ScalarImpl::from(string)));
         None
     } else {
         Some(ScalarImpl::from(string))
