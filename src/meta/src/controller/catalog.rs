@@ -31,8 +31,8 @@ use risingwave_meta_model_v2::{
     sink, source, streaming_job, subscription, table, user_privilege, view, worker_property,
     ActorId, ActorUpstreamActors, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId,
     FragmentId, FunctionId, I32Array, IndexId, JobStatus, ObjectId, PrivateLinkService, Property,
-    SchemaId, SinkId, SourceId, StreamSourceInfo, StreamingParallelism, TableId, UserId, WorkerId,
-    StreamNode,
+    SchemaId, SinkId, SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, TableId,
+    UserId, WorkerId,
 };
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{

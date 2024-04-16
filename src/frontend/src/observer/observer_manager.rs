@@ -19,7 +19,7 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::catalog::CatalogVersion;
-use risingwave_common::hash::{ParallelUnitMapping, WorkerMapping};
+use risingwave_common::hash::{WorkerMapping};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeFrontend};

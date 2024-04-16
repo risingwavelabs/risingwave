@@ -88,7 +88,6 @@ impl CatalogControllerInner {
                     mapping: Some(worker_mapping),
                 }
             }))
-
     }
 }
 
