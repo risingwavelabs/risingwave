@@ -3,10 +3,14 @@
 // zx: A tool for writing better scripts
 // https://google.github.io/zx/
 
-const { mv: mv, topic: topic, _: _command } = minimist(process.argv.slice(3), {
-  string: ['mv', 'topic'],
-  _: ['list-members', 'list-lags'],
-})
+const {
+  mv: mv,
+  topic: topic,
+  _: _command,
+} = minimist(process.argv.slice(3), {
+  string: ["mv", "topic"],
+  _: ["list-members", "list-lags"],
+});
 const command = _command[0];
 
 async function get_fragment_id_of_mv(mv_name) {
@@ -25,26 +29,57 @@ async function get_fragment_id_of_mv(mv_name) {
 }
 
 async function list_consumer_groups(fragment_id) {
-  const res =
-    await $`rpk group list | tail -n +2 | cut -w -f2 | grep "rw-consumer-${fragment_id}"`;
-  return res;
+  return (await $`rpk group list`)
+    .toString()
+    .trim()
+    .split("\n")
+    .slice(1)
+    .map((line) => {
+      const [_broker_id, group_name] = line.split(/\s+/);
+      return group_name;
+    })
+    .filter((group_name) => {
+      return group_name.startsWith(`rw-consumer-${fragment_id}`);
+    });
+}
+
+async function describe_consumer_group(group_name) {
+  const res = await $`rpk group describe -s ${group_name}`;
+  // GROUP        rw-consumer-1-1
+  // COORDINATOR  0
+  // STATE        Empty
+  // BALANCER     
+  // MEMBERS      0
+  // TOTAL-LAG    2
+  const obj = {};
+  for (const line of res.toString().trim().split("\n")) {
+    const [key, value] = line.split(/\s+/);
+    obj[key] = value;
+  }
+  return obj;
 }
 
 async function list_consumer_group_members(fragment_id) {
-  const res =
-    await $`rpk group list | tail -n +2 | cut -w -f2 | grep "rw-consumer-${fragment_id}" | xargs -n1 -I {} sh -c "rpk group describe -s {} | grep "MEMBERS""`;
-  return res;
+  const groups = await list_consumer_groups(fragment_id);
+  return Promise.all(
+    groups.map(async (group_name) => {
+      return (await describe_consumer_group(group_name))["MEMBERS"]
+    })
+  );
 }
 
-async function list_consumer_group_lags(fragment_id, topic_name) {
-  const res =
-    await $`rpk group list | tail -n +2 | cut -w -f2 | grep "rw-consumer-${fragment_id}" | xargs -n1 -I {} sh -c "rpk group describe -t {} | grep "${topic_name}""`;
-  return res;
+async function list_consumer_group_lags(fragment_id) {
+  const groups = await list_consumer_groups(fragment_id);
+  return Promise.all(
+    groups.map(async (group_name) => {
+      return (await describe_consumer_group(group_name))["TOTAL-LAG"]
+    })
+  );
 }
 
 const fragment_id = await get_fragment_id_of_mv(mv);
 if (command == "list-groups") {
-  echo`${await list_consumer_groups(fragment_id)}`;
+  echo`${(await list_consumer_groups(fragment_id))}`;
 } else if (command == "list-members") {
   echo`${await list_consumer_group_members(fragment_id)}`;
 } else if (command == "list-lags") {

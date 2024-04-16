@@ -50,23 +50,19 @@ sleep 5s
 system ok
 ./e2e_test/source_inline/kafka/consumer_group.mjs --mv mv --topic test_consumer_group list-members
 ----
-MEMBERS      0
-MEMBERS      0
-MEMBERS      0
+0,0,0
 
 
 # The lag for batch query's group is 0, and each MV parition's group is 2 (1 of 3 consumed).
 system ok
 ./e2e_test/source_inline/kafka/consumer_group.mjs --mv mv --topic test_consumer_group list-lags
 ----
-test_consumer_group  2
-test_consumer_group  2
-test_consumer_group  2
+2,2,2
 
 
 # We try to interfere by creating consumers that subscribing to the topic with the RW's group id.
 system ok
-./e2e_test/source_inline/kafka/consumer_group.mjs --mv mv --topic test_consumer_group list-groups | xargs -P4 -n1 -I {} sh -c "timeout 10s rpk topic consume test_consumer_group -g {}" &
+./e2e_test/source_inline/kafka/consumer_group.mjs --mv mv --topic test_consumer_group list-groups | tr ',' '\n' | xargs -P4 -n1 -I {} sh -c "timeout 10s rpk topic consume test_consumer_group -g {}" &
 
 # Wait a while for them to subscribe to the topic.
 sleep 5s
@@ -75,9 +71,7 @@ sleep 5s
 system ok
 ./e2e_test/source_inline/kafka/consumer_group.mjs --mv mv --topic test_consumer_group list-lags
 ----
-test_consumer_group  0
-test_consumer_group  0
-test_consumer_group  0
+0,0,0
 
 
 system ok
@@ -107,9 +101,7 @@ DROP SOURCE s CASCADE;
 system ok
 ./e2e_test/source_inline/kafka/consumer_group.mjs --mv mv --topic test_consumer_group list-members
 ----
-MEMBERS      0
-MEMBERS      0
-MEMBERS      0
+0,0,0
 
 
 system ok
