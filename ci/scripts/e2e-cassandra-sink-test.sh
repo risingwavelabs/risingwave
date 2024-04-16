@@ -38,10 +38,13 @@ sleep 1
 echo "--- create cassandra table"
 curl https://downloads.apache.org/cassandra/4.1.3/apache-cassandra-4.1.3-bin.tar.gz  --output apache-cassandra-4.1.3-bin.tar.gz
 tar xfvz apache-cassandra-4.1.3-bin.tar.gz
+# remove bundled packages, and use installed packages, because Python 3.12 has removed asyncore, but I failed to install libev support for bundled Python driver.
 rm apache-cassandra-4.1.3/lib/six-1.12.0-py2.py3-none-any.zip
-cd apache-cassandra-4.1.3/bin
+rm apache-cassandra-4.1.3/lib/cassandra-driver-internal-only-3.25.0.zip
 apt-get install -y libev4 libev-dev
 pip3 install --break-system-packages cassandra-driver
+
+cd apache-cassandra-4.1.3/bin
 export CQLSH_HOST=cassandra-server
 export CQLSH_PORT=9042
 ./cqlsh -e "CREATE KEYSPACE demo WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};use demo;
