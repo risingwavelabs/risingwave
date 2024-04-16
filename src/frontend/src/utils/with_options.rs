@@ -112,6 +112,12 @@ impl WithOptions {
     }
 }
 
+pub(crate) fn resolve_secret_in_with_options(
+    with_options: &mut WithOptions,
+) -> RwResult<HashMap<String, u32>> {
+    todo!()
+}
+
 pub(crate) fn resolve_privatelink_in_with_option(
     with_options: &mut WithOptions,
     schema_name: &Option<String>,

@@ -212,6 +212,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             create_type: PbCreateType::Foreground as _,
+            secret_ref: value.0.secret_ref.into_iter().collect(),
         }
     }
 }

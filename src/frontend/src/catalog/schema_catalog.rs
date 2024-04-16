@@ -34,7 +34,7 @@ use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::system_catalog::SystemTableCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
-use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SinkId, SourceId, ViewId};
+use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SecretId, SinkId, SourceId, ViewId};
 use crate::expr::{infer_type_name, infer_type_with_sigmap, Expr, ExprImpl};
 use crate::user::UserId;
 
@@ -481,6 +481,10 @@ impl SchemaCatalog {
         self.connection_by_name
             .remove(&connection_ref.name)
             .expect("connection not found by name");
+    }
+
+    pub fn create_secret(&mut self, secret_id: SecretId) {
+        todo!()
     }
 
     pub fn iter_all(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {

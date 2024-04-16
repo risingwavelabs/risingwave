@@ -71,6 +71,7 @@ pub type IndexId = ObjectId;
 pub type ViewId = ObjectId;
 pub type FunctionId = ObjectId;
 pub type ConnectionId = ObjectId;
+pub type SecretId = ObjectId;
 pub type UserId = i32;
 pub type PrivilegeId = i32;
 

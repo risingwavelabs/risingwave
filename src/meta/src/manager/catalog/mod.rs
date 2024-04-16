@@ -328,6 +328,7 @@ impl CatalogManager {
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
         let mut functions = BTreeMapTransaction::new(&mut database_core.functions);
         let mut connections = BTreeMapTransaction::new(&mut database_core.connections);
+        let mut secrets = BTreeMapTransaction::new(&mut database_core.secrets);
 
         /// `drop_by_database_id` provides a wrapper for dropping relations by database id, it will
         /// return the relation ids that dropped.
@@ -360,7 +361,7 @@ impl CatalogManager {
             let views_to_drop = drop_by_database_id!(views, database_id);
             let functions_to_drop = drop_by_database_id!(functions, database_id);
             let connections_to_drop = drop_by_database_id!(connections, database_id);
-            connections_dropped = connections_to_drop.clone();
+            let secrets_to_drop = drop_by_database_id!(secrets, database_id);
 
             let objects = std::iter::once(Object::DatabaseId(database_id))
                 .chain(

@@ -82,6 +82,9 @@ message StreamSourceInfo {
   bool is_distributed = 15;
   // Options specified by user in the FORMAT ENCODE clause.
   map<string, string> format_encode_options = 14;
+
+  // Handle the source relies on any sceret. The key is the propertity name and the value is the secret id.
+  map<string, uint32> secret_ref = 16;
 }
 
 message Source {
@@ -175,6 +178,9 @@ message Sink {
 
   // Whether it should use background ddl or block until backfill finishes.
   CreateType create_type = 24;
+
+  // Handle the source relies on any sceret. The key is the propertity name and the value is the secret id.
+  map<string, uint32> secret_ref = 25;
 }
 
 message Subscription {
@@ -422,6 +428,8 @@ message Comment {
 message Secret {
   uint32 id = 1;
   string name = 2;
-  bytes value = 3;
-  uint32 owner = 4;
+  uint32 database_id = 3;
+  bytes value = 4;
+  uint32 owner = 5;
+
 }
