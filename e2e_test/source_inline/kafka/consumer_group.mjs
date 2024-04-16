@@ -47,7 +47,7 @@ async function describe_consumer_group(group_name) {
   // GROUP        rw-consumer-1-1
   // COORDINATOR  0
   // STATE        Empty
-  // BALANCER     
+  // BALANCER
   // MEMBERS      0
   // TOTAL-LAG    2
   const obj = {};
