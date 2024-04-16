@@ -1,4 +1,4 @@
-#!npx zx
+#!/usr/bin/env zx
 
 // zx: A tool for writing better scripts
 // https://google.github.io/zx/
