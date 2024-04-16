@@ -41,11 +41,11 @@ fn jsonb_populate_record(
     ctx: &Context,
 ) -> Result<StructValue> {
     let output_type = ctx.return_type.as_struct();
-    Ok(match base {
+    match base {
         None => jsonb.to_struct(output_type),
         Some(base) => jsonb.populate_struct(output_type, base),
     }
-    .map_err(parse_err)?)
+    .map_err(parse_err)
 }
 
 /// Expands the top-level JSON array of objects to a set of rows having the composite type of the
