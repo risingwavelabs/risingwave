@@ -40,6 +40,7 @@ curl https://downloads.apache.org/cassandra/4.1.3/apache-cassandra-4.1.3-bin.tar
 tar xfvz apache-cassandra-4.1.3-bin.tar.gz
 rm apache-cassandra-4.1.3/lib/six-1.12.0-py2.py3-none-any.zip
 cd apache-cassandra-4.1.3/bin
+apt-get install -y libev4 libev-dev
 export CQLSH_HOST=cassandra-server
 export CQLSH_PORT=9042
 ./cqlsh -e "CREATE KEYSPACE demo WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};use demo;
