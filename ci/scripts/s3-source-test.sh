@@ -4,7 +4,7 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
-while getopts 'p:s:' opt; do
+while getopts 'p:s:t:' opt; do
     case ${opt} in
         p )
             profile=$OPTARG
