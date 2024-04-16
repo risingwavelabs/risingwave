@@ -477,7 +477,7 @@ where
                                     rate_limit = new_rate_limit;
                                     tracing::info!(
                                         id = self.actor_id,
-                                        new_rate_limit = ?self.rate_limit,
+                                        new_rate_limit = ?rate_limit,
                                         "actor rate limit changed",
                                     );
                                     // The builder is emptied above via `DataChunkBuilder::consume_all`.
@@ -656,7 +656,7 @@ where
         if paused {
             #[for_await]
             for _ in tokio_stream::pending() {
-                yield None;
+                bail!("BUG: paused stream should not yield");
             }
         } else {
             // Checked the rate limit is not zero.
