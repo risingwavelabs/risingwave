@@ -22,6 +22,15 @@ RUN add-apt-repository ppa:deadsnakes/ppa -y && \
     rm -rf /var/lib/{apt,dpkg,cache,log}/
 ENV PYO3_PYTHON=python3.12
 
+# Install nvm and zx
+ENV NVM_DIR /root/.nvm
+ENV NODE_VERSION 20.11.1
+RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash \
+  && . $NVM_DIR/nvm.sh \
+  && nvm install $NODE_VERSION
+ENV PATH $NVM_DIR/versions/node/v$NODE_VERSION/bin:$PATH
+RUN npm install -g zx
+
 SHELL ["/bin/bash", "-c"]
 
 RUN mkdir -p /risingwave
