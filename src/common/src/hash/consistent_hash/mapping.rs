@@ -307,7 +307,7 @@ impl ActorMapping {
     }
 
     pub fn to_worker_slot(&self, to_map: &HashMap<ActorId, u32>) -> WorkerSlotMapping {
-        let x: HashMap<_, _> =
+        let actor_location: HashMap<_, _> =
             self.iter()
                 .map(|actor_id| (to_map.get(&actor_id).cloned().unwrap(), actor_id))
                 .into_group_map()
@@ -320,7 +320,7 @@ impl ActorMapping {
                 })
                 .collect();
 
-        self.transform(&x)
+        self.transform(&actor_location)
     }
 
     /// Create an actor mapping from the protobuf representation.

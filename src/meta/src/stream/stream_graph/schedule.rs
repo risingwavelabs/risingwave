@@ -190,8 +190,8 @@ impl Distribution {
         match fragment.get_distribution_type().unwrap() {
             FragmentDistributionType::Unspecified => unreachable!(),
             FragmentDistributionType::Single => {
-                let parallel_unit = mapping.to_single().unwrap();
-                Distribution::Singleton(parallel_unit)
+                let worker_slot_id = mapping.to_single().unwrap();
+                Distribution::Singleton(worker_slot_id)
             }
             FragmentDistributionType::Hash => Distribution::Hash(mapping),
         }
@@ -294,7 +294,7 @@ impl Scheduler {
         // External
         for (id, req) in existing_distribution {
             let dist = match req {
-                Distribution::Singleton(parallel_unit) => DistId::Singleton(parallel_unit),
+                Distribution::Singleton(worker_slot_id) => DistId::Singleton(worker_slot_id),
                 Distribution::Hash(mapping) => DistId::Hash(hash_mapping_id[&mapping]),
             };
             facts.push(Fact::ExternalReq { id, dist });
