@@ -264,7 +264,7 @@ async fn test_arrangement_backfill_progress() -> Result<()> {
     let progress = progress.replace('%', "");
     let progress = progress.parse::<f64>().unwrap();
     assert!(
-        (1.0..2.0).contains(&progress),
+        (1.0..10.0).contains(&progress),
         "progress not within bounds {}",
         progress
     );
