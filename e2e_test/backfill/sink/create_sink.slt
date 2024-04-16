@@ -26,3 +26,5 @@ with (
     allow.auto.create.topics=true,
 )
 FORMAT DEBEZIUM ENCODE JSON;
+
+SET BACKGROUND_DDL=false;
