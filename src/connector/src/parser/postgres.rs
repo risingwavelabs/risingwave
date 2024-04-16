@@ -391,7 +391,7 @@ fn postgres_decimal_to_rw_int256(
     match Int256::from_str(string.as_str()) {
         Ok(num) => {
             if let Some(builder) = builder {
-                builder.append(Some(ScalarImpl::from(num.clone())));
+                builder.append(Some(ScalarImpl::from(num)));
                 None
             } else {
                 Some(ScalarImpl::from(num))
