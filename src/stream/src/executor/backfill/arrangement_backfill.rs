@@ -33,9 +33,9 @@ use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
 #[cfg(debug_assertions)]
 use crate::executor::backfill::utils::METADATA_STATE_LEN;
 use crate::executor::backfill::utils::{
-    compute_bounds, create_builder, get_progress_per_vnode, mapping_chunk, mapping_message,
-    mark_chunk_ref_by_vnode, owned_row_iter, persist_state_per_vnode, update_pos_by_vnode,
-    BackfillProgressPerVnode, BackfillState,
+    compute_bounds, create_builder, create_limiter, get_progress_per_vnode, mapping_chunk,
+    mapping_message, mark_chunk_ref_by_vnode, owned_row_iter, persist_state_per_vnode,
+    update_pos_by_vnode, BackfillProgressPerVnode, BackfillRateLimiter, BackfillState,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -215,6 +215,9 @@ where
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
             let mut pending_barrier: Option<Barrier> = None;
 
+            let rate_limiter = self.rate_limit.and_then(create_limiter);
+            let rate_limit = self.rate_limit;
+
             let backfill_snapshot_read_row_count_metric = self
                 .metrics
                 .backfill_snapshot_read_row_count
@@ -243,10 +246,14 @@ where
                 {
                     let left_upstream = upstream.by_ref().map(Either::Left);
 
+                    // Check if stream paused
+                    let paused = paused || matches!(rate_limit, Some(0));
+                    // Create the snapshot stream
                     let right_snapshot = pin!(Self::make_snapshot_stream(
                         &upstream_table,
                         backfill_state.clone(), // FIXME: Use mutable reference instead.
                         paused,
+                        &rate_limiter,
                     )
                     .map(Either::Right));
 
@@ -290,7 +297,7 @@ where
                                         // Consume remaining rows in the builder.
                                         for (vnode, builder) in &mut builders {
                                             if let Some(data_chunk) = builder.consume_all() {
-                                                yield Self::handle_snapshot_chunk(
+                                                yield Message::Chunk(Self::handle_snapshot_chunk(
                                                     data_chunk,
                                                     *vnode,
                                                     &pk_in_output_indices,
@@ -298,7 +305,7 @@ where
                                                     &mut cur_barrier_snapshot_processed_rows,
                                                     &mut total_snapshot_processed_rows,
                                                     &self.output_indices,
-                                                )?;
+                                                )?);
                                             }
                                         }
 
@@ -326,7 +333,7 @@ where
                                     Some((vnode, row)) => {
                                         let builder = builders.get_mut(&vnode).unwrap();
                                         if let Some(chunk) = builder.append_one_row(row) {
-                                            yield Self::handle_snapshot_chunk(
+                                            yield Message::Chunk(Self::handle_snapshot_chunk(
                                                 chunk,
                                                 vnode,
                                                 &pk_in_output_indices,
@@ -334,7 +341,7 @@ where
                                                 &mut cur_barrier_snapshot_processed_rows,
                                                 &mut total_snapshot_processed_rows,
                                                 &self.output_indices,
-                                            )?;
+                                            )?);
                                         }
                                     }
                                 }
@@ -366,7 +373,7 @@ where
                                 Some((vnode, row)) => {
                                     let builder = builders.get_mut(&vnode).unwrap();
                                     if let Some(chunk) = builder.append_one_row(row) {
-                                        yield Self::handle_snapshot_chunk(
+                                        yield Message::Chunk(Self::handle_snapshot_chunk(
                                             chunk,
                                             vnode,
                                             &pk_in_output_indices,
@@ -374,7 +381,7 @@ where
                                             &mut cur_barrier_snapshot_processed_rows,
                                             &mut total_snapshot_processed_rows,
                                             &self.output_indices,
-                                        )?;
+                                        )?);
                                     }
 
                                     break;
@@ -585,10 +592,11 @@ where
     }
 
     #[try_stream(ok = Option<(VirtualNode, OwnedRow)>, error = StreamExecutorError)]
-    async fn make_snapshot_stream(
-        upstream_table: &ReplicatedStateTable<S, SD>,
+    async fn make_snapshot_stream<'a>(
+        upstream_table: &'a ReplicatedStateTable<S, SD>,
         backfill_state: BackfillState,
         paused: bool,
+        rate_limiter: &'a Option<BackfillRateLimiter>,
     ) {
         if paused {
             #[for_await]
@@ -596,9 +604,14 @@ where
                 yield None;
             }
         } else {
+            // Checked the rate limit is not zero.
             #[for_await]
             for r in Self::snapshot_read_per_vnode(upstream_table, backfill_state) {
-                yield r?;
+                let r = r?;
+                if let Some(rate_limit) = rate_limiter {
+                    rate_limit.until_ready().await;
+                }
+                yield r;
             }
         }
     }
@@ -611,7 +624,7 @@ where
         cur_barrier_snapshot_processed_rows: &mut u64,
         total_snapshot_processed_rows: &mut u64,
         output_indices: &[usize],
-    ) -> StreamExecutorResult<Message> {
+    ) -> StreamExecutorResult<StreamChunk> {
         let chunk = StreamChunk::from_parts(vec![Op::Insert; chunk.capacity()], chunk);
         // Raise the current position.
         // As snapshot read streams are ordered by pk, so we can
@@ -628,8 +641,7 @@ where
         let chunk_cardinality = chunk.cardinality() as u64;
         *cur_barrier_snapshot_processed_rows += chunk_cardinality;
         *total_snapshot_processed_rows += chunk_cardinality;
-        let chunk = Message::Chunk(mapping_chunk(chunk, output_indices));
-        Ok(chunk)
+        Ok(mapping_chunk(chunk, output_indices))
     }
 
     /// Read snapshot per vnode.
