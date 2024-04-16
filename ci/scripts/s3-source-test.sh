@@ -4,13 +4,16 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
-while getopts 'p:s:' opt; do
+while getopts 'p:s:t:' opt; do
     case ${opt} in
         p )
             profile=$OPTARG
             ;;
         s )
             script=$OPTARG
+            ;;
+        t )
+            format_type=$OPTARG
             ;;
         \? )
             echo "Invalid Option: -$OPTARG" 1>&2
@@ -30,7 +33,11 @@ risedev ci-start ci-1cn-1fe
 
 echo "--- Run test"
 python3 -m pip install minio psycopg2-binary opendal
-python3 e2e_test/s3/"$script"
+if [[ -v format_type ]]; then
+  python3 e2e_test/s3/"$script" "$format_type"
+else
+  python3 e2e_test/s3/"$script"
+fi
 
 echo "--- Kill cluster"
 risedev ci-kill
