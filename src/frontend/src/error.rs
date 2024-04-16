@@ -166,7 +166,7 @@ pub enum ErrorCode {
         SessionConfigError,
     ),
     #[error("{0} has been deprecated, please use {1} instead.")]
-    Deprecated(String, String)
+    Deprecated(String, String),
 }
 
 /// The result type for the frontend crate.

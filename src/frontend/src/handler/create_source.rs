@@ -68,7 +68,7 @@ use thiserror_ext::AsReport;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::error::ErrorCode::{self, InvalidInputSyntax, NotSupported, ProtocolError, Deprecated};
+use crate::error::ErrorCode::{self, Deprecated, InvalidInputSyntax, NotSupported, ProtocolError};
 use crate::error::{Result, RwError};
 use crate::expr::Expr;
 use crate::handler::create_table::{
@@ -1078,11 +1078,10 @@ pub fn validate_compatibility(
     }
 
     if connector == S3_CONNECTOR {
-        return Err(
-            RwError::from(
-                Deprecated(S3_CONNECTOR.to_string(), OPENDAL_S3_CONNECTOR.to_string())
-            )
-        )
+        return Err(RwError::from(Deprecated(
+            S3_CONNECTOR.to_string(),
+            OPENDAL_S3_CONNECTOR.to_string(),
+        )));
     }
 
     let compatible_encodes = compatible_formats
