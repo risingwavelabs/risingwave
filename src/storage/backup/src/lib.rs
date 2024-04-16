@@ -51,7 +51,7 @@ pub type MetaBackupJobId = u64;
 pub struct MetaSnapshotMetadata {
     pub id: MetaSnapshotId,
     pub hummock_version_id: HummockVersionId,
-    pub ssts: Vec<HummockSstableObjectId>,
+    pub ssts: HashSet<HummockSstableObjectId>,
     pub max_committed_epoch: u64,
     pub safe_epoch: u64,
     #[serde(default)]
@@ -69,9 +69,7 @@ impl MetaSnapshotMetadata {
         Self {
             id,
             hummock_version_id: v.id,
-            ssts: HashSet::<HummockSstableObjectId>::from_iter(v.get_object_ids())
-                .into_iter()
-                .collect_vec(),
+            ssts: v.get_object_ids(),
             max_committed_epoch: v.max_committed_epoch,
             safe_epoch: v.safe_epoch,
             format_version,
