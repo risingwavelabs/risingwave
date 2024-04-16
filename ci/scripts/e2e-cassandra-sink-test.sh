@@ -38,10 +38,10 @@ sleep 1
 echo "--- create cassandra table"
 curl https://downloads.apache.org/cassandra/4.1.3/apache-cassandra-4.1.3-bin.tar.gz  --output apache-cassandra-4.1.3-bin.tar.gz
 tar xfvz apache-cassandra-4.1.3-bin.tar.gz
+rm apache-cassandra-4.1.3/lib/six-1.12.0-py2.py3-none-any.zip
 cd apache-cassandra-4.1.3/bin
 export CQLSH_HOST=cassandra-server
 export CQLSH_PORT=9042
-pip3 install --break-system-packages six
 ./cqlsh -e "CREATE KEYSPACE demo WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};use demo;
 CREATE table demo_bhv_table(v1 int primary key,v2 smallint,v3 bigint,v4 float,v5 double,v6 text,v7 date,v8 timestamp,v9 boolean);"
 
