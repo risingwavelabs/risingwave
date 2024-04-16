@@ -951,12 +951,21 @@ impl CatalogController {
 
         fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
             let mut found = false;
-            if *fragment_type_mask & PbFragmentTypeFlag::StreamScan as i32 != 0 {
-                visit_stream_node(stream_node, |node| {
-                    if let PbNodeBody::StreamScan(node) = node {
+            if (*fragment_type_mask & PbFragmentTypeFlag::StreamScan as i32 != 0)
+                || (*fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0)
+            {
+                visit_stream_node(stream_node, |node| match node {
+                    PbNodeBody::StreamScan(node) => {
                         node.rate_limit = rate_limit;
                         found = true;
                     }
+                    PbNodeBody::Source(node) => {
+                        if let Some(inner) = node.source_inner.as_mut() {
+                            inner.rate_limit = rate_limit;
+                            found = true;
+                        }
+                    }
+                    _ => {}
                 });
             }
             found
@@ -964,7 +973,7 @@ impl CatalogController {
 
         if fragments.is_empty() {
             return Err(MetaError::invalid_parameter(format!(
-                "stream scan node not found in job id {job_id}"
+                "stream scan node or source node not found in job id {job_id}"
             )));
         }
         let fragment_ids = fragments.iter().map(|(id, _, _)| *id).collect_vec();

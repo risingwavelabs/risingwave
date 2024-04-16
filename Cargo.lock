@@ -3779,9 +3779,9 @@ dependencies = [
 
 [[package]]
 name = "either"
-version = "1.10.0"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11157ac094ffbdde99aa67b23417ebdd801842852b500e395a45a9c0aac03e4a"
+checksum = "a47c1c47d2f5964e29c61246e81db715514cd532db6b5116a25ea3c03d6780a2"
 dependencies = [
  "serde",
 ]
@@ -4346,9 +4346,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.1.4"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d1c86096f23d567783f7fd3ad34e9d7e94a56854b405305c6b0fe24850a2731"
+checksum = "f59727e86709e4eab603f8a5086f3b2c7d3ddddf7c8b31d8dea2b00364b7fb95"
 dependencies = [
  "ahash 0.8.6",
  "bitflags 2.5.0",
@@ -4984,9 +4984,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.4.3"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51ee2dd2e4f378392eeff5d51618cd9a63166a2513846bbc55f21cfacd9199d4"
+checksum = "816ec7294445779408f36fe57bc5b7fc1cf59664059096c65f905c1c61f58069"
 dependencies = [
  "bytes",
  "fnv",
@@ -5271,7 +5271,7 @@ dependencies = [
  "bytes",
  "futures-channel",
  "futures-util",
- "h2 0.4.3",
+ "h2 0.4.4",
  "http 1.0.0",
  "http-body 1.0.0",
  "httparse",
@@ -8907,7 +8907,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "futures-util",
- "h2 0.4.3",
+ "h2 0.4.4",
  "http 1.0.0",
  "http-body 1.0.0",
  "http-body-util",
@@ -10245,6 +10245,7 @@ dependencies = [
  "risingwave_meta_model_v2",
  "risingwave_pb",
  "sea-orm",
+ "serde_json",
  "sync-point",
  "thiserror-ext",
  "tokio-stream",
@@ -10360,6 +10361,7 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "moka",
+ "paste",
  "rand",
  "risingwave_common",
  "risingwave_error",

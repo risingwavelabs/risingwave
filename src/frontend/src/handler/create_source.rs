@@ -32,7 +32,7 @@ use risingwave_connector::parser::additional_columns::{
 };
 use risingwave_connector::parser::{
     schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
-    SpecificParserConfig, DEBEZIUM_IGNORE_KEY,
+    SpecificParserConfig, TimestamptzHandling, DEBEZIUM_IGNORE_KEY,
 };
 use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
@@ -438,6 +438,21 @@ pub(crate) async fn bind_columns_from_source(
             Format::Plain | Format::Upsert | Format::Maxwell | Format::Canal | Format::Debezium,
             Encode::Json,
         ) => {
+            if matches!(
+                source_schema.format,
+                Format::Plain | Format::Upsert | Format::Debezium
+            ) {
+                // Parse the value but throw it away.
+                // It would be too late to report error in `SpecificParserConfig::new`,
+                // which leads to recovery loop.
+                TimestamptzHandling::from_options(&format_encode_options_to_consume)
+                    .map_err(|err| InvalidInputSyntax(err.message))?;
+                try_consume_string_from_options(
+                    &mut format_encode_options_to_consume,
+                    TimestamptzHandling::OPTION_KEY,
+                );
+            }
+
             let schema_config = get_json_schema_location(&mut format_encode_options_to_consume)?;
             stream_source_info.use_schema_registry =
                 json_schema_infer_use_schema_registry(&schema_config);
