@@ -67,8 +67,8 @@ sleep 15
 # FIXME: Integrate standalone into risedev, so we can reuse risedev-env functionality here.
 cat << EOF > "$RW_PREFIX"/config/risedev-env
 RW_META_ADDR="http://0.0.0.0:5690"
-RW_FRONTEND_LISTEN_ADDRESS="0.0.0.0"
-RW_FRONTEND_PORT="4566"
+RISEDEV_RW_FRONTEND_LISTEN_ADDRESS="0.0.0.0"
+RISEDEV_RW_FRONTEND_PORT="4566"
 EOF
 
 echo "--- Setting up table"

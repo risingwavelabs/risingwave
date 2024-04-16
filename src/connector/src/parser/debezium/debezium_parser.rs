@@ -21,6 +21,7 @@ use super::{DebeziumAvroAccessBuilder, DebeziumAvroParserConfig};
 use crate::error::ConnectorResult;
 use crate::extract_key_config;
 use crate::parser::unified::debezium::DebeziumChangeEvent;
+use crate::parser::unified::json::TimestamptzHandling;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, JsonProperties,
@@ -69,8 +70,12 @@ async fn build_accessor_builder(
                 DebeziumAvroAccessBuilder::new(config, encoding_type)?,
             ))
         }
-        EncodingProperties::Json(_) => Ok(AccessBuilderImpl::DebeziumJson(
-            DebeziumJsonAccessBuilder::new()?,
+        EncodingProperties::Json(json_config) => Ok(AccessBuilderImpl::DebeziumJson(
+            DebeziumJsonAccessBuilder::new(
+                json_config
+                    .timestamptz_handling
+                    .unwrap_or(TimestamptzHandling::GuessNumberUnit),
+            )?,
         )),
         EncodingProperties::Protobuf(_) => {
             Ok(AccessBuilderImpl::new_default(config, encoding_type).await?)
@@ -111,6 +116,7 @@ impl DebeziumParser {
             key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
+                timestamptz_handling: None,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
@@ -216,6 +222,7 @@ mod tests {
             key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
+                timestamptz_handling: None,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };

@@ -294,7 +294,6 @@ async fn test_failpoints_user_read_err() {
         let result = ui.next().await;
         if result.is_err() {
             assert!(i < 400);
-            break;
         }
     }
     assert!(i < 400);
