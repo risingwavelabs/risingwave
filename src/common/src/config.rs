@@ -1730,7 +1730,7 @@ pub mod default {
         const DEFAULT_RETRY_INTERVAL_MS: u64 = 20;
         const DEFAULT_RETRY_MAX_DELAY_MS: u64 = 10 * 1000;
         const DEFAULT_RETRY_MAX_RETRY_ATTEMPTS: usize = 3;
-        pub const UNLIMITED_MAX_TIMEOUT: u64 = u64::MAX;
+        pub const UNLIMITED_MAX_TIMEOUT: u64 = 24 * 7 * 3600 * 1000;
 
         /// DEPRECATED: This config will be deprecated in the future version, use `object_store_streaming_read_attempt_timeout_ms` instead.
         pub fn object_store_streaming_read_timeout_ms() -> u64 {
