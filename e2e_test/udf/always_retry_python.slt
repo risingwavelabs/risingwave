@@ -56,7 +56,7 @@ SELECT count(*) > 0 FROM mv_no_retry where s1 is NULL;
 t
 
 statement ok
-SET STREAMING_RATE_LIMIT=0;
+SET ENABLE_STREAMING_RATE_LIMIT=false;
 
 statement ok
 SET BACKGROUND_DDL=false;
