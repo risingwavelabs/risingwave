@@ -40,9 +40,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
-use risingwave_pb::stream_service::{
-    streaming_control_stream_response, BarrierCompleteResponse, StreamingControlStreamResponse,
-};
+use risingwave_pb::stream_service::BarrierCompleteResponse;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::sync::Mutex;
@@ -661,16 +659,10 @@ impl GlobalBarrierManager {
                             .set_checkpoint_frequency(p.checkpoint_frequency() as usize)
                     }
                 }
-                resp_result = self.control_stream_manager.next_response() => {
+                resp_result = self.control_stream_manager.next_complete_barrier_response() => {
                     match resp_result {
                         Ok((worker_id, prev_epoch, resp)) => {
-                            let resp: StreamingControlStreamResponse = resp;
-                            match resp.response {
-                                Some(streaming_control_stream_response::Response::CompleteBarrier(resp)) => {
-                                    self.checkpoint_control.barrier_collected(worker_id, prev_epoch, resp);
-                                },
-                                resp => unreachable!("invalid response: {:?}", resp),
-                            }
+                            self.checkpoint_control.barrier_collected(worker_id, prev_epoch, resp);
 
                         }
                         Err(e) => {
