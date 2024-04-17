@@ -223,7 +223,8 @@ impl ConnectorClient {
                     source_id,
                     err.message()
                 )
-            })?
+            })
+            .map_err(RpcError::from_connector_status)?
             .into_inner())
     }
 
@@ -251,7 +252,8 @@ impl ConnectorClient {
             .await
             .inspect_err(|err| {
                 tracing::error!("failed to validate source#{}: {}", source_id, err.message())
-            })?
+            })
+            .map_err(RpcError::from_connector_status)?
             .into_inner();
 
         response.error.map_or(Ok(()), |err| {
@@ -281,8 +283,12 @@ impl ConnectorClient {
                 rpc_client
                     .sink_writer_stream(ReceiverStream::new(rx))
                     .await
-                    .map(|response| response.into_inner().map_err(RpcError::from))
-                    .map_err(RpcError::from)
+                    .map(|response| {
+                        response
+                            .into_inner()
+                            .map_err(RpcError::from_connector_status)
+                    })
+                    .map_err(RpcError::from_connector_status)
             },
         )
         .await?;
@@ -313,8 +319,12 @@ impl ConnectorClient {
                 rpc_client
                     .sink_coordinator_stream(ReceiverStream::new(rx))
                     .await
-                    .map(|response| response.into_inner().map_err(RpcError::from))
-                    .map_err(RpcError::from)
+                    .map(|response| {
+                        response
+                            .into_inner()
+                            .map_err(RpcError::from_connector_status)
+                    })
+                    .map_err(RpcError::from_connector_status)
             },
         )
         .await?;
@@ -340,7 +350,8 @@ impl ConnectorClient {
             .await
             .inspect_err(|err| {
                 tracing::error!("failed to validate sink properties: {}", err.message())
-            })?
+            })
+            .map_err(RpcError::from_connector_status)?
             .into_inner();
         response.error.map_or_else(
             || Ok(()), // If there is no error message, return Ok here.

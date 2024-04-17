@@ -1108,6 +1108,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
 async fn test_extend_objects_to_delete() {
     let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
+    let _pinned_version1 = hummock_manager.pin_version(context_id).await.unwrap();
     let sst_infos = add_test_tables(hummock_manager.as_ref(), context_id).await;
     let max_committed_object_id = sst_infos
         .iter()
@@ -1120,7 +1121,7 @@ async fn test_extend_objects_to_delete() {
         .max()
         .unwrap();
     let orphan_sst_num = 10;
-    let orphan_object_ids = sst_infos
+    let all_object_ids = sst_infos
         .iter()
         .flatten()
         .map(|s| s.get_object_id())
@@ -1129,7 +1130,7 @@ async fn test_extend_objects_to_delete() {
     assert!(hummock_manager.get_objects_to_delete().await.is_empty());
     assert_eq!(
         hummock_manager
-            .extend_objects_to_delete_from_scan(&orphan_object_ids)
+            .extend_objects_to_delete_from_scan(&all_object_ids)
             .await,
         orphan_sst_num as usize
     );
@@ -1144,15 +1145,32 @@ async fn test_extend_objects_to_delete() {
         6
     );
     assert_eq!(
+        hummock_manager.get_objects_to_delete().await.len(),
+        orphan_sst_num as usize
+    );
+    // since version1 is still pinned, the sst removed in compaction can not be reclaimed.
+    assert_eq!(
         hummock_manager
-            .extend_objects_to_delete_from_scan(&orphan_object_ids)
+            .extend_objects_to_delete_from_scan(&all_object_ids)
             .await,
         orphan_sst_num as usize
     );
+    let objects_to_delete = hummock_manager.get_objects_to_delete().await;
+    assert_eq!(objects_to_delete.len(), orphan_sst_num as usize);
+    let pinned_version2 = hummock_manager.pin_version(context_id).await.unwrap();
+    hummock_manager
+        .unpin_version_before(context_id, pinned_version2.id)
+        .await
+        .unwrap();
+    // version1 is unpin, and then the sst removed in compaction can be reclaimed
     assert_eq!(
-        hummock_manager.get_objects_to_delete().await.len(),
+        hummock_manager
+            .extend_objects_to_delete_from_scan(&all_object_ids)
+            .await,
         orphan_sst_num as usize + 3
     );
+    let objects_to_delete = hummock_manager.get_objects_to_delete().await;
+    assert_eq!(objects_to_delete.len(), orphan_sst_num as usize + 3);
 }
 
 #[tokio::test]
