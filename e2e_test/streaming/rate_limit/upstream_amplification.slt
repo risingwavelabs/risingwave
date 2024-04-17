@@ -43,6 +43,11 @@ flush;
 statement ok
 flush;
 
+query T
+select name from rw_sinks where name = 'sink';
+----
+sink
+
 statement ok
 drop sink sink;
 
