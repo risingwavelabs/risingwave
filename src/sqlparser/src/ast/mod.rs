@@ -1519,6 +1519,8 @@ pub enum Statement {
     /// WAIT for ALL running stream jobs to finish.
     /// It will block the current session the condition is met.
     Wait,
+    /// Trigger stream job recover
+    Recover,
 }
 
 impl fmt::Display for Statement {
@@ -2106,6 +2108,10 @@ impl fmt::Display for Statement {
             }
             Statement::Kill(process_id) => {
                 write!(f, "KILL {}", process_id)?;
+                Ok(())
+            }
+            Statement::Recover => {
+                write!(f, "RECOVER")?;
                 Ok(())
             }
         }

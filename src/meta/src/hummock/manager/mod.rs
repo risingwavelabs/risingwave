@@ -610,7 +610,10 @@ impl HummockManager {
         };
 
         versioning_guard.objects_to_delete.clear();
-        versioning_guard.mark_objects_for_deletion();
+        // Not delete stale objects when archive is enabled
+        if !self.env.opts.enable_hummock_data_archive {
+            versioning_guard.mark_objects_for_deletion();
+        }
 
         self.initial_compaction_group_config_after_load(versioning_guard)
             .await?;

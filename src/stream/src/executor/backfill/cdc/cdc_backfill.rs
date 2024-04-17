@@ -272,6 +272,17 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                                 paused = false;
                                                 valve.resume();
                                             }
+                                            Mutation::Throttle(some) => {
+                                                if let Some(rate_limit) =
+                                                    some.get(&self.actor_ctx.id)
+                                                {
+                                                    self.chunk_size = rate_limit
+                                                        .map(|x| x as usize)
+                                                        .unwrap_or(self.chunk_size);
+                                                    // rebuild the new reader stream with new chunk size
+                                                    continue 'backfill_loop;
+                                                }
+                                            }
                                             _ => (),
                                         }
                                     }
