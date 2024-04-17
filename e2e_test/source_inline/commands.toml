@@ -29,7 +29,6 @@ if [ ! -d "${PREFIX_BIN}/kafka" ]; then
     exit 1
 fi
 
-# TODO: we may support risedev-env.override so that we can connect to a Kafka not started by risedev-dev.
 if [ -z "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" ]; then
     echo "RISEDEV_KAFKA_BOOTSTRAP_SERVERS is not set in risedev-env file. Did you start Kafka using $(tput setaf 4)\`./risedev d\`$(tput sgr0)?"
     exit 1
