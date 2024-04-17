@@ -440,7 +440,7 @@ async fn test_foreground_index_cancel() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_sink_create() -> Result<()> {
+async fn test_background_sink_create() -> Result<()> {
     init_logger();
     let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
     let mut session = cluster.start_session();
@@ -450,6 +450,7 @@ async fn test_sink_create() -> Result<()> {
 
     let mut session2 = cluster.start_session();
     tokio::spawn(async move {
+        session2.run(SET_BACKGROUND_DDL).await.unwrap();
         session2.run(SET_RATE_LIMIT_2).await.unwrap();
         session2
             .run("CREATE SINK s FROM t WITH (connector='blackhole');")

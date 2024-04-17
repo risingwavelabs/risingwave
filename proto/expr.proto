@@ -192,6 +192,8 @@ message ExprNode {
     CONVERT_TO = 323;
     DECRYPT = 324;
     ENCRYPT = 325;
+    INET_ATON = 328;
+    INET_NTOA = 329;
 
     // Unary operators
     NEG = 401;
@@ -274,6 +276,8 @@ message ExprNode {
     JSONB_PATH_MATCH = 621;
     JSONB_PATH_QUERY_ARRAY = 622;
     JSONB_PATH_QUERY_FIRST = 623;
+    JSONB_POPULATE_RECORD = 629;
+    JSONB_TO_RECORD = 630;
 
     // Non-pure functions below (> 1000)
     // ------------------------
@@ -328,6 +332,8 @@ message TableFunction {
     JSONB_EACH_TEXT = 13;
     JSONB_OBJECT_KEYS = 14;
     JSONB_PATH_QUERY = 15;
+    JSONB_POPULATE_RECORDSET = 16;
+    JSONB_TO_RECORDSET = 17;
     // User defined table function
     UDTF = 100;
   }

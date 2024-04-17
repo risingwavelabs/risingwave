@@ -73,7 +73,7 @@ impl From<PbConnection> for ActiveModel {
         Self {
             connection_id: Set(conn.id as _),
             name: Set(conn.name),
-            info: Set(PrivateLinkService(private_link_srv)),
+            info: Set(PrivateLinkService::from(&private_link_srv)),
         }
     }
 }
