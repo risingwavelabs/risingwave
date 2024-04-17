@@ -41,6 +41,15 @@ impl ConnectSchema {
         }
     }
 
+    pub fn base_mut(&mut self) -> &mut SchemaBase {
+        match self {
+            ConnectSchema::Primitive(s) => &mut s.base,
+            ConnectSchema::Array(s) => &mut s.base,
+            ConnectSchema::Map(s) => &mut s.base,
+            ConnectSchema::Struct(s) => &mut s.base,
+        }
+    }
+
     pub fn equals(&self, _other: &Self) -> bool {
         todo!()
     }
@@ -48,19 +57,35 @@ impl ConnectSchema {
 
 #[derive(Debug, Clone)]
 pub struct SchemaBase {
-    type_: SchemaType,
-    optional: bool,
-    default: Option<Value>,
-    name: Option<Box<str>>,
-    version: Option<i32>,
-    doc: Option<Box<str>>,
+    pub type_: SchemaType,
+    pub optional: bool,
+    pub default: Option<Value>,
+    pub name: Option<Box<str>>,
+    pub version: Option<i32>,
+    pub doc: Option<Box<str>>,
     /// For logical types, e.g. `decimal` with `scale`.
-    parameters: std::collections::HashMap<String, String>,
+    pub parameters: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct PrimitiveSchema {
     base: SchemaBase,
+}
+
+impl PrimitiveSchema {
+    pub fn new(type_: SchemaType) -> Self {
+        Self {
+            base: SchemaBase {
+                type_,
+                optional: false,
+                default: None,
+                name: None,
+                version: None,
+                doc: None,
+                parameters: Default::default(),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -218,7 +243,7 @@ static SCHEMA_TYPE_CLASSES: LazyLock<std::collections::HashMap<SchemaType, Box<[
 static LOGICAL_TYPE_CLASSES: LazyLock<std::collections::HashMap<&'static str, Box<[Class]>>> =
     LazyLock::new(|| {
         let mut m = std::collections::HashMap::default();
-        m.insert("decimal", [Class::BigDecimal].into());
+        m.insert(super::decimal::LOGICAL_NAME, [Class::BigDecimal].into());
         m.insert("date", [Class::Date].into());
         m.insert("time", [Class::Date].into());
         m.insert("timestamp", [Class::Date].into());

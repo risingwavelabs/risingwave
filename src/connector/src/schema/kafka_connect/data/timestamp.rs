@@ -1,0 +1,50 @@
+// Copyright 2024 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use std::sync::LazyLock;
+
+use chrono::{DateTime, TimeZone, Utc};
+
+use super::schema::{ConnectSchema, PrimitiveSchema, SchemaType};
+use crate::schema::kafka_connect::error::DataException;
+
+pub const LOGICAL_NAME: &str = "org.apache.kafka.connect.data.Timestamp";
+
+pub static SCHEMA: LazyLock<ConnectSchema> = LazyLock::new(|| {
+    let mut schema = ConnectSchema::Primitive(PrimitiveSchema::new(SchemaType::Int64));
+    let base_mut = schema.base_mut();
+    base_mut.name = Some(LOGICAL_NAME.into());
+    base_mut.version = Some(1);
+    schema
+});
+
+pub fn from_logical(schema: &ConnectSchema, value: DateTime<Utc>) -> Result<i64, DataException> {
+    if Some(LOGICAL_NAME) != schema.base().name.as_deref() {
+        return Err(DataException::new(
+            "Requested conversion of Timestamp object but the schema does not match.",
+        ));
+    }
+    Ok(value.timestamp_millis())
+}
+
+pub fn to_logical(schema: &ConnectSchema, value: i64) -> Result<DateTime<Utc>, DataException> {
+    if Some(LOGICAL_NAME) != schema.base().name.as_deref() {
+        return Err(DataException::new(
+            "Requested conversion of Timestamp object but the schema does not match.",
+        ));
+    }
+    Utc.timestamp_millis_opt(value)
+        .single()
+        .ok_or_else(|| DataException::new("Timestamp overflow"))
+}

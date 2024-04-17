@@ -12,8 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod date;
-mod decimal;
-mod schema;
-mod time;
-mod timestamp;
+pub struct DataException {
+    message: Box<str>,
+    cause: Option<Box<dyn std::error::Error>>,
+}
+
+impl DataException {
+    pub fn new(m: impl std::fmt::Display) -> Self {
+        Self {
+            message: m.to_string().into(),
+            cause: None,
+        }
+    }
+}
