@@ -226,14 +226,17 @@ impl ControlStreamManager {
         first_err: MetaError,
     ) -> Vec<(WorkerId, MetaError)> {
         let mut errors = vec![(worker_id, first_err)];
-        let _ = timeout(COLLECT_ERROR_TIMEOUT, async {
-            while let Some((worker_id, result)) = self.next_response().await {
-                if let Err(e) = result {
-                    errors.push((worker_id, e));
+        #[cfg(not(madsim))]
+        {
+            let _ = timeout(COLLECT_ERROR_TIMEOUT, async {
+                while let Some((worker_id, result)) = self.next_response().await {
+                    if let Err(e) = result {
+                        errors.push((worker_id, e));
+                    }
                 }
-            }
-        })
-        .await;
+            })
+            .await;
+        }
         errors
     }
 }
