@@ -627,7 +627,7 @@ def section_object_storage(outer_panels):
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                         panels.target(
-                            f"sum(irate({metric('s3_read_request_retry_count')}[$__rate_interval])) by ({NODE_LABEL}, {COMPONENT_LABEL}, type)",
+                            f"sum(irate({metric('object_store_request_retry_count')}[$__rate_interval])) by ({NODE_LABEL}, {COMPONENT_LABEL}, type)",
                             "{{type}} - {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),

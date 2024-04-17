@@ -89,7 +89,7 @@ pub trait StreamingUploader: Send {
 
 /// The implementation must be thread-safe.
 #[async_trait::async_trait]
-pub trait ObjectStore: Send + Sync + Clone {
+pub trait ObjectStore: Send + Sync {
     /// Get the key prefix for object
     fn get_object_prefix(&self, obj_id: u64) -> String;
 
