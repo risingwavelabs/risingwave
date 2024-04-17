@@ -149,7 +149,7 @@ def format_cmd(messages):
     cmd=f"""
 cat <<- YAML | buildkite-agent pipeline upload
 steps:
-  - label: "Test"
+  - label: "trigger failed test notification"
     command: echo "running failed test notification" && exit 1
     notify:
       - slack:
