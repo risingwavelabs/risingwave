@@ -1293,7 +1293,7 @@ echo "All processes has exited."
 [tasks.slt]
 env = { SLT_HOST = "${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS}", SLT_PORT = "${RISEDEV_RW_FRONTEND_PORT}", SLT_DB = "dev" }
 category = "RiseDev - Test - SQLLogicTest"
-install_crate = { version = "0.20.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { version = "0.20.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
   "--help",
 ], install_command = "binstall" }
 dependencies = ["check-risedev-env-file"]
