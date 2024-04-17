@@ -60,10 +60,10 @@ pub fn inet_aton(str: &str) -> Result<i64> {
 /// # Example
 ///
 /// ```slt
-/// query I
+/// query T
 /// select inet_ntoa(167773449);
 /// ----
-/// '10.0.5.9'
+/// 10.0.5.9
 /// ```
 #[function("inet_ntoa(int8) -> varchar")]
 pub fn inet_ntoa(mut num: i64) -> Result<Box<str>> {
