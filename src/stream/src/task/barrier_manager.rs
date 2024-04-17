@@ -25,13 +25,14 @@ use parking_lot::Mutex;
 use risingwave_pb::stream_service::barrier_complete_response::{
     GroupedSstableInfo, PbCreateMviewProgress,
 };
+use risingwave_rpc_client::error::{ToTonicStatus, TonicStatusWrapper};
 use rw_futures_util::{pending_on_none, AttachedFuture};
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use tonic::Status;
+use tonic::{Code, Status};
 
 use self::managed_state::ManagedBarrierState;
 use crate::error::{IntoUnexpectedExit, StreamError, StreamResult};
@@ -102,7 +103,11 @@ impl ControlStreamHandle {
 
     fn reset_stream_with_err(&mut self, err: Status) {
         if let Some((sender, _)) = self.pair.take() {
-            warn!("control stream reset with: {:?}", err.as_report());
+            // Note: `TonicStatusWrapper` provides a better error report.
+            let err = TonicStatusWrapper::new(err);
+            warn!(error = %err.as_report(), "control stream reset with error");
+
+            let err = err.into_inner();
             if sender.send(Err(err)).is_err() {
                 warn!("failed to notify finish of control stream");
             }
@@ -111,7 +116,7 @@ impl ControlStreamHandle {
 
     fn inspect_result(&mut self, result: StreamResult<()>) {
         if let Err(e) = result {
-            self.reset_stream_with_err(Status::internal(format!("get error: {:?}", e.as_report())));
+            self.reset_stream_with_err(e.to_status_unnamed(Code::Internal));
         }
     }
 
@@ -132,10 +137,11 @@ impl ControlStreamHandle {
                 Some(Ok(request)) => {
                     return request;
                 }
-                Some(Err(e)) => self.reset_stream_with_err(Status::internal(format!(
-                    "failed to get request: {:?}",
-                    e.as_report()
-                ))),
+                Some(Err(e)) => self.reset_stream_with_err(
+                    anyhow!(TonicStatusWrapper::new(e)) // wrap the status to provide better error report
+                        .context("failed to get request")
+                        .to_status_unnamed(Code::Internal),
+                ),
                 None => self.reset_stream_with_err(Status::internal("end of stream")),
             }
         }
@@ -703,12 +709,14 @@ impl LocalBarrierWorker {
         let root_err = self.try_find_root_failure(err).await;
         let failed_epochs = self.state.epochs_await_on_actor(actor_id).collect_vec();
         if !failed_epochs.is_empty() {
-            self.control_stream_handle
-                .reset_stream_with_err(Status::internal(format!(
-                    "failed to collect barrier. epoch: {:?}, err: {:?}",
-                    failed_epochs,
-                    root_err.as_report()
-                )));
+            self.control_stream_handle.reset_stream_with_err(
+                anyhow!(root_err)
+                    .context(format!(
+                        "failed to collect barrier for epoch {:?}",
+                        failed_epochs
+                    ))
+                    .to_status_unnamed(Code::Internal),
+            );
         }
     }
 

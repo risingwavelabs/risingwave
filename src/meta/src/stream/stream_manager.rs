@@ -461,6 +461,7 @@ impl GlobalStreamManager {
             definition: definition.to_string(),
             ddl_type,
             replace_table: replace_table_command,
+            create_type,
         };
         tracing::debug!("sending Command::CreateStreamingJob");
         if let Err(err) = self.barrier_scheduler.run_command(command).await {

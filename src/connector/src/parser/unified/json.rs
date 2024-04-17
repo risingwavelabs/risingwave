@@ -513,9 +513,7 @@ impl JsonParseOptions {
                 .into(),
             // ---- Interval -----
             (Some(DataType::Interval), ValueType::String) => {
-                Interval::from_iso_8601(value.as_str().unwrap())
-                    .map_err(|_| create_error())?
-                    .into()
+                value.as_str().unwrap().parse::<Interval>().map_err(|_| create_error())?.into()
             }
             // ---- Struct -----
             (Some(DataType::Struct(struct_type_info)), ValueType::Object) => StructValue::new(
