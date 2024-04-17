@@ -356,8 +356,15 @@ impl DdlController {
         &self,
         table_id: u32,
         parallelism: PbTableParallelism,
-        deferred: bool,
+        mut deferred: bool,
     ) -> MetaResult<()> {
+        if self.barrier_manager.check_status_running().is_err() {
+            tracing::info!(
+                "alter parallelism is set to deferred mode because the system is in recovery state"
+            );
+            deferred = true;
+        }
+
         if !deferred
             && !self
                 .metadata_manager
