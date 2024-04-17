@@ -119,6 +119,10 @@ pub enum MetaErrorInner {
         #[backtrace]
         anyhow::Error,
     ),
+
+    // Indicates that recovery was triggered manually.
+    #[error("adhoc recovery triggered")]
+    AdhocRecovery,
 }
 
 impl MetaError {

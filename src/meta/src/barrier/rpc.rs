@@ -192,7 +192,8 @@ impl ControlStreamManager {
                         .nodes
                         .remove(&worker_id)
                         .expect("should exist when get collect resp");
-                    warn!(node = ?node.worker, err = ?err.as_report(), "get error from response stream");
+                    // Note: No need to use `?` as the backtrace is from meta and not useful.
+                    warn!(node = ?node.worker, err = %err.as_report(), "get error from response stream");
                     if let Some(command) = node.inflight_barriers.pop_front() {
                         self.context.report_collect_failure(&command, &err);
                         break Err(err);

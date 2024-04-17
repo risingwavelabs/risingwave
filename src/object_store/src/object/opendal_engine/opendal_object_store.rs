@@ -44,6 +44,7 @@ pub enum EngineType {
     Memory,
     Hdfs,
     Gcs,
+    Minio,
     S3,
     Obs,
     Oss,
@@ -71,6 +72,7 @@ impl ObjectStore for OpendalObjectStore {
     fn get_object_prefix(&self, obj_id: u64) -> String {
         match self.engine_type {
             EngineType::S3 => prefix::s3::get_object_prefix(obj_id),
+            EngineType::Minio => prefix::s3::get_object_prefix(obj_id),
             EngineType::Memory => String::default(),
             EngineType::Hdfs => String::default(),
             EngineType::Gcs => String::default(),
@@ -229,6 +231,7 @@ impl ObjectStore for OpendalObjectStore {
         match self.engine_type {
             EngineType::Memory => "Memory",
             EngineType::Hdfs => "Hdfs",
+            EngineType::Minio => "Minio",
             EngineType::S3 => "S3",
             EngineType::Gcs => "Gcs",
             EngineType::Obs => "Obs",

@@ -1004,9 +1004,9 @@ dependencies = [
 
 [[package]]
 name = "aws-credential-types"
-version = "1.1.2"
+version = "1.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a7cb3510b95492bd9014b60e2e3bee3e48bc516e220316f8e6b60df18b47331"
+checksum = "d67c6836a1009b23e3f4cd1457c83e0aa49a490d9c3033b53c3f7b8cf2facc0f"
 dependencies = [
  "aws-smithy-async",
  "aws-smithy-runtime-api",
@@ -1349,9 +1349,9 @@ dependencies = [
 
 [[package]]
 name = "aws-types"
-version = "1.1.2"
+version = "1.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8549aa62c5b7db5c57ab915200ee214b4f5d8f19b29a4a8fa0b3ad3bca1380e3"
+checksum = "ee2739d97d47f47cdf0d27982019a405dcc736df25925d1a75049f1faa79df88"
 dependencies = [
  "aws-credential-types",
  "aws-smithy-async",
@@ -3779,9 +3779,9 @@ dependencies = [
 
 [[package]]
 name = "either"
-version = "1.10.0"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11157ac094ffbdde99aa67b23417ebdd801842852b500e395a45a9c0aac03e4a"
+checksum = "a47c1c47d2f5964e29c61246e81db715514cd532db6b5116a25ea3c03d6780a2"
 dependencies = [
  "serde",
 ]
@@ -8448,7 +8448,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.12.1",
+ "parking_lot 0.11.2",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
@@ -8823,7 +8823,7 @@ dependencies = [
 [[package]]
 name = "reqsign"
 version = "0.14.9"
-source = "git+https://github.com/wcy-fdu/reqsign.git?rev=e6cb304#e6cb3048581033275f4525431b757c8c612d37db"
+source = "git+https://github.com/wcy-fdu/reqsign.git?rev=002ee2a#002ee2a41749b08bb5336f344e31f514d8fce718"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9325,6 +9325,7 @@ dependencies = [
  "serde_with",
  "smallbitset",
  "speedate",
+ "stacker",
  "static_assertions",
  "strum 0.26.1",
  "strum_macros 0.26.1",
@@ -12341,6 +12342,19 @@ name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
+
+[[package]]
+name = "stacker"
+version = "0.1.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c886bd4480155fd3ef527d45e9ac8dd7118a898a46530b7b94c3e21866259fce"
+dependencies = [
+ "cc",
+ "cfg-if",
+ "libc",
+ "psm",
+ "winapi",
+]
 
 [[package]]
 name = "static_assertions"

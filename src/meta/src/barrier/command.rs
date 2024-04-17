@@ -23,6 +23,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorMapping;
 use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_pb::catalog::CreateType;
 use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
@@ -164,6 +165,7 @@ pub enum Command {
         init_split_assignment: SplitAssignment,
         definition: String,
         ddl_type: DdlType,
+        create_type: CreateType,
         replace_table: Option<ReplaceTablePlan>,
     },
     /// `CancelStreamingJob` command generates a `Stop` barrier including the actors of the given

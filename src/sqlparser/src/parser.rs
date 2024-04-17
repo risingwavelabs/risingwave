@@ -283,6 +283,7 @@ impl Parser {
                 Keyword::CLOSE => Ok(self.parse_close_cursor()?),
                 Keyword::FLUSH => Ok(Statement::Flush),
                 Keyword::WAIT => Ok(Statement::Wait),
+                Keyword::RECOVER => Ok(Statement::Recover),
                 _ => self.expected(
                     "an SQL statement",
                     Token::Word(w).with_location(token.location),
