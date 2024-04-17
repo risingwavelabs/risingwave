@@ -273,6 +273,12 @@ impl HummockReadVersion {
                 // TODO: add a check to ensure that the added batch id of added imm is greater than
                 // the batch id of imm at the front
                 StagingData::ImmMem(imm) => {
+                    if let Some(item) = self.staging.data.last() {
+                        // check batch_id order from newest to old
+                        if let StagingData::ImmMem(last_imm) = item {
+                            debug_assert!(last_imm.batch_id() < imm.batch_id());
+                        }
+                    }
                     self.staging.data.push(StagingData::ImmMem(imm));
                 }
                 StagingData::Sst(staging_sst_ref) => {
@@ -285,23 +291,22 @@ impl HummockReadVersion {
                     // 3) The intersection between staging_sst.imm_ids and self.staging.imm
                     //    are always the suffix of self.staging.imm
 
-                    // Check 1)
-                    // Calculate intersection
-                    let staging_imm_ids_from_imms: HashSet<u64> = self
-                        .staging
-                        .data
-                        .iter()
-                        .filter_map(|data| data.to_imm().map(|imm| imm.batch_id()))
-                        .collect();
+                    let sst_imm_ids: HashSet<u64> =
+                        staging_sst_ref.imm_ids.iter().copied().collect();
 
-                    // intersected batch_id order from oldest to newest
-                    let intersect_imm_ids: HashSet<u64> = staging_sst_ref
-                        .imm_ids
-                        .iter()
-                        .rev()
-                        .copied()
-                        .filter(|id| staging_imm_ids_from_imms.contains(id))
-                        .collect();
+                    let mut intersect_imm_ids: HashSet<u64> = HashSet::default();
+                    let mut check_consecutive = false;
+                    for data in &self.staging.data {
+                        if let Some(imm) = data.to_imm()
+                            && sst_imm_ids.contains(&imm.batch_id())
+                        {
+                            assert!(intersect_imm_ids.is_empty() || check_consecutive);
+                            intersect_imm_ids.insert(imm.batch_id());
+                            check_consecutive = true;
+                        } else {
+                            check_consecutive = false;
+                        }
+                    }
 
                     if !intersect_imm_ids.is_empty() {
                         // Check 2)

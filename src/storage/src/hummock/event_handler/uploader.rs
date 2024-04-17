@@ -1052,6 +1052,9 @@ impl HummockUploader {
             unseal_epochs.sort_by_key(|item| item.0);
             for (_, epoch) in unseal_epochs.iter().rev() {
                 let unsealed_data = self.unsealed_data.get_mut(epoch).unwrap();
+                if !unsealed_data.spilled_data.uploading_tasks.is_empty() {
+                    continue;
+                }
                 unsealed_data.flush(&self.context);
                 flushed = true;
                 if !self.context.buffer_tracker.need_more_flush() {
@@ -1128,16 +1131,13 @@ impl HummockUploader {
         self.sealed_data.spilled_data.poll_success_spill(cx)
     }
 
-    /// Poll the success of the oldest spilled task of unsealed data. Return `Poll::Ready(None)` if
-    /// there is no spilling task.
+    /// Poll the success of all spilled task of unsealed data. Return `Poll::Ready(None)` if
+    /// there is no task finished.
     fn poll_unsealed_spill_task(
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Option<StagingSstableInfo>> {
-        // iterator from older epoch to new epoch so that the spill task are finished in epoch order
         for unsealed_data in self.unsealed_data.values_mut() {
-            // if None, there is no spilling task. Search for the unsealed data of the next epoch in
-            // the next iteration.
             if let Poll::Ready(Some(sstable_info)) =
                 unsealed_data.spilled_data.poll_success_spill(cx)
             {
