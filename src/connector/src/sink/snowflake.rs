@@ -177,12 +177,12 @@ pub struct SnowflakeSinkWriter {
     /// mainly used for debugging purpose
     epoch: u64,
     /// streaming uploader to upload data to the intermediate (s3) storage.
-    /// i.e., opendal s3 engine.
+    /// this also contains the file suffix *unique* to the *local* sink writer per epoch.
+    /// i.e., opendal s3 engine and the file suffix for intermediate s3 file.
     /// note: the option here *implicitly* indicates whether we have at
     /// least call `streaming_upload` once during this epoch,
     /// which is mainly used to prevent uploading empty data.
-    streaming_uploader: Option<Box<dyn StreamingUploader>>,
-    file_suffix: Option<String>,
+    streaming_uploader: Option<(Box<dyn StreamingUploader>, String)>,
 }
 
 impl SnowflakeSinkWriter {
@@ -232,7 +232,6 @@ impl SnowflakeSinkWriter {
             // will be (lazily) initialized after the begin of each epoch
             // when some data is ready to be upload
             streaming_uploader: None,
-            file_suffix: None,
         })
     }
 
@@ -255,15 +254,13 @@ impl SnowflakeSinkWriter {
                     err
                 ))
             })?;
-        self.streaming_uploader = Some(uploader);
-        self.file_suffix = Some(file_suffix);
+        self.streaming_uploader = Some((uploader, file_suffix));
         Ok(())
     }
 
     /// should be *only* called after `commit` per epoch.
     fn reset_streaming_uploader(&mut self) {
         self.streaming_uploader = None;
-        self.file_suffix = None;
     }
 
     /// the `Option` is the flag to determine if there is data to upload.
@@ -285,6 +282,7 @@ impl SnowflakeSinkWriter {
             );
         };
         uploader
+            .0
             .write_bytes(data)
             .await
             .map_err(|err| {
@@ -298,7 +296,7 @@ impl SnowflakeSinkWriter {
 
     /// finalize streaming upload for this epoch.
     /// ensure all the data has been properly uploaded to intermediate s3.
-    async fn finish_streaming_upload(&mut self) -> Result<()> {
+    async fn finish_streaming_upload(&mut self) -> Result<String> {
         let uploader = std::mem::take(&mut self.streaming_uploader);
         let Some(uploader) = uploader else {
             return Err(SinkError::Snowflake(format!(
@@ -307,13 +305,13 @@ impl SnowflakeSinkWriter {
                 )
             ));
         };
-        uploader.finish().await.map_err(|err| {
+        uploader.0.finish().await.map_err(|err| {
             SinkError::Snowflake(format!(
                 "failed to finish streaming upload to s3 for snowflake sink, error: {}",
                 err
             ))
         })?;
-        Ok(())
+        Ok(uploader.1)
     }
 
     async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
@@ -345,10 +343,10 @@ impl SnowflakeSinkWriter {
     /// sink `payload` to s3, then trigger corresponding `insertFiles` post request
     /// to snowflake, to finish the overall sinking pipeline.
     async fn commit(&mut self) -> Result<()> {
-        self.finish_streaming_upload().await?;
+        let file_suffix = self.finish_streaming_upload().await?;
         // trigger `insertFiles` post request to snowflake
         self.http_client
-            .send_request(self.file_suffix.as_ref().unwrap().as_str())
+            .send_request(&file_suffix)
             .await?;
         self.reset_streaming_uploader();
         Ok(())
