@@ -847,7 +847,7 @@ pub fn try_find_root_actor_failure<'a>(
     fn stream_executor_error_score(e: &StreamExecutorError) -> i32 {
         use crate::executor::error::ErrorKind;
         match e.inner() {
-            ErrorKind::ChannelClosed(_) => 0,
+            ErrorKind::ChannelClosed(_) | ErrorKind::ExchangeChannelClosed(_) => 0,
             ErrorKind::Internal(_) => 1,
             _ => 999,
         }
