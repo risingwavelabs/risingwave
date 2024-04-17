@@ -45,10 +45,6 @@ RUN pip3 install --break-system-packages pyarrow pytest
 RUN curl -sSL https://install.python-poetry.org | python3 -
 ENV PATH /root/.local/bin:$PATH
 
-# Install psycopg
-RUN python3 -m pip install psycopg2-binary
-ENV PATH /root/.local/bin:$PATH
-
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 
 # install build tools
