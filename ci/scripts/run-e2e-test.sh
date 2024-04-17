@@ -97,8 +97,6 @@ sqllogictest -p 4566 -d dev './e2e_test/database/prepare.slt'
 sqllogictest -p 4566 -d test './e2e_test/database/test.slt'
 
 echo "--- e2e, $mode, subscription"
-curl -sSL https://install.python-poetry.org | python3 -
-python3 -m pip install psycopg2-binary
 sqllogictest -p 4566 -d dev './e2e_test/subscription/check_sql_statement.slt'
 python3 ./e2e_test/subscription/main.py
 

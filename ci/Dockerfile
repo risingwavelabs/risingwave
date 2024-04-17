@@ -46,6 +46,9 @@ RUN pip3 install pyarrow pytest
 # Install poetry
 RUN curl -sSL https://install.python-poetry.org | python3 -
 
+# Install psycopg
+RUN python3 -m pip install psycopg2-binary
+
 # add required rustup components
 RUN rustup component add rustfmt llvm-tools-preview clippy
 RUN rustup target add wasm32-wasi
