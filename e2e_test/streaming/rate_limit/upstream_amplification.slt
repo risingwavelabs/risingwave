@@ -43,6 +43,9 @@ flush;
 statement ok
 flush;
 
+skipif in-memory
+sleep 1s
+
 query T
 select name from rw_sinks where name = 'sink';
 ----
