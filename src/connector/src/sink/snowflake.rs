@@ -18,6 +18,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use bytes::Bytes;
+use bytes::BytesMut;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
@@ -38,6 +39,7 @@ use crate::sink::writer::SinkWriterExt;
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
 
 pub const SNOWFLAKE_SINK: &str = "snowflake";
+const INITIAL_CHUNK_CAPACITY: usize = 1024;
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct SnowflakeCommon {
@@ -315,11 +317,13 @@ impl SnowflakeSinkWriter {
     }
 
     async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
+        let mut chunk_buf = BytesMut::with_capacity(INITIAL_CHUNK_CAPACITY);
         for (op, row) in chunk.rows() {
             assert_eq!(op, Op::Insert, "expect all `op(s)` to be `Op::Insert`");
-            let row_json_string = Value::Object(self.row_encoder.encode(row)?).to_string();
-            self.streaming_upload(row_json_string.into()).await?;
+            chunk_buf.extend_from_slice(Value::Object(self.row_encoder.encode(row)?).to_string().as_bytes());
         }
+        // streaming upload in a chunk-by-chunk manner
+        self.streaming_upload(chunk_buf.freeze()).await?;
         Ok(())
     }
 
