@@ -1,6 +1,3 @@
-system ok
-pip3 install -r e2e_test/udf/requirements.txt -q
-
 statement ok
 CREATE FUNCTION gcd(a int, b int) RETURNS int LANGUAGE javascript RUNTIME deno AS $$
     if(a == null || b == null) {
