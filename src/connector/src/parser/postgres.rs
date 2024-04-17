@@ -429,16 +429,8 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
 }
 
 fn pg_numeric_to_rw_int256(val: Option<PgNumeric>) -> Option<ScalarImpl> {
-    let val = if let Some(PgNumeric {
-        n: Some(big_decimal),
-    }) = val
-    {
-        big_decimal.to_string()
-    } else {
-        // either NULL or NaN
-        return None;
-    };
-    match Int256::from_str(val.as_str()) {
+    let string = pg_numeric_to_string(val)?;
+    match Int256::from_str(string.as_str()) {
         Ok(num) => Some(ScalarImpl::from(num)),
         Err(err) => {
             if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
@@ -454,13 +446,16 @@ fn pg_numeric_to_rw_int256(val: Option<PgNumeric>) -> Option<ScalarImpl> {
 }
 
 fn pg_numeric_to_varchar(val: Option<PgNumeric>) -> Option<ScalarImpl> {
-    // TODO(kexiang): support Infinity and -Infinity
-    if let Some(v) = val {
-        if let Some(big_decimal) = v.n {
-            Some(ScalarImpl::from(big_decimal.to_string()))
-        } else {
-            // NaN
-            Some(ScalarImpl::from(String::from("NaN")))
+    pg_numeric_to_string(val).map(ScalarImpl::from)
+}
+
+fn pg_numeric_to_string(val: Option<PgNumeric>) -> Option<String> {
+    if let Some(pg_numeric) = val {
+        match pg_numeric {
+            PgNumeric::NegativeInf => Some(String::from("-Infinity")),
+            PgNumeric::Normalized(big_decimal) => Some(big_decimal.to_string()),
+            PgNumeric::PositiveInf => Some(String::from("Infinity")),
+            PgNumeric::NaN => Some(String::from("NaN")),
         }
     } else {
         // NULL

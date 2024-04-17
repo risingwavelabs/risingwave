@@ -8390,7 +8390,7 @@ dependencies = [
 [[package]]
 name = "pg_bigdecimal"
 version = "0.1.5"
-source = "git+https://github.com/risingwavelabs/rust-pg_bigdecimal?rev=3ec5e7bb283d9795d3626ffd8f9cb28cf0378608#3ec5e7bb283d9795d3626ffd8f9cb28cf0378608"
+source = "git+https://github.com/risingwavelabs/rust-pg_bigdecimal?rev=0b7893d88894ca082b4525f94f812da034486f7c#0b7893d88894ca082b4525f94f812da034486f7c"
 dependencies = [
  "bigdecimal 0.4.2",
  "byteorder",
