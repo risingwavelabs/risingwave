@@ -51,6 +51,40 @@ pub fn inet_aton(str: &str) -> Result<i64> {
     Ok(result)
 }
 
+/// Given a numeric IPv4 network address in network byte order (big endian),
+/// returns the dotted-quad string representation of the address as a string.
+///
+/// This function is ported from MySQL.
+/// Ref: <https://dev.mysql.com/doc/refman/8.3/en/miscellaneous-functions.html#function_inet-ntoa>.
+///
+/// # Example
+///
+/// ```slt
+/// query I
+/// select inet_aton(167773449);
+/// ----
+/// '10.0.5.9'
+#[function("inet_ntoa(int8) -> varchar")]
+pub fn inet_ntoa(mut num: i64) -> Result<Box<str>> {
+    if (num > u32::MAX as i64) || (num < 0) {
+        return Err(ExprError::InvalidParam {
+            name: "num",
+            reason: format!("Invalid IP number: {}", num).into(),
+        });
+    }
+    let mut parts = vec![0u8, 0, 0, 0];
+    for i in (0..4).rev() {
+        parts[i] = (num & 0xFF) as u8;
+        num >>= 8;
+    }
+    let str = parts
+        .iter()
+        .map(|&x| x.to_string())
+        .collect::<Vec<_>>()
+        .join(".");
+    Ok(str.into_boxed_str())
+}
+
 #[cfg(test)]
 mod tests {
     use std::assert_matches::assert_matches;
@@ -72,5 +106,28 @@ mod tests {
         assert_matches!(inet_aton("127.0.1"), Err(ExprError::InvalidParam { .. }));
         assert_matches!(inet_aton("1.0.0.256"), Err(ExprError::InvalidParam { .. }));
         assert_matches!(inet_aton("1.0.0.-1"), Err(ExprError::InvalidParam { .. }));
+    }
+
+    #[test]
+    fn test_inet_ntoa() {
+        assert_eq!(inet_ntoa(167773449).unwrap(), "10.0.5.9".into());
+        assert_eq!(inet_ntoa(3413450530).unwrap(), "203.117.31.34".into());
+        assert_eq!(inet_ntoa(0).unwrap(), "0.0.0.0".into());
+        assert_eq!(
+            inet_ntoa(u32::MAX as i64).unwrap(),
+            "255.255.255.255".into()
+        );
+
+        if let ExprError::InvalidParam { name, reason } = inet_ntoa(-1).unwrap_err() {
+            assert_eq!(name, "num");
+            assert_eq!(reason, "Invalid IP number: -1".into());
+        } else {
+            panic!("Expected InvalidParam error");
+        }
+
+        assert_matches!(
+            inet_ntoa(u32::MAX as i64 + 1),
+            Err(ExprError::InvalidParam { .. })
+        );
     }
 }
