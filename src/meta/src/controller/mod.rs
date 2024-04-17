@@ -240,7 +240,7 @@ impl From<ObjectModel<subscription::Model>> for PbSubscription {
             subscription_from_name: value.0.subscription_from_name,
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
-            subscription_internal_table_name: Some(value.0.subscription_internal_table_name),
+            subscription_internal_table_name: value.0.subscription_internal_table_name,
         }
     }
 }
