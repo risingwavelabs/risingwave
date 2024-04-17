@@ -4,22 +4,18 @@
 # and corresponding rw-build-env version in docker-compose.yml.                             #
 #############################################################################################
 
-FROM ubuntu:22.04 AS risingwave-build-env
+FROM ubuntu:24.04 AS risingwave-build-env
 
 ENV LANG en_US.utf8
 
 # Use AWS ubuntu mirror
 RUN sed -i 's|http://archive.ubuntu.com/ubuntu|http://us-east-2.ec2.archive.ubuntu.com/ubuntu/|g' /etc/apt/sources.list
 RUN apt-get update -yy && \
-    DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl parallel python3 python3-pip software-properties-common \
-    openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config bash openjdk-11-jdk wget unzip git tmux lld postgresql-client kafkacat netcat mysql-client \
-    maven zstd libzstd-dev locales -yy \
+    DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl parallel python3 python3-pip python3-venv software-properties-common \
+    openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config bash openjdk-11-jdk wget unzip git tmux lld postgresql-client kcat netcat-openbsd mysql-client \
+    maven zstd libzstd-dev locales \
+    python3.12 python3.12-dev \
     && rm -rf /var/lib/{apt,dpkg,cache,log}/
-# Install Python 3.12
-RUN add-apt-repository ppa:deadsnakes/ppa -y && \
-    apt-get update -yy && \
-    DEBIAN_FRONTEND=noninteractive apt-get install python3.12 python3.12-dev -yy && \
-    rm -rf /var/lib/{apt,dpkg,cache,log}/
 ENV PYO3_PYTHON=python3.12
 
 SHELL ["/bin/bash", "-c"]
@@ -34,24 +30,24 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-mo
 
 ENV PATH /root/.cargo/bin/:$PATH
 
-RUN rustup show
-RUN rustup default `rustup show active-toolchain | awk '{print $1}'`
+RUN rustup show && \
+    rustup default `rustup show active-toolchain | awk '{print $1}'` && \
+    rustup component add rustfmt llvm-tools-preview clippy && \
+    rustup target add wasm32-wasi
 
 RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.29.0/buf-$(uname -s)-$(uname -m).tar.gz" | \
     tar -xvzf - -C /usr/local --strip-components 1
 
 # install python dependencies
-RUN pip3 install pyarrow pytest
+RUN pip3 install --break-system-packages pyarrow pytest
 
 # Install poetry
 RUN curl -sSL https://install.python-poetry.org | python3 -
+ENV PATH /root/.local/bin:$PATH
 
 # Install psycopg
 RUN python3 -m pip install psycopg2-binary
-
-# add required rustup components
-RUN rustup component add rustfmt llvm-tools-preview clippy
-RUN rustup target add wasm32-wasi
+ENV PATH /root/.local/bin:$PATH
 
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 
