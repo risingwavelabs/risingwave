@@ -370,6 +370,7 @@ fn get_upload_body(data: Vec<Bytes>) -> ByteStream {
 
 /// Object store with S3 backend
 /// The full path to a file on S3 would be `s3://bucket/<data_directory>/prefix/file`
+#[derive(Clone)]
 pub struct S3ObjectStore {
     client: Client,
     bucket: String,
