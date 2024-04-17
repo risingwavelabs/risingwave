@@ -101,6 +101,7 @@ impl StreamTemporalJoin {
     ///
     /// Write pattern:
     ///   for each left input row (with insert op), construct the memo table pk and insert the row into the memo table.
+    ///
     /// Read pattern:
     ///   for each left input row (with delete op), construct pk prefix (`join_key` + `left_pk`) to fetch rows and delete them from the memo table.
     pub fn infer_memo_table_catalog(&self, right_scan: &StreamTableScan) -> TableCatalog {
@@ -132,8 +133,14 @@ impl StreamTemporalJoin {
             internal_table_catalog_builder.add_order_column(*idx, OrderType::ascending())
         });
 
+        let dist_key_len = right_scan
+            .core()
+            .distribution_key()
+            .map(|keys| keys.len())
+            .unwrap_or(0);
+
         let internal_table_dist_keys =
-            (right_scan_schema.len()..(right_scan_schema.len() + left_eq_indexes.len())).collect();
+            (right_scan_schema.len()..(right_scan_schema.len() + dist_key_len)).collect();
         internal_table_catalog_builder.build(internal_table_dist_keys, read_prefix_len_hint)
     }
 }
