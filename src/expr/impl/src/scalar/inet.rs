@@ -61,9 +61,10 @@ pub fn inet_aton(str: &str) -> Result<i64> {
 ///
 /// ```slt
 /// query I
-/// select inet_aton(167773449);
+/// select inet_ntoa(167773449);
 /// ----
 /// '10.0.5.9'
+/// ```
 #[function("inet_ntoa(int8) -> varchar")]
 pub fn inet_ntoa(mut num: i64) -> Result<Box<str>> {
     if (num > u32::MAX as i64) || (num < 0) {
