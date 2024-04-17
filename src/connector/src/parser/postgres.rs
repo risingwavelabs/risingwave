@@ -17,7 +17,6 @@ use std::sync::LazyLock;
 
 use chrono::{NaiveDate, Utc};
 use pg_bigdecimal::PgNumeric;
-use risingwave_common::array::ArrayBuilderImpl;
 use risingwave_common::catalog::Schema;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::row::OwnedRow;
@@ -142,7 +141,26 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                 DataType::Decimal => {
                     handle_data_type!(row, i, name, RustDecimal, Decimal)
                 }
-                DataType::Int256 => postgres_decimal_to_rw_int256(&row, i, name, None),
+                DataType::Int256 => {
+                    // Currently in order to handle the decimal beyond RustDecimal,
+                    // we use the PgNumeric type to convert the decimal to a string.
+                    // Then we convert the string to Int256.
+                    let res = row.try_get::<_, Option<PgNumeric>>(i);
+                    match res {
+                        Ok(val) => pg_numeric_to_rw_int256(val),
+                        Err(err) => {
+                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                                tracing::error!(
+                                    column = name,
+                                    error = %err.as_report(),
+                                    suppressed_count,
+                                    "parse numeric column as pg_numeric failed",
+                                );
+                            }
+                            None
+                        }
+                    }
+                }
                 DataType::Varchar => {
                     match *row.columns()[i].type_() {
                         // Since we don't support UUID natively, adapt it to a VARCHAR column
@@ -163,8 +181,26 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                 }
                             }
                         }
-                        // support converting NUMERIC to VARCHAR implicitly
-                        Type::NUMERIC => postgres_decimal_to_varchar(&row, i, name, None),
+                        // we support converting NUMERIC to VARCHAR implicitly
+                        Type::NUMERIC => {
+                            // Currently in order to handle the decimal beyond RustDecimal,
+                            // we use the PgNumeric type to convert the decimal to a string.
+                            let res = row.try_get::<_, Option<PgNumeric>>(i);
+                            match res {
+                                Ok(val) => pg_numeric_to_varchar(val),
+                                Err(err) => {
+                                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                                        tracing::error!(
+                                            column = name,
+                                            error = %err.as_report(),
+                                            suppressed_count,
+                                            "parse numeric column as pg_numeric failed",
+                                        );
+                                    }
+                                    None
+                                }
+                            }
+                        }
                         _ => {
                             handle_data_type!(row, i, name, String)
                         }
@@ -235,13 +271,16 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                         DataType::Varchar => {
                             match *row.columns()[i].type_() {
                                 // Since we don't support UUID natively, adapt it to a VARCHAR column
-                                Type::UUID => {
-                                    let res = row.try_get::<_, Option<uuid::Uuid>>(i);
+                                Type::UUID_ARRAY => {
+                                    let res = row.try_get::<_, Option<Vec<uuid::Uuid>>>(i);
                                     match res {
                                         Ok(val) => {
                                             if let Some(v) = val {
-                                                builder
-                                                    .append(Some(ScalarImpl::from(v.to_string())));
+                                                v.into_iter().for_each(|val| {
+                                                    builder.append(Some(ScalarImpl::from(
+                                                        val.to_string(),
+                                                    )))
+                                                });
                                             }
                                         }
                                         Err(err) => {
@@ -256,9 +295,27 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                         }
                                     };
                                 }
-                                // support converting NUMERIC to VARCHAR implicitly
-                                Type::NUMERIC => {
-                                    let _ = postgres_decimal_to_varchar(&row, i, name, None);
+                                Type::NUMERIC_ARRAY => {
+                                    let res = row.try_get::<_, Option<Vec<PgNumeric>>>(i);
+                                    match res {
+                                        Ok(val) => {
+                                            if let Some(v) = val {
+                                                v.into_iter().for_each(|val| {
+                                                    builder.append(pg_numeric_to_varchar(Some(val)))
+                                                });
+                                            }
+                                        }
+                                        Err(err) => {
+                                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                                                tracing::error!(
+                                                    suppressed_count,
+                                                    column = name,
+                                                    error = %err.as_report(),
+                                                    "parse numeric list column as pg_numeric list failed",
+                                                );
+                                            }
+                                        }
+                                    };
                                 }
                                 _ => {
                                     handle_list_data_type!(row, i, name, String, builder);
@@ -326,8 +383,26 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                             }
                         }
                         DataType::Int256 => {
-                            let _ =
-                                postgres_decimal_to_rw_int256(&row, i, name, Some(&mut builder));
+                            let res = row.try_get::<_, Option<Vec<PgNumeric>>>(i);
+                            match res {
+                                Ok(val) => {
+                                    if let Some(v) = val {
+                                        v.into_iter().for_each(|val| {
+                                            builder.append(pg_numeric_to_rw_int256(Some(val)))
+                                        });
+                                    }
+                                }
+                                Err(err) => {
+                                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                                        tracing::error!(
+                                            suppressed_count,
+                                            column = name,
+                                            error = %err.as_report(),
+                                            "parse numeric list column as pg_numeric list failed",
+                                        );
+                                    }
+                                }
+                            };
                         }
                         DataType::Struct(_) | DataType::List(_) | DataType::Serial => {
                             tracing::warn!(
@@ -351,59 +426,16 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
     OwnedRow::new(datums)
 }
 
-fn postgres_decimal_to_string(row: &tokio_postgres::Row, idx: usize, name: &str) -> Option<String> {
-    let res = row.try_get::<_, Option<PgNumeric>>(idx);
-    match res {
-        Ok(val) => {
-            if let Some(PgNumeric {
-                n: Some(big_decimal),
-            }) = val
-            {
-                Some(big_decimal.to_string())
-            } else {
-                None
-            }
-        }
-        Err(err) => {
-            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                tracing::error!(
-                    column = name,
-                    error = %err.as_report(),
-                    suppressed_count,
-                    "parse column failed",
-                );
-            }
-            None
-        }
-    }
-}
-
-fn postgres_decimal_to_rw_int256(
-    row: &tokio_postgres::Row,
-    idx: usize,
-    name: &str,
-    builder: Option<&mut ArrayBuilderImpl>,
-) -> Option<ScalarImpl> {
-    // Currently in order to handle the decimal beyond RustDecimal,
-    // we use the PgNumeric type to convert the decimal to a string.
-    // Then we convert the string to Int256.
-    let string = postgres_decimal_to_string(row, idx, name)?;
+fn pg_numeric_to_rw_int256(val: Option<PgNumeric>) -> Option<ScalarImpl> {
+    let string = pg_numeric_to_string(val)?;
     match Int256::from_str(string.as_str()) {
-        Ok(num) => {
-            if let Some(builder) = builder {
-                builder.append(Some(ScalarImpl::from(num)));
-                None
-            } else {
-                Some(ScalarImpl::from(num))
-            }
-        }
+        Ok(num) => Some(ScalarImpl::from(num)),
         Err(err) => {
             if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                 tracing::error!(
-                    column = name,
                     error = %err.as_report(),
                     suppressed_count,
-                    "parse column failed",
+                    "parse numeric string as rw_int256 failed",
                 );
             }
             None
@@ -411,20 +443,17 @@ fn postgres_decimal_to_rw_int256(
     }
 }
 
-fn postgres_decimal_to_varchar(
-    row: &tokio_postgres::Row,
-    idx: usize,
-    name: &str,
-    builder: Option<&mut ArrayBuilderImpl>,
-) -> Option<ScalarImpl> {
-    // Currently in order to handle the decimal beyond RustDecimal,
-    // we use the PgNumeric type to convert the decimal to a string.
-    let string = postgres_decimal_to_string(row, idx, name)?;
+fn pg_numeric_to_varchar(val: Option<PgNumeric>) -> Option<ScalarImpl> {
+    pg_numeric_to_string(val).map(ScalarImpl::from)
+}
 
-    if let Some(builder) = builder {
-        builder.append(Some(ScalarImpl::from(string)));
-        None
+fn pg_numeric_to_string(val: Option<PgNumeric>) -> Option<String> {
+    if let Some(PgNumeric {
+        n: Some(big_decimal),
+    }) = val
+    {
+        Some(big_decimal.to_string())
     } else {
-        Some(ScalarImpl::from(string))
+        None
     }
 }
