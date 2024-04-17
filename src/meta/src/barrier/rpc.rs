@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::error::Error;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
@@ -28,7 +29,7 @@ use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::stream_plan::{Barrier, BarrierMutation, StreamActor};
 use risingwave_pb::stream_service::{
-    streaming_control_stream_request, streaming_control_stream_response,
+    streaming_control_stream_request, streaming_control_stream_response, BarrierCompleteResponse,
     BroadcastActorInfoTableRequest, BuildActorsRequest, DropActorsRequest, InjectBarrierRequest,
     StreamingControlStreamRequest, StreamingControlStreamResponse, UpdateActorsRequest,
 };
@@ -46,6 +47,8 @@ use super::command::CommandContext;
 use super::GlobalBarrierManagerContext;
 use crate::manager::{MetaSrvEnv, WorkerId};
 use crate::{MetaError, MetaResult};
+
+const COLLECT_ERROR_TIMEOUT: Duration = Duration::from_secs(3);
 
 struct ControlStreamNode {
     worker: WorkerNode,
@@ -162,17 +165,25 @@ impl ControlStreamManager {
         Ok(())
     }
 
-    pub(super) async fn next_response(
+    async fn next_response(
         &mut self,
-    ) -> MetaResult<(WorkerId, u64, StreamingControlStreamResponse)> {
+    ) -> Option<(WorkerId, MetaResult<StreamingControlStreamResponse>)> {
+        let (worker_id, response_stream, result) = self.response_streams.next().await?;
+        if result.is_ok() {
+            self.response_streams
+                .push(into_future(worker_id, response_stream));
+        }
+        Some((worker_id, result))
+    }
+
+    pub(super) async fn next_complete_barrier_response(
+        &mut self,
+    ) -> MetaResult<(WorkerId, u64, BarrierCompleteResponse)> {
         loop {
-            let (worker_id, response_stream, result) =
-                pending_on_none(self.response_streams.next()).await;
+            let (worker_id, result) = pending_on_none(self.next_response()).await;
             match result {
-                Ok(resp) => match &resp.response {
-                    Some(streaming_control_stream_response::Response::CompleteBarrier(_)) => {
-                        self.response_streams
-                            .push(into_future(worker_id, response_stream));
+                Ok(resp) => match resp.response {
+                    Some(streaming_control_stream_response::Response::CompleteBarrier(resp)) => {
                         let node = self
                             .nodes
                             .get_mut(&worker_id)
@@ -195,15 +206,38 @@ impl ControlStreamManager {
                     // Note: No need to use `?` as the backtrace is from meta and not useful.
                     warn!(node = ?node.worker, err = %err.as_report(), "get error from response stream");
                     if let Some(command) = node.inflight_barriers.pop_front() {
+                        let errors = self.collect_errors(node.worker.id, err).await;
+                        let err = merge_node_rpc_errors("get error from control stream", errors);
                         self.context.report_collect_failure(&command, &err);
                         break Err(err);
                     } else {
                         // for node with no inflight barrier, simply ignore the error
+                        info!(node = ?node.worker, "no inflight barrier no node. Ignore error");
                         continue;
                     }
                 }
             }
         }
+    }
+
+    async fn collect_errors(
+        &mut self,
+        worker_id: WorkerId,
+        first_err: MetaError,
+    ) -> Vec<(WorkerId, MetaError)> {
+        let mut errors = vec![(worker_id, first_err)];
+        #[cfg(not(madsim))]
+        {
+            let _ = timeout(COLLECT_ERROR_TIMEOUT, async {
+                while let Some((worker_id, result)) = self.next_response().await {
+                    if let Err(e) = result {
+                        errors.push((worker_id, e));
+                    }
+                }
+            })
+            .await;
+        }
+        errors
     }
 }
 
@@ -356,7 +390,7 @@ impl StreamRpcManager {
             let client = pool.get(node).await.map_err(|e| (node.id, e))?;
             f(client, input).await.map_err(|e| (node.id, e))
         });
-        let result = try_join_all_with_error_timeout(iters, Duration::from_secs(3)).await;
+        let result = try_join_all_with_error_timeout(iters, COLLECT_ERROR_TIMEOUT).await;
         result.map_err(|results_err| merge_node_rpc_errors("merged RPC Error", results_err))
     }
 
@@ -491,9 +525,9 @@ where
     Err(results_err)
 }
 
-fn merge_node_rpc_errors(
+fn merge_node_rpc_errors<E: Error>(
     message: &str,
-    errors: impl IntoIterator<Item = (WorkerId, RpcError)>,
+    errors: impl IntoIterator<Item = (WorkerId, E)>,
 ) -> MetaError {
     use std::fmt::Write;
 
