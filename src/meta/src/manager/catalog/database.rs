@@ -31,7 +31,8 @@ use super::{
     ViewId,
 };
 use crate::manager::{IndexId, MetaSrvEnv, TableId, UserId};
-use crate::model::MetadataModel;
+use crate::model::{BTreeMapTransaction, MetadataModel, ValTransaction};
+use crate::storage::MetaStore;
 use crate::{MetaError, MetaResult};
 
 pub type Catalog = (
@@ -129,7 +130,7 @@ impl DatabaseManager {
             (subscription.id, subscription)
         }));
         let indexes = BTreeMap::from_iter(indexes.into_iter().map(|index| (index.id, index)));
-        let tables = BTreeMap::from_iter(tables.into_iter().map(|table| {
+        let mut tables = BTreeMap::from_iter(tables.into_iter().map(|table| {
             for depend_relation_id in &table.dependent_relations {
                 *relation_ref_count.entry(*depend_relation_id).or_default() += 1;
             }
@@ -143,6 +144,47 @@ impl DatabaseManager {
         }));
         let functions = BTreeMap::from_iter(functions.into_iter().map(|f| (f.id, f)));
         let connections = BTreeMap::from_iter(connections.into_iter().map(|c| (c.id, c)));
+
+        // dirty hack to insert incoming sinks for table
+        let mut table_sink_target = HashMap::new();
+        for sink in sinks.values() {
+            if let Some(table_id) = sink.target_table {
+                table_sink_target
+                    .entry(table_id)
+                    .or_insert(HashSet::new())
+                    .insert(sink.id);
+            }
+        }
+
+        for table in tables.values() {
+            if let Some(sink_ids) = table_sink_target.get(&table.id) {
+                let incoming_sinks: HashSet<_> = table.incoming_sinks.iter().copied().collect();
+                let diff: HashSet<_> = incoming_sinks.symmetric_difference(sink_ids).collect();
+                if diff.is_empty() {
+                    table_sink_target.remove(&table.id);
+                }
+            }
+        }
+
+        let mut tables_txn = BTreeMapTransaction::new(&mut tables);
+        for (table_id, sink_ids) in table_sink_target {
+            let mut table = tables_txn.get_mut(table_id).unwrap();
+
+            tracing::info!(
+                "updating incoming sink ids as {:?} for table: {:?}",
+                sink_ids,
+                table_id
+            );
+
+            table.incoming_sinks = sink_ids.iter().copied().collect();
+        }
+
+        {
+            let mut trx = crate::storage::Transaction::default();
+            tables_txn.apply_to_txn(&mut trx).await?;
+            env.meta_store().as_kv().txn(trx).await?;
+            tables_txn.commit();
+        }
 
         Ok(Self {
             databases,
