@@ -17,8 +17,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use bytes::Bytes;
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
@@ -320,7 +319,11 @@ impl SnowflakeSinkWriter {
         let mut chunk_buf = BytesMut::with_capacity(INITIAL_CHUNK_CAPACITY);
         for (op, row) in chunk.rows() {
             assert_eq!(op, Op::Insert, "expect all `op(s)` to be `Op::Insert`");
-            chunk_buf.extend_from_slice(Value::Object(self.row_encoder.encode(row)?).to_string().as_bytes());
+            chunk_buf.extend_from_slice(
+                Value::Object(self.row_encoder.encode(row)?)
+                    .to_string()
+                    .as_bytes(),
+            );
         }
         // streaming upload in a chunk-by-chunk manner
         self.streaming_upload(chunk_buf.freeze()).await?;
@@ -349,9 +352,7 @@ impl SnowflakeSinkWriter {
     async fn commit(&mut self) -> Result<()> {
         let file_suffix = self.finish_streaming_upload().await?;
         // trigger `insertFiles` post request to snowflake
-        self.http_client
-            .send_request(&file_suffix)
-            .await?;
+        self.http_client.send_request(&file_suffix).await?;
         self.reset_streaming_uploader();
         Ok(())
     }
