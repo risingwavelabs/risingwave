@@ -472,7 +472,7 @@ impl LocalQueryExecution {
                     node_body: Some(node_body),
                 })
             }
-            PlanNodeType::BatchSource => {
+            PlanNodeType::BatchSource | PlanNodeType::BatchKafkaScan => {
                 let mut node_body = execution_plan_node.node.clone();
                 match &mut node_body {
                     NodeBody::Source(ref mut source_node) => {

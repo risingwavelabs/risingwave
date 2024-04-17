@@ -974,6 +974,7 @@ fn require_additional_exchange_on_root_in_distributed_mode(plan: PlanRef) -> boo
 
     fn is_source(plan: &PlanRef) -> bool {
         plan.node_type() == PlanNodeType::BatchSource
+            || plan.node_type() == PlanNodeType::BatchKafkaScan
     }
 
     fn is_insert(plan: &PlanRef) -> bool {
@@ -1005,6 +1006,7 @@ fn require_additional_exchange_on_root_in_local_mode(plan: PlanRef) -> bool {
 
     fn is_source(plan: &PlanRef) -> bool {
         plan.node_type() == PlanNodeType::BatchSource
+            || plan.node_type() == PlanNodeType::BatchKafkaScan
     }
 
     fn is_insert(plan: &PlanRef) -> bool {
