@@ -951,13 +951,13 @@ pub async fn build_remote_object_store(
             if config.s3.developer.use_opendal {
                 tracing::info!("Using OpenDAL to access minio.");
                 ObjectStoreImpl::Opendal(
-                    OpendalObjectStore::with_minio(minio, config.clone())
+                    OpendalObjectStore::new_minio_engine(minio, config.clone())
                         .unwrap()
                         .monitored(metrics, config),
                 )
             } else {
                 ObjectStoreImpl::S3(
-                    S3ObjectStore::with_minio(minio, metrics.clone(), config.clone())
+                    S3ObjectStore::new_minio_engine(minio, metrics.clone(), config.clone())
                         .await
                         .monitored(metrics, config),
                 )

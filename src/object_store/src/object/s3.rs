@@ -702,7 +702,7 @@ impl S3ObjectStore {
     }
 
     /// Creates a minio client. The server should be like `minio://key:secret@address:port/bucket`.
-    pub async fn with_minio(
+    pub async fn new_minio_engine(
         server: &str,
         metrics: Arc<ObjectStoreMetrics>,
         object_store_config: Arc<ObjectStoreConfig>,
