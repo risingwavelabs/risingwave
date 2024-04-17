@@ -1062,15 +1062,14 @@ async fn test_delete_get_inner(
         )
         .await
         .unwrap();
+    let epoch2 = epoch1.next_epoch();
+    local.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
     let ssts = hummock_storage
         .seal_and_sync_epoch(epoch1)
         .await
         .unwrap()
         .uncommitted_ssts;
     meta_client.commit_epoch(epoch1, ssts).await.unwrap();
-    let epoch2 = epoch1.next_epoch();
-
-    local.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
     let batch2 = vec![(
         gen_key_from_str(VirtualNode::ZERO, "bb"),
         StorageValue::new_delete(),
