@@ -73,7 +73,7 @@ pub fn inet_ntoa(mut num: i64) -> Result<Box<str>> {
             reason: format!("Invalid IP number: {}", num).into(),
         });
     }
-    let mut parts = vec![0u8, 0, 0, 0];
+    let mut parts = [0u8, 0, 0, 0];
     for i in (0..4).rev() {
         parts[i] = (num & 0xFF) as u8;
         num >>= 8;
