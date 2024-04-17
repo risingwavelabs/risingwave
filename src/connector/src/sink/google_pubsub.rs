@@ -47,27 +47,31 @@ pub const PUBSUB_SINK: &str = "google_pubsub";
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct GooglePubSubConfig {
     /// The Google Pub/Sub Project ID
+    #[serde(rename = "pubsub.project_id")]
     pub project_id: String,
 
     /// Specifies the Pub/Sub topic to publish messages
+    #[serde(rename = "pubsub.topic")]
     pub topic: String,
 
     /// The Google Pub/Sub endpoint URL
+    #[serde(rename = "pubsub.endpoint")]
     pub endpoint: String,
-
-    // accept "append-only"
-    pub r#type: String,
 
     /// use the connector with a pubsub emulator
     /// <https://cloud.google.com/pubsub/docs/emulator>
-    // #[serde(rename = "pubsub.emulator_host")]
+    #[serde(rename = "pubsub.emulator_host")]
     pub emulator_host: Option<String>,
 
     /// A JSON string containing the service account credentials for authorization,
     /// see the [service-account](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account) credentials guide.
     /// The provided account credential must have the
     /// `pubsub.publisher` [role](https://cloud.google.com/pubsub/docs/access-control#roles)
+    #[serde(rename = "pubsub.credentials")]
     pub credentials: Option<String>,
+
+    // accept "append-only"
+    pub r#type: String,
 }
 
 impl GooglePubSubConfig {
