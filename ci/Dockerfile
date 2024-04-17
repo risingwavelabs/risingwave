@@ -43,10 +43,6 @@ RUN rustup show && \
     rustup default `rustup show active-toolchain | awk '{print $1}'` && \
     rustup component add rustfmt llvm-tools-preview clippy && \
     rustup target add wasm32-wasi
-RUN rustup show && \
-    rustup default `rustup show active-toolchain | awk '{print $1}'` && \
-    rustup component add rustfmt llvm-tools-preview clippy && \
-    rustup target add wasm32-wasi
 
 RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.29.0/buf-$(uname -s)-$(uname -m).tar.gz" | \
     tar -xvzf - -C /usr/local --strip-components 1
