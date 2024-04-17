@@ -239,14 +239,16 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             object_store_streaming_read_timeout_ms: c
                 .storage
                 .object_store
-                .object_store_streaming_read_timeout_ms,
+                .retry
+                .streaming_read_timeout_ms,
             compact_iter_recreate_timeout_ms: c.storage.compact_iter_recreate_timeout_ms,
             object_store_streaming_upload_timeout_ms: c
                 .storage
                 .object_store
-                .object_store_streaming_upload_timeout_ms,
-            object_store_read_timeout_ms: c.storage.object_store.object_store_read_timeout_ms,
-            object_store_upload_timeout_ms: c.storage.object_store.object_store_upload_timeout_ms,
+                .retry
+                .streaming_upload_timeout_ms,
+            object_store_read_timeout_ms: c.storage.object_store.retry.read_timeout_ms,
+            object_store_upload_timeout_ms: c.storage.object_store.retry.upload_timeout_ms,
             max_preload_io_retry_times: c.storage.max_preload_io_retry_times,
             backup_storage_url: p.backup_storage_url().to_string(),
             backup_storage_directory: p.backup_storage_directory().to_string(),

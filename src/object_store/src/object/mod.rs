@@ -560,7 +560,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         };
 
         let retry_condition = RetryCondition::new(
-            self.config.object_store_upload_timeout_ms,
+            self.config.retry.upload_timeout_ms,
             operation_type,
             self.object_store_metrics.clone(),
         );
@@ -589,7 +589,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         };
 
         let retry_condition = RetryCondition::new(
-            self.config.object_store_streaming_upload_timeout_ms,
+            self.config.retry.streaming_upload_timeout_ms,
             operation_type,
             self.object_store_metrics.clone(),
         );
@@ -601,11 +601,11 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             media_type,
             res?,
             self.object_store_metrics.clone(),
-            if self.config.object_store_streaming_upload_timeout_ms == 0 {
+            if self.config.retry.streaming_upload_timeout_ms == 0 {
                 None
             } else {
                 Some(Duration::from_millis(
-                    self.config.object_store_streaming_upload_timeout_ms,
+                    self.config.retry.streaming_upload_timeout_ms,
                 ))
             },
         ))
@@ -621,7 +621,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .start_timer();
 
         let retry_condition = RetryCondition::new(
-            self.config.object_store_read_timeout_ms,
+            self.config.retry.read_timeout_ms,
             operation_type,
             self.object_store_metrics.clone(),
         );
@@ -674,7 +674,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .start_timer();
 
         let retry_condition = RetryCondition::new(
-            self.config.object_store_streaming_read_timeout_ms,
+            self.config.retry.streaming_read_timeout_ms,
             operation_type,
             self.object_store_metrics.clone(),
         );
@@ -694,11 +694,11 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             media_type,
             res?,
             self.object_store_metrics.clone(),
-            if self.config.object_store_streaming_read_timeout_ms == 0 {
+            if self.config.retry.streaming_read_timeout_ms == 0 {
                 None
             } else {
                 Some(Duration::from_millis(
-                    self.config.object_store_streaming_read_timeout_ms,
+                    self.config.retry.streaming_read_timeout_ms,
                 ))
             },
         ))
@@ -987,10 +987,8 @@ fn get_retry_strategy(
     operation_type: OperationType,
 ) -> impl Iterator<Item = Duration> {
     let attempts = get_retry_attempts_by_type(config, operation_type);
-    ExponentialBackoff::from_millis(config.object_store_req_retry_interval_ms)
-        .max_delay(Duration::from_millis(
-            config.object_store_req_retry_max_delay_ms,
-        ))
+    ExponentialBackoff::from_millis(config.retry.req_retry_interval_ms)
+        .max_delay(Duration::from_millis(config.retry.req_retry_max_delay_ms))
         .factor(2)
         .take(attempts)
         .map(jitter)
@@ -1032,35 +1030,35 @@ impl OperationType {
 
 fn get_retry_attempts_by_type(config: &ObjectStoreConfig, operation_type: OperationType) -> usize {
     match operation_type {
-        OperationType::Upload => config.object_store_upload_retry_attempts,
+        OperationType::Upload => config.retry.upload_retry_attempts,
         OperationType::StreamingUploadInit | OperationType::StreamingUpload => {
-            config.object_store_streaming_upload_retry_attempts
+            config.retry.streaming_upload_retry_attempts
         }
-        OperationType::Read => config.object_store_read_retry_attempts,
+        OperationType::Read => config.retry.read_retry_attempts,
         OperationType::StreamingReadInit | OperationType::StreamingRead => {
-            config.object_store_streaming_read_retry_attempts
+            config.retry.streaming_read_retry_attempts
         }
-        OperationType::Metadata => config.object_store_metadata_retry_attempts,
-        OperationType::Delete => config.object_store_delete_retry_attempts,
-        OperationType::DeleteObjects => config.object_store_delete_objects_retry_attempts,
-        OperationType::List => config.object_store_list_retry_attempts,
+        OperationType::Metadata => config.retry.metadata_retry_attempts,
+        OperationType::Delete => config.retry.delete_retry_attempts,
+        OperationType::DeleteObjects => config.retry.delete_objects_retry_attempts,
+        OperationType::List => config.retry.list_retry_attempts,
     }
 }
 
 fn get_attempt_timeout_by_type(config: &ObjectStoreConfig, operation_type: OperationType) -> u64 {
     match operation_type {
-        OperationType::Upload => config.object_store_upload_attempt_timeout_ms,
+        OperationType::Upload => config.retry.upload_attempt_timeout_ms,
         OperationType::StreamingUploadInit | OperationType::StreamingUpload => {
-            config.object_store_streaming_upload_attempt_timeout_ms
+            config.retry.streaming_upload_attempt_timeout_ms
         }
-        OperationType::Read => config.object_store_read_attempt_timeout_ms,
+        OperationType::Read => config.retry.read_attempt_timeout_ms,
         OperationType::StreamingReadInit | OperationType::StreamingRead => {
-            config.object_store_streaming_read_attempt_timeout_ms
+            config.retry.streaming_read_attempt_timeout_ms
         }
-        OperationType::Metadata => config.object_store_metadata_attempt_timeout_ms,
-        OperationType::Delete => config.object_store_delete_attempt_timeout_ms,
-        OperationType::DeleteObjects => config.object_store_delete_attempt_timeout_ms,
-        OperationType::List => config.object_store_list_attempt_timeout_ms,
+        OperationType::Metadata => config.retry.metadata_attempt_timeout_ms,
+        OperationType::Delete => config.retry.delete_attempt_timeout_ms,
+        OperationType::DeleteObjects => config.retry.delete_attempt_timeout_ms,
+        OperationType::List => config.retry.list_attempt_timeout_ms,
     }
 }
 
@@ -1096,7 +1094,7 @@ impl RetryCondition {
             err.should_retry()
         };
 
-        if !should_retry {
+        if !should_retry && self.retry_count > 0 {
             self.metrics
                 .request_retry_count
                 .with_label_values(&[self.operation_type.as_str()])

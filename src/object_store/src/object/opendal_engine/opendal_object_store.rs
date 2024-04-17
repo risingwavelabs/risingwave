@@ -141,17 +141,17 @@ impl ObjectStore for OpendalObjectStore {
             .layer(
                 RetryLayer::new()
                     .with_min_delay(Duration::from_millis(
-                        self.config.object_store_req_retry_interval_ms,
+                        self.config.retry.req_retry_interval_ms,
                     ))
                     .with_max_delay(Duration::from_millis(
-                        self.config.object_store_req_retry_max_delay_ms,
+                        self.config.retry.req_retry_max_delay_ms,
                     ))
-                    .with_max_times(self.config.object_store_req_retry_max_retry_attempts)
+                    .with_max_times(self.config.retry.streaming_read_retry_attempts)
                     .with_factor(2.0)
                     .with_jitter(),
             )
             .layer(TimeoutLayer::new().with_io_timeout(Duration::from_millis(
-                self.config.object_store_streaming_read_attempt_timeout_ms,
+                self.config.retry.streaming_read_attempt_timeout_ms,
             )))
             .reader_with(path)
             .range(range)
@@ -255,18 +255,14 @@ impl OpendalStreamingUploader {
             .clone()
             .layer(
                 RetryLayer::new()
-                    .with_min_delay(Duration::from_millis(
-                        config.object_store_req_retry_interval_ms,
-                    ))
-                    .with_max_delay(Duration::from_millis(
-                        config.object_store_req_retry_max_delay_ms,
-                    ))
-                    .with_max_times(config.object_store_streaming_upload_retry_attempts)
+                    .with_min_delay(Duration::from_millis(config.retry.req_retry_interval_ms))
+                    .with_max_delay(Duration::from_millis(config.retry.req_retry_max_delay_ms))
+                    .with_max_times(config.retry.streaming_upload_retry_attempts)
                     .with_factor(2.0)
                     .with_jitter(),
             )
             .layer(TimeoutLayer::new().with_io_timeout(Duration::from_millis(
-                config.object_store_streaming_upload_attempt_timeout_ms,
+                config.retry.streaming_upload_attempt_timeout_ms,
             )))
             .writer_with(&path)
             .concurrent(8)

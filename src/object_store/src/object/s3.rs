@@ -224,7 +224,7 @@ impl S3StreamingUploader {
                     }
                 },
                 RetryCondition::new(
-                    config.object_store_upload_timeout_ms,
+                    config.retry.upload_timeout_ms,
                     operation_type,
                     metrics.clone(),
                 ),
