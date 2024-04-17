@@ -33,15 +33,11 @@ impl OverwriteOptions {
                 // FIXME(tabVersion): validate the value
                 Some(x.parse::<u32>().unwrap())
             } else {
-                // SET STREAMING_RATE_LIMIT=N;
-                // -- OR
-                // SET ENABLE_STREAMING_RATE_LIMIT=true|false;
-                // CREATE MATERIALIZED VIEW m1
-                let config = args.session.config();
-                if config.enable_streaming_rate_limit() {
-                    Some(args.session.config().streaming_rate_limit())
-                } else {
+                let rate_limit = args.session.config().streaming_rate_limit();
+                if rate_limit < 0 {
                     None
+                } else {
+                    Some(rate_limit as u32)
                 }
             }
         };

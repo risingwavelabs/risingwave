@@ -52,6 +52,10 @@ pub enum SessionConfigError {
 
 type SessionConfigResult<T> = std::result::Result<T, SessionConfigError>;
 
+// NOTE(kwannoel): We declare it separately as a constant,
+// otherwise seems like it can't infer the type of -1 when written inline.
+const DISABLE_STREAMING_RATE_LIMIT: i32 = -1;
+
 #[serde_as]
 /// This is the Session Config of RisingWave.
 #[derive(Clone, Debug, Deserialize, Serialize, SessionConfig, ConfigDoc, PartialEq)]
@@ -242,12 +246,8 @@ pub struct SessionConfig {
     standard_conforming_strings: String,
 
     /// Set streaming rate limit (rows per second) for each parallelism for mv / source backfilling, source reads.
-    #[parameter(default = 1u32, flags = "SETTER")]
-    streaming_rate_limit: u32,
-
-    /// Disable streaming rate limit
-    #[parameter(default = false, flags = "SETTER")]
-    enable_streaming_rate_limit: bool,
+    #[parameter(default = DISABLE_STREAMING_RATE_LIMIT)]
+    streaming_rate_limit: i32,
 
     /// Cache policy for partition cache in streaming over window.
     /// Can be "full", "recent", "`recent_first_n`" or "`recent_last_n`".
@@ -299,24 +299,6 @@ fn check_bytea_output(val: &str) -> Result<(), String> {
 }
 
 impl SessionConfig {
-    pub fn set_streaming_rate_limit(
-        &mut self,
-        val: u32,
-        reporter: &mut impl ConfigReporter,
-    ) -> SessionConfigResult<u32> {
-        self.set_enable_streaming_rate_limit(true, reporter)?;
-        self.set_streaming_rate_limit_inner(val, reporter)
-    }
-
-    pub fn set_enable_streaming_rate_limit(
-        &mut self,
-        val: bool,
-        reporter: &mut impl ConfigReporter,
-    ) -> SessionConfigResult<bool> {
-        let set_val = self.set_enable_streaming_rate_limit_inner(val, reporter)?;
-        Ok(set_val)
-    }
-
     pub fn set_force_two_phase_agg(
         &mut self,
         val: bool,
