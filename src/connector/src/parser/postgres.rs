@@ -145,6 +145,7 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                     // Currently in order to handle the decimal beyond RustDecimal,
                     // we use the PgNumeric type to convert the decimal to a string.
                     // Then we convert the string to Int256.
+                    // Note: It's only used to map the numeric type in upstream Postgres to RisingWave's rw_int256.
                     let res = row.try_get::<_, Option<PgNumeric>>(i);
                     match res {
                         Ok(val) => pg_numeric_to_rw_int256(val),
@@ -185,6 +186,7 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                         Type::NUMERIC => {
                             // Currently in order to handle the decimal beyond RustDecimal,
                             // we use the PgNumeric type to convert the decimal to a string.
+                            // Note: It's only used to map the numeric type in upstream Postgres to RisingWave's varchar.
                             let res = row.try_get::<_, Option<PgNumeric>>(i);
                             match res {
                                 Ok(val) => pg_numeric_to_varchar(val),

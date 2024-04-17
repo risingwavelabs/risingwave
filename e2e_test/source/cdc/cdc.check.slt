@@ -47,8 +47,8 @@ select count(*) from tt3_rw;
 ----
 2
 
-query III rowsort
-select * from numeric_to_varchar
+query II
+select * from numeric_to_varchar order by id;
 ----
 1 3.14
 2 57896044618658097711785492504343953926634992332820282019728792003956564819967
@@ -57,8 +57,8 @@ select * from numeric_to_varchar
 5 115792089237316195423570985008687907853269984665640564039457584007913129639936.555555
 
 # The invalid data for rw_int256 is converted to NULL
-query III rowsort
-select * from numeric_to_rw_int256
+query II
+select * from numeric_to_rw_int256 order by id;
 ----
 1 NULL
 2 57896044618658097711785492504343953926634992332820282019728792003956564819967
