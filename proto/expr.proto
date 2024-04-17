@@ -192,6 +192,8 @@ message ExprNode {
     CONVERT_TO = 323;
     DECRYPT = 324;
     ENCRYPT = 325;
+    INET_ATON = 328;
+    INET_NTOA = 329;
 
     // Unary operators
     NEG = 401;
