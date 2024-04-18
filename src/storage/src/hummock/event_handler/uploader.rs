@@ -266,8 +266,8 @@ impl UploadingTask {
         } else {
             debug!("start upload task: {:?}", task_info);
         }
-        let join_handle = (context.spawn_upload_task)(payload.clone(), task_info.clone());
         context.stats.uploader_uploading_task_count.inc();
+        let join_handle = (context.spawn_upload_task)(payload.clone(), task_info.clone());
         Self {
             payload,
             join_handle,
@@ -692,6 +692,8 @@ struct UploaderContext {
     /// merging tasks to merge them.
     imm_merge_threshold: usize,
 
+    max_upload_task_number: u64,
+
     stats: Arc<HummockStateStoreMetrics>,
 }
 
@@ -710,6 +712,7 @@ impl UploaderContext {
             spawn_merging_task,
             buffer_tracker,
             imm_merge_threshold: config.imm_merge_threshold,
+            max_upload_task_number: config.max_upload_task_number,
             stats,
         }
     }
@@ -1037,11 +1040,10 @@ impl HummockUploader {
     }
 
     pub(crate) fn may_flush(&mut self) -> bool {
-        let mut flushed = false;
-        if self.context.buffer_tracker.need_more_flush() {
-            self.sealed_data.flush(&self.context, true);
-            flushed = true;
+        if !self.context.buffer_tracker.need_more_flush() {
+            return false;
         }
+        self.sealed_data.flush(&self.context, true);
 
         if self.context.buffer_tracker.need_more_flush() {
             let mut unseal_epochs = vec![];
@@ -1051,18 +1053,18 @@ impl HummockUploader {
             // flush large data at first to avoid generate small files.
             unseal_epochs.sort_by_key(|item| item.0);
             for (_, epoch) in unseal_epochs.iter().rev() {
-                let unsealed_data = self.unsealed_data.get_mut(epoch).unwrap();
-                if !unsealed_data.spilled_data.uploading_tasks.is_empty() {
-                    continue;
+                let task_count =  self.context.stats.uploader_uploading_task_count.get() as u64;
+                if task_count >= self.context.max_upload_task_number {
+                    break;
                 }
+                let unsealed_data = self.unsealed_data.get_mut(epoch).unwrap();
                 unsealed_data.flush(&self.context);
-                flushed = true;
                 if !self.context.buffer_tracker.need_more_flush() {
                     break;
                 }
             }
         }
-        flushed
+        true
     }
 
     pub(crate) fn clear(&mut self) {

@@ -122,6 +122,7 @@ sstable_id_remote_fetch_number = 10
 min_sst_size_for_streaming_upload = 33554432
 max_sub_compaction = 4
 max_concurrent_compaction_task_number = 16
+max_upload_task_number = 4
 max_preload_wait_time_mill = 0
 max_version_pinning_duration_sec = 10800
 compactor_max_sst_key_count = 2097152

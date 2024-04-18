@@ -273,11 +273,9 @@ impl HummockReadVersion {
                 // TODO: add a check to ensure that the added batch id of added imm is greater than
                 // the batch id of imm at the front
                 StagingData::ImmMem(imm) => {
-                    if let Some(item) = self.staging.data.last() {
+                    if let Some(StagingData::ImmMem(item)) = self.staging.data.last() {
                         // check batch_id order from newest to old
-                        if let StagingData::ImmMem(last_imm) = item {
-                            debug_assert!(last_imm.batch_id() < imm.batch_id());
-                        }
+                        debug_assert!(item.batch_id() < imm.batch_id());
                     }
                     self.staging.data.push(StagingData::ImmMem(imm));
                 }
