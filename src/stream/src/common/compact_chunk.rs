@@ -105,7 +105,7 @@ type OpRowMap<'a, 'b> =
 pub enum RowOp<'a> {
     Insert(RowRef<'a>),
     Delete(RowRef<'a>),
-    /// (old_value, new_value)
+    /// (`old_value`, `new_value`)
     Update((RowRef<'a>, RowRef<'a>)),
 }
 static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);

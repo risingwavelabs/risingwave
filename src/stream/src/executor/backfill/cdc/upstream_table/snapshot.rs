@@ -40,18 +40,18 @@ pub trait UpstreamTableRead {
 
 #[derive(Debug, Default)]
 pub struct SnapshotReadArgs {
-    pub epoch: u64,
+    pub _epoch: u64,
     pub current_pos: Option<OwnedRow>,
-    pub ordered: bool,
+    pub _ordered: bool,
     pub chunk_size: usize,
 }
 
 impl SnapshotReadArgs {
     pub fn new_for_cdc(current_pos: Option<OwnedRow>, chunk_size: usize) -> Self {
         Self {
-            epoch: INVALID_EPOCH,
+            _epoch: INVALID_EPOCH,
             current_pos,
-            ordered: false,
+            _ordered: false,
             chunk_size,
         }
     }

@@ -226,11 +226,11 @@ impl<S: StateStore> SourceExecutor<S> {
             );
 
             core.updated_splits_in_epoch
-                .retain(|split_id, _| target_state.get(split_id).is_some());
+                .retain(|split_id, _| target_state.contains_key(split_id));
 
             let dropped_splits = core
                 .latest_split_info
-                .extract_if(|split_id, _| target_state.get(split_id).is_none())
+                .extract_if(|split_id, _| !target_state.contains_key(split_id))
                 .map(|(_, split)| split)
                 .collect_vec();
 

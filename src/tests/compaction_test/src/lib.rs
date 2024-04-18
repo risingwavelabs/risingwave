@@ -44,7 +44,7 @@ pub struct CompactionTestOpts {
     #[clap(long)]
     pub client_address: Option<String>,
 
-    /// The state store string e.g. hummock+s3://test-bucket
+    /// The state store string e.g. `hummock+s3://test-bucket`
     #[clap(short, long)]
     pub state_store: String,
 

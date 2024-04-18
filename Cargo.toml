@@ -253,6 +253,8 @@ ptr_arg = "allow"
 get_first = "allow"
 # https://github.com/rust-lang/rust-clippy/issues/12016
 blocks_in_conditions = "allow"
+# https://github.com/rust-lang/rust-clippy/issues/12537
+duplicated_attributes = "allow"
 
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"

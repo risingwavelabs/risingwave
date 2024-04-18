@@ -508,7 +508,7 @@ mod tests {
                 data_type: DataType::Int64,
                 ..mock_field.clone()
             },
-            Some(ScalarImpl::Int64(std::i64::MAX).as_scalar_ref_impl()),
+            Some(ScalarImpl::Int64(i64::MAX).as_scalar_ref_impl()),
             DateHandlingMode::FromCe,
             TimestampHandlingMode::String,
             TimestamptzHandlingMode::UtcString,
@@ -518,7 +518,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             serde_json::to_string(&int64_value).unwrap(),
-            std::i64::MAX.to_string()
+            i64::MAX.to_string()
         );
 
         // https://github.com/debezium/debezium/blob/main/debezium-core/src/main/java/io/debezium/time/ZonedTimestamp.java

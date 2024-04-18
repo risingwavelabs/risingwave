@@ -266,7 +266,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         };
         match mutation {
             // Add is for mv, index and sink creation.
-            Mutation::Add(AddMutation { adds, .. }) => adds.get(&actor_id).is_some(),
+            Mutation::Add(AddMutation { adds, .. }) => adds.contains_key(&actor_id),
             // AddAndUpdate is for sink-into-table.
             Mutation::AddAndUpdate(
                 AddMutation { adds, .. },
@@ -276,9 +276,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     ..
                 },
             ) => {
-                adds.get(&actor_id).is_some()
-                    || actor_dispatchers.get(&actor_id).is_some()
-                    || dispatchers.get(&actor_id).is_some()
+                adds.contains_key(&actor_id)
+                    || actor_dispatchers.contains_key(&actor_id)
+                    || dispatchers.contains_key(&actor_id)
             }
             Mutation::Update(_)
             | Mutation::Stop(_)

@@ -580,7 +580,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 }
                 shutdown_rx.check()?;
                 if !ANTI_JOIN {
-                    if hash_map.get(probe_key).is_some() {
+                    if hash_map.contains_key(probe_key) {
                         if let Some(spilled) = Self::append_one_probe_row(
                             &mut chunk_builder,
                             &probe_chunk,
