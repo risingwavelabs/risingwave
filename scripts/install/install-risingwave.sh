@@ -9,12 +9,9 @@ fi
 STATE_STORE_PATH="${HOME}/.risingwave/state_store"
 META_STORE_PATH="${HOME}/.risingwave/meta_store"
 
-VERSION="v1.7.0-standalone"
-# TODO(kwannoel): re-enable it once we have stable release in latest for single node mode.
-#VERSION=$(curl -s https://api.github.com/repos/risingwavelabs/risingwave/releases/latest \
-# | grep '.tag_name' \
-# | sed -E -n 's/.*(v[0-9]+.[0-9]+.[0-9])\",/\1/p')
-HOMEBREW_VERSION="1.7-standalone"
+VERSION=$(curl -s https://api.github.com/repos/risingwavelabs/risingwave/releases/latest \
+ | grep '.tag_name' \
+ | sed -E -n 's/.*(v[0-9]+.[0-9]+.[0-9])\",/\1/p')
 
 BASE_URL="https://github.com/risingwavelabs/risingwave/releases/download"
 
@@ -51,11 +48,11 @@ fi
 
 ############# BREW INSTALL
 if [ "${USE_BREW}" -eq 1 ]; then
-  echo "Installing RisingWave@${HOMEBREW_VERSION} using Homebrew."
+  echo "Installing RisingWave@${VERSION} using Homebrew."
   brew tap risingwavelabs/risingwave
-  brew install risingwave@${HOMEBREW_VERSION}
+  brew install risingwave
   echo
-  echo "Successfully installed RisingWave@${HOMEBREW_VERSION} using Homebrew."
+  echo "Successfully installed RisingWave@${VERSION} using Homebrew."
   echo
   echo "Run RisingWave:"
   echo
@@ -108,4 +105,3 @@ if [ -z "${JAVA_HOME}" ]; then
   echo "WARNING: Java is required to use RisingWave's Java Connectors (e.g. MySQL)."
   echo "Please install Java, and set the \$JAVA_HOME environment variable."
 fi
-# TODO(kwannoel): Include link to our docs.

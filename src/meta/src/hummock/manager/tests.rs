@@ -1157,12 +1157,51 @@ async fn test_extend_objects_to_delete() {
     );
     let objects_to_delete = hummock_manager.get_objects_to_delete().await;
     assert_eq!(objects_to_delete.len(), orphan_sst_num as usize);
-    let pinned_version2 = hummock_manager.pin_version(context_id).await.unwrap();
+    let pinned_version2: HummockVersion = hummock_manager.pin_version(context_id).await.unwrap();
+    let objects_to_delete = hummock_manager.get_objects_to_delete().await;
+    assert_eq!(
+        objects_to_delete.len(),
+        orphan_sst_num as usize,
+        "{:?}",
+        objects_to_delete
+    );
     hummock_manager
         .unpin_version_before(context_id, pinned_version2.id)
         .await
         .unwrap();
-    // version1 is unpin, and then the sst removed in compaction can be reclaimed
+    let objects_to_delete = hummock_manager.get_objects_to_delete().await;
+    assert_eq!(
+        objects_to_delete.len(),
+        orphan_sst_num as usize,
+        "{:?}",
+        objects_to_delete
+    );
+    // version1 is unpin, but version2 is pinned, and version2 is the checkpoint version.
+    // stale objects are combined in the checkpoint of version2, so no sst to reclaim
+    assert_eq!(
+        hummock_manager
+            .extend_objects_to_delete_from_scan(&all_object_ids)
+            .await,
+        orphan_sst_num as usize
+    );
+    let objects_to_delete = hummock_manager.get_objects_to_delete().await;
+    assert_eq!(objects_to_delete.len(), orphan_sst_num as usize);
+    let new_epoch = pinned_version2.max_committed_epoch.next_epoch();
+    hummock_manager
+        .commit_epoch(
+            new_epoch,
+            CommitEpochInfo::for_test(Vec::<ExtendedSstableInfo>::new(), Default::default()),
+        )
+        .await
+        .unwrap();
+    let pinned_version3: HummockVersion = hummock_manager.pin_version(context_id).await.unwrap();
+    assert_eq!(new_epoch, pinned_version3.max_committed_epoch);
+    hummock_manager
+        .unpin_version_before(context_id, pinned_version3.id)
+        .await
+        .unwrap();
+    // version3 is the min pinned, and sst removed in compaction can be reclaimed, because they were tracked
+    // in the stale objects of version2 checkpoint
     assert_eq!(
         hummock_manager
             .extend_objects_to_delete_from_scan(&all_object_ids)

@@ -1026,6 +1026,8 @@ impl Binder {
                 ("decrypt", raw_call(ExprType::Decrypt)),
                 ("left", raw_call(ExprType::Left)),
                 ("right", raw_call(ExprType::Right)),
+                ("inet_aton", raw_call(ExprType::InetAton)),
+                ("inet_ntoa", raw_call(ExprType::InetNtoa)),
                 ("int8send", raw_call(ExprType::PgwireSend)),
                 ("int8recv", guard_by_len(1, raw(|_binder, mut inputs| {
                     // Similar to `cast` from string, return type is set explicitly rather than inferred.

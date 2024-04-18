@@ -98,28 +98,8 @@ fn task_main(
     let mut ports = vec![];
 
     for service in services {
-        let listen_info = match service {
-            ServiceConfig::Minio(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Etcd(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Sqlite(_) => None,
-            ServiceConfig::Prometheus(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::ComputeNode(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::MetaNode(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Frontend(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Compactor(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Grafana(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Tempo(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Kafka(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Pubsub(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Redis(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::ZooKeeper(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::AwsS3(_) => None,
-            ServiceConfig::Opendal(_) => None,
-            ServiceConfig::RedPanda(_) => None,
-        };
-
-        if let Some(x) = listen_info {
-            ports.push(x);
+        if let Some(port) = service.port() {
+            ports.push((port, service.id().to_string(), service.user_managed()));
         }
     }
 
