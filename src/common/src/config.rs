@@ -1771,23 +1771,25 @@ pub mod default {
         }
 
         pub fn object_store_upload_attempt_timeout_ms() -> u64 {
-            5 * 60 * 1000
+            3 * 1000 // 3s
         }
 
         pub fn object_store_upload_retry_attempts() -> usize {
             DEFAULT_RETRY_MAX_RETRY_ATTEMPTS
         }
 
+        // init + upload_part + finish
         pub fn object_store_streaming_upload_attempt_timeout_ms() -> u64 {
-            60 * 1000
+            3 * 1000 // 3s
         }
 
         pub fn object_store_streaming_upload_retry_attempts() -> usize {
             DEFAULT_RETRY_MAX_RETRY_ATTEMPTS
         }
 
+        // tips: depend on block_size
         pub fn object_store_read_attempt_timeout_ms() -> u64 {
-            60 * 1000
+            300 // 300ms
         }
 
         pub fn object_store_read_retry_attempts() -> usize {
@@ -1795,15 +1797,15 @@ pub mod default {
         }
 
         pub fn object_store_streaming_read_attempt_timeout_ms() -> u64 {
-            2 * 60 * 1000
+            300 // 300ms
         }
 
         pub fn object_store_streaming_read_retry_attempts() -> usize {
-            DEFAULT_RETRY_MAX_RETRY_ATTEMPTS
+            5
         }
 
         pub fn object_store_metadata_attempt_timeout_ms() -> u64 {
-            5 * 60 * 1000
+            60 * 1000 // 1min
         }
 
         pub fn object_store_metadata_retry_attempts() -> usize {
@@ -1811,19 +1813,20 @@ pub mod default {
         }
 
         pub fn object_store_delete_attempt_timeout_ms() -> u64 {
-            2 * 60 * 1000
+            5 * 1000
         }
 
         pub fn object_store_delete_retry_attempts() -> usize {
             DEFAULT_RETRY_MAX_RETRY_ATTEMPTS
         }
 
+        // tips: depend on batch size
         pub fn object_store_delete_objects_attempt_timeout_ms() -> u64 {
-            10 * 60 * 1000
+            5 * 1000
         }
 
         pub fn object_store_delete_objects_retry_attempts() -> usize {
-            DEFAULT_RETRY_MAX_RETRY_ATTEMPTS
+            5
         }
 
         pub fn object_store_list_attempt_timeout_ms() -> u64 {
@@ -1831,7 +1834,7 @@ pub mod default {
         }
 
         pub fn object_store_list_retry_attempts() -> usize {
-            DEFAULT_RETRY_MAX_RETRY_ATTEMPTS
+            5
         }
 
         pub mod s3 {
