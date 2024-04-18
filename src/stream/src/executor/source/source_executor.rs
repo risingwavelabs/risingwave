@@ -160,14 +160,14 @@ impl<S: StateStore> SourceExecutor<S> {
             self.actor_ctx.id,
             self.stream_source_core.as_ref().unwrap().source_id,
             self.actor_ctx.fragment_id,
-            source_desc.metrics.clone(),
-            self.source_ctrl_opts.clone(),
-            source_desc.source.config.clone(),
             self.stream_source_core
                 .as_ref()
                 .unwrap()
                 .source_name
                 .clone(),
+            source_desc.metrics.clone(),
+            self.source_ctrl_opts.clone(),
+            source_desc.source.config.clone(),
         );
         let stream = source_desc
             .source
@@ -839,7 +839,10 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
             system_params_manager.get_params(),
-            SourceCtrlOpts::default(),
+            SourceCtrlOpts {
+                chunk_size: 1024,
+                rate_limit: None,
+            },
         );
         let mut executor = executor.boxed().execute();
 
@@ -927,7 +930,10 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
             system_params_manager.get_params(),
-            SourceCtrlOpts::default(),
+            SourceCtrlOpts {
+                chunk_size: 1024,
+                rate_limit: None,
+            },
         );
         let mut handler = executor.boxed().execute();
 

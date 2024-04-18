@@ -201,7 +201,7 @@ mod test {
     use crate::parser::{
         AccessBuilderImpl, EncodingType, SourceStreamChunkBuilder, SpecificParserConfig,
     };
-    use crate::source::SourceColumnDesc;
+    use crate::source::{SourceColumnDesc, SourceContext};
 
     fn test_data_path(file_name: &str) -> String {
         let curr_dir = env::current_dir().unwrap().into_os_string();
@@ -279,7 +279,7 @@ mod test {
                 EncodingType::Value,
             )?),
             rw_columns: Vec::default(),
-            source_ctx: Default::default(),
+            source_ctx: SourceContext::dummy().into(),
             transaction_meta_builder: None,
         })
     }

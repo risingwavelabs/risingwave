@@ -294,7 +294,7 @@ impl SourceScanInfo {
         match fetch_info.connector {
             ConnectorProperties::Kafka(prop) => {
                 let mut kafka_enumerator =
-                    KafkaSplitEnumerator::new(*prop, SourceEnumeratorContext::default().into())
+                    KafkaSplitEnumerator::new(*prop, SourceEnumeratorContext::dummy().into())
                         .await?;
                 let split_info = kafka_enumerator
                     .list_splits_batch(fetch_info.timebound.0, fetch_info.timebound.1)
@@ -329,7 +329,7 @@ impl SourceScanInfo {
             }
             ConnectorProperties::Iceberg(prop) => {
                 let iceberg_enumerator =
-                    IcebergSplitEnumerator::new(*prop, SourceEnumeratorContext::default().into())
+                    IcebergSplitEnumerator::new(*prop, SourceEnumeratorContext::dummy().into())
                         .await?;
 
                 let time_travel_info = match fetch_info.as_of {

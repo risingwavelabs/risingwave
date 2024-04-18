@@ -23,6 +23,8 @@ mod tests {
         EncodingProperties, JsonProperties, ProtocolProperties, SourceColumnDesc,
         SourceStreamChunkBuilder, SpecificParserConfig,
     };
+    use crate::source::SourceContext;
+
     #[tokio::test]
     async fn test_json_parser() {
         let descs = vec![
@@ -40,7 +42,7 @@ mod tests {
             }),
             protocol_config: ProtocolProperties::Maxwell,
         };
-        let mut parser = MaxwellParser::new(props, descs.clone(), Default::default())
+        let mut parser = MaxwellParser::new(props, descs.clone(), SourceContext::dummy().into())
             .await
             .unwrap();
 

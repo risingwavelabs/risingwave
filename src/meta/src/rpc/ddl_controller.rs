@@ -845,7 +845,7 @@ impl DdlController {
         async fn new_enumerator_for_validate<P: SourceProperties>(
             source_props: P,
         ) -> Result<P::SplitEnumerator, ConnectorError> {
-            P::SplitEnumerator::new(source_props, SourceEnumeratorContext::default().into()).await
+            P::SplitEnumerator::new(source_props, SourceEnumeratorContext::dummy().into()).await
         }
 
         for actor in &stream_scan_fragment.actors {
