@@ -160,14 +160,14 @@ impl<S: StateStore> SourceExecutor<S> {
             self.actor_ctx.id,
             self.stream_source_core.as_ref().unwrap().source_id,
             self.actor_ctx.fragment_id,
-            source_desc.metrics.clone(),
-            self.source_ctrl_opts.clone(),
-            source_desc.source.config.clone(),
             self.stream_source_core
                 .as_ref()
                 .unwrap()
                 .source_name
                 .clone(),
+            source_desc.metrics.clone(),
+            self.source_ctrl_opts.clone(),
+            source_desc.source.config.clone(),
         );
         let stream = source_desc
             .source

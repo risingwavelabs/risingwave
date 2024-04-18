@@ -177,10 +177,10 @@ impl SourceContext {
         actor_id: u32,
         source_id: TableId,
         fragment_id: u32,
+        source_name: String,
         metrics: Arc<SourceMetrics>,
         source_ctrl_opts: SourceCtrlOpts,
         connector_props: ConnectorProperties,
-        source_name: String,
     ) -> Self {
         Self {
             actor_id,
@@ -200,13 +200,13 @@ impl SourceContext {
             0,
             TableId::new(0),
             0,
+            "dummy".to_string(),
             Arc::new(SourceMetrics::default()),
             SourceCtrlOpts {
                 chunk_size: MAX_CHUNK_SIZE,
                 rate_limit: None,
             },
             ConnectorProperties::default(),
-            "dummy".to_string(),
         )
     }
 }
