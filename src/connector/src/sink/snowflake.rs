@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::io::Write;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -317,11 +317,12 @@ impl SnowflakeSinkWriter {
             assert_eq!(op, Op::Insert, "expect all `op(s)` to be `Op::Insert`");
             // to prevent temporary string allocation,
             // so we use an intermediate vector buffer instead.
-            write!(row_buf, "{}", Value::Object(self.row_encoder.encode(row)?))
-                .map_err(|err| SinkError::Snowflake(format!(
+            write!(row_buf, "{}", Value::Object(self.row_encoder.encode(row)?)).map_err(|err| {
+                SinkError::Snowflake(format!(
                     "failed to write json object to `row_buf`, error: {}",
                     err
-                )))?;
+                ))
+            })?;
             chunk_buf.extend_from_slice(&row_buf);
             row_buf.clear();
         }
