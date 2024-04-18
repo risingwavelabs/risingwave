@@ -708,15 +708,14 @@ fn gen_table_plan_inner(
     });
 
     let source_catalog = source.as_ref().map(|source| Rc::new((source).into()));
-    let source_node: PlanRef = LogicalSource::new(
+    let source_node: PlanRef = LogicalSource::create(
         source_catalog.clone(),
         columns.clone(),
         row_id_index,
         SourceNodeKind::CreateTable,
         context.clone(),
         None,
-    )?
-    .into();
+    )?;
 
     let required_cols = FixedBitSet::with_capacity(columns.len());
     let mut plan_root = PlanRoot::new(

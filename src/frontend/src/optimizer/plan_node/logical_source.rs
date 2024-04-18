@@ -28,13 +28,13 @@ use super::generic::{GenericPlanRef, SourceNodeKind};
 use super::stream_watermark_filter::StreamWatermarkFilter;
 use super::utils::{childless_record, Distill};
 use super::{
-    generic, BatchProject, BatchSource, ColPrunable, ExprRewritable, Logical, LogicalFilter,
-    LogicalProject, PlanBase, PlanRef, PredicatePushdown, StreamProject, StreamRowIdGen,
-    StreamSource, StreamSourceScan, ToBatch, ToStream,
+    generic, BatchSource, ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalProject,
+    PlanBase, PlanRef, PredicatePushdown, StreamRowIdGen, StreamSource, StreamSourceScan, ToBatch,
+    ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::Result;
-use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef};
+use crate::expr::{ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::stream_fs_fetch::StreamFsFetch;
@@ -53,23 +53,20 @@ pub struct LogicalSource {
     pub base: PlanBase<Logical>,
     pub core: generic::Source,
 
-    /// Expressions to output. This field presents and will be turned to a `Project` when
-    /// converting to a physical plan, only if there are generated columns.
-    pub(crate) output_exprs: Option<Vec<ExprImpl>>,
     /// When there are generated columns, the `StreamRowIdGen`'s `row_id_index` is different from
     /// the one in `core`. So we store the one in `output_exprs` here.
     pub(crate) output_row_id_index: Option<usize>,
 }
 
 impl LogicalSource {
-    pub fn new(
+    pub fn create(
         source_catalog: Option<Rc<SourceCatalog>>,
         column_catalog: Vec<ColumnCatalog>,
         row_id_index: Option<usize>,
         kind: SourceNodeKind,
         ctx: OptimizerContextRef,
         as_of: Option<AsOf>,
-    ) -> Result<Self> {
+    ) -> Result<PlanRef> {
         let core = generic::Source {
             catalog: source_catalog,
             column_catalog,
@@ -83,17 +80,22 @@ impl LogicalSource {
             bail!("Time travel is not supported for the source")
         }
 
-        let base = PlanBase::new_logical_with_core(&core);
-
         let output_exprs = Self::derive_output_exprs_from_generated_columns(&core.column_catalog)?;
         let (core, output_row_id_index) = core.exclude_generated_columns();
 
-        Ok(LogicalSource {
+        let base = PlanBase::new_logical_with_core(&core);
+
+        let source = LogicalSource {
             base,
             core,
-            output_exprs,
             output_row_id_index,
-        })
+        };
+
+        if let Some(exprs) = output_exprs {
+            Ok(LogicalProject::create(source.into(), exprs.to_vec()))
+        } else {
+            Ok(source.into())
+        }
     }
 
     pub fn with_catalog(
@@ -101,14 +103,14 @@ impl LogicalSource {
         kind: SourceNodeKind,
         ctx: OptimizerContextRef,
         as_of: Option<AsOf>,
-    ) -> Result<Self> {
+    ) -> Result<PlanRef> {
         let column_catalogs = source_catalog.columns.clone();
         let row_id_index = source_catalog.row_id_index;
         if !source_catalog.append_only {
             assert!(row_id_index.is_none());
         }
 
-        Self::new(
+        Self::create(
             Some(source_catalog),
             column_catalogs,
             row_id_index,
@@ -270,34 +272,9 @@ impl ColPrunable for LogicalSource {
     }
 }
 
-impl ExprRewritable for LogicalSource {
-    fn has_rewritable_expr(&self) -> bool {
-        self.output_exprs.is_some()
-    }
+impl ExprRewritable for LogicalSource {}
 
-    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut output_exprs = self.output_exprs.clone();
-
-        for expr in output_exprs.iter_mut().flatten() {
-            *expr = r.rewrite_expr(expr.clone());
-        }
-
-        Self {
-            output_exprs,
-            ..self.clone()
-        }
-        .into()
-    }
-}
-
-impl ExprVisitable for LogicalSource {
-    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
-        self.output_exprs
-            .iter()
-            .flatten()
-            .for_each(|e| v.visit_expr(e));
-    }
-}
+impl ExprVisitable for LogicalSource {}
 
 impl PredicatePushdown for LogicalSource {
     fn predicate_pushdown(
@@ -315,12 +292,7 @@ impl ToBatch for LogicalSource {
             !self.core.is_kafka_connector(),
             "LogicalSource with a kafka property should be converted to LogicalKafkaScan"
         );
-        let mut plan: PlanRef = BatchSource::new(self.core.clone()).into();
-
-        if let Some(exprs) = &self.output_exprs {
-            let logical_project = generic::Project::new(exprs.to_vec(), plan);
-            plan = BatchProject::new(logical_project).into();
-        }
+        let plan: PlanRef = BatchSource::new(self.core.clone()).into();
 
         Ok(plan)
     }
@@ -355,11 +327,6 @@ impl ToStream for LogicalSource {
                     } else {
                         plan = StreamSource::new(self.core.clone()).into()
                     }
-                }
-
-                if let Some(exprs) = &self.output_exprs {
-                    let logical_project = generic::Project::new(exprs.to_vec(), plan);
-                    plan = StreamProject::new(logical_project).into();
                 }
 
                 if let Some(catalog) = self.source_catalog()

@@ -77,7 +77,7 @@ use crate::expr::TimestamptzExprFinder;
 use crate::optimizer::plan_node::generic::{SourceNodeKind, Union};
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive, StreamExchange, StreamUnion,
-    ToStream, VisitExprsRecursive,
+    VisitExprsRecursive,
 };
 use crate::optimizer::plan_visitor::TemporalJoinValidator;
 use crate::optimizer::property::Distribution;
@@ -637,7 +637,7 @@ impl PlanRoot {
                 }
             };
 
-            let dummy_source_node = LogicalSource::new(
+            let dummy_source_node = LogicalSource::create(
                 None,
                 columns.clone(),
                 row_id_index,

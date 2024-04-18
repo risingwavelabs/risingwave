@@ -24,12 +24,12 @@ use risingwave_connector::source::DataType;
 use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{
-    generic, BatchProject, ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalProject,
-    PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream,
+    generic, ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalProject, PlanBase,
+    PlanRef, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::Result;
-use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor};
+use crate::expr::{Expr, ExprImpl, ExprType};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::plan_node::{
@@ -43,10 +43,6 @@ use crate::utils::{ColIndexMapping, Condition};
 pub struct LogicalKafkaScan {
     pub base: PlanBase<Logical>,
     pub core: generic::Source,
-
-    /// Expressions to output. This field presents and will be turned to a `Project` when
-    /// converting to a physical plan, only if there are generated columns.
-    output_exprs: Option<Vec<ExprImpl>>,
 
     /// Kafka timestamp range.
     kafka_timestamp_range: (Bound<i64>, Bound<i64>),
@@ -63,7 +59,6 @@ impl LogicalKafkaScan {
         LogicalKafkaScan {
             base,
             core,
-            output_exprs: logical_source.output_exprs.clone(),
             kafka_timestamp_range,
         }
     }
@@ -76,7 +71,6 @@ impl LogicalKafkaScan {
         Self {
             base: self.base.clone(),
             core: self.core.clone(),
-            output_exprs: self.output_exprs.clone(),
             kafka_timestamp_range: range,
         }
     }
@@ -107,34 +101,9 @@ impl ColPrunable for LogicalKafkaScan {
     }
 }
 
-impl ExprRewritable for LogicalKafkaScan {
-    fn has_rewritable_expr(&self) -> bool {
-        self.output_exprs.is_some()
-    }
+impl ExprRewritable for LogicalKafkaScan {}
 
-    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut output_exprs = self.output_exprs.clone();
-
-        for expr in output_exprs.iter_mut().flatten() {
-            *expr = r.rewrite_expr(expr.clone());
-        }
-
-        Self {
-            output_exprs,
-            ..self.clone()
-        }
-        .into()
-    }
-}
-
-impl ExprVisitable for LogicalKafkaScan {
-    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
-        self.output_exprs
-            .iter()
-            .flatten()
-            .for_each(|e| v.visit_expr(e));
-    }
-}
+impl ExprVisitable for LogicalKafkaScan {}
 
 /// A util function to extract kafka offset timestamp range.
 ///
@@ -320,14 +289,8 @@ impl PredicatePushdown for LogicalKafkaScan {
 
 impl ToBatch for LogicalKafkaScan {
     fn to_batch(&self) -> Result<PlanRef> {
-        let mut plan: PlanRef =
+        let plan: PlanRef =
             BatchKafkaScan::new(self.core.clone(), self.kafka_timestamp_range).into();
-
-        if let Some(exprs) = &self.output_exprs {
-            let logical_project = generic::Project::new(exprs.to_vec(), plan);
-            plan = BatchProject::new(logical_project).into();
-        }
-
         Ok(plan)
     }
 }

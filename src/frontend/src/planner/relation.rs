@@ -125,8 +125,7 @@ impl Planner {
                 SourceNodeKind::CreateMViewOrBatch,
                 self.ctx(),
                 as_of,
-            )?
-            .into())
+            )?)
         }
     }
 
