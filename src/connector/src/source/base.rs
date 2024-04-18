@@ -138,7 +138,7 @@ pub struct SourceCtrlOpts {
     pub rate_limit: Option<u32>,
 }
 
-// The options in `SourceCtrlOpts` is so important that we don't want to impl `Default` for it,
+// The options in `SourceCtrlOpts` are so important that we don't want to impl `Default` for it,
 // so that we can prevent any unintentional use of the default value.
 impl !Default for SourceCtrlOpts {}
 
