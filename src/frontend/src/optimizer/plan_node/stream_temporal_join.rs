@@ -96,6 +96,10 @@ impl StreamTemporalJoin {
         &self.eq_join_predicate
     }
 
+    pub fn append_only(&self) -> bool {
+        self.append_only
+    }
+
     /// Return memo-table catalog and its `pk_indices`.
     /// (`join_key` + `left_pk` + `right_pk`) -> (`right_scan_schema` + `join_key` + `left_pk`)
     ///
