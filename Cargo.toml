@@ -252,8 +252,7 @@ await_holding_lock = "warn"
 ptr_arg = "allow"
 # a little pedantic
 get_first = "allow"
-# https://github.com/rust-lang/rust-clippy/issues/12016
-blocks_in_conditions = "allow"
+new_without_default = "allow"
 # https://github.com/rust-lang/rust-clippy/issues/12537
 duplicated_attributes = "allow"
 
