@@ -260,11 +260,6 @@ impl SnowflakeSinkWriter {
         Ok(())
     }
 
-    /// should be *only* called after `commit` per epoch.
-    fn reset_streaming_uploader(&mut self) {
-        self.streaming_uploader = None;
-    }
-
     /// the `Option` is the flag to determine if there is data to upload.
     fn has_data(&self) -> bool {
         self.streaming_uploader.is_some()
@@ -298,14 +293,11 @@ impl SnowflakeSinkWriter {
 
     /// finalize streaming upload for this epoch.
     /// ensure all the data has been properly uploaded to intermediate s3.
-    async fn finish_streaming_upload(&mut self) -> Result<String> {
+    async fn finish_streaming_upload(&mut self) -> Result<Option<String>> {
         let uploader = std::mem::take(&mut self.streaming_uploader);
         let Some(uploader) = uploader else {
-            return Err(SinkError::Snowflake(format!(
-                "streaming uploader is not valid when trying to finish streaming upload for epoch {}",
-                self.epoch
-                )
-            ));
+            // there is no data to be uploaded for this epoch
+            return Ok(None);
         };
         uploader.0.finish().await.map_err(|err| {
             SinkError::Snowflake(format!(
@@ -313,7 +305,7 @@ impl SnowflakeSinkWriter {
                 err
             ))
         })?;
-        Ok(uploader.1)
+        Ok(Some(uploader.1))
     }
 
     async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
@@ -359,10 +351,15 @@ impl SnowflakeSinkWriter {
     /// sink `payload` to s3, then trigger corresponding `insertFiles` post request
     /// to snowflake, to finish the overall sinking pipeline.
     async fn commit(&mut self) -> Result<()> {
-        let file_suffix = self.finish_streaming_upload().await?;
+        // note that after `finish_streaming_upload`, do *not* interact with
+        // `streaming_uploader` until new data comes in at next epoch,
+        // since the ownership has been taken in this method, and `None` will be left.
+        let Some(file_suffix) = self.finish_streaming_upload().await? else {
+            // represents there is no data to be uploaded for this epoch
+            return Ok(());
+        };
         // trigger `insertFiles` post request to snowflake
         self.http_client.send_request(&file_suffix).await?;
-        self.reset_streaming_uploader();
         Ok(())
     }
 }
