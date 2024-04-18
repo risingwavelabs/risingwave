@@ -241,7 +241,7 @@ impl SnowflakeSinkWriter {
     /// note: should *only* be called iff after a new epoch begins,
     /// and `streaming_upload` being called the first time.
     /// i.e., lazily initialization of the internal `streaming_uploader`.
-    /// plus, this function is *pure*, the `&mut self` is to make rustc (and tokio) happy.
+    /// plus, this function is *pure*, the `&mut self` here is to make rustc (and tokio) happy.
     async fn new_streaming_uploader(&mut self) -> Result<(Box<dyn StreamingUploader>, String)> {
         let file_suffix = self.file_suffix();
         let path = generate_s3_file_name(self.s3_client.s3_path(), &file_suffix);
