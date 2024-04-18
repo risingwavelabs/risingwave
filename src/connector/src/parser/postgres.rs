@@ -451,11 +451,13 @@ fn pg_numeric_to_varchar(val: Option<PgNumeric>) -> Option<ScalarImpl> {
 
 fn pg_numeric_to_string(val: Option<PgNumeric>) -> Option<String> {
     if let Some(pg_numeric) = val {
+        // TODO(kexiang): NEGATIVE_INFINITY -> -Infinity, POSITIVE_INFINITY -> Infinity, NAN -> NaN
+        // The current implementation is to ensure consistency with the behavior of cdc event parsor.
         match pg_numeric {
-            PgNumeric::NegativeInf => Some(String::from("-Infinity")),
+            PgNumeric::NegativeInf => Some(String::from("NEGATIVE_INFINITY")),
             PgNumeric::Normalized(big_decimal) => Some(big_decimal.to_string()),
-            PgNumeric::PositiveInf => Some(String::from("Infinity")),
-            PgNumeric::NaN => Some(String::from("NaN")),
+            PgNumeric::PositiveInf => Some(String::from("POSITIVE_INFINITY")),
+            PgNumeric::NaN => Some(String::from("NAN")),
         }
     } else {
         // NULL
