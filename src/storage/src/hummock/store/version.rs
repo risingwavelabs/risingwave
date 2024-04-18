@@ -28,6 +28,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
+use risingwave_hummock_sdk::change_log::EpochNewChangeLog;
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, is_empty_key_range, FullKey, TableKey, TableKeyRange, UserKey,
 };
@@ -1134,11 +1135,12 @@ impl HummockVersionReader {
         key_range: TableKeyRange,
         options: ReadLogOptions,
     ) -> HummockResult<ChangeLogIterator> {
-        let (new_value_ssts, old_value_ssts) =
+        let change_log =
             if let Some(change_log) = version.version().table_change_log.get(&options.table_id) {
-                change_log.filter(epoch_range, &key_range)
+                change_log.filter_epoch(epoch_range)
             } else {
-                (vec![], vec![])
+                static EMPTY_VEC: Vec<EpochNewChangeLog> = Vec::new();
+                &EMPTY_VEC[..]
             };
         let read_options = Arc::new(SstableIteratorReadOptions {
             cache_policy: Default::default(),
@@ -1147,30 +1149,46 @@ impl HummockVersionReader {
             prefetch_for_large_query: false,
         });
 
-        let make_iter = |ssts: Vec<SstableInfo>| async {
-            let iters = try_join_all(
-                ssts.into_iter()
-                    .filter(|sst| filter_single_sst(sst, options.table_id, &key_range))
-                    .map(|sst| {
-                        let sstable_store = self.sstable_store.clone();
-                        let read_options = read_options.clone();
-                        async move {
-                            let mut local_stat = StoreLocalStatistic::default();
-                            let table_holder = sstable_store.sstable(&sst, &mut local_stat).await?;
-                            Ok::<_, HummockError>(SstableIterator::new(
-                                table_holder,
-                                sstable_store,
-                                read_options,
-                            ))
-                        }
-                    }),
-            )
+        async fn make_iter(
+            ssts: impl Iterator<Item = &SstableInfo>,
+            sstable_store: &SstableStoreRef,
+            read_options: Arc<SstableIteratorReadOptions>,
+        ) -> HummockResult<MergeIterator<SstableIterator>> {
+            let iters = try_join_all(ssts.map(|sst| {
+                let sstable_store = sstable_store.clone();
+                let read_options = read_options.clone();
+                async move {
+                    let mut local_stat = StoreLocalStatistic::default();
+                    let table_holder = sstable_store.sstable(sst, &mut local_stat).await?;
+                    Ok::<_, HummockError>(SstableIterator::new(
+                        table_holder,
+                        sstable_store,
+                        read_options,
+                    ))
+                }
+            }))
             .await?;
             Ok::<_, HummockError>(MergeIterator::new(iters))
-        };
+        }
 
-        let new_value_iter = make_iter(new_value_ssts).await?;
-        let old_value_iter = make_iter(old_value_ssts).await?;
+        let new_value_iter = make_iter(
+            change_log
+                .iter()
+                .flat_map(|log| log.new_value.iter())
+                .filter(|sst| filter_single_sst(sst, options.table_id, &key_range)),
+            &self.sstable_store,
+            read_options.clone(),
+        )
+        .await?;
+        let old_value_iter = make_iter(
+            change_log
+                .iter()
+                .flat_map(|log| log.old_value.iter())
+                .filter(|sst| filter_single_sst(sst, options.table_id, &key_range)),
+            &self.sstable_store,
+            read_options.clone(),
+        )
+        .await?;
         ChangeLogIterator::new(
             epoch_range,
             key_range,

@@ -12,54 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::buffer::Bitmap;
-use risingwave_pb::hummock::{
-    PbChangeLogShard, PbEpochNewChangeLog, PbTableChangeLog, SstableInfo,
-};
-
-use crate::key::{vnode, TableKeyRange};
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ChangeLogShard {
-    pub new_value: Vec<SstableInfo>,
-    pub old_value: Vec<SstableInfo>,
-    pub vnode_bitmap: Bitmap,
-}
+use risingwave_pb::hummock::{PbEpochNewChangeLog, PbTableChangeLog, SstableInfo};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EpochNewChangeLog {
+    pub new_value: Vec<SstableInfo>,
+    pub old_value: Vec<SstableInfo>,
     pub epochs: Vec<u64>,
-    pub shards: Vec<ChangeLogShard>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableChangeLog(pub Vec<EpochNewChangeLog>);
 
 impl TableChangeLog {
-    pub fn filter(
-        &self,
-        (min_epoch, max_epoch): (u64, u64),
-        key_range: &TableKeyRange,
-    ) -> (Vec<SstableInfo>, Vec<SstableInfo>) {
-        let mut new_value_sst = Vec::new();
-        let mut old_value_sst = Vec::new();
-        let vnode = vnode(key_range);
-        for epoch_change_log in &self.0 {
-            if epoch_change_log.epochs.last().expect("non-empty") < &min_epoch {
-                continue;
-            }
-            if epoch_change_log.epochs.first().expect("non-empty") > &max_epoch {
-                break;
-            }
-            for shard in &epoch_change_log.shards {
-                if shard.vnode_bitmap.is_set(vnode.to_index()) {
-                    new_value_sst.extend_from_slice(shard.new_value.as_slice());
-                    old_value_sst.extend_from_slice(shard.old_value.as_slice());
-                    break;
-                }
-            }
-        }
-        (new_value_sst, old_value_sst)
+    pub fn filter_epoch(&self, (min_epoch, max_epoch): (u64, u64)) -> &[EpochNewChangeLog] {
+        let start = self.0.partition_point(|epoch_change_log| {
+            epoch_change_log.epochs.last().expect("non-empty") < &min_epoch
+        });
+        let end = self.0.partition_point(|epoch_change_log| {
+            epoch_change_log.epochs.first().expect("non-empty") <= &max_epoch
+        });
+        &self.0[start..end]
     }
 }
 
@@ -71,15 +44,8 @@ impl TableChangeLog {
                 .iter()
                 .map(|epoch_new_log| PbEpochNewChangeLog {
                     epochs: epoch_new_log.epochs.clone(),
-                    shards: epoch_new_log
-                        .shards
-                        .iter()
-                        .map(|shard| PbChangeLogShard {
-                            new_value: shard.new_value.clone(),
-                            old_value: shard.old_value.clone(),
-                            vnode_bitmap: Some(shard.vnode_bitmap.to_protobuf()),
-                        })
-                        .collect(),
+                    new_value: epoch_new_log.new_value.clone(),
+                    old_value: epoch_new_log.old_value.clone(),
                 })
                 .collect(),
         }
@@ -91,17 +57,57 @@ impl TableChangeLog {
                 .iter()
                 .map(|epoch_new_log| EpochNewChangeLog {
                     epochs: epoch_new_log.epochs.clone(),
-                    shards: epoch_new_log
-                        .shards
-                        .iter()
-                        .map(|shard| ChangeLogShard {
-                            new_value: shard.new_value.clone(),
-                            old_value: shard.old_value.clone(),
-                            vnode_bitmap: Bitmap::from(shard.vnode_bitmap.as_ref().unwrap()),
-                        })
-                        .collect(),
+                    new_value: epoch_new_log.new_value.clone(),
+                    old_value: epoch_new_log.old_value.clone(),
                 })
                 .collect(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use itertools::Itertools;
+
+    use crate::change_log::{EpochNewChangeLog, TableChangeLog};
+
+    #[test]
+    fn test_filter_epoch() {
+        let table_change_log = TableChangeLog(vec![
+            EpochNewChangeLog {
+                new_value: vec![],
+                old_value: vec![],
+                epochs: vec![2],
+            },
+            EpochNewChangeLog {
+                new_value: vec![],
+                old_value: vec![],
+                epochs: vec![3, 4],
+            },
+            EpochNewChangeLog {
+                new_value: vec![],
+                old_value: vec![],
+                epochs: vec![5],
+            },
+        ]);
+
+        let epochs = [1, 2, 3, 4, 5, 6];
+        for i in 0..epochs.len() {
+            for j in i..epochs.len() {
+                let min_epoch = epochs[i];
+                let max_epoch = epochs[j];
+                let expected = table_change_log
+                    .0
+                    .iter()
+                    .filter(|log| {
+                        &min_epoch <= log.epochs.last().unwrap()
+                            && log.epochs.first().unwrap() <= &max_epoch
+                    })
+                    .cloned()
+                    .collect_vec();
+                let actual = table_change_log.filter_epoch((min_epoch, max_epoch));
+                assert_eq!(&expected, actual, "{:?}", (min_epoch, max_epoch));
+            }
+        }
     }
 }

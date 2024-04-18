@@ -137,16 +137,11 @@ message TableWatermarks {
   bool is_ascending = 2;
 }
 
-message ChangeLogShard {
+message EpochNewChangeLog {
   repeated SstableInfo old_value = 1;
   repeated SstableInfo new_value = 2;
-  common.Buffer vnode_bitmap = 3;
-}
-
-message EpochNewChangeLog {
-  repeated ChangeLogShard shards = 1;
   // Epochs should be sorted in ascending order, which means earlier epoch at the front
-  repeated uint64 epochs = 2;
+  repeated uint64 epochs = 3;
 }
 
 message TableChangeLog {
