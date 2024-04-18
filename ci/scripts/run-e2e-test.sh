@@ -96,6 +96,11 @@ sqllogictest -p 4566 -d dev './e2e_test/ttl/ttl.slt'
 sqllogictest -p 4566 -d dev './e2e_test/database/prepare.slt'
 sqllogictest -p 4566 -d test './e2e_test/database/test.slt'
 
+echo "--- e2e, $mode, subscription"
+python3 -m pip install --break-system-packages psycopg2-binary
+sqllogictest -p 4566 -d dev './e2e_test/subscription/check_sql_statement.slt'
+python3 ./e2e_test/subscription/main.py
+
 echo "--- e2e, $mode, Apache Superset"
 sqllogictest -p 4566 -d dev './e2e_test/superset/*.slt' --junit "batch-${profile}"
 
@@ -122,7 +127,6 @@ sqllogictest -p 4566 -d dev './e2e_test/udf/wasm_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/rust_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/js_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/python_udf.slt'
-sqllogictest -p 4566 -d dev './e2e_test/udf/deno_udf.slt'
 
 echo "--- Kill cluster"
 cluster_stop
@@ -170,7 +174,7 @@ if [[ "$RUN_COMPACTION" -eq "1" ]]; then
 
     # Poll the current version id until we have around 100 version deltas
     delta_log_cnt=0
-    while [ $delta_log_cnt -le 90 ]
+    while [ "$delta_log_cnt" -le 90 ]
     do
         delta_log_cnt="$(./target/debug/risingwave risectl hummock list-version --verbose | grep -w '^ *id:' | grep -o '[0-9]\+' | head -n 1)"
         echo "Current version $delta_log_cnt"

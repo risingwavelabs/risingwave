@@ -141,6 +141,18 @@ pub enum DebugCommands {
         #[command(flatten)]
         common: DebugCommon,
     },
+    /// Fix table fragments by cleaning up some un-exist fragments, which happens when the upstream
+    /// streaming job is failed to create and the fragments are not cleaned up due to some unidentified issues.
+    FixDirtyUpstreams {
+        #[command(flatten)]
+        common: DebugCommon,
+
+        #[clap(long)]
+        table_id: u32,
+
+        #[clap(long, value_delimiter = ',')]
+        dirty_fragment_ids: Vec<u32>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -853,6 +865,11 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 .await?
         }
         Commands::Debug(DebugCommands::Dump { common }) => cmd_impl::debug::dump(common).await?,
+        Commands::Debug(DebugCommands::FixDirtyUpstreams {
+            common,
+            table_id,
+            dirty_fragment_ids,
+        }) => cmd_impl::debug::fix_table_fragments(common, table_id, dirty_fragment_ids).await?,
         Commands::Throttle(ThrottleCommands::Source(args)) => {
             apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Source, args).await?
         }

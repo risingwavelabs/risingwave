@@ -15,6 +15,7 @@ extend = [
   { path = "src/storage/backup/integration_tests/Makefile.toml" },
   { path = "src/java_binding/make-java-binding.toml" },
   { path = "src/stream/tests/integration_tests/integration_test.toml" },
+  { path = "e2e_test/source_inline/commands.toml" },
 ]
 
 env_files = ["./risedev-components.user.env"]
@@ -34,7 +35,6 @@ is_release = get_env ENABLE_RELEASE_PROFILE
 is_not_release = not ${is_release}
 is_dynamic_linking = get_env ENABLE_DYNAMIC_LINKING
 is_hummock_trace = get_env ENABLE_HUMMOCK_TRACE
-is_deno_udf_enabled = get_env ENABLE_DENO_UDF
 is_python_udf_enabled = get_env ENABLE_PYTHON_UDF
 
 if ${is_sanitizer_enabled}
@@ -56,11 +56,6 @@ if ${is_not_release} and ${is_dynamic_linking}
   set_env RISINGWAVE_FEATURE_FLAGS "--features rw-dynamic-link --no-default-features"
 else
   set_env RISINGWAVE_FEATURE_FLAGS "--features rw-static-link"
-end
-
-if ${is_deno_udf_enabled}
-  flags = get_env RISINGWAVE_FEATURE_FLAGS
-  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features embedded-deno-udf"
 end
 
 if ${is_python_udf_enabled}
@@ -564,8 +559,8 @@ env_files = ["${PREFIX_CONFIG}/risedev-env"]
 script = '''
 #!/usr/bin/env bash
 cat <<EOF > "${PREFIX_CONFIG}/psql-env"
-export PGHOST=$RW_FRONTEND_LISTEN_ADDRESS
-export PGPORT=$RW_FRONTEND_PORT
+export PGHOST=$RISEDEV_RW_FRONTEND_LISTEN_ADDRESS
+export PGPORT=$RISEDEV_RW_FRONTEND_PORT
 export PGUSER=root
 export PGDATABASE=dev
 EOF
@@ -582,7 +577,7 @@ dependencies = ["check-risedev-env-file"]
 env_files = ["${PREFIX_CONFIG}/risedev-env"]
 script = '''
 #!/usr/bin/env bash
-psql -h $RW_FRONTEND_LISTEN_ADDRESS -p $RW_FRONTEND_PORT -U root -d dev "$@"
+psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root -d dev "$@"
 '''
 
 [tasks.ctl]
@@ -889,7 +884,7 @@ cargo build \
 """
 
 [tasks.stest]
-category = "RiseDev - Deterministic Simulation"
+category = "RiseDev - Test - Deterministic Simulation"
 description = "Run unit tests in deterministic simulation mode"
 dependencies = ["install-nextest"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -914,7 +909,7 @@ cargo nextest run \
 """
 
 [tasks.sit-test]
-category = "RiseDev - Deterministic Simulation"
+category = "RiseDev - Test - Deterministic Simulation"
 description = "Run integration tests in deterministic simulation mode"
 dependencies = ["install-nextest"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -929,7 +924,7 @@ cargo nextest run \
 """
 
 [tasks.sarchive-it-test]
-category = "RiseDev - Deterministic Simulation"
+category = "RiseDev - Test - Deterministic Simulation"
 description = "Archive integration tests in deterministic simulation mode"
 dependencies = ["install-nextest"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -945,7 +940,7 @@ cargo nextest archive \
 """
 
 [tasks.scheck]
-category = "RiseDev - Deterministic Simulation"
+category = "RiseDev - Test - Deterministic Simulation"
 description = "Run cargo check in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -970,7 +965,7 @@ cargo check \
 """
 
 [tasks.sslt]
-category = "RiseDev - Deterministic Simulation"
+category = "RiseDev - Test - Deterministic Simulation"
 description = "Run e2e tests in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -984,7 +979,7 @@ cargo run \
 """
 
 [tasks.sslt-build-all]
-category = "RiseDev - Deterministic Simulation"
+category = "RiseDev - Test - Deterministic Simulation"
 description = "Build deterministic simulation runner and tests"
 dependencies = ["warn-on-missing-tools"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -999,7 +994,7 @@ cargo build \
 """
 
 [tasks.sslt-cov]
-category = "RiseDev - Deterministic Simulation"
+category = "RiseDev - Test - Deterministic Simulation"
 description = "Run e2e tests in deterministic simulation mode and report code coverage"
 dependencies = ["install-llvm-cov"]
 env = { CARGO_TARGET_DIR = "target/sim-cov" }
@@ -1296,42 +1291,42 @@ echo "All processes has exited."
 """
 
 [tasks.slt]
-category = "RiseDev - SQLLogicTest"
-install_crate = { version = "0.19.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+env = { SLT_HOST = "${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS}", SLT_PORT = "${RISEDEV_RW_FRONTEND_PORT}", SLT_DB = "dev" }
+category = "RiseDev - Test - SQLLogicTest"
+install_crate = { version = "0.20.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
   "--help",
 ], install_command = "binstall" }
 dependencies = ["check-risedev-env-file"]
 env_files = ["${PREFIX_CONFIG}/risedev-env"]
-env = { SLT_HOST = "${RW_FRONTEND_LISTEN_ADDRESS}", SLT_PORT = "${RW_FRONTEND_PORT}", SLT_DB = "dev" }
 command = "sqllogictest"
 args = ["${@}"]
 description = "🌟 Run SQLLogicTest"
 
 [tasks.slt-streaming]
-category = "RiseDev - SQLLogicTest"
+category = "RiseDev - Test - SQLLogicTest"
 extend = "slt"
 args = ["${@}", "./e2e_test/streaming/**/*.slt"]
 description = "Run all streaming e2e tests"
 
 [tasks.slt-batch]
-category = "RiseDev - SQLLogicTest"
+category = "RiseDev - Test - SQLLogicTest"
 extend = "slt"
 args = ["${@}", "./e2e_test/batch/*.slt"]
 description = "Run all batch e2e tests"
 
 [tasks.slt-generated]
-category = "RiseDev - SQLLogicTest"
+category = "RiseDev - Test - SQLLogicTest"
 extend = "slt"
 args = ["${@}", "./e2e_test/generated/**/*.slt"]
 description = "Run all generated e2e tests"
 
 [tasks.slt-all]
-category = "RiseDev - SQLLogicTest"
+category = "RiseDev - Test - SQLLogicTest"
 run_task = { name = ["slt-streaming", "slt-batch", "slt-generated"] }
 description = "Run all e2e tests"
 
 [tasks.docslt]
-category = "RiseDev - SQLLogicTest"
+category = "RiseDev - Test - SQLLogicTest"
 description = "Extract SQL examples written in SQLLogicTest syntax from Rust doc comments"
 script = '''
 #!/usr/bin/env bash
@@ -1406,7 +1401,7 @@ UPDATE_EXPECT=1 cargo test -p risingwave_connector tests::test_with_options_yaml
 '''
 
 [tasks.backwards-compat-test]
-category = "RiseDev - Backwards Compatibility Test"
+category = "RiseDev - Test - Backwards Compatibility Test"
 description = "Run backwards compatibility test"
 script = "./backwards-compat-tests/scripts/run_local.sh"
 

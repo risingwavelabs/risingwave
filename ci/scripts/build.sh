@@ -41,9 +41,9 @@ cargo fmt --all -- --check
 echo "--- Build Rust components"
 
 if [[ "$profile" == "ci-dev" ]]; then
-    RISINGWAVE_FEATURE_FLAGS="--features rw-dynamic-link --no-default-features"
+    RISINGWAVE_FEATURE_FLAGS=(--features rw-dynamic-link --no-default-features)
 else
-    RISINGWAVE_FEATURE_FLAGS="--features rw-static-link"
+    RISINGWAVE_FEATURE_FLAGS=(--features rw-static-link)
 fi
 
 cargo build \
@@ -53,8 +53,7 @@ cargo build \
     -p risingwave_sqlsmith \
     -p risingwave_compaction_test \
     -p risingwave_e2e_extended_mode_test \
-    $RISINGWAVE_FEATURE_FLAGS \
-    --features embedded-deno-udf \
+    "${RISINGWAVE_FEATURE_FLAGS[@]}" \
     --features embedded-python-udf \
     --profile "$profile"
 

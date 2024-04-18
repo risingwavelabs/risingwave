@@ -794,7 +794,7 @@ profile:
         health-check-port: 6788
       - use: compactor
 
-  ci-pubsub:
+  ci-pubsub-kafka:
     config-path: src/config/ci.toml
     steps:
       - use: minio
@@ -807,6 +807,10 @@ profile:
       - use: compactor
       - use: pubsub
         persist-data: true
+      - use: kafka
+        user-managed: true
+        address: message_queue
+        port: 29092
 
   ci-redis:
     config-path: src/config/ci.toml
@@ -1331,6 +1335,8 @@ template:
 
     # Kafka broker id. If there are multiple instances of Kafka, we will need to set.
     broker-id: 0
+
+    user-managed: false
 
   # Google pubsub emulator service
   pubsub:

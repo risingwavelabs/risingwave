@@ -14,13 +14,19 @@
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::num::NonZeroU32;
 use std::ops::Bound;
+use std::time::Instant;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use futures::future::try_join_all;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
+use governor::clock::MonotonicClock;
+use governor::middleware::NoOpMiddleware;
+use governor::state::{InMemoryState, NotKeyed};
+use governor::{Quota, RateLimiter};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
@@ -799,6 +805,9 @@ pub(crate) async fn persist_state<S: StateStore, const IS_REPLICATED: bool>(
     Ok(())
 }
 
+pub type BackfillRateLimiter =
+    RateLimiter<NotKeyed, InMemoryState, MonotonicClock, NoOpMiddleware<Instant>>;
+
 /// Creates a data chunk builder for snapshot read.
 /// If the `rate_limit` is smaller than `chunk_size`, it will take precedence.
 /// This is so we can partition snapshot read into smaller chunks than chunk size.
@@ -809,9 +818,19 @@ pub fn create_builder(
 ) -> DataChunkBuilder {
     if let Some(rate_limit) = rate_limit
         && rate_limit < chunk_size
+        && rate_limit > 0
     {
         DataChunkBuilder::new(data_types, rate_limit)
     } else {
         DataChunkBuilder::new(data_types, chunk_size)
     }
+}
+
+pub fn create_limiter(rate_limit: usize) -> Option<BackfillRateLimiter> {
+    if rate_limit == 0 {
+        return None;
+    }
+    let quota = Quota::per_second(NonZeroU32::new(rate_limit as u32).unwrap());
+    let clock = MonotonicClock;
+    Some(RateLimiter::direct_with_clock(quota, &clock))
 }

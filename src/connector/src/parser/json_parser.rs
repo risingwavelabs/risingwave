@@ -23,7 +23,7 @@ use risingwave_pb::plan_common::ColumnDesc;
 
 use super::avro::schema_resolver::ConfluentSchemaResolver;
 use super::util::{bytes_from_url, get_kafka_topic};
-use super::{EncodingProperties, SchemaRegistryAuth, SpecificParserConfig};
+use super::{EncodingProperties, JsonProperties, SchemaRegistryAuth, SpecificParserConfig};
 use crate::error::ConnectorResult;
 use crate::only_parse_payload;
 use crate::parser::avro::util::avro_schema_to_column_descs;
@@ -40,6 +40,7 @@ use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 pub struct JsonAccessBuilder {
     value: Option<Vec<u8>>,
     payload_start_idx: usize,
+    json_parse_options: JsonParseOptions,
 }
 
 impl AccessBuilder for JsonAccessBuilder {
@@ -58,16 +59,21 @@ impl AccessBuilder for JsonAccessBuilder {
             value,
             // Debezium and Canal have their special json access builder and will not
             // use this
-            &JsonParseOptions::DEFAULT,
+            &self.json_parse_options,
         )))
     }
 }
 
 impl JsonAccessBuilder {
-    pub fn new(use_schema_registry: bool) -> ConnectorResult<Self> {
+    pub fn new(config: JsonProperties) -> ConnectorResult<Self> {
+        let mut json_parse_options = JsonParseOptions::DEFAULT;
+        if let Some(mode) = config.timestamptz_handling {
+            json_parse_options.timestamptz_handling = mode;
+        }
         Ok(Self {
             value: None,
-            payload_start_idx: if use_schema_registry { 5 } else { 0 },
+            payload_start_idx: if config.use_schema_registry { 5 } else { 0 },
+            json_parse_options,
         })
     }
 }
@@ -216,8 +222,8 @@ mod tests {
 
     fn get_payload() -> Vec<Vec<u8>> {
         vec![
-            br#"{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269","decimal":12345.67890}"#.to_vec(),
-            br#"{"i32":1,"f32":12345e+10,"f64":12345,"decimal":12345}"#.to_vec(),
+            br#"{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269","decimal":12345.67890,"interval":"P1Y2M3DT0H5M0S"}"#.to_vec(),
+            br#"{"i32":1,"f32":12345e+10,"f64":12345,"decimal":12345,"interval":"1 day"}"#.to_vec(),
         ]
     }
 
@@ -239,6 +245,7 @@ mod tests {
             SourceColumnDesc::simple("date", DataType::Date, 8.into()),
             SourceColumnDesc::simple("timestamp", DataType::Timestamp, 9.into()),
             SourceColumnDesc::simple("decimal", DataType::Decimal, 10.into()),
+            SourceColumnDesc::simple("interval", DataType::Interval, 11.into()),
         ];
 
         let parser = JsonParser::new(
@@ -301,6 +308,10 @@ mod tests {
                 row.datum_at(9).to_owned_datum(),
                 (Some(ScalarImpl::Decimal("12345.67890".parse().unwrap())))
             );
+            assert_eq!(
+                row.datum_at(10).to_owned_datum(),
+                (Some(ScalarImpl::Interval("P1Y2M3DT0H5M0S".parse().unwrap())))
+            );
         }
 
         {
@@ -322,6 +333,10 @@ mod tests {
             assert_eq!(
                 row.datum_at(9).to_owned_datum(),
                 (Some(ScalarImpl::Decimal(12345.into())))
+            );
+            assert_eq!(
+                row.datum_at(10).to_owned_datum(),
+                (Some(ScalarImpl::Interval("1 day".parse().unwrap())))
             );
         }
     }
@@ -595,6 +610,7 @@ mod tests {
             key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
+                timestamptz_handling: None,
             }),
             protocol_config: ProtocolProperties::Upsert,
         };

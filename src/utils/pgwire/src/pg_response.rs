@@ -42,6 +42,7 @@ pub enum StatementType {
     FETCH,
     COPY,
     EXPLAIN,
+    CLOSE_CURSOR,
     CREATE_TABLE,
     CREATE_MATERIALIZED_VIEW,
     CREATE_VIEW,
@@ -55,6 +56,7 @@ pub enum StatementType {
     CREATE_FUNCTION,
     CREATE_CONNECTION,
     COMMENT,
+    DECLARE_CURSOR,
     DESCRIBE,
     GRANT_PRIVILEGE,
     DROP_TABLE,
@@ -100,11 +102,10 @@ pub enum StatementType {
     ROLLBACK,
     SET_TRANSACTION,
     CANCEL_COMMAND,
-    DECLARE_CURSOR,
     FETCH_CURSOR,
-    CLOSE_CURSOR,
     WAIT,
     KILL,
+    RECOVER,
 }
 
 impl std::fmt::Display for StatementType {

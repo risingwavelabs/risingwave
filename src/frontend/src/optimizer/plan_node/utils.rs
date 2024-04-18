@@ -355,17 +355,7 @@ pub fn infer_kv_log_store_table_catalog_inner(
 
     let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
 
-    let payload_indices = table_catalog_builder.extend_columns(
-        &columns
-            .iter()
-            .map(|column| {
-                // make payload hidden column visible in kv log store batch query
-                let mut column = column.clone();
-                column.is_hidden = false;
-                column
-            })
-            .collect_vec(),
-    );
+    let payload_indices = table_catalog_builder.extend_columns(columns);
 
     value_indices.extend(payload_indices);
     table_catalog_builder.set_value_indices(value_indices);
