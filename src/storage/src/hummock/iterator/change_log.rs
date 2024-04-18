@@ -32,18 +32,34 @@ struct ChangeLogIteratorInner<
     NI: HummockIterator<Direction = Forward>,
     OI: HummockIterator<Direction = Forward>,
 > {
+    /// Iterator for new value. In each `next`, the iterator will iterate over all value of the current key.
+    /// Therefore, we need to buffer the key and newest value in `curr_key` and `new_value`.
+    ///
+    /// We assume that all operation between `min_epoch` and `max_epoch` will be included in the `new_value_iter`.
     new_value_iter: NI,
+    /// Iterator for old value. When `is_old_value_set` is true, its value is the old value in the change log value.
+    ///
+    /// We assume that each old value will have a new value of the same epoch in the `new_value_iter`. This is to say,
+    /// For a specific key, we won't have an epoch that only exists in the `old_value_iter` but not exists in `new_value_iter`.
+    /// `Delete` also contains a tombstone value.
     old_value_iter: OI,
+    /// Inclusive max epoch
     max_epoch: u64,
+    /// Inclusive min epoch
     min_epoch: u64,
     key_range: UserKeyRange,
 
+    /// Buffer of current key
     curr_key: FullKey<Vec<u8>>,
+    /// Buffer for new value. Only valid when `is_new_value_delete` is true
     new_value: Vec<u8>,
+    /// Indicate whether the current new value is delete.
     is_new_value_delete: bool,
 
+    /// Whether Indicate whether the current `old_value_iter` represents the old value in ChangeLogValue
     is_old_value_set: bool,
 
+    /// Whether the iterator is currently pointing at a valid key with ChangeLogValue
     is_current_pos_valid: bool,
 }
 
@@ -151,6 +167,7 @@ impl<NI: HummockIterator<Direction = Forward>, OI: HummockIterator<Direction = F
         }
     }
 
+    /// Advance the `new_value_iter` to a valid key and valid epoch.
     async fn advance_to_valid_key(&mut self) -> HummockResult<()> {
         self.is_current_pos_valid = false;
         loop {
@@ -177,6 +194,8 @@ impl<NI: HummockIterator<Direction = Forward>, OI: HummockIterator<Direction = F
         debug_assert!(self.is_valid_epoch(self.new_value_iter.key().epoch_with_gap));
         debug_assert!(!self.user_key_out_of_range(self.new_value_iter.key().user_key));
         self.is_current_pos_valid = true;
+        // The key and value will be saved in a buffer, because in the next step we will
+        // continue advancing the `new_value_iter`.
         self.curr_key.set(self.new_value_iter.key());
         match self.new_value_iter.value() {
             HummockValue::Put(val) => {
@@ -192,6 +211,7 @@ impl<NI: HummockIterator<Direction = Forward>, OI: HummockIterator<Direction = F
         Ok(())
     }
 
+    /// Advance the `new_value_iter` to find the oldest epoch of the current key.
     async fn advance_to_find_oldest_epoch(&mut self) -> HummockResult<EpochWithGap> {
         let mut ret = self.curr_key.epoch_with_gap;
         debug_assert!(self.is_valid_epoch(ret));
@@ -265,6 +285,9 @@ impl<NI: HummockIterator<Direction = Forward>, OI: HummockIterator<Direction = F
                 }
                 Ordering::Equal => match old_value_iter_key.epoch_with_gap.cmp(&oldest_epoch) {
                     Ordering::Less => {
+                        // The assertion holds because we assume that for a specific key, any old value will have a new value of the same
+                        // epoch in the `new_value_iter`. If the assertion is broken, it means we must have a new value of the same epoch
+                        // that are valid but older than the `oldest_epoch`, which breaks the definition of `oldest_epoch`.
                         assert!(
                                 old_value_iter_key.epoch_with_gap.pure_epoch() < self.min_epoch,
                                 "there should not be old value between oldest new_value and min_epoch. \
