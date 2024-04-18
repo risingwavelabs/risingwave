@@ -365,7 +365,7 @@ pub async fn compact(
         .map(|table_info| table_info.file_size)
         .sum::<u64>();
 
-    let optimize_by_copy_block = optimize_by_copy_block(&compact_task, context.clone());
+    let optimize_by_copy_block = optimize_by_copy_block(&compact_task, &context);
 
     if !optimize_by_copy_block {
         match generate_splits(&sstable_infos, compaction_size, context.clone()).await {
@@ -618,7 +618,7 @@ pub async fn compact(
 }
 
 /// Fills in the compact task and tries to report the task result to meta node.
-fn compact_done(
+pub(crate) fn compact_done(
     mut compact_task: CompactTask,
     context: CompactorContext,
     output_ssts: Vec<CompactOutput>,
