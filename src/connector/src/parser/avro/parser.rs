@@ -257,7 +257,7 @@ mod test {
     }
 
     async fn new_avro_conf_from_local(file_name: &str) -> ConnectorResult<AvroParserConfig> {
-        let schema_path = "file://".to_owned() + &test_data_path(file_name);
+        let schema_path = format!("file://{}", test_data_path(file_name));
         let info = StreamSourceInfo {
             row_schema_location: schema_path.clone(),
             use_schema_registry: false,
