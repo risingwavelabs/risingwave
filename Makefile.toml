@@ -122,6 +122,17 @@ rm -rf "${PREFIX_CONFIG}"
 rm -rf "${PREFIX_PROFILING}"
 '''
 
+[tasks.reset-rw]
+category = "RiseDev - Start/Stop"
+description = "Clean all data in the default database dev of the running RisingWave"
+dependencies = ["check-risedev-env-file"]
+env_files = ["${PREFIX_CONFIG}/risedev-env"]
+script = '''
+#!/usr/bin/env bash
+psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root -d dev -c "CREATE DATABASE risedev_tmp;"
+psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root -d risedev_tmp -c "DROP DATABASE dev; CREATE DATABASE dev;"
+psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root -d dev -c "DROP DATABASE risedev_tmp;"
+'''
 
 [tasks.l]
 alias = "logs"
