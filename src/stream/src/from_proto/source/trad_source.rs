@@ -269,7 +269,10 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 barrier_receiver,
                 system_params,
                 // we don't expect any data in, so no need to set chunk_sizes
-                SourceCtrlOpts::default(),
+                SourceCtrlOpts {
+                    chunk_size: 0,
+                    rate_limit: None,
+                },
             );
             Ok((params.info, exec).into())
         }

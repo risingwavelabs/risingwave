@@ -9256,7 +9256,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.11.2",
+ "parking_lot 0.12.1",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
@@ -13019,9 +13019,9 @@ dependencies = [
 
 [[package]]
 name = "sqllogictest"
-version = "0.20.0"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8518892e5e36bfa90163e53c4e4f36a388e0afa1cd6a3de0614253b3c9029c7"
+checksum = "7e7c6a33098cd55e4fead1bd1f85c1d2064f02bafdb9fe004ca39fd94aee36e6"
 dependencies = [
  "async-trait",
  "educe 0.4.23",
@@ -13987,9 +13987,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext"
-version = "0.0.11"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54a6a1db013d9f7175962ec64a0fb90760832062e29f6664f1aefee91d072a50"
+checksum = "a7c19760dc47062bca5c1b3699b032111c93802d51ac47660db11b08afc6bad2"
 dependencies = [
  "thiserror",
  "thiserror-ext-derive",
@@ -13997,9 +13997,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext-derive"
-version = "0.0.11"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98c358cfea7a4a0f4554d4df6533f9b652d44c0108e99db3685f28f30b0954aa"
+checksum = "667c8c48f68021098038115926c64d9950b0582062ae63f7d30638b1168daf03"
 dependencies = [
  "either",
  "proc-macro2",

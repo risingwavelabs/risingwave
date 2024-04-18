@@ -12,15 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::str::FromStr;
 use std::collections::{BTreeMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, TableId, UserId, OBJECT_ID_PLACEHOLDER};
+use risingwave_common::types::Interval;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{PbStreamJobStatus, PbSubscription};
+use thiserror_ext::AsReport;
 
 use super::OwnedByUserCatalog;
+use crate::error::{ErrorCode, Result};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(test, derive(Default))]
@@ -67,6 +71,7 @@ pub struct SubscriptionCatalog {
 
     pub created_at_cluster_version: Option<String>,
     pub initialized_at_cluster_version: Option<String>,
+    pub subscription_internal_table_name: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
@@ -98,8 +103,29 @@ impl SubscriptionCatalog {
         self
     }
 
+    pub fn get_retention_seconds(&self) -> Result<u64> {
+        let retention_seconds_str = self.properties.get("retention").ok_or_else(|| {
+            ErrorCode::InternalError("Subscription retention time not set.".to_string())
+        })?;
+        let retention_seconds = (Interval::from_str(retention_seconds_str)
+            .map_err(|err| {
+                ErrorCode::InternalError(format!(
+                    "Retention needs to be set in Interval format: {:?}",
+                    err.to_report_string()
+                ))
+            })?
+            .epoch_in_micros()
+            / 1000000) as u64;
+
+        Ok(retention_seconds)
+    }
+
     pub fn create_sql(&self) -> String {
         self.definition.clone()
+    }
+
+    pub fn get_log_store_name(&self) -> String {
+        self.subscription_internal_table_name.clone().unwrap()
     }
 
     pub fn to_proto(&self) -> PbSubscription {
@@ -130,6 +156,7 @@ impl SubscriptionCatalog {
             stream_job_status: PbStreamJobStatus::Creating.into(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             created_at_cluster_version: self.created_at_cluster_version.clone(),
+            subscription_internal_table_name: self.subscription_internal_table_name.clone(),
         }
     }
 }
@@ -165,6 +192,7 @@ impl From<&PbSubscription> for SubscriptionCatalog {
             initialized_at_epoch: prost.initialized_at_epoch.map(Epoch::from),
             created_at_cluster_version: prost.created_at_cluster_version.clone(),
             initialized_at_cluster_version: prost.initialized_at_cluster_version.clone(),
+            subscription_internal_table_name: prost.subscription_internal_table_name.clone(),
         }
     }
 }

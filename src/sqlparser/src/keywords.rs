@@ -462,6 +462,7 @@ define_keywords!(
     SETS,
     SHOW,
     SIMILAR,
+    SINCE,
     SINK,
     SINKS,
     SMALLINT,

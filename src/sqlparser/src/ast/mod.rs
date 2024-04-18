@@ -1286,6 +1286,22 @@ pub enum Statement {
         append_only: bool,
         params: CreateFunctionBody,
     },
+
+    /// DECLARE CURSOR
+    DeclareCursor {
+        stmt: DeclareCursorStatement,
+    },
+
+    // FETCH CURSOR
+    FetchCursor {
+        stmt: FetchCursorStatement,
+    },
+
+    // CLOSE CURSOR
+    CloseCursor {
+        stmt: CloseCursorStatement,
+    },
+
     /// ALTER DATABASE
     AlterDatabase {
         name: ObjectName,
@@ -1496,21 +1512,6 @@ pub enum Statement {
     AlterSystem {
         param: Ident,
         value: SetVariableValue,
-    },
-    /// DECLARE CURSOR
-    DeclareCursor {
-        cursor_name: ObjectName,
-        query: Box<Query>,
-    },
-    /// FETCH FROM CURSOR
-    FetchCursor {
-        cursor_name: ObjectName,
-        /// Number of rows to fetch. `None` means `FETCH ALL`.
-        count: Option<i32>,
-    },
-    /// CLOSE CURSOR
-    CloseCursor {
-        cursor_name: Option<ObjectName>,
     },
     /// FLUSH the current barrier.
     ///
@@ -1854,6 +1855,9 @@ impl fmt::Display for Statement {
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
             Statement::CreateSubscription { stmt } => write!(f, "CREATE SUBSCRIPTION {}", stmt,),
             Statement::CreateConnection { stmt } => write!(f, "CREATE CONNECTION {}", stmt,),
+            Statement::DeclareCursor { stmt } => write!(f, "DECLARE {}", stmt,),
+            Statement::FetchCursor { stmt } => write!(f, "FETCH {}", stmt),
+            Statement::CloseCursor { stmt } => write!(f, "CLOSE {}", stmt),
             Statement::AlterDatabase { name, operation } => {
                 write!(f, "ALTER DATABASE {} {}", name, operation)
             }
@@ -2071,23 +2075,6 @@ impl fmt::Display for Statement {
                     f,
                     "{param} = {value}",
                 )
-            }
-            Statement::DeclareCursor { cursor_name, query } => {
-                write!(f, "DECLARE {} CURSOR FOR {}", cursor_name, query)
-            },
-            Statement::FetchCursor { cursor_name , count} => {
-                if let Some(count) = count {
-                    write!(f, "FETCH {} FROM {}", count, cursor_name)
-                } else {
-                    write!(f, "FETCH NEXT FROM {}", cursor_name)
-                }
-            },
-            Statement::CloseCursor { cursor_name } => {
-                if let Some(name) = cursor_name {
-                    write!(f, "CLOSE {}", name)
-                } else {
-                    write!(f, "CLOSE ALL")
-                }
             }
             Statement::Flush => {
                 write!(f, "FLUSH")

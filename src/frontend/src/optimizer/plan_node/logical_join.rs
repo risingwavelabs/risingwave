@@ -1071,13 +1071,6 @@ impl LogicalJoin {
         // Enforce a shuffle for the temporal join LHS to let the scheduler be able to schedule the join fragment together with the RHS with a `no_shuffle` exchange.
         let left = required_dist.enforce(left, &Order::any());
 
-        if !left.append_only() {
-            return Err(RwError::from(ErrorCode::NotSupported(
-                "Temporal join requires an append-only left input".into(),
-                "Please ensure your left input is append-only".into(),
-            )));
-        }
-
         // Extract the predicate from logical scan. Only pure scan is supported.
         let (new_scan, scan_predicate, project_expr) = logical_scan.predicate_pull_up();
         // Construct output column to require column mapping
