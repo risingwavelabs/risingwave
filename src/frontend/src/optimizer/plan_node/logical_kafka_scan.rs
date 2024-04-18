@@ -52,8 +52,8 @@ impl LogicalKafkaScan {
     pub fn create(logical_source: &LogicalSource) -> PlanRef {
         assert!(logical_source.core.is_kafka_connector());
 
-        let base = logical_source.base.clone_with_new_plan_id();
         let core = logical_source.core.clone();
+        let base = PlanBase::new_logical_with_core(&core);
         let kafka_timestamp_range = (Bound::Unbounded, Bound::Unbounded);
 
         let kafka_scan = LogicalKafkaScan {
