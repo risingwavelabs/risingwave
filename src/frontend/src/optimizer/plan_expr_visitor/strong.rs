@@ -300,7 +300,9 @@ impl Strong {
             | ExprType::PgIndexesSize
             | ExprType::PgRelationSize
             | ExprType::PgGetSerialSequence
-            | ExprType::IcebergTransform => false,
+            | ExprType::IcebergTransform
+            | ExprType::InetAton
+            | ExprType::InetNtoa => false,
             ExprType::Unspecified => unreachable!(),
         }
     }

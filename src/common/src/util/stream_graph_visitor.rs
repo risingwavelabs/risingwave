@@ -199,7 +199,7 @@ pub fn visit_stream_node_tables_inner<F>(
 
             // Subscription
             NodeBody::Subscription(node) => {
-                // A Subscription should have a state table.
+                // A Subscription should have a log store
                 optional!(node.log_store_table, "Subscription")
             }
 

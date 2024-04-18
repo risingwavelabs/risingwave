@@ -18,6 +18,15 @@ RUN apt-get update -yy && \
     && rm -rf /var/lib/{apt,dpkg,cache,log}/
 ENV PYO3_PYTHON=python3.12
 
+# Install nvm and zx
+ENV NVM_DIR /root/.nvm
+ENV NODE_VERSION 20.11.1
+RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash \
+  && . $NVM_DIR/nvm.sh \
+  && nvm install $NODE_VERSION
+ENV PATH $NVM_DIR/versions/node/v$NODE_VERSION/bin:$PATH
+RUN npm install -g zx
+
 SHELL ["/bin/bash", "-c"]
 
 RUN mkdir -p /risingwave
@@ -43,6 +52,16 @@ RUN pip3 install --break-system-packages pyarrow pytest
 
 # Install poetry
 RUN curl -sSL https://install.python-poetry.org | python3 -
+# Install rpk
+RUN if [ "$(uname -m)" = "amd64" ] || [ "$(uname -m)" = "x86_64" ]; then \
+        curl -LO https://github.com/redpanda-data/redpanda/releases/latest/download/rpk-linux-amd64.zip && \
+        unzip rpk-linux-amd64.zip -d ~/.local/bin/ && \
+        rm rpk-linux-amd64.zip; \
+    else \
+        curl -LO https://github.com/redpanda-data/redpanda/releases/latest/download/rpk-linux-arm64.zip && \
+        unzip rpk-linux-arm64.zip -d ~/.local/bin/ && \
+        rm rpk-linux-arm64.zip; \
+    fi
 ENV PATH /root/.local/bin:$PATH
 
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
@@ -51,7 +70,7 @@ ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 RUN cargo binstall -y --no-symlinks cargo-llvm-cov cargo-nextest cargo-hakari cargo-sort cargo-cache cargo-audit \
     cargo-make@0.37.9 \
-    sqllogictest-bin@0.19.1 \
+    sqllogictest-bin@0.20.1 \
     sccache@0.7.4 \
     && cargo cache -a \
     && rm -rf "/root/.cargo/registry/index" \

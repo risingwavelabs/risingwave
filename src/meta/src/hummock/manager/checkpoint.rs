@@ -30,6 +30,7 @@ use risingwave_pb::hummock::{PbHummockVersionArchive, PbHummockVersionCheckpoint
 use thiserror_ext::AsReport;
 
 use crate::hummock::error::Result;
+use crate::hummock::manager::versioning::Versioning;
 use crate::hummock::manager::{read_lock, write_lock};
 use crate::hummock::metrics_utils::trigger_gc_stat;
 use crate::hummock::HummockManager;
@@ -37,6 +38,12 @@ use crate::hummock::HummockManager;
 #[derive(Default)]
 pub struct HummockVersionCheckpoint {
     pub version: HummockVersion,
+
+    /// stale objects of versions before the current checkpoint.
+    ///
+    /// Previously we stored the stale object of each single version.
+    /// Currently we will merge the stale object between two checkpoints, and only the
+    /// id of the checkpointed hummock version are included in the map.
     pub stale_objects: HashMap<HummockVersionId, PbStaleObjects>,
 }
 
@@ -119,18 +126,29 @@ impl HummockManager {
         let timer = self.metrics.version_checkpoint_latency.start_timer();
         // 1. hold read lock and create new checkpoint
         let versioning_guard = read_lock!(self, versioning).await;
-        let versioning = versioning_guard.deref();
-        let current_version = &versioning.current_version;
-        let old_checkpoint = &versioning.checkpoint;
+        let versioning: &Versioning = versioning_guard.deref();
+        let current_version: &HummockVersion = &versioning.current_version;
+        let old_checkpoint: &HummockVersionCheckpoint = &versioning.checkpoint;
         let new_checkpoint_id = current_version.id;
         let old_checkpoint_id = old_checkpoint.version.id;
         if new_checkpoint_id < old_checkpoint_id + min_delta_log_num {
             return Ok(0);
         }
+        if cfg!(test) && new_checkpoint_id == old_checkpoint_id {
+            drop(versioning_guard);
+            let mut versioning = write_lock!(self, versioning).await;
+            versioning.mark_objects_for_deletion();
+            let min_pinned_version_id = versioning.min_pinned_version_id();
+            trigger_gc_stat(&self.metrics, &versioning.checkpoint, min_pinned_version_id);
+            return Ok(0);
+        }
+        assert!(new_checkpoint_id > old_checkpoint_id);
         let mut archive: Option<PbHummockVersionArchive> = None;
         let mut stale_objects = old_checkpoint.stale_objects.clone();
         // `object_sizes` is used to calculate size of stale objects.
         let mut object_sizes = object_size_map(&old_checkpoint.version);
+        // The set of object ids that once exist in any hummock version
+        let mut versions_object_ids = old_checkpoint.version.get_object_ids();
         for (_, version_delta) in versioning
             .hummock_version_deltas
             .range((Excluded(old_checkpoint_id), Included(new_checkpoint_id)))
@@ -144,22 +162,24 @@ impl HummockManager {
                         .map(|t| (t.object_id, t.file_size)),
                 );
             }
-            let removed_object_ids = version_delta.gc_object_ids.clone();
-            if removed_object_ids.is_empty() {
-                continue;
-            }
-            let total_file_size = removed_object_ids
-                .iter()
-                .map(|t| object_sizes.get(t).copied().unwrap())
-                .sum::<u64>();
-            stale_objects.insert(
-                version_delta.id,
-                StaleObjects {
-                    id: removed_object_ids,
-                    total_file_size,
-                },
-            );
+
+            versions_object_ids.extend(version_delta.newly_added_object_ids());
         }
+
+        // Object ids that once exist in any hummock version but not exist in the latest hummock version
+        let removed_object_ids = &versions_object_ids - &current_version.get_object_ids();
+
+        let total_file_size = removed_object_ids
+            .iter()
+            .map(|t| object_sizes.get(t).copied().unwrap())
+            .sum::<u64>();
+        stale_objects.insert(
+            current_version.id,
+            StaleObjects {
+                id: removed_object_ids.into_iter().collect(),
+                total_file_size,
+            },
+        );
         if self.env.opts.enable_hummock_data_archive {
             archive = Some(PbHummockVersionArchive {
                 version: Some(old_checkpoint.version.to_protobuf()),
@@ -189,7 +209,7 @@ impl HummockManager {
         // 3. hold write lock and update in memory state
         let mut versioning_guard = write_lock!(self, versioning).await;
         let versioning = versioning_guard.deref_mut();
-        assert!(new_checkpoint.version.id >= versioning.checkpoint.version.id);
+        assert!(new_checkpoint.version.id > versioning.checkpoint.version.id);
         versioning.checkpoint = new_checkpoint;
         // Not delete stale objects when archive is enabled
         if !self.env.opts.enable_hummock_data_archive {

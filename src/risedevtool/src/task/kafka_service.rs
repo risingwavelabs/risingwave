@@ -74,7 +74,16 @@ impl Task for KafkaService {
 
         cmd.arg(config_path);
 
-        ctx.run_command(ctx.tmux_run(cmd)?)?;
+        if !self.config.user_managed {
+            ctx.run_command(ctx.tmux_run(cmd)?)?;
+        } else {
+            ctx.pb.set_message("user managed");
+            writeln!(
+                &mut ctx.log,
+                "Please start your Kafka at {}:{}\n\n",
+                self.config.listen_address, self.config.port
+            )?;
+        }
 
         ctx.pb.set_message("started");
 
