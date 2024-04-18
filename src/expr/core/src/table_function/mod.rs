@@ -32,6 +32,7 @@ mod user_defined;
 
 pub use self::empty::*;
 pub use self::repeat::*;
+pub use self::user_defined::UserDefinedTableFunction;
 use self::user_defined::*;
 
 /// Instance of a table function.

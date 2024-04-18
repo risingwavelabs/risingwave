@@ -52,6 +52,7 @@ pub async fn replace_table_with_definition(
         on_conflict,
         with_version_column,
         wildcard_idx,
+        udf,
         ..
     } = definition
     else {
@@ -72,6 +73,7 @@ pub async fn replace_table_with_definition(
         append_only,
         on_conflict,
         with_version_column,
+        udf,
     )
     .await?;
 

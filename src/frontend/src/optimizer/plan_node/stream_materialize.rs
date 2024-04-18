@@ -267,6 +267,8 @@ impl StreamMaterialize {
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
             retention_seconds: retention_seconds.map(|i| i.into()),
+            // TODO: check this
+            udf_expr: None,
         })
     }
 

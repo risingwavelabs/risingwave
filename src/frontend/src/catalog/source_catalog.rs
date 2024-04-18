@@ -46,6 +46,7 @@ pub struct SourceCatalog {
     pub version: SourceVersionId,
     pub created_at_cluster_version: Option<String>,
     pub initialized_at_cluster_version: Option<String>,
+    pub udf_expr: Option<risingwave_pb::expr::ExprNode>,
 }
 
 impl SourceCatalog {
@@ -77,6 +78,7 @@ impl SourceCatalog {
             version: self.version,
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
+            udf_expr: self.udf_expr.clone(),
         }
     }
 
@@ -140,6 +142,7 @@ impl From<&PbSource> for SourceCatalog {
             version,
             created_at_cluster_version: prost.created_at_cluster_version.clone(),
             initialized_at_cluster_version: prost.initialized_at_cluster_version.clone(),
+            udf_expr: prost.udf_expr.clone(),
         }
     }
 }

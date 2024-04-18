@@ -131,6 +131,31 @@ impl Expr for TableFunction {
     }
 
     fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
-        unreachable!("Table function should not be converted to ExprNode")
+        use risingwave_pb::expr::expr_node::*;
+        use risingwave_pb::expr::*;
+
+        let catalog = self
+            .udtf_catalog
+            .as_ref()
+            .expect("not a user defined table function");
+
+        ExprNode {
+            function_type: Type::Unspecified.into(),
+            return_type: Some(self.return_type().to_protobuf()),
+            rex_node: Some(RexNode::Udf(UserDefinedFunction {
+                children: self.args.iter().map(Expr::to_expr_proto).collect(),
+                name: catalog.name.clone(),
+                arg_names: catalog.arg_names.clone(),
+                arg_types: catalog.arg_types.iter().map(|t| t.to_protobuf()).collect(),
+                language: catalog.language.clone(),
+                identifier: catalog.identifier.clone(),
+                link: catalog.link.clone(),
+                body: catalog.body.clone(),
+                compressed_binary: catalog.compressed_binary.clone(),
+                always_retry_on_network_error: catalog.always_retry_on_network_error,
+                function_type: catalog.function_type.clone(),
+                runtime: catalog.runtime.clone(),
+            })),
+        }
     }
 }

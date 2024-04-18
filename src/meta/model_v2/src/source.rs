@@ -18,8 +18,8 @@ use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
 
 use crate::{
-    ColumnCatalogArray, ConnectionId, I32Array, Property, SourceId, StreamSourceInfo, TableId,
-    WatermarkDescArray,
+    ColumnCatalogArray, ConnectionId, ExprNode, I32Array, Property, SourceId, StreamSourceInfo,
+    TableId, WatermarkDescArray,
 };
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
@@ -38,6 +38,7 @@ pub struct Model {
     pub optional_associated_table_id: Option<TableId>,
     pub connection_id: Option<ConnectionId>,
     pub version: i64,
+    pub udf_expr: Option<ExprNode>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -100,6 +101,7 @@ impl From<PbSource> for ActiveModel {
             optional_associated_table_id: Set(optional_associated_table_id),
             connection_id: Set(source.connection_id.map(|id| id as _)),
             version: Set(source.version as _),
+            udf_expr: Set(source.udf_expr.as_ref().map(ExprNode::from)),
         }
     }
 }

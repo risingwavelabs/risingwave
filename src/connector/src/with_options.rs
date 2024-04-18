@@ -62,6 +62,7 @@ impl WithOptions for crate::connector_common::mqtt_common::QualityOfService {}
 impl WithOptions for crate::sink::kafka::CompressionCodec {}
 impl WithOptions for nexmark::config::RateShape {}
 impl WithOptions for nexmark::event::EventType {}
+impl WithOptions for risingwave_pb::expr::ExprNode {}
 
 pub trait Get {
     fn get(&self, key: &str) -> Option<&String>;

@@ -304,6 +304,7 @@ derive_array_from_blob!(
 );
 derive_from_blob!(StreamSourceInfo, risingwave_pb::catalog::PbStreamSourceInfo);
 derive_from_blob!(WatermarkDesc, risingwave_pb::catalog::PbWatermarkDesc);
+derive_from_blob!(ExprNode, risingwave_pb::expr::ExprNode);
 derive_array_from_blob!(
     WatermarkDescArray,
     risingwave_pb::catalog::PbWatermarkDesc,

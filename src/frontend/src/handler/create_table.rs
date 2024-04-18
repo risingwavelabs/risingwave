@@ -45,7 +45,7 @@ use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
     CdcTableInfo, ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType,
-    ExplainOptions, Format, ObjectName, OnConflict, SourceWatermark, TableConstraint,
+    ExplainOptions, Format, Function, ObjectName, OnConflict, SourceWatermark, TableConstraint,
 };
 use risingwave_sqlparser::parser::IncludeOption;
 
@@ -59,7 +59,8 @@ use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InlineNowProcTime};
 use crate::handler::create_source::{
     bind_all_columns, bind_columns_from_source, bind_source_pk, bind_source_watermark,
-    check_source_schema, handle_addition_columns, validate_compatibility, UPSTREAM_SOURCE_KEY,
+    check_source_schema, handle_addition_columns, validate_compatibility,
+    validate_udf_compatibility, UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::SourceNodeKind;
@@ -469,6 +470,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
     include_column_options: IncludeOption,
+    udf: Option<Function>,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     if append_only
         && source_schema.format != Format::Plain
@@ -483,7 +485,42 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     let session = &handler_args.session;
     let mut with_properties = handler_args.with_options.clone().into_connector_props();
-    validate_compatibility(&source_schema, &mut with_properties)?;
+
+    let mut udf_expr = None;
+    let mut udf_return_type = None;
+    let mut udf_function_name = None;
+
+    if let Some(udf) = udf {
+        let mut binder = Binder::new_for_ddl(session);
+        let expr = binder.bind_expr(risingwave_sqlparser::ast::Expr::Function(udf))?;
+        let expr_proto = expr.to_expr_proto();
+        if let Some(node) = &expr_proto.rex_node {
+            if !node.is_udf() {
+                return Err(RwError::from(ErrorCode::BindError(
+                    "Only user defined functions are supported when creating a udf source"
+                        .to_string(),
+                )));
+            }
+            with_properties.insert(UPSTREAM_SOURCE_KEY.into(), "udf".into());
+
+            let udf_node = node.as_udf().unwrap();
+            udf_function_name = Some(udf_node.name.clone());
+            udf_return_type = expr_proto
+                .return_type
+                .as_ref()
+                .map(risingwave_common::types::DataType::from);
+
+            validate_udf_compatibility(&column_defs, udf_return_type.as_ref())?;
+
+            udf_expr = Some(expr_proto);
+        } else {
+            return Err(RwError::from(ErrorCode::BindError(
+                "Only user defined functions are supported when creating a udf source".to_string(),
+            )));
+        }
+    } else {
+        validate_compatibility(&source_schema, &mut with_properties)?;
+    }
 
     ensure_table_constraints_supported(&constraints)?;
 
@@ -491,7 +528,34 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     let (columns_from_resolve_source, source_info) =
         bind_columns_from_source(session, &source_schema, &with_properties).await?;
-    let columns_from_sql = bind_sql_columns(&column_defs)?;
+    let mut columns_from_sql = bind_sql_columns(&column_defs)?;
+
+    if let (Some(data_type), Some(name)) = (udf_return_type, udf_function_name)
+        && columns_from_sql.is_empty()
+        && (columns_from_resolve_source.is_none()
+            || columns_from_resolve_source.as_ref().unwrap().is_empty())
+    {
+        match data_type {
+            risingwave_common::types::DataType::Struct(st) => {
+                st.iter().enumerate().for_each(|(idx, (name, data_type))| {
+                    columns_from_sql.push(ColumnCatalog {
+                        column_desc: ColumnDesc::named(
+                            name,
+                            (idx as i32).into(),
+                            data_type.clone(),
+                        ),
+                        is_hidden: false,
+                    });
+                });
+            }
+            _ => {
+                columns_from_sql.push(ColumnCatalog {
+                    column_desc: ColumnDesc::named(name, 0.into(), data_type),
+                    is_hidden: false,
+                });
+            }
+        }
+    }
 
     let mut columns = bind_all_columns(
         &source_schema,
@@ -559,6 +623,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         append_only,
         on_conflict,
         with_version_column,
+        udf_expr,
         Some(col_id_gen.into_version()),
     )
 }
@@ -624,6 +689,9 @@ pub(crate) fn gen_create_table_plan_without_bind(
         &columns,
     )?;
 
+    // TODO: Create table source
+    let udf_expr = None;
+
     bind_sql_column_constraints(
         context.session_ctx(),
         table_name.real_value(),
@@ -645,6 +713,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
         append_only,
         on_conflict,
         with_version_column,
+        udf_expr,
         version,
     )
 }
@@ -663,6 +732,7 @@ fn gen_table_plan_inner(
     append_only: bool,
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
+    udf_expr: Option<risingwave_pb::expr::ExprNode>,
     version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
                                     * TABLE` for `CREATE TABLE AS`. */
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
@@ -702,6 +772,7 @@ fn gen_table_plan_inner(
         optional_associated_table_id: Some(OptionalAssociatedTableId::AssociatedTableId(
             TableId::placeholder().table_id,
         )),
+        udf_expr: udf_expr.clone(),
         version: INITIAL_SOURCE_VERSION_ID,
         initialized_at_cluster_version: None,
         created_at_cluster_version: None,
@@ -956,6 +1027,7 @@ pub(super) async fn handle_create_table_plan(
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
     include_column_options: IncludeOption,
+    udf: Option<Function>,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable, TableJobType)> {
     let source_schema = check_create_table_with_source(
         &handler_args.with_options,
@@ -980,6 +1052,7 @@ pub(super) async fn handle_create_table_plan(
                     on_conflict,
                     with_version_column,
                     include_column_options,
+                    udf,
                 )
                 .await?,
                 TableJobType::General,
@@ -1043,6 +1116,7 @@ pub async fn handle_create_table(
     with_version_column: Option<String>,
     cdc_table_info: Option<CdcTableInfo>,
     include_column_options: IncludeOption,
+    udf: Option<Function>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
@@ -1075,6 +1149,7 @@ pub async fn handle_create_table(
             on_conflict,
             with_version_column,
             include_column_options,
+            udf,
         )
         .await?;
 
@@ -1138,6 +1213,7 @@ pub async fn generate_stream_graph_for_table(
     append_only: bool,
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
+    udf: Option<Function>,
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>)> {
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 
@@ -1157,6 +1233,7 @@ pub async fn generate_stream_graph_for_table(
                 on_conflict,
                 with_version_column,
                 vec![],
+                udf,
             )
             .await?
         }

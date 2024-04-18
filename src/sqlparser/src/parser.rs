@@ -2661,11 +2661,13 @@ impl Parser {
             .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
         let connector = option.map(|opt| opt.value.to_string());
 
-        let source_schema = if let Some(connector) = connector {
+        let mut source_schema = if let Some(connector) = connector {
             Some(self.parse_source_schema_with_connector(&connector, false)?)
         } else {
             None // Table is NOT created with an external connector.
         };
+
+        let mut udf = None;
         // Parse optional `AS ( query )`
         let query = if self.parse_keyword(Keyword::AS) {
             if !source_watermarks.is_empty() {
@@ -2673,7 +2675,29 @@ impl Parser {
                     "Watermarks can't be defined on table created by CREATE TABLE AS".to_string(),
                 ));
             }
-            Some(Box::new(self.parse_query()?))
+
+            let token = self.peek_token();
+            if let Token::Word(w) = token.token {
+                if w.to_ident().is_ok() {
+                    let token = self.peek_nth_token(1);
+                    if token.token == Token::LParen {
+                        let name = self.parse_identifier()?;
+                        let func_expr = self.parse_function(ObjectName(vec![name]))?;
+                        if let Expr::Function(func) = func_expr {
+                            udf = Some(func);
+
+                            source_schema =
+                                Some(self.parse_source_schema_with_connector("udf", false)?);
+                        }
+                    }
+                }
+            }
+
+            if udf.is_none() {
+                Some(Box::new(self.parse_query()?))
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -2705,6 +2729,7 @@ impl Parser {
             on_conflict,
             with_version_column,
             query,
+            udf,
             cdc_table_info,
             include_column_options: include_options,
         })

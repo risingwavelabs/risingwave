@@ -21,9 +21,10 @@ use serde::{Deserialize, Serialize};
 
 use super::ddl::SourceWatermark;
 use super::legacy_source::{parse_source_schema, CompatibleSourceSchema};
-use super::{EmitMode, Ident, ObjectType, Query};
+use super::{EmitMode, Function, Ident, ObjectType, Query};
 use crate::ast::{
-    display_comma_separated, display_separated, ColumnDef, ObjectName, SqlOption, TableConstraint,
+    display_comma_separated, display_separated, ColumnDef, Expr, ObjectName, SqlOption,
+    TableConstraint,
 };
 use crate::keywords::Keyword;
 use crate::parser::{IncludeOption, IsOptional, Parser, ParserError, UPSTREAM_SOURCE_KEY};
@@ -85,6 +86,7 @@ pub struct CreateSourceStatement {
     pub constraints: Vec<TableConstraint>,
     pub source_name: ObjectName,
     pub with_properties: WithProperties,
+    pub udf: Option<Function>,
     pub source_schema: CompatibleSourceSchema,
     pub source_watermarks: Vec<SourceWatermark>,
     pub include_column_options: IncludeOption,
@@ -271,6 +273,13 @@ impl Parser {
                 }
             }
             Ok(expected.into())
+        } else if connector.contains("udf") {
+            if self.peek_source_schema_format() {
+                return Err(ParserError::ParserError(
+                    "Format for udf connectors should be omitted".to_string(),
+                ));
+            }
+            Ok(ConnectorSchema::native().into())
         } else {
             Ok(parse_source_schema(self)?)
         }
@@ -375,7 +384,22 @@ impl ParseTo for CreateSourceStatement {
         let option = with_options
             .iter()
             .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
-        let connector: String = option.map(|opt| opt.value.to_string()).unwrap_or_default();
+
+        let mut udf = None;
+
+        let connector: String = if p.parse_keyword(Keyword::AS) {
+            let name = p.parse_identifier()?;
+            let func_expr = p.parse_function(ObjectName(vec![name]))?;
+            if let Expr::Function(func) = func_expr {
+                udf = Some(func);
+                "udf".to_string()
+            } else {
+                return Err(ParserError::ParserError("expected function".to_string()));
+            }
+        } else {
+            option.map(|opt| opt.value.to_string()).unwrap_or_default()
+        };
+
         // The format of cdc source job is fixed to `FORMAT PLAIN ENCODE JSON`
         let cdc_source_job =
             connector.contains("-cdc") && columns.is_empty() && constraints.is_empty();
@@ -389,6 +413,7 @@ impl ParseTo for CreateSourceStatement {
             wildcard_idx,
             constraints,
             source_name,
+            udf,
             with_properties: WithProperties(with_options),
             source_schema,
             source_watermarks,
@@ -453,6 +478,11 @@ impl fmt::Display for CreateSourceStatement {
 
         impl_fmt_display!(with_properties, v, self);
         impl_fmt_display!(source_schema, v, self);
+
+        if let Some(function) = &self.udf {
+            v.push(format!("AS {}", function));
+        }
+
         v.iter().join(" ").fmt(f)
     }
 }

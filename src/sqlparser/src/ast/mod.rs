@@ -1229,6 +1229,8 @@ pub enum Statement {
         with_version_column: Option<String>,
         /// `AS ( query )`
         query: Option<Box<Query>>,
+        /// AS function (param)
+        udf: Option<Function>,
         /// `FROM cdc_source TABLE database_name.table_name`
         cdc_table_info: Option<CdcTableInfo>,
         /// `INCLUDE a AS b INCLUDE c`
@@ -1751,6 +1753,7 @@ impl fmt::Display for Statement {
                 query,
                 cdc_table_info,
                 include_column_options,
+                udf,
             } => {
                 // We want to allow the following options
                 // Empty column list, allowed by PostgreSQL:
@@ -1811,6 +1814,9 @@ impl fmt::Display for Statement {
                 }
                 if let Some(query) = query {
                     write!(f, " AS {}", query)?;
+                }
+                if let Some(udf) = udf {
+                    write!(f, " AS {}", udf)?;
                 }
                 if let Some(info) = cdc_table_info {
                     write!(f, " FROM {}", info.source_name)?;

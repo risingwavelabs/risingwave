@@ -160,6 +160,7 @@ async fn compaction_test(
         incoming_sinks: vec![],
         initialized_at_cluster_version: None,
         created_at_cluster_version: None,
+        udf_expr: None,
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;

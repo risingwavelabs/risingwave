@@ -39,6 +39,7 @@ macro_rules! for_all_classified_sources {
                 { OpendalS3, $crate::source::filesystem::opendal_source::OpendalS3Properties, $crate::source::filesystem::OpendalFsSplit<$crate::source::filesystem::opendal_source::OpendalS3> },
                 { PosixFs, $crate::source::filesystem::opendal_source::PosixFsProperties, $crate::source::filesystem::OpendalFsSplit<$crate::source::filesystem::opendal_source::OpendalPosixFs> },
                 { Test, $crate::source::test_source::TestSourceProperties, $crate::source::test_source::TestSourceSplit},
+                { Udf, $crate::source::udf::UdfProperties, $crate::source::udf::split::UdfSplit },
                 { Iceberg, $crate::source::iceberg::IcebergProperties, $crate::source::iceberg::IcebergSplit}
             }
             $(

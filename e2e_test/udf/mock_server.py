@@ -1,6 +1,6 @@
 import json
 
-from flask import Flask, Response, stream_with_context, jsonify
+from flask import Flask, Response, stream_with_context, jsonify, request
 
 app = Flask(__name__)
 def format_sse(data: str | None, event=None) -> str:
@@ -17,6 +17,20 @@ def format_sse(data: str | None, event=None) -> str:
 @app.route('/')
 def home():
     return jsonify({"results": [{"idx": 1}, {"idx": 2}]})
+
+
+@app.route('/updates')
+def updates():
+    it = request.args.get('it', default = 0, type = int)
+    if it == 0:
+        return jsonify({"results": [{"idx": 1, "event": "create", "data": "1"}, {"idx": 2, "event": "create", "data": "2"}]})
+
+    if it == 1:
+        return jsonify({"results": [{"idx": 1, "event": "update", "data": "0" }, {"idx": 3, "event": "create", "data": "3"}]})
+
+    return jsonify({"results": []})
+
+
 
 @app.route('/graphql/stream',  methods=['POST'])
 def stream():

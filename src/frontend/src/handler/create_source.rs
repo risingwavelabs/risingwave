@@ -59,8 +59,8 @@ use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColum
 use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
-    get_delimiter, AstString, ColumnDef, ConnectorSchema, CreateSourceStatement, Encode, Format,
-    ProtobufSchema, SourceWatermark,
+    get_delimiter, AstString, ColumnDef, ConnectorSchema, CreateSourceStatement,
+    DataType as AstDataType, Encode, Format, ProtobufSchema, SourceWatermark,
 };
 use risingwave_sqlparser::parser::IncludeOption;
 use thiserror_ext::AsReport;
@@ -68,7 +68,9 @@ use thiserror_ext::AsReport;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::error::ErrorCode::{self, Deprecated, InvalidInputSyntax, NotSupported, ProtocolError};
+use crate::error::ErrorCode::{
+    self, BindError, Deprecated, InvalidInputSyntax, NotSupported, ProtocolError,
+};
 use crate::error::{Result, RwError};
 use crate::expr::Expr;
 use crate::handler::create_table::{
@@ -1316,7 +1318,7 @@ pub async fn handle_create_source(
     let (database_id, schema_id) =
         session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
-    if handler_args.with_options.is_empty() {
+    if handler_args.with_options.is_empty() && stmt.udf.is_none() {
         return Err(RwError::from(InvalidInputSyntax(
             "missing WITH clause".to_string(),
         )));
@@ -1325,7 +1327,39 @@ pub async fn handle_create_source(
     let source_schema = stmt.source_schema.into_v2_with_warning();
 
     let mut with_properties = handler_args.with_options.clone().into_connector_props();
-    validate_compatibility(&source_schema, &mut with_properties)?;
+
+    let mut udf_expr = None;
+    let mut udf_return_type = None;
+    let mut udf_function_name = None;
+
+    if let Some(udf) = stmt.udf {
+        let mut binder = Binder::new_for_ddl(&session);
+        let expr = binder.bind_expr(risingwave_sqlparser::ast::Expr::Function(udf))?;
+        let expr_proto = expr.to_expr_proto();
+        if let Some(node) = &expr_proto.rex_node {
+            if !node.is_udf() {
+                return Err(RwError::from(InvalidInputSyntax(
+                    "Only user defined functions are supported when creating a udf source"
+                        .to_string(),
+                )));
+            }
+            with_properties.insert(UPSTREAM_SOURCE_KEY.into(), "udf".into());
+
+            let udf_node = node.as_udf().unwrap();
+            udf_function_name = Some(udf_node.name.clone());
+            udf_return_type = expr_proto.return_type.as_ref().map(DataType::from);
+
+            validate_udf_compatibility(&stmt.columns, udf_return_type.as_ref())?;
+
+            udf_expr = Some(expr_proto);
+        } else {
+            return Err(RwError::from(InvalidInputSyntax(
+                "Only user defined functions are supported when creating a udf source".to_string(),
+            )));
+        }
+    } else {
+        validate_compatibility(&source_schema, &mut with_properties)?;
+    }
 
     ensure_table_constraints_supported(&stmt.constraints)?;
     let sql_pk_names = bind_sql_pk_names(&stmt.columns, &stmt.constraints)?;
@@ -1344,7 +1378,34 @@ pub async fn handle_create_source(
         source_info.cdc_source_job = true;
         source_info.is_distributed = !create_cdc_source_job;
     }
-    let columns_from_sql = bind_sql_columns(&stmt.columns)?;
+    let mut columns_from_sql = bind_sql_columns(&stmt.columns)?;
+
+    if let (Some(data_type), Some(name)) = (udf_return_type, udf_function_name)
+        && columns_from_sql.is_empty()
+        && (columns_from_resolve_source.is_none()
+            || columns_from_resolve_source.as_ref().unwrap().is_empty())
+    {
+        match data_type {
+            DataType::Struct(st) => {
+                st.iter().enumerate().for_each(|(idx, (name, data_type))| {
+                    columns_from_sql.push(ColumnCatalog {
+                        column_desc: ColumnDesc::named(
+                            name,
+                            (idx as i32).into(),
+                            data_type.clone(),
+                        ),
+                        is_hidden: false,
+                    });
+                });
+            }
+            _ => {
+                columns_from_sql.push(ColumnCatalog {
+                    column_desc: ColumnDesc::named(name, 0.into(), data_type),
+                    is_hidden: false,
+                });
+            }
+        }
+    }
 
     let mut columns = bind_all_columns(
         &source_schema,
@@ -1353,6 +1414,7 @@ pub async fn handle_create_source(
         &stmt.columns,
         stmt.wildcard_idx,
     )?;
+
     // add additional columns before bind pk, because `format upsert` requires the key column
     handle_addition_columns(&with_properties, stmt.include_column_options, &mut columns)?;
     let pk_names = bind_source_pk(
@@ -1436,6 +1498,7 @@ pub async fn handle_create_source(
         version: INITIAL_SOURCE_VERSION_ID,
         initialized_at_cluster_version: None,
         created_at_cluster_version: None,
+        udf_expr,
     };
 
     let catalog_writer = session.catalog_writer()?;
@@ -1470,6 +1533,80 @@ pub async fn handle_create_source(
     }
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SOURCE))
+}
+
+/// Check if the schema of `columns` matches the expected `data_types`. Used for debugging.
+pub fn schema_check<'a, T, C>(data_types: T, columns: C) -> Result<()>
+where
+    T: IntoIterator<Item = &'a DataType>,
+    C: IntoIterator<Item = &'a ColumnDef>,
+{
+    for (i, pair) in data_types
+        .into_iter()
+        .zip_longest(
+            columns
+                .into_iter()
+                .map(|c| &c.data_type)
+                .filter(|dt| dt.is_some())
+                .flatten(),
+        )
+        .enumerate()
+    {
+        match (pair.as_ref().left(), pair.as_ref().right()) {
+            (Some(DataType::Boolean), Some(AstDataType::Boolean)) => continue,
+            (Some(DataType::Int32), Some(AstDataType::Int)) => continue,
+            (Some(DataType::Int64), Some(AstDataType::Int)) => continue,
+            (Some(DataType::Int64), Some(AstDataType::BigInt)) => continue,
+            (Some(DataType::Float32), Some(AstDataType::Float(_))) => continue,
+            (Some(DataType::Float64), Some(AstDataType::Float(_))) => continue,
+            (Some(DataType::Decimal), Some(AstDataType::Decimal(_, _))) => continue,
+            (Some(DataType::Date), Some(AstDataType::Date)) => continue,
+            (Some(DataType::Varchar), Some(AstDataType::Varchar)) => continue,
+            (Some(DataType::Varchar), Some(AstDataType::Text)) => continue,
+            (Some(DataType::Time), Some(AstDataType::Time(_))) => continue,
+            (Some(DataType::Timestamp), Some(AstDataType::Timestamp(_))) => continue,
+            (Some(DataType::Timestamptz), Some(AstDataType::Timestamp(_))) => continue,
+            (Some(DataType::Interval), Some(AstDataType::Interval)) => continue,
+            (Some(DataType::Struct(_)), Some(AstDataType::Struct(_))) => continue,
+            (Some(DataType::List(_)), Some(AstDataType::Array(_))) => continue,
+            (Some(DataType::Bytea), Some(AstDataType::Bytea)) => continue,
+            (Some(DataType::Jsonb), Some(AstDataType::Jsonb)) => continue,
+            (Some(DataType::Serial), Some(AstDataType::Int)) => continue,
+            (Some(DataType::Serial), Some(AstDataType::BigInt)) => continue,
+            (data_type, column_data_type) => {
+                return Err(RwError::from( BindError(format!(
+                    "column type mismatched at position {i}: expected {data_type:?}, found {column_data_type:?}"
+                ))));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+pub(crate) fn validate_udf_compatibility(
+    columns: &[ColumnDef],
+    udf_return_type: Option<&DataType>,
+) -> Result<()> {
+    if columns.is_empty() && udf_return_type.is_some() {
+        return Ok(());
+    }
+
+    match udf_return_type {
+        Some(data_type) => match data_type {
+            DataType::Struct(st) => {
+                let data_types = st.types();
+                schema_check(data_types, columns)?;
+            }
+            _ => schema_check([data_type], columns)?,
+        },
+        None => {
+            return Err(RwError::from(BindError(
+                "UDF return type is not specified".to_string(),
+            )))
+        }
+    }
+    Ok(())
 }
 
 fn format_to_prost(format: &Format) -> FormatType {

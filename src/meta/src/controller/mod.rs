@@ -143,6 +143,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             retention_seconds: value.0.retention_seconds.map(|id| id as u32),
+            udf_expr: value.0.udf_expr.map(|expr| expr.to_protobuf()),
         }
     }
 }
@@ -177,6 +178,7 @@ impl From<ObjectModel<source::Model>> for PbSource {
                 .map(|id| PbOptionalAssociatedTableId::AssociatedTableId(id as _)),
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
+            udf_expr: value.0.udf_expr.map(|expr| expr.to_protobuf()),
         }
     }
 }

@@ -414,6 +414,7 @@ MqttConfig:
     required: true
   - name: topic.field
     field_type: String
+    comments: if set, will use a field value as the topic name, if topic is also set it will be used as a fallback
     required: false
 NatsConfig:
   fields:
