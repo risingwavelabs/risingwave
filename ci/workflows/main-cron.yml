@@ -474,7 +474,7 @@ steps:
 
   - label: "S3_v2 source check on AWS (json parser)"
     key: "s3-v2-source-check-aws-json-parser"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s 'fs_source_v2.py json'"
+    command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_source_v2.py -t json"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-s3-source-tests"
@@ -496,7 +496,7 @@ steps:
 
   - label: "S3_v2 source batch read on AWS (json parser)"
     key: "s3-v2-source-batch-read-check-aws-json-parser"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s 'fs_source_batch.py json'"
+    command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_source_batch.py -t json"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-s3-source-tests"
@@ -518,7 +518,7 @@ steps:
 
   - label: "S3_v2 source check on AWS (csv parser)"
     key: "s3-v2-source-check-aws-csv-parser"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s 'fs_source_v2.py csv_without_header'"
+    command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_source_v2.py -t csv_without_header"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-s3-source-tests"
@@ -540,7 +540,7 @@ steps:
 
   - label: "PosixFs source on OpenDAL fs engine (csv parser)"
     key: "s3-source-test-for-opendal-fs-engine-csv-parser"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s 'posix_fs_source.py csv_without_header'"
+    command: "ci/scripts/s3-source-test.sh -p ci-release -s posix_fs_source.py -t csv_without_header"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-s3-source-tests"
