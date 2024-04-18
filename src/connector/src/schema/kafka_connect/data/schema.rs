@@ -49,10 +49,6 @@ impl ConnectSchema {
             ConnectSchema::Struct(s) => &mut s.base,
         }
     }
-
-    pub fn equals(&self, _other: &Self) -> bool {
-        todo!()
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -103,16 +99,16 @@ pub struct MapSchema {
 
 #[derive(Debug, Clone)]
 pub struct StructSchema {
-    base: SchemaBase,
-    fields: Vec<Field>, // java: LinkedHashMap
-    fields_by_name: std::collections::BTreeMap<String, usize>,
+    pub base: SchemaBase,
+    pub fields: Vec<Field>, // java: LinkedHashMap
+    pub fields_by_name: std::collections::BTreeMap<String, usize>,
 }
 
 #[derive(Debug, Clone /* , PartialEq, Eq, Hash */)]
 pub struct Field {
-    name: String,
-    index: usize,
-    schema: ConnectSchema,
+    pub name: String,
+    pub index: usize,
+    pub schema: ConnectSchema,
 }
 
 impl StructSchema {
@@ -127,6 +123,16 @@ impl StructSchema {
             fields,
             fields_by_name,
         }
+    }
+
+    pub fn equals(&self, _other: &Self) -> bool {
+        todo!()
+    }
+
+    pub fn field(&self, field_name: &str) -> Option<&Field> {
+        self.fields_by_name
+            .get(field_name)
+            .map(|idx| &self.fields[*idx])
     }
 }
 
@@ -177,22 +183,9 @@ impl std::fmt::Display for SchemaType {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum Value {
-    Struct(Struct),
+    Struct(super::struct_::Struct),
     List(Vec<Option<Value>>),
     Map(std::collections::HashMap<Value, Value>),
-}
-
-#[derive(Debug, Clone)]
-pub struct Struct;
-
-impl Struct {
-    pub fn schema(&self) -> ConnectSchema {
-        todo!()
-    }
-
-    pub fn validate(&self) -> Result<(), String> {
-        todo!()
-    }
 }
 
 /// Rust `TypeId`?
@@ -276,11 +269,11 @@ impl ConnectSchema {
             return Err(format!("Invalid Java object for schema"));
         }
         match self {
-            ConnectSchema::Struct(_) => {
+            ConnectSchema::Struct(st_schema) => {
                 let Value::Struct(st) = value else {
                     return Err(format!("value is not struct"));
                 };
-                if !st.schema().equals(self) {
+                if !st.schema().equals(st_schema) {
                     return Err(format!("Struct schemas do not match."));
                 }
                 st.validate()
