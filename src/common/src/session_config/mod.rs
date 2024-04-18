@@ -23,8 +23,10 @@ mod visibility_mode;
 use chrono_tz::Tz;
 pub use over_window::OverWindowCachePolicy;
 pub use query_mode::QueryMode;
-use risingwave_common_proc_macro::SessionConfig;
+use risingwave_common_proc_macro::{ConfigDoc, SessionConfig};
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
+use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, DisplayFromStr};
 use thiserror::Error;
 
 use self::non_zero64::ConfigNonZeroU64;
@@ -50,9 +52,14 @@ pub enum SessionConfigError {
 
 type SessionConfigResult<T> = std::result::Result<T, SessionConfigError>;
 
+// NOTE(kwannoel): We declare it separately as a constant,
+// otherwise seems like it can't infer the type of -1 when written inline.
+const DISABLE_STREAMING_RATE_LIMIT: i32 = -1;
+
+#[serde_as]
 /// This is the Session Config of RisingWave.
-#[derive(SessionConfig)]
-pub struct ConfigMap {
+#[derive(Clone, Debug, Deserialize, Serialize, SessionConfig, ConfigDoc, PartialEq)]
+pub struct SessionConfig {
     /// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
     /// until the entire dataflow is refreshed. In other words, every related table & MV will
     /// be able to see the write.
@@ -67,7 +74,8 @@ pub struct ConfigMap {
     /// A temporary config variable to force query running in either local or distributed mode.
     /// The default value is auto which means let the system decide to run batch queries in local
     /// or distributed mode automatically.
-    #[parameter(default = QueryMode::default())]
+    #[serde_as(as = "DisplayFromStr")]
+    #[parameter(default = QueryMode::default(), flags = "NO_ALTER_SYS")]
     query_mode: QueryMode,
 
     /// Sets the number of digits displayed for floating-point values.
@@ -106,19 +114,23 @@ pub struct ConfigMap {
     /// Sets the order in which schemas are searched when an object (table, data type, function, etc.)
     /// is referenced by a simple name with no schema specified.
     /// See <https://www.postgresql.org/docs/14/runtime-config-client.html#GUC-SEARCH-PATH>
+    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = SearchPath::default())]
     search_path: SearchPath,
 
     /// If `VISIBILITY_MODE` is all, we will support querying data without checkpoint.
+    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = VisibilityMode::default())]
     visibility_mode: VisibilityMode,
 
     /// See <https://www.postgresql.org/docs/current/transaction-iso.html>
+    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = IsolationLevel::default())]
     transaction_isolation: IsolationLevel,
 
     /// Select as of specific epoch.
     /// Sets the historical epoch for querying data. If 0, querying latest data.
+    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = ConfigNonZeroU64::default())]
     query_epoch: ConfigNonZeroU64,
 
@@ -128,6 +140,7 @@ pub struct ConfigMap {
 
     /// If `STREAMING_PARALLELISM` is non-zero, CREATE MATERIALIZED VIEW/TABLE/INDEX will use it as
     /// streaming parallelism.
+    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = ConfigNonZeroU64::default())]
     streaming_parallelism: ConfigNonZeroU64,
 
@@ -177,6 +190,7 @@ pub struct ConfigMap {
     interval_style: String,
 
     /// If `BATCH_PARALLELISM` is non-zero, batch queries will use this parallelism.
+    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = ConfigNonZeroU64::default())]
     batch_parallelism: ConfigNonZeroU64,
 
@@ -197,6 +211,7 @@ pub struct ConfigMap {
     client_encoding: String,
 
     /// Enable decoupling sink and internal streaming graph or not
+    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = SinkDecouple::default())]
     sink_decouple: SinkDecouple,
 
@@ -230,12 +245,15 @@ pub struct ConfigMap {
     #[parameter(default = STANDARD_CONFORMING_STRINGS)]
     standard_conforming_strings: String,
 
-    /// Set streaming rate limit (rows per second) for each parallelism for mv backfilling
-    #[parameter(default = ConfigNonZeroU64::default())]
-    streaming_rate_limit: ConfigNonZeroU64,
+    /// Set streaming rate limit (rows per second) for each parallelism for mv / source backfilling, source reads.
+    /// If set to -1, disable rate limit.
+    /// If set to 0, this pauses the snapshot read / source read.
+    #[parameter(default = DISABLE_STREAMING_RATE_LIMIT)]
+    streaming_rate_limit: i32,
 
     /// Cache policy for partition cache in streaming over window.
     /// Can be "full", "recent", "`recent_first_n`" or "`recent_last_n`".
+    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = OverWindowCachePolicy::default(), rename = "rw_streaming_over_window_cache_policy")]
     streaming_over_window_cache_policy: OverWindowCachePolicy,
 
@@ -282,17 +300,17 @@ fn check_bytea_output(val: &str) -> Result<(), String> {
     }
 }
 
-impl ConfigMap {
+impl SessionConfig {
     pub fn set_force_two_phase_agg(
         &mut self,
         val: bool,
         reporter: &mut impl ConfigReporter,
-    ) -> SessionConfigResult<()> {
-        self.set_force_two_phase_agg_inner(val, reporter)?;
+    ) -> SessionConfigResult<bool> {
+        let set_val = self.set_force_two_phase_agg_inner(val, reporter)?;
         if self.force_two_phase_agg {
             self.set_enable_two_phase_agg(true, reporter)
         } else {
-            Ok(())
+            Ok(set_val)
         }
     }
 
@@ -300,12 +318,12 @@ impl ConfigMap {
         &mut self,
         val: bool,
         reporter: &mut impl ConfigReporter,
-    ) -> SessionConfigResult<()> {
-        self.set_enable_two_phase_agg_inner(val, reporter)?;
+    ) -> SessionConfigResult<bool> {
+        let set_val = self.set_enable_two_phase_agg_inner(val, reporter)?;
         if !self.force_two_phase_agg {
             self.set_force_two_phase_agg(false, reporter)
         } else {
-            Ok(())
+            Ok(set_val)
         }
     }
 }
@@ -332,7 +350,7 @@ mod test {
 
     #[derive(SessionConfig)]
     struct TestConfig {
-        #[parameter(default = 1, alias = "test_param_alias" | "alias_param_test")]
+        #[parameter(default = 1, flags = "NO_ALTER_SYS", alias = "test_param_alias" | "alias_param_test")]
         test_param: i32,
     }
 
@@ -345,5 +363,6 @@ mod test {
             .set("alias_param_test", "3".to_string(), &mut ())
             .unwrap();
         assert_eq!(config.get("test_param_alias").unwrap(), "3");
+        assert!(TestConfig::check_no_alter_sys("test_param").unwrap());
     }
 }

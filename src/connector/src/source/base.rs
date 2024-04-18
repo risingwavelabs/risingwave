@@ -45,6 +45,7 @@ use crate::parser::ParserConfig;
 pub(crate) use crate::source::common::CommonSplitReader;
 use crate::source::filesystem::FsPageItem;
 use crate::source::monitor::EnumeratorMetrics;
+use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc};
 use crate::with_options::WithOptions;
 use crate::{
     dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
@@ -424,6 +425,24 @@ impl SplitImpl {
             |other| bail!("connector '{}' is not supported", other)
         )
     }
+
+    pub fn is_cdc_split(&self) -> bool {
+        matches!(
+            self,
+            MysqlCdc(_) | PostgresCdc(_) | MongodbCdc(_) | CitusCdc(_)
+        )
+    }
+
+    /// Get the current split offset.
+    pub fn get_cdc_split_offset(&self) -> String {
+        match self {
+            MysqlCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            PostgresCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            MongodbCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            CitusCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            _ => unreachable!("get_cdc_split_offset() is only for cdc split"),
+        }
+    }
 }
 
 impl SplitMetaData for SplitImpl {
@@ -538,6 +557,7 @@ pub trait SplitMetaData: Sized {
         Self::restore_from_json(JsonbVal::value_deserialize(bytes).unwrap())
     }
 
+    /// Encode the whole split metadata to a JSON object
     fn encode_to_json(&self) -> JsonbVal;
     fn restore_from_json(value: JsonbVal) -> Result<Self>;
     fn update_offset(&mut self, last_seen_offset: String) -> crate::error::ConnectorResult<()>;

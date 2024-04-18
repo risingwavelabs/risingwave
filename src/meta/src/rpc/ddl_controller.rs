@@ -774,8 +774,11 @@ impl DdlController {
             }
         };
 
-        match create_type {
-            CreateType::Foreground | CreateType::Unspecified => {
+        match (create_type, &stream_job) {
+            (CreateType::Foreground, _)
+            | (CreateType::Unspecified, _)
+            // FIXME(kwannoel): Unify background stream's creation path with MV below.
+            | (CreateType::Background, &StreamingJob::Sink(_, _)) => {
                 self.create_streaming_job_inner(
                     mgr,
                     stream_job,
@@ -785,7 +788,7 @@ impl DdlController {
                 )
                 .await
             }
-            CreateType::Background => {
+            (CreateType::Background, _) => {
                 let ctrl = self.clone();
                 let mgr = mgr.clone();
                 let stream_job_id = stream_job.id();
