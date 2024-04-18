@@ -626,7 +626,7 @@ pub async fn transform_upstream(upstream: BoxedMessageStream, schema: &Schema) {
     let mut parser = DebeziumParser::new(
         props,
         get_rw_columns(schema),
-        Arc::new(SourceContext::default()),
+        Arc::new(SourceContext::dummy()),
     )
     .await
     .map_err(StreamExecutorError::connector_error)?;

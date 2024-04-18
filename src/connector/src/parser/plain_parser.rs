@@ -195,7 +195,7 @@ mod tests {
 
         let source_ctx = SourceContext {
             connector_props: ConnectorProperties::PostgresCdc(Box::default()),
-            ..Default::default()
+            ..SourceContext::dummy().into()
         };
         let source_ctx = Arc::new(source_ctx);
         // format plain encode json parser
@@ -348,7 +348,7 @@ mod tests {
         // format plain encode json parser
         let source_ctx = SourceContext {
             connector_props: ConnectorProperties::MysqlCdc(Box::default()),
-            ..Default::default()
+            ..SourceContext::dummy()
         };
         let mut parser = PlainParser::new(
             SpecificParserConfig::DEFAULT_PLAIN_JSON,

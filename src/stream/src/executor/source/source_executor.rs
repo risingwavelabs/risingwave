@@ -839,7 +839,10 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
             system_params_manager.get_params(),
-            SourceCtrlOpts::default(),
+            SourceCtrlOpts {
+                chunk_size: 1024,
+                rate_limit: None,
+            },
         );
         let mut executor = executor.boxed().execute();
 
@@ -927,7 +930,10 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
             system_params_manager.get_params(),
-            SourceCtrlOpts::default(),
+            SourceCtrlOpts {
+                chunk_size: 1024,
+                rate_limit: None,
+            },
         );
         let mut handler = executor.boxed().execute();
 

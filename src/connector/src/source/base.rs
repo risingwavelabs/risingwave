@@ -138,27 +138,29 @@ pub struct SourceCtrlOpts {
     pub rate_limit: Option<u32>,
 }
 
-impl Default for SourceCtrlOpts {
-    fn default() -> Self {
-        Self {
-            chunk_size: MAX_CHUNK_SIZE,
-            rate_limit: None,
-        }
-    }
-}
-
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SourceEnumeratorContext {
     pub info: SourceEnumeratorInfo,
     pub metrics: Arc<EnumeratorMetrics>,
 }
 
-#[derive(Clone, Debug, Default)]
+impl SourceEnumeratorContext {
+    /// Create a dummy `SourceEnumeratorContext` for testing purpose, or for the situation
+    /// where the real context doesn't matter.
+    pub fn dummy() -> SourceEnumeratorContext {
+        SourceEnumeratorContext {
+            info: SourceEnumeratorInfo { source_id: 0 },
+            metrics: Arc::new(EnumeratorMetrics::default()),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct SourceEnumeratorInfo {
     pub source_id: u32,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SourceContext {
     pub actor_id: u32,
     pub source_id: TableId,
@@ -189,6 +191,23 @@ impl SourceContext {
             source_ctrl_opts,
             connector_props,
         }
+    }
+
+    /// Create a dummy `SourceContext` for testing purpose, or for the situation
+    /// where the real context doesn't matter.
+    pub fn dummy() -> Self {
+        Self::new(
+            0,
+            TableId::new(0),
+            0,
+            Arc::new(SourceMetrics::default()),
+            SourceCtrlOpts {
+                chunk_size: MAX_CHUNK_SIZE,
+                rate_limit: None,
+            },
+            ConnectorProperties::default(),
+            "dummy".to_string(),
+        )
     }
 }
 
