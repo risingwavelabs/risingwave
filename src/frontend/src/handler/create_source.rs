@@ -78,7 +78,7 @@ use crate::handler::create_table::{
 use crate::handler::util::SourceSchemaCompatExt;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::SourceNodeKind;
-use crate::optimizer::plan_node::{LogicalSource, ToStreamContext};
+use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
 use crate::session::SessionImpl;
 use crate::utils::resolve_privatelink_in_with_option;
 use crate::{bind_data_type, build_graph, OptimizerContext, WithOptions};
