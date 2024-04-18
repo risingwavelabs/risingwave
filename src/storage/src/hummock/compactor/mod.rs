@@ -470,6 +470,7 @@ pub fn start_compactor(
                                                         sstable_object_id_manager.remove_watermark_object_id(tracker_id);
                                                     },
                                                 );
+
                                                 compactor_runner::compact(context.clone(), compact_task, rx, Box::new(sstable_object_id_manager.clone()), filter_key_extractor_manager.clone()).await
                                             },
                                             Err(err) => {
