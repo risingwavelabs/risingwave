@@ -26,7 +26,8 @@ use risingwave_connector::parser::{
     ByteStreamSourceParser, JsonParser, SourceParserIntoStreamExt, SpecificParserConfig,
 };
 use risingwave_connector::source::{
-    BoxChunkSourceStream, BoxSourceStream, SourceColumnDesc, SourceMessage, SourceMeta,
+    BoxChunkSourceStream, BoxSourceStream, SourceColumnDesc, SourceContext, SourceMessage,
+    SourceMeta,
 };
 use tracing::Level;
 use tracing_subscriber::prelude::*;
@@ -87,7 +88,7 @@ fn make_parser() -> impl ByteStreamSourceParser {
 
     let props = SpecificParserConfig::DEFAULT_PLAIN_JSON;
 
-    JsonParser::new(props, columns, Default::default()).unwrap()
+    JsonParser::new(props, columns, SourceContext::dummy().into()).unwrap()
 }
 
 fn make_stream_iter() -> impl Iterator<Item = StreamChunk> {

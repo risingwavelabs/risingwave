@@ -195,7 +195,7 @@ mod tests {
 
         let source_ctx = SourceContext {
             connector_props: ConnectorProperties::PostgresCdc(Box::default()),
-            ..SourceContext::dummy().into()
+            ..SourceContext::dummy()
         };
         let source_ctx = Arc::new(source_ctx);
         // format plain encode json parser

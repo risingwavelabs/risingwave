@@ -110,7 +110,6 @@ impl DebeziumParser {
         })
     }
 
-    #[cfg(test)]
     pub async fn new_for_test(rw_columns: Vec<SourceColumnDesc>) -> ConnectorResult<Self> {
         use crate::parser::JsonProperties;
 
