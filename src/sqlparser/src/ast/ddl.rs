@@ -140,11 +140,7 @@ pub enum AlterViewOperation {
     },
     /// `SET STREAMING_RATE_LIMIT TO <rate_limit>`
     SetStreamingRateLimit {
-        rate_limit: u32,
-    },
-    /// `SET ENABLE_STREAMING_RATE_LIMIT TO (true|false)`
-    SetEnableStreamingRateLimit {
-        enable: bool,
+        rate_limit: i32,
     },
 }
 
@@ -356,6 +352,9 @@ impl fmt::Display for AlterViewOperation {
                     parallelism,
                     if *deferred { " DEFERRED" } else { "" }
                 )
+            }
+            AlterViewOperation::SetStreamingRateLimit { rate_limit } => {
+                write!(f, "SET STREAMING_RATE_LIMIT TO {}", rate_limit)
             }
         }
     }

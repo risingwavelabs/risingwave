@@ -750,6 +750,18 @@ pub async fn handle(
                 .await
             }
         }
+        Statement::AlterView {
+            materialized,
+            name,
+            operation: AlterViewOperation::SetStreamingRateLimit { rate_limit },
+        } if materialized => {
+            todo!()
+            // alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+            //     handler_args,
+            //     name,
+            //     rate_limit,
+            // )
+        }
         Statement::AlterSink {
             name,
             operation: AlterSinkOperation::RenameSink { sink_name },
