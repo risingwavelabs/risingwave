@@ -18,8 +18,8 @@ use std::cell::RefCell;
 
 // See documentation of `stacker` for the meaning of these constants.
 // TODO: determine good values or make them configurable
-const RED_ZONE: usize = 128 * 1024; // 128KiB
-const STACK_SIZE: usize = 16 * RED_ZONE; // 2MiB
+const RED_ZONE: usize = 256 * 1024; // 256KiB
+const STACK_SIZE: usize = 2 * 1024 * 1024; // 2MiB
 
 /// Recursion depth.
 struct Depth {
