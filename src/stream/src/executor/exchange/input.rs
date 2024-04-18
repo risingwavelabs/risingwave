@@ -81,6 +81,8 @@ impl LocalInput {
         while let Some(msg) = channel.recv().verbose_instrument_await(span.clone()).await {
             yield msg;
         }
+        // Always emit an error outside the loop. This is because we use barrier as the control
+        // message to stop the stream. Reaching here means the channel is closed unexpectedly.
         Err(ExchangeChannelClosed::local_input(actor_id))?
     }
 }
@@ -218,6 +220,8 @@ impl RemoteInput {
             }
         }
 
+        // Always emit an error outside the loop. This is because we use barrier as the control
+        // message to stop the stream. Reaching here means the channel is closed unexpectedly.
         Err(ExchangeChannelClosed::remote_input(up_down_ids.0, None))?
     }
 }
