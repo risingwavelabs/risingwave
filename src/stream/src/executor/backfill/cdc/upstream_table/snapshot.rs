@@ -86,7 +86,7 @@ impl UpstreamTableReader<ExternalStorageTable> {
     pub async fn snapshot_read_full_table(&self, args: SnapshotReadArgs, limit: u32) {
         let mut read_args = args;
 
-        'read_loop: loop {
+        loop {
             let mut read_count: usize = 0;
             let chunk_stream = self.snapshot_read(read_args.clone(), limit);
             let mut current_pk_pos = read_args.current_pos.clone().unwrap_or(OwnedRow::default());
@@ -103,7 +103,9 @@ impl UpstreamTableReader<ExternalStorageTable> {
                     None => {
                         // reach the end of the table
                         if read_count < limit as _ {
-                            break 'read_loop;
+                            tracing::debug!("finished loading of table snapshot");
+                            yield None;
+                            unreachable!("snapshot stream is ended, should not reach here");
                         } else {
                             // update PK position
                             read_args.current_pos = Some(current_pk_pos);

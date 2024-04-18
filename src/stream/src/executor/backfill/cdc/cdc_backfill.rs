@@ -342,6 +342,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     // if the number of barriers reaches the snapshot interval
                                     if can_start_new_snapshot {
                                         pending_barrier = Some(barrier);
+                                        tracing::debug!(
+                                            upstream_table_id,
+                                            ?current_pk_pos,
+                                            ?snapshot_read_row_cnt,
+                                            "Prepare to start a new snapshot"
+                                        );
                                         // Break the for loop and prepare to start a new snapshot
                                         break;
                                     } else {
@@ -358,8 +364,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     let chunk_binlog_offset =
                                         get_cdc_chunk_last_offset(&offset_parse_func, &chunk)?;
 
-                                    tracing::trace!(
-                                        target: "events::stream::cdc_backfill",
+                                    tracing::debug!(
                                         "recv changelog chunk: chunk_offset {:?}, capactiy {}",
                                         chunk_binlog_offset,
                                         chunk.capacity()
@@ -372,8 +377,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         if let Some(chunk_offset) = chunk_binlog_offset
                                             && chunk_offset < *last_binlog_offset
                                         {
-                                            tracing::trace!(
-                                                target: "events::stream::cdc_backfill",
+                                            tracing::debug!(
                                                 "skip changelog chunk: chunk_offset {:?}, capacity {}",
                                                 chunk_offset,
                                                 chunk.capacity()
@@ -468,7 +472,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     upstream_table_id,
                                     ?last_binlog_offset,
                                     ?current_pk_pos,
-                                    "snapshot read stream ends"
+                                    "snapshot read stream ends in the force emit branch"
                                 );
                                 // End of the snapshot read stream.
                                 // Consume the buffered upstream chunk without filtering by `binlog_low`.
