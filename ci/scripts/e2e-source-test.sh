@@ -152,7 +152,7 @@ risedev ci-kill
 
 echo "--- e2e, ci-kafka-plus-pubsub, kafka and pubsub source"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-risedev ci-start ci-pubsub
+risedev ci-start ci-pubsub-kafka
 ./scripts/source/prepare_ci_kafka.sh
 cargo run --bin prepare_ci_pubsub
 risedev slt './e2e_test/source/basic/*.slt'
@@ -167,6 +167,9 @@ risedev slt './e2e_test/source/basic/alter/kafka_after_new_data.slt'
 echo "--- e2e, kafka alter source again"
 ./scripts/source/prepare_data_after_alter.sh 3
 risedev slt './e2e_test/source/basic/alter/kafka_after_new_data_2.slt'
+
+echo "--- e2e, inline test"
+risedev slt './e2e_test/source_inline/**/*.slt'
 
 echo "--- Run CH-benCHmark"
 risedev slt './e2e_test/ch_benchmark/batch/ch_benchmark.slt'
