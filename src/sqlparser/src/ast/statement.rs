@@ -153,6 +153,7 @@ pub enum Encode {
     Json,     // Keyword::JSON
     Bytes,    // Keyword::BYTES
     None,     // Keyword::None
+    TEXT,     // Keyword::TEXT
     Native,
     Template,
 }
@@ -172,6 +173,7 @@ impl fmt::Display for Encode {
                 Encode::Native => "NATIVE",
                 Encode::Template => "TEMPLATE",
                 Encode::None => "NONE",
+                Encode::TEXT => "TEXT",
             }
         )
     }
@@ -181,6 +183,7 @@ impl Encode {
     pub fn from_keyword(s: &str) -> Result<Self, ParserError> {
         Ok(match s {
             "AVRO" => Encode::Avro,
+            "TEXT" => Encode::TEXT,
             "BYTES" => Encode::Bytes,
             "CSV" => Encode::Csv,
             "PROTOBUF" => Encode::Protobuf,
@@ -202,6 +205,8 @@ pub struct ConnectorSchema {
     pub format: Format,
     pub row_encode: Encode,
     pub row_options: Vec<SqlOption>,
+
+    pub key_encode: Option<Encode>,
 }
 
 impl Parser {
@@ -295,6 +300,7 @@ impl Parser {
             format,
             row_encode,
             row_options,
+            key_encode: None,
         }))
     }
 }
@@ -305,6 +311,7 @@ impl ConnectorSchema {
             format: Format::Plain,
             row_encode: Encode::Json,
             row_options: Vec::new(),
+            key_encode: None,
         }
     }
 
@@ -314,6 +321,7 @@ impl ConnectorSchema {
             format: Format::Debezium,
             row_encode: Encode::Json,
             row_options: Vec::new(),
+            key_encode: None,
         }
     }
 
@@ -322,6 +330,7 @@ impl ConnectorSchema {
             format: Format::DebeziumMongo,
             row_encode: Encode::Json,
             row_options: Vec::new(),
+            key_encode: None,
         }
     }
 
@@ -331,6 +340,7 @@ impl ConnectorSchema {
             format: Format::Native,
             row_encode: Encode::Native,
             row_options: Vec::new(),
+            key_encode: None,
         }
     }
 
@@ -341,6 +351,7 @@ impl ConnectorSchema {
             format: Format::None,
             row_encode: Encode::None,
             row_options: Vec::new(),
+            key_encode: None,
         }
     }
 
@@ -532,7 +543,18 @@ impl ParseTo for CreateSinkStatement {
             ));
         }
 
-        let sink_schema = p.parse_schema()?;
+        let mut sink_schema = p.parse_schema()?;
+
+        {
+            // handle key encode clause for sink
+            if let Some(schema_inner) = &mut sink_schema
+                && p.parse_keywords(&[Keyword::KEY, Keyword::ENCODE])
+            {
+                schema_inner.key_encode = Some(Encode::from_keyword(
+                    p.parse_identifier()?.value.to_ascii_uppercase().as_str(),
+                )?);
+            }
+        }
 
         Ok(Self {
             if_not_exists,

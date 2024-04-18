@@ -241,6 +241,7 @@ impl SourceSchema {
             format,
             row_encode,
             row_options,
+            key_encode: None,
         }
     }
 }
