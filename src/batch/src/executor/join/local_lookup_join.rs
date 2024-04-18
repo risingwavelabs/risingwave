@@ -21,7 +21,7 @@ use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::hash::table_distribution::TableDistribution;
 use risingwave_common::hash::{
-    ExpandedParallelUnitMapping, HashKey, HashKeyDispatcher, ParallelUnitId, VirtualNode,
+    ExpandedWorkerMapping, HashKey, HashKeyDispatcher, ParallelUnitId, VirtualNode, WorkerId,
 };
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::{DataType, Datum};
@@ -29,7 +29,6 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_common::util::tracing::TracingContext;
-use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
@@ -52,7 +51,7 @@ use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 struct InnerSideExecutorBuilder<C> {
     table_desc: StorageTableDesc,
     table_distribution: TableDistribution,
-    vnode_mapping: ExpandedParallelUnitMapping,
+    vnode_mapping: ExpandedWorkerMapping,
     outer_side_key_types: Vec<DataType>,
     inner_side_schema: Schema,
     inner_side_column_ids: Vec<i32>,
@@ -61,8 +60,8 @@ struct InnerSideExecutorBuilder<C> {
     context: C,
     task_id: TaskId,
     epoch: BatchQueryEpoch,
-    pu_to_worker_mapping: HashMap<ParallelUnitId, WorkerNode>,
-    pu_to_scan_range_mapping: HashMap<ParallelUnitId, Vec<(ScanRange, VirtualNode)>>,
+    worker_mapping: HashMap<WorkerId, WorkerNode>,
+    worker_to_scan_range_mapping: HashMap<WorkerId, Vec<(ScanRange, VirtualNode)>>,
     chunk_size: usize,
     shutdown_rx: ShutdownToken,
     next_stage_id: usize,
@@ -92,7 +91,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
     /// Creates the `RowSeqScanNode` that will be used for scanning the inner side table
     /// based on the passed `scan_range` and virtual node.
     fn create_row_seq_scan_node(&self, id: &ParallelUnitId) -> Result<NodeBody> {
-        let list = self.pu_to_scan_range_mapping.get(id).unwrap();
+        let list = self.worker_to_scan_range_mapping.get(id).unwrap();
         let mut scan_ranges = vec![];
         let mut vnode_bitmap = BitmapBuilder::zeroed(self.vnode_mapping.len());
 
@@ -114,11 +113,11 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
     }
 
     /// Creates the `PbExchangeSource` using the given `id`.
-    fn build_prost_exchange_source(&self, id: &ParallelUnitId) -> Result<PbExchangeSource> {
+    fn build_prost_exchange_source(&self, id: &WorkerId) -> Result<PbExchangeSource> {
         let worker = self
-            .pu_to_worker_mapping
+            .worker_mapping
             .get(id)
-            .context("No worker node found for the given parallel unit id.")?;
+            .context("No worker node found for the given worker id.")?;
 
         let local_execute_plan = LocalExecutePlan {
             plan: Some(PlanFragment {
@@ -160,7 +159,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
 #[async_trait::async_trait]
 impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> {
     fn reset(&mut self) {
-        self.pu_to_scan_range_mapping = HashMap::new();
+        self.worker_to_scan_range_mapping = HashMap::new();
     }
 
     /// Adds the scan range made from the given `kwy_scalar_impls` into the parallel unit id
@@ -191,11 +190,11 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
         }
 
         let vnode = self.get_virtual_node(&scan_range)?;
-        let parallel_unit_id = self.vnode_mapping[vnode.to_index()];
+        let worker_id = self.vnode_mapping[vnode.to_index()];
 
         let list = self
-            .pu_to_scan_range_mapping
-            .entry(parallel_unit_id)
+            .worker_to_scan_range_mapping
+            .entry(worker_id)
             .or_default();
         list.push((scan_range, vnode));
 
@@ -207,7 +206,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
     async fn build_executor(&mut self) -> Result<BoxedExecutor> {
         self.next_stage_id += 1;
         let mut sources = vec![];
-        for id in self.pu_to_scan_range_mapping.keys() {
+        for id in self.worker_to_scan_range_mapping.keys() {
             sources.push(self.build_prost_exchange_source(id)?);
         }
 
@@ -373,6 +372,14 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
 
         let chunk_size = source.context.get_config().developer.chunk_size;
 
+        let worker_nodes = lookup_join_node.get_worker_nodes();
+        let worker_mapping: HashMap<WorkerId, WorkerNode> = worker_nodes
+            .iter()
+            .map(|worker| (worker.id, worker.clone()))
+            .collect();
+
+        assert_eq!(worker_mapping.len(), worker_nodes.len());
+
         let inner_side_builder = InnerSideExecutorBuilder {
             table_desc: table_desc.clone(),
             table_distribution: TableDistribution::new_from_storage_table_desc(
@@ -388,11 +395,11 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             context: source.context().clone(),
             task_id: source.task_id.clone(),
             epoch: source.epoch(),
-            pu_to_worker_mapping: get_pu_to_worker_mapping(lookup_join_node.get_worker_nodes()),
-            pu_to_scan_range_mapping: HashMap::new(),
+            worker_to_scan_range_mapping: HashMap::new(),
             chunk_size,
             shutdown_rx: source.shutdown_rx.clone(),
             next_stage_id: 0,
+            worker_mapping,
         };
 
         let identity = source.plan_node().get_identity().clone();
