@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::io::Write;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -38,7 +39,7 @@ use crate::sink::writer::SinkWriterExt;
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
 
 pub const SNOWFLAKE_SINK: &str = "snowflake";
-const INITIAL_CHUNK_CAPACITY: usize = 1024;
+const INITIAL_ROW_CAPACITY: usize = 1024;
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct SnowflakeCommon {
@@ -316,15 +317,23 @@ impl SnowflakeSinkWriter {
     }
 
     async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
-        let mut chunk_buf = BytesMut::with_capacity(INITIAL_CHUNK_CAPACITY);
+        let mut chunk_buf = BytesMut::new();
+        let mut row_buf: Vec<u8> = Vec::with_capacity(INITIAL_ROW_CAPACITY);
+
+        // write the json representations of the row(s) in current chunk to `chunk_buf`
         for (op, row) in chunk.rows() {
             assert_eq!(op, Op::Insert, "expect all `op(s)` to be `Op::Insert`");
-            chunk_buf.extend_from_slice(
-                Value::Object(self.row_encoder.encode(row)?)
-                    .to_string()
-                    .as_bytes(),
-            );
+            // to prevent temporary string allocation,
+            // so we use an intermediate vector buffer instead.
+            write!(row_buf, "{}", Value::Object(self.row_encoder.encode(row)?))
+                .map_err(|err| SinkError::Snowflake(format!(
+                    "failed to write json object to `row_buf`, error: {}",
+                    err
+                )))?;
+            chunk_buf.extend_from_slice(&row_buf);
+            row_buf.clear();
         }
+
         // streaming upload in a chunk-by-chunk manner
         self.streaming_upload(chunk_buf.freeze()).await?;
         Ok(())
