@@ -1065,7 +1065,6 @@ pub fn build_version_delta_after_version(version: &HummockVersion) -> HummockVer
         trivial_move: false,
         max_committed_epoch: version.max_committed_epoch,
         group_deltas: Default::default(),
-        gc_object_ids: vec![],
         new_table_watermarks: HashMap::new(),
         removed_table_ids: vec![],
     }
