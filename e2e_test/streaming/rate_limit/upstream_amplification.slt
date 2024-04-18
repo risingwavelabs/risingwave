@@ -43,10 +43,6 @@ flush;
 statement ok
 flush;
 
-# Wait for sink to be created.
-skipif in-memory
-sleep 1s
-
 statement ok
 drop sink sink;
 
