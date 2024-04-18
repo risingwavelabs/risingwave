@@ -23,10 +23,11 @@ pub struct CompactionExecutor {
     /// Runtime for compaction tasks.
     runtime: BackgroundShutdownRuntime,
     worker_num: usize,
+    compactor_is_one_shot: bool,
 }
 
 impl CompactionExecutor {
-    pub fn new(worker_threads_num: Option<usize>) -> Self {
+    pub fn new(worker_threads_num: Option<usize>, compactor_is_one_shot: bool) -> Self {
         let mut worker_num = resource_util::cpu::total_cpu_available() as usize;
         let runtime = {
             let mut builder = tokio::runtime::Builder::new_multi_thread();
@@ -41,6 +42,7 @@ impl CompactionExecutor {
         Self {
             runtime: runtime.into(),
             worker_num,
+            compactor_is_one_shot,
         }
     }
 

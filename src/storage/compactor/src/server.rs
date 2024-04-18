@@ -241,6 +241,7 @@ pub async fn compactor_serve(
 
     let compaction_executor = Arc::new(CompactionExecutor::new(
         opts.compaction_worker_threads_number,
+        opts.compactor_is_one_shot,
     ));
     let max_task_parallelism = Arc::new(AtomicU32::new(
         (compaction_executor.worker_num() as f32 * storage_opts.compactor_max_task_multiplier)
@@ -259,6 +260,7 @@ pub async fn compactor_serve(
         await_tree_reg: await_tree_reg.clone(),
         running_task_parallelism: Arc::new(AtomicU32::new(0)),
         max_task_parallelism,
+        is_one_shot: false,
     };
     let mut sub_tasks = vec![
         MetaClient::start_heartbeat_loop(
@@ -377,6 +379,7 @@ pub async fn shared_compactor_serve(
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel();
     let compaction_executor = Arc::new(CompactionExecutor::new(
         opts.compaction_worker_threads_number,
+        opts.compactor_is_one_shot, // TODO: do I need to set this here?
     ));
     let max_task_parallelism = Arc::new(AtomicU32::new(
         (compaction_executor.worker_num() as f32 * storage_opts.compactor_max_task_multiplier)
@@ -393,6 +396,7 @@ pub async fn shared_compactor_serve(
         await_tree_reg,
         running_task_parallelism: Arc::new(AtomicU32::new(0)),
         max_task_parallelism,
+        is_one_shot: opts.compactor_is_one_shot,
     };
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()

@@ -659,7 +659,7 @@ if [[ $ENABLE_COREDUMP == "true" ]]; then
 fi
 
 set -x
-target/${BUILD_MODE_DIR}/risedev-dev ${@}
+target/debug/risedev-dev ${@}
 '''
 
 [tasks.kill-risedev]

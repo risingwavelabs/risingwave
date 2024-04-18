@@ -142,6 +142,7 @@ impl HummockStorage {
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
         await_tree_config: Option<await_tree::Config>,
+        compactor_is_one_shot: bool,
     ) -> HummockResult<Self> {
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
             hummock_meta_client.clone(),
@@ -192,6 +193,7 @@ impl HummockStorage {
             sstable_store.clone(),
             compactor_metrics.clone(),
             await_tree_reg.clone(),
+            compactor_is_one_shot,
         );
 
         let seal_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
@@ -663,6 +665,7 @@ impl HummockStorage {
             Arc::new(HummockStateStoreMetrics::unused()),
             Arc::new(CompactorMetrics::unused()),
             None,
+            false,
         )
         .await
     }

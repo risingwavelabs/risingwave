@@ -65,6 +65,10 @@ pub struct CompactorOpts {
     #[clap(long, env = "RW_COMPACTION_WORKER_THREADS_NUMBER")]
     pub compaction_worker_threads_number: Option<usize>,
 
+    /// If true, compactor will process one message only and then exit
+    #[clap(long, env = "RW_COMPACTOR_IS_ONE_SHOT", default_value_t = false)]
+    pub compactor_is_one_shot: bool,
+
     /// The path of `risingwave.toml` configuration file.
     ///
     /// If empty, default configuration values will be used.

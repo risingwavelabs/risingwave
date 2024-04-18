@@ -565,6 +565,7 @@ impl StateStoreImpl {
         storage_metrics: Arc<MonitoredStorageMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
         await_tree_config: Option<await_tree::Config>,
+        compactor_is_one_shot: bool,
     ) -> StorageResult<Self> {
         set_foyer_metrics_registry(GLOBAL_METRICS_REGISTRY.clone());
 
@@ -677,6 +678,7 @@ impl StateStoreImpl {
                     state_store_metrics.clone(),
                     compactor_metrics.clone(),
                     await_tree_config,
+                    compactor_is_one_shot,
                 )
                 .await?;
 

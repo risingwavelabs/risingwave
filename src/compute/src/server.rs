@@ -195,6 +195,7 @@ pub async fn compute_node_serve(
         storage_metrics.clone(),
         compactor_metrics.clone(),
         await_tree_config.clone(),
+        false,
     )
     .await
     .unwrap();
@@ -215,7 +216,7 @@ pub async fn compute_node_serve(
                 storage_opts.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
             ));
 
-            let compaction_executor = Arc::new(CompactionExecutor::new(Some(1)));
+            let compaction_executor = Arc::new(CompactionExecutor::new(Some(1), false));
             let max_task_parallelism = Arc::new(AtomicU32::new(
                 (compaction_executor.worker_num() as f32
                     * storage_opts.compactor_max_task_multiplier)
@@ -236,6 +237,7 @@ pub async fn compute_node_serve(
                     .map(new_compaction_await_tree_reg_ref),
                 running_task_parallelism: Arc::new(AtomicU32::new(0)),
                 max_task_parallelism,
+                is_one_shot: false,
             };
 
             let (handle, shutdown_sender) = start_compactor(

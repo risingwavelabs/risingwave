@@ -115,6 +115,10 @@ pub struct NodeSpecificOpts {
     // ------- Compactor Node Options -------
     #[clap(long)]
     pub compaction_worker_threads_number: Option<usize>,
+
+    /// If true, compactor will process one message only and then exit
+    #[clap(long)]
+    pub compactor_is_one_shot: bool,
 }
 
 pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedStandaloneOpts {
@@ -225,6 +229,7 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
     if let Some(n) = opts.node_opts.compaction_worker_threads_number {
         compactor_opts.compaction_worker_threads_number = Some(n);
     }
+    compactor_opts.compactor_is_one_shot = opts.node_opts.compactor_is_one_shot;
 
     ParsedStandaloneOpts {
         meta_opts: Some(meta_opts),

@@ -1353,7 +1353,7 @@ mod tests {
         F: UploadFn<Fut>,
     {
         let config = StorageOpts::default();
-        let compaction_executor = Arc::new(CompactionExecutor::new(None));
+        let compaction_executor = Arc::new(CompactionExecutor::new(None, false));
         UploaderContext::new(
             initial_pinned_version(),
             Arc::new(move |payload, task_info| spawn(upload_fn(payload, task_info))),
@@ -1373,7 +1373,7 @@ mod tests {
             imm_merge_threshold: 4,
             ..Default::default()
         };
-        let compaction_executor = Arc::new(CompactionExecutor::new(None));
+        let compaction_executor = Arc::new(CompactionExecutor::new(None, false));
         HummockUploader::new(
             Arc::new(HummockStateStoreMetrics::unused()),
             initial_pinned_version(),
@@ -1843,7 +1843,7 @@ mod tests {
         };
 
         let config = StorageOpts::default();
-        let compaction_executor = Arc::new(CompactionExecutor::new(None));
+        let compaction_executor = Arc::new(CompactionExecutor::new(None, false));
         let uploader = HummockUploader::new(
             Arc::new(HummockStateStoreMetrics::unused()),
             initial_pinned_version(),

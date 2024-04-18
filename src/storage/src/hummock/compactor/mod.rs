@@ -627,7 +627,7 @@ pub fn start_shared_compactor(
                     return
                 }
 
-                request = receiver.recv() => {
+                request = receiver.recv() => { // TODO: need to handle sender. Compactor may already be shut down
                     request
                 }
 
@@ -775,6 +775,10 @@ pub fn start_shared_compactor(
                     });
                 }
                 None => continue 'consume_stream,
+            }
+            if context.is_one_shot {
+                tracing::info!("One-shot compactor shutting down after processing a single task");
+                return;
             }
         }
     });

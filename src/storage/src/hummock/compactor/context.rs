@@ -69,6 +69,9 @@ pub struct CompactorContext {
     pub running_task_parallelism: Arc<AtomicU32>,
 
     pub max_task_parallelism: Arc<AtomicU32>,
+
+    /// If true compactor will only process a single message
+    pub is_one_shot: bool,
 }
 
 impl CompactorContext {
@@ -77,14 +80,17 @@ impl CompactorContext {
         sstable_store: SstableStoreRef,
         compactor_metrics: Arc<CompactorMetrics>,
         await_tree_reg: Option<CompactionAwaitTreeRegRef>,
+        is_one_shot: bool,
     ) -> Self {
         let compaction_executor = if storage_opts.share_buffer_compaction_worker_threads_number == 0
         {
-            Arc::new(CompactionExecutor::new(None))
+            // TODO: not sure if we need to pass one_shot here
+            Arc::new(CompactionExecutor::new(None, is_one_shot))
         } else {
-            Arc::new(CompactionExecutor::new(Some(
-                storage_opts.share_buffer_compaction_worker_threads_number as usize,
-            )))
+            Arc::new(CompactionExecutor::new(
+                Some(storage_opts.share_buffer_compaction_worker_threads_number as usize),
+                is_one_shot, // TODO: not sure if we need to pass one_shot here
+            ))
         };
 
         // not limit memory for local compact
@@ -99,6 +105,7 @@ impl CompactorContext {
             await_tree_reg,
             running_task_parallelism: Arc::new(AtomicU32::new(0)),
             max_task_parallelism: Arc::new(AtomicU32::new(u32::MAX)),
+            is_one_shot,
         }
     }
 
