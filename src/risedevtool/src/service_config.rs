@@ -380,6 +380,50 @@ impl ServiceConfig {
             Self::Opendal(c) => &c.id,
         }
     }
+
+    pub fn port(&self) -> Option<u16> {
+        match self {
+            Self::ComputeNode(c) => Some(c.port),
+            Self::MetaNode(c) => Some(c.port),
+            Self::Frontend(c) => Some(c.port),
+            Self::Compactor(c) => Some(c.port),
+            Self::Minio(c) => Some(c.port),
+            Self::Etcd(c) => Some(c.port),
+            Self::Sqlite(_) => None,
+            Self::Prometheus(c) => Some(c.port),
+            Self::Grafana(c) => Some(c.port),
+            Self::Tempo(c) => Some(c.port),
+            Self::AwsS3(_) => None,
+            Self::ZooKeeper(c) => Some(c.port),
+            Self::Kafka(c) => Some(c.port),
+            Self::Pubsub(c) => Some(c.port),
+            Self::Redis(c) => Some(c.port),
+            Self::RedPanda(_c) => None,
+            Self::Opendal(_) => None,
+        }
+    }
+
+    pub fn user_managed(&self) -> bool {
+        match self {
+            Self::ComputeNode(c) => c.user_managed,
+            Self::MetaNode(c) => c.user_managed,
+            Self::Frontend(c) => c.user_managed,
+            Self::Compactor(c) => c.user_managed,
+            Self::Minio(_c) => false,
+            Self::Etcd(_c) => false,
+            Self::Sqlite(_c) => false,
+            Self::Prometheus(_c) => false,
+            Self::Grafana(_c) => false,
+            Self::Tempo(_c) => false,
+            Self::AwsS3(_c) => false,
+            Self::ZooKeeper(_c) => false,
+            Self::Kafka(c) => c.user_managed,
+            Self::Pubsub(_c) => false,
+            Self::Redis(_c) => false,
+            Self::RedPanda(_c) => false,
+            Self::Opendal(_c) => false,
+        }
+    }
 }
 
 mod string {

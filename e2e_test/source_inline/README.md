@@ -26,5 +26,5 @@ risedev slt 'e2e_test/source_inline/**/*.slt'
 To write tests, please ensure each file is self-contained and does not depend on running external scripts to setup the environment.
 
 Use `system` command to setup instead.
-For simple cases, you can directly write a bash command; 
+For simple cases, you can directly write a bash command;
 For more complex cases, you can write a test script (with any language like bash, python, zx), and invoke it in the `system` command.

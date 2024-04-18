@@ -17,11 +17,12 @@ use anyhow::Result;
 use super::{ExecuteContext, Task};
 
 pub struct EnsureStopService {
-    ports: Vec<(u16, String)>,
+    /// `(port, id, user_managed)`
+    ports: Vec<(u16, String, bool)>,
 }
 
 impl EnsureStopService {
-    pub fn new(ports: Vec<(u16, String)>) -> Result<Self> {
+    pub fn new(ports: Vec<(u16, String, bool)>) -> Result<Self> {
         Ok(Self { ports })
     }
 }
@@ -30,16 +31,16 @@ impl Task for EnsureStopService {
     fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
         ctx.service(self);
 
-        for (port, service) in &self.ports {
-            // Do not require stopping kafka services
-            if service.starts_with("kafka") {
+        for (port, service_id, user_managed) in &self.ports {
+            // Do not require stopping user-managed services
+            if *user_managed {
                 continue;
             }
             let address = format!("127.0.0.1:{}", port);
 
             ctx.pb.set_message(format!(
                 "waiting for port close - {} (will be used by {})",
-                address, service
+                address, service_id
             ));
             ctx.wait_tcp_close(&address)?;
         }
