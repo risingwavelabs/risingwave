@@ -41,6 +41,7 @@ use thiserror_ext::AsReport;
 use super::executor_core::StreamSourceCore;
 use super::source_backfill_state_table::BackfillStateTableHandler;
 use crate::executor::monitor::StreamingMetrics;
+use crate::executor::source_executor::apply_rate_limit;
 use crate::executor::*;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -209,16 +210,17 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             self.actor_ctx.id,
             self.stream_source_core.source_id,
             self.actor_ctx.fragment_id,
+            self.stream_source_core.source_name.clone(),
             source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
             source_desc.source.config.clone(),
-            self.stream_source_core.source_name.clone(),
         );
-        source_desc
+        let stream = source_desc
             .source
             .to_stream(Some(splits), column_ids, Arc::new(source_ctx))
             .await
-            .map_err(StreamExecutorError::connector_error)
+            .map_err(StreamExecutorError::connector_error)?;
+        Ok(apply_rate_limit(stream, self.source_ctrl_opts.rate_limit).boxed())
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]

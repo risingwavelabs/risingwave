@@ -272,6 +272,17 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                                 paused = false;
                                                 valve.resume();
                                             }
+                                            Mutation::Throttle(some) => {
+                                                if let Some(rate_limit) =
+                                                    some.get(&self.actor_ctx.id)
+                                                {
+                                                    self.chunk_size = rate_limit
+                                                        .map(|x| x as usize)
+                                                        .unwrap_or(self.chunk_size);
+                                                    // rebuild the new reader stream with new chunk size
+                                                    continue 'backfill_loop;
+                                                }
+                                            }
                                             _ => (),
                                         }
                                     }
@@ -607,6 +618,7 @@ pub async fn transform_upstream(upstream: BoxedMessageStream, schema: &Schema) {
         key_encoding_config: None,
         encoding_config: EncodingProperties::Json(JsonProperties {
             use_schema_registry: false,
+            timestamptz_handling: None,
         }),
         // the cdc message is generated internally so the key must exist.
         protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
@@ -614,7 +626,7 @@ pub async fn transform_upstream(upstream: BoxedMessageStream, schema: &Schema) {
     let mut parser = DebeziumParser::new(
         props,
         get_rw_columns(schema),
-        Arc::new(SourceContext::default()),
+        Arc::new(SourceContext::dummy()),
     )
     .await
     .map_err(StreamExecutorError::connector_error)?;

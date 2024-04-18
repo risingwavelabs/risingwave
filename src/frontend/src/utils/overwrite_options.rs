@@ -20,10 +20,11 @@ pub struct OverwriteOptions {
 }
 
 impl OverwriteOptions {
-    const STREAMING_RATE_LIMIT_KEY: &'static str = "streaming_rate_limit";
+    pub(crate) const STREAMING_RATE_LIMIT_KEY: &'static str = "streaming_rate_limit";
 
     pub fn new(args: &mut HandlerArgs) -> Self {
         let streaming_rate_limit = {
+            // CREATE MATERIALIZED VIEW m1 WITH (rate_limit = N) ...
             if let Some(x) = args
                 .with_options
                 .inner_mut()
@@ -32,10 +33,12 @@ impl OverwriteOptions {
                 // FIXME(tabVersion): validate the value
                 Some(x.parse::<u32>().unwrap())
             } else {
-                args.session
-                    .config()
-                    .streaming_rate_limit()
-                    .map(|limit| limit.get() as u32)
+                let rate_limit = args.session.config().streaming_rate_limit();
+                if rate_limit < 0 {
+                    None
+                } else {
+                    Some(rate_limit as u32)
+                }
             }
         };
         Self {

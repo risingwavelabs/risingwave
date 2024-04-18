@@ -1115,7 +1115,7 @@ pub mod default {
         }
 
         pub fn max_heartbeat_interval_sec() -> u32 {
-            300
+            60
         }
 
         pub fn meta_leader_lease_secs() -> u64 {

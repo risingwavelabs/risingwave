@@ -60,6 +60,15 @@ impl ReadSnapshot {
         }
     }
 
+    /// Get the [`Option<Epoch>`] value for this snapshot, only `FrontendPinned`.
+    pub fn epoch_with_frontend_pinned(&self) -> Option<Epoch> {
+        match self.batch_query_epoch().epoch.unwrap() {
+            batch_query_epoch::Epoch::Committed(epoch)
+            | batch_query_epoch::Epoch::Current(epoch) => Some(epoch.into()),
+            batch_query_epoch::Epoch::Backup(_) => None,
+        }
+    }
+
     /// Get the [`Epoch`] value for this snapshot.
     pub fn epoch(&self) -> Epoch {
         match self.batch_query_epoch().epoch.unwrap() {

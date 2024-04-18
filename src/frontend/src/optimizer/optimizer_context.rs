@@ -14,6 +14,7 @@
 
 use core::fmt::Formatter;
 use std::cell::{RefCell, RefMut};
+use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -26,6 +27,8 @@ use crate::session::SessionImpl;
 use crate::utils::{OverwriteOptions, WithOptions};
 
 const RESERVED_ID_NUM: u16 = 10000;
+
+type PhantomUnsend = PhantomData<Rc<()>>;
 
 pub struct OptimizerContext {
     session_ctx: Arc<SessionImpl>,
@@ -54,6 +57,8 @@ pub struct OptimizerContext {
     /// Store the configs can be overwritten in with clause
     /// if not specified, use the value from session variable.
     overwrite_options: OverwriteOptions,
+
+    _phantom: PhantomUnsend,
 }
 
 pub type OptimizerContextRef = Rc<OptimizerContext>;
@@ -85,6 +90,7 @@ impl OptimizerContext {
             next_expr_display_id: RefCell::new(RESERVED_ID_NUM.into()),
             total_rule_applied: RefCell::new(0),
             overwrite_options,
+            _phantom: Default::default(),
         }
     }
 
@@ -106,6 +112,7 @@ impl OptimizerContext {
             next_expr_display_id: RefCell::new(0),
             total_rule_applied: RefCell::new(0),
             overwrite_options: OverwriteOptions::default(),
+            _phantom: Default::default(),
         }
         .into()
     }

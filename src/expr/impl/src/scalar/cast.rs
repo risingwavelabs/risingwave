@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::array::{ArrayImpl, DataChunk, ListRef, ListValue, StructRef, StructValue};
 use risingwave_common::cast;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{Int256, IntoOrdered, JsonbRef, ToText, F64};
+use risingwave_common::types::{Int256, JsonbRef, ToText, F64};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{build_func, Context, ExpressionBoxExt, InputRefExpression};
 use risingwave_expr::{function, ExprError, Result};
@@ -79,7 +79,6 @@ pub fn jsonb_to_bool(v: JsonbRef<'_>) -> Result<bool> {
 pub fn jsonb_to_number<T: TryFrom<F64>>(v: JsonbRef<'_>) -> Result<T> {
     v.as_number()
         .map_err(|e| ExprError::Parse(e.into()))?
-        .into_ordered()
         .try_into()
         .map_err(|_| ExprError::NumericOutOfRange)
 }

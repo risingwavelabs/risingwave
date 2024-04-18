@@ -372,16 +372,8 @@ impl BindContext {
             entry.extend(v.into_iter().map(|x| x + begin));
         }
         for (k, (x, y)) in other.range_of {
-            match self.range_of.entry(k.clone()) {
+            match self.range_of.entry(k) {
                 Entry::Occupied(e) => {
-                    // check if this is a merge with recursive cte
-                    if let Some(r) = self.cte_to_relation.get(&k) {
-                        if let BindingCteState::Bound { .. } = r.borrow().state {
-                            // no-op
-                            continue;
-                        }
-                    }
-                    // otherwise this merge in invalid
                     return Err(ErrorCode::InternalError(format!(
                         "Duplicated table name while merging adjacent contexts: {}",
                         e.key()

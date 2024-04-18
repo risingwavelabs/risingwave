@@ -18,6 +18,8 @@ use anyhow::Context;
 use arrow_array::RecordBatch;
 use arrow_schema::{Field, Fields, Schema, SchemaRef};
 use arrow_udf_js::{CallMode as JsCallMode, Runtime as JsRuntime};
+#[cfg(feature = "embedded-deno-udf")]
+use arrow_udf_js_deno::{CallMode as DenoCallMode, Runtime as DenoRuntime};
 #[cfg(feature = "embedded-python-udf")]
 use arrow_udf_python::{CallMode as PythonCallMode, Runtime as PythonRuntime};
 use cfg_or_panic::cfg_or_panic;
@@ -75,6 +77,13 @@ impl UdfImpl {
             #[cfg(feature = "embedded-python-udf")]
             UdfImpl::Python(runtime) => {
                 for res in runtime.call_table_function(identifier, &input, 1024)? {
+                    yield res?;
+                }
+            }
+            #[cfg(feature = "embedded-deno-udf")]
+            UdfImpl::Deno(runtime) => {
+                let mut iter = runtime.call_table_function(identifier, input, 1024).await?;
+                while let Some(res) = iter.next().await {
                     yield res?;
                 }
             }
@@ -188,6 +197,15 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
     let identifier = udtf.get_identifier()?;
     let return_type = DataType::from(prost.get_return_type()?);
 
+    #[cfg(not(feature = "embedded-deno-udf"))]
+    let runtime = "quickjs";
+
+    #[cfg(feature = "embedded-deno-udf")]
+    let runtime = match udtf.runtime.as_deref() {
+        Some("deno") => "deno",
+        _ => "quickjs",
+    };
+
     let client = match udtf.language.as_str() {
         "wasm" | "rust" => {
             let compressed_wasm_binary = udtf.get_compressed_binary()?;
@@ -196,7 +214,7 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
             let runtime = crate::expr::expr_udf::get_or_create_wasm_runtime(&wasm_binary)?;
             UdfImpl::Wasm(runtime)
         }
-        "javascript" => {
+        "javascript" if runtime != "deno" => {
             let mut rt = JsRuntime::new()?;
             let body = format!(
                 "export function* {}({}) {{ {} }}",
@@ -211,6 +229,44 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
                 &body,
             )?;
             UdfImpl::JavaScript(rt)
+        }
+        #[cfg(feature = "embedded-deno-udf")]
+        "javascript" if runtime == "deno" => {
+            let rt = DenoRuntime::new();
+            let body = match udtf.get_body() {
+                Ok(body) => body.clone(),
+                Err(_) => match udtf.get_compressed_binary() {
+                    Ok(compressed_binary) => {
+                        let binary = zstd::stream::decode_all(compressed_binary.as_slice())
+                            .context("failed to decompress binary")?;
+                        String::from_utf8(binary).context("failed to decode binary")?
+                    }
+                    Err(_) => {
+                        bail!("UDF body or compressed binary is required for deno UDF");
+                    }
+                },
+            };
+
+            let body = format!(
+                "export {} {}({}) {{ {} }}",
+                match udtf.function_type.as_deref() {
+                    Some("async") => "async function",
+                    Some("async_generator") => "async function*",
+                    Some("sync") => "function",
+                    _ => "function*",
+                },
+                identifier,
+                udtf.arg_names.join(","),
+                body
+            );
+
+            futures::executor::block_on(rt.add_function(
+                identifier,
+                arrow_schema::DataType::try_from(&return_type)?,
+                DenoCallMode::CalledOnNullInput,
+                &body,
+            ))?;
+            UdfImpl::Deno(rt)
         }
         #[cfg(feature = "embedded-python-udf")]
         "python" if udtf.body.is_some() => {

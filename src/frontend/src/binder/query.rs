@@ -346,6 +346,7 @@ impl Binder {
                     .get()
                     .clone();
 
+                self.push_context();
                 if let Some(with) = with {
                     self.bind_with(with)?;
                 }
@@ -359,8 +360,16 @@ impl Binder {
                     schema: base.schema().clone(),
                 };
 
+                // Reset context for right side, but keep `cte_to_relation`.
+                let new_context = std::mem::take(&mut self.context);
+                self.context
+                    .cte_to_relation
+                    .clone_from(&new_context.cte_to_relation);
                 // bind the rest of the recursive cte
                 let mut recursive = self.bind_set_expr(*right)?;
+                // Reset context for the set operation.
+                self.context = Default::default();
+                self.context.cte_to_relation = new_context.cte_to_relation;
 
                 Self::align_schema(&mut base, &mut recursive, SetOperator::Union)?;
                 let schema = base.schema().clone();
@@ -375,6 +384,9 @@ impl Binder {
                 entry.borrow_mut().state = BindingCteState::Bound {
                     query: either::Either::Right(recursive_union),
                 };
+                // TODO: This does not execute during early return by `?`
+                // We shall extract it similar to `bind_query` and `bind_query_inner`.
+                self.pop_context()?;
             } else {
                 let bound_query = self.bind_query(query)?;
                 self.context.cte_to_relation.insert(

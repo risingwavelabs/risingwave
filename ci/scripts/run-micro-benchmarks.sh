@@ -12,7 +12,7 @@ BENCHMARKS="stream_hash_agg json_parser bench_block_iter bench_compactor bench_l
 
 # Reference: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
 get_instance_type() {
-  TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"` \
+  TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600") \
   && curl -H "X-aws-ec2-metadata-token: $TOKEN" -v http://169.254.169.254/latest/meta-data/instance-type
 }
 
@@ -26,8 +26,8 @@ bench() {
     if [[ $REASON == \"benchmark-complete\" ]]; then
       ID="$(jq ".id" <<< "$LINE")"
       MEAN="$(jq ".mean" <<< "$LINE")"
-      EST="$(jq ".estimate" <<< $MEAN)"
-      UNIT="$(jq ".unit" <<< $MEAN)"
+      EST="$(jq ".estimate" <<< "$MEAN")"
+      UNIT="$(jq ".unit" <<< "$MEAN")"
 
       echo "Benchmark ID: $ID"
       echo "Average Time Taken: $EST"
@@ -71,7 +71,7 @@ main() {
     OLD_IFS=$IFS
     IFS=$'\n'
 
-    bench $BENCHMARK
+    bench "$BENCHMARK"
 
     IFS=$OLD_IFS
 
@@ -90,7 +90,7 @@ local_test() {
   for BENCHMARK in $BENCHMARKS
   do
     echo "--- Running $BENCHMARK"
-    bench $BENCHMARK
+    bench "$BENCHMARK"
   done
   NO_TRAILING_COMMA=$(sed -E '$ s/(.*),$/\1/' ./results.json)
   echo "$NO_TRAILING_COMMA" > ./results.json

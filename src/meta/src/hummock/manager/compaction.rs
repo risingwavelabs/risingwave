@@ -20,13 +20,16 @@ use futures::future::Shared;
 use itertools::Itertools;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId};
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
+use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::subscribe_compaction_event_request::{
     self, Event as RequestEvent, PullTask,
 };
 use risingwave_pb::hummock::subscribe_compaction_event_response::{
     Event as ResponseEvent, PullTaskAck,
 };
-use risingwave_pb::hummock::{CompactStatus as PbCompactStatus, CompactTaskAssignment};
+use risingwave_pb::hummock::{
+    CompactStatus as PbCompactStatus, CompactTaskAssignment, CompactionConfig,
+};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::oneshot::Receiver as OneShotReceiver;
@@ -255,5 +258,43 @@ impl HummockManager {
                 }
             } => {}
         }
+    }
+}
+
+pub fn check_cg_write_limit(
+    levels: &Levels,
+    compaction_config: &CompactionConfig,
+) -> WriteLimitType {
+    let threshold = compaction_config.level0_stop_write_threshold_sub_level_number as usize;
+    let l0_sub_level_number = levels.l0.as_ref().unwrap().sub_levels.len();
+    if threshold < l0_sub_level_number {
+        return WriteLimitType::WriteStop(l0_sub_level_number, threshold);
+    }
+
+    WriteLimitType::Unlimited
+}
+
+pub enum WriteLimitType {
+    Unlimited,
+
+    // (l0_level_count, threshold)
+    WriteStop(usize, usize),
+}
+
+impl WriteLimitType {
+    pub fn as_str(&self) -> String {
+        match self {
+            Self::Unlimited => "Unlimited".to_string(),
+            Self::WriteStop(l0_level_count, threshold) => {
+                format!(
+                    "WriteStop(l0_level_count: {}, threshold: {}) too many L0 sub levels",
+                    l0_level_count, threshold
+                )
+            }
+        }
+    }
+
+    pub fn is_write_stop(&self) -> bool {
+        matches!(self, Self::WriteStop(_, _))
     }
 }

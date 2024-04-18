@@ -112,7 +112,7 @@ pub trait Session: Send + Sync {
 
     fn id(&self) -> SessionId;
 
-    fn set_config(&self, key: &str, value: String) -> Result<(), BoxedError>;
+    fn set_config(&self, key: &str, value: String) -> Result<String, BoxedError>;
 
     fn transaction_status(&self) -> TransactionStatus;
 
@@ -436,8 +436,8 @@ mod tests {
             (0, 0)
         }
 
-        fn set_config(&self, _key: &str, _value: String) -> Result<(), BoxedError> {
-            Ok(())
+        fn set_config(&self, _key: &str, _value: String) -> Result<String, BoxedError> {
+            Ok("".to_string())
         }
 
         fn take_notices(self: Arc<Self>) -> Vec<String> {

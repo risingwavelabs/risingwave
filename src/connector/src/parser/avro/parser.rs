@@ -197,8 +197,11 @@ mod test {
     use crate::connector_common::AwsAuthProps;
     use crate::parser::plain_parser::PlainParser;
     use crate::parser::unified::avro::unix_epoch_days;
-    use crate::parser::{AccessBuilderImpl, SourceStreamChunkBuilder, SpecificParserConfig};
-    use crate::source::SourceColumnDesc;
+    use crate::parser::{
+        AccessBuilderImpl, EncodingType, SourceStreamChunkBuilder, SourceStreamChunkBuilder,
+        SpecificParserConfig, SpecificParserConfig,
+    };
+    use crate::source::{SourceColumnDesc, SourceContext};
 
     fn test_data_path(file_name: &str) -> String {
         let curr_dir = env::current_dir().unwrap().into_os_string();
@@ -254,7 +257,7 @@ mod test {
     }
 
     async fn new_avro_conf_from_local(file_name: &str) -> ConnectorResult<AvroParserConfig> {
-        let schema_path = "file://".to_owned() + &test_data_path(file_name);
+        let schema_path = format!("file://{}", test_data_path(file_name));
         let info = StreamSourceInfo {
             row_schema_location: schema_path.clone(),
             use_schema_registry: false,
@@ -276,7 +279,7 @@ mod test {
                 EncodingType::Value,
             )?),
             rw_columns: Vec::default(),
-            source_ctx: Default::default(),
+            source_ctx: SourceContext::dummy().into(),
             transaction_meta_builder: None,
         })
     }

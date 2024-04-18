@@ -305,6 +305,8 @@ mod tests {
 
     use super::*;
     use crate::connector_common::KinesisCommon;
+    use crate::source::kinesis::split::KinesisSplit;
+    use crate::source::SourceContext;
 
     #[tokio::test]
     async fn test_reject_redundant_seq_props() {
@@ -333,7 +335,7 @@ mod tests {
                 end_position: KinesisOffset::None,
             }],
             Default::default(),
-            Default::default(),
+            SourceContext::dummy().into(),
             None,
         )
         .await;
@@ -369,7 +371,7 @@ mod tests {
                 end_position: KinesisOffset::None,
             }],
             Default::default(),
-            Default::default(),
+            SourceContext::dummy().into(),
             None,
         )
         .await?
@@ -387,7 +389,7 @@ mod tests {
                 end_position: KinesisOffset::None,
             }],
             Default::default(),
-            Default::default(),
+            SourceContext::dummy().into(),
             None,
         )
         .await?

@@ -14,6 +14,7 @@
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::TemporalJoinNode;
@@ -24,26 +25,29 @@ use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary};
 use crate::expr::{Expr, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::plan_tree_node::PlanTreeNodeUnary;
-use crate::optimizer::plan_node::utils::IndicesDisplay;
+use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::plan_node::{
     EqJoinPredicate, EqJoinPredicateDisplay, StreamExchange, StreamTableScan, TryToStreamPb,
 };
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
+use crate::TableCatalog;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamTemporalJoin {
     pub base: PlanBase<Stream>,
     core: generic::Join<PlanRef>,
     eq_join_predicate: EqJoinPredicate,
+    append_only: bool,
 }
 
 impl StreamTemporalJoin {
     pub fn new(core: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Self {
         assert!(core.join_type == JoinType::Inner || core.join_type == JoinType::LeftOuter);
-        assert!(core.left.append_only());
+        let append_only = core.left.append_only();
         let right = core.right.clone();
         let exchange: &StreamExchange = right
             .as_stream_exchange()
@@ -77,6 +81,7 @@ impl StreamTemporalJoin {
             base,
             core,
             eq_join_predicate,
+            append_only,
         }
     }
 
@@ -88,6 +93,58 @@ impl StreamTemporalJoin {
     pub fn eq_join_predicate(&self) -> &EqJoinPredicate {
         &self.eq_join_predicate
     }
+
+    pub fn append_only(&self) -> bool {
+        self.append_only
+    }
+
+    /// Return memo-table catalog and its `pk_indices`.
+    /// (`join_key` + `left_pk` + `right_pk`) -> (`right_scan_schema` + `join_key` + `left_pk`)
+    ///
+    /// Write pattern:
+    ///   for each left input row (with insert op), construct the memo table pk and insert the row into the memo table.
+    ///
+    /// Read pattern:
+    ///   for each left input row (with delete op), construct pk prefix (`join_key` + `left_pk`) to fetch rows and delete them from the memo table.
+    pub fn infer_memo_table_catalog(&self, right_scan: &StreamTableScan) -> TableCatalog {
+        let left_eq_indexes = self.eq_join_predicate.left_eq_indexes();
+        let read_prefix_len_hint = left_eq_indexes.len() + self.left().stream_key().unwrap().len();
+
+        // Build internal table
+        let mut internal_table_catalog_builder = TableCatalogBuilder::default();
+        // Add right table fields
+        let right_scan_schema = right_scan.core().schema();
+        for field in right_scan_schema.fields() {
+            internal_table_catalog_builder.add_column(field);
+        }
+        // Add join_key + left_pk
+        for field in left_eq_indexes
+            .iter()
+            .chain(self.core.left.stream_key().unwrap())
+            .map(|idx| &self.core.left.schema().fields()[*idx])
+        {
+            internal_table_catalog_builder.add_column(field);
+        }
+
+        let mut pk_indices = vec![];
+        pk_indices
+            .extend(right_scan_schema.len()..(right_scan_schema.len() + read_prefix_len_hint));
+        pk_indices.extend(right_scan.stream_key().unwrap());
+
+        pk_indices.iter().for_each(|idx| {
+            internal_table_catalog_builder.add_order_column(*idx, OrderType::ascending())
+        });
+
+        let dist_key_len = right_scan
+            .core()
+            .distribution_key()
+            .map(|keys| keys.len())
+            .unwrap_or(0);
+
+        let internal_table_dist_keys =
+            (right_scan_schema.len()..(right_scan_schema.len() + dist_key_len)).collect();
+        internal_table_catalog_builder.build(internal_table_dist_keys, read_prefix_len_hint)
+    }
 }
 
 impl Distill for StreamTemporalJoin {
@@ -95,6 +152,7 @@ impl Distill for StreamTemporalJoin {
         let verbose = self.base.ctx().is_explain_verbose();
         let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
         vec.push(("type", Pretty::debug(&self.core.join_type)));
+        vec.push(("append_only", Pretty::debug(&self.append_only)));
 
         let concat_schema = self.core.concat_schema();
         vec.push((
@@ -140,7 +198,7 @@ impl_plan_tree_node_for_binary! { StreamTemporalJoin }
 impl TryToStreamPb for StreamTemporalJoin {
     fn try_to_stream_prost_body(
         &self,
-        _state: &mut BuildFragmentGraphState,
+        state: &mut BuildFragmentGraphState,
     ) -> SchedulerResult<NodeBody> {
         let left_jk_indices = self.eq_join_predicate.left_eq_indexes();
         let right_jk_indices = self.eq_join_predicate.right_eq_indexes();
@@ -172,6 +230,13 @@ impl TryToStreamPb for StreamTemporalJoin {
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
             table_desc: Some(scan.core().table_desc.try_to_protobuf()?),
             table_output_indices: scan.core().output_col_idx.iter().map(|&i| i as _).collect(),
+            memo_table: if self.append_only {
+                None
+            } else {
+                let mut memo_table = self.infer_memo_table_catalog(scan);
+                memo_table = memo_table.with_id(state.gen_table_id_wrapped());
+                Some(memo_table.to_internal_table_prost())
+            },
         }))
     }
 }

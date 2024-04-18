@@ -424,6 +424,14 @@ static LOGICAL_FILTER_EXPRESSION_SIMPLIFY: LazyLock<OptimizationStage> = LazyLoc
     )
 });
 
+static REWRITE_SOURCE_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Rewrite Source For Batch",
+        vec![SourceToKafkaScanRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
 impl LogicalOptimizer {
     pub fn predicate_pushdown(
         plan: PlanRef,
@@ -661,6 +669,7 @@ impl LogicalOptimizer {
         // Convert the dag back to the tree, because we don't support DAG plan for batch.
         plan = plan.optimize_by_rules(&DAG_TO_TREE);
 
+        plan = plan.optimize_by_rules(&REWRITE_SOURCE_FOR_BATCH);
         plan = plan.optimize_by_rules(&GROUPING_SETS);
         plan = plan.optimize_by_rules(&REWRITE_LIKE_EXPR);
         plan = plan.optimize_by_rules(&SET_OPERATION_MERGE);
