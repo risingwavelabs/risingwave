@@ -18,16 +18,17 @@
 // src/expr/macro/src/types.rs
 
 use std::convert::TryFrom;
-use std::fmt::Debug;
+use std::error::Error;
+use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 use std::str::FromStr;
 
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use chrono::{Datelike, Timelike};
 use itertools::Itertools;
 use parse_display::{Display, FromStr};
 use paste::paste;
-use postgres_types::{FromSql, IsNull, ToSql, Type};
+use postgres_types::{to_sql_checked, FromSql, IsNull, ToSql, Type};
 use risingwave_common_estimate_size::{EstimateSize, ZeroHeapSize};
 use risingwave_pb::data::data_type::PbTypeName;
 use risingwave_pb::data::PbDataType;
@@ -595,6 +596,33 @@ impl !PartialOrd for ScalarRefImpl<'_> {}
 
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
+
+/// An adapter type to support upstream data types that don't have ScalarImpl implementations
+#[derive(Debug)]
+pub enum DatumAdapter {
+    Datum(Datum),
+    Uuid(uuid::Uuid),
+}
+
+impl ToSql for DatumAdapter {
+    to_sql_checked!();
+
+    fn to_sql(
+        &self,
+        ty: &Type,
+        out: &mut BytesMut,
+    ) -> Result<IsNull, Box<dyn Error + Sync + Send>> {
+        match self {
+            DatumAdapter::Datum(Some(scalar)) => scalar.as_scalar_ref_impl().to_sql(ty, out),
+            DatumAdapter::Datum(None) => Ok(IsNull::Yes),
+            DatumAdapter::Uuid(uuid) => uuid.to_sql(ty, out),
+        }
+    }
+
+    fn accepts(_ty: &Type) -> bool {
+        true
+    }
+}
 
 /// This trait is to implement `to_owned_datum` for `Option<ScalarImpl>`
 pub trait ToOwnedDatum {

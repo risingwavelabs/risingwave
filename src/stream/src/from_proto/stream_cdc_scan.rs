@@ -55,10 +55,6 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-        let table_type = CdcTableType::from_properties(&properties);
-        let table_reader = table_type
-            .create_table_reader(properties.clone(), table_schema.clone())
-            .await?;
 
         let table_pk_order_types = table_desc
             .pk
@@ -70,6 +66,15 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             .iter()
             .map(|k| k.column_index as usize)
             .collect_vec();
+
+        let table_type = CdcTableType::from_properties(&properties);
+        let table_reader = table_type
+            .create_table_reader(
+                properties.clone(),
+                table_schema.clone(),
+                table_pk_indices.clone(),
+            )
+            .await?;
 
         let schema_table_name = SchemaTableName::from_properties(&properties);
         let external_table = ExternalStorageTable::new(

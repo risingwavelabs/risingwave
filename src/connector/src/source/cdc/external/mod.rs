@@ -69,13 +69,14 @@ impl CdcTableType {
         &self,
         with_properties: HashMap<String, String>,
         schema: Schema,
+        pk_indices: Vec<usize>,
     ) -> ConnectorResult<ExternalTableReaderImpl> {
         match self {
             Self::MySql => Ok(ExternalTableReaderImpl::MySql(
                 MySqlExternalTableReader::new(with_properties, schema).await?,
             )),
             Self::Postgres => Ok(ExternalTableReaderImpl::Postgres(
-                PostgresExternalTableReader::new(with_properties, schema).await?,
+                PostgresExternalTableReader::new(with_properties, schema, pk_indices).await?,
             )),
             _ => bail!("invalid external table type: {:?}", *self),
         }

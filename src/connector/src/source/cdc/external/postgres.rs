@@ -22,9 +22,11 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
 use postgres_openssl::MakeTlsConnector;
+use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::DatumRef;
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::DatumAdapter;
+use risingwave_common::util::iter_util::ZipEqFast;
 use serde_derive::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 use tokio_postgres::types::PgLsn;
@@ -77,6 +79,8 @@ pub struct PostgresExternalTableReader {
     config: ExternalTableConfig,
     rw_schema: Schema,
     field_names: String,
+    // store the name of uuid fields
+    pk_uuid_field_bitmap: Bitmap,
 
     client: tokio::sync::Mutex<tokio_postgres::Client>,
 }
@@ -124,6 +128,7 @@ impl PostgresExternalTableReader {
     pub async fn new(
         properties: HashMap<String, String>,
         rw_schema: Schema,
+        pk_indices: Vec<usize>,
     ) -> ConnectorResult<Self> {
         tracing::debug!(?rw_schema, "create postgres external table reader");
 
@@ -180,10 +185,42 @@ impl PostgresExternalTableReader {
             .map(|f| Self::quote_column(&f.name))
             .join(",");
 
+        // query upstream to get the name of uuid fields
+        let rows = client
+            .query(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = $1 AND table_schema = $2 AND data_type = 'uuid'",
+                &[&config.table, &config.schema],
+            ).await?;
+
+        let field_idx_map: HashMap<String, usize> = rw_schema
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(i, f)| (f.name.clone(), i))
+            .collect();
+
+        // mark uuid field in the table schema
+        let mut uuid_field_bitmap = BitmapBuilder::zeroed(rw_schema.fields.len());
+        rows.iter().for_each(|row| {
+            let name: String = row.get::<_, String>(0);
+            if let Some(idx) = field_idx_map.get(&name) {
+                uuid_field_bitmap.set(*idx, true);
+            }
+        });
+
+        let mut pk_bitmap = BitmapBuilder::zeroed(pk_indices.len());
+        let uuid_field_bitmap = uuid_field_bitmap.finish();
+        for (i, pk_idx) in pk_indices.into_iter().enumerate() {
+            if uuid_field_bitmap.is_set(pk_idx) {
+                pk_bitmap.set(i, true);
+            }
+        }
+
         Ok(Self {
             config,
             rw_schema,
             field_names,
+            pk_uuid_field_bitmap: pk_bitmap.finish(),
             client: tokio::sync::Mutex::new(client),
         })
     }
@@ -226,8 +263,19 @@ impl PostgresExternalTableReader {
         let client = self.client.lock().await;
         client.execute("set time zone '+00:00'", &[]).await?;
 
-        let params: Vec<DatumRef<'_>> = match start_pk_row {
-            Some(ref pk_row) => pk_row.iter().collect_vec(),
+        let params: Vec<DatumAdapter> = match start_pk_row {
+            Some(pk_row) => pk_row
+                .into_iter()
+                .zip_eq_fast(self.pk_uuid_field_bitmap.iter())
+                .map(|(datum, is_uuid)| {
+                    if is_uuid && let Some(scalar) = datum {
+                        let uuid = uuid::Uuid::try_parse(scalar.as_utf8()).expect("parse uuid");
+                        DatumAdapter::Uuid(uuid)
+                    } else {
+                        DatumAdapter::Datum(datum)
+                    }
+                })
+                .collect(),
             None => Vec::new(),
         };
 
