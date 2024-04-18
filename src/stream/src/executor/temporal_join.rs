@@ -56,7 +56,7 @@ pub struct TemporalJoinExecutor<
     K: HashKey,
     S: StateStore,
     const T: JoinTypePrimitive,
-    const A: bool,
+    const APPEND_ONLY: bool,
 > {
     ctx: ActorContextRef,
     #[allow(dead_code)]
@@ -439,7 +439,7 @@ mod phase1 {
         K: HashKey,
         S: StateStore,
         E: Phase1Evaluation,
-        const A: bool,
+        const APPEND_ONLY: bool,
     >(
         chunk_size: usize,
         right_size: usize,
@@ -461,7 +461,7 @@ mod phase1 {
             .zip_eq_debug(chunk.ops())
             .filter_map(|((vis, key), op)| {
                 if vis {
-                    if A {
+                    if APPEND_ONLY {
                         assert_eq!(*op, Op::Insert);
                         Some(key)
                     } else {
@@ -485,7 +485,7 @@ mod phase1 {
 
             let mut matched = false;
 
-            if A {
+            if APPEND_ONLY {
                 // Append-only temporal join
                 if key.null_bitmap().is_subset(null_matched)
                     && let join_entry = right_table.force_peek(&key)
