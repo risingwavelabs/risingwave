@@ -154,4 +154,15 @@ public class PostgresDialect implements JdbcDialect {
             }
         }
     }
+
+    @Override
+    public void bindDeleteStatement(PreparedStatement stmt, Connection _conn, TableSchema tableSchema, SinkRow row) throws SQLException {
+        // TODO: need to derive pkSqlTypes from columnSqlTypes
+        // int placeholderIdx = 1;
+        // for (String primaryKey : pkColumnNames) {
+        //     Object fromRow = tableSchema.getFromRow(primaryKey, row);
+        //     stmt.setObject(placeholderIdx++, fromRow);
+        // }
+
+    }
 }

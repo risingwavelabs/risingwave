@@ -25,7 +25,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-/** A dialect for a specific database. ref: https://github.com/apache/flink-connector-jdbc */
+/**
+ * A dialect for a specific database. ref: https://github.com/apache/flink-connector-jdbc
+ */
 public interface JdbcDialect {
 
     /**
@@ -34,7 +36,9 @@ public interface JdbcDialect {
      */
     SchemaTableName createSchemaTableName(String schemaName, String tableName);
 
-    /** Returns the normalized table name to be used in the SQL statements */
+    /**
+     * Returns the normalized table name to be used in the SQL statements
+     */
     String getNormalizedTableName(SchemaTableName schemaTableName);
 
     /**
@@ -110,4 +114,9 @@ public interface JdbcDialect {
     void bindInsertIntoStatement(
             PreparedStatement stmt, Connection conn, TableSchema tableSchema, SinkRow row)
             throws SQLException;
+
+    void bindDeleteStatement(
+            PreparedStatement stmt, Connection conn, TableSchema tableSchema, SinkRow row)
+            throws SQLException;
+
 }
