@@ -145,6 +145,11 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
 
     // workers.
     let workers = model::Worker::list(&meta_store).await?;
+    let next_worker_id = workers
+        .iter()
+        .map(|w| w.worker_node.id + 1)
+        .max()
+        .unwrap_or(1);
     for worker in workers {
         Worker::insert(worker::ActiveModel::from(&worker.worker_node))
             .exec(&meta_store_sql.conn)
@@ -795,6 +800,13 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     // Rest sequence for object and user.
     match meta_store_sql.conn.get_database_backend() {
         DbBackend::MySql => {
+            meta_store_sql
+                .conn
+                .execute(Statement::from_string(
+                    DatabaseBackend::MySql,
+                    format!("ALTER TABLE worker AUTO_INCREMENT = {next_worker_id};"),
+                ))
+                .await?;
             let next_object_id = next_available_id();
             meta_store_sql
                 .conn
@@ -816,14 +828,21 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 .conn
                 .execute(Statement::from_string(
                     DatabaseBackend::Postgres,
-                    "SELECT setval('object_oid_seq', SELECT MAX(oid) FROM object);",
+                    "SELECT setval('worker_worker_id_seq', (SELECT MAX(worker_id) FROM worker));",
                 ))
                 .await?;
             meta_store_sql
                 .conn
                 .execute(Statement::from_string(
                     DatabaseBackend::Postgres,
-                    "SELECT setval('user_user_id_seq', SELECT MAX(user_id) FROM \"user\");",
+                    "SELECT setval('object_oid_seq', (SELECT MAX(oid) FROM object));",
+                ))
+                .await?;
+            meta_store_sql
+                .conn
+                .execute(Statement::from_string(
+                    DatabaseBackend::Postgres,
+                    "SELECT setval('user_user_id_seq', (SELECT MAX(user_id) FROM \"user\"));",
                 ))
                 .await?;
         }

@@ -144,7 +144,7 @@ sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/drop_sink.slt'
 
 # test different encoding
 echo "preparing confluent schema registry"
-python3 -m pip install requests confluent-kafka
+python3 -m pip install --break-system-packages requests confluent-kafka
 
 echo "testing protobuf"
 cp src/connector/src/test_data/proto_recursive/recursive.pb ./proto-recursive
