@@ -265,7 +265,11 @@ impl SnowflakeSinkWriter {
         let (uploader, _) = match self.streaming_uploader.as_mut() {
             Some(s) => s,
             None => {
-                assert_eq!(self.streaming_uploader.is_none(), true, "expect `streaming_uploader` to be None");
+                assert_eq!(
+                    self.streaming_uploader.is_none(),
+                    true,
+                    "expect `streaming_uploader` to be None"
+                );
                 let uploader = self.new_streaming_uploader().await?;
                 self.streaming_uploader.insert(uploader)
             }
@@ -307,7 +311,12 @@ impl SnowflakeSinkWriter {
             assert_eq!(op, Op::Insert, "expect all `op(s)` to be `Op::Insert`");
             // to prevent temporary string allocation,
             // so we directly write to `chunk_buf` implicitly via `write_fmt`.
-            write!(chunk_buf, "{}", Value::Object(self.row_encoder.encode(row)?)).map_err(|err| {
+            write!(
+                chunk_buf,
+                "{}",
+                Value::Object(self.row_encoder.encode(row)?)
+            )
+            .map_err(|err| {
                 SinkError::Snowflake(format!(
                     "failed to write json object to `row_buf`, error: {}",
                     err
