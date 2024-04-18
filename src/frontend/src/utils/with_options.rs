@@ -87,7 +87,6 @@ impl WithOptions {
         self.inner
             .into_iter()
             .filter(|(key, _)| key != OverwriteOptions::STREAMING_RATE_LIMIT_KEY)
-            .into_iter()
             .collect()
     }
 
