@@ -102,7 +102,6 @@ sqllogictest -p 4566 -d dev './e2e_test/superset/*.slt' --junit "batch-${profile
 echo "--- e2e, $mode, external python udf"
 python3 e2e_test/udf/test.py &
 sleep 1
-export RUST_LOG="debug"
 sqllogictest -p 4566 -d dev './e2e_test/udf/external_udf.slt'
 pkill python3
 
