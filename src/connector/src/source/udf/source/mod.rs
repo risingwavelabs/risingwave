@@ -150,6 +150,18 @@ impl SplitReader for UdfSplitReader {
     type Properties = UdfProperties;
     type Split = UdfSplit;
 
+    #[cfg(madsim)]
+    async fn new(
+        properties: UdfProperties,
+        splits: Vec<UdfSplit>,
+        _parser_config: ParserConfig,
+        source_ctx: SourceContextRef,
+        columns: Option<Vec<Column>>,
+    ) -> ConnectorResult<Self> {
+        unimplemented!("udf functions are not supported with msadmin builds")
+    }
+
+    #[cfg(not(madsim))]
     async fn new(
         properties: UdfProperties,
         splits: Vec<UdfSplit>,
