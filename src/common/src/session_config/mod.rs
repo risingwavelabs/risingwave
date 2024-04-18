@@ -246,6 +246,8 @@ pub struct SessionConfig {
     standard_conforming_strings: String,
 
     /// Set streaming rate limit (rows per second) for each parallelism for mv / source backfilling, source reads.
+    /// If set to -1, disable rate limit.
+    /// If set to 0, this pauses the snapshot read / source read.
     #[parameter(default = DISABLE_STREAMING_RATE_LIMIT)]
     streaming_rate_limit: i32,
 
