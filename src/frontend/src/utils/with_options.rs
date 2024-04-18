@@ -25,6 +25,7 @@ use risingwave_sqlparser::ast::{
     CreateSubscriptionStatement, SqlOption, Statement, Value,
 };
 
+use super::OverwriteOptions;
 use crate::catalog::connection_catalog::resolve_private_link_connection;
 use crate::catalog::ConnectionId;
 use crate::error::{ErrorCode, Result as RwResult, RwError};
@@ -79,6 +80,15 @@ impl WithOptions {
     /// Take the value of the inner map.
     pub fn into_inner(self) -> BTreeMap<String, String> {
         self.inner
+    }
+
+    /// Convert to connector props, remove the key-value pairs used in the top-level.
+    pub fn into_connector_props(self) -> HashMap<String, String> {
+        self.inner
+            .into_iter()
+            .filter(|(key, _)| key != OverwriteOptions::STREAMING_RATE_LIMIT_KEY)
+            .into_iter()
+            .collect()
     }
 
     /// Parse the retention seconds from the options.

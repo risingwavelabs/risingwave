@@ -1317,12 +1317,7 @@ pub async fn handle_create_source(
 
     let source_schema = stmt.source_schema.into_v2_with_warning();
 
-    let mut with_properties = handler_args
-        .with_options
-        .clone()
-        .into_inner()
-        .into_iter()
-        .collect();
+    let mut with_properties = handler_args.with_options.clone().into_connector_props();
     validate_compatibility(&source_schema, &mut with_properties)?;
 
     ensure_table_constraints_supported(&stmt.constraints)?;

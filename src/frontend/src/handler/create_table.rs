@@ -482,12 +482,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     }
 
     let session = &handler_args.session;
-    let mut with_properties = handler_args
-        .with_options
-        .inner()
-        .clone()
-        .into_iter()
-        .collect();
+    let mut with_properties = handler_args.with_options.clone().into_connector_props();
     validate_compatibility(&source_schema, &mut with_properties)?;
 
     ensure_table_constraints_supported(&constraints)?;
