@@ -55,6 +55,7 @@ impl TableChangeLog {
                 if shard.vnode_bitmap.is_set(vnode.to_index()) {
                     new_value_sst.extend_from_slice(shard.new_value.as_slice());
                     old_value_sst.extend_from_slice(shard.old_value.as_slice());
+                    break;
                 }
             }
         }
