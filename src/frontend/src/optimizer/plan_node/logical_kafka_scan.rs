@@ -38,6 +38,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::utils::{ColIndexMapping, Condition};
 
+/// `LogicalKafkaScan` is only used by batch queries. At the beginning of the batch query optimization, `LogicalSource` with a kafka property would be converted into a `LogicalKafkaScan`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalKafkaScan {
     pub base: PlanBase<Logical>,

@@ -311,6 +311,10 @@ impl PredicatePushdown for LogicalSource {
 
 impl ToBatch for LogicalSource {
     fn to_batch(&self) -> Result<PlanRef> {
+        assert!(
+            !self.core.is_kafka_connector(),
+            "LogicalSource with a kafka property should be converted to LogicalKafkaScan"
+        );
         let mut plan: PlanRef = BatchSource::new(self.core.clone()).into();
 
         if let Some(exprs) = &self.output_exprs {
