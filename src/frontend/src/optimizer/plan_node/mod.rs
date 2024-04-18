@@ -856,6 +856,7 @@ mod logical_hop_window;
 mod logical_insert;
 mod logical_intersect;
 mod logical_join;
+mod logical_kafka_scan;
 mod logical_limit;
 mod logical_max_one_row;
 mod logical_multi_join;
@@ -903,6 +904,7 @@ mod stream_topn;
 mod stream_values;
 mod stream_watermark_filter;
 
+mod batch_kafka_scan;
 mod derive;
 mod stream_cdc_table_scan;
 mod stream_share;
@@ -919,6 +921,7 @@ pub use batch_hash_agg::BatchHashAgg;
 pub use batch_hash_join::BatchHashJoin;
 pub use batch_hop_window::BatchHopWindow;
 pub use batch_insert::BatchInsert;
+pub use batch_kafka_scan::BatchKafkaScan;
 pub use batch_limit::BatchLimit;
 pub use batch_lookup_join::BatchLookupJoin;
 pub use batch_max_one_row::BatchMaxOneRow;
@@ -949,6 +952,7 @@ pub use logical_hop_window::LogicalHopWindow;
 pub use logical_insert::LogicalInsert;
 pub use logical_intersect::LogicalIntersect;
 pub use logical_join::LogicalJoin;
+pub use logical_kafka_scan::LogicalKafkaScan;
 pub use logical_limit::LogicalLimit;
 pub use logical_max_one_row::LogicalMaxOneRow;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
@@ -1053,6 +1057,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Intersect }
             , { Logical, Except }
             , { Logical, MaxOneRow }
+            , { Logical, KafkaScan }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -1080,6 +1085,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, Source }
             , { Batch, OverWindow }
             , { Batch, MaxOneRow }
+            , { Batch, KafkaScan }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -1151,6 +1157,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Intersect }
             , { Logical, Except }
             , { Logical, MaxOneRow }
+            , { Logical, KafkaScan }
         }
     };
 }
@@ -1187,6 +1194,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, Source }
             , { Batch, OverWindow }
             , { Batch, MaxOneRow }
+            , { Batch, KafkaScan }
         }
     };
 }

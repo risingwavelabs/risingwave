@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
+use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::rc::Rc;
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SourceNode;
-use risingwave_sqlparser::ast::AsOf;
 
 use super::batch::prelude::*;
 use super::utils::{childless_record, column_names_pretty, Distill};
@@ -29,15 +30,17 @@ use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Distribution, Order};
 
-/// [`BatchSource`] represents a table/connector source at the very beginning of the graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct BatchSource {
+pub struct BatchKafkaScan {
     pub base: PlanBase<Batch>,
     pub core: generic::Source,
+
+    /// Kafka timestamp range.
+    kafka_timestamp_range: (Bound<i64>, Bound<i64>),
 }
 
-impl BatchSource {
-    pub fn new(core: generic::Source) -> Self {
+impl BatchKafkaScan {
+    pub fn new(core: generic::Source, kafka_timestamp_range: (Bound<i64>, Bound<i64>)) -> Self {
         let base = PlanBase::new_batch_with_core(
             &core,
             // Use `Single` by default, will be updated later with `clone_with_dist`.
@@ -45,7 +48,11 @@ impl BatchSource {
             Order::any(),
         );
 
-        Self { base, core }
+        Self {
+            base,
+            core,
+            kafka_timestamp_range,
+        }
     }
 
     pub fn column_names(&self) -> Vec<&str> {
@@ -56,8 +63,20 @@ impl BatchSource {
         self.core.catalog.clone()
     }
 
-    pub fn as_of(&self) -> Option<AsOf> {
-        self.core.as_of.clone()
+    pub fn kafka_timestamp_range_value(&self) -> (Option<i64>, Option<i64>) {
+        let (lower_bound, upper_bound) = &self.kafka_timestamp_range;
+        let lower_bound = match lower_bound {
+            Included(t) => Some(*t),
+            Excluded(t) => Some(*t - 1),
+            Unbounded => None,
+        };
+
+        let upper_bound = match upper_bound {
+            Included(t) => Some(*t),
+            Excluded(t) => Some(*t + 1),
+            Unbounded => None,
+        };
+        (lower_bound, upper_bound)
     }
 
     pub fn clone_with_dist(&self) -> Self {
@@ -67,39 +86,38 @@ impl BatchSource {
         Self {
             base,
             core: self.core.clone(),
+            kafka_timestamp_range: self.kafka_timestamp_range,
         }
     }
 }
 
-impl_plan_tree_node_for_leaf! { BatchSource }
+impl_plan_tree_node_for_leaf! { BatchKafkaScan }
 
-impl Distill for BatchSource {
+impl Distill for BatchKafkaScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let src = Pretty::from(self.source_catalog().unwrap().name.clone());
-        let mut fields = vec![
+        let fields = vec![
             ("source", src),
             ("columns", column_names_pretty(self.schema())),
+            ("filter", Pretty::debug(&self.kafka_timestamp_range_value())),
         ];
-        if let Some(as_of) = &self.core.as_of {
-            fields.push(("as_of", Pretty::debug(as_of)));
-        }
-        childless_record("BatchSource", fields)
+        childless_record("BatchKafkaScan", fields)
     }
 }
 
-impl ToLocalBatch for BatchSource {
+impl ToLocalBatch for BatchKafkaScan {
     fn to_local(&self) -> Result<PlanRef> {
         Ok(self.clone_with_dist().into())
     }
 }
 
-impl ToDistributedBatch for BatchSource {
+impl ToDistributedBatch for BatchKafkaScan {
     fn to_distributed(&self) -> Result<PlanRef> {
         Ok(self.clone_with_dist().into())
     }
 }
 
-impl ToBatchPb for BatchSource {
+impl ToBatchPb for BatchKafkaScan {
     fn to_batch_prost_body(&self) -> NodeBody {
         let source_catalog = self.source_catalog().unwrap();
         NodeBody::Source(SourceNode {
@@ -117,6 +135,6 @@ impl ToBatchPb for BatchSource {
     }
 }
 
-impl ExprRewritable for BatchSource {}
+impl ExprRewritable for BatchKafkaScan {}
 
-impl ExprVisitable for BatchSource {}
+impl ExprVisitable for BatchKafkaScan {}
