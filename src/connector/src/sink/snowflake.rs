@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::io::Write;
+use std::fmt::Write;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -310,21 +310,18 @@ impl SnowflakeSinkWriter {
 
     async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
         let mut chunk_buf = BytesMut::new();
-        let mut row_buf: Vec<u8> = Vec::with_capacity(INITIAL_ROW_CAPACITY);
 
         // write the json representations of the row(s) in current chunk to `chunk_buf`
         for (op, row) in chunk.rows() {
             assert_eq!(op, Op::Insert, "expect all `op(s)` to be `Op::Insert`");
             // to prevent temporary string allocation,
-            // so we use an intermediate vector buffer instead.
-            write!(row_buf, "{}", Value::Object(self.row_encoder.encode(row)?)).map_err(|err| {
+            // so we directly write to `chunk_buf` implicitly via `write_fmt`.
+            write!(chunk_buf, "{}", Value::Object(self.row_encoder.encode(row)?)).map_err(|err| {
                 SinkError::Snowflake(format!(
                     "failed to write json object to `row_buf`, error: {}",
                     err
                 ))
             })?;
-            chunk_buf.extend_from_slice(&row_buf);
-            row_buf.clear();
         }
 
         // streaming upload in a chunk-by-chunk manner
