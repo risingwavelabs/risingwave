@@ -237,10 +237,10 @@ It SHOULD NEVER be used in benchmarks and production environment!!!"
         eprintln!("Connect to the RisingWave instance via psql:");
         eprintln!(
             "{}",
-            console::style(
-                format!("  psql -h {host} -p {port} -d {database} -U {user}")
-            )
-                .blue()
+            console::style(format!(
+                "  psql -h {host} -p {port} -d {database} -U {user}"
+            ))
+            .blue()
         );
     }
 
