@@ -233,7 +233,7 @@ It SHOULD NEVER be used in benchmarks and production environment!!!"
         let port = opts.listen_addr.split(':').last().unwrap_or("4566");
         let database = "dev";
         let user = "root";
-        eprintln!("");
+        eprintln!();
         eprintln!("Connect to the RisingWave instance via psql:");
         eprintln!(
             "{}",
