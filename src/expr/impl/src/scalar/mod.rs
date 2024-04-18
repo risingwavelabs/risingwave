@@ -82,6 +82,7 @@ mod vnode;
 pub use to_jsonb::*;
 mod encrypt;
 mod external;
+mod inet;
 mod to_timestamp;
 mod translate;
 mod trigonometric;
