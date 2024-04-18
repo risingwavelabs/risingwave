@@ -32,8 +32,10 @@ use super::Barrier;
 pub type StreamExecutorResult<T> = std::result::Result<T, StreamExecutorError>;
 
 /// The error type for streaming executors.
-#[derive(thiserror::Error, Debug, thiserror_ext::Box, thiserror_ext::Construct)]
-#[thiserror_ext(newtype(name = StreamExecutorError, backtrace, report_debug))]
+#[derive(
+    thiserror::Error, thiserror_ext::ReportDebug, thiserror_ext::Box, thiserror_ext::Construct,
+)]
+#[thiserror_ext(newtype(name = StreamExecutorError, backtrace))]
 #[derive(AsRefStr)]
 pub enum ErrorKind {
     #[error("Storage error: {0}")]
