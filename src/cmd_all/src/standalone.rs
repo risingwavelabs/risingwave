@@ -192,8 +192,16 @@ pub async fn standalone(
         tracing::info!("starting meta-node thread with cli args: {:?}", opts);
 
         let _meta_handle = tokio::spawn(async move {
+            let dangerous_max_idle_secs = opts.dangerous_max_idle_secs;
             risingwave_meta_node::start(opts).await;
             tracing::warn!("meta is stopped, shutdown all nodes");
+            if let Some(idle_exit_secs) = dangerous_max_idle_secs {
+                eprintln!("{}",
+                          console::style(format_args!(
+                              "RisingWave playground exited after being idle for {idle_exit_secs} seconds. Bye!"
+                          )).bold());
+                std::process::exit(0);
+            }
         });
         // wait for the service to be ready
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
