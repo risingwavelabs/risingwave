@@ -151,8 +151,7 @@ mod tests {
 
     use super::*;
     use crate::parser::{
-        DebeziumAvroParserConfig, DebeziumParser, DebeziumParser, SourceStreamChunkBuilder,
-        SourceStreamChunkBuilder, SpecificParserConfig, SpecificParserConfig,
+        DebeziumAvroParserConfig, DebeziumParser, SourceStreamChunkBuilder, SpecificParserConfig,
     };
     use crate::source::{SourceColumnDesc, SourceContext};
 

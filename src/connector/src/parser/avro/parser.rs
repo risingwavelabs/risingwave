@@ -198,8 +198,7 @@ mod test {
     use crate::parser::plain_parser::PlainParser;
     use crate::parser::unified::avro::unix_epoch_days;
     use crate::parser::{
-        AccessBuilderImpl, EncodingType, SourceStreamChunkBuilder, SourceStreamChunkBuilder,
-        SpecificParserConfig, SpecificParserConfig,
+        AccessBuilderImpl, EncodingType, SourceStreamChunkBuilder, SpecificParserConfig,
     };
     use crate::source::{SourceColumnDesc, SourceContext};
 
