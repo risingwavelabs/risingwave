@@ -49,8 +49,10 @@ pub struct CreateStreamingJobContext {
     /// New dispatchers to add from upstream actors to downstream actors.
     pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
 
-    /// Upstream mview actor ids grouped by table id.
-    pub upstream_mview_actors: HashMap<TableId, Vec<ActorId>>,
+    /// Upstream root fragments' actor ids grouped by table id.
+    ///
+    /// Refer to the doc on [`MetadataManager::get_upstream_root_fragments`] for the meaning of "root".
+    pub upstream_root_actors: HashMap<TableId, Vec<ActorId>>,
 
     /// Internal tables in the streaming job.
     pub internal_tables: HashMap<u32, Table>,
@@ -381,7 +383,7 @@ impl GlobalStreamManager {
         table_fragments: TableFragments,
         CreateStreamingJobContext {
             dispatchers,
-            upstream_mview_actors,
+            upstream_root_actors,
             building_locations,
             existing_locations,
             definition,
@@ -396,6 +398,10 @@ impl GlobalStreamManager {
 
         self.build_actors(&table_fragments, &building_locations, &existing_locations)
             .await?;
+        tracing::debug!(
+            table_id = %table_fragments.table_id(),
+            "built actors finished"
+        );
 
         if let Some((streaming_job, context, table_fragments)) = replace_table_job_info {
             self.build_actors(
@@ -420,7 +426,6 @@ impl GlobalStreamManager {
             }
 
             let dummy_table_id = table_fragments.table_id();
-
             let init_split_assignment =
                 self.source_manager.allocate_splits(&dummy_table_id).await?;
 
@@ -437,18 +442,28 @@ impl GlobalStreamManager {
 
         let table_id = table_fragments.table_id();
 
-        let init_split_assignment = self.source_manager.allocate_splits(&table_id).await?;
+        // Here we need to consider:
+        // - Shared source
+        // - Table with connector
+        // - MV on shared source
+        let mut init_split_assignment = self.source_manager.allocate_splits(&table_id).await?;
+        init_split_assignment.extend(
+            self.source_manager
+                .allocate_splits_for_backfill(&table_id, &dispatchers)
+                .await?,
+        );
 
         let command = Command::CreateStreamingJob {
             table_fragments,
-            upstream_mview_actors,
+            upstream_root_actors,
             dispatchers,
             init_split_assignment,
             definition: definition.to_string(),
             ddl_type,
             replace_table: replace_table_command,
+            create_type,
         };
-
+        tracing::debug!("sending Command::CreateStreamingJob");
         if let Err(err) = self.barrier_scheduler.run_command(command).await {
             if create_type == CreateType::Foreground || err.is_cancelled() {
                 let mut table_ids = HashSet::from_iter(std::iter::once(table_id));
@@ -483,7 +498,6 @@ impl GlobalStreamManager {
             .await?;
 
         let dummy_table_id = table_fragments.table_id();
-
         let init_split_assignment = self.source_manager.allocate_splits(&dummy_table_id).await?;
 
         if let Err(err) = self
@@ -917,7 +931,7 @@ mod tests {
 
             sleep(Duration::from_secs(1)).await;
 
-            let env = MetaSrvEnv::for_test_opts(Arc::new(MetaOpts::test(enable_recovery))).await;
+            let env = MetaSrvEnv::for_test_opts(MetaOpts::test(enable_recovery)).await;
             let system_params = env.system_params_reader().await;
             let meta_metrics = Arc::new(MetaMetrics::default());
             let cluster_manager =

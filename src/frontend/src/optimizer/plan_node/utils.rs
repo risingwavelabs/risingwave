@@ -20,14 +20,15 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, Str, StrAssocArr, XmlNode};
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ConflictBehavior, Field, FieldDisplay, Schema, OBJECT_ID_PLACEHOLDER,
+    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Field, FieldDisplay, Schema,
+    OBJECT_ID_PLACEHOLDER,
 };
 use risingwave_common::constants::log_store::v2::{
     KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, VNODE_COLUMN_INDEX,
 };
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
-use crate::catalog::table_catalog::{CreateType, TableType};
+use crate::catalog::table_catalog::TableType;
 use crate::catalog::{ColumnId, TableCatalog, TableId};
 use crate::optimizer::property::{Cardinality, Order, RequiredDist};
 use crate::utils::{Condition, IndexSet};
@@ -163,6 +164,7 @@ impl TableCatalogBuilder {
                 .unwrap_or_else(|| (0..self.columns.len()).collect_vec()),
             definition: "".into(),
             conflict_behavior: ConflictBehavior::NoCheck,
+            version_column_index: None,
             read_prefix_len_hint,
             version: None, // the internal table is not versioned and can't be schema changed
             watermark_columns,
@@ -353,17 +355,7 @@ pub fn infer_kv_log_store_table_catalog_inner(
 
     let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
 
-    let payload_indices = table_catalog_builder.extend_columns(
-        &columns
-            .iter()
-            .map(|column| {
-                // make payload hidden column visible in kv log store batch query
-                let mut column = column.clone();
-                column.is_hidden = false;
-                column
-            })
-            .collect_vec(),
-    );
+    let payload_indices = table_catalog_builder.extend_columns(columns);
 
     value_indices.extend(payload_indices);
     table_catalog_builder.set_value_indices(value_indices);

@@ -411,8 +411,6 @@ pub struct MonitoredStreamingReader {
     streaming_read_timeout: Option<Duration>,
 }
 
-unsafe impl Sync for MonitoredStreamingReader {}
-
 impl MonitoredStreamingReader {
     pub fn new(
         media_type: &'static str,
@@ -792,6 +790,7 @@ pub async fn build_remote_object_store(
     ident: &str,
     config: ObjectStoreConfig,
 ) -> ObjectStoreImpl {
+    tracing::debug!(config=?config, "object store {ident}");
     match url {
         s3 if s3.starts_with("s3://") => {
             if config.s3.developer.use_opendal {
@@ -889,11 +888,22 @@ pub async fn build_remote_object_store(
             set your endpoint to the environment variable RW_S3_ENDPOINT.");
             panic!("Passing s3-compatible is not supported, please modify the environment variable and pass in s3.");
         }
-        minio if minio.starts_with("minio://") => ObjectStoreImpl::S3(
-            S3ObjectStore::with_minio(minio, metrics.clone(), config.clone())
-                .await
-                .monitored(metrics, config),
-        ),
+        minio if minio.starts_with("minio://") => {
+            if config.s3.developer.use_opendal {
+                tracing::info!("Using OpenDAL to access minio.");
+                ObjectStoreImpl::Opendal(
+                    OpendalObjectStore::with_minio(minio, config.clone())
+                        .unwrap()
+                        .monitored(metrics, config),
+                )
+            } else {
+                ObjectStoreImpl::S3(
+                    S3ObjectStore::with_minio(minio, metrics.clone(), config.clone())
+                        .await
+                        .monitored(metrics, config),
+                )
+            }
+        }
         "memory" => {
             if ident == "Meta Backup" {
                 tracing::warn!("You're using in-memory remote object store for {}. This is not recommended for production environment.", ident);

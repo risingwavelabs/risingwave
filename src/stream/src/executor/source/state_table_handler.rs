@@ -47,13 +47,13 @@ use crate::executor::StreamExecutorResult;
 const COMPLETE_SPLIT_PREFIX: &str = "SsGLdzRDqBuKzMf9bDap";
 
 pub struct SourceStateTableHandler<S: StateStore> {
-    pub state_store: StateTable<S>,
+    pub state_table: StateTable<S>,
 }
 
 impl<S: StateStore> SourceStateTableHandler<S> {
     pub async fn from_table_catalog(table_catalog: &PbTable, store: S) -> Self {
         Self {
-            state_store: StateTable::from_table_catalog(table_catalog, store, None).await,
+            state_table: StateTable::from_table_catalog(table_catalog, store, None).await,
         }
     }
 
@@ -63,12 +63,12 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
         Self {
-            state_store: StateTable::from_table_catalog(table_catalog, store, vnodes).await,
+            state_table: StateTable::from_table_catalog(table_catalog, store, vnodes).await,
         }
     }
 
     pub fn init_epoch(&mut self, epoch: EpochPair) {
-        self.state_store.init_epoch(epoch);
+        self.state_table.init_epoch(epoch);
     }
 
     fn string_to_scalar(rhs: impl Into<String>) -> ScalarImpl {
@@ -76,13 +76,13 @@ impl<S: StateStore> SourceStateTableHandler<S> {
     }
 
     pub(crate) async fn get(&self, key: SplitId) -> StreamExecutorResult<Option<OwnedRow>> {
-        self.state_store
+        self.state_table
             .get_row(row::once(Some(Self::string_to_scalar(key.deref()))))
             .await
             .map_err(StreamExecutorError::from)
     }
 
-    // this method should only be used by `FsSourceExecutor
+    /// this method should only be used by [`FsSourceExecutor`](super::FsSourceExecutor)
     pub(crate) async fn get_all_completed(&self) -> StreamExecutorResult<HashSet<SplitId>> {
         let start = Bound::Excluded(row::once(Some(Self::string_to_scalar(
             COMPLETE_SPLIT_PREFIX,
@@ -94,7 +94,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
 
         // all source executor has vnode id zero
         let iter = self
-            .state_store
+            .state_table
             .iter_with_vnode(VirtualNode::ZERO, &(start, end), PrefetchOptions::default())
             .await?;
 
@@ -105,7 +105,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
             if let Some(ScalarRefImpl::Jsonb(jsonb_ref)) = row.datum_at(1) {
                 let split = SplitImpl::restore_from_json(jsonb_ref.to_owned_scalar())?;
                 let fs = split
-                    .as_fs()
+                    .as_s3()
                     .unwrap_or_else(|| panic!("split {:?} is not fs", split));
                 if fs.offset == fs.size {
                     let split_id = split.id();
@@ -126,14 +126,14 @@ impl<S: StateStore> SourceStateTableHandler<S> {
             Some(ScalarImpl::Jsonb(value)),
         ];
         if let Some(prev_row) = self.get(key).await? {
-            self.state_store.delete(prev_row);
+            self.state_table.delete(prev_row);
         }
-        self.state_store.insert(row);
+        self.state_table.insert(row);
         Ok(())
     }
 
     /// set all complete
-    /// can only used by `FsSourceExecutor`
+    /// can only used by [`FsSourceExecutor`](super::FsSourceExecutor)
     pub(crate) async fn set_all_complete(
         &mut self,
         states: Vec<SplitImpl>,
@@ -157,10 +157,10 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         ];
         match self.get(key).await? {
             Some(prev_row) => {
-                self.state_store.update(prev_row, row);
+                self.state_table.update(prev_row, row);
             }
             None => {
-                self.state_store.insert(row);
+                self.state_table.insert(row);
             }
         }
         Ok(())
@@ -168,7 +168,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
 
     pub async fn delete(&mut self, key: SplitId) -> StreamExecutorResult<()> {
         if let Some(prev_row) = self.get(key).await? {
-            self.state_store.delete(prev_row);
+            self.state_table.delete(prev_row);
         }
 
         Ok(())
@@ -310,9 +310,9 @@ pub(crate) mod tests {
         state_table_handler
             .set_states(vec![split_impl.clone()])
             .await?;
-        state_table_handler.state_store.commit(epoch_2).await?;
+        state_table_handler.state_table.commit(epoch_2).await?;
 
-        state_table_handler.state_store.commit(epoch_3).await?;
+        state_table_handler.state_table.commit(epoch_3).await?;
 
         match state_table_handler
             .try_recover_from_state_store(&split_impl)

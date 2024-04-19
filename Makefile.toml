@@ -15,6 +15,7 @@ extend = [
   { path = "src/storage/backup/integration_tests/Makefile.toml" },
   { path = "src/java_binding/make-java-binding.toml" },
   { path = "src/stream/tests/integration_tests/integration_test.toml" },
+  { path = "e2e_test/source_inline/commands.toml" },
 ]
 
 env_files = ["./risedev-components.user.env"]
@@ -34,6 +35,7 @@ is_release = get_env ENABLE_RELEASE_PROFILE
 is_not_release = not ${is_release}
 is_dynamic_linking = get_env ENABLE_DYNAMIC_LINKING
 is_hummock_trace = get_env ENABLE_HUMMOCK_TRACE
+is_deno_udf_enabled = get_env ENABLE_DENO_UDF
 is_python_udf_enabled = get_env ENABLE_PYTHON_UDF
 
 if ${is_sanitizer_enabled}
@@ -45,9 +47,6 @@ else
   set_env RISEDEV_BUILD_TARGET_DIR ""
 end
 
-set_env RISEDEV_CARGO_BUILD_CRATE "risingwave_cmd_all"
-set_env RISEDEV_CTL_RUN_CMD "-- risectl"
-
 if ${is_hdfs_backend}
   set_env BUILD_HDFS_BACKEND_CMD "-p risingwave_object_store --features hdfs-backend"
 else
@@ -58,6 +57,11 @@ if ${is_not_release} and ${is_dynamic_linking}
   set_env RISINGWAVE_FEATURE_FLAGS "--features rw-dynamic-link --no-default-features"
 else
   set_env RISINGWAVE_FEATURE_FLAGS "--features rw-static-link"
+end
+
+if ${is_deno_udf_enabled}
+  flags = get_env RISINGWAVE_FEATURE_FLAGS
+  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features embedded-deno-udf"
 end
 
 if ${is_python_udf_enabled}
@@ -86,9 +90,9 @@ if ${is_not_ci}
   no_rust_log = not ${rust_log}
 
   if ${no_rust_log}
-    set_env RUST_LOG "pgwire_query_log=info"
+    set_env RUST_LOG "pgwire_query_log=info,hyper::client::connect::http=info"
   else
-    set_env RUST_LOG "pgwire_query_log=info,${rust_log}"
+    set_env RUST_LOG "pgwire_query_log=info,hyper::client::connect::http=info,${rust_log}"
   end
 end
 
@@ -103,7 +107,7 @@ skip_core_tasks = true
 skip_git_env_info = true
 skip_rust_env_info = false
 skip_crate_env_info = true
-min_version = "0.36.10"
+min_version = "0.37.1"
 
 [tasks.clean-full]
 category = "Misc"
@@ -124,6 +128,17 @@ rm -rf "${PREFIX_CONFIG}"
 rm -rf "${PREFIX_PROFILING}"
 '''
 
+[tasks.reset-rw]
+category = "RiseDev - Start/Stop"
+description = "Clean all data in the default database dev of the running RisingWave"
+dependencies = ["check-risedev-env-file"]
+env_files = ["${PREFIX_CONFIG}/risedev-env"]
+script = '''
+#!/usr/bin/env bash
+psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root -d dev -c "CREATE DATABASE risedev_tmp;"
+psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root -d risedev_tmp -c "DROP DATABASE dev; CREATE DATABASE dev;"
+psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root -d dev -c "DROP DATABASE risedev_tmp;"
+'''
 
 [tasks.l]
 alias = "logs"
@@ -367,7 +382,8 @@ echo "$(tput setaf 4)$(tput bold)[Reminder]$(tput sgr0) risedev will only build 
 [[ -z "${RISEDEV_RUSTFLAGS}" ]] || export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
 echo + RUSTFLAGS="${RUSTFLAGS:-<not set>}"
 set -xe
-cargo build -p ${RISEDEV_CARGO_BUILD_CRATE} -p risedev ${BUILD_HDFS_BACKEND_CMD}\
+cargo build -p risedev
+cargo build -p risingwave_cmd_all ${BUILD_HDFS_BACKEND_CMD}\
 ${BUILD_HUMMOCK_TRACE_CMD}\
             --profile "${RISINGWAVE_BUILD_PROFILE}" \
             ${RISINGWAVE_FEATURE_FLAGS} \
@@ -560,8 +576,8 @@ env_files = ["${PREFIX_CONFIG}/risedev-env"]
 script = '''
 #!/usr/bin/env bash
 cat <<EOF > "${PREFIX_CONFIG}/psql-env"
-export PGHOST=$RW_FRONTEND_LISTEN_ADDRESS
-export PGPORT=$RW_FRONTEND_PORT
+export PGHOST=$RISEDEV_RW_FRONTEND_LISTEN_ADDRESS
+export PGPORT=$RISEDEV_RW_FRONTEND_PORT
 export PGUSER=root
 export PGDATABASE=dev
 EOF
@@ -578,7 +594,7 @@ dependencies = ["check-risedev-env-file"]
 env_files = ["${PREFIX_CONFIG}/risedev-env"]
 script = '''
 #!/usr/bin/env bash
-psql -h $RW_FRONTEND_LISTEN_ADDRESS -p $RW_FRONTEND_PORT -U root -d dev "$@"
+psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root -d dev "$@"
 '''
 
 [tasks.ctl]
@@ -588,7 +604,7 @@ dependencies = ["check-risedev-env-file"]
 env_files = ["${PREFIX_CONFIG}/risedev-env"]
 script = '''
 #!/usr/bin/env bash
-cargo run -p ${RISEDEV_CARGO_BUILD_CRATE} --profile "${RISINGWAVE_BUILD_PROFILE}" ${RISEDEV_CTL_RUN_CMD} "$@"
+cargo run -p risingwave_cmd_all --profile "${RISINGWAVE_BUILD_PROFILE}" -- ctl "$@"
 test $? -eq 0 || exit 1
 '''
 
@@ -885,7 +901,7 @@ cargo build \
 """
 
 [tasks.stest]
-category = "RiseDev - Deterministic Simulation"
+category = "RiseDev - Test - Deterministic Simulation"
 description = "Run unit tests in deterministic simulation mode"
 dependencies = ["install-nextest"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -910,7 +926,7 @@ cargo nextest run \
 """
 
 [tasks.sit-test]
-category = "RiseDev - Deterministic Simulation"
+category = "RiseDev - Test - Deterministic Simulation"
 description = "Run integration tests in deterministic simulation mode"
 dependencies = ["install-nextest"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -925,7 +941,7 @@ cargo nextest run \
 """
 
 [tasks.sarchive-it-test]
-category = "RiseDev - Deterministic Simulation"
+category = "RiseDev - Test - Deterministic Simulation"
 description = "Archive integration tests in deterministic simulation mode"
 dependencies = ["install-nextest"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -941,7 +957,7 @@ cargo nextest archive \
 """
 
 [tasks.scheck]
-category = "RiseDev - Deterministic Simulation"
+category = "RiseDev - Test - Deterministic Simulation"
 description = "Run cargo check in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -966,7 +982,7 @@ cargo check \
 """
 
 [tasks.sslt]
-category = "RiseDev - Deterministic Simulation"
+category = "RiseDev - Test - Deterministic Simulation"
 description = "Run e2e tests in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -980,7 +996,7 @@ cargo run \
 """
 
 [tasks.sslt-build-all]
-category = "RiseDev - Deterministic Simulation"
+category = "RiseDev - Test - Deterministic Simulation"
 description = "Build deterministic simulation runner and tests"
 dependencies = ["warn-on-missing-tools"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -995,7 +1011,7 @@ cargo build \
 """
 
 [tasks.sslt-cov]
-category = "RiseDev - Deterministic Simulation"
+category = "RiseDev - Test - Deterministic Simulation"
 description = "Run e2e tests in deterministic simulation mode and report code coverage"
 dependencies = ["install-llvm-cov"]
 env = { CARGO_TARGET_DIR = "target/sim-cov" }
@@ -1134,7 +1150,7 @@ fi
 private = true
 category = "RiseDev - Check"
 description = "Run cargo typos-cli check"
-install_crate = { min_version = "1.15.0", crate_name = "typos-cli", binary = "typos", test_arg = [
+install_crate = { min_version = "1.20.4", crate_name = "typos-cli", binary = "typos", test_arg = [
   "--help",
 ], install_command = "binstall" }
 script = """
@@ -1180,7 +1196,8 @@ scripts/check/check-trailing-spaces.sh --fix
 category = "RiseDev - Check"
 dependencies = [
   "warn-on-missing-tools",
-  "check-hakari",
+  # Disable hakari until we make sure it's useful
+  # "check-hakari",
   "check-dep-sort",
   "check-fmt",
   "check-trailing-spaces",
@@ -1291,42 +1308,42 @@ echo "All processes has exited."
 """
 
 [tasks.slt]
-category = "RiseDev - SQLLogicTest"
-install_crate = { version = "0.19.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+env = { SLT_HOST = "${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS}", SLT_PORT = "${RISEDEV_RW_FRONTEND_PORT}", SLT_DB = "dev" }
+category = "RiseDev - Test - SQLLogicTest"
+install_crate = { version = "0.20.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
   "--help",
 ], install_command = "binstall" }
 dependencies = ["check-risedev-env-file"]
 env_files = ["${PREFIX_CONFIG}/risedev-env"]
-env = { SLT_HOST = "${RW_FRONTEND_LISTEN_ADDRESS}", SLT_PORT = "${RW_FRONTEND_PORT}", SLT_DB = "dev" }
 command = "sqllogictest"
 args = ["${@}"]
 description = "🌟 Run SQLLogicTest"
 
 [tasks.slt-streaming]
-category = "RiseDev - SQLLogicTest"
+category = "RiseDev - Test - SQLLogicTest"
 extend = "slt"
 args = ["${@}", "./e2e_test/streaming/**/*.slt"]
 description = "Run all streaming e2e tests"
 
 [tasks.slt-batch]
-category = "RiseDev - SQLLogicTest"
+category = "RiseDev - Test - SQLLogicTest"
 extend = "slt"
 args = ["${@}", "./e2e_test/batch/*.slt"]
 description = "Run all batch e2e tests"
 
 [tasks.slt-generated]
-category = "RiseDev - SQLLogicTest"
+category = "RiseDev - Test - SQLLogicTest"
 extend = "slt"
 args = ["${@}", "./e2e_test/generated/**/*.slt"]
 description = "Run all generated e2e tests"
 
 [tasks.slt-all]
-category = "RiseDev - SQLLogicTest"
+category = "RiseDev - Test - SQLLogicTest"
 run_task = { name = ["slt-streaming", "slt-batch", "slt-generated"] }
 description = "Run all e2e tests"
 
 [tasks.docslt]
-category = "RiseDev - SQLLogicTest"
+category = "RiseDev - Test - SQLLogicTest"
 description = "Extract SQL examples written in SQLLogicTest syntax from Rust doc comments"
 script = '''
 #!/usr/bin/env bash
@@ -1401,7 +1418,7 @@ UPDATE_EXPECT=1 cargo test -p risingwave_connector tests::test_with_options_yaml
 '''
 
 [tasks.backwards-compat-test]
-category = "RiseDev - Backwards Compatibility Test"
+category = "RiseDev - Test - Backwards Compatibility Test"
 description = "Run backwards compatibility test"
 script = "./backwards-compat-tests/scripts/run_local.sh"
 

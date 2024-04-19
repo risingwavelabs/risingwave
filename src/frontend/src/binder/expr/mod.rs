@@ -74,7 +74,7 @@ impl Binder {
             Expr::Identifier(ident) => {
                 if SYS_FUNCTION_WITHOUT_ARGS
                     .iter()
-                    .any(|e| ident.real_value().as_str() == *e)
+                    .any(|e| ident.real_value().as_str() == *e && ident.quote_style().is_none())
                 {
                     // Rewrite a system variable to a function call, e.g. `SELECT current_schema;`
                     // will be rewritten to `SELECT current_schema();`.
@@ -484,9 +484,6 @@ impl Binder {
             };
             return self.bind_binary_op(expr, op, pattern);
         }
-        if escape_char.is_some() {
-            bail_not_implemented!(issue = 15701, "LIKE with escape character is not supported");
-        }
         let expr = self.bind_expr_inner(expr)?;
         let pattern = self.bind_expr_inner(pattern)?;
         match (expr.return_type(), pattern.return_type()) {
@@ -497,8 +494,14 @@ impl Binder {
                 _ => unreachable!(),
             },
         }
-        let func_call =
-            FunctionCall::new_unchecked(expr_type, vec![expr, pattern], DataType::Boolean);
+        let args = match escape_char {
+            Some(escape_char) => {
+                let escape_char = ExprImpl::literal_varchar(escape_char.to_string());
+                vec![expr, pattern, escape_char]
+            }
+            None => vec![expr, pattern],
+        };
+        let func_call = FunctionCall::new_unchecked(expr_type, args, DataType::Boolean);
         let func_call = if negated {
             FunctionCall::new_unchecked(ExprType::Not, vec![func_call.into()], DataType::Boolean)
         } else {

@@ -182,7 +182,8 @@ mod tests {
             SourceColumnDesc::simple("_id", DataType::Varchar, ColumnId::from(0)),
             SourceColumnDesc::simple("payload", DataType::Jsonb, ColumnId::from(1)),
         ];
-        let mut parser = DebeziumMongoJsonParser::new(columns.clone(), Default::default()).unwrap();
+        let mut parser =
+            DebeziumMongoJsonParser::new(columns.clone(), SourceContext::dummy().into()).unwrap();
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns.clone(), 3);
         let writer = builder.row_writer();
         parser
@@ -218,7 +219,8 @@ mod tests {
         ];
         for data in input {
             let mut parser =
-                DebeziumMongoJsonParser::new(columns.clone(), Default::default()).unwrap();
+                DebeziumMongoJsonParser::new(columns.clone(), SourceContext::dummy().into())
+                    .unwrap();
 
             let mut builder = SourceStreamChunkBuilder::with_capacity(columns.clone(), 3);
 

@@ -13,22 +13,30 @@
 // limitations under the License.
 
 use std::fmt::Formatter;
+use std::num::NonZeroU32;
+use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use either::Either;
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
+use governor::clock::MonotonicClock;
+use governor::{Quota, RateLimiter};
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_connector::error::ConnectorError;
+use risingwave_connector::source::cdc::jni_source;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
     BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitMetaData,
 };
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
@@ -59,6 +67,54 @@ pub struct SourceExecutor<S: StateStore> {
     source_ctrl_opts: SourceCtrlOpts,
 }
 
+#[try_stream(ok = StreamChunk, error = ConnectorError)]
+pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit: Option<u32>) {
+    if let Some(limit) = rate_limit
+        && limit == 0
+    {
+        // block the stream until the rate limit is reset
+        let future = futures::future::pending::<()>();
+        future.await;
+    }
+    let get_rate_limiter = |rate_limit: u32| {
+        let quota = Quota::per_second(NonZeroU32::new(rate_limit).unwrap());
+        let clock = MonotonicClock;
+        RateLimiter::direct_with_clock(quota, &clock)
+    };
+    let limiter = rate_limit.map(get_rate_limiter);
+    if rate_limit.is_some() {
+        tracing::info!(rate_limit = ?rate_limit, "applied rate limit");
+    }
+    #[for_await]
+    for batch in stream {
+        let chunk: StreamChunk = batch?;
+        let chunk_cardinality = chunk.cardinality();
+        let Some(n) = NonZeroU32::new(chunk_cardinality as u32) else {
+            // pass empty chunk
+            yield chunk;
+            continue;
+        };
+        if let Some(limiter) = &limiter {
+            let limit = NonZeroU32::new(rate_limit.unwrap()).unwrap();
+            if n <= limit {
+                // `InsufficientCapacity` should never happen because we have done the check
+                limiter.until_n_ready(n).await.unwrap();
+                yield chunk;
+            } else {
+                // Cut the chunk into smaller chunks
+                for chunk in chunk.split(limit.get() as usize) {
+                    let n = NonZeroU32::new(chunk.cardinality() as u32).unwrap();
+                    // Ditto.
+                    limiter.until_n_ready(n).await.unwrap();
+                    yield chunk;
+                }
+            }
+        } else {
+            yield chunk;
+        }
+    }
+}
+
 impl<S: StateStore> SourceExecutor<S> {
     pub fn new(
         actor_ctx: ActorContextRef,
@@ -78,6 +134,18 @@ impl<S: StateStore> SourceExecutor<S> {
         }
     }
 
+    pub fn spawn_wait_epoch_worker(
+        core: &StreamSourceCore<S>,
+    ) -> UnboundedSender<(Epoch, HashMap<SplitId, String>)> {
+        let (wait_epoch_tx, wait_epoch_rx) = mpsc::unbounded_channel();
+        let wait_epoch_worker = WaitEpochWorker {
+            wait_epoch_rx,
+            state_store: core.split_state_store.state_table.state_store().clone(),
+        };
+        tokio::spawn(wait_epoch_worker.run());
+        wait_epoch_tx
+    }
+
     pub async fn build_stream_source_reader(
         &self,
         source_desc: &SourceDesc,
@@ -92,20 +160,22 @@ impl<S: StateStore> SourceExecutor<S> {
             self.actor_ctx.id,
             self.stream_source_core.as_ref().unwrap().source_id,
             self.actor_ctx.fragment_id,
-            source_desc.metrics.clone(),
-            self.source_ctrl_opts.clone(),
-            source_desc.source.config.clone(),
             self.stream_source_core
                 .as_ref()
                 .unwrap()
                 .source_name
                 .clone(),
+            source_desc.metrics.clone(),
+            self.source_ctrl_opts.clone(),
+            source_desc.source.config.clone(),
         );
-        source_desc
+        let stream = source_desc
             .source
             .to_stream(state, column_ids, Arc::new(source_ctx))
             .await
-            .map_err(StreamExecutorError::connector_error)
+            .map_err(StreamExecutorError::connector_error);
+
+        Ok(apply_rate_limit(stream?, self.source_ctrl_opts.rate_limit).boxed())
     }
 
     /// `source_id | source_name | actor_id | fragment_id`
@@ -297,7 +367,7 @@ impl<S: StateStore> SourceExecutor<S> {
     async fn persist_state_and_clear_cache(
         &mut self,
         epoch: EpochPair,
-    ) -> StreamExecutorResult<()> {
+    ) -> StreamExecutorResult<HashMap<SplitId, SplitImpl>> {
         let core = self.stream_source_core.as_mut().unwrap();
 
         let cache = core
@@ -312,16 +382,19 @@ impl<S: StateStore> SourceExecutor<S> {
         }
 
         // commit anyway, even if no message saved
-        core.split_state_store.state_store.commit(epoch).await?;
+        core.split_state_store.state_table.commit(epoch).await?;
+
+        let updated_splits = core.updated_splits_in_epoch.clone();
+
         core.updated_splits_in_epoch.clear();
 
-        Ok(())
+        Ok(updated_splits)
     }
 
     /// try mem table spill
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
         let core = self.stream_source_core.as_mut().unwrap();
-        core.split_state_store.state_store.try_flush().await?;
+        core.split_state_store.state_table.try_flush().await?;
 
         Ok(())
     }
@@ -352,6 +425,12 @@ impl<S: StateStore> SourceExecutor<S> {
         let source_desc = source_desc_builder
             .build()
             .map_err(StreamExecutorError::connector_error)?;
+
+        let wait_epoch_tx = if source_desc.source.need_commit_offset_to_upstream() {
+            Some(Self::spawn_wait_epoch_worker(&core))
+        } else {
+            None
+        };
 
         let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
         else {
@@ -415,7 +494,7 @@ impl<S: StateStore> SourceExecutor<S> {
         if barrier.is_pause_on_startup() {
             stream.pause_stream();
         }
-        // TODO: for backfill-able source, pause until there's a MV.
+        // TODO: for shared source, pause until there's a MV.
 
         yield Message::Barrier(barrier);
 
@@ -475,11 +554,36 @@ impl<S: StateStore> SourceExecutor<S> {
                                 )
                                 .await?;
                             }
+                            Mutation::Throttle(actor_to_apply) => {
+                                if let Some(throttle) = actor_to_apply.get(&self.actor_ctx.id) {
+                                    self.source_ctrl_opts.rate_limit = *throttle;
+                                    // recreate from latest_split_info
+                                    self.rebuild_stream_reader(&source_desc, &mut stream)
+                                        .await?;
+                                }
+                            }
                             _ => {}
                         }
                     }
 
-                    self.persist_state_and_clear_cache(epoch).await?;
+                    let updated_splits = self.persist_state_and_clear_cache(epoch).await?;
+
+                    // when handle a checkpoint barrier, spawn a task to wait for epoch commit notification
+                    if barrier.kind.is_checkpoint()
+                        && !updated_splits.is_empty()
+                        && let Some(ref tx) = wait_epoch_tx
+                    {
+                        let mut updated_offsets = HashMap::new();
+                        for (split_id, split_impl) in updated_splits {
+                            if split_impl.is_cdc_split() {
+                                updated_offsets.insert(split_id, split_impl.get_cdc_split_offset());
+                            }
+                        }
+
+                        tracing::debug!("epoch to wait {:?}", epoch);
+                        tx.send((Epoch(epoch.prev), updated_offsets))
+                            .expect("wait_epoch_tx send success");
+                    }
 
                     yield Message::Barrier(barrier);
                 }
@@ -610,6 +714,59 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
     }
 }
 
+struct WaitEpochWorker<S: StateStore> {
+    wait_epoch_rx: UnboundedReceiver<(Epoch, HashMap<SplitId, String>)>,
+    state_store: S,
+}
+
+impl<S: StateStore> WaitEpochWorker<S> {
+    pub async fn run(mut self) {
+        tracing::debug!("wait epoch worker start success");
+        loop {
+            // poll the rx and wait for the epoch commit
+            match self.wait_epoch_rx.recv().await {
+                Some((epoch, updated_offsets)) => {
+                    tracing::debug!("start to wait epoch {}", epoch.0);
+                    let ret = self
+                        .state_store
+                        .try_wait_epoch(HummockReadEpoch::Committed(epoch.0))
+                        .await;
+
+                    match ret {
+                        Ok(()) => {
+                            tracing::debug!(epoch = epoch.0, "wait epoch success");
+                            // cdc source only has one split
+                            assert_eq!(1, updated_offsets.len());
+                            let (split_id, offset) = updated_offsets.into_iter().next().unwrap();
+                            let source_id: u64 = u64::from_str(split_id.as_ref()).unwrap();
+                            // notify cdc connector to commit offset
+                            match jni_source::commit_cdc_offset(source_id, offset.clone()) {
+                                Ok(_) => {}
+                                Err(e) => {
+                                    tracing::error!(
+                                        error = %e.as_report(),
+                                        "source#{source_id}: failed to commit cdc offset: {offset}.",
+                                    )
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                            error = %e.as_report(),
+                            "wait epoch {} failed", epoch.0
+                            );
+                        }
+                    }
+                }
+                None => {
+                    tracing::error!("wait epoch rx closed");
+                    break;
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -682,7 +839,10 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
             system_params_manager.get_params(),
-            SourceCtrlOpts::default(),
+            SourceCtrlOpts {
+                chunk_size: 1024,
+                rate_limit: None,
+            },
         );
         let mut executor = executor.boxed().execute();
 
@@ -770,7 +930,10 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
             system_params_manager.get_params(),
-            SourceCtrlOpts::default(),
+            SourceCtrlOpts {
+                chunk_size: 1024,
+                rate_limit: None,
+            },
         );
         let mut handler = executor.boxed().execute();
 

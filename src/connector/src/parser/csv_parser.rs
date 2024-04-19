@@ -192,7 +192,7 @@ mod tests {
                 delimiter: b',',
                 has_header: false,
             },
-            Default::default(),
+            SourceContext::dummy().into(),
         )
         .unwrap();
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);
@@ -299,7 +299,7 @@ mod tests {
                 delimiter: b',',
                 has_header: true,
             },
-            Default::default(),
+            SourceContext::dummy().into(),
         )
         .unwrap();
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);

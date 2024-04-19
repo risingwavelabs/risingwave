@@ -18,14 +18,14 @@ use std::net::SocketAddr;
 use std::path::Path as FilePath;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
-use axum::body::boxed;
+use anyhow::{anyhow, Context as _, Result};
 use axum::extract::{Extension, Path};
 use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
 use risingwave_rpc_client::ComputeClientPool;
+use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::compression::CompressionLayer;
@@ -56,6 +56,7 @@ pub(super) mod handlers {
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::{Sink, Source, Table, View};
     use risingwave_pb::common::{WorkerNode, WorkerType};
+    use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
     use risingwave_pb::meta::PbTableFragments;
     use risingwave_pb::monitor_service::{
         GetBackPressureResponse, HeapProfilingResponse, ListHeapProfilingResponse,
@@ -193,6 +194,21 @@ pub(super) mod handlers {
         Ok(Json(table_fragments))
     }
 
+    pub async fn list_object_dependencies(
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<Vec<PbObjectDependencies>>> {
+        let object_dependencies = match &srv.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_object_dependencies().await,
+            MetadataManager::V2(mgr) => mgr
+                .catalog_controller
+                .list_object_dependencies()
+                .await
+                .map_err(err)?,
+        };
+
+        Ok(Json(object_dependencies))
+    }
+
     async fn dump_await_tree_inner(
         worker_nodes: impl IntoIterator<Item = &WorkerNode>,
         compute_clients: &ComputeClientPool,
@@ -315,7 +331,7 @@ pub(super) mod handlers {
         let response = Response::builder()
             .header("Content-Type", "application/octet-stream")
             .header("Content-Disposition", collapsed_file_name)
-            .body(boxed(collapsed_str));
+            .body(collapsed_str.into());
 
         response.map_err(err)
     }
@@ -378,6 +394,7 @@ impl DashboardService {
             .route("/internal_tables", get(list_internal_tables))
             .route("/sources", get(list_sources))
             .route("/sinks", get(list_sinks))
+            .route("/object_dependencies", get(list_object_dependencies))
             .route("/metrics/cluster", get(prometheus::list_prometheus_cluster))
             .route(
                 "/metrics/fragment/prometheus_back_pressures",
@@ -412,10 +429,13 @@ impl DashboardService {
             .nest("/trace", trace_ui_router)
             .layer(CompressionLayer::new());
 
-        axum::Server::bind(&srv.dashboard_addr)
-            .serve(app.into_make_service())
+        let listener = TcpListener::bind(&srv.dashboard_addr)
             .await
-            .map_err(|err| anyhow!(err))?;
+            .context("failed to bind dashboard address")?;
+        axum::serve(listener, app)
+            .await
+            .context("failed to serve dashboard service")?;
+
         Ok(())
     }
 }

@@ -14,8 +14,10 @@
 
 pub mod enumerator;
 pub mod external;
+pub mod jni_source;
 pub mod source;
 pub mod split;
+
 use std::collections::HashMap;
 use std::marker::PhantomData;
 
@@ -148,7 +150,7 @@ where
         };
         self.table_schema = table_schema;
         if let Some(info) = source.info.as_ref() {
-            self.is_cdc_source_job = info.cdc_source_job;
+            self.is_cdc_source_job = info.is_shared();
         }
     }
 

@@ -20,6 +20,7 @@ use parking_lot::RwLock;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::hash::ParallelUnitMapping;
+use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeFrontend};
 use risingwave_pb::common::WorkerNode;
@@ -27,6 +28,7 @@ use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{FragmentParallelUnitMapping, MetaSnapshot, SubscribeResponse};
+use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::watch::Sender;
 
 use crate::catalog::root_catalog::Catalog;
@@ -43,6 +45,8 @@ pub struct FrontendObserverNode {
     user_info_updated_tx: Sender<UserInfoVersion>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     system_params_manager: LocalSystemParamsManagerRef,
+    session_params: Arc<RwLock<SessionConfig>>,
+    compute_client_pool: ComputeClientPoolRef,
 }
 
 impl ObserverState for FrontendObserverNode {
@@ -90,11 +94,20 @@ impl ObserverState for FrontendObserverNode {
             Info::SystemParams(p) => {
                 self.system_params_manager.try_set_params(p);
             }
+            Info::SessionParam(p) => {
+                self.session_params
+                    .write()
+                    .set(&p.param, p.value().to_string(), &mut ())
+                    .unwrap();
+            }
             Info::HummockStats(stats) => {
                 self.handle_table_stats_notification(stats);
             }
             Info::ServingParallelUnitMappings(m) => {
                 self.handle_fragment_serving_mapping_notification(m.mappings, resp.operation());
+            }
+            Info::Recovery(_) => {
+                self.compute_client_pool.invalidate_all();
             }
         }
     }
@@ -127,6 +140,7 @@ impl ObserverState for FrontendObserverNode {
             hummock_version: _,
             meta_backup_manifest_id: _,
             hummock_write_limits: _,
+            session_params,
             version,
         } = snapshot;
 
@@ -180,6 +194,8 @@ impl ObserverState for FrontendObserverNode {
         self.user_info_updated_tx
             .send(snapshot_version.catalog_version)
             .unwrap();
+        *self.session_params.write() =
+            serde_json::from_str(&session_params.unwrap().params).unwrap();
     }
 }
 
@@ -192,6 +208,8 @@ impl FrontendObserverNode {
         user_info_updated_tx: Sender<UserInfoVersion>,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
         system_params_manager: LocalSystemParamsManagerRef,
+        session_params: Arc<RwLock<SessionConfig>>,
+        compute_client_pool: ComputeClientPoolRef,
     ) -> Self {
         Self {
             worker_node_manager,
@@ -201,6 +219,8 @@ impl FrontendObserverNode {
             user_info_updated_tx,
             hummock_snapshot_manager,
             system_params_manager,
+            session_params,
+            compute_client_pool,
         }
     }
 

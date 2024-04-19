@@ -20,7 +20,7 @@ use risingwave_connector::parser::{
     EncodingProperties, JsonParser, JsonProperties, ProtocolProperties, SourceStreamChunkBuilder,
     SpecificParserConfig,
 };
-use risingwave_connector::source::SourceColumnDesc;
+use risingwave_connector::source::{SourceColumnDesc, SourceContext};
 use serde_json::json;
 use tokio::runtime::Runtime;
 
@@ -77,10 +77,11 @@ fn create_parser(
         key_encoding_config: None,
         encoding_config: EncodingProperties::Json(JsonProperties {
             use_schema_registry: false,
+            timestamptz_handling: None,
         }),
         protocol_config: ProtocolProperties::Plain,
     };
-    let parser = JsonParser::new(props, desc.clone(), Default::default()).unwrap();
+    let parser = JsonParser::new(props, desc.clone(), SourceContext::dummy().into()).unwrap();
     let input = gen_input(mode, chunk_size, chunk_num);
     (parser, desc, input)
 }

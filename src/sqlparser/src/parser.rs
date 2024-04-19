@@ -241,6 +241,9 @@ impl Parser {
                     self.prev_token();
                     Ok(Statement::Query(Box::new(self.parse_query()?)))
                 }
+                Keyword::DECLARE => Ok(self.parse_declare()?),
+                Keyword::FETCH => Ok(self.parse_fetch_cursor()?),
+                Keyword::CLOSE => Ok(self.parse_close_cursor()?),
                 Keyword::TRUNCATE => Ok(self.parse_truncate()?),
                 Keyword::CREATE => Ok(self.parse_create()?),
                 Keyword::DROP => Ok(self.parse_drop()?),
@@ -280,6 +283,7 @@ impl Parser {
                 Keyword::COMMENT => Ok(self.parse_comment()?),
                 Keyword::FLUSH => Ok(Statement::Flush),
                 Keyword::WAIT => Ok(Statement::Wait),
+                Keyword::RECOVER => Ok(Statement::Recover),
                 _ => self.expected(
                     "an SQL statement",
                     Token::Word(w).with_location(token.location),
@@ -2358,6 +2362,24 @@ impl Parser {
         })
     }
 
+    pub fn parse_declare(&mut self) -> Result<Statement, ParserError> {
+        Ok(Statement::DeclareCursor {
+            stmt: DeclareCursorStatement::parse_to(self)?,
+        })
+    }
+
+    pub fn parse_fetch_cursor(&mut self) -> Result<Statement, ParserError> {
+        Ok(Statement::FetchCursor {
+            stmt: FetchCursorStatement::parse_to(self)?,
+        })
+    }
+
+    pub fn parse_close_cursor(&mut self) -> Result<Statement, ParserError> {
+        Ok(Statement::CloseCursor {
+            stmt: CloseCursorStatement::parse_to(self)?,
+        })
+    }
+
     fn parse_table_column_def(&mut self) -> Result<TableColumnDef, ParserError> {
         Ok(TableColumnDef {
             name: self.parse_identifier_non_reserved()?,
@@ -2418,6 +2440,9 @@ impl Parser {
             } else if self.parse_keyword(Keyword::LANGUAGE) {
                 ensure_not_set(&body.language, "LANGUAGE")?;
                 body.language = Some(self.parse_identifier()?);
+            } else if self.parse_keyword(Keyword::RUNTIME) {
+                ensure_not_set(&body.runtime, "RUNTIME")?;
+                body.runtime = Some(self.parse_function_runtime()?);
             } else if self.parse_keyword(Keyword::IMMUTABLE) {
                 ensure_not_set(&body.behavior, "IMMUTABLE | STABLE | VOLATILE")?;
                 body.behavior = Some(FunctionBehavior::Immutable);
@@ -2433,6 +2458,15 @@ impl Parser {
             } else if self.parse_keyword(Keyword::USING) {
                 ensure_not_set(&body.using, "USING")?;
                 body.using = Some(self.parse_create_function_using()?);
+            } else if self.parse_keyword(Keyword::SYNC) {
+                ensure_not_set(&body.function_type, "SYNC | ASYNC")?;
+                body.function_type = Some(self.parse_function_type(false, false)?);
+            } else if self.parse_keyword(Keyword::ASYNC) {
+                ensure_not_set(&body.function_type, "SYNC | ASYNC")?;
+                body.function_type = Some(self.parse_function_type(true, false)?);
+            } else if self.parse_keyword(Keyword::GENERATOR) {
+                ensure_not_set(&body.function_type, "SYNC | ASYNC")?;
+                body.function_type = Some(self.parse_function_type(false, true)?);
             } else {
                 return Ok(body);
             }
@@ -2452,6 +2486,36 @@ impl Parser {
                 Ok(CreateFunctionUsing::Base64(base64))
             }
             _ => unreachable!("{}", keyword),
+        }
+    }
+
+    fn parse_function_runtime(&mut self) -> Result<FunctionRuntime, ParserError> {
+        let ident = self.parse_identifier()?;
+        match ident.value.to_lowercase().as_str() {
+            "deno" => Ok(FunctionRuntime::Deno),
+            "quickjs" => Ok(FunctionRuntime::QuickJs),
+            r => Err(ParserError::ParserError(format!(
+                "Unsupported runtime: {r}"
+            ))),
+        }
+    }
+
+    fn parse_function_type(
+        &mut self,
+        is_async: bool,
+        is_generator: bool,
+    ) -> Result<CreateFunctionType, ParserError> {
+        let is_generator = if is_generator {
+            true
+        } else {
+            self.parse_keyword(Keyword::GENERATOR)
+        };
+
+        match (is_async, is_generator) {
+            (false, false) => Ok(CreateFunctionType::Sync),
+            (true, false) => Ok(CreateFunctionType::Async),
+            (false, true) => Ok(CreateFunctionType::Generator),
+            (true, true) => Ok(CreateFunctionType::AsyncGenerator),
         }
     }
 
@@ -2547,6 +2611,17 @@ impl Parser {
         })
     }
 
+    pub fn parse_with_version_column(&mut self) -> Result<Option<String>, ParserError> {
+        if self.parse_keywords(&[Keyword::WITH, Keyword::VERSION, Keyword::COLUMN]) {
+            self.expect_token(&Token::LParen)?;
+            let name = self.parse_identifier_non_reserved()?;
+            self.expect_token(&Token::RParen)?;
+            Ok(Some(name.value))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn parse_on_conflict(&mut self) -> Result<Option<OnConflict>, ParserError> {
         if self.parse_keywords(&[Keyword::ON, Keyword::CONFLICT]) {
             self.parse_handle_conflict_behavior()
@@ -2575,6 +2650,7 @@ impl Parser {
 
         let on_conflict = self.parse_on_conflict()?;
 
+        let with_version_column = self.parse_with_version_column()?;
         let include_options = self.parse_include_options()?;
 
         // PostgreSQL supports `WITH ( options )`, before `AS`
@@ -2627,6 +2703,7 @@ impl Parser {
             source_watermarks,
             append_only,
             on_conflict,
+            with_version_column,
             query,
             cdc_table_info,
             include_column_options: include_options,
@@ -2820,7 +2897,7 @@ impl Parser {
             Keyword::NOT,
             Keyword::NULL,
         ]) {
-            return parser_err!("On conflict behavior do update if not null is not supported yet.");
+            Ok(Some(OnConflict::DoUpdateIfNotNull))
         } else {
             Ok(None)
         }
@@ -2969,6 +3046,44 @@ impl Parser {
         self.expect_token(&Token::Eq)?;
         let value = self.parse_value()?;
         Ok(SqlOption { name, value })
+    }
+
+    pub fn parse_since(&mut self) -> Result<Option<Since>, ParserError> {
+        if self.parse_keyword(Keyword::SINCE) {
+            let token = self.next_token();
+            match token.token {
+                Token::Word(w) => {
+                    let ident = w.to_ident()?;
+                    // Backward compatibility for now.
+                    if ident.real_value() == "proctime" || ident.real_value() == "now" {
+                        self.expect_token(&Token::LParen)?;
+                        self.expect_token(&Token::RParen)?;
+                        Ok(Some(Since::ProcessTime))
+                    } else if ident.real_value() == "begin" {
+                        self.expect_token(&Token::LParen)?;
+                        self.expect_token(&Token::RParen)?;
+                        Ok(Some(Since::Begin))
+                    } else {
+                        parser_err!(format!(
+                            "Expected proctime(), begin() or now(), found: {}",
+                            ident.real_value()
+                        ))
+                    }
+                }
+                Token::Number(s) => {
+                    let num = s.parse::<u64>().map_err(|e| {
+                        ParserError::ParserError(format!("Could not parse '{}' as u64: {}", s, e))
+                    });
+                    Ok(Some(Since::TimestampMsNum(num?)))
+                }
+                unexpected => self.expected(
+                    "proctime(), begin() , now(), Number",
+                    unexpected.with_location(token.location),
+                ),
+            }
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn parse_emit_mode(&mut self) -> Result<Option<EmitMode>, ParserError> {
@@ -3377,7 +3492,6 @@ impl Parser {
                         self.peek_token(),
                     );
                 }
-
                 let value = self.parse_set_variable()?;
                 let deferred = self.parse_keyword(Keyword::DEFERRED);
 
