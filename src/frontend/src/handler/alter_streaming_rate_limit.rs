@@ -27,7 +27,7 @@ use crate::Binder;
 
 pub async fn handle_alter_streaming_rate_limit(
     handler_args: HandlerArgs,
-    table_type: TableType,
+    kind: PbThrottleTarget,
     table_name: ObjectName,
     rate_limit: i32,
 ) -> Result<RwPgResponse> {
@@ -54,11 +54,6 @@ pub async fn handle_alter_streaming_rate_limit(
 
         session.check_privilege_for_drop_alter(schema_name, &**table)?;
         table.id
-    };
-
-    let kind = match table_type {
-        TableType::MaterializedView => PbThrottleTarget::Mv,
-        _ => unreachable!(),
     };
 
     let meta_client = session.env().meta_client();

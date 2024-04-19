@@ -758,7 +758,7 @@ pub async fn handle(
         } if materialized => {
             alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                 handler_args,
-                TableType::MaterializedView,
+                PbThrottleType::Mv,
                 name,
                 rate_limit,
             )
