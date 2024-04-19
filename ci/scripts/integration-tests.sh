@@ -24,17 +24,17 @@ shift $((OPTIND -1))
 
 echo "export INTEGRATION_TEST_CASE=${case}" > env_vars.sh
 
-echo "~~~ clean up docker"
+echo "--- clean up docker"
 if [ $(docker ps -aq |wc -l) -gt 0 ]; then
   docker rm -f $(docker ps -aq)
 fi
 docker network prune -f
 docker volume prune -f
 
-echo "~~~ ghcr login"
+echo "--- ghcr login"
 echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 
-echo "+++ set RW_IMAGE"
+echo "--- case: ${case}, format: ${format}"
 
 if [[ -n "${RW_IMAGE_TAG+x}" ]]; then
   export RW_IMAGE="ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_TAG}"
@@ -47,22 +47,16 @@ if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
   echo Docker image: "$RW_IMAGE"
 fi
 
-if [ -z "${RW_IMAGE+x}" ]; then
-  echo "RW_IMAGE is not set. The image defined in docker-compose.yml will be used."
-fi
-
-echo "--- case: ${case}, format: ${format}"
-
 if [ "${case}" == "client-library" ]; then
   cd integration_tests/client-library
   python3 client_test.py
   exit 0
 fi
 
-echo "~~~ install postgresql"
+echo "--- install postgresql"
 sudo yum install -y postgresql15
 
-echo "~~~ install poetry"
+echo "--- install poetry"
 curl -sSL https://install.python-poetry.org | POETRY_VERSION=1.8.0 python3 -
 
 
