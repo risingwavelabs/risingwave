@@ -50,6 +50,9 @@ pub enum ObjectErrorInner {
     #[cfg(madsim)]
     #[error(transparent)]
     Sim(#[from] crate::object::sim::SimError),
+
+    #[error("Timeout error: {0}")]
+    Timeout(String),
 }
 
 impl ObjectError {
@@ -100,7 +103,6 @@ impl ObjectError {
     }
 
     pub fn should_retry(&self) -> bool {
-        // return true;
         match self.inner() {
             ObjectErrorInner::S3 {
                 inner: _,
@@ -108,6 +110,8 @@ impl ObjectError {
             } => *should_retry,
 
             ObjectErrorInner::Opendal(e) => e.is_temporary(),
+
+            ObjectErrorInner::Timeout(_) => true,
 
             _ => false,
         }

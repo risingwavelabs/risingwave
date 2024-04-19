@@ -219,7 +219,7 @@ impl S3StreamingUploader {
                         match ret {
                             Ok(Ok(res)) => Ok(res),
                             Ok(Err(err)) => Err(err),
-                            Err(_) => Err(ObjectError::internal(format!(
+                            Err(_) => Err(ObjectError::timeout(format!(
                                 "{} timeout",
                                 operation_type_str
                             ))),
@@ -997,6 +997,7 @@ fn set_error_should_retry<E>(config: Arc<ObjectStoreConfig>, object_err: ObjectE
 where
     E: ProvideErrorMetadata + Into<BoxError> + Sync + Send + std::error::Error + 'static,
 {
+    let not_found = object_err.is_object_not_found_error();
     let mut inner = object_err.into_inner();
     match inner.borrow_mut() {
         ObjectErrorInner::S3 {
@@ -1059,7 +1060,7 @@ where
                 _ => false,
             };
 
-            *should_retry = err_should_retry;
+            *should_retry = err_should_retry && !not_found;
         }
 
         _ => unreachable!(),

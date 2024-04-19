@@ -361,7 +361,7 @@ impl MonitoredStreamingUploader {
             Some(timeout) => tokio::time::timeout(*timeout, future)
                 .await
                 .unwrap_or_else(|_| {
-                    Err(ObjectError::internal(format!(
+                    Err(ObjectError::timeout(format!(
                         "{} timeout",
                         operation_type_str
                     )))
@@ -385,18 +385,22 @@ impl MonitoredStreamingUploader {
             .with_label_values(&[self.media_type, operation_type_str])
             .start_timer();
 
+        let streaming_upload_finish_timeout = self
+            .streaming_upload_timeout
+            .map(|timeout| Duration::from_millis(timeout.as_millis() as u64 * 3));
+
         let future = async {
             self.inner
                 .finish()
                 .verbose_instrument_await(operation_type_str)
                 .await
         };
-        let res = match self.streaming_upload_timeout.as_ref() {
+        let res = match streaming_upload_finish_timeout.as_ref() {
             None => future.await,
             Some(timeout) => tokio::time::timeout(*timeout, future)
                 .await
                 .unwrap_or_else(|_| {
-                    Err(ObjectError::internal(format!(
+                    Err(ObjectError::timeout(format!(
                         "{} timeout",
                         operation_type_str
                     )))
@@ -461,7 +465,7 @@ impl MonitoredStreamingReader {
             Some(timeout) => tokio::time::timeout(*timeout, future)
                 .await
                 .unwrap_or_else(|_| {
-                    Some(Err(ObjectError::internal(format!(
+                    Some(Err(ObjectError::timeout(format!(
                         "{} timeout",
                         operation_type_str
                     ))))
@@ -1161,7 +1165,7 @@ where
             tokio::time::timeout(timeout_duration, future)
                 .await
                 .unwrap_or_else(|_| {
-                    Err(ObjectError::internal(format!(
+                    Err(ObjectError::timeout(format!(
                         "{} timeout",
                         operation_type.as_str()
                     )))
