@@ -202,7 +202,7 @@ pub async fn standalone(
         tracing::info!("starting compute-node thread with cli args: {:?}", opts);
         let _compute_handle = tokio::spawn(async move { risingwave_compute::start(opts).await });
     }
-    if let Some(opts) = frontend_opts {
+    if let Some(opts) = frontend_opts.clone() {
         tracing::info!("starting frontend-node thread with cli args: {:?}", opts);
         let _frontend_handle = tokio::spawn(async move { risingwave_frontend::start(opts).await });
     }
@@ -214,8 +214,9 @@ pub async fn standalone(
 
     // wait for log messages to be flushed
     tokio::time::sleep(std::time::Duration::from_millis(5000)).await;
-    eprintln!("-------------------------------");
-    eprintln!("RisingWave standalone mode is ready.");
+    eprintln!("----------------------------------------");
+    eprintln!("| RisingWave standalone mode is ready. |");
+    eprintln!("----------------------------------------");
     if is_in_memory {
         eprintln!(
             "{}",
@@ -225,6 +226,21 @@ It SHOULD NEVER be used in benchmarks and production environment!!!"
             )
             .red()
             .bold()
+        );
+    }
+    if let Some(opts) = frontend_opts {
+        let host = opts.listen_addr.split(':').next().unwrap_or("localhost");
+        let port = opts.listen_addr.split(':').last().unwrap_or("4566");
+        let database = "dev";
+        let user = "root";
+        eprintln!();
+        eprintln!("Connect to the RisingWave instance via psql:");
+        eprintln!(
+            "{}",
+            console::style(format!(
+                "  psql -h {host} -p {port} -d {database} -U {user}"
+            ))
+            .blue()
         );
     }
 

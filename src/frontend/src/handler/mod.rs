@@ -87,6 +87,7 @@ pub mod handle_privilege;
 mod kill_process;
 pub mod privilege;
 pub mod query;
+mod recover;
 pub mod show;
 mod transaction;
 pub mod util;
@@ -311,6 +312,7 @@ pub async fn handle(
             source_watermarks,
             append_only,
             on_conflict,
+            with_version_column,
             cdc_table_info,
             include_column_options,
         } => {
@@ -329,6 +331,7 @@ pub async fn handle(
                     columns,
                     append_only,
                     on_conflict,
+                    with_version_column,
                 )
                 .await;
             }
@@ -344,6 +347,7 @@ pub async fn handle(
                 source_watermarks,
                 append_only,
                 on_conflict,
+                with_version_column,
                 cdc_table_info,
                 include_column_options,
             )
@@ -358,6 +362,15 @@ pub async fn handle(
             if_not_exists,
         } => create_schema::handle_create_schema(handler_args, schema_name, if_not_exists).await,
         Statement::CreateUser(stmt) => create_user::handle_create_user(handler_args, stmt).await,
+        Statement::DeclareCursor { stmt } => {
+            declare_cursor::handle_declare_cursor(handler_args, stmt).await
+        }
+        Statement::FetchCursor { stmt } => {
+            fetch_cursor::handle_fetch_cursor(handler_args, stmt).await
+        }
+        Statement::CloseCursor { stmt } => {
+            close_cursor::handle_close_cursor(handler_args, stmt).await
+        }
         Statement::AlterUser(stmt) => alter_user::handle_alter_user(handler_args, stmt).await,
         Statement::Grant { .. } => {
             handle_privilege::handle_grant_privilege(handler_args, stmt).await
@@ -506,6 +519,7 @@ pub async fn handle(
         }
         Statement::Flush => flush::handle_flush(handler_args).await,
         Statement::Wait => wait::handle_wait(handler_args).await,
+        Statement::Recover => recover::handle_recover(handler_args).await,
         Statement::SetVariable {
             local: _,
             variable,
@@ -924,15 +938,6 @@ pub async fn handle(
             object_name,
             comment,
         } => comment::handle_comment(handler_args, object_type, object_name, comment).await,
-        Statement::DeclareCursor { cursor_name, query } => {
-            declare_cursor::handle_declare_cursor(handler_args, cursor_name, *query).await
-        }
-        Statement::FetchCursor { cursor_name, count } => {
-            fetch_cursor::handle_fetch_cursor(handler_args, cursor_name, count).await
-        }
-        Statement::CloseCursor { cursor_name } => {
-            close_cursor::handle_close_cursor(handler_args, cursor_name).await
-        }
         _ => bail_not_implemented!("Unhandled statement: {}", stmt),
     }
 }

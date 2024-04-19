@@ -27,8 +27,8 @@ pub use database::*;
 pub use fragment::*;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    valid_table_name, TableId as StreamingJobId, TableOption, DEFAULT_DATABASE_NAME,
-    DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG,
+    is_subscription_internal_table, valid_table_name, TableId as StreamingJobId, TableOption,
+    DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG,
     DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
 };
 use risingwave_common::{bail, ensure};
@@ -89,7 +89,7 @@ macro_rules! commit_meta_with_trx {
                     $val_txn.apply_to_txn(&mut $trx).await?;
                 )*
                 // Commit to meta store
-                $manager.env.meta_store_checked().txn($trx).await?;
+                $manager.env.meta_store().as_kv().txn($trx).await?;
                 // Upon successful commit, commit the change to in-mem meta
                 $(
                     $val_txn.commit();
@@ -243,6 +243,7 @@ impl CatalogManager {
             database.id = self
                 .env
                 .id_gen_manager()
+                .as_kv()
                 .generate::<{ IdCategory::Database }>()
                 .await? as u32;
             self.create_database(&database).await?;
@@ -267,6 +268,7 @@ impl CatalogManager {
                 id: self
                     .env
                     .id_gen_manager()
+                    .as_kv()
                     .generate::<{ IdCategory::Schema }>()
                     .await? as u32,
                 database_id: database.id,
@@ -3229,6 +3231,15 @@ impl CatalogManager {
             subscription.schema_id,
             subscription.name.clone(),
         );
+        let log_store_names: Vec<_> = internal_tables
+            .iter()
+            .filter(|a| is_subscription_internal_table(&subscription.name, a.get_name()))
+            .map(|a| a.get_name())
+            .collect();
+        if log_store_names.len() != 1 {
+            bail!("A subscription can only have one log_store_name");
+        }
+        subscription.subscription_internal_table_name = log_store_names.get(0).cloned().cloned();
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         let mut subscriptions = BTreeMapTransaction::new(&mut database_core.subscriptions);
         assert!(
@@ -3858,7 +3869,7 @@ impl CatalogManager {
                     ..Default::default()
                 };
 
-                default_user.insert(self.env.meta_store_checked()).await?;
+                default_user.insert(self.env.meta_store().as_kv()).await?;
                 core.user_info.insert(default_user.id, default_user);
             }
         }

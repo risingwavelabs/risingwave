@@ -461,6 +461,7 @@ impl GlobalStreamManager {
             definition: definition.to_string(),
             ddl_type,
             replace_table: replace_table_command,
+            create_type,
         };
         tracing::debug!("sending Command::CreateStreamingJob");
         if let Err(err) = self.barrier_scheduler.run_command(command).await {
@@ -930,7 +931,7 @@ mod tests {
 
             sleep(Duration::from_secs(1)).await;
 
-            let env = MetaSrvEnv::for_test_opts(Arc::new(MetaOpts::test(enable_recovery))).await;
+            let env = MetaSrvEnv::for_test_opts(MetaOpts::test(enable_recovery)).await;
             let system_params = env.system_params_reader().await;
             let meta_metrics = Arc::new(MetaMetrics::default());
             let cluster_manager =

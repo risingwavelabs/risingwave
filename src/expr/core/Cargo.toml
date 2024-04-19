@@ -16,6 +16,7 @@ ignored = ["workspace-hack", "ctor"]
 normal = ["workspace-hack", "ctor"]
 
 [features]
+embedded-deno-udf = ["arrow-udf-js-deno"]
 embedded-python-udf = ["arrow-udf-python"]
 
 [dependencies]
@@ -23,6 +24,7 @@ anyhow = "1"
 arrow-array = { workspace = true }
 arrow-schema = { workspace = true }
 arrow-udf-js = { workspace = true }
+arrow-udf-js-deno = { workspace = true, optional = true }
 arrow-udf-python = { workspace = true, optional = true }
 arrow-udf-wasm = { workspace = true }
 async-trait = "0.1"
@@ -39,9 +41,10 @@ easy-ext = "1"
 educe = "0.5"
 either = "1"
 enum-as-inner = "0.6"
+futures = "0.3"
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
-itertools = "0.12"
+itertools = { workspace = true }
 linkme = { version = "0.3", features = ["used_linker"] }
 md5 = "0.7"
 moka = { version = "0.12", features = ["sync"] }

@@ -124,7 +124,7 @@ pub type FragmentManagerRef = Arc<FragmentManager>;
 
 impl FragmentManager {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let table_fragments = TableFragments::list(env.meta_store_checked()).await?;
+        let table_fragments = TableFragments::list(env.meta_store().as_kv()).await?;
 
         // `expr_context` of `StreamActor` is introduced in 1.6.0.
         // To ensure compatibility, we fill it for table fragments that were created with older versions.
@@ -133,7 +133,7 @@ impl FragmentManager {
             .map(|tf| (tf.table_id(), tf.fill_expr_context()))
             .collect();
 
-        let table_revision = TableRevision::get(env.meta_store_checked()).await?;
+        let table_revision = TableRevision::get(env.meta_store().as_kv()).await?;
 
         Ok(Self {
             env,
@@ -952,15 +952,24 @@ impl FragmentManager {
         let mut fragment_to_apply = HashMap::new();
 
         for fragment in fragment.fragments.values_mut() {
-            if (fragment.get_fragment_type_mask() & FragmentTypeFlag::StreamScan as u32) != 0 {
+            if (fragment.get_fragment_type_mask() & FragmentTypeFlag::StreamScan as u32) != 0
+                || (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0
+            {
                 let mut actor_to_apply = Vec::new();
                 for actor in &mut fragment.actors {
                     if let Some(node) = actor.nodes.as_mut() {
-                        visit_stream_node(node, |node_body| {
-                            if let NodeBody::StreamScan(ref mut node) = node_body {
+                        visit_stream_node(node, |node_body| match node_body {
+                            NodeBody::StreamScan(ref mut node) => {
                                 node.rate_limit = rate_limit;
                                 actor_to_apply.push(actor.actor_id);
                             }
+                            NodeBody::Source(ref mut node) => {
+                                if let Some(ref mut node_inner) = node.source_inner {
+                                    node_inner.rate_limit = rate_limit;
+                                    actor_to_apply.push(actor.actor_id);
+                                }
+                            }
+                            _ => {}
                         })
                     };
                 }

@@ -103,6 +103,7 @@ INTEGRATION_TEST_MAP = {
     "pinot-sink-json": ["yiming"],
     "presto-trino-json": ["wutao"],
     "client-library-none": ["wutao"],
+    "kafka-cdc-json": ["bohan"],
 }
 
 def get_failed_tests(get_test_status, test_map):
@@ -149,7 +150,7 @@ def format_cmd(messages):
     cmd=f"""
 cat <<- YAML | buildkite-agent pipeline upload
 steps:
-  - label: "Test"
+  - label: "trigger failed test notification"
     command: echo "running failed test notification" && exit 1
     notify:
       - slack:

@@ -204,8 +204,11 @@ impl DdlController {
 
         // create streaming jobs.
         let stream_job_id = streaming_job.id();
-        match streaming_job.create_type() {
-            CreateType::Unspecified | CreateType::Foreground => {
+        match (streaming_job.create_type(), streaming_job) {
+            (CreateType::Unspecified, _)
+            | (CreateType::Foreground, _)
+            // FIXME(kwannoel): Unify background stream's creation path with MV below.
+            | (CreateType::Background, StreamingJob::Sink(_, _)) => {
                 let replace_table_job_info = ctx.replace_table_job_info.as_ref().map(
                     |(streaming_job, ctx, table_fragments)| {
                         (
@@ -241,7 +244,7 @@ impl DdlController {
 
                 Ok(version)
             }
-            CreateType::Background => {
+            (CreateType::Background, _) => {
                 let ctrl = self.clone();
                 let mgr = mgr.clone();
                 let fut = async move {
@@ -400,7 +403,7 @@ impl DdlController {
         // delete vpc endpoints.
         for conn in connections {
             let _ = self
-                .delete_vpc_endpoint_v2(conn.into_inner())
+                .delete_vpc_endpoint_v2(conn.to_protobuf())
                 .await
                 .inspect_err(|err| {
                     tracing::warn!(err = ?err.as_report(), "failed to delete vpc endpoint");

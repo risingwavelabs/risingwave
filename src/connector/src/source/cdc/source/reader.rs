@@ -97,7 +97,6 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
         let (mut tx, mut rx) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
 
         let jvm = JVM.get_or_init()?;
-
         let get_event_stream_request = GetEventStreamRequest {
             source_id,
             source_type: source_type as _,
@@ -158,8 +157,8 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
         }
         tracing::info!(?source_id, "cdc connector started");
 
-        match T::source_type() {
-            CdcSourceType::Mysql | CdcSourceType::Postgres | CdcSourceType::Mongodb => Ok(Self {
+        let instance = match T::source_type() {
+            CdcSourceType::Mysql | CdcSourceType::Postgres | CdcSourceType::Mongodb => Self {
                 source_id: split.split_id() as u64,
                 start_offset: split.start_offset().clone(),
                 server_addr: None,
@@ -169,8 +168,8 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
                 parser_config,
                 source_ctx,
                 rx,
-            }),
-            CdcSourceType::Citus => Ok(Self {
+            },
+            CdcSourceType::Citus => Self {
                 source_id: split.split_id() as u64,
                 start_offset: split.start_offset().clone(),
                 server_addr: citus_server_addr,
@@ -180,11 +179,12 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
                 parser_config,
                 source_ctx,
                 rx,
-            }),
+            },
             CdcSourceType::Unspecified => {
                 unreachable!();
             }
-        }
+        };
+        Ok(instance)
     }
 
     fn into_stream(self) -> BoxChunkSourceStream {

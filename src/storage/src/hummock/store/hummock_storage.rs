@@ -47,6 +47,7 @@ use crate::hummock::event_handler::hummock_event_handler::{BufferTracker, Hummoc
 use crate::hummock::event_handler::{
     HummockEvent, HummockEventHandler, HummockVersionUpdate, ReadOnlyReadVersionMapping,
 };
+use crate::hummock::iterator::ChangeLogIterator;
 use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
 use crate::hummock::observer_manager::HummockObserverNode;
 use crate::hummock::utils::{validate_safe_epoch, wait_for_epoch};
@@ -459,7 +460,7 @@ impl HummockStorage {
 }
 
 impl StateStoreRead for HummockStorage {
-    type ChangeLogIter = PanicStateStoreIter<StateStoreReadLogItem>;
+    type ChangeLogIter = ChangeLogIterator;
     type Iter = HummockStorageIterator;
 
     fn get(
@@ -490,11 +491,16 @@ impl StateStoreRead for HummockStorage {
 
     async fn iter_log(
         &self,
-        _epoch_range: (u64, u64),
-        _key_range: TableKeyRange,
-        _options: ReadLogOptions,
+        epoch_range: (u64, u64),
+        key_range: TableKeyRange,
+        options: ReadLogOptions,
     ) -> StorageResult<Self::ChangeLogIter> {
-        unimplemented!()
+        let version = (**self.pinned_version.load()).clone();
+        let iter = self
+            .hummock_version_reader
+            .iter_log(version, epoch_range, key_range, options)
+            .await?;
+        Ok(iter)
     }
 }
 
@@ -598,8 +604,6 @@ impl StateStore for HummockStorage {
 
 #[cfg(any(test, feature = "test"))]
 use risingwave_hummock_sdk::version::HummockVersion;
-
-use crate::panic_store::PanicStateStoreIter;
 
 #[cfg(any(test, feature = "test"))]
 impl HummockStorage {

@@ -47,7 +47,7 @@ use crate::hummock::compaction::selector::{
 use crate::hummock::error::Error;
 use crate::hummock::test_utils::*;
 use crate::hummock::{CommitEpochInfo, HummockManager, HummockManagerRef};
-use crate::manager::{MetaSrvEnv, WorkerId};
+use crate::manager::{MetaSrvEnv, MetaStoreImpl, WorkerId};
 use crate::model::MetadataModel;
 use crate::rpc::metrics::MetaMetrics;
 
@@ -100,11 +100,9 @@ fn get_compaction_group_object_ids(
 }
 
 async fn list_pinned_snapshot_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPinnedSnapshot> {
-    match env.sql_meta_store() {
-        None => HummockPinnedSnapshot::list(env.meta_store_checked())
-            .await
-            .unwrap(),
-        Some(sql_meta_store) => {
+    match env.meta_store() {
+        MetaStoreImpl::Kv(meta_store) => HummockPinnedSnapshot::list(meta_store).await.unwrap(),
+        MetaStoreImpl::Sql(sql_meta_store) => {
             use risingwave_meta_model_v2::hummock_pinned_snapshot;
             use sea_orm::EntityTrait;
             hummock_pinned_snapshot::Entity::find()
@@ -119,11 +117,9 @@ async fn list_pinned_snapshot_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPi
 }
 
 async fn list_pinned_version_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPinnedVersion> {
-    match env.sql_meta_store() {
-        None => HummockPinnedVersion::list(env.meta_store_checked())
-            .await
-            .unwrap(),
-        Some(sql_meta_store) => {
+    match env.meta_store() {
+        MetaStoreImpl::Kv(meta_store) => HummockPinnedVersion::list(meta_store).await.unwrap(),
+        MetaStoreImpl::Sql(sql_meta_store) => {
             use risingwave_meta_model_v2::hummock_pinned_version;
             use sea_orm::EntityTrait;
             hummock_pinned_version::Entity::find()
@@ -783,7 +779,7 @@ async fn test_print_compact_task() {
     );
 
     let s = compact_task_to_string(&compact_task);
-    assert!(s.contains("Compaction task id: 1, group-id: 2, task type: Dynamic, target level: 0"));
+    assert!(s.contains("Compaction task id: 1, group-id: 2, type: Dynamic, target level: 0"));
 }
 
 #[tokio::test]
@@ -1112,6 +1108,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
 async fn test_extend_objects_to_delete() {
     let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
+    let _pinned_version1 = hummock_manager.pin_version(context_id).await.unwrap();
     let sst_infos = add_test_tables(hummock_manager.as_ref(), context_id).await;
     let max_committed_object_id = sst_infos
         .iter()
@@ -1124,7 +1121,7 @@ async fn test_extend_objects_to_delete() {
         .max()
         .unwrap();
     let orphan_sst_num = 10;
-    let orphan_object_ids = sst_infos
+    let all_object_ids = sst_infos
         .iter()
         .flatten()
         .map(|s| s.get_object_id())
@@ -1133,7 +1130,7 @@ async fn test_extend_objects_to_delete() {
     assert!(hummock_manager.get_objects_to_delete().await.is_empty());
     assert_eq!(
         hummock_manager
-            .extend_objects_to_delete_from_scan(&orphan_object_ids)
+            .extend_objects_to_delete_from_scan(&all_object_ids)
             .await,
         orphan_sst_num as usize
     );
@@ -1148,15 +1145,71 @@ async fn test_extend_objects_to_delete() {
         6
     );
     assert_eq!(
+        hummock_manager.get_objects_to_delete().await.len(),
+        orphan_sst_num as usize
+    );
+    // since version1 is still pinned, the sst removed in compaction can not be reclaimed.
+    assert_eq!(
         hummock_manager
-            .extend_objects_to_delete_from_scan(&orphan_object_ids)
+            .extend_objects_to_delete_from_scan(&all_object_ids)
             .await,
         orphan_sst_num as usize
     );
+    let objects_to_delete = hummock_manager.get_objects_to_delete().await;
+    assert_eq!(objects_to_delete.len(), orphan_sst_num as usize);
+    let pinned_version2: HummockVersion = hummock_manager.pin_version(context_id).await.unwrap();
+    let objects_to_delete = hummock_manager.get_objects_to_delete().await;
     assert_eq!(
-        hummock_manager.get_objects_to_delete().await.len(),
+        objects_to_delete.len(),
+        orphan_sst_num as usize,
+        "{:?}",
+        objects_to_delete
+    );
+    hummock_manager
+        .unpin_version_before(context_id, pinned_version2.id)
+        .await
+        .unwrap();
+    let objects_to_delete = hummock_manager.get_objects_to_delete().await;
+    assert_eq!(
+        objects_to_delete.len(),
+        orphan_sst_num as usize,
+        "{:?}",
+        objects_to_delete
+    );
+    // version1 is unpin, but version2 is pinned, and version2 is the checkpoint version.
+    // stale objects are combined in the checkpoint of version2, so no sst to reclaim
+    assert_eq!(
+        hummock_manager
+            .extend_objects_to_delete_from_scan(&all_object_ids)
+            .await,
+        orphan_sst_num as usize
+    );
+    let objects_to_delete = hummock_manager.get_objects_to_delete().await;
+    assert_eq!(objects_to_delete.len(), orphan_sst_num as usize);
+    let new_epoch = pinned_version2.max_committed_epoch.next_epoch();
+    hummock_manager
+        .commit_epoch(
+            new_epoch,
+            CommitEpochInfo::for_test(Vec::<ExtendedSstableInfo>::new(), Default::default()),
+        )
+        .await
+        .unwrap();
+    let pinned_version3: HummockVersion = hummock_manager.pin_version(context_id).await.unwrap();
+    assert_eq!(new_epoch, pinned_version3.max_committed_epoch);
+    hummock_manager
+        .unpin_version_before(context_id, pinned_version3.id)
+        .await
+        .unwrap();
+    // version3 is the min pinned, and sst removed in compaction can be reclaimed, because they were tracked
+    // in the stale objects of version2 checkpoint
+    assert_eq!(
+        hummock_manager
+            .extend_objects_to_delete_from_scan(&all_object_ids)
+            .await,
         orphan_sst_num as usize + 3
     );
+    let objects_to_delete = hummock_manager.get_objects_to_delete().await;
+    assert_eq!(objects_to_delete.len(), orphan_sst_num as usize + 3);
 }
 
 #[tokio::test]

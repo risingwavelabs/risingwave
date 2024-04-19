@@ -34,7 +34,6 @@ use serde::de::DeserializeOwned;
 
 use super::cdc::DebeziumCdcMeta;
 use super::datagen::DatagenMeta;
-use super::filesystem::FsSplit;
 use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
 use super::kinesis::KinesisMeta;
@@ -46,6 +45,7 @@ use crate::parser::ParserConfig;
 pub(crate) use crate::source::common::CommonSplitReader;
 use crate::source::filesystem::FsPageItem;
 use crate::source::monitor::EnumeratorMetrics;
+use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc};
 use crate::with_options::WithOptions;
 use crate::{
     dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
@@ -138,27 +138,33 @@ pub struct SourceCtrlOpts {
     pub rate_limit: Option<u32>,
 }
 
-impl Default for SourceCtrlOpts {
-    fn default() -> Self {
-        Self {
-            chunk_size: MAX_CHUNK_SIZE,
-            rate_limit: None,
-        }
-    }
-}
+// The options in `SourceCtrlOpts` are so important that we don't want to impl `Default` for it,
+// so that we can prevent any unintentional use of the default value.
+impl !Default for SourceCtrlOpts {}
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SourceEnumeratorContext {
     pub info: SourceEnumeratorInfo,
     pub metrics: Arc<EnumeratorMetrics>,
 }
 
-#[derive(Clone, Debug, Default)]
+impl SourceEnumeratorContext {
+    /// Create a dummy `SourceEnumeratorContext` for testing purpose, or for the situation
+    /// where the real context doesn't matter.
+    pub fn dummy() -> SourceEnumeratorContext {
+        SourceEnumeratorContext {
+            info: SourceEnumeratorInfo { source_id: 0 },
+            metrics: Arc::new(EnumeratorMetrics::default()),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct SourceEnumeratorInfo {
     pub source_id: u32,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SourceContext {
     pub actor_id: u32,
     pub source_id: TableId,
@@ -175,10 +181,10 @@ impl SourceContext {
         actor_id: u32,
         source_id: TableId,
         fragment_id: u32,
+        source_name: String,
         metrics: Arc<SourceMetrics>,
         source_ctrl_opts: SourceCtrlOpts,
         connector_props: ConnectorProperties,
-        source_name: String,
     ) -> Self {
         Self {
             actor_id,
@@ -189,6 +195,23 @@ impl SourceContext {
             source_ctrl_opts,
             connector_props,
         }
+    }
+
+    /// Create a dummy `SourceContext` for testing purpose, or for the situation
+    /// where the real context doesn't matter.
+    pub fn dummy() -> Self {
+        Self::new(
+            0,
+            TableId::new(0),
+            0,
+            "dummy".to_string(),
+            Arc::new(SourceMetrics::default()),
+            SourceCtrlOpts {
+                chunk_size: MAX_CHUNK_SIZE,
+                rate_limit: None,
+            },
+            ConnectorProperties::default(),
+        )
     }
 }
 
@@ -416,24 +439,6 @@ impl TryFrom<&ConnectorSplit> for SplitImpl {
     }
 }
 
-// for the `FsSourceExecutor`
-impl SplitImpl {
-    #[allow(clippy::result_unit_err)]
-    pub fn into_fs(self) -> Result<FsSplit, ()> {
-        match self {
-            Self::S3(split) => Ok(split),
-            _ => Err(()),
-        }
-    }
-
-    pub fn as_fs(&self) -> Option<&FsSplit> {
-        match self {
-            Self::S3(split) => Some(split),
-            _ => None,
-        }
-    }
-}
-
 impl SplitImpl {
     fn restore_from_json_inner(split_type: &str, value: JsonbVal) -> Result<Self> {
         match_source_name_str!(
@@ -442,6 +447,24 @@ impl SplitImpl {
             <PropType as SourceProperties>::Split::restore_from_json(value).map(Into::into),
             |other| bail!("connector '{}' is not supported", other)
         )
+    }
+
+    pub fn is_cdc_split(&self) -> bool {
+        matches!(
+            self,
+            MysqlCdc(_) | PostgresCdc(_) | MongodbCdc(_) | CitusCdc(_)
+        )
+    }
+
+    /// Get the current split offset.
+    pub fn get_cdc_split_offset(&self) -> String {
+        match self {
+            MysqlCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            PostgresCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            MongodbCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            CitusCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            _ => unreachable!("get_cdc_split_offset() is only for cdc split"),
+        }
     }
 }
 
@@ -469,12 +492,12 @@ impl SplitMetaData for SplitImpl {
         Self::restore_from_json_inner(&split_type, inner_value.into())
     }
 
-    fn update_with_offset(&mut self, start_offset: String) -> Result<()> {
+    fn update_offset(&mut self, last_seen_offset: String) -> Result<()> {
         dispatch_split_impl!(
             self,
             inner,
             IgnoreType,
-            inner.update_with_offset(start_offset)
+            inner.update_offset(last_seen_offset)
         )
     }
 }
@@ -486,9 +509,9 @@ impl SplitImpl {
         })
     }
 
-    pub fn update_in_place(&mut self, start_offset: String) -> Result<()> {
+    pub fn update_in_place(&mut self, last_seen_offset: String) -> Result<()> {
         dispatch_split_impl!(self, inner, IgnoreType, {
-            inner.update_with_offset(start_offset)?
+            inner.update_offset(last_seen_offset)?
         });
         Ok(())
     }
@@ -557,9 +580,10 @@ pub trait SplitMetaData: Sized {
         Self::restore_from_json(JsonbVal::value_deserialize(bytes).unwrap())
     }
 
+    /// Encode the whole split metadata to a JSON object
     fn encode_to_json(&self) -> JsonbVal;
     fn restore_from_json(value: JsonbVal) -> Result<Self>;
-    fn update_with_offset(&mut self, start_offset: String) -> crate::error::ConnectorResult<()>;
+    fn update_offset(&mut self, last_seen_offset: String) -> crate::error::ConnectorResult<()>;
 }
 
 /// [`ConnectorState`] maintains the consuming splits' info. In specific split readers,

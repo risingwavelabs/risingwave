@@ -30,7 +30,7 @@ DECLARE
     test_cursor CURSOR FOR
         SELECT * FROM test where a > 2 ORDER BY a;
 
-statement error cursor "test_cursor" already exists
+statement error
 DECLARE
     test_cursor CURSOR FOR
         SELECT * FROM test where a > 2;
@@ -40,7 +40,7 @@ DECLARE
     test_cursor CURSOR FOR
         SELECT * FROM test_non_existent where a > 2;
 
-statement error cursor "test_cursor_non_existent" does not exist
+statement error
 FETCH NEXT from test_cursor_non_existent;
 
 query II
@@ -57,13 +57,13 @@ query II
 FETCH NEXT from test_cursor;
 ----
 
-statement error cursor "test_cursor_non_existent" does not exist
+statement error
 CLOSE test_cursor_non_existent;
 
 statement ok
 CLOSE test_cursor;
 
-statement error cursor "test_cursor" does not exist
+statement error
 FETCH NEXT from test_cursor;
 
 statement ok

@@ -48,7 +48,7 @@ use risingwave_common::config::{
     load_config, BatchConfig, MetaConfig, MetricLevel, StreamingConfig,
 };
 use risingwave_common::memory::MemoryContext;
-use risingwave_common::session_config::{ConfigMap, ConfigReporter, VisibilityMode};
+use risingwave_common::session_config::{ConfigReporter, SessionConfig, VisibilityMode};
 use risingwave_common::system_param::local_manager::{
     LocalSystemParamsManager, LocalSystemParamsManagerRef,
 };
@@ -78,10 +78,12 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::info;
 
+use self::cursor_manager::CursorManager;
 use crate::binder::{Binder, BoundStatement, ResolveQualifiedNameError};
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::root_catalog::Catalog;
+use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::{
     check_schema_writable, CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId,
 };
@@ -112,7 +114,7 @@ use crate::user::UserId;
 use crate::{FrontendOpts, PgResponseStream};
 
 pub(crate) mod current;
-pub(crate) mod cursor;
+pub(crate) mod cursor_manager;
 pub(crate) mod transaction;
 
 /// The global environment for the frontend server.
@@ -129,6 +131,7 @@ pub struct FrontendEnv {
     query_manager: QueryManager,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     system_params_manager: LocalSystemParamsManagerRef,
+    session_params: Arc<RwLock<SessionConfig>>,
 
     server_addr: HostAddr,
     client_pool: ComputeClientPoolRef,
@@ -209,6 +212,7 @@ impl FrontendEnv {
             query_manager,
             hummock_snapshot_manager,
             system_params_manager,
+            session_params: Default::default(),
             server_addr,
             client_pool,
             sessions_map: Arc::new(RwLock::new(HashMap::new())),
@@ -286,7 +290,7 @@ impl FrontendEnv {
             Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
-            compute_client_pool,
+            compute_client_pool.clone(),
             catalog_reader.clone(),
             Arc::new(GLOBAL_DISTRIBUTED_QUERY_METRICS.clone()),
             batch_config.distributed_query_limit,
@@ -303,6 +307,9 @@ impl FrontendEnv {
 
         let system_params_manager =
             Arc::new(LocalSystemParamsManager::new(system_params_reader.clone()));
+
+        // This `session_params` should be initialized during the initial notification in `observer_manager`
+        let session_params = Arc::new(RwLock::new(SessionConfig::default()));
         let frontend_observer_node = FrontendObserverNode::new(
             worker_node_manager.clone(),
             catalog,
@@ -311,6 +318,8 @@ impl FrontendEnv {
             user_info_updated_tx,
             hummock_snapshot_manager.clone(),
             system_params_manager.clone(),
+            session_params.clone(),
+            compute_client_pool,
         );
         let observer_manager =
             ObserverManager::new_with_meta_client(meta_client.clone(), frontend_observer_node)
@@ -410,6 +419,7 @@ impl FrontendEnv {
                 query_manager,
                 hummock_snapshot_manager,
                 system_params_manager,
+                session_params,
                 server_addr: frontend_address,
                 client_pool,
                 frontend_metrics,
@@ -479,6 +489,10 @@ impl FrontendEnv {
 
     pub fn system_params_manager(&self) -> &LocalSystemParamsManagerRef {
         &self.system_params_manager
+    }
+
+    pub fn session_params_snapshot(&self) -> SessionConfig {
+        self.session_params.read_recursive().clone()
     }
 
     pub fn server_address(&self) -> &HostAddr {
@@ -570,7 +584,7 @@ pub struct SessionImpl {
     /// Used for user authentication.
     user_authenticator: UserAuthenticator,
     /// Stores the value of configurations.
-    config_map: Arc<RwLock<ConfigMap>>,
+    config_map: Arc<RwLock<SessionConfig>>,
     /// buffer the Notices to users,
     notices: RwLock<Vec<String>>,
 
@@ -596,8 +610,7 @@ pub struct SessionImpl {
     /// Last idle instant
     last_idle_instant: Arc<Mutex<Option<Instant>>>,
 
-    /// The cursors declared in the transaction.
-    cursors: tokio::sync::Mutex<HashMap<ObjectName, cursor::Cursor>>,
+    cursor_manager: Arc<CursorManager>,
 }
 
 #[derive(Error, Debug)]
@@ -624,12 +637,13 @@ impl SessionImpl {
         user_authenticator: UserAuthenticator,
         id: SessionId,
         peer_addr: AddressRef,
+        session_config: SessionConfig,
     ) -> Self {
         Self {
             env,
             auth_context,
             user_authenticator,
-            config_map: Default::default(),
+            config_map: Arc::new(RwLock::new(session_config)),
             id,
             peer_addr,
             txn: Default::default(),
@@ -637,7 +651,7 @@ impl SessionImpl {
             notices: Default::default(),
             exec_context: Mutex::new(None),
             last_idle_instant: Default::default(),
-            cursors: Default::default(),
+            cursor_manager: Arc::new(CursorManager::default()),
         }
     }
 
@@ -664,7 +678,7 @@ impl SessionImpl {
             ))
             .into(),
             last_idle_instant: Default::default(),
-            cursors: Default::default(),
+            cursor_manager: Arc::new(CursorManager::default()),
         }
     }
 
@@ -688,15 +702,15 @@ impl SessionImpl {
         self.auth_context.user_id
     }
 
-    pub fn shared_config(&self) -> Arc<RwLock<ConfigMap>> {
+    pub fn shared_config(&self) -> Arc<RwLock<SessionConfig>> {
         Arc::clone(&self.config_map)
     }
 
-    pub fn config(&self) -> RwLockReadGuard<'_, ConfigMap> {
+    pub fn config(&self) -> RwLockReadGuard<'_, SessionConfig> {
         self.config_map.read()
     }
 
-    pub fn set_config(&self, key: &str, value: String) -> Result<()> {
+    pub fn set_config(&self, key: &str, value: String) -> Result<String> {
         self.config_map
             .write()
             .set(key, value, &mut ())
@@ -708,7 +722,7 @@ impl SessionImpl {
         key: &str,
         value: Option<String>,
         mut reporter: impl ConfigReporter,
-    ) -> Result<()> {
+    ) -> Result<String> {
         if let Some(value) = value {
             self.config_map
                 .write()
@@ -732,6 +746,10 @@ impl SessionImpl {
             .as_ref()
             .and_then(|weak| weak.upgrade())
             .map(|context| context.running_sql.clone())
+    }
+
+    pub fn get_cursor_manager(&self) -> Arc<CursorManager> {
+        self.cursor_manager.clone()
     }
 
     pub fn peer_addr(&self) -> &Address {
@@ -859,6 +877,32 @@ impl SessionImpl {
                 )))
             })?;
         Ok(connection.clone())
+    }
+
+    pub fn get_subscription_by_name(
+        &self,
+        schema_name: Option<String>,
+        subscription_name: &str,
+    ) -> Result<Arc<SubscriptionCatalog>> {
+        let db_name = self.database();
+        let search_path = self.config().search_path();
+        let user_name = &self.auth_context().user_name;
+
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        let schema = match schema_name {
+            Some(schema_name) => catalog_reader.get_schema_by_name(db_name, &schema_name)?,
+            None => catalog_reader.first_valid_schema(db_name, &search_path, user_name)?,
+        };
+        let schema = catalog_reader.get_schema_by_name(db_name, schema.name().as_str())?;
+        let subscription = schema
+            .get_subscription_by_name(subscription_name)
+            .ok_or_else(|| {
+                RwError::from(ErrorCode::ItemNotFound(format!(
+                    "subscription {} not found",
+                    subscription_name
+                )))
+            })?;
+        Ok(subscription.clone())
     }
 
     pub fn clear_cancel_query_flag(&self) {
@@ -1020,6 +1064,9 @@ impl SessionManager for SessionManagerImpl {
             let secret_key = self.number.fetch_add(1, Ordering::Relaxed);
             // Use a trivial strategy: process_id and secret_key are equal.
             let id = (secret_key, secret_key);
+            // Read session params snapshot from frontend env.
+            let session_config = self.env.session_params_snapshot();
+
             let session_impl: Arc<SessionImpl> = SessionImpl::new(
                 self.env.clone(),
                 Arc::new(AuthContext::new(
@@ -1030,6 +1077,7 @@ impl SessionManager for SessionManagerImpl {
                 user_authenticator,
                 id,
                 peer_addr,
+                session_config,
             )
             .into();
             self.insert_session(session_impl.clone());
@@ -1192,7 +1240,7 @@ impl Session for SessionImpl {
         }
     }
 
-    fn set_config(&self, key: &str, value: String) -> std::result::Result<(), BoxedError> {
+    fn set_config(&self, key: &str, value: String) -> std::result::Result<String, BoxedError> {
         Self::set_config(self, key, value).map_err(Into::into)
     }
 
