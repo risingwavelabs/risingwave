@@ -12,25 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Formatter;
-use std::sync::Arc;
-
 use anyhow::anyhow;
 use either::Either;
-use futures::{StreamExt, TryStreamExt};
+use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::Op;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::SourceCtrlOpts;
-use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use crate::executor::error::StreamExecutorError;
-use crate::executor::monitor::StreamingMetrics;
+use super::{barrier_to_message_stream, StreamSourceCore};
+use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::executor::*;
 
 const CHUNK_SIZE: usize = 1024;
 

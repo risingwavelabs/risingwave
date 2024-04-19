@@ -12,21 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::{Debug, Formatter};
-
-use futures::StreamExt;
-use futures_async_stream::try_stream;
 use multimap::MultiMap;
-use risingwave_common::array::StreamChunk;
-use risingwave_common::row::{Row, RowExt};
-use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
+use risingwave_common::row::RowExt;
+use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::NonStrictExpression;
 
-use super::{
-    ActorContextRef, BoxedMessageStream, Execute, Executor, Message, StreamExecutorError,
-    StreamExecutorResult, Watermark,
-};
+use crate::executor::prelude::*;
 
 /// `ProjectExecutor` project data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a new data chunk. And then, `ProjectExecutor` will insert, delete

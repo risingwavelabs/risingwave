@@ -12,37 +12,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Formatter;
+use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use either::Either;
-use futures::{StreamExt, TryStreamExt};
-use futures_async_stream::try_stream;
+use futures::TryStreamExt;
 use governor::clock::MonotonicClock;
 use governor::{Quota, RateLimiter};
+use itertools::Itertools;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::cdc::jni_source;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
-    BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitMetaData,
+    BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
+    SplitMetaData,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
-use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
-use crate::executor::monitor::StreamingMetrics;
+use crate::executor::prelude::*;
+use crate::executor::source::{
+    barrier_to_message_stream, get_split_offset_col_idx, get_split_offset_mapping_from_chunk,
+    prune_additional_cols,
+};
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::executor::*;
+use crate::executor::{AddMutation, UpdateMutation};
 
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.

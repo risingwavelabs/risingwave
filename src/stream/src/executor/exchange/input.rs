@@ -29,7 +29,7 @@ use super::permit::Receiver;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::*;
+use crate::executor::prelude::*;
 use crate::task::{
     FragmentId, LocalBarrierManager, SharedContext, UpDownActorIds, UpDownFragmentIds,
 };
