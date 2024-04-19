@@ -315,6 +315,10 @@ impl ToBatch for LogicalSource {
             !self.core.is_kafka_connector(),
             "LogicalSource with a kafka property should be converted to LogicalKafkaScan"
         );
+        assert!(
+            !self.core.is_iceberg_connector(),
+            "LogicalSource with a iceberg property should be converted to LogicalIcebergScan"
+        );
         let mut plan: PlanRef = BatchSource::new(self.core.clone()).into();
 
         if let Some(exprs) = &self.output_exprs {
