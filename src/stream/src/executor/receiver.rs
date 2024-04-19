@@ -76,7 +76,6 @@ impl ReceiverExecutor {
     pub fn for_test(input: super::exchange::permit::Receiver) -> Self {
         use super::exchange::input::LocalInput;
         use crate::executor::exchange::input::Input;
-        use crate::executor::ActorContext;
 
         Self::new(
             ActorContext::for_test(114),

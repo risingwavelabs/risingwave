@@ -774,6 +774,7 @@ impl<S: StateStore> WaitEpochWorker<S> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::time::Duration;
 
     use futures::StreamExt;
@@ -793,6 +794,7 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::executor::source::{default_source_internal_table, SourceStateTableHandler};
     use crate::executor::ActorContext;
 
     const MOCK_SOURCE_NAME: &str = "mock_source";
