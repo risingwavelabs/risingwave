@@ -24,7 +24,9 @@ use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_hummock_sdk::key::prefixed_range_with_vnode;
-use risingwave_hummock_sdk::{HummockReadEpoch, HummockSstableObjectId, LocalSstableInfo};
+use risingwave_hummock_sdk::{
+    HummockReadEpoch, HummockSstableObjectId, LocalSstableInfo, SyncResult,
+};
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
@@ -372,12 +374,8 @@ async fn test_basic_inner(
         .unwrap();
     let len = count_stream(iter).await;
     assert_eq!(len, 4);
-    let ssts = hummock_storage
-        .seal_and_sync_epoch(epoch1)
-        .await
-        .unwrap()
-        .uncommitted_ssts;
-    meta_client.commit_epoch(epoch1, ssts).await.unwrap();
+    let res = hummock_storage.seal_and_sync_epoch(epoch1).await.unwrap();
+    meta_client.commit_epoch(epoch1, res).await.unwrap();
     hummock_storage
         .try_wait_epoch(HummockReadEpoch::Committed(epoch1))
         .await
@@ -1062,12 +1060,8 @@ async fn test_delete_get_inner(
         )
         .await
         .unwrap();
-    let ssts = hummock_storage
-        .seal_and_sync_epoch(epoch1)
-        .await
-        .unwrap()
-        .uncommitted_ssts;
-    meta_client.commit_epoch(epoch1, ssts).await.unwrap();
+    let res = hummock_storage.seal_and_sync_epoch(epoch1).await.unwrap();
+    meta_client.commit_epoch(epoch1, res).await.unwrap();
     let epoch2 = epoch1.next_epoch();
 
     local.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
@@ -1086,12 +1080,8 @@ async fn test_delete_get_inner(
         .await
         .unwrap();
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
-    let ssts = hummock_storage
-        .seal_and_sync_epoch(epoch2)
-        .await
-        .unwrap()
-        .uncommitted_ssts;
-    meta_client.commit_epoch(epoch2, ssts).await.unwrap();
+    let res = hummock_storage.seal_and_sync_epoch(epoch2).await.unwrap();
+    meta_client.commit_epoch(epoch2, res).await.unwrap();
     hummock_storage
         .try_wait_epoch(HummockReadEpoch::Committed(epoch2))
         .await
@@ -1242,12 +1232,12 @@ async fn test_multiple_epoch_sync_inner(
     test_get().await;
 
     meta_client
-        .commit_epoch(epoch2, sync_result2.uncommitted_ssts)
+        .commit_epoch(epoch2, sync_result2)
         .await
         .unwrap();
 
     meta_client
-        .commit_epoch(epoch3, sync_result3.uncommitted_ssts)
+        .commit_epoch(epoch3, sync_result3)
         .await
         .unwrap();
     hummock_storage
@@ -1340,7 +1330,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
         min_object_id_epoch1,
     );
     meta_client
-        .commit_epoch(epoch1, sync_result1.uncommitted_ssts)
+        .commit_epoch(epoch1, sync_result1)
         .await
         .unwrap();
     hummock_storage
