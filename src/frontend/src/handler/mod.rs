@@ -44,6 +44,7 @@ mod alter_rename;
 mod alter_set_schema;
 mod alter_source_column;
 mod alter_source_with_sr;
+mod alter_streaming_rate_limit;
 mod alter_system;
 mod alter_table_column;
 mod alter_table_with_sr;
@@ -755,12 +756,13 @@ pub async fn handle(
             name,
             operation: AlterViewOperation::SetStreamingRateLimit { rate_limit },
         } if materialized => {
-            todo!()
-            // alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
-            //     handler_args,
-            //     name,
-            //     rate_limit,
-            // )
+            alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                handler_args,
+                TableType::MaterializedView,
+                name,
+                rate_limit,
+            )
+            .await
         }
         Statement::AlterSink {
             name,
