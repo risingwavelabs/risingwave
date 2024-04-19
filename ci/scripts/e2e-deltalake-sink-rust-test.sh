@@ -63,7 +63,7 @@ spark-3.3.1-bin-hadoop3/bin/spark-sql --packages $DEPENDENCIES \
     --conf 'spark.hadoop.fs.s3a.secret.key=hummockadmin' \
     --conf 'spark.hadoop.fs.s3a.endpoint=http://localhost:9301' \
     --conf 'spark.hadoop.fs.s3a.path.style.access=true' \
-    --S --e 'INSERT OVERWRITE DIRECTORY "./spark-output" USING CSV SELECT * FROM delta.`s3a://deltalake/deltalake-test`;'
+    --S --e 'INSERT OVERWRITE DIRECTORY "./spark-output" USING CSV SELECT v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,CAST(v11 as varchar(12)) FROM delta.`s3a://deltalake/deltalake-test`;'
 
 # check sink destination using shell
 if cat ./spark-output/*.csv | sort | awk -F "," '{

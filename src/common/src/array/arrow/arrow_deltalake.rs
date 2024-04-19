@@ -81,11 +81,7 @@ impl arrow_impl::ToArrowArrayWithTypeConvert for DeltaLakeConvert {
         // Convert Decimal to i128:
         let values: Vec<Option<i128>> = array
             .iter()
-            .map(|e| {
-                e.and_then(|e| {
-                    DeltaLakeConvert::decimal_to_i128(e, precision as u8, max_scale as i8)
-                })
-            })
+            .map(|e| e.and_then(|e| DeltaLakeConvert::decimal_to_i128(e, precision, max_scale)))
             .collect();
 
         let array = arrow_array::Decimal128Array::from(values)
@@ -177,8 +173,7 @@ impl arrow_impl::ToArrowArrayWithTypeConvert for DeltaLakeConvert {
                         .with_data_type(DataType::Decimal128(precision, max_scale)),
                     |b, v| {
                         let v = v.and_then(|v| {
-                            let val = DeltaLakeConvert::decimal_to_i128(v, precision, max_scale);
-                            val
+                            DeltaLakeConvert::decimal_to_i128(v, precision, max_scale)
                         });
                         b.append_option(v);
                     },
