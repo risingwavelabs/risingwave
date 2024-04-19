@@ -111,3 +111,51 @@ pub fn prune_additional_cols(
             .collect_vec(),
     )
 }
+
+#[try_stream(ok = StreamChunk, error = ConnectorError)]
+pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Option<u32>) {
+    if let Some(limit) = rate_limit_rps
+        && limit == 0
+    {
+        // block the stream until the rate limit is reset
+        let future = futures::future::pending::<()>();
+        future.await;
+    }
+    let get_rate_limiter = |rate_limit: u32| {
+        let quota = Quota::per_second(NonZeroU32::new(rate_limit).unwrap());
+        let clock = MonotonicClock;
+        RateLimiter::direct_with_clock(quota, &clock)
+    };
+    let limiter = rate_limit_rps.map(get_rate_limiter);
+    if rate_limit_rps.is_some() {
+        tracing::info!(rate_limit = ?rate_limit_rps, "applied rate limit");
+    }
+    #[for_await]
+    for batch in stream {
+        let chunk: StreamChunk = batch?;
+        let chunk_cardinality = chunk.cardinality();
+        let Some(n) = NonZeroU32::new(chunk_cardinality as u32) else {
+            // pass empty chunk
+            yield chunk;
+            continue;
+        };
+        if let Some(limiter) = &limiter {
+            let limit = NonZeroU32::new(rate_limit_rps.unwrap()).unwrap();
+            if n <= limit {
+                // `InsufficientCapacity` should never happen because we have done the check
+                limiter.until_n_ready(n).await.unwrap();
+                yield chunk;
+            } else {
+                // Cut the chunk into smaller chunks
+                for chunk in chunk.split(limit.get() as usize) {
+                    let n = NonZeroU32::new(chunk.cardinality() as u32).unwrap();
+                    // Ditto.
+                    limiter.until_n_ready(n).await.unwrap();
+                    yield chunk;
+                }
+            }
+        } else {
+            yield chunk;
+        }
+    }
+}
