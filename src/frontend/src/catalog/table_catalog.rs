@@ -418,7 +418,7 @@ impl TableCatalog {
             initialized_at_epoch: self.initialized_at_epoch.map(|epoch| epoch.0),
             created_at_epoch: self.created_at_epoch.map(|epoch| epoch.0),
             cleaned_by_watermark: self.cleaned_by_watermark,
-            stream_job_status: PbStreamJobStatus::Creating.into(),
+            stream_job_status: self.stream_job_status.to_proto().into(),
             create_type: self.create_type.to_proto().into(),
             description: self.description.clone(),
             incoming_sinks: self.incoming_sinks.clone(),
