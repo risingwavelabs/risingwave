@@ -17,7 +17,8 @@ use std::collections::{HashMap, HashSet};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ConflictBehavior, CreateType, Field, Schema, TableDesc, TableId, TableVersionId,
+    ColumnCatalog, ConflictBehavior, CreateType, Field, Schema, StreamJobStatus, TableDesc,
+    TableId, TableVersionId,
 };
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -481,6 +482,9 @@ impl From<PbTable> for TableCatalog {
         let id = tb.id;
         let tb_conflict_behavior = tb.handle_pk_conflict_behavior();
         let table_type = tb.get_table_type().unwrap();
+        let stream_job_status = tb
+            .get_stream_job_status()
+            .unwrap_or(PbStreamJobStatus::Created);
         let create_type = tb.get_create_type().unwrap_or(PbCreateType::Foreground);
         let associated_source_id = tb.optional_associated_source_id.map(|id| match id {
             OptionalAssociatedSourceId::AssociatedSourceId(id) => id,
@@ -542,6 +546,7 @@ impl From<PbTable> for TableCatalog {
             created_at_epoch: tb.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: tb.initialized_at_epoch.map(Epoch::from),
             cleaned_by_watermark: tb.cleaned_by_watermark,
+            // stream_job_status: StreamJobStatus::from_proto(stream_job_status),
             create_type: CreateType::from_proto(create_type),
             description: tb.description,
             incoming_sinks: tb.incoming_sinks.clone(),
