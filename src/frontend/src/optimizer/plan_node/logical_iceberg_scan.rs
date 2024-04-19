@@ -91,7 +91,7 @@ impl PredicatePushdown for LogicalIcebergScan {
         _ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
         // No pushdown.
-        LogicalFilter::create(self.clone().into(), predicate).into()
+        LogicalFilter::create(self.clone().into(), predicate)
     }
 }
 
