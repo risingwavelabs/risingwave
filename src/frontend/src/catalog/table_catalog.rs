@@ -155,6 +155,10 @@ pub struct TableCatalog {
     /// Indicate whether to create table in background or foreground.
     pub create_type: CreateType,
 
+    /// Indicate the stream job status, whether it is created or creating.
+    /// If it is creating, we should hide it.
+    pub stream_job_status: StreamJobStatus,
+
     /// description of table, set by `comment on`.
     pub description: Option<String>,
 
@@ -546,8 +550,8 @@ impl From<PbTable> for TableCatalog {
             created_at_epoch: tb.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: tb.initialized_at_epoch.map(Epoch::from),
             cleaned_by_watermark: tb.cleaned_by_watermark,
-            // stream_job_status: StreamJobStatus::from_proto(stream_job_status),
             create_type: CreateType::from_proto(create_type),
+            stream_job_status: StreamJobStatus::from_proto(stream_job_status),
             description: tb.description,
             incoming_sinks: tb.incoming_sinks.clone(),
             created_at_cluster_version: tb.created_at_cluster_version.clone(),
