@@ -265,9 +265,8 @@ impl SnowflakeSinkWriter {
         let (uploader, _) = match self.streaming_uploader.as_mut() {
             Some(s) => s,
             None => {
-                assert_eq!(
+                assert!(
                     self.streaming_uploader.is_none(),
-                    true,
                     "expect `streaming_uploader` to be None"
                 );
                 let uploader = self.new_streaming_uploader().await?;
