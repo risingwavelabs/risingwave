@@ -12,14 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Debug;
+use risingwave_common::array::{Array, I64Array};
 
-use futures::StreamExt;
-use futures_async_stream::try_stream;
-use risingwave_common::array::{Array, I64Array, StreamChunk};
-
-use super::error::StreamExecutorError;
-use super::{BoxedMessageStream, Execute, Executor, Message};
+use crate::executor::prelude::*;
 
 pub struct ExpandExecutor {
     input: Executor,

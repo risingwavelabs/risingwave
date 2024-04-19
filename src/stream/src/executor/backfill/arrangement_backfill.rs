@@ -12,24 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::pin::pin;
-use std::sync::Arc;
+use std::collections::HashMap;
 
 use either::Either;
 use futures::stream::{select_all, select_with_strategy};
-use futures::{stream, StreamExt, TryStreamExt};
-use futures_async_stream::try_stream;
+use futures::{stream, TryStreamExt};
 use itertools::Itertools;
-use risingwave_common::array::{DataChunk, Op, StreamChunk};
+use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::bail;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
-use risingwave_common::row::OwnedRow;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::StateStore;
 
-use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
+use crate::common::table::state_table::ReplicatedStateTable;
 #[cfg(debug_assertions)]
 use crate::executor::backfill::utils::METADATA_STATE_LEN;
 use crate::executor::backfill::utils::{
@@ -37,12 +33,8 @@ use crate::executor::backfill::utils::{
     mapping_message, mark_chunk_ref_by_vnode, owned_row_iter, persist_state_per_vnode,
     update_pos_by_vnode, BackfillProgressPerVnode, BackfillRateLimiter, BackfillState,
 };
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{
-    expect_first_barrier, Barrier, BoxedMessageStream, Execute, Executor, HashMap, Message,
-    StreamExecutorError, StreamExecutorResult,
-};
-use crate::task::{ActorId, CreateMviewProgress};
+use crate::executor::prelude::*;
+use crate::task::CreateMviewProgress;
 
 type Builders = HashMap<VirtualNode, DataChunkBuilder>;
 

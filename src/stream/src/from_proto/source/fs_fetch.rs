@@ -24,9 +24,8 @@ use risingwave_pb::stream_plan::StreamFsFetchNode;
 use risingwave_storage::StateStore;
 
 use crate::error::StreamResult;
-use crate::executor::{
-    Execute, Executor, FsFetchExecutor, SourceStateTableHandler, StreamSourceCore,
-};
+use crate::executor::source::{FsFetchExecutor, SourceStateTableHandler, StreamSourceCore};
+use crate::executor::{Execute, Executor};
 use crate::from_proto::ExecutorBuilder;
 use crate::task::ExecutorParams;
 

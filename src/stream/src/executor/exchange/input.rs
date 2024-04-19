@@ -29,13 +29,13 @@ use super::permit::Receiver;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::*;
+use crate::executor::prelude::*;
 use crate::task::{
     FragmentId, LocalBarrierManager, SharedContext, UpDownActorIds, UpDownFragmentIds,
 };
 
-/// `Input` provides an interface for [`MergeExecutor`] and [`ReceiverExecutor`] to receive data
-/// from upstream actors.
+/// `Input` provides an interface for [`MergeExecutor`](crate::executor::MergeExecutor) and
+/// [`ReceiverExecutor`](crate::executor::ReceiverExecutor) to receive data from upstream actors.
 pub trait Input: MessageStream {
     /// The upstream actor id.
     fn actor_id(&self) -> ActorId;

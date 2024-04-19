@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod prelude;
+
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -137,7 +139,6 @@ use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 pub use simple_agg::SimpleAggExecutor;
 pub use sink::SinkExecutor;
 pub use sort::*;
-pub use source::*;
 pub use stateless_simple_agg::StatelessSimpleAggExecutor;
 pub use subscription::SubscriptionExecutor;
 pub use temporal_join::*;
