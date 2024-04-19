@@ -25,7 +25,9 @@ use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
-use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
+use risingwave_connector::sink::catalog::{
+    SinkEncode, SinkFormat, SinkFormatDesc, SinkId, SinkType,
+};
 use risingwave_connector::sink::iceberg::ICEBERG_SINK;
 use risingwave_connector::sink::trivial::TABLE_SINK;
 use risingwave_connector::sink::{
@@ -315,6 +317,56 @@ impl StreamSink {
         let (pk, _) = derive_pk(input.clone(), user_order_by, &columns);
         let mut downstream_pk =
             Self::parse_downstream_pk(&columns, properties.get(DOWNSTREAM_PK_KEY))?;
+
+        {
+            // check for key encode TEXT
+            // if key encode is TEXT, we require the key to be a single column
+            // and the column should be of these types: varchar, bool, small int, int, big int
+            if let Some(format_desc) = &format_desc
+                && let Some(key_encode) = &format_desc.key_encode
+            {
+                if key_encode != &SinkEncode::Text {
+                    return Err(ErrorCode::SinkError(Box::new(Error::new(
+                        ErrorKind::InvalidInput,
+                        format!(
+                            "The key encode {:?} is not supported, only TEXT is supported.",
+                            &key_encode
+                        ),
+                    )))
+                    .into());
+                }
+                if downstream_pk.len() != 1 {
+                    return Err(ErrorCode::SinkError(Box::new(Error::new(
+                        ErrorKind::InvalidInput,
+                        format!(
+                            "The key encode is TEXT, but the primary key has {} columns. The key encode TEXT requires the primary key to be a single column.",
+                            downstream_pk.len()
+                        ),
+                    ))).into());
+                }
+            }
+            let key_col_catalog = columns.get(downstream_pk[0]).unwrap();
+            match &key_col_catalog.column_desc.data_type {
+                DataType::Varchar
+                | DataType::Boolean
+                | DataType::Int16
+                | DataType::Int32
+                | DataType::Int64 => {}
+                _ => {
+                    // why we don't allow float as text for key encode: https://github.com/risingwavelabs/risingwave/issues/6412
+                    return Err(ErrorCode::SinkError(Box::new(Error::new(
+                        ErrorKind::InvalidInput,
+                        format!(
+                            "The key encode is TEXT, but the primary key column {} has type {}. The key encode TEXT requires the primary key column to be of type varchar, bool, small int, int, or big int.\n
+                            Please concat the columns into a single column with the type varchar.",
+                            key_col_catalog.column_desc.name,
+                            key_col_catalog.column_desc.data_type
+                        ),
+                    ))).into());
+                }
+            }
+        }
+
         let mut extra_partition_col_idx = None;
         let required_dist = match input.distribution() {
             Distribution::Single => RequiredDist::single(),

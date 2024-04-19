@@ -153,7 +153,7 @@ pub enum Encode {
     Json,     // Keyword::JSON
     Bytes,    // Keyword::BYTES
     None,     // Keyword::None
-    TEXT,     // Keyword::TEXT
+    Text,     // Keyword::TEXT
     Native,
     Template,
 }
@@ -173,7 +173,7 @@ impl fmt::Display for Encode {
                 Encode::Native => "NATIVE",
                 Encode::Template => "TEMPLATE",
                 Encode::None => "NONE",
-                Encode::TEXT => "TEXT",
+                Encode::Text => "TEXT",
             }
         )
     }
@@ -183,7 +183,7 @@ impl Encode {
     pub fn from_keyword(s: &str) -> Result<Self, ParserError> {
         Ok(match s {
             "AVRO" => Encode::Avro,
-            "TEXT" => Encode::TEXT,
+            "TEXT" => Encode::Text,
             "BYTES" => Encode::Bytes,
             "CSV" => Encode::Csv,
             "PROTOBUF" => Encode::Protobuf,

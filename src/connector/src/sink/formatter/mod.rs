@@ -94,6 +94,10 @@ impl SinkFormatterImpl {
             )))
         };
         let timestamptz_mode = TimestamptzHandlingMode::from_options(&format_desc.options)?;
+        let message_key_text_encode = format_desc
+            .key_encode
+            .as_ref()
+            .map(|encode| matches!(encode, SinkEncode::Text));
 
         match format_desc.format {
             SinkFormat::AppendOnly => {
@@ -161,6 +165,10 @@ impl SinkFormatterImpl {
                             AppendOnlyFormatter::new(Some(key_encoder), val_encoder),
                         ))
                     }
+                    ref encode => Err(SinkError::Config(anyhow!(
+                        "Unsupported encode for append-only: {:?}",
+                        encode
+                    ))),
                 }
             }
             SinkFormat::Debezium => {
@@ -264,6 +272,11 @@ impl SinkFormatterImpl {
                         Ok(SinkFormatterImpl::UpsertAvro(formatter))
                     }
                     SinkEncode::Protobuf => err_unsupported(),
+
+                    ref encode => Err(SinkError::Config(anyhow!(
+                        "Unsupported encode for upsert: {:?}",
+                        encode
+                    ))),
                 }
             }
         }

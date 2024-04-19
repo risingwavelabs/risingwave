@@ -400,6 +400,7 @@ fn mock_from_legacy_type(
             format,
             encode: SinkEncode::Json,
             options: Default::default(),
+            key_encode: None,
         }))
     } else {
         SinkFormatDesc::from_legacy_type(connector, r#type)
