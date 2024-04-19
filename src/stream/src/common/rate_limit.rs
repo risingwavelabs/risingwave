@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/// Get the rate-limited max chunk size.
 pub(crate) fn limited_chunk_size(rate_limit: Option<u32>) -> usize {
     let config_chunk_size = crate::config::chunk_size();
     rate_limit
