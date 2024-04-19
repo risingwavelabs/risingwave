@@ -29,6 +29,7 @@ use parse_display::Display;
 pub use physical_table::*;
 use risingwave_pb::catalog::{
     CreateType as PbCreateType, HandleConflictBehavior as PbHandleConflictBehavior,
+    StreamJobStatus as PbStreamJobStatus,
 };
 use risingwave_pb::plan_common::ColumnDescVersion;
 pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
@@ -474,6 +475,29 @@ impl ConflictBehavior {
             ConflictBehavior::Overwrite => "Overwrite".to_string(),
             ConflictBehavior::IgnoreConflict => "IgnoreConflict".to_string(),
             ConflictBehavior::DoUpdateIfNotNull => "DoUpdateIfNotNull".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Display, Hash, PartialOrd, PartialEq, Eq, Ord)]
+pub enum StreamJobStatus {
+    #[default]
+    Creating,
+    Created,
+}
+
+impl StreamJobStatus {
+    pub fn from_proto(stream_job_status: PbStreamJobStatus) -> Self {
+        match stream_job_status {
+            PbStreamJobStatus::Creating => StreamJobStatus::Creating,
+            PbStreamJobStatus::Created | PbStreamJobStatus::Unspecified => StreamJobStatus::Created,
+        }
+    }
+
+    pub fn to_proto(self) -> PbStreamJobStatus {
+        match self {
+            StreamJobStatus::Creating => PbStreamJobStatus::Creating,
+            StreamJobStatus::Created => PbStreamJobStatus::Created,
         }
     }
 }
