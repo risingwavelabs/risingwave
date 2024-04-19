@@ -25,13 +25,13 @@ use futures::stream::FuturesOrdered;
 use futures::{FutureExt, StreamExt};
 use prometheus::HistogramTimer;
 use risingwave_common::must_match;
+use risingwave_hummock_sdk::SyncResult;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
-use risingwave_hummock_sdk::SyncResult;
 
 use super::progress::BackfillState;
 use super::BarrierCompleteResult;

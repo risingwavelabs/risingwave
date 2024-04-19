@@ -758,10 +758,7 @@ pub(crate) mod tests {
             storage.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
             other.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
 
-            let res = global_storage
-                .seal_and_sync_epoch(epoch)
-                .await
-                .unwrap();
+            let res = global_storage.seal_and_sync_epoch(epoch).await.unwrap();
             hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
         }
 
@@ -950,10 +947,7 @@ pub(crate) mod tests {
             local.flush().await.unwrap();
             local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
 
-            let res = storage
-                .seal_and_sync_epoch(epoch)
-                .await
-                .unwrap();
+            let res = storage.seal_and_sync_epoch(epoch).await.unwrap();
             hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
         }
 
@@ -1148,10 +1142,7 @@ pub(crate) mod tests {
                 .unwrap();
             local.flush().await.unwrap();
             local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
-            let res = storage
-                .seal_and_sync_epoch(epoch)
-                .await
-                .unwrap();
+            let res = storage.seal_and_sync_epoch(epoch).await.unwrap();
             hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
         }
 

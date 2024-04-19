@@ -30,6 +30,7 @@ use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::MetaSrvEnv;
 use risingwave_pb::catalog::{PbTable, Table};
 use risingwave_pb::common::WorkerNode;
+use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::error::StorageResult;
 use risingwave_storage::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
@@ -46,7 +47,6 @@ use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use risingwave_rpc_client::HummockMetaClient;
 
 use crate::mock_notification_client::get_notification_client_for_test;
 
