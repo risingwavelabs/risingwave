@@ -479,8 +479,9 @@ impl ConflictBehavior {
     }
 }
 
-#[derive(Clone, Copy, Debug, Display, Hash, PartialOrd, PartialEq, Eq, Ord)]
+#[derive(Clone, Copy, Debug, Default, Display, Hash, PartialOrd, PartialEq, Eq, Ord)]
 pub enum StreamJobStatus {
+    #[default]
     Creating,
     Created,
 }
