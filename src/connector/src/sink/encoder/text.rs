@@ -12,9 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub struct TextEncoder {
-}
+use super::RowEncoder;
+
+pub struct TextEncoder {}
 
 impl RowEncoder for TextEncoder {
+    type Output = String;
 
+    fn schema(&self) -> &risingwave_common::catalog::Schema {
+        unimplemented!()
+    }
+
+    fn col_indices(&self) -> Option<&[usize]> {
+        unimplemented!()
+    }
+
+    fn encode(&self, row: impl risingwave_common::row::Row) -> crate::sink::Result<Self::Output> {
+        unimplemented!()
+    }
+
+    fn encode_cols(
+        &self,
+        row: impl risingwave_common::row::Row,
+        col_indices: impl Iterator<Item = usize>,
+    ) -> crate::sink::Result<Self::Output> {
+        unimplemented!()
+    }
 }

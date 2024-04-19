@@ -357,8 +357,7 @@ impl StreamSink {
                     return Err(ErrorCode::SinkError(Box::new(Error::new(
                         ErrorKind::InvalidInput,
                         format!(
-                            "The key encode is TEXT, but the primary key column {} has type {}. The key encode TEXT requires the primary key column to be of type varchar, bool, small int, int, or big int.\n
-                            Please concat the columns into a single column with the type varchar.",
+                            "The key encode is TEXT, but the primary key column {} has type {}. The key encode TEXT requires the primary key column to be of type varchar, bool, small int, int, or big int.",
                             key_col_catalog.column_desc.name,
                             key_col_catalog.column_desc.data_type
                         ),

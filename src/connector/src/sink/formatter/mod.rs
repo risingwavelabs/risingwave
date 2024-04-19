@@ -28,6 +28,7 @@ pub use upsert::UpsertFormatter;
 
 use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
 use super::encoder::template::TemplateEncoder;
+use super::encoder::text::TextEncoder;
 use super::encoder::{
     DateHandlingMode, KafkaConnectParams, TimeHandlingMode, TimestamptzHandlingMode,
 };
@@ -68,13 +69,22 @@ macro_rules! tri {
 }
 
 pub enum SinkFormatterImpl {
+    // append-only
     AppendOnlyJson(AppendOnlyFormatter<JsonEncoder, JsonEncoder>),
+    AppendOnlyTextJson(AppendOnlyFormatter<TextEncoder, JsonEncoder>),
     AppendOnlyProto(AppendOnlyFormatter<JsonEncoder, ProtoEncoder>),
-    UpsertJson(UpsertFormatter<JsonEncoder, JsonEncoder>),
-    UpsertAvro(UpsertFormatter<AvroEncoder, AvroEncoder>),
-    DebeziumJson(DebeziumJsonFormatter),
+    AppendOnlyTextProto(AppendOnlyFormatter<TextEncoder, ProtoEncoder>),
     AppendOnlyTemplate(AppendOnlyFormatter<TemplateEncoder, TemplateEncoder>),
+    AppendOnlyTextTemplate(AppendOnlyFormatter<TextEncoder, TemplateEncoder>),
+    // upsert
+    UpsertJson(UpsertFormatter<JsonEncoder, JsonEncoder>),
+    UpsertTextJson(UpsertFormatter<TextEncoder, JsonEncoder>),
+    UpsertAvro(UpsertFormatter<AvroEncoder, AvroEncoder>),
+    UpsertTextAvro(UpsertFormatter<TextEncoder, AvroEncoder>),
     UpsertTemplate(UpsertFormatter<TemplateEncoder, TemplateEncoder>),
+    UpsertTextTemplate(UpsertFormatter<TextEncoder, TemplateEncoder>),
+    // debezium
+    DebeziumJson(DebeziumJsonFormatter),
 }
 
 impl SinkFormatterImpl {
@@ -288,11 +298,18 @@ macro_rules! dispatch_sink_formatter_impl {
     ($impl:expr, $name:ident, $body:expr) => {
         match $impl {
             SinkFormatterImpl::AppendOnlyJson($name) => $body,
+            SinkFormatterImpl::AppendOnlyTextJson($name) => $body,
             SinkFormatterImpl::AppendOnlyProto($name) => $body,
+            SinkFormatterImpl::AppendOnlyTextProto($name) => $body,
+
             SinkFormatterImpl::UpsertJson($name) => $body,
+            SinkFormatterImpl::UpsertTextJson($name) => $body,
             SinkFormatterImpl::UpsertAvro($name) => $body,
+            SinkFormatterImpl::UpsertTextAvro($name) => $body,
             SinkFormatterImpl::DebeziumJson($name) => $body,
+            SinkFormatterImpl::AppendOnlyTextTemplate($name) => $body,
             SinkFormatterImpl::AppendOnlyTemplate($name) => $body,
+            SinkFormatterImpl::UpsertTextTemplate($name) => $body,
             SinkFormatterImpl::UpsertTemplate($name) => $body,
         }
     };
@@ -303,11 +320,18 @@ macro_rules! dispatch_sink_formatter_str_key_impl {
     ($impl:expr, $name:ident, $body:expr) => {
         match $impl {
             SinkFormatterImpl::AppendOnlyJson($name) => $body,
+            SinkFormatterImpl::AppendOnlyTextJson($name) => $body,
             SinkFormatterImpl::AppendOnlyProto($name) => $body,
+            SinkFormatterImpl::AppendOnlyTextProto($name) => $body,
+
             SinkFormatterImpl::UpsertJson($name) => $body,
-            SinkFormatterImpl::UpsertAvro(_) => unreachable!(),
+            SinkFormatterImpl::UpsertTextJson($name) => $body,
+            SinkFormatterImpl::UpsertAvro($name) => $body,
+            SinkFormatterImpl::UpsertTextAvro($name) => $body,
             SinkFormatterImpl::DebeziumJson($name) => $body,
+            SinkFormatterImpl::AppendOnlyTextTemplate($name) => $body,
             SinkFormatterImpl::AppendOnlyTemplate($name) => $body,
+            SinkFormatterImpl::UpsertTextTemplate($name) => $body,
             SinkFormatterImpl::UpsertTemplate($name) => $body,
         }
     };
