@@ -90,6 +90,10 @@ message ThrottleMutation {
   map<uint32, RateLimit> actor_throttle = 1;
 }
 
+message FailActorMutation {
+  string identity_contains = 1;
+}
+
 message CombinedMutation {
   repeated BarrierMutation mutations = 1;
 }
@@ -111,6 +115,8 @@ message BarrierMutation {
     ResumeMutation resume = 8;
     // Throttle specific source exec or chain exec.
     ThrottleMutation throttle = 10;
+    // TODO
+    FailActorMutation fail_actor = 11;
     // Combined mutation.
     CombinedMutation combined = 100;
   }

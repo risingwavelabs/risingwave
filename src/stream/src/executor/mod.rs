@@ -38,9 +38,9 @@ use risingwave_pb::stream_plan::barrier_mutation::PbMutation;
 use risingwave_pb::stream_plan::stream_message::StreamMessage;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    BarrierMutation, CombinedMutation, Dispatchers, PauseMutation, PbAddMutation, PbBarrier,
-    PbDispatcher, PbStreamMessage, PbUpdateMutation, PbWatermark, ResumeMutation,
-    SourceChangeSplitMutation, StopMutation, ThrottleMutation,
+    BarrierMutation, CombinedMutation, Dispatchers, FailActorMutation, PauseMutation,
+    PbAddMutation, PbBarrier, PbDispatcher, PbStreamMessage, PbUpdateMutation, PbWatermark,
+    ResumeMutation, SourceChangeSplitMutation, StopMutation, ThrottleMutation,
 };
 use smallvec::SmallVec;
 
@@ -284,6 +284,7 @@ pub enum Mutation {
     Resume,
     Throttle(HashMap<ActorId, Option<u32>>),
     AddAndUpdate(AddMutation, UpdateMutation),
+    FailActor(FailActorMutation),
 }
 
 #[derive(Debug, Clone)]
@@ -538,6 +539,7 @@ impl Mutation {
                     .map(|(actor_id, limit)| (*actor_id, RateLimit { rate_limit: *limit }))
                     .collect(),
             }),
+            Mutation::FailActor(fail_actor) => PbMutation::FailActor(fail_actor.clone()),
 
             Mutation::AddAndUpdate(add, update) => PbMutation::Combined(CombinedMutation {
                 mutations: vec![
@@ -646,6 +648,7 @@ impl Mutation {
                     .map(|(actor_id, limit)| (*actor_id, limit.rate_limit))
                     .collect(),
             ),
+            PbMutation::FailActor(fail_actor) => Mutation::FailActor(fail_actor.clone()),
 
             PbMutation::Combined(CombinedMutation { mutations }) => match &mutations[..] {
                 [BarrierMutation {

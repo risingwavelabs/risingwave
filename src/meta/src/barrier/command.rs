@@ -32,9 +32,9 @@ use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
-    AddMutation, BarrierMutation, CombinedMutation, Dispatcher, Dispatchers, PauseMutation,
-    ResumeMutation, SourceChangeSplitMutation, StopMutation, StreamActor, ThrottleMutation,
-    UpdateMutation,
+    AddMutation, BarrierMutation, CombinedMutation, Dispatcher, Dispatchers, FailActorMutation,
+    PauseMutation, ResumeMutation, SourceChangeSplitMutation, StopMutation, StreamActor,
+    ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use thiserror_ext::AsReport;
@@ -201,6 +201,9 @@ pub enum Command {
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
     /// the `rate_limit` of `FlowControl` Executor after `StreamScan` or Source.
     Throttle(ThrottleConfig),
+
+    /// TODO
+    FailActor { identity_contains: String },
 }
 
 impl Command {
@@ -214,6 +217,12 @@ impl Command {
 
     pub fn resume(reason: PausedReason) -> Self {
         Self::Resume(reason)
+    }
+
+    pub fn fail_actor(identity_contains: impl Into<String>) -> Self {
+        Self::FailActor {
+            identity_contains: identity_contains.into(),
+        }
     }
 
     pub fn actor_changes(&self) -> Option<CommandActorChanges> {
@@ -285,6 +294,7 @@ impl Command {
             Command::ReplaceTable(plan) => Some(plan.actor_changes()),
             Command::SourceSplitAssignment(_) => None,
             Command::Throttle(_) => None,
+            Command::FailActor { .. } => None,
         }
     }
 
@@ -405,6 +415,12 @@ impl CommandContext {
 
                     Some(Mutation::Throttle(ThrottleMutation {
                         actor_throttle: actor_to_apply,
+                    }))
+                }
+
+                Command::FailActor { identity_contains } => {
+                    Some(Mutation::FailActor(FailActorMutation {
+                        identity_contains: identity_contains.clone(),
                     }))
                 }
 
@@ -775,6 +791,8 @@ impl CommandContext {
             }
 
             Command::Resume(_) => {}
+
+            Command::FailActor { .. } => {}
 
             Command::SourceSplitAssignment(split_assignment) => {
                 self.barrier_manager_context

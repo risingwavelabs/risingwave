@@ -300,6 +300,8 @@ message ExprNode {
     PG_RELATION_SIZE = 2405;
     PG_GET_SERIAL_SEQUENCE = 2406;
 
+    RW_FAIL_ACTOR = 2500;
+
     // EXTERNAL
     ICEBERG_TRANSFORM = 2201;
   }

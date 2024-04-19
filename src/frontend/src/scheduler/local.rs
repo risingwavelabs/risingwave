@@ -49,6 +49,7 @@ use tracing::debug;
 use super::plan_fragmenter::{PartitionInfo, QueryStage, QueryStageRef};
 use crate::catalog::{FragmentId, TableId};
 use crate::error::RwError;
+use crate::expr::function_impl::context::META_CLIENT;
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
@@ -148,6 +149,7 @@ impl LocalQueryExecution {
         let db_name = self.session.database().to_string();
         let search_path = self.session.config().search_path();
         let time_zone = self.session.config().timezone();
+        let meta_client = self.front_env.meta_client_ref().clone();
         let timeout = self.timeout;
 
         let sender1 = sender.clone();
@@ -180,6 +182,7 @@ impl LocalQueryExecution {
         let exec = async move { SEARCH_PATH::scope(search_path, exec).await }.boxed();
         let exec = async move { AUTH_CONTEXT::scope(auth_context, exec).await }.boxed();
         let exec = async move { TIME_ZONE::scope(time_zone, exec).await }.boxed();
+        let exec = async move { META_CLIENT::scope(meta_client, exec).await }.boxed();
 
         if let Some(timeout) = timeout {
             let exec = async move {

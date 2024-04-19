@@ -285,7 +285,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             | Mutation::Pause
             | Mutation::Resume
             | Mutation::SourceChangeSplit(_)
-            | Mutation::Throttle(_) => false,
+            | Mutation::Throttle(_)
+            | Mutation::FailActor { .. } => false,
         }
     }
 }

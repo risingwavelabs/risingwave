@@ -54,6 +54,8 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn recover(&self) -> Result<()>;
 
+    async fn fail_actor(&self, identity_contains: &str) -> Result<()>;
+
     async fn cancel_creating_jobs(&self, jobs: PbJobs) -> Result<Vec<u32>>;
 
     async fn list_table_fragments(
@@ -141,6 +143,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn recover(&self) -> Result<()> {
         self.0.recover().await
+    }
+
+    async fn fail_actor(&self, identity_contains: &str) -> Result<()> {
+        self.0.fail_actor(identity_contains).await
     }
 
     async fn cancel_creating_jobs(&self, infos: PbJobs) -> Result<Vec<u32>> {

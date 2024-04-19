@@ -423,4 +423,25 @@ impl StreamManagerService for StreamServiceImpl {
             .await;
         Ok(Response::new(RecoverResponse {}))
     }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn fail_actor(
+        &self,
+        request: Request<FailActorRequest>,
+    ) -> Result<Response<FailActorResponse>, Status> {
+        if !cfg!(debug_assertions) {
+            return Err(Status::unimplemented(format!(
+                "fail_actor is for debugging purposes thus not available in release build"
+            )));
+        }
+
+        // TODO
+        self.barrier_scheduler
+            .run_command(Command::FailActor {
+                identity_contains: request.into_inner().identity_contains,
+            })
+            .await?;
+
+        Ok(Response::new(FailActorResponse {}))
+    }
 }

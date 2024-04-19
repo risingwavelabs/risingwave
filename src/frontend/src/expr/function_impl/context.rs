@@ -17,6 +17,7 @@ use std::sync::Arc;
 use risingwave_common::session_config::SearchPath;
 use risingwave_expr::define_context;
 
+use crate::meta_client::FrontendMetaClient;
 use crate::session::AuthContext;
 
 // Only for local mode.
@@ -26,4 +27,5 @@ define_context! {
     pub(super) AUTH_CONTEXT: Arc<AuthContext>,
     pub(super) DB_NAME: String,
     pub(super) SEARCH_PATH: SearchPath,
+    pub(super) META_CLIENT: Arc<dyn FrontendMetaClient>,
 }

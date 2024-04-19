@@ -937,6 +937,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(())
     }
 
+    async fn fail_actor(&self, _identity_contains: &str) -> RpcResult<()> {
+        Ok(())
+    }
+
     async fn cancel_creating_jobs(&self, _infos: PbJobs) -> RpcResult<Vec<u32>> {
         Ok(vec![])
     }

@@ -267,6 +267,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::PgIndexesSize
             | Type::PgRelationSize
             | Type::PgGetSerialSequence
+            | Type::RwFailActor
             | Type::MakeTimestamptz => self.impure = true,
         }
     }

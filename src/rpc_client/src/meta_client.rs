@@ -804,6 +804,14 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn fail_actor(&self, identity_contains: &str) -> Result<()> {
+        let request = FailActorRequest {
+            identity_contains: identity_contains.to_owned(),
+        };
+        self.inner.fail_actor(request).await?;
+        Ok(())
+    }
+
     pub async fn cancel_creating_jobs(&self, jobs: PbJobs) -> Result<Vec<u32>> {
         let request = CancelCreatingJobsRequest { jobs: Some(jobs) };
         let resp = self.inner.cancel_creating_jobs(request).await?;
@@ -1910,6 +1918,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }
             ,{ stream_client, recover, RecoverRequest, RecoverResponse }
+            ,{ stream_client, fail_actor, FailActorRequest, FailActorResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }

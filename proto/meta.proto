@@ -270,6 +270,12 @@ message RecoverRequest {}
 
 message RecoverResponse {}
 
+message FailActorRequest {
+  string identity_contains = 1;
+}
+
+message FailActorResponse {}
+
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
   rpc Pause(PauseRequest) returns (PauseResponse);
@@ -282,6 +288,7 @@ service StreamManagerService {
   rpc ListObjectDependencies(ListObjectDependenciesRequest) returns (ListObjectDependenciesResponse);
   rpc ApplyThrottle(ApplyThrottleRequest) returns (ApplyThrottleResponse);
   rpc Recover(RecoverRequest) returns (RecoverResponse);
+  rpc FailActor(FailActorRequest) returns (FailActorResponse);
 }
 
 // Below for cluster service.
