@@ -228,11 +228,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 let left_upstream = upstream.by_ref().map(Either::Left);
 
                 let mut snapshot_read_row_cnt: usize = 0;
-                let args = SnapshotReadArgs::new_for_cdc(
-                    current_pk_pos.clone(),
-                    limited_chunk_size(self.rate_limit_rps),
-                );
-
+                let args =
+                    SnapshotReadArgs::new_for_cdc(current_pk_pos.clone(), self.rate_limit_rps);
                 let right_snapshot = pin!(upstream_table_reader
                     .snapshot_read(args, snapshot_read_limit as u32)
                     .map(Either::Right));
