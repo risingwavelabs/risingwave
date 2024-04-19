@@ -1007,7 +1007,7 @@ fn get_retry_strategy(
     let attempts = get_retry_attempts_by_type(config, operation_type);
     ExponentialBackoff::from_millis(config.retry.req_retry_interval_ms)
         .max_delay(Duration::from_millis(config.retry.req_retry_max_delay_ms))
-        .factor(2)
+        .factor(config.retry.req_retry_factor)
         .take(attempts)
         .map(jitter)
 }
@@ -1114,12 +1114,7 @@ impl RetryCondition {
             err.should_retry()
         };
 
-        if !should_retry && self.retry_count > 0 {
-            self.metrics
-                .request_retry_count
-                .with_label_values(&[self.operation_type.as_str()])
-                .inc_by(self.retry_count as _);
-        } else {
+        if should_retry {
             self.retry_count += 1;
         }
 
@@ -1130,6 +1125,17 @@ impl RetryCondition {
 impl tokio_retry::Condition<ObjectError> for RetryCondition {
     fn should_retry(&mut self, err: &ObjectError) -> bool {
         self.should_retry_inner(err)
+    }
+}
+
+impl Drop for RetryCondition {
+    fn drop(&mut self) {
+        if self.retry_count > 0 {
+            self.metrics
+                .request_retry_count
+                .with_label_values(&[self.operation_type.as_str()])
+                .inc_by(self.retry_count as _);
+        }
     }
 }
 

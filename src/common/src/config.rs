@@ -169,7 +169,6 @@ pub struct RwConfig {
 serde_with::with_prefix!(meta_prefix "meta_");
 serde_with::with_prefix!(streaming_prefix "stream_");
 serde_with::with_prefix!(batch_prefix "batch_");
-serde_with::with_prefix!(object_store_prefix "object_store_");
 
 #[derive(Copy, Clone, Debug, Default, ValueEnum, Serialize, Deserialize)]
 pub enum MetaBackend {
@@ -975,7 +974,7 @@ pub struct ObjectStoreConfig {
     #[serde(default = "default::object_store_config::object_store_set_atomic_write_dir")]
     pub object_store_set_atomic_write_dir: bool,
 
-    #[serde(default, with = "object_store_prefix")]
+    #[serde(default)]
     pub retry: ObjectStoreRetryConfig,
 
     #[serde(default)]
@@ -1044,6 +1043,8 @@ pub struct ObjectStoreRetryConfig {
     pub req_retry_interval_ms: u64,
     #[serde(default = "default::object_store_config::object_store_req_retry_max_delay_ms")]
     pub req_retry_max_delay_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_req_retry_factor")]
+    pub req_retry_factor: u64,
 
     // upload
     #[serde(default = "default::object_store_config::object_store_upload_attempt_timeout_ms")]
@@ -1733,8 +1734,8 @@ pub mod default {
     }
 
     pub mod object_store_config {
-        const DEFAULT_RETRY_INTERVAL_MS: u64 = 20;
-        const DEFAULT_RETRY_MAX_DELAY_MS: u64 = 10 * 1000;
+        const DEFAULT_RETRY_INTERVAL_MS: u64 = 1000; // 1s
+        const DEFAULT_RETRY_MAX_DELAY_MS: u64 = 10 * 1000; // 10s
         const DEFAULT_RETRY_MAX_RETRY_ATTEMPTS: usize = 3;
         pub const UNLIMITED_MAX_TIMEOUT: u64 = 24 * 7 * 3600 * 1000;
 
@@ -1768,6 +1769,10 @@ pub mod default {
 
         pub fn object_store_req_retry_max_delay_ms() -> u64 {
             DEFAULT_RETRY_MAX_DELAY_MS // 10s
+        }
+
+        pub fn object_store_req_retry_factor() -> u64 {
+            2
         }
 
         pub fn object_store_upload_attempt_timeout_ms() -> u64 {

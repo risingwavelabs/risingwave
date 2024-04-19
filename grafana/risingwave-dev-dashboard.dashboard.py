@@ -628,7 +628,7 @@ def section_object_storage(outer_panels):
                         ),
                         panels.target(
                             f"sum(irate({metric('object_store_request_retry_count')}[$__rate_interval])) by ({NODE_LABEL}, {COMPONENT_LABEL}, type)",
-                            "{{type}} - {{%s}} @ {{%s}}"
+                            "oper {{type}} - {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],

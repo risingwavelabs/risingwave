@@ -219,7 +219,10 @@ impl S3StreamingUploader {
                         match ret {
                             Ok(Ok(res)) => Ok(res),
                             Ok(Err(err)) => Err(err),
-                            Err(_) => Err(ObjectError::internal("streaming upload part timeout")),
+                            Err(_) => Err(ObjectError::internal(format!(
+                                "{} timeout",
+                                operation_type_str
+                            ))),
                         }
                     }
                 },
