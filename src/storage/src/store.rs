@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::cmp::min;
-use std::collections::HashMap;
 use std::default::Default;
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
@@ -30,10 +29,8 @@ use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
-use risingwave_hummock_sdk::table_watermark::{
-    TableWatermarks, VnodeWatermark, WatermarkDirection,
-};
-use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
+use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
 use risingwave_hummock_trace::{
     TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel, TracedPrefetchOptions,
     TracedReadOptions, TracedSealCurrentEpochOptions, TracedWriteOptions,
@@ -309,16 +306,6 @@ pub trait StateStoreWrite: StaticSendSync {
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
     ) -> StorageResult<usize>;
-}
-
-#[derive(Default, Debug)]
-pub struct SyncResult {
-    /// The size of all synced shared buffers.
-    pub sync_size: usize,
-    /// The `sst_info` of sync.
-    pub uncommitted_ssts: Vec<LocalSstableInfo>,
-    /// The collected table watermarks written by state tables.
-    pub table_watermarks: HashMap<TableId, TableWatermarks>,
 }
 
 pub trait StateStore: StateStoreRead + StaticSendSync + Clone {

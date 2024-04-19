@@ -48,7 +48,7 @@ mod tests;
 pub use progress::CreateMviewProgress;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
-use risingwave_hummock_sdk::LocalSstableInfo;
+use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
@@ -58,7 +58,6 @@ use risingwave_pb::stream_service::{
     streaming_control_stream_response, BarrierCompleteResponse, StreamingControlStreamRequest,
     StreamingControlStreamResponse,
 };
-use risingwave_storage::store::SyncResult;
 
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;

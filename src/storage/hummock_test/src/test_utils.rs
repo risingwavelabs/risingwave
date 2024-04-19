@@ -21,6 +21,8 @@ use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::TableKey;
 pub use risingwave_hummock_sdk::key::{gen_key_from_bytes, gen_key_from_str};
+#[cfg(test)]
+use risingwave_hummock_sdk::SyncResult;
 use risingwave_meta::hummock::test_utils::{
     register_table_ids_to_compaction_group, setup_compute_env,
 };
@@ -44,6 +46,7 @@ use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use risingwave_rpc_client::HummockMetaClient;
 
 use crate::mock_notification_client::get_notification_client_for_test;
 
@@ -252,10 +255,7 @@ impl HummockTestEnv {
     // On completion of this function call, the provided epoch should be committed and visible.
     pub async fn commit_epoch(&self, epoch: u64) {
         let res = self.storage.seal_and_sync_epoch(epoch).await.unwrap();
-        self.meta_client
-            .commit_epoch_with_watermark(epoch, res.uncommitted_ssts, res.table_watermarks)
-            .await
-            .unwrap();
+        self.meta_client.commit_epoch(epoch, res).await.unwrap();
 
         self.storage.try_wait_epoch_for_test(epoch).await;
     }
