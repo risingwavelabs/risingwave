@@ -31,6 +31,7 @@ use risingwave_connector::source::cdc::external::CdcOffset;
 use risingwave_connector::source::{SourceColumnDesc, SourceContext};
 use rw_futures_util::pausable;
 
+use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::backfill::cdc::state::CdcBackfillState;
 use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::cdc::upstream_table::snapshot::{
@@ -65,7 +66,8 @@ pub struct CdcBackfillExecutor<S: StateStore> {
 
     metrics: Arc<StreamingMetrics>,
 
-    chunk_size: usize,
+    /// Rate limit in rows/s.
+    rate_limit_rps: Option<u32>,
 
     disable_backfill: bool,
 }
@@ -80,7 +82,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         progress: Option<CreateMviewProgress>,
         metrics: Arc<StreamingMetrics>,
         state_table: StateTable<S>,
-        chunk_size: usize,
+        rate_limit_rps: Option<u32>,
         disable_backfill: bool,
     ) -> Self {
         Self {
@@ -91,7 +93,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             state_table,
             progress,
             metrics,
-            chunk_size,
+            rate_limit_rps,
             disable_backfill,
         }
     }
@@ -163,7 +165,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             is_finished = state.is_finished,
             disable_backfill = self.disable_backfill,
             snapshot_row_count = total_snapshot_row_count,
-            chunk_size = self.chunk_size,
+            rate_limit = self.rate_limit_rps,
             "start cdc backfill"
         );
 
@@ -221,11 +223,15 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
             // the buffer will be drained when a barrier comes
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
+
             'backfill_loop: loop {
                 let left_upstream = upstream.by_ref().map(Either::Left);
 
                 let mut snapshot_read_row_cnt: usize = 0;
-                let args = SnapshotReadArgs::new_for_cdc(current_pk_pos.clone(), self.chunk_size);
+                let args = SnapshotReadArgs::new_for_cdc(
+                    current_pk_pos.clone(),
+                    limited_chunk_size(self.rate_limit_rps),
+                );
 
                 let right_snapshot = pin!(upstream_table_reader
                     .snapshot_read(args, snapshot_read_limit as u32)
@@ -264,13 +270,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                                 valve.resume();
                                             }
                                             Mutation::Throttle(some) => {
-                                                if let Some(rate_limit) =
+                                                if let Some(new_rate_limit) =
                                                     some.get(&self.actor_ctx.id)
                                                 {
-                                                    self.chunk_size = rate_limit
-                                                        .map(|x| x as usize)
-                                                        .unwrap_or(self.chunk_size);
-                                                    // rebuild the new reader stream with new chunk size
+                                                    self.rate_limit_rps = *new_rate_limit;
+                                                    // rebuild the new reader stream with new rate limit
                                                     continue 'backfill_loop;
                                                 }
                                             }

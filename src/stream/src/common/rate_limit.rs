@@ -12,12 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use column_mapping::*;
-
-pub mod cache;
-mod column_mapping;
-pub mod compact_chunk;
-pub mod log_store_impl;
-pub mod metrics;
-pub mod rate_limit;
-pub mod table;
+pub(crate) fn limited_chunk_size(rate_limit: Option<u32>) -> usize {
+    let config_chunk_size = crate::config::chunk_size();
+    rate_limit
+        .map(|limit| config_chunk_size.min(limit as usize))
+        .unwrap_or(config_chunk_size)
+}

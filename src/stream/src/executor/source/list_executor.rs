@@ -45,19 +45,18 @@ pub struct FsListExecutor<S: StateStore> {
     /// System parameter reader to read barrier interval
     system_params: SystemParamsReaderRef,
 
-    // control options for connector level
-    source_ctrl_opts: SourceCtrlOpts,
+    /// Rate limit in rows/s.
+    rate_limit_rps: Option<u32>,
 }
 
 impl<S: StateStore> FsListExecutor<S> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
         stream_source_core: Option<StreamSourceCore<S>>,
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
         system_params: SystemParamsReaderRef,
-        source_ctrl_opts: SourceCtrlOpts,
+        rate_limit_rps: Option<u32>,
     ) -> Self {
         Self {
             actor_ctx,
@@ -65,7 +64,7 @@ impl<S: StateStore> FsListExecutor<S> {
             metrics,
             barrier_receiver: Some(barrier_receiver),
             system_params,
-            source_ctrl_opts,
+            rate_limit_rps,
         }
     }
 
