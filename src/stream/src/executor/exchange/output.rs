@@ -24,7 +24,7 @@ use tokio::sync::mpsc::error::SendError;
 use super::permit::Sender;
 use crate::error::StreamResult;
 use crate::executor::Message;
-use crate::task::{ActorId, SharedContext};
+use crate::task::{ActorId, SharedContext, UpDownActorIds, UpDownFragmentIds};
 
 /// `Output` provides an interface for `Dispatcher` to send data into downstream actors.
 #[async_trait]
@@ -147,12 +147,13 @@ impl Output for RemoteOutput {
 /// downstream actor id. Used by dispatchers.
 pub fn new_output(
     context: &SharedContext,
-    actor_id: ActorId,
-    down_id: ActorId,
+    actor_ids: UpDownActorIds,
+    fragment_ids: UpDownFragmentIds,
 ) -> StreamResult<BoxedOutput> {
-    let tx = context.take_sender(&(actor_id, down_id))?;
+    let tx = context.take_sender(actor_ids, fragment_ids)?;
 
-    let is_local_address = match context.get_actor_info(&down_id) {
+    let down_actor_id = actor_ids.1;
+    let is_local_address = match context.get_actor_info(&down_actor_id) {
         Ok(info) => is_local_address(&context.addr, &info.get_host()?.into()),
         // If we can't get the actor info locally, it must be a remote actor.
         // This may happen when we create a mv-on-mv on different workers from the upstream. #4153
@@ -160,9 +161,9 @@ pub fn new_output(
     };
 
     let output = if is_local_address {
-        LocalOutput::new(down_id, tx).boxed()
+        LocalOutput::new(down_actor_id, tx).boxed()
     } else {
-        RemoteOutput::new(down_id, tx).boxed()
+        RemoteOutput::new(down_actor_id, tx).boxed()
     };
 
     Ok(output)
