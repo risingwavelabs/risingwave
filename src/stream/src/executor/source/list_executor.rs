@@ -19,7 +19,6 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::Op;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
-use risingwave_connector::source::SourceCtrlOpts;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
 

@@ -31,13 +31,12 @@ use risingwave_connector::source::{
 use risingwave_storage::store::PrefetchOptions;
 use thiserror_ext::AsReport;
 
-use super::{get_split_offset_col_idx, SourceStateTableHandler, StreamSourceCore};
+use super::{
+    apply_rate_limit, get_split_offset_col_idx, get_split_offset_mapping_from_chunk,
+    prune_additional_cols, SourceStateTableHandler, StreamSourceCore,
+};
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
-use crate::executor::source::{
-    apply_rate_limit, get_split_offset_mapping_from_chunk, prune_additional_cols,
-};
-use crate::executor::source_executor::apply_rate_limit;
 use crate::executor::stream_reader::StreamReaderWithPause;
 
 const SPLIT_BATCH_SIZE: usize = 1000;

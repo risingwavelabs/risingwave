@@ -34,13 +34,12 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
-use crate::common::rate_limit::limited_chunk_size;
-use crate::executor::prelude::*;
-use crate::executor::source::{
+use super::{
     apply_rate_limit, barrier_to_message_stream, get_split_offset_col_idx,
     get_split_offset_mapping_from_chunk, prune_additional_cols,
 };
-use crate::executor::source_executor::apply_rate_limit;
+use crate::common::rate_limit::limited_chunk_size;
+use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::{AddMutation, UpdateMutation};
 

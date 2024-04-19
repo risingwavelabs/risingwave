@@ -13,21 +13,17 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::num::NonZeroU32;
 use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use either::Either;
 use futures::TryStreamExt;
-use governor::clock::MonotonicClock;
-use governor::{Quota, RateLimiter};
 use itertools::Itertools;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
-use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::cdc::jni_source;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
@@ -41,12 +37,12 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
+use super::{
+    apply_rate_limit, barrier_to_message_stream, get_split_offset_col_idx,
+    get_split_offset_mapping_from_chunk, prune_additional_cols,
+};
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
-use crate::executor::source::{
-    barrier_to_message_stream, get_split_offset_col_idx, get_split_offset_mapping_from_chunk,
-    prune_additional_cols,
-};
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::{AddMutation, UpdateMutation};
 

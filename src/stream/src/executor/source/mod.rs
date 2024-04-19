@@ -13,13 +13,17 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::num::NonZeroU32;
 
 use await_tree::InstrumentAwait;
+use governor::clock::MonotonicClock;
+use governor::{Quota, RateLimiter};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::row::Row;
-use risingwave_connector::source::{SourceColumnDesc, SplitId};
+use risingwave_connector::error::ConnectorError;
+use risingwave_connector::source::{BoxChunkSourceStream, SourceColumnDesc, SplitId};
 use risingwave_pb::plan_common::additional_column::ColumnType;
 use risingwave_pb::plan_common::AdditionalColumn;
 pub use state_table_handler::*;

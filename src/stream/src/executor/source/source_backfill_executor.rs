@@ -36,11 +36,10 @@ use thiserror_ext::AsReport;
 
 use super::executor_core::StreamSourceCore;
 use super::source_backfill_state_table::BackfillStateTableHandler;
+use super::{apply_rate_limit, get_split_offset_col_idx};
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
 use crate::executor::source::source_executor::WAIT_BARRIER_MULTIPLE_TIMES;
-use crate::executor::source::{apply_rate_limit, get_split_offset_col_idx};
-use crate::executor::source_executor::apply_rate_limit;
 use crate::executor::{AddMutation, UpdateMutation};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
