@@ -14,12 +14,16 @@
 
 //! Channel implementation for permit-based back-pressure.
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
-use risingwave_pb::task_service::permits;
-use tokio::sync::{mpsc, AcquireError, Semaphore, SemaphorePermit};
+use prometheus::{register_int_gauge_vec_with_registry, IntGauge, IntGaugeVec};
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+use risingwave_common_estimate_size::EstimateSize;
+use risingwave_pb::task_service::PbPermits;
+use tokio::sync::{mpsc, AcquireError, Semaphore};
 
 use crate::executor::Message;
+use crate::task::UpDownFragmentIds;
 
 /// Message with its required permits.
 ///
@@ -28,45 +32,76 @@ use crate::executor::Message;
 /// `permits` back verbatim, in case the version of the upstream and the downstream are different.
 pub struct MessageWithPermits {
     pub message: Message,
-    pub permits: Option<permits::Value>,
+    pub permits: Option<PbPermits>,
 }
 
 /// Create a channel for the exchange service.
-pub fn channel(
-    initial_permits: usize,
-    batched_permits: usize,
-    concurrent_barriers: usize,
-) -> (Sender, Receiver) {
+pub fn channel(permits: PbPermits, fragment_ids: UpDownFragmentIds) -> (Sender, Receiver) {
     // Use an unbounded channel since we manage the permits manually.
     let (tx, rx) = mpsc::unbounded_channel();
 
-    let records = Semaphore::new(initial_permits);
-    let barriers = Semaphore::new(concurrent_barriers);
-    let permits = Arc::new(Permits { records, barriers });
+    let initial_permits = permits.clone();
+    let permits = Arc::new(Permits {
+        records: Semaphore::new(permits.records as _),
+        bytes: Semaphore::new(permits.bytes as _),
+        barriers: Semaphore::new(permits.barriers as _),
+    });
 
-    let max_chunk_permits: usize = initial_permits - batched_permits;
+    let metric_memory_size =
+        MEMORY_SIZE.with_label_values(&[&fragment_ids.0.to_string(), &fragment_ids.1.to_string()]);
+    let metric_num_rows =
+        NUM_ROWS.with_label_values(&[&fragment_ids.0.to_string(), &fragment_ids.1.to_string()]);
 
     (
         Sender {
             tx,
             permits: permits.clone(),
-            max_chunk_permits,
+            initial_permits,
+            metric_memory_size: metric_memory_size.clone(),
+            metric_num_rows: metric_num_rows.clone(),
         },
-        Receiver { rx, permits },
+        Receiver {
+            rx,
+            permits,
+            metric_memory_size,
+            metric_num_rows,
+        },
     )
 }
 
+static MEMORY_SIZE: LazyLock<IntGaugeVec> = LazyLock::new(|| {
+    register_int_gauge_vec_with_registry!(
+        "stream_exchange_memory_size",
+        "Total size of memory in the exchange channel",
+        &["up_fragment_id", "down_fragment_id"],
+        GLOBAL_METRICS_REGISTRY,
+    )
+    .unwrap()
+});
+
+static NUM_ROWS: LazyLock<IntGaugeVec> = LazyLock::new(|| {
+    register_int_gauge_vec_with_registry!(
+        "stream_exchange_num_rows",
+        "Total number of rows in the exchange channel",
+        &["up_fragment_id", "down_fragment_id"],
+        GLOBAL_METRICS_REGISTRY,
+    )
+    .unwrap()
+});
+
 /// The configuration for tests.
 pub mod for_test {
-    pub const INITIAL_PERMITS: usize = (u32::MAX / 2) as _;
-    pub const BATCHED_PERMITS: usize = 1;
-    pub const CONCURRENT_BARRIERS: usize = (u32::MAX / 2) as _;
+    use super::PbPermits;
+
+    pub const INITIAL_PERMITS: PbPermits = PbPermits {
+        records: u32::MAX / 2,
+        bytes: tokio::sync::Semaphore::MAX_PERMITS as u64 / 2,
+        barriers: u32::MAX / 2,
+    };
 }
 
 pub fn channel_for_test() -> (Sender, Receiver) {
-    use for_test::*;
-
-    channel(INITIAL_PERMITS, BATCHED_PERMITS, CONCURRENT_BARRIERS)
+    channel(for_test::INITIAL_PERMITS, (0, 0))
 }
 
 /// Semaphore-based permits to control the back-pressure.
@@ -75,34 +110,38 @@ pub fn channel_for_test() -> (Sender, Receiver) {
 pub struct Permits {
     /// The permits for records in chunks.
     records: Semaphore,
+    /// The permits for total bytes in chunks.
+    bytes: Semaphore,
     /// The permits for barriers.
     barriers: Semaphore,
 }
 
 impl Permits {
     /// Add permits back to the semaphores.
-    pub fn add_permits(&self, permits: permits::Value) {
-        match permits {
-            permits::Value::Record(p) => self.records.add_permits(p as usize),
-            permits::Value::Barrier(p) => self.barriers.add_permits(p as usize),
-        }
+    pub fn add_permits(&self, permits: PbPermits) {
+        self.records.add_permits(permits.records as usize);
+        self.bytes.add_permits(permits.bytes as usize);
+        self.barriers.add_permits(permits.barriers as usize);
     }
 
     /// Acquire permits from the semaphores.
     ///
     /// This function is cancellation-safe except for the fairness of waking.
-    async fn acquire_permits(&self, permits: &permits::Value) -> Result<(), AcquireError> {
-        match permits {
-            permits::Value::Record(p) => self.records.acquire_many(*p as _),
-            permits::Value::Barrier(p) => self.barriers.acquire_many(*p as _),
-        }
-        .await
-        .map(SemaphorePermit::forget)
+    async fn acquire_permits(&self, permits: &PbPermits) -> Result<(), AcquireError> {
+        let p1 = self.records.acquire_many(permits.records as _).await?;
+        let p2 = self.bytes.acquire_many(permits.bytes as _).await?;
+        let p3 = self.barriers.acquire_many(permits.barriers as _).await?;
+        // forget the permits together to make the function cancellation-safe
+        p1.forget();
+        p2.forget();
+        p3.forget();
+        Ok(())
     }
 
     /// Close the semaphores so that all pending `acquire` will fail immediately.
     fn close(&self) {
         self.records.close();
+        self.bytes.close();
         self.barriers.close();
     }
 }
@@ -112,10 +151,11 @@ pub struct Sender {
     tx: mpsc::UnboundedSender<MessageWithPermits>,
     permits: Arc<Permits>,
 
-    /// The maximum permits required by a chunk. If there're too many rows in a chunk, we only
-    /// acquire these permits. `BATCHED_PERMITS` is subtracted to avoid deadlock with
-    /// batching.
-    max_chunk_permits: usize,
+    /// The maximum permits required by a chunk.
+    /// If the permits required by a chunk exceed this, the permits will be capped.
+    initial_permits: PbPermits,
+    metric_memory_size: IntGauge,
+    metric_num_rows: IntGauge,
 }
 
 impl Sender {
@@ -125,14 +165,16 @@ impl Sender {
     pub async fn send(&self, message: Message) -> Result<(), mpsc::error::SendError<Message>> {
         // The semaphores should never be closed.
         let permits = match &message {
-            Message::Chunk(c) => {
-                let card = c.cardinality().clamp(1, self.max_chunk_permits);
-                if card == self.max_chunk_permits {
-                    tracing::warn!(cardinality = c.cardinality(), "large chunk in exchange")
-                }
-                Some(permits::Value::Record(card as _))
-            }
-            Message::Barrier(_) => Some(permits::Value::Barrier(1)),
+            Message::Chunk(c) => Some(PbPermits {
+                records: (c.cardinality() as u32).min(self.initial_permits.records),
+                bytes: (c.estimated_size() as u64).min(self.initial_permits.bytes),
+                barriers: 0,
+            }),
+            Message::Barrier(_) => Some(PbPermits {
+                records: 0,
+                bytes: 0,
+                barriers: 1,
+            }),
             Message::Watermark(_) => None,
         };
 
@@ -140,6 +182,11 @@ impl Sender {
             if self.permits.acquire_permits(permits).await.is_err() {
                 return Err(mpsc::error::SendError(message));
             }
+        }
+
+        if let Message::Chunk(chunk) = &message {
+            self.metric_memory_size.add(chunk.estimated_size() as i64);
+            self.metric_num_rows.add(chunk.cardinality() as i64);
         }
 
         self.tx
@@ -152,6 +199,8 @@ impl Sender {
 pub struct Receiver {
     rx: mpsc::UnboundedReceiver<MessageWithPermits>,
     permits: Arc<Permits>,
+    metric_memory_size: IntGauge,
+    metric_num_rows: IntGauge,
 }
 
 impl Receiver {
@@ -164,6 +213,10 @@ impl Receiver {
 
         if let Some(permits) = permits {
             self.permits.add_permits(permits);
+        }
+        if let Message::Chunk(chunk) = &message {
+            self.metric_memory_size.sub(chunk.estimated_size() as i64);
+            self.metric_num_rows.sub(chunk.cardinality() as i64);
         }
 
         Some(message)
@@ -178,6 +231,10 @@ impl Receiver {
 
         if let Some(permits) = permits {
             self.permits.add_permits(permits);
+        }
+        if let Message::Chunk(chunk) = &message {
+            self.metric_memory_size.sub(chunk.estimated_size() as i64);
+            self.metric_num_rows.sub(chunk.cardinality() as i64);
         }
 
         Ok(message)
@@ -218,7 +275,14 @@ mod tests {
 
     #[test]
     fn test_channel_close() {
-        let (tx, mut rx) = channel(0, 0, 1);
+        let (tx, mut rx) = channel(
+            PbPermits {
+                records: 0,
+                bytes: 0,
+                barriers: 1,
+            },
+            (0, 0),
+        );
 
         let send = || {
             tx.send(Message::Barrier(Barrier::with_prev_epoch_for_test(

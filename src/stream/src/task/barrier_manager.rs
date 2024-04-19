@@ -60,6 +60,7 @@ use risingwave_pb::stream_service::{
 };
 use risingwave_storage::store::SyncResult;
 
+use super::UpDownFragmentIds;
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Actor, Barrier, DispatchExecutor, Mutation, StreamExecutorError};
@@ -222,7 +223,8 @@ pub(super) enum LocalActorOperation {
         result_sender: oneshot::Sender<StreamResult<()>>,
     },
     TakeReceiver {
-        ids: UpDownActorIds,
+        actor_ids: UpDownActorIds,
+        fragment_ids: UpDownFragmentIds,
         result_sender: oneshot::Sender<StreamResult<Receiver>>,
     },
     #[cfg(test)]
@@ -490,8 +492,15 @@ impl LocalBarrierWorker {
             } => {
                 let _ = result_sender.send(self.update_actor_info(new_actor_infos));
             }
-            LocalActorOperation::TakeReceiver { ids, result_sender } => {
-                let _ = result_sender.send(self.current_shared_context.take_receiver(ids));
+            LocalActorOperation::TakeReceiver {
+                actor_ids,
+                fragment_ids,
+                result_sender,
+            } => {
+                let _ = result_sender.send(
+                    self.current_shared_context
+                        .take_receiver(actor_ids, fragment_ids),
+                );
             }
             #[cfg(test)]
             LocalActorOperation::GetCurrentSharedContext(sender) => {

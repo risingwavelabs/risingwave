@@ -81,12 +81,12 @@ message GetDataRequest {
 
 // The structure for permit-based back-pressure.
 message Permits {
-  oneof value {
-    // The permits required for a chunk, i.e. the cardinality of the chunk.
-    uint32 record = 1;
-    // The permits required for a barrier, typically 1.
-    uint32 barrier = 2;
-  }
+  // The cardinality of the chunk.
+  uint32 records = 1;
+  // The total bytes of the chunk.
+  uint64 bytes = 3;
+  // The number of barriers, typically 1.
+  uint32 barriers = 2;
 }
 
 message GetStreamRequest {

@@ -72,7 +72,7 @@ pub struct StreamingMetrics {
     pub mview_input_row_count: IntCounterVec,
 
     // Exchange (see also `compute::ExchangeServiceMetrics`)
-    pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
+    pub exchange_frag_recv_size: LabelGuardedIntCounterVec<2>,
 
     // Backpressure
     pub actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
@@ -272,7 +272,7 @@ impl StreamingMetrics {
             )
             .unwrap();
 
-        let exchange_frag_recv_size = register_int_counter_vec_with_registry!(
+        let exchange_frag_recv_size = register_guarded_int_counter_vec_with_registry!(
             "stream_exchange_frag_recv_size",
             "Total size of messages that have been received from upstream Fragment",
             &["up_fragment_id", "down_fragment_id"],

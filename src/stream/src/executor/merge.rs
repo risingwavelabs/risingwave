@@ -586,7 +586,13 @@ mod tests {
         // 2. Take downstream receivers.
         let txs = [untouched, old, new]
             .into_iter()
-            .map(|id| (id, ctx.take_sender(&(id, actor_id)).unwrap()))
+            .map(|id| {
+                (
+                    id,
+                    ctx.take_sender((id, actor_id), (upstream_fragment_id, fragment_id))
+                        .unwrap(),
+                )
+            })
             .collect::<HashMap<_, _>>();
         macro_rules! send {
             ($actors:expr, $msg:expr) => {
@@ -697,7 +703,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_stream_exchange_client() {
-        const BATCHED_PERMITS: usize = 1024;
         let rpc_called = Arc::new(AtomicBool::new(false));
         let server_run = Arc::new(AtomicBool::new(false));
         let addr = "127.0.0.1:12348".parse().unwrap();
@@ -731,7 +736,6 @@ mod tests {
                 (0, 0),
                 (0, 0),
                 Arc::new(StreamingMetrics::unused()),
-                BATCHED_PERMITS,
             )
         };
 
