@@ -103,6 +103,7 @@ INTEGRATION_TEST_MAP = {
     "pinot-sink-json": ["yiming"],
     "presto-trino-json": ["wutao"],
     "client-library-none": ["wutao"],
+    "kafka-cdc-json": ["bohan"],
 }
 
 def get_failed_tests(get_test_status, test_map):

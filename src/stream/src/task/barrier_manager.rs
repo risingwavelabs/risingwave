@@ -62,7 +62,7 @@ use risingwave_storage::store::SyncResult;
 
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{Actor, Barrier, DispatchExecutor, Mutation};
+use crate::executor::{Actor, Barrier, DispatchExecutor, Mutation, StreamExecutorError};
 use crate::task::barrier_manager::progress::BackfillState;
 
 /// If enabled, all actors will be grouped in the same tracing span within one epoch.
@@ -694,7 +694,8 @@ impl LocalBarrierWorker {
     /// will notice actor's exit while collecting.
     async fn notify_failure(&mut self, actor_id: ActorId, err: StreamError) {
         self.add_failure(actor_id, err.clone());
-        let root_err = self.try_find_root_failure(err).await;
+        let root_err = self.try_find_root_failure().await;
+
         let failed_epochs = self.state.epochs_await_on_actor(actor_id).collect_vec();
         if !failed_epochs.is_empty() {
             self.control_stream_handle.reset_stream_with_err(
@@ -709,7 +710,6 @@ impl LocalBarrierWorker {
     }
 
     fn add_failure(&mut self, actor_id: ActorId, err: StreamError) {
-        let err = err.into_unexpected_exit(actor_id);
         if let Some(prev_err) = self.failure_actors.insert(actor_id, err) {
             warn!(
                 actor_id,
@@ -719,7 +719,7 @@ impl LocalBarrierWorker {
         }
     }
 
-    async fn try_find_root_failure(&mut self, default_err: StreamError) -> StreamError {
+    async fn try_find_root_failure(&mut self) -> StreamError {
         if let Some(root_failure) = &self.root_failure {
             return root_failure.clone();
         }
@@ -731,7 +731,10 @@ impl LocalBarrierWorker {
         })
         .await;
         self.root_failure = try_find_root_actor_failure(self.failure_actors.values());
-        self.root_failure.clone().unwrap_or(default_err)
+
+        self.root_failure
+            .clone()
+            .expect("failure actors should not be empty")
     }
 }
 
@@ -817,7 +820,9 @@ impl LocalBarrierManager {
     /// When a actor exit unexpectedly, it should report this event using this function, so meta
     /// will notice actor's exit while collecting.
     pub fn notify_failure(&self, actor_id: ActorId, err: StreamError) {
-        let _ = self.actor_failure_sender.send((actor_id, err));
+        let _ = self
+            .actor_failure_sender
+            .send((actor_id, err.into_unexpected_exit(actor_id)));
     }
 
     /// When a `RemoteInput` get a barrier, it should wait and read the barrier mutation from the barrier manager.
@@ -839,26 +844,30 @@ impl LocalBarrierManager {
 pub fn try_find_root_actor_failure<'a>(
     actor_errors: impl IntoIterator<Item = &'a StreamError>,
 ) -> Option<StreamError> {
-    use crate::executor::StreamExecutorError;
-    let stream_executor_error_score = |e: &StreamExecutorError| {
+    fn stream_executor_error_score(e: &StreamExecutorError) -> i32 {
         use crate::executor::error::ErrorKind;
         match e.inner() {
             ErrorKind::ChannelClosed(_) => 0,
             ErrorKind::Internal(_) => 1,
             _ => 999,
         }
-    };
-    let stream_error_score = |e: &&StreamError| {
+    }
+
+    fn stream_error_score(e: &StreamError) -> i32 {
         use crate::error::ErrorKind;
         match e.inner() {
+            // `UnexpectedExit` wraps the original error. Score on the inner error.
+            ErrorKind::UnexpectedExit { source, .. } => stream_error_score(source),
+
             ErrorKind::Internal(_) => 1000,
             ErrorKind::Executor(ee) => 2000 + stream_executor_error_score(ee),
             _ => 3000,
         }
-    };
+    }
+
     actor_errors
         .into_iter()
-        .max_by_key(stream_error_score)
+        .max_by_key(|&e| stream_error_score(e))
         .cloned()
 }
 

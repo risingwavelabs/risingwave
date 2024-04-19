@@ -167,3 +167,37 @@ create table shipments (
  table.name = 'shipments',
  slot.name = 'shipments'
 ) format canal encode csv;
+
+statement ok
+explain create table numeric_to_rw_int256 (
+  id int,
+  num rw_int256,
+  PRIMARY KEY (id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = 'cdc_test',
+ schema.name = 'public',
+ table.name = 'numeric_table',
+ slot.name = 'numeric_to_rw_int256'
+);
+
+statement ok
+explain create table numeric_to_varchar (
+  id int,
+  num varchar,
+  PRIMARY KEY (id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = 'cdc_test',
+ schema.name = 'public',
+ table.name = 'numeric_table',
+ slot.name = 'numeric_to_varchar'
+);

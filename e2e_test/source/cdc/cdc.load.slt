@@ -193,3 +193,36 @@ create table person_rw (
   publication.name='dumb_publicaton',
   publication.create.enable='false'
 );
+
+statement ok
+create table numeric_to_rw_int256 (
+  id int,
+  num rw_int256,
+  PRIMARY KEY (id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
+ table.name = 'numeric_table',
+ slot.name = 'numeric_to_rw_int256'
+);
+
+statement ok
+create table numeric_to_varchar (
+  id int,
+  num varchar,
+  PRIMARY KEY (id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
+ schema.name = 'public',
+ table.name = 'numeric_table',
+ slot.name = 'numeric_to_varchar'
+);

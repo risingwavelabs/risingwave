@@ -21,9 +21,9 @@ pub mod test_utils;
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 pub use column::*;
 pub use external_table::*;
+use futures::stream::BoxStream;
 pub use internal_table::*;
 use parse_display::Display;
 pub use physical_table::*;
@@ -148,9 +148,9 @@ pub fn cdc_table_name_column_desc() -> ColumnDesc {
 }
 
 /// The local system catalog reader in the frontend node.
-#[async_trait]
 pub trait SysCatalogReader: Sync + Send + 'static {
-    async fn read_table(&self, table_id: &TableId) -> Result<DataChunk, BoxedError>;
+    /// Reads the data of the system catalog table.
+    fn read_table(&self, table_id: TableId) -> BoxStream<'_, Result<DataChunk, BoxedError>>;
 }
 
 pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;

@@ -172,10 +172,10 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             self.actor_ctx.id,
             source_id,
             self.actor_ctx.fragment_id,
+            source_name.to_owned(),
             source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
             source_desc.source.config.clone(),
-            source_name.to_owned(),
         )
     }
 

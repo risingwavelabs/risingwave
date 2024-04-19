@@ -100,10 +100,10 @@ impl<S: StateStore> FsSourceExecutor<S> {
             self.actor_ctx.id,
             self.stream_source_core.source_id,
             self.actor_ctx.fragment_id,
+            self.stream_source_core.source_name.clone(),
             source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
             source_desc.source.config.clone(),
-            self.stream_source_core.source_name.clone(),
         );
         let stream = source_desc
             .source
