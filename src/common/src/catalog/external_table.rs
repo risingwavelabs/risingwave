@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,7 +42,7 @@ pub struct CdcTableDesc {
 
     pub value_indices: Vec<usize>,
 
-    /// properties will be passed into the StreamScanNode
+    /// properties will be passed into the `StreamScanNode`
     pub connect_properties: BTreeMap<String, String>,
 }
 

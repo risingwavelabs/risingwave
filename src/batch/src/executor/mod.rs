@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,10 +20,12 @@ mod generic_exchange;
 mod group_top_n;
 mod hash_agg;
 mod hop_window;
+mod iceberg_scan;
 mod insert;
 mod join;
 mod limit;
 mod managed;
+mod max_one_row;
 mod merge_sort_exchange;
 mod order_by;
 mod project;
@@ -51,10 +53,12 @@ pub use generic_exchange::*;
 pub use group_top_n::*;
 pub use hash_agg::*;
 pub use hop_window::*;
+pub use iceberg_scan::*;
 pub use insert::*;
 pub use join::*;
 pub use limit::*;
 pub use managed::*;
+pub use max_one_row::*;
 pub use merge_sort_exchange::*;
 pub use order_by::*;
 pub use project::*;
@@ -76,7 +80,7 @@ pub use update::*;
 pub use utils::*;
 pub use values::*;
 
-use self::test_utils::{BlockExecutorBuidler, BusyLoopExecutorBuidler};
+use self::test_utils::{BlockExecutorBuilder, BusyLoopExecutorBuilder};
 use crate::error::Result;
 use crate::executor::sys_row_seq_scan::SysRowSeqScanExecutorBuilder;
 use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
@@ -231,9 +235,10 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::Union => UnionExecutor,
             NodeBody::Source => SourceExecutor,
             NodeBody::SortOverWindow => SortOverWindowExecutor,
+            NodeBody::MaxOneRow => MaxOneRowExecutor,
             // Follow NodeBody only used for test
-            NodeBody::BlockExecutor => BlockExecutorBuidler,
-            NodeBody::BusyLoopExecutor => BusyLoopExecutorBuidler,
+            NodeBody::BlockExecutor => BlockExecutorBuilder,
+            NodeBody::BusyLoopExecutor => BusyLoopExecutorBuilder,
         }
         .await?;
 

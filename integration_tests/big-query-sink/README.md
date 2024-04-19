@@ -23,9 +23,9 @@ CREATE table '${project_id}'.'${dataset_id}'.'${table_id}'(
 
 4. Execute the SQL queries in sequence:
 
-- append-only/create_source.sql
-- append-only/create_mv.sql
-- append-only/create_sink.sql
+- create_source.sql
+- create_mv.sql
+- create_sink.sql
 
     1. We need to obtain the JSON file for Google Cloud service accounts, which can be configured here: https://console.cloud.google.com/iam-admin/serviceaccounts.
     2. Because BigQuery has limited support for updates and deletes, we currently only support 'append only'

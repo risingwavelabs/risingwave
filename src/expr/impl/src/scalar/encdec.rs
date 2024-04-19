@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ use std::fmt::Write;
 
 use risingwave_common::cast::{parse_bytes_hex, parse_bytes_traditional};
 use risingwave_expr::{function, ExprError, Result};
+use thiserror_ext::AsReport;
 
 const PARSE_BASE64_INVALID_END: &str = "invalid base64 end sequence";
 const PARSE_BASE64_INVALID_PADDING: &str = "unexpected \"=\" while decoding base64 sequence";
@@ -95,7 +96,7 @@ pub fn convert_from(data: &[u8], src_encoding: &str, writer: &mut impl Write) ->
         CharacterSet::Utf8 => {
             let text = String::from_utf8(data.to_vec()).map_err(|e| ExprError::InvalidParam {
                 name: "data",
-                reason: e.to_string().into(),
+                reason: e.to_report_string().into(),
             })?;
             writer.write_str(&text).unwrap();
             Ok(())

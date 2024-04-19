@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@ pub use nexmark::event::EventType;
 use nexmark::event::{Auction, Bid, Event, Person};
 use risingwave_common::array::StructValue;
 use risingwave_common::catalog::ROWID_PREFIX;
-use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, ScalarImpl, StructType, Timestamp};
 use serde::{Deserialize, Serialize};
 
@@ -180,7 +179,10 @@ pub(crate) fn get_bid_struct_type() -> StructType {
     ])
 }
 
-pub(crate) fn combined_event_to_row(e: CombinedEvent, row_id_index: Option<usize>) -> OwnedRow {
+pub(crate) fn combined_event_to_row(
+    e: CombinedEvent,
+    row_id_index: Option<usize>,
+) -> Vec<Option<ScalarImpl>> {
     let mut fields = vec![
         Some(ScalarImpl::Int64(e.event_type as i64)),
         e.person
@@ -199,10 +201,10 @@ pub(crate) fn combined_event_to_row(e: CombinedEvent, row_id_index: Option<usize
         fields.insert(row_id_index, None);
     }
 
-    OwnedRow::new(fields)
+    fields
 }
 
-pub(crate) fn event_to_row(e: Event, row_id_index: Option<usize>) -> OwnedRow {
+pub(crate) fn event_to_row(e: Event, row_id_index: Option<usize>) -> Vec<Option<ScalarImpl>> {
     let mut fields = match e {
         Event::Person(p) => person_to_datum(p),
         Event::Auction(a) => auction_to_datum(a),
@@ -212,7 +214,7 @@ pub(crate) fn event_to_row(e: Event, row_id_index: Option<usize>) -> OwnedRow {
         // _row_id
         fields.insert(row_id_index, None);
     }
-    OwnedRow::new(fields)
+    fields
 }
 
 fn person_to_datum(p: Person) -> Vec<Datum> {

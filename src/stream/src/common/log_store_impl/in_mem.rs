@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
+use risingwave_common::util::epoch::{EpochExt, EpochPair, INVALID_EPOCH};
 use risingwave_connector::sink::log_store::{
     LogReader, LogStoreFactory, LogStoreReadItem, LogStoreResult, LogWriter, TruncateOffset,
 };
@@ -132,8 +132,12 @@ impl LogReader for BoundedInMemLogStoreReader {
         let epoch = init_epoch_rx.await.context("unable to get init epoch")?;
         assert_eq!(self.epoch_progress, UNINITIALIZED);
         self.epoch_progress = LogReaderEpochProgress::Consuming(epoch);
-        self.latest_offset = TruncateOffset::Barrier { epoch: epoch - 1 };
-        self.truncate_offset = TruncateOffset::Barrier { epoch: epoch - 1 };
+        self.latest_offset = TruncateOffset::Barrier {
+            epoch: epoch.prev_epoch(),
+        };
+        self.truncate_offset = TruncateOffset::Barrier {
+            epoch: epoch.prev_epoch(),
+        };
         Ok(())
     }
 
@@ -233,6 +237,10 @@ impl LogReader for BoundedInMemLogStoreReader {
         self.truncate_offset = offset;
         Ok(())
     }
+
+    async fn rewind(&mut self) -> LogStoreResult<(bool, Option<Bitmap>)> {
+        Ok((false, None))
+    }
 }
 
 impl LogWriter for BoundedInMemLogStoreWriter {
@@ -313,7 +321,7 @@ mod tests {
     use futures::FutureExt;
     use risingwave_common::array::Op;
     use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_common::util::epoch::EpochPair;
+    use risingwave_common::util::epoch::{test_epoch, EpochPair};
     use risingwave_connector::sink::log_store::{
         LogReader, LogStoreFactory, LogStoreReadItem, LogWriter, TruncateOffset,
     };
@@ -326,9 +334,9 @@ mod tests {
         let factory = BoundedInMemLogStoreFactory::new(4);
         let (mut reader, mut writer) = factory.build().await;
 
-        let init_epoch = 233;
-        let epoch1 = init_epoch + 1;
-        let epoch2 = init_epoch + 2;
+        let init_epoch = test_epoch(1);
+        let epoch1 = test_epoch(2);
+        let epoch2 = test_epoch(3);
 
         let ops = vec![Op::Insert, Op::Delete, Op::UpdateInsert, Op::UpdateDelete];
         let mut builder = StreamChunkBuilder::new(10000, vec![DataType::Int64, DataType::Varchar]);

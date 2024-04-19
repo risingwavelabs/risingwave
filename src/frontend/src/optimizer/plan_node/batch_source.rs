@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,9 +15,9 @@
 use std::rc::Rc;
 
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SourceNode;
+use risingwave_sqlparser::ast::AsOf;
 
 use super::batch::prelude::*;
 use super::utils::{childless_record, column_names_pretty, Distill};
@@ -25,6 +25,7 @@ use super::{
     generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
 use crate::catalog::source_catalog::SourceCatalog;
+use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Distribution, Order};
 
@@ -32,7 +33,7 @@ use crate::optimizer::property::{Distribution, Order};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSource {
     pub base: PlanBase<Batch>,
-    core: generic::Source,
+    pub core: generic::Source,
 }
 
 impl BatchSource {
@@ -55,8 +56,8 @@ impl BatchSource {
         self.core.catalog.clone()
     }
 
-    pub fn kafka_timestamp_range_value(&self) -> (Option<i64>, Option<i64>) {
-        self.core.kafka_timestamp_range_value()
+    pub fn as_of(&self) -> Option<AsOf> {
+        self.core.as_of.clone()
     }
 
     pub fn clone_with_dist(&self) -> Self {
@@ -75,11 +76,13 @@ impl_plan_tree_node_for_leaf! { BatchSource }
 impl Distill for BatchSource {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let src = Pretty::from(self.source_catalog().unwrap().name.clone());
-        let fields = vec![
+        let mut fields = vec![
             ("source", src),
             ("columns", column_names_pretty(self.schema())),
-            ("filter", Pretty::debug(&self.kafka_timestamp_range_value())),
         ];
+        if let Some(as_of) = &self.core.as_of {
+            fields.push(("as_of", Pretty::debug(as_of)));
+        }
         childless_record("BatchSource", fields)
     }
 }
@@ -108,7 +111,7 @@ impl ToBatchPb for BatchSource {
                 .iter()
                 .map(|c| c.to_protobuf())
                 .collect(),
-            properties: source_catalog.properties.clone().into_iter().collect(),
+            with_properties: source_catalog.with_properties.clone().into_iter().collect(),
             split: vec![],
         })
     }

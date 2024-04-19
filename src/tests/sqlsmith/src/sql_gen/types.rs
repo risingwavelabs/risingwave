@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,9 +20,8 @@ use std::sync::LazyLock;
 use itertools::Itertools;
 use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_expr::aggregate::AggKind;
-use risingwave_expr::sig::cast::{cast_sigs, CastContext, CastSig as RwCastSig};
 use risingwave_expr::sig::{FuncSign, FUNCTION_REGISTRY};
-use risingwave_frontend::expr::ExprType;
+use risingwave_frontend::expr::{cast_sigs, CastContext, CastSig as RwCastSig, ExprType};
 use risingwave_sqlparser::ast::{BinaryOperator, DataType as AstDataType, StructField};
 
 pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
@@ -113,6 +112,10 @@ static FUNC_BAN_LIST: LazyLock<HashSet<ExprType>> = LazyLock::new(|| {
         ExprType::Repeat,
         // The format argument needs to be handled specially. It is still generated in `gen_special_func`.
         ExprType::Decode,
+        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
+        ExprType::Sqrt,
+        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
+        ExprType::Pow,
     ]
     .into_iter()
     .collect()
@@ -182,6 +185,7 @@ pub(crate) static AGG_FUNC_TABLE: LazyLock<HashMap<DataType, Vec<&'static FuncSi
                         AggKind::PercentileCont,
                         AggKind::PercentileDisc,
                         AggKind::Mode,
+                        AggKind::JsonbObjectAgg, // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
                     ]
                     .contains(&func.name.as_aggregate())
                     // Exclude 2 phase agg global sum.
@@ -268,9 +272,7 @@ pub(crate) static BINARY_INEQUALITY_OP_TABLE: LazyLock<
         .filter_map(|func| {
             let lhs = func.inputs_type[0].as_exact().clone();
             let rhs = func.inputs_type[1].as_exact().clone();
-            let Some(op) = expr_type_to_inequality_op(func.name.as_scalar()) else {
-                return None;
-            };
+            let op = expr_type_to_inequality_op(func.name.as_scalar())?;
             Some(((lhs, rhs), op))
         })
         .for_each(|(args, op)| funcs.entry(args).or_default().push(op));

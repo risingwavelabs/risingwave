@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,12 +13,14 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
+use std::num::NonZeroU32;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, TableId};
-use risingwave_common::error::Result;
+use risingwave_common::catalog::{
+    ColumnCatalog, ConflictBehavior, CreateType, TableId, OBJECT_ID_PLACEHOLDER,
+};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -28,8 +30,8 @@ use super::stream::prelude::*;
 use super::stream::StreamPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{reorganize_elements_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::catalog::table_catalog::{CreateType, TableCatalog, TableType, TableVersion};
-use crate::catalog::FragmentId;
+use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
+use crate::error::Result;
 use crate::optimizer::plan_node::derive::derive_pk;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -77,6 +79,7 @@ impl StreamMaterialize {
         definition: String,
         table_type: TableType,
         cardinality: Cardinality,
+        retention_seconds: Option<NonZeroU32>,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, table_type)?;
         // the hidden column name might refer some expr id
@@ -92,9 +95,11 @@ impl StreamMaterialize {
             ConflictBehavior::NoCheck,
             None,
             None,
+            None,
             table_type,
             None,
             cardinality,
+            retention_seconds,
         )?;
 
         Ok(Self::new(input, table))
@@ -114,9 +119,11 @@ impl StreamMaterialize {
         columns: Vec<ColumnCatalog>,
         definition: String,
         conflict_behavior: ConflictBehavior,
+        version_column_index: Option<usize>,
         pk_column_indices: Vec<usize>,
         row_id_index: Option<usize>,
         version: Option<TableVersion>,
+        retention_seconds: Option<NonZeroU32>,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, TableType::Table)?;
 
@@ -127,11 +134,13 @@ impl StreamMaterialize {
             columns,
             definition,
             conflict_behavior,
+            version_column_index,
             Some(pk_column_indices),
             row_id_index,
             TableType::Table,
             version,
             Cardinality::unknown(), // unknown cardinality for tables
+            retention_seconds,
         )?;
 
         Ok(Self::new(input, table))
@@ -196,17 +205,18 @@ impl StreamMaterialize {
         columns: Vec<ColumnCatalog>,
         definition: String,
         conflict_behavior: ConflictBehavior,
+        version_column_index: Option<usize>,
         pk_column_indices: Option<Vec<usize>>, // Is some when create table
         row_id_index: Option<usize>,
         table_type: TableType,
         version: Option<TableVersion>,
         cardinality: Cardinality,
+        retention_seconds: Option<NonZeroU32>,
     ) -> Result<TableCatalog> {
         let input = rewritten_input;
 
         let value_indices = (0..columns.len()).collect_vec();
         let distribution_key = input.distribution().dist_column_indices().to_vec();
-        let properties = input.ctx().with_options().internal_table_subset(); // TODO: remove this
         let append_only = input.append_only();
         let watermark_columns = input.watermark_columns().clone();
 
@@ -227,6 +237,7 @@ impl StreamMaterialize {
             id: TableId::placeholder(),
             associated_source_id: None,
             name,
+            dependent_relations: vec![],
             columns,
             pk: table_pk,
             stream_key,
@@ -234,15 +245,14 @@ impl StreamMaterialize {
             table_type,
             append_only,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-            properties,
-            // TODO(zehua): replace it with FragmentId::placeholder()
-            fragment_id: FragmentId::MAX - 1,
+            fragment_id: OBJECT_ID_PLACEHOLDER,
             dml_fragment_id: None,
             vnode_col_index: None,
             row_id_index,
             value_indices,
             definition,
             conflict_behavior,
+            version_column_index,
             read_prefix_len_hint,
             version,
             watermark_columns,
@@ -253,6 +263,10 @@ impl StreamMaterialize {
             cleaned_by_watermark: false,
             create_type: CreateType::Foreground, // Will be updated in the handler itself.
             description: None,
+            incoming_sinks: vec![],
+            initialized_at_cluster_version: None,
+            created_at_cluster_version: None,
+            retention_seconds: retention_seconds.map(|i| i.into()),
         })
     }
 

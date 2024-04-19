@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,10 @@
 
 use std::marker::PhantomData;
 
-use risingwave_common::estimate_size::collections::VecDeque;
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::Datum;
 use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
+use risingwave_common_estimate_size::collections::EstimatedVecDeque;
+use risingwave_common_estimate_size::EstimateSize;
 use smallvec::SmallVec;
 
 use self::private::RankFuncCount;
@@ -111,7 +111,7 @@ pub struct RankState<RF: RankFuncCount> {
     /// First state key of the partition.
     first_key: Option<StateKey>,
     /// State keys that are waiting to be outputted.
-    buffer: VecDeque<StateKey>,
+    buffer: EstimatedVecDeque<StateKey>,
     /// Function-specific state.
     func_state: RF,
     _phantom: PhantomData<RF>,

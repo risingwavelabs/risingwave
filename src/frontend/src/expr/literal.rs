@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -93,7 +93,7 @@ impl Literal {
 
     pub(super) fn from_expr_proto(
         proto: &risingwave_pb::expr::ExprNode,
-    ) -> risingwave_common::error::Result<Self> {
+    ) -> crate::error::Result<Self> {
         let data_type = proto.get_return_type()?;
         Ok(Self {
             data: value_encoding_to_literal(&proto.rex_node, &data_type.into())?,
@@ -126,7 +126,7 @@ pub fn literal_to_value_encoding(d: &Datum) -> RexNode {
 fn value_encoding_to_literal(
     proto: &Option<RexNode>,
     ty: &DataType,
-) -> risingwave_common::error::Result<Datum> {
+) -> crate::error::Result<Datum> {
     if let Some(rex_node) = proto {
         if let RexNode::Constant(prost_datum) = rex_node {
             let datum = Datum::from_protobuf(prost_datum, ty)?;

@@ -11,6 +11,7 @@ message StackTraceResponse {
   map<uint32, string> actor_traces = 1;
   map<string, string> rpc_traces = 2;
   map<string, string> compaction_task_traces = 3;
+  map<uint64, string> inflight_barrier_traces = 4;
 }
 
 // CPU profiling
@@ -48,10 +49,25 @@ message AnalyzeHeapResponse {
   bytes result = 1;
 }
 
+// Back pressure
+message GetBackPressureRequest {}
+
+message BackPressureInfo {
+  uint32 actor_id = 1;
+  uint32 fragment_id = 2;
+  uint32 downstream_fragment_id = 3;
+  double value = 4;
+}
+
+message GetBackPressureResponse {
+  repeated BackPressureInfo back_pressure_infos = 1;
+}
+
 service MonitorService {
   rpc StackTrace(StackTraceRequest) returns (StackTraceResponse);
   rpc Profiling(ProfilingRequest) returns (ProfilingResponse);
   rpc HeapProfiling(HeapProfilingRequest) returns (HeapProfilingResponse);
   rpc ListHeapProfiling(ListHeapProfilingRequest) returns (ListHeapProfilingResponse);
   rpc AnalyzeHeap(AnalyzeHeapRequest) returns (AnalyzeHeapResponse);
+  rpc GetBackPressure(GetBackPressureRequest) returns (GetBackPressureResponse);
 }

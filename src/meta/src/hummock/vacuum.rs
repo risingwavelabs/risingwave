@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::VacuumTask;
+use thiserror_ext::AsReport;
 
 use super::CompactorManagerRef;
 use crate::backup_restore::BackupManagerRef;
@@ -33,7 +34,7 @@ pub struct VacuumManager {
     env: MetaSrvEnv,
     hummock_manager: HummockManagerRef,
     backup_manager: BackupManagerRef,
-    /// Use the CompactorManager to dispatch VacuumTask.
+    /// Use the `CompactorManager` to dispatch `VacuumTask`.
     compactor_manager: CompactorManagerRef,
     /// SST object ids which have been dispatched to vacuum nodes but are not replied yet.
     pending_object_ids: parking_lot::RwLock<HashSet<HummockSstableObjectId>>,
@@ -148,9 +149,9 @@ impl VacuumManager {
                 }
                 Err(err) => {
                     tracing::warn!(
-                        "Failed to send vacuum task to worker {}: {:#?}",
+                        error = %err.as_report(),
+                        "Failed to send vacuum task to worker {}",
                         compactor.context_id(),
-                        err
                     );
                     self.compactor_manager
                         .remove_compactor(compactor.context_id());
@@ -227,40 +228,29 @@ mod tests {
             backup_manager,
             compactor_manager.clone(),
         ));
-        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 0);
-        assert_eq!(
-            VacuumManager::vacuum_object(&vacuum).await.unwrap().len(),
-            0
-        );
+        assert_eq!(vacuum.vacuum_metadata().await.unwrap(), 0);
+        assert_eq!(vacuum.vacuum_object().await.unwrap().len(), 0);
         hummock_manager.pin_version(context_id).await.unwrap();
         let sst_infos = add_test_tables(hummock_manager.as_ref(), context_id).await;
-        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 0);
+        assert_eq!(vacuum.vacuum_metadata().await.unwrap(), 0);
         hummock_manager.create_version_checkpoint(1).await.unwrap();
-        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 6);
-        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 0);
+        assert_eq!(vacuum.vacuum_metadata().await.unwrap(), 6);
+        assert_eq!(vacuum.vacuum_metadata().await.unwrap(), 0);
 
         assert!(hummock_manager.get_objects_to_delete().await.is_empty());
         hummock_manager
             .unpin_version_before(context_id, HummockVersionId::MAX)
             .await
             .unwrap();
+        hummock_manager.create_version_checkpoint(0).await.unwrap();
         assert!(!hummock_manager.get_objects_to_delete().await.is_empty());
         // No SST deletion is scheduled because no available worker.
-        assert_eq!(
-            VacuumManager::vacuum_object(&vacuum).await.unwrap().len(),
-            0
-        );
+        assert_eq!(vacuum.vacuum_object().await.unwrap().len(), 0);
         let _receiver = compactor_manager.add_compactor(context_id);
         // SST deletion is scheduled.
-        assert_eq!(
-            VacuumManager::vacuum_object(&vacuum).await.unwrap().len(),
-            3
-        );
+        assert_eq!(vacuum.vacuum_object().await.unwrap().len(), 3);
         // The deletion is not acked yet.
-        assert_eq!(
-            VacuumManager::vacuum_object(&vacuum).await.unwrap().len(),
-            3
-        );
+        assert_eq!(vacuum.vacuum_object().await.unwrap().len(), 3);
         // The vacuum task is reported.
         vacuum
             .report_vacuum_task(VacuumTask {
@@ -274,9 +264,6 @@ mod tests {
             .await
             .unwrap();
         // No objects_to_delete.
-        assert_eq!(
-            VacuumManager::vacuum_object(&vacuum).await.unwrap().len(),
-            0
-        );
+        assert_eq!(vacuum.vacuum_object().await.unwrap().len(), 0);
     }
 }

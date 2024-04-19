@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 
 use std::sync::Arc;
 
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_pb::task_service::permits;
 use tokio::sync::{mpsc, AcquireError, Semaphore, SemaphorePermit};
 
@@ -34,18 +33,18 @@ pub struct MessageWithPermits {
 
 /// Create a channel for the exchange service.
 pub fn channel(
-    max_bytes: usize,
-    ack_bytes: usize,
+    initial_permits: usize,
+    batched_permits: usize,
     concurrent_barriers: usize,
 ) -> (Sender, Receiver) {
     // Use an unbounded channel since we manage the permits manually.
     let (tx, rx) = mpsc::unbounded_channel();
 
-    let records = Semaphore::new(max_bytes);
+    let records = Semaphore::new(initial_permits);
     let barriers = Semaphore::new(concurrent_barriers);
     let permits = Arc::new(Permits { records, barriers });
 
-    let max_chunk_permits: usize = max_bytes - ack_bytes;
+    let max_chunk_permits: usize = initial_permits - batched_permits;
 
     (
         Sender {
@@ -59,15 +58,15 @@ pub fn channel(
 
 /// The configuration for tests.
 pub mod for_test {
-    pub const MAX_BYTES: usize = (u32::MAX / 2) as _;
-    pub const ACK_BYTES: usize = 1;
+    pub const INITIAL_PERMITS: usize = (u32::MAX / 2) as _;
+    pub const BATCHED_PERMITS: usize = 1;
     pub const CONCURRENT_BARRIERS: usize = (u32::MAX / 2) as _;
 }
 
 pub fn channel_for_test() -> (Sender, Receiver) {
     use for_test::*;
 
-    channel(MAX_BYTES, ACK_BYTES, CONCURRENT_BARRIERS)
+    channel(INITIAL_PERMITS, BATCHED_PERMITS, CONCURRENT_BARRIERS)
 }
 
 /// Semaphore-based permits to control the back-pressure.
@@ -113,8 +112,9 @@ pub struct Sender {
     tx: mpsc::UnboundedSender<MessageWithPermits>,
     permits: Arc<Permits>,
 
-    /// The maximum permits required by a chunk. If the chunk size is too large, we only
-    /// acquire these permits. `ack_bytes` is subtracted to avoid deadlock with batching.
+    /// The maximum permits required by a chunk. If there're too many rows in a chunk, we only
+    /// acquire these permits. `BATCHED_PERMITS` is subtracted to avoid deadlock with
+    /// batching.
     max_chunk_permits: usize,
 }
 
@@ -126,12 +126,11 @@ impl Sender {
         // The semaphores should never be closed.
         let permits = match &message {
             Message::Chunk(c) => {
-                let size = c.estimated_size();
-                let permits = size.min(self.max_chunk_permits);
-                if permits == self.max_chunk_permits {
-                    tracing::warn!(size, "large chunk in exchange")
+                let card = c.cardinality().clamp(1, self.max_chunk_permits);
+                if card == self.max_chunk_permits {
+                    tracing::warn!(cardinality = c.cardinality(), "large chunk in exchange")
                 }
-                Some(permits::Value::Record(permits as _))
+                Some(permits::Value::Record(card as _))
             }
             Message::Barrier(_) => Some(permits::Value::Barrier(1)),
             Message::Watermark(_) => None,

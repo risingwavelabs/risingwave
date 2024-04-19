@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -67,8 +67,12 @@ impl CoordinatorStreamHandle {
             move |rx| async move {
                 init_stream(rx)
                     .await
-                    .map(|response| response.into_inner().map_err(RpcError::from))
-                    .map_err(RpcError::from)
+                    .map(|response| {
+                        response
+                            .into_inner()
+                            .map_err(RpcError::from_connector_status)
+                    })
+                    .map_err(RpcError::from_connector_status)
             },
         )
         .await?;

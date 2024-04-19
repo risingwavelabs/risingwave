@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,6 +34,8 @@ pub struct StoreLocalStatistic {
     pub cache_data_block_total: u64,
     pub cache_meta_block_miss: u64,
     pub cache_meta_block_total: u64,
+    pub cache_data_prefetch_count: u64,
+    pub cache_data_prefetch_block_count: u64,
 
     // include multiple versions of one key.
     pub total_key_count: u64,
@@ -78,11 +80,6 @@ impl StoreLocalStatistic {
         if other.added.fetch_or(true, Ordering::Relaxed) || other.reported.load(Ordering::Relaxed) {
             tracing::error!("double added\n{:#?}", other);
         }
-    }
-
-    pub fn apply_meta_fetch(&mut self, local_cache_meta_block_miss: u64) {
-        self.cache_meta_block_total += 1;
-        self.cache_meta_block_miss += local_cache_meta_block_miss;
     }
 
     fn report(&self, metrics: &mut LocalStoreMetrics) {
@@ -191,6 +188,7 @@ impl StoreLocalStatistic {
             || self.cache_data_block_total != 0
             || self.cache_meta_block_miss != 0
             || self.cache_meta_block_total != 0
+            || self.cache_data_prefetch_count != 0
             || self.skip_multi_version_key_count != 0
             || self.skip_delete_key_count != 0
             || self.processed_key_count != 0
@@ -217,6 +215,8 @@ struct LocalStoreMetrics {
     cache_data_block_miss: LabelGuardedLocalIntCounter<2>,
     cache_meta_block_total: LabelGuardedLocalIntCounter<2>,
     cache_meta_block_miss: LabelGuardedLocalIntCounter<2>,
+    cache_data_prefetch_count: LabelGuardedLocalIntCounter<2>,
+    cache_data_prefetch_block_count: LabelGuardedLocalIntCounter<2>,
     remote_io_time: LocalHistogram,
     processed_key_count: LabelGuardedLocalIntCounter<2>,
     skip_multi_version_key_count: LabelGuardedLocalIntCounter<2>,
@@ -257,6 +257,14 @@ impl LocalStoreMetrics {
         let cache_meta_block_total = metrics
             .sst_store_block_request_counts
             .with_label_values(&[table_id_label, "meta_total"])
+            .local();
+        let cache_data_prefetch_count = metrics
+            .sst_store_block_request_counts
+            .with_label_values(&[table_id_label, "prefetch_count"])
+            .local();
+        let cache_data_prefetch_block_count = metrics
+            .sst_store_block_request_counts
+            .with_label_values(&[table_id_label, "prefetch_data_count"])
             .local();
 
         let cache_meta_block_miss = metrics
@@ -345,6 +353,8 @@ impl LocalStoreMetrics {
             cache_data_block_miss,
             cache_meta_block_total,
             cache_meta_block_miss,
+            cache_data_prefetch_count,
+            cache_data_prefetch_block_count,
             remote_io_time,
             processed_key_count,
             skip_multi_version_key_count,
@@ -447,6 +457,8 @@ add_local_metrics_count!(
     cache_data_block_miss,
     cache_meta_block_total,
     cache_meta_block_miss,
+    cache_data_prefetch_count,
+    cache_data_prefetch_block_count,
     skip_multi_version_key_count,
     skip_delete_key_count,
     get_shared_buffer_hit_counts,

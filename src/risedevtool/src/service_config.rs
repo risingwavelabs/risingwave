@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -61,6 +61,7 @@ pub struct MetaNodeConfig {
     pub user_managed: bool,
 
     pub provide_etcd_backend: Option<Vec<EtcdConfig>>,
+    pub provide_sqlite_backend: Option<Vec<SqliteConfig>>,
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
 
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
@@ -140,6 +141,10 @@ pub struct MinioConfig {
     pub hummock_bucket: String,
 
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
+
+    // For rate limiting minio in a test environment.
+    pub api_requests_max: usize,
+    pub api_requests_deadline: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -167,6 +172,17 @@ pub struct EtcdConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
+pub struct SqliteConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub file: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct PrometheusConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
@@ -180,6 +196,8 @@ pub struct PrometheusConfig {
     pub remote_write: bool,
     pub remote_write_region: String,
     pub remote_write_url: String,
+
+    pub scrape_interval: String,
 
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
@@ -217,6 +235,7 @@ pub struct TempoConfig {
     pub address: String,
     pub port: u16,
     pub otlp_port: u16,
+    pub max_bytes_per_trace: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -258,6 +277,8 @@ pub struct KafkaConfig {
     pub provide_zookeeper: Option<Vec<ZooKeeperConfig>>,
     pub persist_data: bool,
     pub broker_id: u32,
+
+    pub user_managed: bool,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -324,10 +345,11 @@ pub enum ServiceConfig {
     Compactor(CompactorConfig),
     Minio(MinioConfig),
     Etcd(EtcdConfig),
+    Sqlite(SqliteConfig),
     Prometheus(PrometheusConfig),
     Grafana(GrafanaConfig),
     Tempo(TempoConfig),
-    OpenDal(OpendalConfig),
+    Opendal(OpendalConfig),
     AwsS3(AwsS3Config),
     Kafka(KafkaConfig),
     Pubsub(PubsubConfig),
@@ -345,6 +367,7 @@ impl ServiceConfig {
             Self::Compactor(c) => &c.id,
             Self::Minio(c) => &c.id,
             Self::Etcd(c) => &c.id,
+            Self::Sqlite(c) => &c.id,
             Self::Prometheus(c) => &c.id,
             Self::Grafana(c) => &c.id,
             Self::Tempo(c) => &c.id,
@@ -354,7 +377,51 @@ impl ServiceConfig {
             Self::Pubsub(c) => &c.id,
             Self::Redis(c) => &c.id,
             Self::RedPanda(c) => &c.id,
-            Self::OpenDal(c) => &c.id,
+            Self::Opendal(c) => &c.id,
+        }
+    }
+
+    pub fn port(&self) -> Option<u16> {
+        match self {
+            Self::ComputeNode(c) => Some(c.port),
+            Self::MetaNode(c) => Some(c.port),
+            Self::Frontend(c) => Some(c.port),
+            Self::Compactor(c) => Some(c.port),
+            Self::Minio(c) => Some(c.port),
+            Self::Etcd(c) => Some(c.port),
+            Self::Sqlite(_) => None,
+            Self::Prometheus(c) => Some(c.port),
+            Self::Grafana(c) => Some(c.port),
+            Self::Tempo(c) => Some(c.port),
+            Self::AwsS3(_) => None,
+            Self::ZooKeeper(c) => Some(c.port),
+            Self::Kafka(c) => Some(c.port),
+            Self::Pubsub(c) => Some(c.port),
+            Self::Redis(c) => Some(c.port),
+            Self::RedPanda(_c) => None,
+            Self::Opendal(_) => None,
+        }
+    }
+
+    pub fn user_managed(&self) -> bool {
+        match self {
+            Self::ComputeNode(c) => c.user_managed,
+            Self::MetaNode(c) => c.user_managed,
+            Self::Frontend(c) => c.user_managed,
+            Self::Compactor(c) => c.user_managed,
+            Self::Minio(_c) => false,
+            Self::Etcd(_c) => false,
+            Self::Sqlite(_c) => false,
+            Self::Prometheus(_c) => false,
+            Self::Grafana(_c) => false,
+            Self::Tempo(_c) => false,
+            Self::AwsS3(_c) => false,
+            Self::ZooKeeper(_c) => false,
+            Self::Kafka(c) => c.user_managed,
+            Self::Pubsub(_c) => false,
+            Self::Redis(_c) => false,
+            Self::RedPanda(_c) => false,
+            Self::Opendal(_c) => false,
         }
     }
 }

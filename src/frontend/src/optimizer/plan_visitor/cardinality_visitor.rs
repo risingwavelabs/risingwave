@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,43 +35,13 @@ impl CardinalityVisitor {
         input_card: Cardinality,
         eq_set: HashSet<usize>,
     ) -> Cardinality {
-        let mut unique_keys: Vec<HashSet<_>> = if let Some(stream_key) = input.stream_key() {
-            vec![stream_key.iter().copied().collect()]
-        } else {
-            vec![]
-        };
-        // We don't have UNIQUE key now. So we hack here to support some complex queries on
-        // system tables.
-        // TODO(card): remove this after we have UNIQUE key. https://github.com/risingwavelabs/risingwave/issues/12514
-        {
-            // Hack for unique key `nspname` on `pg_catalog.pg_namespace`
-            //
-            // LogicalFilter { predicate: (rw_schemas.name = ...) }
-            //  (below is expanded logical view, see src/frontend/src/catalog/system_catalog/pg_catalog/pg_namespace.rs)
-            //  └─LogicalProject { exprs: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
-            //    └─LogicalScan { table: rw_schemas, columns: [id, name, owner, acl] }
-            fn try_get_unique_key_from_pg_namespace(plan: &dyn PlanNode) -> Option<HashSet<usize>> {
-                let proj = plan.as_logical_project()?;
-                if !proj.is_identity() {
-                    return None;
-                }
-                let scan = proj.input();
-                let scan = scan.as_logical_sys_scan()?;
-                if scan.table_name() == "rw_schemas" {
-                    if let Some(name) = scan
-                        .output_col_idx()
-                        .iter()
-                        .find(|i| scan.table_desc().columns[**i].name == "name")
-                    {
-                        return Some([*name].into_iter().collect());
-                    }
-                }
-                None
-            }
-            if let Some(unique_key) = try_get_unique_key_from_pg_namespace(input) {
-                unique_keys.push(unique_key);
-            }
-        }
+        // TODO: there could be more unique keys than the stream key after we support it.
+        let unique_keys: Vec<HashSet<_>> = input
+            .stream_key()
+            .into_iter()
+            .map(|s| s.iter().copied().collect())
+            .collect();
+
         if unique_keys
             .iter()
             .any(|unique_key| eq_set.is_superset(unique_key))
@@ -97,6 +67,23 @@ impl PlanVisitor for CardinalityVisitor {
         plan.rows().len().into()
     }
 
+    fn visit_logical_share(&mut self, plan: &plan_node::LogicalShare) -> Cardinality {
+        self.visit(plan.input())
+    }
+
+    fn visit_logical_dedup(&mut self, plan: &plan_node::LogicalDedup) -> Cardinality {
+        let input = self.visit(plan.input());
+        if plan.dedup_cols().is_empty() {
+            input.min(1)
+        } else {
+            input
+        }
+    }
+
+    fn visit_logical_over_window(&mut self, plan: &super::LogicalOverWindow) -> Self::Result {
+        self.visit(plan.input())
+    }
+
     fn visit_logical_agg(&mut self, plan: &plan_node::LogicalAgg) -> Cardinality {
         let input = self.visit(plan.input());
 
@@ -109,6 +96,10 @@ impl PlanVisitor for CardinalityVisitor {
 
     fn visit_logical_limit(&mut self, plan: &plan_node::LogicalLimit) -> Cardinality {
         self.visit(plan.input()).min(plan.limit() as usize)
+    }
+
+    fn visit_logical_max_one_row(&mut self, plan: &plan_node::LogicalMaxOneRow) -> Cardinality {
+        self.visit(plan.input()).min(1)
     }
 
     fn visit_logical_project(&mut self, plan: &plan_node::LogicalProject) -> Cardinality {

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use risingwave_common::bail_not_implemented;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, JsonbVal};
 use risingwave_sqlparser::ast::{BinaryOperator, Expr};
 
 use crate::binder::Binder;
+use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall};
 
 impl Binder {
@@ -94,13 +94,13 @@ impl Binder {
             BinaryOperator::GtEq => ExprType::GreaterThanOrEqual,
             BinaryOperator::And => ExprType::And,
             BinaryOperator::Or => ExprType::Or,
-            BinaryOperator::Like => ExprType::Like,
-            BinaryOperator::NotLike => {
+            BinaryOperator::PGLikeMatch => ExprType::Like,
+            BinaryOperator::PGNotLikeMatch => {
                 func_types.push(ExprType::Not);
                 ExprType::Like
             }
-            BinaryOperator::ILike => ExprType::ILike,
-            BinaryOperator::NotILike => {
+            BinaryOperator::PGILikeMatch => ExprType::ILike,
+            BinaryOperator::PGNotILikeMatch => {
                 func_types.push(ExprType::Not);
                 ExprType::ILike
             }
@@ -113,8 +113,8 @@ impl Binder {
             BinaryOperator::Arrow => ExprType::JsonbAccess,
             BinaryOperator::LongArrow => ExprType::JsonbAccessStr,
             BinaryOperator::HashMinus => ExprType::JsonbDeletePath,
-            BinaryOperator::HashArrow => ExprType::JsonbExtractPath,
-            BinaryOperator::HashLongArrow => ExprType::JsonbExtractPathText,
+            BinaryOperator::HashArrow => ExprType::JsonbExtractPathVariadic,
+            BinaryOperator::HashLongArrow => ExprType::JsonbExtractPathTextVariadic,
             BinaryOperator::Prefix => ExprType::StartsWith,
             BinaryOperator::Contains => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());

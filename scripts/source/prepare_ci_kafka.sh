@@ -3,17 +3,8 @@
 # Exits as soon as any line fails.
 set -e
 
-KCAT_BIN="kcat"
-# kcat bin name on linux is "kafkacat"
-if [ "$(uname)" == "Linux" ]
-then
-    KCAT_BIN="kafkacat"
-fi
-
 SCRIPT_PATH="$(cd "$(dirname "$0")" >/dev/null 2>&1 && pwd)"
 cd "$SCRIPT_PATH/.." || exit 1
-
-KAFKA_BIN="$SCRIPT_PATH/../../.risingwave/bin/kafka/bin"
 
 echo "$SCRIPT_PATH"
 
@@ -46,15 +37,15 @@ for filename in $kafka_data_files; do
 
     # always ok
     echo "Drop topic $topic"
-    "$KAFKA_BIN"/kafka-topics.sh --bootstrap-server message_queue:29092 --topic "$topic" --delete || true
+    risedev kafka-topics --topic "$topic" --delete || true
 
     echo "Recreate topic $topic with partition $partition"
-    "$KAFKA_BIN"/kafka-topics.sh --bootstrap-server message_queue:29092 --topic "$topic" --create --partitions "$partition") &
+    risedev kafka-topics --topic "$topic" --create --partitions "$partition") &
 done
 wait
 
 echo "Fulfill kafka topics"
-python3 -m pip install requests fastavro confluent_kafka jsonschema
+python3 -m pip install --break-system-packages requests fastavro confluent_kafka jsonschema
 for filename in $kafka_data_files; do
     ([ -e "$filename" ]
     base=$(basename "$filename")
@@ -63,16 +54,20 @@ for filename in $kafka_data_files; do
     echo "Fulfill kafka topic $topic with data from $base"
     # binary data, one message a file, filename/topic ends with "bin"
     if [[ "$topic" = *bin ]]; then
-        ${KCAT_BIN} -P -b message_queue:29092 -t "$topic" "$filename"
+        kcat -P -b message_queue:29092 -t "$topic" "$filename"
     elif [[ "$topic" = *avro_json ]]; then
         python3 source/schema_registry_producer.py "message_queue:29092" "http://message_queue:8081" "$filename" "topic" "avro"
     elif [[ "$topic" = *json_schema ]]; then
         python3 source/schema_registry_producer.py "kafka:9093" "http://schemaregistry:8082" "$filename" "topic" "json"
     else
-        cat "$filename" | ${KCAT_BIN} -P -K ^  -b message_queue:29092 -t "$topic"
+        cat "$filename" | kcat -P -K ^  -b message_queue:29092 -t "$topic"
     fi
     ) &
 done
+
+# test additional columns: produce messages with headers
+ADDI_COLUMN_TOPIC="kafka_additional_columns"
+for i in {0..100}; do echo "key$i:{\"a\": $i}" | kcat -P -b message_queue:29092 -t ${ADDI_COLUMN_TOPIC} -K : -H "header1=v1" -H "header2=v2"; done
 
 # write schema with name strategy
 

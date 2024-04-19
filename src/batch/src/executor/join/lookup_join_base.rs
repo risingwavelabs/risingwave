@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::expr::BoxedExpression;
 
 use crate::error::BatchError;
@@ -34,7 +35,6 @@ use crate::executor::{
     utils, BoxedDataChunkListStream, BoxedExecutor, BufferChunkExecutor, EquiJoinParams,
     HashJoinExecutor, JoinHashMap, JoinType, LookupExecutorBuilder, RowId,
 };
-use crate::risingwave_common::estimate_size::EstimateSize;
 use crate::task::ShutdownToken;
 
 /// Lookup Join Base.
@@ -146,7 +146,7 @@ impl<K: HashKey> LookupJoinBase<K> {
 
             // Build hash map
             for (build_chunk_id, build_chunk) in build_side.iter().enumerate() {
-                let build_keys = K::build(&hash_join_build_side_key_idxs, build_chunk)?;
+                let build_keys = K::build_many(&hash_join_build_side_key_idxs, build_chunk);
 
                 for (build_row_id, (build_key, visible)) in build_keys
                     .into_iter()

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -56,16 +56,15 @@ use risingwave_expr::function;
 /// ```
 #[function("array_replace(anyarray, any, any) -> anyarray")]
 fn array_replace(
-    array: Option<ListRef<'_>>,
+    array: ListRef<'_>,
     elem_from: Option<ScalarRefImpl<'_>>,
     elem_to: Option<ScalarRefImpl<'_>>,
-) -> Option<ListValue> {
-    let array = array?;
-    Some(ListValue::from_datum_iter(
+) -> ListValue {
+    ListValue::from_datum_iter(
         &array.data_type(),
         array.iter().map(|val| match val == elem_from {
             true => elem_to,
             false => val,
         }),
-    ))
+    )
 }

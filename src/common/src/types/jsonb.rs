@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,9 +17,11 @@ use std::hash::Hash;
 
 use bytes::Buf;
 use jsonbb::{Value, ValueRef};
+use risingwave_common_estimate_size::EstimateSize;
 
-use crate::estimate_size::EstimateSize;
-use crate::types::{Scalar, ScalarRef};
+use super::{Datum, IntoOrdered, ListValue, ScalarImpl, StructRef, ToOwnedDatum, F64};
+use crate::types::{DataType, Scalar, ScalarRef, StructType, StructValue};
+use crate::util::iter_util::ZipEqDebug;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct JsonbVal(pub(crate) Value);
@@ -297,11 +299,12 @@ impl<'a> JsonbRef<'a> {
     ///
     /// According to RFC 8259, only number within IEEE 754 binary64 (double precision) has good
     /// interoperability. We do not support arbitrary precision like PostgreSQL `numeric` right now.
-    pub fn as_number(&self) -> Result<f64, String> {
+    pub fn as_number(&self) -> Result<F64, String> {
         self.0
             .as_number()
             .ok_or_else(|| format!("cannot cast jsonb {} to type number", self.type_name()))?
             .as_f64()
+            .map(|f| f.into_ordered())
             .ok_or_else(|| "jsonb number out of range".into())
     }
 
@@ -378,6 +381,107 @@ impl<'a> JsonbRef<'a> {
         let mut ser =
             Serializer::with_formatter(FmtToIoUnchecked(f), PrettyFormatter::with_indent(b"    "));
         self.0.serialize(&mut ser).map_err(|_| std::fmt::Error)
+    }
+
+    /// Convert the jsonb value to a datum.
+    pub fn to_datum(self, ty: &DataType) -> Result<Datum, String> {
+        if !matches!(
+            ty,
+            DataType::Jsonb
+                | DataType::Boolean
+                | DataType::Int16
+                | DataType::Int32
+                | DataType::Int64
+                | DataType::Float32
+                | DataType::Float64
+                | DataType::Varchar
+                | DataType::List(_)
+                | DataType::Struct(_)
+        ) {
+            return Err(format!("cannot cast jsonb to {ty}"));
+        }
+        if self.0.as_null().is_some() {
+            return Ok(None);
+        }
+        Ok(Some(match ty {
+            DataType::Jsonb => ScalarImpl::Jsonb(self.into()),
+            DataType::Boolean => ScalarImpl::Bool(self.as_bool()?),
+            DataType::Int16 => ScalarImpl::Int16(self.as_number()?.try_into()?),
+            DataType::Int32 => ScalarImpl::Int32(self.as_number()?.try_into()?),
+            DataType::Int64 => ScalarImpl::Int64(self.as_number()?.try_into()?),
+            DataType::Float32 => ScalarImpl::Float32(self.as_number()?.try_into()?),
+            DataType::Float64 => ScalarImpl::Float64(self.as_number()?),
+            DataType::Varchar => ScalarImpl::Utf8(self.force_string().into()),
+            DataType::List(t) => ScalarImpl::List(self.to_list(t)?),
+            DataType::Struct(s) => ScalarImpl::Struct(self.to_struct(s)?),
+            _ => unreachable!(),
+        }))
+    }
+
+    /// Convert the jsonb value to a list value.
+    pub fn to_list(self, elem_type: &DataType) -> Result<ListValue, String> {
+        let array = self
+            .0
+            .as_array()
+            .ok_or_else(|| format!("expected JSON array, but found {self}"))?;
+        let mut builder = elem_type.create_array_builder(array.len());
+        for v in array.iter() {
+            builder.append(Self(v).to_datum(elem_type)?);
+        }
+        Ok(ListValue::new(builder.finish()))
+    }
+
+    /// Convert the jsonb value to a struct value.
+    pub fn to_struct(self, ty: &StructType) -> Result<StructValue, String> {
+        let object = self.0.as_object().ok_or_else(|| {
+            format!(
+                "cannot call populate_composite on a jsonb {}",
+                self.type_name()
+            )
+        })?;
+        let mut fields = Vec::with_capacity(ty.len());
+        for (name, ty) in ty.iter() {
+            let datum = match object.get(name) {
+                Some(v) => Self(v).to_datum(ty)?,
+                None => None,
+            };
+            fields.push(datum);
+        }
+        Ok(StructValue::new(fields))
+    }
+
+    /// Expands the top-level JSON object to a row having the struct type of the `base` argument.
+    pub fn populate_struct(
+        self,
+        ty: &StructType,
+        base: Option<StructRef<'_>>,
+    ) -> Result<StructValue, String> {
+        let Some(base) = base else {
+            return self.to_struct(ty);
+        };
+        let object = self.0.as_object().ok_or_else(|| {
+            format!(
+                "cannot call populate_composite on a jsonb {}",
+                self.type_name()
+            )
+        })?;
+        let mut fields = Vec::with_capacity(ty.len());
+        for ((name, ty), base_field) in ty.iter().zip_eq_debug(base.iter_fields_ref()) {
+            let datum = match object.get(name) {
+                Some(v) => match ty {
+                    // recursively populate the nested struct
+                    DataType::Struct(s) => Some(
+                        Self(v)
+                            .populate_struct(s, base_field.map(|s| s.into_struct()))?
+                            .into(),
+                    ),
+                    _ => Self(v).to_datum(ty)?,
+                },
+                None => base_field.to_owned_datum(),
+            };
+            fields.push(datum);
+        }
+        Ok(StructValue::new(fields))
     }
 
     /// Returns the capacity of the underlying buffer.

@@ -539,14 +539,6 @@ impl<'a> Tokenizer<'a> {
                     chars.next(); // consume the first char
                     let s = self.tokenize_word(ch, chars);
 
-                    if s.chars().all(|x| x.is_ascii_digit() || x == '.') {
-                        let mut s = peeking_take_while(&mut s.chars().peekable(), |ch| {
-                            ch.is_ascii_digit() || ch == '.'
-                        });
-                        let s2 = peeking_take_while(chars, |ch| ch.is_ascii_digit() || ch == '.');
-                        s += s2.as_str();
-                        return Ok(Some(Token::Number(s)));
-                    }
                     Ok(Some(Token::make_word(&s, None)))
                 }
                 // string
@@ -574,10 +566,24 @@ impl<'a> Tokenizer<'a> {
                     let mut s = peeking_take_while(chars, |ch| ch.is_ascii_digit());
 
                     // match binary literal that starts with 0x
-                    if s == "0" && chars.peek() == Some(&'x') {
+                    if s == "0"
+                        && let Some(&radix) = chars.peek()
+                        && "xob".contains(radix.to_ascii_lowercase())
+                    {
                         chars.next();
-                        let s2 = peeking_take_while(chars, |ch| ch.is_ascii_hexdigit());
-                        return Ok(Some(Token::HexStringLiteral(s2)));
+                        let radix = radix.to_ascii_lowercase();
+                        let base = match radix {
+                            'x' => 16,
+                            'o' => 8,
+                            'b' => 2,
+                            _ => unreachable!(),
+                        };
+                        let s2 = peeking_take_while(chars, |ch| ch.is_digit(base));
+                        if s2.is_empty() {
+                            return self.tokenizer_error("incomplete integer literal");
+                        }
+                        self.reject_number_junk(chars)?;
+                        return Ok(Some(Token::Number(format!("0{radix}{s2}"))));
                     }
 
                     // match one period
@@ -603,11 +609,13 @@ impl<'a> Tokenizer<'a> {
                                 chars.next();
                             }
                             s += &peeking_take_while(chars, |ch| ch.is_ascii_digit());
+                            self.reject_number_junk(chars)?;
                             return Ok(Some(Token::Number(s)));
                         }
                         // Not a scientific number
                         _ => {}
                     };
+                    self.reject_number_junk(chars)?;
                     Ok(Some(Token::Number(s)))
                 }
                 // punctuation
@@ -861,7 +869,7 @@ impl<'a> Tokenizer<'a> {
                 match chars.peek() {
                     Some('$') => {
                         chars.next();
-                        for (_, c) in value.chars().enumerate() {
+                        for c in value.chars() {
                             let next_char = chars.next();
                             if Some(c) != next_char {
                                 return self.tokenizer_error(format!(
@@ -899,6 +907,15 @@ impl<'a> Tokenizer<'a> {
             col: self.col,
             line: self.line,
         })
+    }
+
+    fn reject_number_junk(&self, chars: &mut Peekable<Chars<'_>>) -> Result<(), TokenizerError> {
+        if let Some(ch) = chars.peek()
+            && is_identifier_start(*ch)
+        {
+            return self.tokenizer_error("trailing junk after numeric literal");
+        }
+        Ok(())
     }
 
     // Consume characters until newline

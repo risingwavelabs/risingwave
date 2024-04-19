@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,10 +39,9 @@
 use std::iter::{self, TrustedLen};
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, Not, RangeInclusive};
 
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::PbBuffer;
-
-use crate::estimate_size::EstimateSize;
 
 #[derive(Default, Debug, Clone, EstimateSize)]
 pub struct BitmapBuilder {
@@ -293,7 +292,6 @@ impl Bitmap {
     /// Creates a new bitmap from a slice of `bool`.
     pub fn from_bool_slice(bools: &[bool]) -> Self {
         // use SIMD to speed up
-        use std::simd::ToBitMask;
         let mut iter = bools.array_chunks::<BITS>();
         let mut bits = Vec::with_capacity(Self::vec_len(bools.len()));
         for chunk in iter.by_ref() {

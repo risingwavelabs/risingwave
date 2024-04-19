@@ -3,23 +3,26 @@ FROM ubuntu:22.04 AS base
 ENV LANG en_US.utf8
 
 RUN apt-get update \
-  && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-11-jdk
+  && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-11-jdk software-properties-common
 
-FROM base AS dashboard-builder
-
-RUN apt-get install -y curl gnupg protobuf-compiler && mkdir -p /etc/apt/keyrings \
-  && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
-  && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_18.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
-  && apt-get update && apt-get install -y nodejs
-
-COPY ./dashboard/ /risingwave/dashboard
-COPY ./proto  /risingwave/proto
-
-RUN cd /risingwave/dashboard && npm i && npm run build-static && rm -rf node_modules
+# Install Python 3.12
+RUN add-apt-repository ppa:deadsnakes/ppa -y && \
+    apt-get update -yy && \
+    DEBIAN_FRONTEND=noninteractive apt-get install python3.12 python3.12-dev -yy
+ENV PYO3_PYTHON=python3.12
 
 FROM base AS rust-base
 
-RUN apt-get -y install make cmake protobuf-compiler curl bash lld unzip
+RUN apt-get update && apt-get -y install make cmake protobuf-compiler curl bash lld unzip
+
+# Install Node.js as dependency for building the dashboard.
+# Bump version together with `dashboard/.node-version`.
+ENV NVM_DIR /root/.nvm
+ENV NODE_VERSION 20.11.1
+RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash \
+  && . $NVM_DIR/nvm.sh \
+  && nvm install $NODE_VERSION
+ENV PATH $NVM_DIR/versions/node/v$NODE_VERSION/bin:$PATH
 
 SHELL ["/bin/bash", "-c"]
 
@@ -33,7 +36,8 @@ COPY rust-toolchain rust-toolchain
 RUN rustup self update \
   && rustup set profile minimal \
   && rustup show \
-  && rustup component add rustfmt
+  && rustup component add rustfmt \
+  && rustup target add wasm32-wasi
 
 RUN cargo install flamegraph
 # TODO: cargo-chef doesn't work well now, because we update Cargo.lock very often.
@@ -68,8 +72,10 @@ ENV GIT_SHA=$GIT_SHA
 COPY ./ /risingwave
 WORKDIR /risingwave
 
+ENV ENABLE_BUILD_DASHBOARD=1
+
 RUN cargo fetch && \
-  cargo build -p risingwave_cmd_all --release --features "rw-static-link" && \
+  cargo build -p risingwave_cmd_all --release --features "rw-static-link" --features embedded-deno-udf --features embedded-python-udf && \
   mkdir -p /risingwave/bin && \
     mv /risingwave/target/release/risingwave /risingwave/bin/ && \
     mv /risingwave/target/release/risingwave.dwp /risingwave/bin/ && \
@@ -90,7 +96,7 @@ RUN find . -name pom.xml -exec bash -c 'mkdir -p poms/$(dirname {}); mv {} poms/
 # We use rust-maven-plugin to build java-binding. So it's FROM rust-base
 FROM rust-base AS java-builder
 
-RUN apt-get -y install maven
+RUN apt-get update && apt-get -y install maven
 
 RUN mkdir -p /risingwave
 WORKDIR /risingwave/java
@@ -118,7 +124,7 @@ LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwa
 RUN apt-get update && apt-get -y install linux-tools-generic \
     && ln -s "$(find /usr/lib/linux-tools/*/perf | head -1)" /usr/local/bin/perf
 
-RUN apt-get -y install gdb \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install gdb libpam-krb5 krb5-user telnet kafkacat \
   && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
 RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
@@ -126,14 +132,11 @@ RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
 COPY --from=rust-builder /risingwave/bin/risingwave /risingwave/bin/risingwave
 COPY --from=rust-builder /risingwave/bin/risingwave.dwp /risingwave/bin/risingwave.dwp
 COPY --from=java-builder /risingwave/bin/connector-node /risingwave/bin/connector-node
-COPY --from=dashboard-builder /risingwave/dashboard/out /risingwave/ui
 COPY --from=rust-builder /risingwave/bin/jeprof /usr/local/bin/jeprof
 COPY --from=rust-base /root/.cargo/bin/flamegraph /usr/local/bin/flamegraph
 
 # Set default playground mode to docker-playground profile
 ENV PLAYGROUND_PROFILE docker-playground
-# Set default dashboard UI to local path instead of github proxy
-ENV RW_DASHBOARD_UI_PATH /risingwave/ui
 # Set default connector libs path
 ENV CONNECTOR_LIBS_PATH /risingwave/bin/connector-node/libs
 ENV IN_CONTAINER=1

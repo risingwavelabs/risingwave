@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -51,8 +51,7 @@ impl StreamOverWindow {
     }
 
     fn infer_state_table(&self) -> TableCatalog {
-        let mut tbl_builder =
-            TableCatalogBuilder::new(self.ctx().with_options().internal_table_subset());
+        let mut tbl_builder = TableCatalogBuilder::default();
 
         let out_schema = self.core.schema();
         for field in out_schema.fields() {

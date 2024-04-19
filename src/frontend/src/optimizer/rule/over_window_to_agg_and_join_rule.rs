@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,9 +37,9 @@ impl Rule for OverWindowToAggAndJoinRule {
         let over_window = plan.as_logical_over_window()?;
         let window_functions = over_window.window_functions();
         if window_functions.iter().any(|window| {
-            !window.order_by.is_empty()
-                || !window.frame.bounds.start_is_unbounded()
-                || !window.frame.bounds.end_is_unbounded()
+            !(window.order_by.is_empty()
+                && window.frame.bounds.start_is_unbounded()
+                && window.frame.bounds.end_is_unbounded())
         }) {
             return None;
         }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,19 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
-use parking_lot::RwLock;
 use risingwave_pb::compactor::compactor_service_server::CompactorService;
 use risingwave_pb::compactor::{
     DispatchCompactionTaskRequest, DispatchCompactionTaskResponse, EchoRequest, EchoResponse,
 };
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
-    AnalyzeHeapRequest, AnalyzeHeapResponse, HeapProfilingRequest, HeapProfilingResponse,
-    ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
-    StackTraceRequest, StackTraceResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, GetBackPressureRequest, GetBackPressureResponse,
+    HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
+    ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, StackTraceRequest,
+    StackTraceResponse,
 };
+use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
+use risingwave_storage::hummock::compactor::CompactionAwaitTreeRegRef;
 use tokio::sync::mpsc;
 use tonic::{Request, Response, Status};
 
@@ -68,11 +68,11 @@ impl CompactorService for CompactorServiceImpl {
 }
 
 pub struct MonitorServiceImpl {
-    await_tree_reg: Option<Arc<RwLock<await_tree::Registry<String>>>>,
+    await_tree_reg: Option<CompactionAwaitTreeRegRef>,
 }
 
 impl MonitorServiceImpl {
-    pub fn new(await_tree_reg: Option<Arc<RwLock<await_tree::Registry<String>>>>) -> Self {
+    pub fn new(await_tree_reg: Option<CompactionAwaitTreeRegRef>) -> Self {
         Self { await_tree_reg }
     }
 }
@@ -86,15 +86,14 @@ impl MonitorService for MonitorServiceImpl {
         let compaction_task_traces = match &self.await_tree_reg {
             None => Default::default(),
             Some(await_tree_reg) => await_tree_reg
-                .read()
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect::<Compaction>()
+                .into_iter()
+                .map(|(k, v)| (format!("{k:?}"), v.to_string()))
                 .collect(),
         };
         Ok(Response::new(StackTraceResponse {
-            actor_traces: Default::default(),
-            rpc_traces: Default::default(),
             compaction_task_traces,
+            ..Default::default()
         }))
     }
 
@@ -131,6 +130,15 @@ impl MonitorService for MonitorServiceImpl {
     ) -> Result<Response<AnalyzeHeapResponse>, Status> {
         Err(Status::unimplemented(
             "Heap profiling unimplemented in compactor",
+        ))
+    }
+
+    async fn get_back_pressure(
+        &self,
+        _request: Request<GetBackPressureRequest>,
+    ) -> Result<Response<GetBackPressureResponse>, Status> {
+        Err(Status::unimplemented(
+            "Get Back Pressure unimplemented in compactor",
         ))
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,23 +35,32 @@ mod forward_merge;
 pub mod forward_user;
 mod merge_inner;
 pub use forward_user::*;
-pub use merge_inner::{OrderedMergeIteratorInner, UnorderedMergeIteratorInner};
+pub use merge_inner::MergeIterator;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+use risingwave_hummock_sdk::EpochWithGap;
 
 use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Third};
 
+mod change_log;
+pub use change_log::*;
 mod concat_delete_range_iterator;
 mod delete_range_iterator;
+mod skip_watermark;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
-
 pub use delete_range_iterator::{
     DeleteRangeIterator, ForwardMergeRangeIterator, RangeIteratorTyped,
 };
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::EpochWithGap;
+pub use skip_watermark::*;
 
 use crate::monitor::StoreLocalStatistic;
+
+#[derive(Default)]
+pub struct ValueMeta {
+    pub object_id: Option<u64>,
+    pub block_id: Option<u64>,
+}
 
 /// `HummockIterator` defines the interface of all iterators, including `SstableIterator`,
 /// `MergeIterator`, `UserIterator` and `ConcatIterator`.
@@ -59,7 +68,7 @@ use crate::monitor::StoreLocalStatistic;
 /// After creating the iterator instance,
 /// - if you want to iterate from the beginning, you need to then call its `rewind` method.
 /// - if you want to iterate from some specific position, you need to then call its `seek` method.
-pub trait HummockIterator: Send + Sync {
+pub trait HummockIterator: Send {
     type Direction: HummockIteratorDirection;
     /// Moves a valid iterator to the next key.
     ///
@@ -124,6 +133,9 @@ pub trait HummockIterator: Send + Sync {
 
     /// take local statistic info from iterator to report metrics.
     fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic);
+
+    /// Returns value meta.
+    fn value_meta(&self) -> ValueMeta;
 }
 
 /// This is a placeholder trait used in `HummockIteratorUnion`
@@ -159,6 +171,10 @@ impl<D: HummockIteratorDirection> HummockIterator for PhantomHummockIterator<D> 
     }
 
     fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
+
+    fn value_meta(&self) -> ValueMeta {
+        unreachable!()
+    }
 }
 
 /// The `HummockIteratorUnion` acts like a wrapper over multiple types of `HummockIterator`, so that
@@ -258,6 +274,15 @@ impl<
             Fourth(iter) => iter.collect_local_statistic(stats),
         }
     }
+
+    fn value_meta(&self) -> ValueMeta {
+        match self {
+            First(iter) => iter.value_meta(),
+            Second(iter) => iter.value_meta(),
+            Third(iter) => iter.value_meta(),
+            Fourth(iter) => iter.value_meta(),
+        }
+    }
 }
 
 impl<I: HummockIterator> HummockIterator for Box<I> {
@@ -289,6 +314,10 @@ impl<I: HummockIterator> HummockIterator for Box<I> {
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         (*self).deref().collect_local_statistic(stats);
+    }
+
+    fn value_meta(&self) -> ValueMeta {
+        (*self).deref().value_meta()
     }
 }
 
@@ -438,6 +467,10 @@ impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
     }
 
     fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
+
+    fn value_meta(&self) -> ValueMeta {
+        ValueMeta::default()
+    }
 }
 
 #[derive(PartialEq, Eq, Debug)]

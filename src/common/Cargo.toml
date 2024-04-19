@@ -17,11 +17,15 @@ normal = ["workspace-hack"]
 anyhow = "1"
 arc-swap = "1"
 arrow-array = { workspace = true }
+arrow-array-deltalake = { workspace = true }
 arrow-buffer = { workspace = true }
+arrow-buffer-deltalake = { workspace = true }
 arrow-cast = { workspace = true }
+arrow-cast-deltalake = { workspace = true }
 arrow-schema = { workspace = true }
+arrow-schema-deltalake = { workspace = true }
 async-trait = "0.1"
-auto_enums = "0.8"
+auto_enums = { workspace = true }
 auto_impl = "1"
 bitflags = "2"
 byteorder = "1"
@@ -31,34 +35,35 @@ chrono = { version = "0.4", default-features = false, features = [
     "std",
 ] }
 chrono-tz = { version = "0.8", features = ["case-insensitive"] }
-clap = { version = "4", features = ["derive"] }
+clap = { workspace = true }
 comfy-table = "7"
 crc32fast = "1"
 easy-ext = "1"
-educe = "0.4"
+educe = "0.5"
 either = "1"
 enum-as-inner = "0.6"
 enumflags2 = { version = "0.7.8" }
 ethnum = { version = "1", features = ["serde"] }
-fixedbitset = { version = "0.4", features = ["std"] }
-fs-err = "2"
+fixedbitset = "0.5"
+foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+governor = { version = "0.6", default-features = false, features = ["std"] }
 hex = "0.4.3"
 http = "0.2"
 humantime = "2.1"
-hyper = "0.14"
 hytra = { workspace = true }
-itertools = "0.12"
+itertools = { workspace = true }
 itoa = "1.0"
 jsonbb = "0.1.2"
-lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
+lru = { workspace = true }
 memcomparable = { version = "0.2", features = ["decimal"] }
 num-integer = "0.1"
 num-traits = "0.2"
 number_prefix = "0.4.0"
-opentelemetry = { version = "0.20", default-features = false }
-parking_lot = "0.12"
-parse-display = "0.8"
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+parking_lot = { workspace = true }
+parse-display = "0.9"
 paste = "1"
 pin-project-lite = "0.2"
 postgres-types = { version = "0.2.6", features = [
@@ -66,16 +71,20 @@ postgres-types = { version = "0.2.6", features = [
     "with-chrono-0_4",
     "with-serde_json-1",
 ] }
-prehash = "1"
 prometheus = { version = "0.13" }
 prost = { workspace = true }
-rand = "0.8"
+rand = { workspace = true }
 regex = "1"
-reqwest = { version = "0.11", features = ["json"] }
-risingwave_common_proc_macro = { path = "./proc_macro" }
+reqwest = { version = "0.12.2", features = ["json"] }
+risingwave-fields-derive = { path = "./fields-derive" }
+risingwave_common_estimate_size = { workspace = true }
+risingwave_common_metrics = { path = "./metrics" }
+risingwave_common_proc_macro = { workspace = true }
 risingwave_error = { workspace = true }
 risingwave_pb = { workspace = true }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
+rw_iter_util = { workspace = true }
+rw_resource_util = { workspace = true }
 ryu = "1.0"
 serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"
@@ -83,11 +92,12 @@ serde_default = "0.1"
 serde_json = "1"
 serde_with = "3"
 smallbitset = "0.7.1"
-speedate = "0.13.0"
+speedate = "0.14.0"
+stacker = "0.1"
 static_assertions = "1"
-strum = "0.25"
-strum_macros = "0.25"
-sysinfo = { version = "0.29", default-features = false }
+strum = "0.26"
+strum_macros = "0.26"
+sysinfo = { version = "0.30", default-features = false }
 thiserror = "1"
 thiserror-ext = { workspace = true }
 tinyvec = { version = "1", features = ["rustc_1_55", "grab_spare_slice"] }
@@ -99,10 +109,11 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
+tokio-retry = "0.3"
 toml = "0.8"
-tonic = { workspace = true }
 tracing = "0.1"
-tracing-opentelemetry = "0.21"
+tracing-futures = { version = "0.2", features = ["futures-03"] }
+tracing-opentelemetry = { workspace = true }
 tracing-subscriber = "0.3.17"
 twox-hash = "1"
 url = "2"
@@ -120,7 +131,7 @@ libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
-libc = "0.2.148"
+libc = "0.2"
 mach2 = "0.4"
 
 [dev-dependencies]
@@ -128,7 +139,7 @@ criterion = { workspace = true }
 expect-test = "1"
 more-asserts = "0.3"
 pretty_assertions = "1"
-rand = "0.8"
+rand = { workspace = true }
 rusty-fork = "0.3"
 tempfile = "3"
 

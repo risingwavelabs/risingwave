@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use risingwave_common::row;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{Datum, JsonbVal, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_connector::source::external::CdcOffset;
+use risingwave_connector::source::cdc::external::CdcOffset;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
@@ -107,7 +107,7 @@ impl<S: StateStore> CdcBackfillState<S> {
         let state = self.cached_state.as_mut_slice();
         let split_id = Some(ScalarImpl::from(self.split_id.clone()));
         let state_len = state.len();
-        state[0] = split_id.clone();
+        state[0].clone_from(&split_id);
         if let Some(current_pk_pos) = &current_pk_pos {
             state[1..=current_pk_pos.len()].clone_from_slice(current_pk_pos.as_inner());
         }

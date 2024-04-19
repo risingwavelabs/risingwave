@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,11 +14,29 @@
 
 //! Error handling utilities.
 //!
-//! This will eventually replace the `RwError` in `risingwave_common`.
+//! Made into a separate crate so that it can be used in places where
+//! `risingwave_common` is not available or not desired.
+//!
+//! The crate is also re-exported in `risingwave_common::error` for easy
+//! access if `risingwave_common` is already a dependency.
 
 #![feature(error_generic_member_access)]
 #![feature(lint_reasons)]
 #![feature(register_tool)]
 #![register_tool(rw)]
+#![feature(trait_alias)]
 
+pub mod anyhow;
+pub mod common;
+pub mod macros;
 pub mod tonic;
+
+// Re-export the `thiserror-ext` crate.
+pub use thiserror_ext;
+pub use thiserror_ext::*;
+
+/// An error type that is [`Send`], [`Sync`], and `'static`.
+pub trait Error = std::error::Error + Send + Sync + 'static;
+
+/// A boxed error type that is [`Send`], [`Sync`], and `'static`.
+pub type BoxedError = Box<dyn Error>;

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::estimate_size::KvSize;
+use risingwave_common_estimate_size::KvSize;
+use thiserror::Error;
 
 use super::*;
+use crate::consistency::{consistency_error, enable_strict_consistency};
 
 /// We manages a `HashMap` in memory for all entries belonging to a join key.
 /// When evicted, `cached` does not hold any entries.
@@ -36,19 +38,55 @@ impl EstimateSize for JoinEntryState {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum JoinEntryError {
+    #[error("double inserting a join state entry")]
+    OccupiedError,
+    #[error("removing a join state entry but it is not in the cache")]
+    RemoveError,
+}
+
 impl JoinEntryState {
     /// Insert into the cache.
-    pub fn insert(&mut self, key: PkType, value: StateValueType) {
+    pub fn insert(
+        &mut self,
+        key: PkType,
+        value: StateValueType,
+    ) -> Result<&mut StateValueType, JoinEntryError> {
+        let mut removed = false;
+        if !enable_strict_consistency() {
+            // strict consistency is off, let's remove existing (if any) first
+            if let Some(old_value) = self.cached.remove(&key) {
+                self.kv_heap_size.sub(&key, &old_value);
+                removed = true;
+            }
+        }
+
         self.kv_heap_size.add(&key, &value);
-        self.cached.try_insert(key, value).unwrap();
+
+        let ret = self.cached.try_insert(key.clone(), value);
+
+        if !enable_strict_consistency() {
+            assert!(ret.is_ok(), "we have removed existing entry, if any");
+            if removed {
+                // if not silent, we should log the error
+                consistency_error!(?key, "double inserting a join state entry");
+            }
+        }
+
+        ret.map_err(|_| JoinEntryError::OccupiedError)
     }
 
     /// Delete from the cache.
-    pub fn remove(&mut self, pk: PkType) {
+    pub fn remove(&mut self, pk: PkType) -> Result<(), JoinEntryError> {
         if let Some(value) = self.cached.remove(&pk) {
             self.kv_heap_size.sub(&pk, &value);
+            Ok(())
+        } else if enable_strict_consistency() {
+            Err(JoinEntryError::RemoveError)
         } else {
-            panic!("pk {:?} should be in the cache", pk);
+            consistency_error!(?pk, "removing a join state entry but it's not in the cache");
+            Ok(())
         }
     }
 
@@ -98,7 +136,7 @@ mod tests {
             // Pk is only a `i64` here, so encoding method does not matter.
             let pk = OwnedRow::new(pk).project(&value_indices).value_serialize();
             let join_row = JoinRow { row, degree: 0 };
-            managed_state.insert(pk, join_row.encode());
+            managed_state.insert(pk, join_row.encode()).unwrap();
         }
     }
 

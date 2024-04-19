@@ -138,9 +138,17 @@ JNIEXPORT jstring JNICALL Java_com_risingwave_java_binding_Binding_iteratorGetSt
 /*
  * Class:     com_risingwave_java_binding_Binding
  * Method:    iteratorGetTimestampValue
- * Signature: (JI)Ljava/sql/Timestamp;
+ * Signature: (JI)Ljava/time/LocalDatetime;
  */
 JNIEXPORT jobject JNICALL Java_com_risingwave_java_binding_Binding_iteratorGetTimestampValue
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    iteratorGetTimestamptzValue
+ * Signature: (JI)Ljava/time/OffsetDatetime;
+ */
+JNIEXPORT jobject JNICALL Java_com_risingwave_java_binding_Binding_iteratorGetTimestamptzValue
   (JNIEnv *, jclass, jlong, jint);
 
 /*
@@ -154,7 +162,7 @@ JNIEXPORT jobject JNICALL Java_com_risingwave_java_binding_Binding_iteratorGetDe
 /*
  * Class:     com_risingwave_java_binding_Binding
  * Method:    iteratorGetTimeValue
- * Signature: (JI)Ljava/sql/Time;
+ * Signature: (JI)Ljava/time/LocalTime;
  */
 JNIEXPORT jobject JNICALL Java_com_risingwave_java_binding_Binding_iteratorGetTimeValue
   (JNIEnv *, jclass, jlong, jint);
@@ -162,7 +170,7 @@ JNIEXPORT jobject JNICALL Java_com_risingwave_java_binding_Binding_iteratorGetTi
 /*
  * Class:     com_risingwave_java_binding_Binding
  * Method:    iteratorGetDateValue
- * Signature: (JI)Ljava/sql/Date;
+ * Signature: (JI)Ljava/time/LocalDate;
  */
 JNIEXPORT jobject JNICALL Java_com_risingwave_java_binding_Binding_iteratorGetDateValue
   (JNIEnv *, jclass, jlong, jint);

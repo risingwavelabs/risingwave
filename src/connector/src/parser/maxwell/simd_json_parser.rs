@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +23,8 @@ mod tests {
         EncodingProperties, JsonProperties, ProtocolProperties, SourceColumnDesc,
         SourceStreamChunkBuilder, SpecificParserConfig,
     };
+    use crate::source::SourceContext;
+
     #[tokio::test]
     async fn test_json_parser() {
         let descs = vec![
@@ -36,10 +38,11 @@ mod tests {
             key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
+                timestamptz_handling: None,
             }),
             protocol_config: ProtocolProperties::Maxwell,
         };
-        let mut parser = MaxwellParser::new(props, descs.clone(), Default::default())
+        let mut parser = MaxwellParser::new(props, descs.clone(), SourceContext::dummy().into())
             .await
             .unwrap();
 

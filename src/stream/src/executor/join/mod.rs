@@ -1,0 +1,108 @@
+// Copyright 2024 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+pub mod builder;
+pub mod hash_join;
+pub mod join_row_set;
+pub mod row;
+
+/// The `JoinType` and `SideType` are to mimic a enum, because currently
+/// enum is not supported in const generic.
+// TODO: Use enum to replace this once [feature(adt_const_params)](https://github.com/rust-lang/rust/issues/95174) get completed.
+pub type JoinTypePrimitive = u8;
+
+#[allow(non_snake_case, non_upper_case_globals)]
+pub mod JoinType {
+    use super::JoinTypePrimitive;
+    pub const Inner: JoinTypePrimitive = 0;
+    pub const LeftOuter: JoinTypePrimitive = 1;
+    pub const RightOuter: JoinTypePrimitive = 2;
+    pub const FullOuter: JoinTypePrimitive = 3;
+    pub const LeftSemi: JoinTypePrimitive = 4;
+    pub const LeftAnti: JoinTypePrimitive = 5;
+    pub const RightSemi: JoinTypePrimitive = 6;
+    pub const RightAnti: JoinTypePrimitive = 7;
+}
+
+pub type SideTypePrimitive = u8;
+#[allow(non_snake_case, non_upper_case_globals)]
+pub mod SideType {
+    use super::SideTypePrimitive;
+    pub const Left: SideTypePrimitive = 0;
+    pub const Right: SideTypePrimitive = 1;
+}
+
+pub const fn is_outer_side(join_type: JoinTypePrimitive, side_type: SideTypePrimitive) -> bool {
+    join_type == JoinType::FullOuter
+        || (join_type == JoinType::LeftOuter && side_type == SideType::Left)
+        || (join_type == JoinType::RightOuter && side_type == SideType::Right)
+}
+
+pub const fn outer_side_null(join_type: JoinTypePrimitive, side_type: SideTypePrimitive) -> bool {
+    join_type == JoinType::FullOuter
+        || (join_type == JoinType::LeftOuter && side_type == SideType::Right)
+        || (join_type == JoinType::RightOuter && side_type == SideType::Left)
+}
+
+/// Send the update only once if the join type is semi/anti and the update is the same side as the
+/// join
+pub const fn forward_exactly_once(
+    join_type: JoinTypePrimitive,
+    side_type: SideTypePrimitive,
+) -> bool {
+    ((join_type == JoinType::LeftSemi || join_type == JoinType::LeftAnti)
+        && side_type == SideType::Left)
+        || ((join_type == JoinType::RightSemi || join_type == JoinType::RightAnti)
+            && side_type == SideType::Right)
+}
+
+pub const fn only_forward_matched_side(
+    join_type: JoinTypePrimitive,
+    side_type: SideTypePrimitive,
+) -> bool {
+    ((join_type == JoinType::LeftSemi || join_type == JoinType::LeftAnti)
+        && side_type == SideType::Right)
+        || ((join_type == JoinType::RightSemi || join_type == JoinType::RightAnti)
+            && side_type == SideType::Left)
+}
+
+pub const fn is_semi(join_type: JoinTypePrimitive) -> bool {
+    join_type == JoinType::LeftSemi || join_type == JoinType::RightSemi
+}
+
+pub const fn is_anti(join_type: JoinTypePrimitive) -> bool {
+    join_type == JoinType::LeftAnti || join_type == JoinType::RightAnti
+}
+
+pub const fn is_left_semi_or_anti(join_type: JoinTypePrimitive) -> bool {
+    join_type == JoinType::LeftSemi || join_type == JoinType::LeftAnti
+}
+
+pub const fn is_right_semi_or_anti(join_type: JoinTypePrimitive) -> bool {
+    join_type == JoinType::RightSemi || join_type == JoinType::RightAnti
+}
+
+pub const fn need_left_degree(join_type: JoinTypePrimitive) -> bool {
+    join_type == JoinType::FullOuter
+        || join_type == JoinType::LeftOuter
+        || join_type == JoinType::LeftAnti
+        || join_type == JoinType::LeftSemi
+}
+
+pub const fn need_right_degree(join_type: JoinTypePrimitive) -> bool {
+    join_type == JoinType::FullOuter
+        || join_type == JoinType::RightOuter
+        || join_type == JoinType::RightAnti
+        || join_type == JoinType::RightSemi
+}

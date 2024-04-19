@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ mod test {
         default_builder_opt_for_test, gen_iterator_test_sstable_base, iterator_test_key_of,
         iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
-    use crate::hummock::iterator::{HummockIterator, UnorderedMergeIteratorInner};
+    use crate::hummock::iterator::{HummockIterator, MergeIterator};
     use crate::hummock::BackwardSstableIterator;
 
     #[tokio::test]
@@ -54,7 +54,7 @@ mod test {
             BackwardSstableIterator::new(table2, sstable_store),
         ];
 
-        let mut mi = UnorderedMergeIteratorInner::new(iters);
+        let mut mi = MergeIterator::new(iters);
         let mut i = 3 * TEST_KEYS_COUNT;
         mi.rewind().await.unwrap();
         while mi.is_valid() {
@@ -107,7 +107,7 @@ mod test {
             BackwardSstableIterator::new(table2, sstable_store),
         ];
 
-        let mut mi = UnorderedMergeIteratorInner::new(iters);
+        let mut mi = MergeIterator::new(iters);
 
         // right edge case
         mi.seek(iterator_test_key_of(0).to_ref()).await.unwrap();
@@ -173,7 +173,7 @@ mod test {
             BackwardSstableIterator::new(table0, sstable_store),
         ];
 
-        let mut mi = UnorderedMergeIteratorInner::new(iters);
+        let mut mi = MergeIterator::new(iters);
 
         mi.rewind().await.unwrap();
         let mut count = 0;

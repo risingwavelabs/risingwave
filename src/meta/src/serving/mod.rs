@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,9 +24,7 @@ use risingwave_pb::meta::{FragmentParallelUnitMapping, FragmentParallelUnitMappi
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use crate::manager::{
-    ClusterManagerRef, FragmentManagerRef, LocalNotification, NotificationManagerRef,
-};
+use crate::manager::{LocalNotification, MetadataManager, NotificationManagerRef};
 use crate::model::FragmentId;
 
 pub type ServingVnodeMappingRef = Arc<ServingVnodeMapping>;
@@ -54,8 +52,12 @@ impl ServingVnodeMapping {
         for (fragment_id, streaming_parallelism) in streaming_parallelisms {
             let new_mapping = {
                 let old_mapping = serving_vnode_mappings.get(&fragment_id);
-                // Set max serving parallelism to `streaming_parallelism`. It's not a must.
-                place_vnode(old_mapping, workers, streaming_parallelism)
+                let max_parallelism = if streaming_parallelism == 1 {
+                    Some(1)
+                } else {
+                    None
+                };
+                place_vnode(old_mapping, workers, max_parallelism)
             };
             match new_mapping {
                 None => {
@@ -105,15 +107,13 @@ pub(crate) fn to_deleted_fragment_parallel_unit_mapping(
 
 pub async fn on_meta_start(
     notification_manager: NotificationManagerRef,
-    cluster_manager: ClusterManagerRef,
-    fragment_manager: FragmentManagerRef,
+    metadata_manager: &MetadataManager,
     serving_vnode_mapping: ServingVnodeMappingRef,
 ) {
-    let streaming_parallelisms = fragment_manager.running_fragment_parallelisms(None).await;
-    let (mappings, _) = serving_vnode_mapping.upsert(
-        streaming_parallelisms,
-        &cluster_manager.list_active_serving_compute_nodes().await,
-    );
+    let (serving_compute_nodes, streaming_parallelisms) =
+        fetch_serving_infos(metadata_manager).await;
+    let (mappings, _) =
+        serving_vnode_mapping.upsert(streaming_parallelisms, &serving_compute_nodes);
     tracing::debug!(
         "Initialize serving vnode mapping snapshot for fragments {:?}.",
         mappings.keys()
@@ -126,10 +126,44 @@ pub async fn on_meta_start(
     );
 }
 
+async fn fetch_serving_infos(
+    metadata_manager: &MetadataManager,
+) -> (Vec<WorkerNode>, HashMap<FragmentId, usize>) {
+    match metadata_manager {
+        MetadataManager::V1(mgr) => (
+            mgr.cluster_manager
+                .list_active_serving_compute_nodes()
+                .await,
+            mgr.fragment_manager
+                .running_fragment_parallelisms(None)
+                .await,
+        ),
+        MetadataManager::V2(mgr) => {
+            // TODO: need another mechanism to refresh serving info instead of panic.
+            let parallelisms = mgr
+                .catalog_controller
+                .running_fragment_parallelisms(None)
+                .await
+                .expect("fail to fetch running parallelisms");
+            let serving_compute_nodes = mgr
+                .cluster_controller
+                .list_active_serving_workers()
+                .await
+                .expect("fail to list serving compute nodes");
+            (
+                serving_compute_nodes,
+                parallelisms
+                    .into_iter()
+                    .map(|(fragment_id, cnt)| (fragment_id as FragmentId, cnt))
+                    .collect(),
+            )
+        }
+    }
+}
+
 pub async fn start_serving_vnode_mapping_worker(
     notification_manager: NotificationManagerRef,
-    cluster_manager: ClusterManagerRef,
-    fragment_manager: FragmentManagerRef,
+    metadata_manager: MetadataManager,
     serving_vnode_mapping: ServingVnodeMappingRef,
 ) -> (JoinHandle<()>, Sender<()>) {
     let (local_notification_tx, mut local_notification_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -148,8 +182,7 @@ pub async fn start_serving_vnode_mapping_worker(
                                     if w.r#type() != WorkerType::ComputeNode || !w.property.as_ref().map_or(false, |p| p.is_serving) {
                                         continue;
                                     }
-                                    let workers = cluster_manager.list_active_serving_compute_nodes().await;
-                                    let streaming_parallelisms = fragment_manager.running_fragment_parallelisms(None).await;
+                                    let (workers, streaming_parallelisms) = fetch_serving_infos(&metadata_manager).await;
                                     let (mappings, _) = serving_vnode_mapping.upsert(streaming_parallelisms, &workers);
                                     tracing::debug!("Update serving vnode mapping snapshot for fragments {:?}.", mappings.keys());
                                     notification_manager.notify_frontend_without_version(Operation::Snapshot, Info::ServingParallelUnitMappings(FragmentParallelUnitMappings{ mappings: to_fragment_parallel_unit_mapping(&mappings) }));
@@ -158,8 +191,7 @@ pub async fn start_serving_vnode_mapping_worker(
                                     if fragment_ids.is_empty() {
                                         continue;
                                     }
-                                    let workers = cluster_manager.list_active_serving_compute_nodes().await;
-                                    let streaming_parallelisms = fragment_manager.running_fragment_parallelisms(Some(fragment_ids.into_iter().collect())).await;
+                                    let (workers, streaming_parallelisms) = fetch_serving_infos(&metadata_manager).await;
                                     let (upserted, failed) = serving_vnode_mapping.upsert(streaming_parallelisms, &workers);
                                     if !upserted.is_empty() {
                                         tracing::debug!("Update serving vnode mapping for fragments {:?}.", upserted.keys());

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,10 +15,10 @@
 use std::cmp::Ordering::{Equal, Less};
 use std::sync::Arc;
 
-use risingwave_common::cache::CachePriority;
+use foyer::memory::CacheContext;
 use risingwave_hummock_sdk::key::FullKey;
 
-use crate::hummock::iterator::{Backward, HummockIterator};
+use crate::hummock::iterator::{Backward, HummockIterator, ValueMeta};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
@@ -35,7 +35,7 @@ pub struct BackwardSstableIterator {
     cur_idx: usize,
 
     /// Reference to the sstable
-    pub sst: TableHolder,
+    sst: TableHolder,
 
     sstable_store: SstableStoreRef,
 
@@ -46,7 +46,7 @@ impl BackwardSstableIterator {
     pub fn new(sstable: TableHolder, sstable_store: SstableStoreRef) -> Self {
         Self {
             block_iter: None,
-            cur_idx: sstable.value().meta.block_metas.len() - 1,
+            cur_idx: sstable.meta.block_metas.len() - 1,
             sst: sstable,
             sstable_store,
             stats: StoreLocalStatistic::default(),
@@ -59,15 +59,15 @@ impl BackwardSstableIterator {
         idx: isize,
         seek_key: Option<FullKey<&[u8]>>,
     ) -> HummockResult<()> {
-        if idx >= self.sst.value().block_count() as isize || idx < 0 {
+        if idx >= self.sst.block_count() as isize || idx < 0 {
             self.block_iter = None;
         } else {
             let block = self
                 .sstable_store
                 .get(
-                    self.sst.value(),
+                    &self.sst,
                     idx as usize,
-                    crate::hummock::CachePolicy::Fill(CachePriority::High),
+                    crate::hummock::CachePolicy::Fill(CacheContext::Default),
                     &mut self.stats,
                 )
                 .await?;
@@ -117,14 +117,13 @@ impl HummockIterator for BackwardSstableIterator {
     /// Instead of setting idx to 0th block, a `BackwardSstableIterator` rewinds to the last block
     /// in the sstable.
     async fn rewind(&mut self) -> HummockResult<()> {
-        self.seek_idx(self.sst.value().block_count() as isize - 1, None)
+        self.seek_idx(self.sst.block_count() as isize - 1, None)
             .await
     }
 
     async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
         let block_idx = self
             .sst
-            .value()
             .meta
             .block_metas
             .partition_point(|block_meta| {
@@ -149,6 +148,13 @@ impl HummockIterator for BackwardSstableIterator {
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         stats.add(&self.stats)
     }
+
+    fn value_meta(&self) -> ValueMeta {
+        ValueMeta {
+            object_id: Some(self.sst.id),
+            block_id: Some(self.cur_idx as _),
+        }
+    }
 }
 
 impl SstableIteratorType for BackwardSstableIterator {
@@ -168,6 +174,7 @@ mod tests {
     use rand::prelude::*;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
     use crate::assert_bytes_eq;
@@ -186,7 +193,7 @@ mod tests {
                 .await;
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
         // path.
-        assert!(handle.value().meta.block_metas.len() > 10);
+        assert!(handle.meta.block_metas.len() > 10);
         let mut sstable_iter = BackwardSstableIterator::new(handle, sstable_store);
         let mut cnt = TEST_KEYS_COUNT;
         sstable_iter.rewind().await.unwrap();
@@ -211,7 +218,7 @@ mod tests {
                 .await;
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
         // path.
-        assert!(sstable.value().meta.block_metas.len() > 10);
+        assert!(sstable.meta.block_metas.len() > 10);
         let mut sstable_iter = BackwardSstableIterator::new(sstable, sstable_store);
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();
@@ -244,7 +251,7 @@ mod tests {
                 format!("key_zzzz_{:05}", 0).as_bytes(),
             ]
             .concat(),
-            233,
+            test_epoch(1),
         );
         sstable_iter.seek(largest_key.to_ref()).await.unwrap();
         let key = sstable_iter.key();
@@ -258,7 +265,7 @@ mod tests {
                 format!("key_aaaa_{:05}", 0).as_bytes(),
             ]
             .concat(),
-            233,
+            test_epoch(1),
         );
         sstable_iter.seek(smallest_key.to_ref()).await.unwrap();
         assert!(!sstable_iter.is_valid());

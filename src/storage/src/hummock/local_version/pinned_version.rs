@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,17 +14,17 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::iter::empty;
-use std::ops::Deref;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use auto_enums::auto_enum;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId, INVALID_VERSION_ID};
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{HummockVersion, Level};
+use risingwave_pb::hummock::PbLevel;
 use risingwave_rpc_client::HummockMetaClient;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio_retry::strategy::jitter;
@@ -101,7 +101,7 @@ impl PinnedVersion {
         self.compaction_group_index.clone()
     }
 
-    pub(crate) fn new_pin_version(&self, version: HummockVersion) -> Self {
+    pub fn new_pin_version(&self, version: HummockVersion) -> Self {
         assert!(
             version.id >= self.version.id,
             "pinning a older version {}. Current is {}",
@@ -110,6 +110,7 @@ impl PinnedVersion {
         );
         let version_id = version.id;
         let compaction_group_index = version.build_compaction_group_info();
+
         PinnedVersion {
             version: Arc::new(version),
             compaction_group_index: Arc::new(compaction_group_index),
@@ -132,7 +133,7 @@ impl PinnedVersion {
         self.version.levels.get(&compaction_group_id).unwrap()
     }
 
-    pub fn levels(&self, table_id: TableId) -> impl Iterator<Item = &Level> {
+    pub fn levels(&self, table_id: TableId) -> impl Iterator<Item = &PbLevel> {
         #[auto_enum(Iterator)]
         match self.compaction_group_index.get(&table_id) {
             Some(compaction_group_id) => {
@@ -159,8 +160,8 @@ impl PinnedVersion {
     }
 
     /// ret value can't be used as `HummockVersion`. it must be modified with delta
-    pub fn version(&self) -> HummockVersion {
-        self.version.deref().clone()
+    pub fn version(&self) -> &HummockVersion {
+        &self.version
     }
 }
 
@@ -264,8 +265,8 @@ pub(crate) async fn start_pinned_version_worker(
                     Err(err) => {
                         let retry_after = retry_backoff.next().unwrap_or(max_retry_interval);
                         tracing::warn!(
-                            "Failed to unpin version {:?}. Will retry after about {} milliseconds",
-                            err,
+                            error = %err.as_report(),
+                            "Failed to unpin version. Will retry after about {} milliseconds",
                             retry_after.as_millis()
                         );
                         tokio::time::sleep(retry_after).await;

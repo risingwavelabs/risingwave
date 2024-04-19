@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,13 +22,15 @@ use super::{
     CompactionInput, CompactionPicker, CompactionTaskValidator, LocalPickerStatistic,
     ValidationRuleType,
 };
-use crate::hummock::compaction::create_overlap_strategy;
 use crate::hummock::compaction::picker::TrivialMovePicker;
+use crate::hummock::compaction::{create_overlap_strategy, CompactionDeveloperConfig};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct IntraCompactionPicker {
     config: Arc<CompactionConfig>,
     compaction_task_validator: Arc<CompactionTaskValidator>,
+
+    developer_config: Arc<CompactionDeveloperConfig>,
 }
 
 impl CompactionPicker for IntraCompactionPicker {
@@ -57,7 +59,16 @@ impl CompactionPicker for IntraCompactionPicker {
             return None;
         }
 
-        if let Some(ret) = self.pick_l0_intra(l0, &level_handlers[0], stats) {
+        let vnode_partition_count = self.config.split_weight_by_vnode;
+
+        if let Some(ret) =
+            self.pick_whole_level(l0, &level_handlers[0], vnode_partition_count, stats)
+        {
+            return Some(ret);
+        }
+
+        if let Some(ret) = self.pick_l0_intra(l0, &level_handlers[0], vnode_partition_count, stats)
+        {
             return Some(ret);
         }
 
@@ -67,36 +78,68 @@ impl CompactionPicker for IntraCompactionPicker {
 
 impl IntraCompactionPicker {
     #[cfg(test)]
-    pub fn new(config: Arc<CompactionConfig>) -> IntraCompactionPicker {
+    pub fn new(
+        config: Arc<CompactionConfig>,
+        developer_config: Arc<CompactionDeveloperConfig>,
+    ) -> IntraCompactionPicker {
         IntraCompactionPicker {
             compaction_task_validator: Arc::new(CompactionTaskValidator::new(config.clone())),
             config,
+            developer_config,
         }
     }
 
     pub fn new_with_validator(
         config: Arc<CompactionConfig>,
         compaction_task_validator: Arc<CompactionTaskValidator>,
+        developer_config: Arc<CompactionDeveloperConfig>,
     ) -> IntraCompactionPicker {
         IntraCompactionPicker {
             config,
             compaction_task_validator,
+            developer_config,
         }
+    }
+
+    fn pick_whole_level(
+        &self,
+        l0: &OverlappingLevel,
+        level_handler: &LevelHandler,
+        partition_count: u32,
+        stats: &mut LocalPickerStatistic,
+    ) -> Option<CompactionInput> {
+        let picker = WholeLevelCompactionPicker::new(
+            self.config.clone(),
+            self.compaction_task_validator.clone(),
+        );
+        picker.pick_whole_level(l0, level_handler, partition_count, stats)
     }
 
     fn pick_l0_intra(
         &self,
         l0: &OverlappingLevel,
         level_handler: &LevelHandler,
+        vnode_partition_count: u32,
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
+        let mut max_vnode_partition_idx = 0;
+        for (idx, level) in l0.sub_levels.iter().enumerate() {
+            if level.vnode_partition_count < vnode_partition_count {
+                break;
+            }
+            max_vnode_partition_idx = idx;
+        }
 
         for (idx, level) in l0.sub_levels.iter().enumerate() {
             if level.level_type() != LevelType::Nonoverlapping
                 || level.total_file_size > self.config.sub_level_max_compaction_bytes
             {
                 continue;
+            }
+
+            if idx > max_vnode_partition_idx {
+                break;
             }
 
             if level_handler.is_level_all_pending_compact(level) {
@@ -114,10 +157,14 @@ impl IntraCompactionPicker {
                 self.config.level0_sub_level_compact_level_count as usize,
                 self.config.level0_max_compact_file_number,
                 overlap_strategy.clone(),
+                self.developer_config.enable_check_task_level_overlap,
             );
 
             let l0_select_tables_vec = non_overlap_sub_level_picker
-                .pick_l0_multi_non_overlap_level(&l0.sub_levels[idx..], level_handler);
+                .pick_l0_multi_non_overlap_level(
+                    &l0.sub_levels[idx..=max_vnode_partition_idx],
+                    level_handler,
+                );
 
             if l0_select_tables_vec.is_empty() {
                 continue;
@@ -181,6 +228,10 @@ impl IntraCompactionPicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
+        if !self.developer_config.enable_trivial_move {
+            return None;
+        }
+
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
 
         for (idx, level) in l0.sub_levels.iter().enumerate() {
@@ -189,6 +240,16 @@ impl IntraCompactionPicker {
             }
 
             if l0.sub_levels[idx + 1].level_type == LevelType::Overlapping as i32 {
+                continue;
+            }
+
+            if level_handlers[0].is_level_pending_compact(level) {
+                continue;
+            }
+
+            if l0.sub_levels[idx + 1].vnode_partition_count
+                != l0.sub_levels[idx].vnode_partition_count
+            {
                 continue;
             }
 
@@ -215,18 +276,6 @@ impl IntraCompactionPicker {
             assert!(overlap
                 .check_multiple_overlap(&l0.sub_levels[idx].table_infos)
                 .is_empty());
-            let mut target_level_idx = idx;
-            while target_level_idx > 0 {
-                if l0.sub_levels[target_level_idx - 1].level_type
-                    != LevelType::Nonoverlapping as i32
-                    || !overlap
-                        .check_multiple_overlap(&l0.sub_levels[target_level_idx - 1].table_infos)
-                        .is_empty()
-                {
-                    break;
-                }
-                target_level_idx -= 1;
-            }
 
             let select_input_size = select_sst.file_size;
             let input_levels = vec![
@@ -244,12 +293,110 @@ impl IntraCompactionPicker {
             return Some(CompactionInput {
                 input_levels,
                 target_level: 0,
-                target_sub_level_id: l0.sub_levels[target_level_idx].sub_level_id,
+                target_sub_level_id: level.sub_level_id,
                 select_input_size,
                 total_file_count: 1,
                 ..Default::default()
             });
         }
+        None
+    }
+}
+
+pub struct WholeLevelCompactionPicker {
+    config: Arc<CompactionConfig>,
+    compaction_task_validator: Arc<CompactionTaskValidator>,
+}
+
+impl WholeLevelCompactionPicker {
+    pub fn new(
+        config: Arc<CompactionConfig>,
+        compaction_task_validator: Arc<CompactionTaskValidator>,
+    ) -> Self {
+        Self {
+            config,
+            compaction_task_validator,
+        }
+    }
+
+    pub fn pick_whole_level(
+        &self,
+        l0: &OverlappingLevel,
+        level_handler: &LevelHandler,
+        partition_count: u32,
+        stats: &mut LocalPickerStatistic,
+    ) -> Option<CompactionInput> {
+        if partition_count == 0 {
+            return None;
+        }
+        for (idx, level) in l0.sub_levels.iter().enumerate() {
+            if level.level_type() != LevelType::Nonoverlapping
+                || level.vnode_partition_count == partition_count
+            {
+                continue;
+            }
+
+            let max_compaction_bytes = std::cmp::max(
+                self.config.max_bytes_for_level_base,
+                self.config.sub_level_max_compaction_bytes
+                    * (self.config.level0_sub_level_compact_level_count as u64),
+            );
+
+            let mut select_input_size = 0;
+
+            let mut select_level_inputs = vec![];
+            let mut total_file_count = 0;
+            let mut wait_enough = false;
+            for next_level in l0.sub_levels.iter().skip(idx) {
+                if (select_input_size > max_compaction_bytes
+                    || total_file_count > self.config.level0_max_compact_file_number
+                    || next_level.vnode_partition_count == partition_count)
+                    && select_level_inputs.len() > 1
+                {
+                    wait_enough = true;
+                    break;
+                }
+
+                if level_handler.is_level_pending_compact(next_level) {
+                    break;
+                }
+
+                select_input_size += next_level.total_file_size;
+                total_file_count += next_level.table_infos.len() as u64;
+
+                select_level_inputs.push(InputLevel {
+                    level_idx: 0,
+                    level_type: next_level.level_type,
+                    table_infos: next_level.table_infos.clone(),
+                });
+            }
+            if !select_level_inputs.is_empty() {
+                let vnode_partition_count =
+                    if select_input_size > self.config.sub_level_max_compaction_bytes / 2 {
+                        partition_count
+                    } else {
+                        0
+                    };
+                let result = CompactionInput {
+                    input_levels: select_level_inputs,
+                    target_sub_level_id: level.sub_level_id,
+                    select_input_size,
+                    total_file_count,
+                    vnode_partition_count,
+                    ..Default::default()
+                };
+                if wait_enough
+                    || self.compaction_task_validator.valid_compact_task(
+                        &result,
+                        ValidationRuleType::Intra,
+                        stats,
+                    )
+                {
+                    return Some(result);
+                }
+            }
+        }
+
         None
     }
 }
@@ -274,21 +421,18 @@ pub mod tests {
                 .level0_sub_level_compact_level_count(1)
                 .build(),
         );
-        IntraCompactionPicker::new(config)
+        IntraCompactionPicker::new(config, Arc::new(CompactionDeveloperConfig::default()))
     }
 
     #[test]
     fn test_l0_to_l1_compact_conflict() {
         // When picking L0->L1, L0's selecting_key_range should not be overlapped with L0's
         // compacting_key_range.
-        let mut picker = create_compaction_picker_for_test();
         let levels = vec![Level {
             level_idx: 1,
             level_type: LevelType::Nonoverlapping as i32,
             table_infos: vec![],
-            total_file_size: 0,
-            sub_level_id: 0,
-            uncompressed_file_size: 0,
+            ..Default::default()
         }];
         let mut levels = Levels {
             levels,
@@ -307,14 +451,9 @@ pub mod tests {
                 generate_table(2, 1, 350, 500, 2),
             ],
         );
-        let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
 
         let mut local_stats = LocalPickerStatistic::default();
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
-        // trivial_move
-        ret.add_pending_task(0, &mut levels_handler); // pending only for test
         push_tables_level0_nonoverlapping(&mut levels, vec![generate_table(3, 1, 250, 300, 3)]);
         let config: CompactionConfig = CompactionConfigBuilder::new()
             .level0_tier_compact_file_number(2)
@@ -341,9 +480,7 @@ pub mod tests {
                 level_idx: 1,
                 level_type: LevelType::Nonoverlapping as i32,
                 table_infos: vec![generate_table(3, 1, 200, 300, 2)],
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             }],
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![
                 generate_table(1, 1, 100, 210, 2),
@@ -398,7 +535,8 @@ pub mod tests {
                     .level0_overlapping_sub_level_compact_level_count(4)
                     .build(),
             );
-            let mut picker = IntraCompactionPicker::new(config);
+            let mut picker =
+                IntraCompactionPicker::new(config, Arc::new(CompactionDeveloperConfig::default()));
             let mut local_stats = LocalPickerStatistic::default();
             let ret = picker
                 .pick_compaction(&levels, &levels_handler, &mut local_stats)
@@ -443,7 +581,8 @@ pub mod tests {
                     .level0_sub_level_compact_level_count(1)
                     .build(),
             );
-            let mut picker = IntraCompactionPicker::new(config);
+            let mut picker =
+                IntraCompactionPicker::new(config, Arc::new(CompactionDeveloperConfig::default()));
             let mut local_stats = LocalPickerStatistic::default();
             let ret = picker
                 .pick_compaction(&levels, &levels_handler, &mut local_stats)
@@ -512,7 +651,8 @@ pub mod tests {
                     .level0_sub_level_compact_level_count(1)
                     .build(),
             );
-            let mut picker = IntraCompactionPicker::new(config);
+            let mut picker =
+                IntraCompactionPicker::new(config, Arc::new(CompactionDeveloperConfig::default()));
             let mut local_stats = LocalPickerStatistic::default();
             let ret = picker
                 .pick_compaction(&levels, &levels_handler, &mut local_stats)
@@ -564,7 +704,8 @@ pub mod tests {
                 .level0_sub_level_compact_level_count(20) // reject intra
                 .build(),
         );
-        let mut picker = IntraCompactionPicker::new(config);
+        let mut picker =
+            IntraCompactionPicker::new(config, Arc::new(CompactionDeveloperConfig::default()));
 
         // Cannot trivial move because there is only 1 sub-level.
         let l0 = generate_l0_overlapping_sublevels(vec![vec![
@@ -622,5 +763,33 @@ pub mod tests {
             .unwrap();
         assert!(is_l0_trivial_move(&ret));
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
+    }
+    #[test]
+    fn test_pick_whole_level() {
+        let config = Arc::new(
+            CompactionConfigBuilder::new()
+                .level0_max_compact_file_number(20)
+                .build(),
+        );
+        let mut table_infos = vec![];
+        for epoch in 1..3 {
+            let base = epoch * 100;
+            let mut ssts = vec![];
+            for i in 1..50 {
+                let left = (i as usize) * 100;
+                let right = left + 100;
+                ssts.push(generate_table(base + i, 1, left, right, epoch));
+            }
+            table_infos.push(ssts);
+        }
+
+        let l0 = generate_l0_nonoverlapping_multi_sublevels(table_infos);
+        let compaction_task_validator = Arc::new(CompactionTaskValidator::new(config.clone()));
+        let picker = WholeLevelCompactionPicker::new(config, compaction_task_validator);
+        let level_handler = LevelHandler::new(0);
+        let ret = picker
+            .pick_whole_level(&l0, &level_handler, 4, &mut LocalPickerStatistic::default())
+            .unwrap();
+        assert_eq!(ret.input_levels.len(), 2);
     }
 }

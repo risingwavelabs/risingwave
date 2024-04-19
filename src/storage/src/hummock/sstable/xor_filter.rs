@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -442,8 +442,9 @@ impl Clone for XorFilterReader {
 
 #[cfg(test)]
 mod tests {
+    use foyer::memory::CacheContext;
     use rand::RngCore;
-    use risingwave_common::cache::CachePriority;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
@@ -461,7 +462,7 @@ mod tests {
         let writer_opts = SstableWriterOptions {
             capacity_hint: None,
             tracker: None,
-            policy: CachePolicy::Fill(CachePriority::High),
+            policy: CachePolicy::Fill(CacheContext::Default),
         };
         let opts = SstableBuilderOptions {
             capacity: 0,
@@ -487,7 +488,7 @@ mod tests {
         for i in 0..TEST_KEYS_COUNT {
             let epoch_count = rng.next_u64() % 20;
             for j in 0..epoch_count {
-                let epoch = 20 - j;
+                let epoch = test_epoch(20 - j);
                 let k = FullKey {
                     user_key: test_user_key_of(i),
                     epoch_with_gap: EpochWithGap::new_from_epoch(epoch),
@@ -504,13 +505,13 @@ mod tests {
             .await
             .unwrap();
         let mut stat = StoreLocalStatistic::default();
-        if let XorFilter::BlockXor16(reader) = &sstable.value().filter_reader.filter {
-            for idx in 0..sstable.value().meta.block_metas.len() {
+        if let XorFilter::BlockXor16(reader) = &sstable.filter_reader.filter {
+            for idx in 0..sstable.meta.block_metas.len() {
                 let resp = sstable_store
                     .get_block_response(
-                        sstable.value(),
+                        &sstable,
                         idx,
-                        CachePolicy::Fill(CachePriority::High),
+                        CachePolicy::Fill(CacheContext::Default),
                         &mut stat,
                     )
                     .await

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,17 +16,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use itertools::Itertools;
+use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::key_with_epoch;
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 #[cfg(test)]
 use risingwave_pb::hummock::compact_task::TaskStatus;
-use risingwave_pb::hummock::{
-    CompactionConfig, HummockSnapshot, HummockVersion, KeyRange, SstableInfo,
-};
+use risingwave_pb::hummock::{CompactionConfig, HummockSnapshot, KeyRange, SstableInfo};
 use risingwave_pb::meta::add_worker_node_request::Property;
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -55,7 +55,10 @@ pub async fn add_test_tables(
     context_id: HummockContextId,
 ) -> Vec<Vec<SstableInfo>> {
     // Increase version by 2.
-    let mut epoch: u64 = 1;
+
+    use risingwave_common::util::epoch::EpochExt;
+
+    let mut epoch = test_epoch(1);
     let sstable_ids = get_sst_ids(hummock_manager, 3).await;
     let test_tables = generate_test_sstables_with_table_id(epoch, 1, sstable_ids);
     register_sstable_infos_to_compaction_group(
@@ -115,7 +118,7 @@ pub async fn add_test_tables(
         assert_eq!(compactor.context_id(), context_id);
     }
 
-    let ret = hummock_manager
+    hummock_manager
         .report_compact_task_for_test(
             compact_task.task_id,
             Some(compact_task),
@@ -125,14 +128,13 @@ pub async fn add_test_tables(
         )
         .await
         .unwrap();
-    assert!(ret);
     if temp_compactor {
         hummock_manager
             .compactor_manager_ref_for_test()
             .remove_compactor(context_id);
     }
     // Increase version by 1.
-    epoch += 1;
+    epoch.inc_epoch();
     let test_tables_3 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager,
@@ -392,7 +394,7 @@ pub async fn add_ssts(
     context_id: HummockContextId,
 ) -> Vec<SstableInfo> {
     let table_ids = get_sst_ids(hummock_manager, 3).await;
-    let test_tables = generate_test_sstables_with_table_id(epoch, 1, table_ids);
+    let test_tables = generate_test_sstables_with_table_id(test_epoch(epoch), 1, table_ids);
     let ssts = to_local_sstable_info(&test_tables);
     let sst_to_worker = ssts
         .iter()

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, StructType};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
+use thiserror_ext::AsReport;
 
 use super::{FieldEncodeError, Result as SinkResult, RowEncoder, SerTo};
 
@@ -134,7 +135,7 @@ impl SerTo<Vec<u8>> for AvroEncoded {
             )));
         };
         let raw = apache_avro::to_avro_datum(&self.schema, self.value)
-            .map_err(|e| crate::sink::SinkError::Encode(e.to_string()))?;
+            .map_err(|e| crate::sink::SinkError::Encode(e.to_report_string()))?;
         let mut buf = Vec::with_capacity(1 + 4 + raw.len());
         buf.put_u8(0);
         buf.put_i32(schema_id);

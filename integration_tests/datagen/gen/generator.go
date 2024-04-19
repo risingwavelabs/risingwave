@@ -6,6 +6,7 @@ import (
 	"datagen/sink/kafka"
 	"datagen/sink/kinesis"
 	"datagen/sink/mysql"
+	"datagen/sink/nats"
 	"datagen/sink/postgres"
 	"datagen/sink/pulsar"
 	"datagen/sink/s3"
@@ -21,6 +22,7 @@ type GeneratorConfig struct {
 	Pulsar   pulsar.PulsarConfig
 	Kinesis  kinesis.KinesisConfig
 	S3       s3.S3Config
+	Nats     nats.NatsConfig
 
 	// Whether to print the content of every event.
 	PrintInsert bool
@@ -40,6 +42,9 @@ type GeneratorConfig struct {
 
 	// The topic to filter. If not specified, all topics will be used.
 	Topic string
+
+	// The total number of events to generate.
+	TotalEvents int64
 }
 
 type LoadGenerator interface {

@@ -1,5 +1,5 @@
 statement ok
-SET RW_IMPLICIT_FLUSH TO true;
+set rw_implicit_flush = true;
 
 include ./basic/mod.slt.part
 include ./rank_func/mod.slt.part

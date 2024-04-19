@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,9 +22,7 @@ pub struct AggCallMergeRule {}
 
 impl Rule for AggCallMergeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let Some(agg) = plan.as_logical_agg() else {
-            return None;
-        };
+        let agg = plan.as_logical_agg()?;
 
         let calls = agg.agg_calls();
         let mut new_calls = Vec::with_capacity(calls.len());

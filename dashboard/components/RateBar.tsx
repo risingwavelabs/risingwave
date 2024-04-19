@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 RisingWave Labs
+ * Copyright 2024 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 
 import { Box, Text, Tooltip } from "@chakra-ui/react"
 import { tinycolor } from "@ctrl/tinycolor"
-import { p50, p90, p95, p99 } from "../pages/api/metric"
+import { p50, p90, p95, p99 } from "../lib/api/metric"
 import { MetricsSample } from "./metrics"
 
 export default function RateBar({ samples }: { samples: MetricsSample[] }) {

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,12 +17,11 @@ use std::sync::Arc;
 
 use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Schema};
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::catalog::PbSchemaRegistryNameStrategy;
 use risingwave_pb::plan_common::ColumnDesc;
 
+use crate::error::ConnectorResult;
 use crate::parser::avro::schema_resolver::ConfluentSchemaResolver;
 use crate::parser::avro::util::avro_schema_to_column_descs;
 use crate::parser::unified::avro::{
@@ -50,13 +49,10 @@ pub struct DebeziumAvroAccessBuilder {
 
 // TODO: reduce encodingtype match
 impl AccessBuilder for DebeziumAvroAccessBuilder {
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>> {
         let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
         let schema = self.schema_resolver.get(schema_id).await?;
-        self.value = Some(
-            from_avro_datum(schema.as_ref(), &mut raw_payload, None)
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?,
-        );
+        self.value = Some(from_avro_datum(schema.as_ref(), &mut raw_payload, None)?);
         self.key_schema = match self.encoding_type {
             EncodingType::Key => Some(schema),
             EncodingType::Value => None,
@@ -72,19 +68,19 @@ impl AccessBuilder for DebeziumAvroAccessBuilder {
 }
 
 impl DebeziumAvroAccessBuilder {
-    pub fn new(config: DebeziumAvroParserConfig, encoding_type: EncodingType) -> Result<Self> {
+    pub fn new(
+        config: DebeziumAvroParserConfig,
+        encoding_type: EncodingType,
+    ) -> ConnectorResult<Self> {
         let DebeziumAvroParserConfig {
             outer_schema,
             schema_resolver,
             ..
         } = config;
 
-        let resolver = apache_avro::schema::ResolvedSchema::try_from(&*outer_schema)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+        let resolver = apache_avro::schema::ResolvedSchema::try_from(&*outer_schema)?;
         // todo: to_resolved may cause stackoverflow if there's a loop in the schema
-        let schema = resolver
-            .to_resolved(&outer_schema)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+        let schema = resolver.to_resolved(&outer_schema)?;
         Ok(Self {
             schema,
             schema_resolver,
@@ -104,7 +100,7 @@ pub struct DebeziumAvroParserConfig {
 }
 
 impl DebeziumAvroParserConfig {
-    pub async fn new(encoding_config: EncodingProperties) -> Result<Self> {
+    pub async fn new(encoding_config: EncodingProperties) -> ConnectorResult<Self> {
         let avro_config = try_match_expand!(encoding_config, EncodingProperties::Avro)?;
         let schema_location = &avro_config.row_schema_location;
         let client_config = &avro_config.client_config;
@@ -126,11 +122,11 @@ impl DebeziumAvroParserConfig {
         })
     }
 
-    pub fn extract_pks(&self) -> anyhow::Result<Vec<ColumnDesc>> {
+    pub fn extract_pks(&self) -> ConnectorResult<Vec<ColumnDesc>> {
         avro_schema_to_column_descs(&self.key_schema)
     }
 
-    pub fn map_to_columns(&self) -> anyhow::Result<Vec<ColumnDesc>> {
+    pub fn map_to_columns(&self) -> ConnectorResult<Vec<ColumnDesc>> {
         avro_schema_to_column_descs(avro_schema_skip_union(avro_extract_field_schema(
             &self.outer_schema,
             Some("before"),
@@ -151,13 +147,14 @@ mod tests {
     use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_pb::catalog::StreamSourceInfo;
+    use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
 
     use super::*;
     use crate::parser::{
         DebeziumAvroParserConfig, DebeziumParser, SourceStreamChunkBuilder, SpecificParserConfig,
     };
-    use crate::source::SourceColumnDesc;
+    use crate::source::{SourceColumnDesc, SourceContext};
 
     const DEBEZIUM_AVRO_DATA: &[u8] = b"\x00\x00\x00\x00\x06\x00\x02\xd2\x0f\x0a\x53\x61\x6c\x6c\x79\x0c\x54\x68\x6f\x6d\x61\x73\x2a\x73\x61\x6c\x6c\x79\x2e\x74\x68\x6f\x6d\x61\x73\x40\x61\x63\x6d\x65\x2e\x63\x6f\x6d\x16\x32\x2e\x31\x2e\x32\x2e\x46\x69\x6e\x61\x6c\x0a\x6d\x79\x73\x71\x6c\x12\x64\x62\x73\x65\x72\x76\x65\x72\x31\xc0\xb4\xe8\xb7\xc9\x61\x00\x30\x66\x69\x72\x73\x74\x5f\x69\x6e\x5f\x64\x61\x74\x61\x5f\x63\x6f\x6c\x6c\x65\x63\x74\x69\x6f\x6e\x12\x69\x6e\x76\x65\x6e\x74\x6f\x72\x79\x00\x02\x12\x63\x75\x73\x74\x6f\x6d\x65\x72\x73\x00\x00\x20\x6d\x79\x73\x71\x6c\x2d\x62\x69\x6e\x2e\x30\x30\x30\x30\x30\x33\x8c\x06\x00\x00\x00\x02\x72\x02\x92\xc3\xe8\xb7\xc9\x61\x00";
 
@@ -257,6 +254,64 @@ mod tests {
     }
 
     #[test]
+    fn test_ref_avro_type() {
+        let test_schema_str = r#"{
+    "type": "record",
+    "name": "Key",
+    "namespace": "dbserver1.inventory.customers",
+    "fields": [{
+        "name": "id",
+        "type": "int"
+    },
+    {
+      "name": "unconstrained_decimal",
+      "type": [
+        "null",
+        {
+          "type": "record",
+          "name": "VariableScaleDecimal",
+          "namespace": "io.debezium.data",
+          "fields": [
+            {
+              "name": "scale",
+              "type": "int"
+            },
+            {
+              "name": "value",
+              "type": "bytes"
+            }
+          ],
+          "connect.doc": "Variable scaled decimal",
+          "connect.name": "io.debezium.data.VariableScaleDecimal",
+          "connect.version": 1
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "unconstrained_numeric",
+      "type": [
+        "null",
+        "io.debezium.data.VariableScaleDecimal"
+      ],
+      "default": null
+    }
+    ],
+    "connect.name": "dbserver1.inventory.customers.Key"
+}
+"#;
+        let schema = Schema::parse_str(test_schema_str).unwrap();
+        let columns = avro_schema_to_column_descs(&schema).unwrap();
+        for col in &columns {
+            let dtype = col.column_type.as_ref().unwrap();
+            println!("name = {}, type = {:?}", col.name, dtype.type_name);
+            if col.name.contains("unconstrained") {
+                assert_eq!(dtype.type_name, TypeName::Decimal as i32);
+            }
+        }
+    }
+
+    #[test]
     fn test_map_to_columns() {
         let outer_schema = get_outer_schema();
         let columns = avro_schema_to_column_descs(
@@ -294,7 +349,7 @@ mod tests {
 
     #[ignore]
     #[tokio::test]
-    async fn test_debezium_avro_parser() -> Result<()> {
+    async fn test_debezium_avro_parser() -> crate::error::ConnectorResult<()> {
         let props = convert_args!(hashmap!(
             "kafka.topic" => "dbserver1.inventory.customers"
         ));
@@ -312,9 +367,12 @@ mod tests {
             .map(CatColumnDesc::from)
             .map(|c| SourceColumnDesc::from(&c))
             .collect_vec();
-        let parser =
-            DebeziumParser::new(parser_config, columns.clone(), Arc::new(Default::default()))
-                .await?;
+        let parser = DebeziumParser::new(
+            parser_config,
+            columns.clone(),
+            SourceContext::dummy().into(),
+        )
+        .await?;
         let [(op, row)]: [_; 1] = parse_one(parser, columns, DEBEZIUM_AVRO_DATA.to_vec())
             .await
             .try_into()

@@ -1,34 +1,20 @@
 ---
 version: "3"
 services:
-  compactor-0:
+  risingwave-standalone:
     extends:
       file: ../../docker/docker-compose.yml
-      service: compactor-0
-  compute-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: compute-node-0
+      service: risingwave-standalone
     volumes:
       - "../../gcp-rwctest.json:/gcp-rwctest.json"
   etcd-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: etcd-0
-  frontend-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: frontend-node-0
   grafana-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: grafana-0
-  meta-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: meta-node-0
-    volumes:
-      - "../../gcp-rwctest.json:/gcp-rwctest.json"
   minio-0:
     extends:
       file: ../../docker/docker-compose.yml
@@ -44,7 +30,7 @@ services:
       - "../../gcp-rwctest.json:/gcp-rwctest.json"
 
 volumes:
-  compute-node-0:
+  risingwave-standalone:
     external: false
   etcd-0:
     external: false

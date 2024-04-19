@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,8 @@
 use std::fmt::{Display, Formatter};
 
 use bytes::{Buf, BufMut};
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_meta_model_v2 as model_v2;
-use risingwave_pb::hummock::HummockVersion;
 use serde::{Deserialize, Serialize};
 
 use crate::meta_snapshot::{MetaSnapshot, Metadata};
@@ -51,7 +51,7 @@ impl Display for MetadataV2 {
 impl Metadata for MetadataV2 {
     fn encode_to(&self, buf: &mut Vec<u8>) -> BackupResult<()> {
         put_with_len_prefix(buf, &self.cluster_id)?;
-        put_with_len_prefix(buf, &self.hummock_version)?;
+        put_with_len_prefix(buf, &self.hummock_version.to_protobuf())?;
         put_with_len_prefix(buf, &self.version_stats)?;
         put_with_len_prefix(buf, &self.compaction_configs)?;
         // TODO: other metadata
@@ -63,13 +63,13 @@ impl Metadata for MetadataV2 {
         Self: Sized,
     {
         let cluster_id = get_with_len_prefix(&mut buf)?;
-        let hummock_version = get_with_len_prefix(&mut buf)?;
+        let pb_hummock_version = get_with_len_prefix(&mut buf)?;
         let version_stats = get_with_len_prefix(&mut buf)?;
         let compaction_configs = get_with_len_prefix(&mut buf)?;
         // TODO: other metadata
         Ok(Self {
             cluster_id,
-            hummock_version,
+            hummock_version: HummockVersion::from_persisted_protobuf(&pb_hummock_version),
             version_stats,
             compaction_configs,
         })

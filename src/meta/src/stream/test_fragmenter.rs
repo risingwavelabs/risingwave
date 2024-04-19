@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,12 +29,12 @@ use risingwave_pb::expr::agg_call::Type;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, PbInputRef};
-use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, Field};
+use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ExprContext, Field};
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     agg_call_state, AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode,
-    FragmentTypeFlag, MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamEnvironment,
+    FragmentTypeFlag, MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamContext,
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource,
 };
 
@@ -413,7 +413,7 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
     StreamFragmentGraphProto {
         fragments: HashMap::from_iter(fragments.into_iter().map(|f| (f.fragment_id, f))),
         edges: make_fragment_edges(),
-        env: Some(StreamEnvironment::default()),
+        ctx: Some(StreamContext::default()),
         dependent_table_ids: vec![],
         table_ids_cnt: 3,
         parallelism: None,
@@ -450,32 +450,37 @@ fn make_cluster_info() -> StreamingClusterInfo {
 }
 
 #[tokio::test]
+#[cfg(not(madsim))]
 async fn test_graph_builder() -> MetaResult<()> {
-    let env = MetaSrvEnv::for_test().await;
+    let env = MetaSrvEnv::for_test_with_sql_meta_store().await;
     let parallel_degree = 4;
     let job = StreamingJob::Table(None, make_materialize_table(888), TableJobType::General);
 
     let graph = make_stream_graph();
-    let fragment_graph = StreamFragmentGraph::new(graph, env.id_gen_manager_ref(), &job).await?;
+    let expr_context = ExprContext {
+        time_zone: graph.ctx.as_ref().unwrap().timezone.clone(),
+    };
+    let fragment_graph = StreamFragmentGraph::new(&env, graph, &job).await?;
     let internal_tables = fragment_graph.internal_tables();
 
     let actor_graph_builder = ActorGraphBuilder::new(
+        job.id(),
         CompleteStreamFragmentGraph::for_test(fragment_graph),
         make_cluster_info(),
         NonZeroUsize::new(parallel_degree).unwrap(),
     )?;
     let ActorGraphBuildResult { graph, .. } = actor_graph_builder
-        .generate_graph(env.id_gen_manager_ref(), &job)
+        .generate_graph(&env, &job, expr_context)
         .await?;
 
     let table_fragments = TableFragments::for_test(TableId::default(), graph);
     let actors = table_fragments.actors();
     let barrier_inject_actor_ids = table_fragments.barrier_inject_actor_ids();
-    let sink_actor_ids = table_fragments.mview_actor_ids();
+    let mview_actor_ids = table_fragments.mview_actor_ids();
 
     assert_eq!(actors.len(), 9);
     assert_eq!(barrier_inject_actor_ids, vec![6, 7, 8, 9]);
-    assert_eq!(sink_actor_ids, vec![1]);
+    assert_eq!(mview_actor_ids, vec![1]);
     assert_eq!(internal_tables.len(), 3);
 
     let fragment_upstreams: HashMap<_, _> = table_fragments
@@ -511,7 +516,6 @@ async fn test_graph_builder() -> MetaResult<()> {
     expected_upstream.insert(9, vec![]);
 
     for actor in actors {
-        println!("actor_id = {}", actor.get_actor_id());
         assert_eq!(
             expected_downstream.get(&actor.get_actor_id()).unwrap(),
             actor

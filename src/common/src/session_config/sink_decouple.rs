@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,12 +38,16 @@ impl FromStr for SinkDecouple {
     }
 }
 
-impl ToString for SinkDecouple {
-    fn to_string(&self) -> String {
-        match self {
-            Self::Default => "default".to_string(),
-            Self::Enable => "enable".to_string(),
-            Self::Disable => "disable".to_string(),
-        }
+impl std::fmt::Display for SinkDecouple {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Default => "default",
+                Self::Enable => "enable",
+                Self::Disable => "disable",
+            }
+        )
     }
 }

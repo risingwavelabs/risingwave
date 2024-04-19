@@ -76,6 +76,16 @@ create source s9 (id bytea) with (
   scan.startup.mode = 'earliest'
 ) FORMAT PLAIN ENCODE BYTES
 
+statement ok
+create source s10 (v1 int, v2 varchar)
+include timestamp as some_ts
+with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON
+
 query IT rowsort
 select * from s1
 ----
@@ -219,8 +229,20 @@ select id from s9 order by id
 \x6b6b
 \x776561776566776566
 
+# query from a kafka timestamp column with alias
+query IT rowsort
+select v1, v2 from s10 where some_ts > '1977-01-01 00:00:00+00:00'
+----
+1 1
+2 22
+3 333
+4 4444
+
 statement ok
 drop table s8
 
 statement ok
 drop source s9
+
+statement ok
+drop source s10

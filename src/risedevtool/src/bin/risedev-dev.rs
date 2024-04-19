@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use std::env;
 use std::fmt::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -27,10 +27,11 @@ use risedev::{
     generate_risedev_env, preflight_check, AwsS3Config, CompactorService, ComputeNodeService,
     ConfigExpander, ConfigureTmuxTask, EnsureStopService, ExecuteContext, FrontendService,
     GrafanaService, KafkaService, MetaNodeService, MinioService, OpendalConfig, PrometheusService,
-    PubsubService, RedisService, ServiceConfig, Task, TempoService, ZooKeeperService,
-    RISEDEV_SESSION_NAME,
+    PubsubService, RedisService, ServiceConfig, SqliteConfig, Task, TempoService, ZooKeeperService,
+    RISEDEV_NAME,
 };
 use tempfile::tempdir;
+use thiserror_ext::AsReport;
 use yaml_rust::YamlEmitter;
 
 #[derive(Default)]
@@ -87,7 +88,7 @@ fn task_main(
         writeln!(
             log_buffer,
             "* Run {} to attach to the tmux console.",
-            style(format!("tmux a -t {}", RISEDEV_SESSION_NAME))
+            style(format!("tmux -L {RISEDEV_NAME} a -t {RISEDEV_NAME}"))
                 .blue()
                 .bold()
         )?;
@@ -97,27 +98,8 @@ fn task_main(
     let mut ports = vec![];
 
     for service in services {
-        let listen_info = match service {
-            ServiceConfig::Minio(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Etcd(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Prometheus(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::ComputeNode(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::MetaNode(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Frontend(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Compactor(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Grafana(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Tempo(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Kafka(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Pubsub(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Redis(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::ZooKeeper(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::AwsS3(_) => None,
-            ServiceConfig::OpenDal(_) => None,
-            ServiceConfig::RedPanda(_) => None,
-        };
-
-        if let Some(x) = listen_info {
-            ports.push(x);
+        if let Some(port) = service.port() {
+            ports.push((port, service.id().to_string(), service.user_managed()));
         }
     }
 
@@ -156,6 +138,34 @@ fn task_main(
                 let mut task =
                     risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, false)?;
                 task.execute(&mut ctx)?;
+            }
+            ServiceConfig::Sqlite(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+
+                struct SqliteService(SqliteConfig);
+                impl Task for SqliteService {
+                    fn execute(
+                        &mut self,
+                        _ctx: &mut ExecuteContext<impl std::io::Write>,
+                    ) -> anyhow::Result<()> {
+                        Ok(())
+                    }
+
+                    fn id(&self) -> String {
+                        self.0.id.clone()
+                    }
+                }
+
+                let prefix_data = env::var("PREFIX_DATA")?;
+                let file_dir = PathBuf::from(&prefix_data).join(&c.id);
+                std::fs::create_dir_all(&file_dir)?;
+                let file_path = file_dir.join(&c.file);
+
+                ctx.service(&SqliteService(c.clone()));
+                ctx.complete_spin();
+                ctx.pb
+                    .set_message(format!("using local sqlite: {:?}", file_path));
             }
             ServiceConfig::Prometheus(c) => {
                 let mut ctx =
@@ -271,7 +281,7 @@ fn task_main(
                 ctx.pb
                     .set_message(format!("using AWS s3 bucket {}", c.bucket));
             }
-            ServiceConfig::OpenDal(c) => {
+            ServiceConfig::Opendal(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
 
@@ -444,9 +454,9 @@ fn main() -> Result<()> {
         }
         Err(err) => {
             println!(
-                "{} - Failed to start: {:?}", // with `Caused by`
+                "{} - Failed to start: {:#}", // pretty with `Caused by`
                 style("ERROR").red().bold(),
-                err,
+                err.as_report(),
             );
             println!();
             println!(

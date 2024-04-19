@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ public abstract class SourceHandlerFactory {
             String startOffset,
             Map<String, String> userProps,
             boolean snapshotDone,
-            boolean isMultiTableShared) {
+            boolean isCdcSourceJob) {
         // userProps extracted from grpc request, underlying implementation is UnmodifiableMap
         Map<String, String> mutableUserProps = new HashMap<>(userProps);
         mutableUserProps.put("source.id", Long.toString(sourceId));
@@ -42,7 +42,7 @@ public abstract class SourceHandlerFactory {
                         startOffset,
                         mutableUserProps,
                         snapshotDone,
-                        isMultiTableShared);
+                        isCdcSourceJob);
         return new DbzSourceHandler(config);
     }
 }

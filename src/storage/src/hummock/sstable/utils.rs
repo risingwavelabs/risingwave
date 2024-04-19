@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -71,7 +71,7 @@ pub fn xxhash64_verify(data: &[u8], checksum: u64) -> HummockResult<()> {
 
 use bytes::{Buf, BufMut};
 
-pub fn put_length_prefixed_slice(buf: &mut Vec<u8>, slice: &[u8]) {
+pub fn put_length_prefixed_slice(mut buf: impl BufMut, slice: &[u8]) {
     let len = checked_into_u32(slice.len())
         .unwrap_or_else(|_| panic!("WARN overflow can't convert slice {} into u32", slice.len()));
     buf.put_u32_le(len);

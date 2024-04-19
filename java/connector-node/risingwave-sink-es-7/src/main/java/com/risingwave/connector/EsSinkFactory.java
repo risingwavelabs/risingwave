@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import com.risingwave.connector.api.sink.SinkFactory;
 import com.risingwave.connector.api.sink.SinkWriter;
 import com.risingwave.connector.api.sink.SinkWriterV1;
 import com.risingwave.proto.Catalog;
+import com.risingwave.proto.Data;
 import io.grpc.Status;
 import java.io.IOException;
 import java.util.Map;
@@ -60,6 +61,32 @@ public class EsSinkFactory implements SinkFactory {
             host = HttpHost.create(config.getUrl());
         } catch (IllegalArgumentException e) {
             throw Status.INVALID_ARGUMENT.withDescription(e.getMessage()).asRuntimeException();
+        }
+        if (config.getIndexColumn() != null) {
+            Data.DataType.TypeName typeName = tableSchema.getColumnType(config.getIndexColumn());
+            if (typeName == null) {
+                throw Status.INVALID_ARGUMENT
+                        .withDescription(
+                                "Index column " + config.getIndexColumn() + " not found in schema")
+                        .asRuntimeException();
+            }
+            if (!typeName.equals(Data.DataType.TypeName.VARCHAR)) {
+                throw Status.INVALID_ARGUMENT
+                        .withDescription(
+                                "Index column must be of type String, but found " + typeName)
+                        .asRuntimeException();
+            }
+            if (config.getIndex() != null) {
+                throw Status.INVALID_ARGUMENT
+                        .withDescription("index and index_column cannot be set at the same time")
+                        .asRuntimeException();
+            }
+        } else {
+            if (config.getIndex() == null) {
+                throw Status.INVALID_ARGUMENT
+                        .withDescription("index or index_column must be set")
+                        .asRuntimeException();
+            }
         }
 
         // 2. check connection

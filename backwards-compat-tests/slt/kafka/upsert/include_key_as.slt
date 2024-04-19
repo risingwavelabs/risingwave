@@ -1,0 +1,18 @@
+statement ok
+CREATE TABLE IF NOT EXISTS kafka_table
+(
+ action varchar,
+ user_id integer,
+ obj_id integer,
+ name varchar,
+ page_id integer,
+ age integer,
+ primary key (_rw_key)
+)
+INCLUDE key as _rw_key
+WITH (
+ connector='kafka',
+ topic='backwards_compat_test_kafka_source',
+ properties.bootstrap.server='localhost:29092',
+ scan.startup.mode='earliest',
+) FORMAT UPSERT ENCODE JSON;

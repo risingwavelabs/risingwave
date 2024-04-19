@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,12 +29,12 @@ pub type StreamResult<T> = std::result::Result<T, StreamError>;
 /// The error type for streaming tasks.
 #[derive(
     thiserror::Error,
-    Debug,
+    thiserror_ext::ReportDebug,
     thiserror_ext::Arc,
     thiserror_ext::ContextInto,
     thiserror_ext::Construct,
 )]
-#[thiserror_ext(newtype(name = StreamError, backtrace, report_debug))]
+#[thiserror_ext(newtype(name = StreamError, backtrace))]
 pub enum ErrorKind {
     #[error("Storage error: {0}")]
     Storage(

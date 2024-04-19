@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,12 +13,12 @@
 // limitations under the License.
 
 use pgwire::pg_response::StatementType;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::ddl_service::alter_set_schema_request::Object;
 use risingwave_sqlparser::ast::{ObjectName, OperateFunctionArg};
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
+use crate::error::{ErrorCode, Result};
 use crate::{bind_data_type, Binder};
 
 // Steps for validation:
@@ -102,6 +102,23 @@ pub async fn handle_alter_set_schema(
                     &sink.name,
                 )?;
                 Object::SinkId(sink.id.sink_id)
+            }
+            StatementType::ALTER_SUBSCRIPTION => {
+                let (subscription, old_schema_name) = catalog_reader.get_subscription_by_name(
+                    db_name,
+                    schema_path,
+                    &real_obj_name,
+                )?;
+                if old_schema_name == new_schema_name {
+                    return Ok(RwPgResponse::empty_result(stmt_type));
+                }
+                session.check_privilege_for_drop_alter(old_schema_name, &**subscription)?;
+                catalog_reader.check_relation_name_duplicated(
+                    db_name,
+                    &new_schema_name,
+                    &subscription.name,
+                )?;
+                Object::SubscriptionId(subscription.id.subscription_id)
             }
             StatementType::ALTER_CONNECTION => {
                 let (connection, old_schema_name) =

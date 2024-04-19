@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 //! Metadata of expressions.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::LazyLock;
@@ -29,15 +30,12 @@ use crate::expr::BoxedExpression;
 use crate::table_function::BoxedTableFunction;
 use crate::ExprError;
 
-pub mod cast;
-
 /// The global registry of all function signatures.
-pub static FUNCTION_REGISTRY: LazyLock<FunctionRegistry> = LazyLock::new(|| unsafe {
-    // SAFETY: this function is called after all `#[ctor]` functions are called.
+pub static FUNCTION_REGISTRY: LazyLock<FunctionRegistry> = LazyLock::new(|| {
     let mut map = FunctionRegistry::default();
-    tracing::info!("found {} functions", FUNCTION_REGISTRY_INIT.len());
-    for sig in FUNCTION_REGISTRY_INIT.drain(..) {
-        map.insert(sig);
+    tracing::info!("found {} functions", FUNCTIONS.len());
+    for f in FUNCTIONS {
+        map.insert(f());
     }
     map
 });
@@ -49,7 +47,7 @@ pub struct FunctionRegistry(HashMap<FuncName, Vec<FuncSign>>);
 impl FunctionRegistry {
     /// Inserts a function signature.
     pub fn insert(&mut self, sig: FuncSign) {
-        let list = self.0.entry(sig.name).or_default();
+        let list = self.0.entry(sig.name.clone()).or_default();
         if sig.is_aggregate() {
             // merge retractable and append-only aggregate
             if let Some(existing) = list
@@ -85,6 +83,22 @@ impl FunctionRegistry {
             }
         }
         list.push(sig);
+    }
+
+    /// Remove a function signature from registry.
+    pub fn remove(&mut self, sig: FuncSign) -> Option<FuncSign> {
+        let pos = self
+            .0
+            .get_mut(&sig.name)?
+            .iter()
+            .positions(|s| s.inputs_type == sig.inputs_type && s.ret_type == sig.ret_type)
+            .rev()
+            .collect_vec();
+        let mut ret = None;
+        for p in pos {
+            ret = Some(self.0.get_mut(&sig.name)?.swap_remove(p));
+        }
+        ret
     }
 
     /// Returns a function signature with the same type, argument types and return type.
@@ -302,11 +316,12 @@ impl FuncSign {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FuncName {
     Scalar(ScalarFunctionType),
     Table(TableFunctionType),
     Aggregate(AggregateFunctionType),
+    Udf(String),
 }
 
 impl From<ScalarFunctionType> for FuncName {
@@ -335,11 +350,12 @@ impl fmt::Display for FuncName {
 
 impl FuncName {
     /// Returns the name of the function in `UPPER_CASE` style.
-    pub fn as_str_name(&self) -> &'static str {
+    pub fn as_str_name(&self) -> Cow<'static, str> {
         match self {
-            Self::Scalar(ty) => ty.as_str_name(),
-            Self::Table(ty) => ty.as_str_name(),
-            Self::Aggregate(ty) => ty.to_protobuf().as_str_name(),
+            Self::Scalar(ty) => ty.as_str_name().into(),
+            Self::Table(ty) => ty.as_str_name().into(),
+            Self::Aggregate(ty) => ty.to_protobuf().as_str_name().into(),
+            Self::Udf(name) => name.clone().into(),
         }
     }
 
@@ -439,24 +455,9 @@ pub enum FuncBuilder {
         /// `None` means equal to the return type.
         append_only_state_type: Option<DataType>,
     },
+    Udf,
 }
 
-/// Register a function into global registry.
-///
-/// # Safety
-///
-/// This function must be called sequentially.
-///
-/// It is designed to be used by `#[function]` macro.
-/// Users SHOULD NOT call this function.
-#[doc(hidden)]
-pub unsafe fn _register(sig: FuncSign) {
-    FUNCTION_REGISTRY_INIT.push(sig)
-}
-
-/// The global registry of function signatures on initialization.
-///
-/// `#[function]` macro will generate a `#[ctor]` function to register the signature into this
-/// vector. The calls are guaranteed to be sequential. The vector will be drained and moved into
-/// `FUNCTION_REGISTRY` on the first access of `FUNCTION_REGISTRY`.
-static mut FUNCTION_REGISTRY_INIT: Vec<FuncSign> = Vec::new();
+/// A static distributed slice of functions defined by `#[function]`.
+#[linkme::distributed_slice]
+pub static FUNCTIONS: [fn() -> FuncSign];

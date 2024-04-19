@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ConnectionId, DatabaseId, SchemaId, TableId, UserId,
+    ColumnCatalog, ConnectionId, CreateType, DatabaseId, SchemaId, TableId, UserId,
 };
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::stream_plan::PbSinkDesc;
@@ -64,6 +64,15 @@ pub struct SinkDesc {
     /// Name of the "table" field for Debezium. If the sink is from table or mv,
     /// it is the name of table/mv. Otherwise, it is the name of the sink.
     pub sink_from_name: String,
+
+    /// Id of the target table for sink into table.
+    pub target_table: Option<TableId>,
+
+    /// See the same name field in `SinkWriterParam`.
+    pub extra_partition_col_idx: Option<usize>,
+
+    /// Whether the sink job should run in foreground or background.
+    pub create_type: CreateType,
 }
 
 impl SinkDesc {
@@ -95,6 +104,10 @@ impl SinkDesc {
             initialized_at_epoch: None,
             db_name: self.db_name,
             sink_from_name: self.sink_from_name,
+            target_table: self.target_table,
+            created_at_cluster_version: None,
+            initialized_at_cluster_version: None,
+            create_type: self.create_type,
         }
     }
 
@@ -116,6 +129,8 @@ impl SinkDesc {
             format_desc: self.format_desc.as_ref().map(|f| f.to_proto()),
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
+            target_table: self.target_table.map(|table_id| table_id.table_id()),
+            extra_partition_col_idx: self.extra_partition_col_idx.map(|idx| idx as u64),
         }
     }
 }

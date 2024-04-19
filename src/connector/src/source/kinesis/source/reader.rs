@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,22 +14,25 @@
 
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
-use aws_sdk_kinesis::error::{DisplayErrorContext, SdkError};
+use aws_sdk_kinesis::error::{ProvideErrorMetadata, SdkError};
 use aws_sdk_kinesis::operation::get_records::{GetRecordsError, GetRecordsOutput};
 use aws_sdk_kinesis::primitives::DateTime;
 use aws_sdk_kinesis::types::ShardIteratorType;
 use aws_sdk_kinesis::Client as KinesisClient;
 use futures_async_stream::try_stream;
+use risingwave_common::bail;
+use thiserror_ext::AsReport;
 use tokio_retry;
 
+use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
-use crate::source::kinesis::source::message::KinesisMessage;
+use crate::source::kinesis::source::message::from_kinesis_record;
 use crate::source::kinesis::split::{KinesisOffset, KinesisSplit};
 use crate::source::kinesis::KinesisProperties;
 use crate::source::{
-    into_chunk_stream, BoxSourceWithStateStream, Column, CommonSplitReader, SourceContextRef,
+    into_chunk_stream, BoxChunkSourceStream, Column, CommonSplitReader, SourceContextRef,
     SourceMessage, SplitId, SplitMetaData, SplitReader,
 };
 
@@ -74,13 +77,11 @@ impl SplitReader for KinesisSplitReader {
                         if let Some(ts) = &properties.timestamp_offset {
                             KinesisOffset::Timestamp(*ts)
                         } else {
-                            return Err(anyhow!("scan.startup.timestamp.millis is required"));
+                            bail!("scan.startup.timestamp.millis is required");
                         }
                     }
                     _ => {
-                        return Err(anyhow!(
-                            "invalid scan_startup_mode, accept earliest/latest/timestamp"
-                        ))
+                        bail!("invalid scan_startup_mode, accept earliest/latest/timestamp")
                     }
                 },
             },
@@ -90,9 +91,7 @@ impl SplitReader for KinesisSplitReader {
         if !matches!(start_position, KinesisOffset::Timestamp(_))
             && properties.timestamp_offset.is_some()
         {
-            return Err(
-                anyhow!("scan.startup.mode need to be set to 'timestamp' if you want to start with a specific timestamp")
-            );
+            bail!("scan.startup.mode need to be set to 'timestamp' if you want to start with a specific timestamp");
         }
 
         let stream_name = properties.common.stream_name.clone();
@@ -113,7 +112,7 @@ impl SplitReader for KinesisSplitReader {
         })
     }
 
-    fn into_stream(self) -> BoxSourceWithStateStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
         into_chunk_stream(self, parser_config, source_context)
@@ -121,7 +120,7 @@ impl SplitReader for KinesisSplitReader {
 }
 
 impl CommonSplitReader for KinesisSplitReader {
-    #[try_stream(ok = Vec < SourceMessage >, error = anyhow::Error)]
+    #[try_stream(ok = Vec < SourceMessage >, error = crate::error::ConnectorError)]
     async fn into_data_stream(mut self) {
         self.new_shard_iter().await?;
         loop {
@@ -138,12 +137,7 @@ impl CommonSplitReader for KinesisSplitReader {
                 Ok(resp) => {
                     self.shard_iter = resp.next_shard_iterator().map(String::from);
                     let chunk = (resp.records().iter())
-                        .map(|r| {
-                            SourceMessage::from(KinesisMessage::new(
-                                self.shard_id.clone(),
-                                r.clone(),
-                            ))
-                        })
+                        .map(|r| from_kinesis_record(r, self.split_id.clone()))
                         .collect::<Vec<SourceMessage>>();
                     if chunk.is_empty() {
                         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -193,15 +187,23 @@ impl CommonSplitReader for KinesisSplitReader {
                     self.new_shard_iter().await?;
                     continue;
                 }
-                Err(e) => {
-                    let error_msg = format!(
-                        "Kinesis got a unhandled error: {:?}, stream {:?}, shard {:?}",
-                        DisplayErrorContext(e),
+                Err(e) if e.code() == Some("InternalFailure") => {
+                    tracing::warn!(
+                        "stream {:?} shard {:?} met internal failure, retrying",
                         self.stream_name,
-                        self.shard_id,
+                        self.shard_id
                     );
-                    tracing::error!("{}", error_msg);
-                    return Err(anyhow!("{}", error_msg));
+                    self.new_shard_iter().await?;
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    continue;
+                }
+                Err(e) => {
+                    let error = anyhow!(e).context(format!(
+                        "Kinesis got a unhandled error on stream {:?}, shard {:?}",
+                        self.stream_name, self.shard_id
+                    ));
+                    tracing::error!(error = %error.as_report());
+                    return Err(error.into());
                 }
             }
         }
@@ -251,12 +253,12 @@ impl KinesisSplitReader {
                 .set_timestamp(starting_timestamp)
                 .send()
                 .await
-                .map_err(|e| anyhow!(DisplayErrorContext(e)))?;
+                .context("failed to get kinesis shard iterator")?;
 
             if let Some(iter) = resp.shard_iterator() {
                 Ok(iter.to_owned())
             } else {
-                Err(anyhow!("shard iterator is none"))
+                bail!("shard iterator is none")
             }
         }
 
@@ -303,8 +305,9 @@ mod tests {
     use futures::{pin_mut, StreamExt};
 
     use super::*;
-    use crate::common::KinesisCommon;
+    use crate::connector_common::KinesisCommon;
     use crate::source::kinesis::split::KinesisSplit;
+    use crate::source::SourceContext;
 
     #[tokio::test]
     async fn test_reject_redundant_seq_props() {
@@ -322,6 +325,8 @@ mod tests {
 
             scan_startup_mode: None,
             timestamp_offset: Some(123456789098765432),
+
+            unknown_fields: Default::default(),
         };
         let client = KinesisSplitReader::new(
             properties,
@@ -331,7 +336,7 @@ mod tests {
                 end_position: KinesisOffset::None,
             }],
             Default::default(),
-            Default::default(),
+            SourceContext::dummy().into(),
             None,
         )
         .await;
@@ -355,6 +360,8 @@ mod tests {
 
             scan_startup_mode: None,
             timestamp_offset: None,
+
+            unknown_fields: Default::default(),
         };
 
         let trim_horizen_reader = KinesisSplitReader::new(
@@ -365,7 +372,7 @@ mod tests {
                 end_position: KinesisOffset::None,
             }],
             Default::default(),
-            Default::default(),
+            SourceContext::dummy().into(),
             None,
         )
         .await?
@@ -383,7 +390,7 @@ mod tests {
                 end_position: KinesisOffset::None,
             }],
             Default::default(),
-            Default::default(),
+            SourceContext::dummy().into(),
             None,
         )
         .await?

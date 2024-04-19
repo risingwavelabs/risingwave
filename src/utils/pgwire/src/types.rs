@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -44,6 +44,10 @@ impl Row {
     /// Returns the values.
     pub fn values(&self) -> &[Option<Bytes>] {
         &self.0
+    }
+
+    pub fn take(self) -> Vec<Option<Bytes>> {
+        self.0
     }
 }
 

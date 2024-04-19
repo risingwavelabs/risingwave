@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,13 +15,13 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::is_system_schema;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::user::grant_privilege::Object;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
+use crate::error::{ErrorCode, Result};
 use crate::Binder;
 
 pub async fn handle_rename_table(
@@ -158,6 +158,37 @@ pub async fn handle_rename_sink(
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_SINK))
+}
+
+pub async fn handle_rename_subscription(
+    handler_args: HandlerArgs,
+    subscription_name: ObjectName,
+    new_subscription_name: ObjectName,
+) -> Result<RwPgResponse> {
+    let session = handler_args.session;
+    let db_name = session.database();
+    let (schema_name, real_subscription_name) =
+        Binder::resolve_schema_qualified_name(db_name, subscription_name.clone())?;
+    let new_subscription_name = Binder::resolve_subscription_name(new_subscription_name)?;
+    let search_path = session.config().search_path();
+    let user_name = &session.auth_context().user_name;
+
+    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+
+    let subscription_id = {
+        let reader = session.env().catalog_reader().read_guard();
+        let (subscription, schema_name) =
+            reader.get_subscription_by_name(db_name, schema_path, &real_subscription_name)?;
+        session.check_privilege_for_drop_alter(schema_name, &**subscription)?;
+        subscription.id
+    };
+
+    let catalog_writer = session.catalog_writer()?;
+    catalog_writer
+        .alter_subscription_name(subscription_id.subscription_id, &new_subscription_name)
+        .await?;
+
+    Ok(PgResponse::empty_result(StatementType::ALTER_SUBSCRIPTION))
 }
 
 pub async fn handle_rename_source(

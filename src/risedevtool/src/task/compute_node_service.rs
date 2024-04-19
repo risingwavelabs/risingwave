@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,17 +34,11 @@ impl ComputeNodeService {
     fn compute_node(&self) -> Result<Command> {
         let prefix_bin = env::var("PREFIX_BIN")?;
 
-        if let Ok(x) = env::var("ENABLE_ALL_IN_ONE")
-            && x == "true"
-        {
-            Ok(Command::new(
-                Path::new(&prefix_bin)
-                    .join("risingwave")
-                    .join("compute-node"),
-            ))
-        } else {
-            Ok(Command::new(Path::new(&prefix_bin).join("compute-node")))
-        }
+        Ok(Command::new(
+            Path::new(&prefix_bin)
+                .join("risingwave")
+                .join("compute-node"),
+        ))
     }
 
     /// Apply command args according to config

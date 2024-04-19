@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -43,11 +43,9 @@ const fn none<T>() -> Option<T> {
     None
 }
 
-pub type NexmarkProperties = Box<NexmarkPropertiesInner>;
-
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
-pub struct NexmarkPropertiesInner {
+pub struct NexmarkProperties {
     #[serde_as(as = "DisplayFromStr")]
     #[serde(rename = "nexmark.split.num", default = "identity_i32::<1>")]
     pub split_num: i32,
@@ -219,6 +217,9 @@ pub struct NexmarkPropertiesInner {
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[serde(rename = "nexmark.threads", default = "none")]
     pub threads: Option<usize>,
+
+    #[serde(flatten)]
+    pub unknown_fields: HashMap<String, String>,
 }
 
 impl SourceProperties for NexmarkProperties {
@@ -229,19 +230,25 @@ impl SourceProperties for NexmarkProperties {
     const SOURCE_NAME: &'static str = NEXMARK_CONNECTOR;
 }
 
+impl crate::source::UnknownFields for NexmarkProperties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        self.unknown_fields.clone()
+    }
+}
+
 fn default_event_num() -> u64 {
     u64::MAX
 }
 
-impl Default for NexmarkPropertiesInner {
+impl Default for NexmarkProperties {
     fn default() -> Self {
         let v = serde_json::to_value(HashMap::<String, String>::new()).unwrap();
-        NexmarkPropertiesInner::deserialize(v).unwrap()
+        NexmarkProperties::deserialize(v).unwrap()
     }
 }
 
-impl From<&NexmarkPropertiesInner> for NexmarkConfig {
-    fn from(value: &NexmarkPropertiesInner) -> Self {
+impl From<&NexmarkProperties> for NexmarkConfig {
+    fn from(value: &NexmarkProperties) -> Self {
         // 2015-07-15 00:00:00
         pub const BASE_TIME: u64 = 1_436_918_400_000;
 

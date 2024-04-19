@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -25,11 +24,12 @@ use risingwave_expr::ExprError;
 use risingwave_pb::plan_common::JoinType;
 
 use crate::binder::{BoundDistinct, BoundSelect};
+use crate::error::{ErrorCode, Result};
 use crate::expr::{
     CorrelatedId, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Subquery,
     SubqueryKind,
 };
-use crate::optimizer::plan_node::generic::{Agg, Project, ProjectBuilder};
+use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef, Project, ProjectBuilder};
 pub use crate::optimizer::plan_node::LogicalFilter;
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalApply, LogicalDedup, LogicalOverWindow, LogicalProject, LogicalProjectSet,
@@ -291,7 +291,7 @@ impl Planner {
         let correlated_indices =
             subquery.collect_correlated_indices_by_depth_and_assign_id(0, correlated_id);
         let output_column_type = subquery.query.data_types()[0].clone();
-        let right_plan = self.plan_query(subquery.query)?.into_subplan();
+        let right_plan = self.plan_query(subquery.query)?.into_unordered_subplan();
         let on = match subquery.kind {
             SubqueryKind::Existential => ExprImpl::literal_bool(true),
             SubqueryKind::In(left_expr) => {
@@ -366,15 +366,16 @@ impl Planner {
             .zip_eq_fast(rewriter.correlated_indices_collection)
             .zip_eq_fast(rewriter.correlated_ids)
         {
-            let mut right = self.plan_query(subquery.query)?.into_subplan();
+            let subroot = self.plan_query(subquery.query)?;
 
-            match subquery.kind {
-                SubqueryKind::Scalar => {}
+            let right = match subquery.kind {
+                SubqueryKind::Scalar => subroot.into_unordered_subplan(),
                 SubqueryKind::Existential => {
-                    right = self.create_exists(right)?;
+                    self.create_exists(subroot.into_unordered_subplan())?
                 }
+                SubqueryKind::Array => subroot.into_array_agg()?,
                 _ => bail_not_implemented!(issue = 1343, "{:?}", subquery.kind),
-            }
+            };
 
             root = Self::create_apply(
                 correlated_id,

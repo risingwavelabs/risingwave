@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -64,7 +64,7 @@ impl StreamingJobTracker {
 
 #[derive(Clone, Default)]
 pub struct CreatingStreamingJobInfo {
-    /// Identified by process_id, secret_key.
+    /// Identified by `process_id`, `secret_key`.
     session_id: SessionId,
     info: CreatingJobInfo,
 }

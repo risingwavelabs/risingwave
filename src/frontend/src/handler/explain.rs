@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,44 +12,43 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
-use pgwire::types::Row;
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
+use risingwave_common::types::Fields;
 use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, Statement};
+use thiserror_ext::AsReport;
 
-use super::create_index::gen_create_index_plan;
+use super::create_index::{gen_create_index_plan, resolve_index_schema};
 use super::create_mv::gen_create_mv_plan;
-use super::create_sink::gen_sink_plan;
+use super::create_sink::{gen_sink_plan, get_partition_compute_info};
+use super::create_subscription::gen_subscription_plan;
 use super::create_table::ColumnIdGenerator;
 use super::query::gen_batch_plan_by_statement;
 use super::util::SourceSchemaCompatExt;
-use super::RwPgResponse;
+use super::{RwPgResponse, RwPgResponseBuilderExt};
+use crate::error::{ErrorCode, Result};
 use crate::handler::create_table::handle_create_table_plan;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{Convention, Explain};
 use crate::optimizer::OptimizerContext;
-use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::BatchPlanFragmenter;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::explain_stream_graph;
 use crate::OptimizerContextRef;
 
 async fn do_handle_explain(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
+    explain_options: ExplainOptions,
     stmt: Statement,
     blocks: &mut Vec<String>,
 ) -> Result<()> {
     // Workaround to avoid `Rc` across `await` point.
     let mut batch_plan_fragmenter = None;
+    let session = handler_args.session.clone();
 
     {
-        let session = context.session_ctx().clone();
-
         let (plan, context) = match stmt {
             // `CREATE TABLE` takes the ownership of the `OptimizerContext` to avoid `Rc` across
             // `await` point. We can only take the reference back from the `PlanRef` if it's
@@ -61,7 +60,11 @@ async fn do_handle_explain(
                 source_schema,
                 source_watermarks,
                 append_only,
+                on_conflict,
+                with_version_column,
                 cdc_table_info,
+                include_column_options,
+                wildcard_idx,
                 ..
             } => {
                 let col_id_gen = ColumnIdGenerator::new_initial();
@@ -69,17 +72,30 @@ async fn do_handle_explain(
                 let source_schema = source_schema.map(|s| s.into_v2_with_warning());
 
                 let (plan, _source, _table, _job_type) = handle_create_table_plan(
-                    context,
+                    handler_args,
+                    explain_options,
                     col_id_gen,
                     source_schema,
                     cdc_table_info,
                     name.clone(),
                     columns,
+                    wildcard_idx,
                     constraints,
                     source_watermarks,
                     append_only,
+                    on_conflict,
+                    with_version_column,
+                    include_column_options,
                 )
                 .await?;
+                let context = plan.ctx();
+                (Ok(plan), context)
+            }
+            Statement::CreateSink { stmt } => {
+                let partition_info = get_partition_compute_info(&handler_args.with_options).await?;
+                let context = OptimizerContext::new(handler_args, explain_options);
+                let plan = gen_sink_plan(&session, context.into(), stmt, partition_info)
+                    .map(|plan| plan.sink_plan)?;
                 let context = plan.ctx();
                 (Ok(plan), context)
             }
@@ -88,7 +104,8 @@ async fn do_handle_explain(
             // `OptimizerContext` even if the planning fails. This enables us to log the partial
             // traces for better debugging experience.
             _ => {
-                let context: OptimizerContextRef = context.into();
+                let context: OptimizerContextRef =
+                    OptimizerContext::new(handler_args, explain_options).into();
                 let plan = match stmt {
                     // -- Streaming DDLs --
                     Statement::CreateView {
@@ -108,11 +125,20 @@ async fn do_handle_explain(
                         emit_mode,
                     )
                     .map(|x| x.0),
-
-                    Statement::CreateSink { stmt } => {
-                        gen_sink_plan(&session, context.clone(), stmt).map(|x| x.1)
+                    Statement::CreateView {
+                        materialized: false,
+                        ..
+                    } => {
+                        return Err(ErrorCode::NotSupported(
+                            "EXPLAIN CREATE VIEW".into(),
+                            "A created VIEW is just an alias. Instead, use EXPLAIN on the queries which reference the view.".into()
+                        ).into());
                     }
 
+                    Statement::CreateSubscription { stmt } => {
+                        gen_subscription_plan(&session, context.clone(), stmt)
+                            .map(|plan| plan.subscription_plan)
+                    }
                     Statement::CreateIndex {
                         name,
                         table_name,
@@ -120,15 +146,20 @@ async fn do_handle_explain(
                         include,
                         distributed_by,
                         ..
-                    } => gen_create_index_plan(
-                        &session,
-                        context.clone(),
-                        name,
-                        table_name,
-                        columns,
-                        include,
-                        distributed_by,
-                    )
+                    } => {
+                        let (schema_name, table, index_table_name) =
+                            resolve_index_schema(&session, name, table_name)?;
+                        gen_create_index_plan(
+                            &session,
+                            context.clone(),
+                            schema_name,
+                            table,
+                            index_table_name,
+                            columns,
+                            include,
+                            distributed_by,
+                        )
+                    }
                     .map(|x| x.0),
 
                     // -- Batch Queries --
@@ -136,13 +167,16 @@ async fn do_handle_explain(
                     | Statement::Delete { .. }
                     | Statement::Update { .. }
                     | Statement::Query { .. } => {
-                        gen_batch_plan_by_statement(&session, context.clone(), stmt).map(|x| x.plan)
+                        gen_batch_plan_by_statement(&session, context, stmt).map(|x| x.plan)
                     }
 
                     _ => bail_not_implemented!("unsupported statement {:?}", stmt),
                 };
 
-                (plan, context)
+                let plan = plan?;
+                let context = plan.ctx().clone();
+
+                (Ok(plan) as Result<_>, context)
             }
         };
 
@@ -173,7 +207,7 @@ async fn do_handle_explain(
                             )?);
                         }
                         Convention::Stream => {
-                            let graph = build_graph(plan.clone());
+                            let graph = build_graph(plan.clone())?;
                             blocks.push(explain_stream_graph(&graph, explain_verbose));
                         }
                     }
@@ -219,18 +253,16 @@ pub async fn handle_explain(
         bail_not_implemented!(issue = 4856, "explain analyze");
     }
 
-    let context = OptimizerContext::new(handler_args.clone(), options.clone());
-
     let mut blocks = Vec::new();
-    let result = do_handle_explain(context, stmt, &mut blocks).await;
+    let result = do_handle_explain(handler_args, options.clone(), stmt, &mut blocks).await;
 
     if let Err(e) = result {
         if options.trace {
             // If `trace` is on, we include the error in the output with partial traces.
             blocks.push(if options.verbose {
-                format!("ERROR: {:?}", e)
+                format!("ERROR: {:?}", e.as_report())
             } else {
-                format!("ERROR: {}", e)
+                format!("ERROR: {}", e.as_report())
             });
         } else {
             // Else, directly return the error.
@@ -238,20 +270,17 @@ pub async fn handle_explain(
         }
     }
 
-    let rows = blocks
-        .iter()
-        .flat_map(|b| b.lines().map(|l| l.to_owned()))
-        .map(|l| Row::new(vec![Some(l.into())]))
-        .collect_vec();
+    let rows = blocks.iter().flat_map(|b| b.lines()).map(|l| ExplainRow {
+        query_plan: l.into(),
+    });
 
     Ok(PgResponse::builder(StatementType::EXPLAIN)
-        .values(
-            rows.into(),
-            vec![PgFieldDescriptor::new(
-                "QUERY PLAN".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            )],
-        )
+        .rows(rows)
         .into())
+}
+
+#[derive(Fields)]
+#[fields(style = "TITLE CASE")]
+struct ExplainRow {
+    query_plan: String,
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,11 +18,11 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::aggregate::{AggCall, AggregateState, BoxedAggregateFunction};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
@@ -224,7 +224,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
         #[for_await]
         for chunk in self.child.execute() {
             let chunk = StreamChunk::from(chunk?);
-            let keys = K::build(self.group_key_columns.as_slice(), &chunk)?;
+            let keys = K::build_many(self.group_key_columns.as_slice(), &chunk);
             let mut memory_usage_diff = 0;
             for (row_id, (key, visible)) in keys
                 .into_iter()
@@ -466,6 +466,7 @@ mod tests {
 
     /// A test to verify that `HashMap` may leak memory counter when using `into_iter`.
     #[test]
+    #[should_panic] // TODO(MrCroxx): This bug is fixed and the test should panic. Remove the test and fix the related code later.
     fn test_hashmap_into_iter_bug() {
         let dropped: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
 

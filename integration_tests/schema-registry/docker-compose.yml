@@ -1,30 +1,18 @@
 ---
 version: "3"
 services:
-  compactor-0:
+  risingwave-standalone:
     extends:
       file: ../../docker/docker-compose.yml
-      service: compactor-0
-  compute-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: compute-node-0
+      service: risingwave-standalone
   etcd-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: etcd-0
-  frontend-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: frontend-node-0
   grafana-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: grafana-0
-  meta-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: meta-node-0
   minio-0:
     extends:
       file: ../../docker/docker-compose.yml
@@ -39,7 +27,7 @@ services:
       service: message_queue
   datagen:
     image: python:3.10
-    depends_on: [ message_queue ]
+    depends_on: [message_queue]
     volumes:
       - type: bind
         source: ./datagen.py
@@ -50,10 +38,29 @@ services:
       - |
         pip install requests fastavro confluent_kafka
         python /datagen.py message_queue:29092 http://message_queue:8081 sr-test
+        python /datagen.py message_queue:29092 http://karapace-registry:8081 sr-test
     restart: always
     container_name: datagen
+  karapace-registry:
+    image: ghcr.io/aiven-open/karapace:latest
+    entrypoint:
+      - /bin/bash
+      - /opt/karapace/start.sh
+      - registry
+    environment:
+      KARAPACE_ADVERTISED_HOSTNAME: karapace-registry
+      KARAPACE_BOOTSTRAP_URI: message_queue:29092
+      KARAPACE_PORT: 8081
+      KARAPACE_HOST: 0.0.0.0
+      KARAPACE_CLIENT_ID: karapace
+      KARAPACE_GROUP_ID: karapace-registry
+      KARAPACE_MASTER_ELIGIBILITY: "true"
+      KARAPACE_TOPIC_NAME: _schemas
+      KARAPACE_LOG_LEVEL: WARNING
+      KARAPACE_COMPATIBILITY: FULL
+    container_name: karapace-registry
 volumes:
-  compute-node-0:
+  risingwave-standalone:
     external: false
   etcd-0:
     external: false

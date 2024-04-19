@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,49 +13,44 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::Result;
-use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
+use risingwave_common::types::{Fields, JsonbVal, Timestamptz};
+use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::meta::event_log::Event;
 use serde_json::json;
 
-use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
+use crate::catalog::system_catalog::SysCatalogReaderImpl;
+use crate::error::Result;
 
-pub const RW_EVENT_LOGS: BuiltinTable = BuiltinTable {
-    name: "rw_event_logs",
-    schema: RW_CATALOG_SCHEMA_NAME,
-    columns: &[
-        (DataType::Varchar, "unique_id"),
-        (DataType::Timestamptz, "timestamp"),
-        (DataType::Varchar, "event_type"),
-        (DataType::Jsonb, "info"),
-    ],
-    pk: &[0],
-};
+#[derive(Fields)]
+struct RwEventLog {
+    #[primary_key]
+    unique_id: String,
+    timestamp: Timestamptz,
+    event_type: String,
+    info: JsonbVal,
+}
 
-impl SysCatalogReaderImpl {
-    pub async fn read_event_logs(&self) -> Result<Vec<OwnedRow>> {
-        let configs = self
-            .meta_client
-            .list_event_log()
-            .await?
-            .into_iter()
-            .sorted_by(|a, b| a.timestamp.cmp(&b.timestamp))
-            .map(|mut e| {
-                let id = e.unique_id.take().unwrap().into();
-                let ts = Timestamptz::from_millis(e.timestamp.take().unwrap() as i64).unwrap();
-                let event_type = event_type(e.event.as_ref().unwrap());
-                OwnedRow::new(vec![
-                    Some(ScalarImpl::Utf8(id)),
-                    Some(ScalarImpl::Timestamptz(ts)),
-                    Some(ScalarImpl::Utf8(event_type.into())),
-                    Some(ScalarImpl::Jsonb(json!(e).into())),
-                ])
-            })
-            .collect_vec();
-        Ok(configs)
-    }
+#[system_catalog(table, "rw_catalog.rw_event_logs")]
+async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwEventLog>> {
+    let configs = reader
+        .meta_client
+        .list_event_log()
+        .await?
+        .into_iter()
+        .sorted_by(|a, b| a.timestamp.cmp(&b.timestamp))
+        .map(|mut e| {
+            let id = e.unique_id.take().unwrap();
+            let ts = Timestamptz::from_millis(e.timestamp.take().unwrap() as i64).unwrap();
+            let event_type = event_type(e.event.as_ref().unwrap());
+            RwEventLog {
+                unique_id: id,
+                timestamp: ts,
+                event_type: event_type.clone(),
+                info: json!(e).into(),
+            }
+        })
+        .collect();
+    Ok(configs)
 }
 
 fn event_type(e: &Event) -> String {

@@ -5,6 +5,7 @@ auto-retry: &auto-retry
       limit: 3
 
 steps:
+  # You may update `gen-integration-test-yaml.py` to add integration test case
   - label: "gen and upload integration test pipeline"
     command: "ci/scripts/gen-integration-test-yaml.py"
 

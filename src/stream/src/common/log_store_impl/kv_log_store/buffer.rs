@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -153,6 +153,12 @@ impl LogStoreBufferInner {
                     chunk_id,
                 },
             );
+        }
+    }
+
+    fn rewind(&mut self) {
+        while let Some((epoch, item)) = self.consumed_queue.pop_front() {
+            self.unconsumed_queue.push_back((epoch, item))
         }
     }
 }
@@ -390,6 +396,10 @@ impl LogStoreBufferReceiver {
                 inner.truncation_list.push_back((epoch, seq_id));
             }
         }
+    }
+
+    pub(crate) fn rewind(&self) {
+        self.buffer.inner().rewind()
     }
 }
 

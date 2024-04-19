@@ -9,3 +9,6 @@ explain create sink sink_t from t with ( connector = 'kafka', type = 'append-onl
 
 statement ok
 drop table t;
+
+statement error Not supported: EXPLAIN CREATE VIEW
+explain create view v as select 1;

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ use clap::Parser;
 use risingwave_common::config::{
     AsyncStackTraceOption, CompactorMode, MetricLevel, OverrideConfig,
 };
+use risingwave_common::util::meta_addr::MetaAddressStrategy;
 
 use crate::server::{compactor_serve, shared_compactor_serve};
 
@@ -40,14 +41,17 @@ pub struct CompactorOpts {
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
-    /// Optional, we will use listen_addr if not specified.
+    /// Optional, we will use `listen_addr` if not specified.
     #[clap(long, env = "RW_ADVERTISE_ADDR")]
     pub advertise_addr: Option<String>,
 
+    // TODO(eric): remove me
     // TODO: This is currently unused.
     #[clap(long, env = "RW_PORT")]
     pub port: Option<u16>,
 
+    /// We will start a http server at this address via `MetricsManager`.
+    /// Then the prometheus instance will poll the metrics from this address.
     #[clap(
         long,
         env = "RW_PROMETHEUS_LISTENER_ADDR",
@@ -56,7 +60,7 @@ pub struct CompactorOpts {
     pub prometheus_listener_addr: String,
 
     #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
-    pub meta_address: String,
+    pub meta_address: MetaAddressStrategy,
 
     #[clap(long, env = "RW_COMPACTION_WORKER_THREADS_NUMBER")]
     pub compaction_worker_threads_number: Option<usize>,
@@ -68,25 +72,35 @@ pub struct CompactorOpts {
     pub config_path: String,
 
     /// Used for control the metrics level, similar to log level.
-    #[clap(long, env = "RW_METRICS_LEVEL")]
+    #[clap(long, hide = true, env = "RW_METRICS_LEVEL")]
     #[override_opts(path = server.metrics_level)]
     pub metrics_level: Option<MetricLevel>,
 
     /// Enable async stack tracing through `await-tree` for risectl.
-    #[clap(long, env = "RW_ASYNC_STACK_TRACE", value_enum)]
+    #[clap(long, hide = true, env = "RW_ASYNC_STACK_TRACE", value_enum)]
     #[override_opts(path = streaming.async_stack_trace)]
     pub async_stack_trace: Option<AsyncStackTraceOption>,
 
     /// Enable heap profile dump when memory usage is high.
-    #[clap(long, env = "RW_HEAP_PROFILING_DIR")]
+    #[clap(long, hide = true, env = "RW_HEAP_PROFILING_DIR")]
     #[override_opts(path = server.heap_profiling.dir)]
     pub heap_profiling_dir: Option<String>,
 
     #[clap(long, env = "RW_COMPACTOR_MODE", value_enum)]
     pub compactor_mode: Option<CompactorMode>,
 
-    #[clap(long, env = "RW_PROXY_RPC_ENDPOINT", default_value = "")]
+    #[clap(long, hide = true, env = "RW_PROXY_RPC_ENDPOINT", default_value = "")]
     pub proxy_rpc_endpoint: String,
+}
+
+impl risingwave_common::opts::Opts for CompactorOpts {
+    fn name() -> &'static str {
+        "compactor"
+    }
+
+    fn meta_addr(&self) -> MetaAddressStrategy {
+        self.meta_address.clone()
+    }
 }
 
 use std::future::Future;

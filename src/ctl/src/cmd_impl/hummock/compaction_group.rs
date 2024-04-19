@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ use comfy_table::{Row, Table};
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId};
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 
 use crate::CtlContext;
@@ -258,5 +259,15 @@ pub async fn get_compaction_score(
         table.add_row(row);
     }
     println!("{table}");
+    Ok(())
+}
+
+pub async fn cancel_compact_task(context: &CtlContext, task_id: u64) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
+    let ret = meta_client
+        .cancel_compact_task(task_id, TaskStatus::ManualCanceled)
+        .await?;
+    println!("cancel_compact_task {} ret {:?}", task_id, ret);
+
     Ok(())
 }

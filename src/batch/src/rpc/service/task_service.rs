@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -64,7 +64,7 @@ impl TaskService for BatchServiceImpl {
             plan,
             epoch,
             tracing_context,
-            captured_execution_context,
+            expr_context,
         } = request.into_inner();
 
         let (state_tx, state_rx) = tokio::sync::mpsc::channel(TASK_STATUS_BUFFER_SIZE);
@@ -81,7 +81,7 @@ impl TaskService for BatchServiceImpl {
                 ),
                 state_reporter,
                 TracingContext::from_protobuf(&tracing_context),
-                captured_execution_context.expect("no captured execution context found"),
+                expr_context.expect("no expression context found"),
             )
             .await;
         match res {
@@ -135,15 +135,14 @@ impl BatchServiceImpl {
             plan,
             epoch,
             tracing_context,
-            captured_execution_context,
+            expr_context,
         } = req;
 
         let task_id = task_id.expect("no task id found");
         let plan = plan.expect("no plan found").clone();
         let epoch = epoch.expect("no epoch found");
         let tracing_context = TracingContext::from_protobuf(&tracing_context);
-        let captured_execution_context =
-            captured_execution_context.expect("no captured execution context found");
+        let expr_context = expr_context.expect("no expression context found");
 
         let context = ComputeNodeContext::new_for_local(env.clone());
         trace!(
@@ -156,7 +155,7 @@ impl BatchServiceImpl {
         let (tx, rx) = tokio::sync::mpsc::channel(LOCAL_EXECUTE_BUFFER_SIZE);
         if let Err(e) = task
             .clone()
-            .async_execute(None, tracing_context, captured_execution_context)
+            .async_execute(None, tracing_context, expr_context)
             .await
         {
             error!(

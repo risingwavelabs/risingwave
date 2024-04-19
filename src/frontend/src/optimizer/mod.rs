@@ -1,6 +1,4 @@
-use std::assert_matches::assert_matches;
-use std::collections::HashMap;
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,55 +11,70 @@ use std::collections::HashMap;
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use std::num::NonZeroU32;
 use std::ops::DerefMut;
 
 pub mod plan_node;
+
 pub use plan_node::{Explain, PlanRef};
+
 pub mod property;
 
 mod delta_join_solver;
 mod heuristic_optimizer;
 mod plan_rewriter;
+
 pub use plan_rewriter::PlanRewriter;
+
 mod plan_visitor;
+
 pub use plan_visitor::{
     ExecutionModeDecider, PlanVisitor, RelationCollectorVisitor, SysTableVisitor,
 };
+use risingwave_sqlparser::ast::OnConflict;
+
 mod logical_optimization;
 mod optimizer_context;
-mod plan_expr_rewriter;
+pub mod plan_expr_rewriter;
 mod plan_expr_visitor;
 mod rule;
+
+use std::assert_matches::assert_matches;
+use std::collections::{HashMap, HashSet};
+
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
 pub use logical_optimization::*;
 pub use optimizer_context::*;
 use plan_expr_rewriter::ConstEvalRewriter;
 use property::Order;
+use risingwave_common::bail;
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema,
+    ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId, UserId,
 };
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::sink::catalog::SinkFormatDesc;
 use risingwave_pb::catalog::WatermarkDesc;
+use risingwave_pb::stream_plan::StreamScanType;
 
 use self::heuristic_optimizer::ApplyOrder;
 use self::plan_node::generic::{self, PhysicalPlanRef};
 use self::plan_node::{
     stream_enforce_eowc_requirement, BatchProject, Convention, LogicalProject, LogicalSource,
-    StreamDml, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink, StreamWatermarkFilter,
-    ToStreamContext,
+    PartitionComputeInfo, StreamDml, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink,
+    StreamSubscription, StreamWatermarkFilter, ToStreamContext,
 };
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
-use self::plan_visitor::{has_batch_exchange, CardinalityVisitor};
+use self::plan_visitor::{has_batch_exchange, CardinalityVisitor, StreamKeyChecker};
 use self::property::{Cardinality, RequiredDist};
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
+use crate::error::{ErrorCode, Result};
 use crate::expr::TimestamptzExprFinder;
-use crate::optimizer::plan_node::generic::Union;
+use crate::optimizer::plan_node::generic::{SourceNodeKind, Union};
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive, StreamExchange, StreamUnion,
     ToStream, VisitExprsRecursive,
@@ -143,19 +156,58 @@ impl PlanRoot {
         }
     }
 
-    /// Get out fields of the plan root.
-    pub fn out_fields(&self) -> &FixedBitSet {
-        &self.out_fields
-    }
-
     /// Transform the [`PlanRoot`] back to a [`PlanRef`] suitable to be used as a subplan, for
     /// example as insert source or subquery. This ignores Order but retains post-Order pruning
     /// (`out_fields`).
-    pub fn into_subplan(self) -> PlanRef {
+    pub fn into_unordered_subplan(self) -> PlanRef {
         if self.out_fields.count_ones(..) == self.out_fields.len() {
             return self.plan;
         }
         LogicalProject::with_out_fields(self.plan, &self.out_fields).into()
+    }
+
+    /// Transform the [`PlanRoot`] wrapped in an array-construction subquery to a [`PlanRef`]
+    /// supported by `ARRAY_AGG`. Similar to the unordered version, this abstracts away internal
+    /// `self.plan` which is further modified by `self.required_order` then `self.out_fields`.
+    pub fn into_array_agg(self) -> Result<PlanRef> {
+        use generic::Agg;
+        use plan_node::PlanAggCall;
+        use risingwave_common::types::ListValue;
+        use risingwave_expr::aggregate::AggKind;
+
+        use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
+        use crate::utils::{Condition, IndexSet};
+
+        let Ok(select_idx) = self.out_fields.ones().exactly_one() else {
+            bail!("subquery must return only one column");
+        };
+        let input_column_type = self.plan.schema().fields()[select_idx].data_type();
+        let return_type = DataType::List(input_column_type.clone().into());
+        let agg = Agg::new(
+            vec![PlanAggCall {
+                agg_kind: AggKind::ArrayAgg,
+                return_type: return_type.clone(),
+                inputs: vec![InputRef::new(select_idx, input_column_type.clone())],
+                distinct: false,
+                order_by: self.required_order.column_orders,
+                filter: Condition::true_cond(),
+                direct_args: vec![],
+            }],
+            IndexSet::empty(),
+            self.plan,
+        );
+        Ok(LogicalProject::create(
+            agg.into(),
+            vec![FunctionCall::new(
+                ExprType::Coalesce,
+                vec![
+                    InputRef::new(0, return_type).into(),
+                    ExprImpl::literal_list(ListValue::empty(&input_column_type), input_column_type),
+                ],
+            )
+            .unwrap()
+            .into()],
+        ))
     }
 
     /// Apply logical optimization to the plan for stream.
@@ -185,6 +237,14 @@ impl PlanRoot {
         // Inline session timezone mainly for rewriting now()
         plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
 
+        // Const eval of exprs at the last minute, but before `to_batch` to make functional index selection happy.
+        plan = const_eval_exprs(plan)?;
+
+        if ctx.is_explain_trace() {
+            ctx.trace("Const eval exprs:");
+            ctx.trace(plan.explain_to_string());
+        }
+
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
         if ctx.is_explain_trace() {
@@ -203,14 +263,6 @@ impl PlanRoot {
 
         if ctx.is_explain_trace() {
             ctx.trace("Inline Session Timezone:");
-            ctx.trace(plan.explain_to_string());
-        }
-
-        // Const eval of exprs at the last minute
-        plan = const_eval_exprs(plan)?;
-
-        if ctx.is_explain_trace() {
-            ctx.trace("Const eval exprs:");
             ctx.trace(plan.explain_to_string());
         }
 
@@ -312,10 +364,23 @@ impl PlanRoot {
 
     /// Generate optimized stream plan
     fn gen_optimized_stream_plan(&mut self, emit_on_window_close: bool) -> Result<PlanRef> {
+        let stream_scan_type = if self.should_use_arrangement_backfill() {
+            StreamScanType::ArrangementBackfill
+        } else {
+            StreamScanType::Backfill
+        };
+        self.gen_optimized_stream_plan_inner(emit_on_window_close, stream_scan_type)
+    }
+
+    fn gen_optimized_stream_plan_inner(
+        &mut self,
+        emit_on_window_close: bool,
+        stream_scan_type: StreamScanType,
+    ) -> Result<PlanRef> {
         let ctx = self.plan.ctx();
         let _explain_trace = ctx.is_explain_trace();
 
-        let mut plan = self.gen_stream_plan(emit_on_window_close)?;
+        let mut plan = self.gen_stream_plan(emit_on_window_close, stream_scan_type)?;
 
         plan = plan.optimize_by_rules(&OptimizationStage::new(
             "Merge StreamProject",
@@ -363,12 +428,28 @@ impl PlanRoot {
     }
 
     /// Generate create index or create materialize view plan.
-    fn gen_stream_plan(&mut self, emit_on_window_close: bool) -> Result<PlanRef> {
+    fn gen_stream_plan(
+        &mut self,
+        emit_on_window_close: bool,
+        stream_scan_type: StreamScanType,
+    ) -> Result<PlanRef> {
         let ctx = self.plan.ctx();
         let explain_trace = ctx.is_explain_trace();
 
         let plan = match self.plan.convention() {
             Convention::Logical => {
+                if !ctx
+                    .session_ctx()
+                    .config()
+                    .streaming_allow_jsonb_in_stream_key()
+                    && let Some(err) = StreamKeyChecker.visit(self.plan.clone())
+                {
+                    return Err(ErrorCode::NotSupported(
+                        err,
+                        "Using JSONB columns as part of the join or aggregation keys can severely impair performance. \
+                        If you intend to proceed, force to enable it with: `set rw_streaming_allow_jsonb_in_stream_key to true`".to_string(),
+                    ).into());
+                }
                 let plan = self.gen_optimized_logical_plan_for_stream()?;
 
                 let (plan, out_col_change) = {
@@ -414,7 +495,10 @@ impl PlanRoot {
                 self.out_fields = out_col_change.rewrite_bitset(&self.out_fields);
                 let plan = plan.to_stream_with_dist_required(
                     &self.required_dist,
-                    &mut ToStreamContext::new(emit_on_window_close),
+                    &mut ToStreamContext::new_with_stream_scan_type(
+                        emit_on_window_close,
+                        stream_scan_type,
+                    ),
                 )?;
                 stream_enforce_eowc_requirement(ctx.clone(), plan, emit_on_window_close)
             }
@@ -447,9 +531,12 @@ impl PlanRoot {
         pk_column_ids: Vec<ColumnId>,
         row_id_index: Option<usize>,
         append_only: bool,
+        on_conflict: Option<OnConflict>,
+        with_version_column: Option<String>,
         watermark_descs: Vec<WatermarkDesc>,
         version: Option<TableVersion>,
         with_external_source: bool,
+        retention_seconds: Option<NonZeroU32>,
     ) -> Result<StreamMaterialize> {
         let stream_plan = self.gen_optimized_stream_plan(false)?;
 
@@ -467,13 +554,23 @@ impl PlanRoot {
                 .collect_vec()
         };
 
-        fn inject_project_if_needed(columns: &[ColumnCatalog], node: PlanRef) -> Result<PlanRef> {
+        fn inject_project_for_generated_column_if_needed(
+            columns: &[ColumnCatalog],
+            node: PlanRef,
+        ) -> Result<PlanRef> {
             let exprs = LogicalSource::derive_output_exprs_from_generated_columns(columns)?;
             if let Some(exprs) = exprs {
                 let logical_project = generic::Project::new(exprs, node);
                 return Ok(StreamProject::new(logical_project).into());
             }
             Ok(node)
+        }
+
+        #[derive(PartialEq, Debug, Copy, Clone)]
+        enum PrimaryKeyKind {
+            UserDefinedPrimaryKey,
+            RowIdAsPrimaryKey,
+            AppendOnly,
         }
 
         fn inject_dml_node(
@@ -487,7 +584,7 @@ impl PlanRoot {
             let mut dml_node = StreamDml::new(stream_plan, append_only, column_descs).into();
 
             // Add generated columns.
-            dml_node = inject_project_if_needed(columns, dml_node)?;
+            dml_node = inject_project_for_generated_column_if_needed(columns, dml_node)?;
 
             dml_node = match kind {
                 PrimaryKeyKind::UserDefinedPrimaryKey | PrimaryKeyKind::RowIdAsPrimaryKey => {
@@ -498,13 +595,6 @@ impl PlanRoot {
             };
 
             Ok(dml_node)
-        }
-
-        #[derive(PartialEq, Debug, Copy, Clone)]
-        enum PrimaryKeyKind {
-            UserDefinedPrimaryKey,
-            RowIdAsPrimaryKey,
-            AppendOnly,
         }
 
         let kind = if append_only {
@@ -526,14 +616,22 @@ impl PlanRoot {
             .map(|c| c.column_desc.clone())
             .collect();
 
+        let version_column_index = if let Some(version_column) = with_version_column {
+            find_version_column_index(&columns, version_column)?
+        } else {
+            None
+        };
+
         let union_inputs = if with_external_source {
             let mut external_source_node = stream_plan;
-            external_source_node = inject_project_if_needed(&columns, external_source_node)?;
+            external_source_node =
+                inject_project_for_generated_column_if_needed(&columns, external_source_node)?;
             external_source_node = match kind {
                 PrimaryKeyKind::UserDefinedPrimaryKey => {
                     RequiredDist::hash_shard(&pk_column_indices)
                         .enforce_if_not_satisfies(external_source_node, &Order::any())?
                 }
+
                 PrimaryKeyKind::RowIdAsPrimaryKey | PrimaryKeyKind::AppendOnly => {
                     StreamExchange::new_no_shuffle(external_source_node).into()
                 }
@@ -543,9 +641,9 @@ impl PlanRoot {
                 None,
                 columns.clone(),
                 row_id_index,
-                false,
-                true,
+                SourceNodeKind::CreateTable,
                 context.clone(),
+                None,
             )
             .and_then(|s| s.to_stream(&mut ToStreamContext::new(false)))?;
 
@@ -621,10 +719,25 @@ impl PlanRoot {
             }
         }
 
-        let conflict_behavior = match append_only {
-            true => ConflictBehavior::NoCheck,
-            false => ConflictBehavior::Overwrite,
+        let conflict_behavior = match on_conflict {
+            Some(on_conflict) => match on_conflict {
+                OnConflict::OverWrite => ConflictBehavior::Overwrite,
+                OnConflict::Ignore => ConflictBehavior::IgnoreConflict,
+                OnConflict::DoUpdateIfNotNull => ConflictBehavior::DoUpdateIfNotNull,
+            },
+            None => match append_only {
+                true => ConflictBehavior::NoCheck,
+                false => ConflictBehavior::Overwrite,
+            },
         };
+
+        if let ConflictBehavior::IgnoreConflict = conflict_behavior
+            && version_column_index.is_some()
+        {
+            Err(ErrorCode::InvalidParameterValue(
+                "The with version column syntax cannot be used with the ignore behavior of on conflict".to_string(),
+            ))?
+        }
 
         let table_required_dist = {
             let mut bitset = FixedBitSet::with_capacity(columns.len());
@@ -644,9 +757,11 @@ impl PlanRoot {
             columns,
             definition,
             conflict_behavior,
+            version_column_index,
             pk_column_indices,
             row_id_index,
             version,
+            retention_seconds,
         )
     }
 
@@ -670,6 +785,7 @@ impl PlanRoot {
             definition,
             TableType::MaterializedView,
             cardinality,
+            None,
         )
     }
 
@@ -678,6 +794,7 @@ impl PlanRoot {
         &mut self,
         index_name: String,
         definition: String,
+        retention_seconds: Option<NonZeroU32>,
     ) -> Result<StreamMaterialize> {
         let cardinality = self.compute_cardinality();
         let stream_plan = self.gen_optimized_stream_plan(false)?;
@@ -692,10 +809,12 @@ impl PlanRoot {
             definition,
             TableType::Index,
             cardinality,
+            retention_seconds,
         )
     }
 
     /// Optimize and generate a create sink plan.
+    #[allow(clippy::too_many_arguments)]
     pub fn gen_sink_plan(
         &mut self,
         sink_name: String,
@@ -705,14 +824,26 @@ impl PlanRoot {
         db_name: String,
         sink_from_table_name: String,
         format_desc: Option<SinkFormatDesc>,
+        without_backfill: bool,
+        target_table: Option<TableId>,
+        partition_info: Option<PartitionComputeInfo>,
     ) -> Result<StreamSink> {
-        let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
+        let stream_scan_type = if without_backfill {
+            StreamScanType::UpstreamOnly
+        } else if self.should_use_arrangement_backfill() {
+            StreamScanType::ArrangementBackfill
+        } else {
+            StreamScanType::Backfill
+        };
+        let stream_plan =
+            self.gen_optimized_stream_plan_inner(emit_on_window_close, stream_scan_type)?;
 
         StreamSink::create(
             stream_plan,
             sink_name,
             db_name,
             sink_from_table_name,
+            target_table,
             self.required_dist.clone(),
             self.required_order.clone(),
             self.out_fields.clone(),
@@ -720,6 +851,42 @@ impl PlanRoot {
             definition,
             properties,
             format_desc,
+            partition_info,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    /// Optimize and generate a create subscription plan.
+    pub fn gen_subscription_plan(
+        &mut self,
+        database_id: u32,
+        schema_id: u32,
+        dependent_relations: HashSet<TableId>,
+        subscription_name: String,
+        definition: String,
+        properties: WithOptions,
+        emit_on_window_close: bool,
+        subscription_from_table_name: String,
+        user_id: UserId,
+    ) -> Result<StreamSubscription> {
+        let stream_scan_type = StreamScanType::UpstreamOnly;
+        let stream_plan =
+            self.gen_optimized_stream_plan_inner(emit_on_window_close, stream_scan_type)?;
+
+        StreamSubscription::create(
+            database_id,
+            schema_id,
+            dependent_relations,
+            stream_plan,
+            subscription_name,
+            subscription_from_table_name,
+            self.required_dist.clone(),
+            self.required_order.clone(),
+            self.out_fields.clone(),
+            self.out_names.clone(),
+            definition,
+            properties,
+            user_id,
         )
     }
 
@@ -727,6 +894,41 @@ impl PlanRoot {
     pub fn set_required_dist(&mut self, required_dist: RequiredDist) {
         self.required_dist = required_dist;
     }
+
+    pub fn should_use_arrangement_backfill(&self) -> bool {
+        let ctx = self.plan.ctx();
+        let session_ctx = ctx.session_ctx();
+        let arrangement_backfill_enabled = session_ctx
+            .env()
+            .streaming_config()
+            .developer
+            .enable_arrangement_backfill;
+        arrangement_backfill_enabled && session_ctx.config().streaming_use_arrangement_backfill()
+    }
+}
+
+fn find_version_column_index(
+    column_catalog: &Vec<ColumnCatalog>,
+    version_column_name: String,
+) -> Result<Option<usize>> {
+    for (index, column) in column_catalog.iter().enumerate() {
+        if column.column_desc.name == version_column_name {
+            if let &DataType::Jsonb
+            | &DataType::List(_)
+            | &DataType::Struct(_)
+            | &DataType::Bytea
+            | &DataType::Boolean = column.data_type()
+            {
+                Err(ErrorCode::InvalidParameterValue(
+                    "The specified version column data type is invalid.".to_string(),
+                ))?
+            }
+            return Ok(Some(index));
+        }
+    }
+    Err(ErrorCode::InvalidParameterValue(
+        "The specified version column name is not in the current columns.".to_string(),
+    ))?
 }
 
 fn const_eval_exprs(plan: PlanRef) -> Result<PlanRef> {
@@ -772,6 +974,7 @@ fn require_additional_exchange_on_root_in_distributed_mode(plan: PlanRef) -> boo
 
     fn is_source(plan: &PlanRef) -> bool {
         plan.node_type() == PlanNodeType::BatchSource
+            || plan.node_type() == PlanNodeType::BatchKafkaScan
     }
 
     fn is_insert(plan: &PlanRef) -> bool {
@@ -803,6 +1006,7 @@ fn require_additional_exchange_on_root_in_local_mode(plan: PlanRef) -> bool {
 
     fn is_source(plan: &PlanRef) -> bool {
         plan.node_type() == PlanNodeType::BatchSource
+            || plan.node_type() == PlanNodeType::BatchKafkaScan
     }
 
     fn is_insert(plan: &PlanRef) -> bool {
@@ -845,7 +1049,7 @@ mod tests {
             out_fields,
             out_names,
         );
-        let subplan = root.into_subplan();
+        let subplan = root.into_unordered_subplan();
         assert_eq!(
             subplan.schema(),
             &Schema::new(vec![Field::with_name(DataType::Int32, "v1")])

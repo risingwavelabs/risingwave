@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -94,8 +94,8 @@ pub enum ObserverError {
 }
 
 impl From<tonic::Status> for ObserverError {
-    fn from(value: tonic::Status) -> Self {
-        Self::Rpc(value.into())
+    fn from(status: tonic::Status) -> Self {
+        Self::Rpc(RpcError::from_meta_status(status))
     }
 }
 
@@ -156,10 +156,11 @@ where
             }
             Info::HummockSnapshot(_) => true,
             Info::MetaBackupManifestId(_) => true,
-            Info::SystemParams(_) => true,
+            Info::SystemParams(_) | Info::SessionParam(_) => true,
             Info::ServingParallelUnitMappings(_) => true,
             Info::Snapshot(_) | Info::HummockWriteLimits(_) => unreachable!(),
             Info::HummockStats(_) => true,
+            Info::Recovery(_) => true,
         });
 
         self.observer_states

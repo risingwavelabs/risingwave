@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -94,6 +94,7 @@ fn gen_tokio_files(path: &Path) -> impl IntoIterator<Item = impl Future<Output =
                 .read(true)
                 .write(true)
                 .create(true)
+                .truncate(true)
                 .custom_flags(F_NOCACHE)
                 .open(file_path)
                 .await
@@ -104,6 +105,7 @@ fn gen_tokio_files(path: &Path) -> impl IntoIterator<Item = impl Future<Output =
                 .read(true)
                 .write(true)
                 .create(true)
+                .truncate(true)
                 .open(file_path)
                 .await
                 .unwrap();

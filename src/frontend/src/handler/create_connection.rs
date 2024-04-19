@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,6 @@
 use std::collections::HashMap;
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
 use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
 use risingwave_pb::catalog::connection::private_link_service::PrivateLinkProvider;
 use risingwave_pb::ddl_service::create_connection_request;
@@ -24,6 +22,8 @@ use risingwave_sqlparser::ast::CreateConnectionStatement;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::error::ErrorCode::ProtocolError;
+use crate::error::{Result, RwError};
 use crate::handler::HandlerArgs;
 
 pub(crate) const CONNECTION_TYPE_PROP: &str = "type";
@@ -124,12 +124,7 @@ pub async fn handle_create_connection(
         };
     }
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
-    let with_properties = handler_args
-        .with_options
-        .inner()
-        .clone()
-        .into_iter()
-        .collect();
+    let with_properties = handler_args.with_options.clone().into_connector_props();
 
     let create_connection_payload = resolve_create_connection_payload(&with_properties)?;
 

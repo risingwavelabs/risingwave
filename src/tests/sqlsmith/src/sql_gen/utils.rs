@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -74,7 +74,7 @@ pub(crate) fn create_table_factor_from_table(table: &Table) -> TableFactor {
     TableFactor::Table {
         name: ObjectName(vec![Ident::new_unchecked(&table.name)]),
         alias: None,
-        for_system_time_as_of_proctime: false,
+        as_of: None,
     }
 }
 

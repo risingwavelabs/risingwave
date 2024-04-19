@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -54,7 +54,7 @@ fn cluster_config_no_compute_nodes() -> Configuration {
         file.write_all(
             "\
 [meta]
-max_heartbeat_interval_secs = 300
+max_heartbeat_interval_secs = 60
 
 [system]
 barrier_interval_ms = 1000
@@ -77,8 +77,7 @@ metrics_level = \"Disabled\"
         meta_nodes: 3,
         compactor_nodes: 2,
         compute_node_cores: 2,
-        etcd_timeout_rate: 0.0,
-        etcd_data_path: None,
+        ..Default::default()
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ use super::utils::Distill;
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamExchange, StreamNode};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{LogicalShare, PlanBase, PlanTreeNode};
+use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::Explain;
 
@@ -84,7 +85,10 @@ impl StreamNode for StreamShare {
 }
 
 impl StreamShare {
-    pub fn adhoc_to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> PbStreamNode {
+    pub fn adhoc_to_stream_prost(
+        &self,
+        state: &mut BuildFragmentGraphState,
+    ) -> SchedulerResult<PbStreamNode> {
         let operator_id = self.base.id().0 as u32;
 
         match state.get_share_stream_node(operator_id) {
@@ -96,7 +100,7 @@ impl StreamShare {
                     .inputs()
                     .into_iter()
                     .map(|plan| plan.to_stream_prost(state))
-                    .collect();
+                    .try_collect()?;
 
                 let stream_node = PbStreamNode {
                     input,
@@ -115,10 +119,10 @@ impl StreamShare {
                 };
 
                 state.add_share_stream_node(operator_id, stream_node.clone());
-                stream_node
+                Ok(stream_node)
             }
 
-            Some(stream_node) => stream_node.clone(),
+            Some(stream_node) => Ok(stream_node.clone()),
         }
     }
 }

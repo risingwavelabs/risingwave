@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ use std::str::FromStr;
 use fancy_regex::{Regex, RegexBuilder};
 use risingwave_common::array::{ArrayBuilder, ListValue, Utf8Array, Utf8ArrayBuilder};
 use risingwave_expr::{bail, function, ExprError, Result};
+use thiserror_ext::AsReport;
 
 #[derive(Debug)]
 pub struct RegexpContext {
@@ -40,7 +41,7 @@ impl RegexpContext {
         Ok(Self {
             regex: RegexBuilder::new(&origin)
                 .build()
-                .map_err(|e| ExprError::Parse(e.to_string().into()))?,
+                .map_err(|e| ExprError::Parse(e.to_report_string().into()))?,
             global: options.global,
             replacement: make_replacement(replacement),
         })

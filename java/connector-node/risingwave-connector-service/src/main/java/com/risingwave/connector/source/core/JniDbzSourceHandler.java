@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,13 +14,20 @@
 
 package com.risingwave.connector.source.core;
 
-import com.risingwave.connector.api.source.CdcEngineRunner;
+import static com.risingwave.proto.ConnectorServiceProto.SourceType.POSTGRES;
+
 import com.risingwave.connector.api.source.SourceTypeE;
+import com.risingwave.connector.cdc.debezium.internal.DebeziumOffset;
+import com.risingwave.connector.cdc.debezium.internal.DebeziumOffsetSerializer;
+import com.risingwave.connector.source.common.CdcConnectorException;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
+import com.risingwave.connector.source.common.DbzSourceUtils;
 import com.risingwave.java.binding.Binding;
 import com.risingwave.metrics.ConnectorNodeMetrics;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -28,17 +35,25 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** handler for starting a debezium source connectors for jni */
+
+/** handler for starting a debezium source connectors for jni */
 public class JniDbzSourceHandler {
     static final Logger LOG = LoggerFactory.getLogger(JniDbzSourceHandler.class);
 
     private final DbzConnectorConfig config;
+    private final DbzCdcEngineRunner runner;
 
-    public JniDbzSourceHandler(DbzConnectorConfig config) {
+    public JniDbzSourceHandler(DbzConnectorConfig config, long channelPtr) {
         this.config = config;
+        this.runner = DbzCdcEngineRunner.create(config, channelPtr);
+
+        if (runner == null) {
+            throw new CdcConnectorException("Failed to create engine runner");
+        }
     }
 
     public static void runJniDbzSourceThread(byte[] getEventStreamRequestBytes, long channelPtr)
-            throws com.google.protobuf.InvalidProtocolBufferException {
+            throws Exception {
         var request =
                 ConnectorServiceProto.GetEventStreamRequest.parseFrom(getEventStreamRequestBytes);
 
@@ -48,8 +63,13 @@ public class JniDbzSourceHandler {
         // userProps extracted from request, underlying implementation is UnmodifiableMap
         Map<String, String> mutableUserProps = new HashMap<>(request.getPropertiesMap());
         mutableUserProps.put("source.id", Long.toString(request.getSourceId()));
-        var commonParam = request.getCommonParam();
-        boolean isMultiTableShared = commonParam.getIsMultiTableShared();
+        boolean isCdcSourceJob = request.getIsSourceJob();
+
+        if (request.getSourceType() == POSTGRES) {
+            DbzSourceUtils.createPostgresPublicationIfNeeded(
+                    request.getPropertiesMap(), request.getSourceId());
+        }
+
         var config =
                 new DbzConnectorConfig(
                         SourceTypeE.valueOf(request.getSourceType()),
@@ -57,16 +77,32 @@ public class JniDbzSourceHandler {
                         request.getStartOffset(),
                         mutableUserProps,
                         request.getSnapshotDone(),
-                        isMultiTableShared);
-        JniDbzSourceHandler handler = new JniDbzSourceHandler(config);
+                        isCdcSourceJob);
+        JniDbzSourceHandler handler = new JniDbzSourceHandler(config, channelPtr);
+        // register handler to the registry
+        JniDbzSourceRegistry.register(config.getSourceId(), handler);
         handler.start(channelPtr);
     }
 
-    public void start(long channelPtr) {
-        var runner = DbzCdcEngineRunner.create(config);
-        if (runner == null) {
-            return;
+    public void commitOffset(String encodedOffset) throws InterruptedException {
+        try {
+            DebeziumOffset offset =
+                    DebeziumOffsetSerializer.INSTANCE.deserialize(
+                            encodedOffset.getBytes(StandardCharsets.UTF_8));
+            var changeEventConsumer = runner.getChangeEventConsumer();
+            if (changeEventConsumer != null) {
+                changeEventConsumer.commitOffset(offset);
+                LOG.info("Engine#{}: committed offset {}", config.getSourceId(), offset);
+            } else {
+                LOG.warn("Engine#{}: changeEventConsumer is null", config.getSourceId());
+            }
+        } catch (IOException err) {
+            LOG.error("Engine#{}: fail to commit offset.", config.getSourceId(), err);
+            throw new CdcConnectorException(err.getMessage());
         }
+    }
+
+    public void start(long channelPtr) {
 
         try {
             // Start the engine
@@ -75,6 +111,8 @@ public class JniDbzSourceHandler {
                 LOG.error(
                         "Failed to send handshake message to channel. sourceId={}",
                         config.getSourceId());
+                // remove the handler from registry
+                JniDbzSourceRegistry.unregister(config.getSourceId());
                 return;
             }
 
@@ -114,10 +152,13 @@ public class JniDbzSourceHandler {
                 LOG.warn("Failed to stop Engine#{}", config.getSourceId(), e);
             }
         }
+
+        // remove the handler from registry
+        JniDbzSourceRegistry.unregister(config.getSourceId());
     }
 
-    private boolean sendHandshakeMessage(CdcEngineRunner runner, long channelPtr, boolean startOk)
-            throws Exception {
+    private boolean sendHandshakeMessage(
+            DbzCdcEngineRunner runner, long channelPtr, boolean startOk) throws Exception {
         // send a handshake message to notify the Source executor
         // if the handshake is not ok, the split reader will return error to source actor
         var controlInfo =

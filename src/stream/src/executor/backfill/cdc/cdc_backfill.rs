@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,22 +21,24 @@ use futures::{pin_mut, stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, StreamChunk};
+use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::parser::{
-    DebeziumParser, EncodingProperties, JsonProperties, ProtocolProperties,
+    DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties, ProtocolProperties,
     SourceStreamChunkBuilder, SpecificParserConfig,
 };
-use risingwave_connector::source::external::CdcOffset;
+use risingwave_connector::source::cdc::external::CdcOffset;
 use risingwave_connector::source::{SourceColumnDesc, SourceContext};
 use risingwave_storage::StateStore;
+use rw_futures_util::pausable;
 
 use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::cdc::state::CdcBackfillState;
-use crate::executor::backfill::upstream_table::external::ExternalStorageTable;
-use crate::executor::backfill::upstream_table::snapshot::{
+use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
+use crate::executor::backfill::cdc::upstream_table::snapshot::{
     SnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
 };
 use crate::executor::backfill::utils::{
@@ -44,8 +46,8 @@ use crate::executor::backfill::utils::{
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
+    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, Message,
+    StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::CreateMviewProgress;
 
@@ -54,19 +56,18 @@ const METADATA_STATE_LEN: usize = 4;
 
 pub struct CdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
-    info: ExecutorInfo,
 
     /// The external table to be backfilled
     external_table: ExternalStorageTable,
 
     /// Upstream changelog stream which may contain metadata columns, e.g. `_rw_offset`
-    upstream: BoxedExecutor,
+    upstream: Executor,
 
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
     /// User may select a subset of columns from the upstream table.
     output_indices: Vec<usize>,
 
-    /// State table of the CdcBackfill executor
+    /// State table of the `CdcBackfill` executor
     state_table: StateTable<S>,
 
     progress: Option<CreateMviewProgress>,
@@ -74,24 +75,25 @@ pub struct CdcBackfillExecutor<S: StateStore> {
     metrics: Arc<StreamingMetrics>,
 
     chunk_size: usize,
+
+    disable_backfill: bool,
 }
 
 impl<S: StateStore> CdcBackfillExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
-        info: ExecutorInfo,
         external_table: ExternalStorageTable,
-        upstream: BoxedExecutor,
+        upstream: Executor,
         output_indices: Vec<usize>,
         progress: Option<CreateMviewProgress>,
         metrics: Arc<StreamingMetrics>,
         state_table: StateTable<S>,
         chunk_size: usize,
+        disable_backfill: bool,
     ) -> Self {
         Self {
             actor_ctx,
-            info,
             external_table,
             upstream,
             output_indices,
@@ -99,6 +101,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             progress,
             metrics,
             chunk_size,
+            disable_backfill,
         }
     }
 
@@ -109,6 +112,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let pk_order = self.external_table.pk_order_types().to_vec();
 
         let upstream_table_id = self.external_table.table_id().table_id;
+        let upstream_table_name = self.external_table.qualified_table_name();
         let upstream_table_schema = self.external_table.schema().clone();
         let upstream_table_reader = UpstreamTableReader::new(self.external_table);
 
@@ -118,10 +122,10 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // `None` means it starts from the beginning.
         let mut current_pk_pos: Option<OwnedRow>;
 
-        tracing::info!(upstream_table_id, ?pk_in_output_indices);
-
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
+
+        let mut paused = first_barrier.is_pause_on_startup();
 
         // Check whether this parallelism has been assigned splits,
         // if not, we should bypass the backfill directly.
@@ -141,7 +145,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let state = state_impl.restore_state().await?;
         current_pk_pos = state.current_pk_pos.clone();
 
-        let to_backfill = !state.is_finished;
+        let to_backfill = !self.disable_backfill && !state.is_finished;
 
         // The first barrier message should be propagated.
         yield Message::Barrier(first_barrier);
@@ -154,12 +158,19 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .last_cdc_offset
             .map_or(upstream_table_reader.current_binlog_offset().await?, Some);
 
+        let offset_parse_func = upstream_table_reader
+            .inner()
+            .table_reader()
+            .get_cdc_offset_parser();
         let mut consumed_binlog_offset: Option<CdcOffset> = None;
 
         tracing::info!(
             upstream_table_id,
+            upstream_table_name,
+            initial_binlog_offset = ?last_binlog_offset,
             ?current_pk_pos,
             is_finished = state.is_finished,
+            disable_backfill = self.disable_backfill,
             snapshot_row_count = total_snapshot_row_count,
             chunk_size = self.chunk_size,
             "start cdc backfill"
@@ -200,10 +211,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                         break;
                     }
                     Message::Chunk(ref chunk) => {
-                        last_binlog_offset = get_cdc_chunk_last_offset(
-                            upstream_table_reader.inner().table_reader(),
-                            chunk,
-                        )?;
+                        last_binlog_offset = get_cdc_chunk_last_offset(&offset_parse_func, chunk)?;
                     }
                     Message::Watermark(_) => {
                         // Ignore watermark
@@ -211,18 +219,34 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 }
             }
 
-            tracing::info!(upstream_table_id, initial_binlog_offset = ?last_binlog_offset, ?current_pk_pos, "start cdc backfill loop");
-            'backfill_loop: loop {
-                let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
+            tracing::info!(upstream_table_id,
+                upstream_table_name,
+                initial_binlog_offset = ?last_binlog_offset,
+                ?current_pk_pos,
+                "start cdc backfill loop");
 
+            // TODO: make the limit configurable
+            let snapshot_read_limit: usize = 1000;
+
+            // the buffer will be drained when a barrier comes
+            let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
+            'backfill_loop: loop {
                 let left_upstream = upstream.by_ref().map(Either::Left);
 
+                let mut snapshot_read_row_cnt: usize = 0;
                 let args = SnapshotReadArgs::new_for_cdc(current_pk_pos.clone(), self.chunk_size);
-                let right_snapshot =
-                    pin!(upstream_table_reader.snapshot_read(args).map(Either::Right));
+
+                let right_snapshot = pin!(upstream_table_reader
+                    .snapshot_read(args, snapshot_read_limit as u32)
+                    .map(Either::Right));
+
+                let (right_snapshot, valve) = pausable(right_snapshot);
+                if paused {
+                    valve.pause();
+                }
 
                 // Prefer to select upstream, so we can stop snapshot stream when barrier comes.
-                let backfill_stream =
+                let mut backfill_stream =
                     select_with_strategy(left_upstream, right_snapshot, |_: &mut ()| {
                         stream::PollNext::Left
                     });
@@ -231,12 +255,116 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 let mut cur_barrier_upstream_processed_rows: u64 = 0;
 
                 #[for_await]
-                for either in backfill_stream {
+                for either in &mut backfill_stream {
                     match either {
                         // Upstream
                         Either::Left(msg) => {
                             match msg? {
                                 Message::Barrier(barrier) => {
+                                    if let Some(mutation) = barrier.mutation.as_deref() {
+                                        use crate::executor::Mutation;
+                                        match mutation {
+                                            Mutation::Pause => {
+                                                paused = true;
+                                                valve.pause();
+                                            }
+                                            Mutation::Resume => {
+                                                paused = false;
+                                                valve.resume();
+                                            }
+                                            Mutation::Throttle(some) => {
+                                                if let Some(rate_limit) =
+                                                    some.get(&self.actor_ctx.id)
+                                                {
+                                                    self.chunk_size = rate_limit
+                                                        .map(|x| x as usize)
+                                                        .unwrap_or(self.chunk_size);
+                                                    // rebuild the new reader stream with new chunk size
+                                                    continue 'backfill_loop;
+                                                }
+                                            }
+                                            _ => (),
+                                        }
+                                    }
+
+                                    // ensure the snapshot stream is consumed once
+                                    // otherwise, reconstruct a snapshot stream with same pk offset may return an
+                                    // empty stream (don't know the cause)
+                                    if snapshot_read_row_cnt == 0 {
+                                        pin_mut!(backfill_stream);
+                                        let (_, mut snapshot_stream) =
+                                            backfill_stream.get_pin_mut();
+                                        if let Some(msg) = snapshot_stream.next().await {
+                                            let Either::Right(msg) = msg else {
+                                                bail!(
+                                                    "BUG: snapshot_read contains upstream messages"
+                                                );
+                                            };
+                                            match msg? {
+                                                None => {
+                                                    tracing::info!(
+                                                        upstream_table_id,
+                                                        ?last_binlog_offset,
+                                                        ?current_pk_pos,
+                                                        "snapshot read stream ends"
+                                                    );
+                                                    // End of the snapshot read stream.
+                                                    // Consume the buffered upstream chunk without filtering by `binlog_low`.
+                                                    for chunk in upstream_chunk_buffer.drain(..) {
+                                                        yield Message::Chunk(mapping_chunk(
+                                                            chunk,
+                                                            &self.output_indices,
+                                                        ));
+                                                    }
+
+                                                    // mark backfill has finished
+                                                    state_impl
+                                                        .mutate_state(
+                                                            current_pk_pos,
+                                                            last_binlog_offset.clone(),
+                                                            total_snapshot_row_count,
+                                                            true,
+                                                        )
+                                                        .await?;
+
+                                                    // commit state because we have received a barrier message
+                                                    state_impl.commit_state(barrier.epoch).await?;
+                                                    yield Message::Barrier(barrier);
+                                                    // end of backfill loop, since backfill has finished
+                                                    break 'backfill_loop;
+                                                }
+                                                Some(chunk) => {
+                                                    // Raise the current pk position.
+                                                    // Because snapshot streams are ordered by pk, so we can
+                                                    // use the last row to update `current_pk_pos`.
+                                                    current_pk_pos = Some(get_new_pos(
+                                                        &chunk,
+                                                        &pk_in_output_indices,
+                                                    ));
+
+                                                    let chunk_cardinality =
+                                                        chunk.cardinality() as u64;
+                                                    cur_barrier_snapshot_processed_rows +=
+                                                        chunk_cardinality;
+                                                    total_snapshot_row_count += chunk_cardinality;
+                                                    snapshot_read_row_cnt +=
+                                                        chunk_cardinality as usize;
+
+                                                    tracing::debug!(
+                                                        upstream_table_id,
+                                                        ?current_pk_pos,
+                                                        ?snapshot_read_row_cnt,
+                                                        "force emit a snapshot chunk"
+                                                    );
+                                                    yield Message::Chunk(mapping_chunk(
+                                                        chunk,
+                                                        &self.output_indices,
+                                                    ));
+                                                }
+                                            }
+                                        }
+                                    }
+
                                     // If it is a barrier, switch snapshot and consume buffered
                                     // upstream chunk.
                                     // If no current_pos, means we did not process any snapshot yet.
@@ -249,12 +377,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                             // record the consumed binlog offset that will be
                                             // persisted later
                                             consumed_binlog_offset = get_cdc_chunk_last_offset(
-                                                upstream_table_reader.inner().table_reader(),
+                                                &offset_parse_func,
                                                 &chunk,
                                             )?;
                                             yield Message::Chunk(mapping_chunk(
                                                 mark_cdc_chunk(
-                                                    upstream_table_reader.inner().table_reader(),
+                                                    &offset_parse_func,
                                                     chunk,
                                                     current_pos,
                                                     &pk_in_output_indices,
@@ -284,7 +412,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                                     // Update last seen binlog offset
                                     if consumed_binlog_offset.is_some() {
-                                        last_binlog_offset = consumed_binlog_offset.clone();
+                                        last_binlog_offset.clone_from(&consumed_binlog_offset);
                                     }
 
                                     // update and persist backfill state
@@ -317,10 +445,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         continue;
                                     }
 
-                                    let chunk_binlog_offset = get_cdc_chunk_last_offset(
-                                        upstream_table_reader.inner().table_reader(),
-                                        &chunk,
-                                    )?;
+                                    let chunk_binlog_offset =
+                                        get_cdc_chunk_last_offset(&offset_parse_func, &chunk)?;
 
                                     tracing::trace!(
                                         target: "events::stream::cdc_backfill",
@@ -357,33 +483,42 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                         Either::Right(msg) => {
                             match msg? {
                                 None => {
-                                    tracing::info!(
-                                        upstream_table_id,
-                                        ?last_binlog_offset,
-                                        ?current_pk_pos,
-                                        "snapshot read stream ends"
-                                    );
-                                    // End of the snapshot read stream.
-                                    // We should not mark the chunk anymore,
-                                    // otherwise, we will ignore some rows
-                                    // in the buffer. Here we choose to never mark the chunk.
-                                    // Consume with the renaming stream buffer chunk without mark.
-                                    for chunk in upstream_chunk_buffer.drain(..) {
-                                        yield Message::Chunk(mapping_chunk(
-                                            chunk,
-                                            &self.output_indices,
-                                        ));
-                                    }
+                                    if snapshot_read_row_cnt < snapshot_read_limit {
+                                        tracing::info!(
+                                            upstream_table_id,
+                                            ?last_binlog_offset,
+                                            ?current_pk_pos,
+                                            "snapshot read stream ends"
+                                        );
+                                        // If the snapshot read stream ends with less than `limit` rows,
+                                        // it means all historical data has been loaded.
+                                        // We should not mark the chunk anymore,
+                                        // otherwise, we will ignore some rows in the buffer.
+                                        // Here we choose to never mark the chunk.
+                                        // Consume with the renaming stream buffer chunk without mark.
+                                        for chunk in upstream_chunk_buffer.drain(..) {
+                                            yield Message::Chunk(mapping_chunk(
+                                                chunk,
+                                                &self.output_indices,
+                                            ));
+                                        }
 
-                                    state_impl
-                                        .mutate_state(
-                                            current_pk_pos,
-                                            last_binlog_offset.clone(),
-                                            total_snapshot_row_count,
-                                            true,
-                                        )
-                                        .await?;
-                                    break 'backfill_loop;
+                                        state_impl
+                                            .mutate_state(
+                                                current_pk_pos.clone(),
+                                                last_binlog_offset.clone(),
+                                                total_snapshot_row_count,
+                                                true,
+                                            )
+                                            .await?;
+
+                                        // exit backfill
+                                        break 'backfill_loop;
+                                    } else {
+                                        // break the for loop to reconstruct a new snapshot with pk offset
+                                        // to ensure we load all historical data
+                                        break;
+                                    }
                                 }
                                 Some(chunk) => {
                                     // Raise the current position.
@@ -400,6 +535,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     let chunk_cardinality = chunk.cardinality() as u64;
                                     cur_barrier_snapshot_processed_rows += chunk_cardinality;
                                     total_snapshot_row_count += chunk_cardinality;
+                                    // count the number of rows in the snapshot
+                                    snapshot_read_row_cnt += chunk_cardinality as usize;
                                     yield Message::Chunk(mapping_chunk(
                                         chunk,
                                         &self.output_indices,
@@ -410,6 +547,21 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     }
                 }
             }
+        } else if self.disable_backfill {
+            // If backfill is disabled, we just mark the backfill as finished
+            tracing::info!(
+                upstream_table_id,
+                upstream_table_name,
+                "CdcBackfill has been disabled"
+            );
+            state_impl
+                .mutate_state(
+                    current_pk_pos,
+                    last_binlog_offset.clone(),
+                    total_snapshot_row_count,
+                    true,
+                )
+                .await?;
         }
 
         // drop reader to release db connection
@@ -417,7 +569,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
         tracing::info!(
             upstream_table_id,
-            "CdcBackfill has already finished and forward messages directly to the downstream"
+            upstream_table_name,
+            "CdcBackfill has already finished and will forward messages directly to the downstream"
         );
 
         // Wait for first barrier to come after backfill is finished.
@@ -465,13 +618,15 @@ pub async fn transform_upstream(upstream: BoxedMessageStream, schema: &Schema) {
         key_encoding_config: None,
         encoding_config: EncodingProperties::Json(JsonProperties {
             use_schema_registry: false,
+            timestamptz_handling: None,
         }),
-        protocol_config: ProtocolProperties::Debezium,
+        // the cdc message is generated internally so the key must exist.
+        protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
     };
     let mut parser = DebeziumParser::new(
         props,
         get_rw_columns(schema),
-        Arc::new(SourceContext::default()),
+        Arc::new(SourceContext::dummy()),
     )
     .await
     .map_err(StreamExecutorError::connector_error)?;
@@ -565,21 +720,9 @@ fn get_rw_columns(schema: &Schema) -> Vec<SourceColumnDesc> {
         .collect_vec()
 }
 
-impl<S: StateStore> Executor for CdcBackfillExecutor<S> {
+impl<S: StateStore> Execute for CdcBackfillExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }
 
@@ -595,7 +738,6 @@ mod tests {
 
     use crate::executor::backfill::cdc::cdc_backfill::transform_upstream;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::Executor;
 
     #[tokio::test]
     async fn test_transform_upstream_chunk() {
@@ -605,7 +747,8 @@ mod tests {
             Field::unnamed(DataType::Varchar), // _rw_table_name
         ]);
         let pk_indices = vec![1];
-        let (mut tx, source) = MockSource::channel(schema.clone(), pk_indices.clone());
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema.clone(), pk_indices.clone());
         // let payload = r#"{"before": null,"after":{"O_ORDERKEY": 5, "O_CUSTKEY": 44485, "O_ORDERSTATUS": "F", "O_TOTALPRICE": "144659.20", "O_ORDERDATE": "1994-07-30" },"source":{"version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002", "ts_ms": 1695277757000, "snapshot": "last", "db": "mydb", "sequence": null, "table": "orders_new", "server_id": 0, "gtid": null, "file": "binlog.000008", "pos": 3693, "row": 0, "thread": null, "query": null},"op":"r","ts_ms":1695277757017,"transaction":null}"#.to_string();
         let payload = r#"{ "payload": { "before": null, "after": { "O_ORDERKEY": 5, "O_CUSTKEY": 44485, "O_ORDERSTATUS": "F", "O_TOTALPRICE": "144659.20", "O_ORDERDATE": "1994-07-30" }, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002", "ts_ms": 1695277757000, "snapshot": "last", "db": "mydb", "sequence": null, "table": "orders_new", "server_id": 0, "gtid": null, "file": "binlog.000008", "pos": 3693, "row": 0, "thread": null, "query": null }, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#;
 

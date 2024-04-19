@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -96,7 +96,7 @@ impl From<&PbWorkerNode> for ActiveModel {
             host: Set(host.host),
             port: Set(host.port),
             status: Set(worker.state().into()),
-            ..Default::default()
+            transaction_id: Set(worker.transactional_id.map(|id| id as _)),
         }
     }
 }

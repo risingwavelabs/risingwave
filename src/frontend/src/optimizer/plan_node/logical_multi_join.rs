@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
 use super::utils::{childless_record, Distill};
@@ -27,6 +26,7 @@ use super::{
     PlanNodeType, PlanRef, PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
     ToStream,
 };
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
@@ -54,8 +54,8 @@ pub struct LogicalMultiJoin {
     inner2output: ColIndexMapping,
     // NOTE(st1page): these fields will be used in prune_col and
     // pk_derive soon.
-    /// the mapping output_col_idx -> (input_idx, input_col_idx), **"output_col_idx" is internal,
-    /// not consider output_indices**
+    /// the mapping `output_col_idx` -> (`input_idx`, `input_col_idx`), **"`output_col_idx`" is internal,
+    /// not consider `output_indices`**
     inner_o2i_mapping: Vec<(usize, usize)>,
     inner_i2o_mappings: Vec<ColIndexMapping>,
 }

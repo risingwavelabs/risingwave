@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ use std::mem::size_of;
 
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::{ListArrayData, PbArray, PbArrayType};
 use serde::{Deserialize, Serializer};
 use thiserror_ext::AsReport;
@@ -29,7 +30,6 @@ use super::{
     PrimitiveArrayItemType, RowRef, Utf8Array,
 };
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::estimate_size::EstimateSize;
 use crate::row::Row;
 use crate::types::{
     hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarImpl, ScalarRefImpl,
@@ -612,6 +612,24 @@ impl Debug for ListRef<'_> {
     }
 }
 
+impl Row for ListRef<'_> {
+    fn datum_at(&self, index: usize) -> DatumRef<'_> {
+        self.array.value_at(self.start as usize + index)
+    }
+
+    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        self.array.value_at_unchecked(self.start as usize + index)
+    }
+
+    fn len(&self) -> usize {
+        self.len()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
+        (*self).iter()
+    }
+}
+
 impl ToText for ListRef<'_> {
     // This function will be invoked when pgwire prints a list value in string.
     // Refer to PostgreSQL `array_out` or `appendPGArray`.
@@ -768,8 +786,7 @@ impl ListValue {
                     }
                 };
                 Ok(Some(
-                    ScalarImpl::from_literal(&s, self.data_type)
-                        .map_err(|e| e.to_report_string())?,
+                    ScalarImpl::from_text(&s, self.data_type).map_err(|e| e.to_report_string())?,
                 ))
             }
 
@@ -797,7 +814,7 @@ impl ListValue {
                         _ => {}
                     }
                 };
-                ScalarImpl::from_literal(&s, self.data_type).map_err(|e| e.to_report_string())
+                ScalarImpl::from_text(&s, self.data_type).map_err(|e| e.to_report_string())
             }
 
             /// Unescape a string.

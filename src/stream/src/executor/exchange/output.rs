@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -76,7 +76,7 @@ impl Output for LocalOutput {
             .await
             .map_err(|SendError(message)| {
                 anyhow!(
-                    "failed to send message to actor {}: {:?}",
+                    "failed to send message to actor {}, message: {:?}",
                     self.actor_id,
                     message
                 )
@@ -130,7 +130,7 @@ impl Output for RemoteOutput {
             .await
             .map_err(|SendError(message)| {
                 anyhow!(
-                    "failed to send message to actor {}: {:#?}",
+                    "failed to send message to actor {}, message: {:?}",
                     self.actor_id,
                     message
                 )

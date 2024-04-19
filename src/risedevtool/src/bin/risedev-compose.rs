@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -123,6 +123,7 @@ fn main() -> Result<()> {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
                 (c.address.clone(), c.compose(&compose_config)?)
             }
+            ServiceConfig::Sqlite(_) => continue,
             ServiceConfig::Prometheus(c) => {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
                 (c.address.clone(), c.compose(&compose_config)?)
@@ -203,7 +204,7 @@ fn main() -> Result<()> {
             ServiceConfig::ZooKeeper(_) => {
                 return Err(anyhow!("not supported, please use redpanda instead"))
             }
-            ServiceConfig::OpenDal(_) => continue,
+            ServiceConfig::Opendal(_) => continue,
             ServiceConfig::AwsS3(_) => continue,
             ServiceConfig::RedPanda(c) => {
                 if opts.deploy {

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,8 @@
 
 use anyhow::Result;
 use clap::Parser;
+use risingwave_common::config::MetaBackend;
+use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
 use risingwave_frontend::FrontendOpts;
@@ -24,6 +26,11 @@ use tokio::signal;
 use crate::common::osstrs;
 
 #[derive(Eq, PartialOrd, PartialEq, Debug, Clone, Parser)]
+#[command(
+    version,
+    about = "The Standalone mode allows users to start multiple services in one process, it exposes node-level options for each service",
+    hide = true
+)]
 pub struct StandaloneOpts {
     /// Compute node options
     /// If missing, compute node won't start
@@ -66,7 +73,27 @@ pub struct ParsedStandaloneOpts {
     pub compactor_opts: Option<CompactorOpts>,
 }
 
-fn parse_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts {
+impl risingwave_common::opts::Opts for ParsedStandaloneOpts {
+    fn name() -> &'static str {
+        "standalone"
+    }
+
+    fn meta_addr(&self) -> MetaAddressStrategy {
+        if let Some(opts) = self.meta_opts.as_ref() {
+            opts.meta_addr()
+        } else if let Some(opts) = self.compute_opts.as_ref() {
+            opts.meta_addr()
+        } else if let Some(opts) = self.frontend_opts.as_ref() {
+            opts.meta_addr()
+        } else if let Some(opts) = self.compactor_opts.as_ref() {
+            opts.meta_addr()
+        } else {
+            unreachable!("at least one service should be specified as checked during parsing")
+        }
+    }
+}
+
+pub fn parse_standalone_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts {
     let meta_opts = opts.meta_opts.as_ref().map(|s| {
         let mut s = split(s).unwrap();
         s.insert(0, "meta-node".into());
@@ -97,32 +124,47 @@ fn parse_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts {
 
     if let Some(config_path) = opts.config_path.as_ref() {
         if let Some(meta_opts) = meta_opts.as_mut() {
-            meta_opts.config_path = config_path.clone();
+            meta_opts.config_path.clone_from(config_path);
         }
         if let Some(compute_opts) = compute_opts.as_mut() {
-            compute_opts.config_path = config_path.clone();
+            compute_opts.config_path.clone_from(config_path);
         }
         if let Some(frontend_opts) = frontend_opts.as_mut() {
-            frontend_opts.config_path = config_path.clone();
+            frontend_opts.config_path.clone_from(config_path);
         }
         if let Some(compactor_opts) = compactor_opts.as_mut() {
-            compactor_opts.config_path = config_path.clone();
+            compactor_opts.config_path.clone_from(config_path);
         }
     }
     if let Some(prometheus_listener_addr) = opts.prometheus_listener_addr.as_ref() {
         if let Some(compute_opts) = compute_opts.as_mut() {
-            compute_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
+            compute_opts
+                .prometheus_listener_addr
+                .clone_from(prometheus_listener_addr);
         }
         if let Some(frontend_opts) = frontend_opts.as_mut() {
-            frontend_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
+            frontend_opts
+                .prometheus_listener_addr
+                .clone_from(prometheus_listener_addr);
         }
         if let Some(compactor_opts) = compactor_opts.as_mut() {
-            compactor_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
+            compactor_opts
+                .prometheus_listener_addr
+                .clone_from(prometheus_listener_addr);
         }
         if let Some(meta_opts) = meta_opts.as_mut() {
-            meta_opts.prometheus_host = Some(prometheus_listener_addr.clone());
+            meta_opts.prometheus_listener_addr = Some(prometheus_listener_addr.clone());
         }
     }
+
+    if meta_opts.is_none()
+        && compute_opts.is_none()
+        && frontend_opts.is_none()
+        && compactor_opts.is_none()
+    {
+        panic!("No service is specified to start.");
+    }
+
     ParsedStandaloneOpts {
         meta_opts,
         compute_opts,
@@ -131,22 +173,35 @@ fn parse_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts {
     }
 }
 
-pub async fn standalone(opts: StandaloneOpts) -> Result<()> {
-    tracing::info!("launching Risingwave in standalone mode");
-
-    let ParsedStandaloneOpts {
+/// For `standalone` mode, we can configure and start multiple services in one process.
+/// `standalone` mode is meant to be used by our cloud service and docker,
+/// where we can configure and start multiple services in one process.
+pub async fn standalone(
+    ParsedStandaloneOpts {
         meta_opts,
         compute_opts,
         frontend_opts,
         compactor_opts,
-    } = parse_opt_args(&opts);
+    }: ParsedStandaloneOpts,
+) -> Result<()> {
+    tracing::info!("launching Risingwave in standalone mode");
 
+    let mut is_in_memory = false;
     if let Some(opts) = meta_opts {
+        is_in_memory = matches!(opts.backend, Some(MetaBackend::Mem));
         tracing::info!("starting meta-node thread with cli args: {:?}", opts);
 
         let _meta_handle = tokio::spawn(async move {
+            let dangerous_max_idle_secs = opts.dangerous_max_idle_secs;
             risingwave_meta_node::start(opts).await;
             tracing::warn!("meta is stopped, shutdown all nodes");
+            if let Some(idle_exit_secs) = dangerous_max_idle_secs {
+                eprintln!("{}",
+                          console::style(format_args!(
+                              "RisingWave playground exited after being idle for {idle_exit_secs} seconds. Bye!"
+                          )).bold());
+                std::process::exit(0);
+            }
         });
         // wait for the service to be ready
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -155,7 +210,7 @@ pub async fn standalone(opts: StandaloneOpts) -> Result<()> {
         tracing::info!("starting compute-node thread with cli args: {:?}", opts);
         let _compute_handle = tokio::spawn(async move { risingwave_compute::start(opts).await });
     }
-    if let Some(opts) = frontend_opts {
+    if let Some(opts) = frontend_opts.clone() {
         tracing::info!("starting frontend-node thread with cli args: {:?}", opts);
         let _frontend_handle = tokio::spawn(async move { risingwave_frontend::start(opts).await });
     }
@@ -166,9 +221,36 @@ pub async fn standalone(opts: StandaloneOpts) -> Result<()> {
     }
 
     // wait for log messages to be flushed
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    eprintln!("-------------------------------");
-    eprintln!("RisingWave standalone mode is ready.");
+    tokio::time::sleep(std::time::Duration::from_millis(5000)).await;
+    eprintln!("----------------------------------------");
+    eprintln!("| RisingWave standalone mode is ready. |");
+    eprintln!("----------------------------------------");
+    if is_in_memory {
+        eprintln!(
+            "{}",
+            console::style(
+                "WARNING: You are using RisingWave's in-memory mode.
+It SHOULD NEVER be used in benchmarks and production environment!!!"
+            )
+            .red()
+            .bold()
+        );
+    }
+    if let Some(opts) = frontend_opts {
+        let host = opts.listen_addr.split(':').next().unwrap_or("localhost");
+        let port = opts.listen_addr.split(':').last().unwrap_or("4566");
+        let database = "dev";
+        let user = "root";
+        eprintln!();
+        eprintln!("Connect to the RisingWave instance via psql:");
+        eprintln!(
+            "{}",
+            console::style(format!(
+                "  psql -h {host} -p {port} -d {database} -U {user}"
+            ))
+            .blue()
+        );
+    }
 
     // TODO: should we join all handles?
     // Currently, not all services can be shutdown gracefully, just quit on Ctrl-C now.
@@ -215,19 +297,18 @@ mod test {
         assert_eq!(actual, opts);
 
         // Test parsing into node-level opts.
-        let actual = parse_opt_args(&opts);
+        let actual = parse_standalone_opt_args(&opts);
+
         check(
             actual,
             expect![[r#"
                 ParsedStandaloneOpts {
                     meta_opts: Some(
                         MetaNodeOpts {
-                            vpc_id: None,
-                            security_group_id: None,
                             listen_addr: "127.0.0.1:8001",
                             advertise_addr: "127.0.0.1:9999",
                             dashboard_host: None,
-                            prometheus_host: Some(
+                            prometheus_listener_addr: Some(
                                 "127.0.0.1:1234",
                             ),
                             etcd_endpoints: "",
@@ -235,11 +316,11 @@ mod test {
                             etcd_username: "",
                             etcd_password: [REDACTED alloc::string::String],
                             sql_endpoint: None,
-                            dashboard_ui_path: None,
                             prometheus_endpoint: None,
                             prometheus_selector: None,
-                            connector_rpc_endpoint: None,
                             privatelink_endpoint_default_tags: None,
+                            vpc_id: None,
+                            security_group_id: None,
                             config_path: "src/config/test.toml",
                             backend: None,
                             barrier_interval_ms: None,
@@ -254,6 +335,8 @@ mod test {
                             backup_storage_url: None,
                             backup_storage_directory: None,
                             heap_profiling_dir: None,
+                            dangerous_max_idle_secs: None,
+                            connector_rpc_endpoint: None,
                         },
                     ),
                     compute_opts: Some(
@@ -261,12 +344,14 @@ mod test {
                             listen_addr: "127.0.0.1:8000",
                             advertise_addr: None,
                             prometheus_listener_addr: "127.0.0.1:1234",
-                            meta_address: "http://127.0.0.1:5690",
-                            connector_rpc_endpoint: None,
+                            meta_address: List(
+                                [
+                                    http://127.0.0.1:5690/,
+                                ],
+                            ),
                             connector_rpc_sink_payload_format: None,
                             config_path: "src/config/test.toml",
                             total_memory_bytes: 34359738368,
-                            mem_table_spill_threshold: 4194304,
                             parallelism: 10,
                             role: Both,
                             metrics_level: None,
@@ -274,14 +359,18 @@ mod test {
                             meta_file_cache_dir: None,
                             async_stack_trace: None,
                             heap_profiling_dir: None,
+                            connector_rpc_endpoint: None,
                         },
                     ),
                     frontend_opts: Some(
                         FrontendOpts {
                             listen_addr: "127.0.0.1:4566",
                             advertise_addr: None,
-                            port: None,
-                            meta_addr: "http://127.0.0.1:5690",
+                            meta_addr: List(
+                                [
+                                    http://127.0.0.1:5690/,
+                                ],
+                            ),
                             prometheus_listener_addr: "127.0.0.1:1234",
                             health_check_listener_addr: "127.0.0.1:6786",
                             config_path: "src/config/test.toml",

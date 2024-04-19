@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,11 +42,13 @@ pub enum StatementType {
     FETCH,
     COPY,
     EXPLAIN,
+    CLOSE_CURSOR,
     CREATE_TABLE,
     CREATE_MATERIALIZED_VIEW,
     CREATE_VIEW,
     CREATE_SOURCE,
     CREATE_SINK,
+    CREATE_SUBSCRIPTION,
     CREATE_DATABASE,
     CREATE_SCHEMA,
     CREATE_USER,
@@ -54,6 +56,7 @@ pub enum StatementType {
     CREATE_FUNCTION,
     CREATE_CONNECTION,
     COMMENT,
+    DECLARE_CURSOR,
     DESCRIBE,
     GRANT_PRIVILEGE,
     DROP_TABLE,
@@ -63,6 +66,7 @@ pub enum StatementType {
     DROP_FUNCTION,
     DROP_SOURCE,
     DROP_SINK,
+    DROP_SUBSCRIPTION,
     DROP_SCHEMA,
     DROP_DATABASE,
     DROP_USER,
@@ -74,6 +78,7 @@ pub enum StatementType {
     ALTER_TABLE,
     ALTER_MATERIALIZED_VIEW,
     ALTER_SINK,
+    ALTER_SUBSCRIPTION,
     ALTER_SOURCE,
     ALTER_FUNCTION,
     ALTER_CONNECTION,
@@ -97,8 +102,10 @@ pub enum StatementType {
     ROLLBACK,
     SET_TRANSACTION,
     CANCEL_COMMAND,
+    FETCH_CURSOR,
     WAIT,
     KILL,
+    RECOVER,
 }
 
 impl std::fmt::Display for StatementType {
@@ -282,8 +289,14 @@ impl StatementType {
                 risingwave_sqlparser::ast::ObjectType::Connection => {
                     Ok(StatementType::DROP_CONNECTION)
                 }
+                risingwave_sqlparser::ast::ObjectType::Subscription => {
+                    Ok(StatementType::DROP_SUBSCRIPTION)
+                }
             },
             Statement::Explain { .. } => Ok(StatementType::EXPLAIN),
+            Statement::DeclareCursor { .. } => Ok(StatementType::DECLARE_CURSOR),
+            Statement::FetchCursor { .. } => Ok(StatementType::FETCH_CURSOR),
+            Statement::CloseCursor { .. } => Ok(StatementType::CLOSE_CURSOR),
             Statement::Flush => Ok(StatementType::FLUSH),
             Statement::Wait => Ok(StatementType::WAIT),
             _ => Err("unsupported statement type".to_string()),
@@ -330,6 +343,7 @@ impl StatementType {
                 | StatementType::DELETE_RETURNING
                 | StatementType::UPDATE_RETURNING
                 | StatementType::CANCEL_COMMAND
+                | StatementType::FETCH_CURSOR
         )
     }
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -76,11 +76,7 @@ pub fn create_input(
     chunk_num: usize,
 ) -> BoxedExecutor {
     let mut input = MockExecutor::new(Schema {
-        fields: input_types
-            .iter()
-            .map(Clone::clone)
-            .map(Field::unnamed)
-            .collect(),
+        fields: input_types.iter().cloned().map(Field::unnamed).collect(),
     });
     for c in gen_data(chunk_size, chunk_num, input_types) {
         input.add(c);

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ pub const USER_NAME_WILD_CARD: &str = "\"$user\"";
 /// valid schema in `search_path`.
 ///
 /// 3. when we `create` a `index` or `sink`, it will use the schema of the associated table.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SearchPath {
     origin_str: String,
     /// The path will implicitly includes `rw_catalog` and `pg_catalog` if user does specify them.

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,7 +39,8 @@ public class DatetimeTypeConverter implements CustomConverter<SchemaBuilder, Rel
         SchemaBuilder schemaBuilder = null;
         Converter converter = null;
         if ("DATE".equals(sqlType)) {
-            schemaBuilder = SchemaBuilder.string().name("rw.cdc.date.string");
+            // field schema should be optional
+            schemaBuilder = SchemaBuilder.string().name("rw.cdc.date.string").optional();
             converter = this::convertDate;
         }
         if (schemaBuilder != null) {
@@ -59,12 +60,10 @@ public class DatetimeTypeConverter implements CustomConverter<SchemaBuilder, Rel
     public static void main(String[] args) {
         var converter = new DatetimeTypeConverter();
         var d1 = LocalDate.of(1988, 5, 4);
-        var d2 = java.sql.Date.valueOf("1960-01-01");
         Integer d3 = 8989;
 
         System.out.println(converter.convertDate(null));
         System.out.println(converter.convertDate(d1));
-        System.out.println(converter.convertDate(d2));
         System.out.println(converter.convertDate(d3));
     }
 }

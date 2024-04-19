@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use const_currying::const_currying;
+use itertools::Itertools;
 use risingwave_expr::function;
 
-fn like_impl<const ESCAPE: u8, const CASE_INSENSITIVE: bool>(s: &str, p: &str) -> bool {
+use crate::{ExprError, Result};
+
+#[const_currying]
+fn like_impl<const CASE_INSENSITIVE: bool>(
+    s: &str,
+    p: &str,
+    #[maybe_const(consts = [b'\\'])] escape: u8,
+) -> bool {
     let (mut px, mut sx) = (0, 0);
     let (mut next_px, mut next_sx) = (0, 0);
     let (pbytes, sbytes) = (p.as_bytes(), s.as_bytes());
@@ -36,8 +45,8 @@ fn like_impl<const ESCAPE: u8, const CASE_INSENSITIVE: bool>(s: &str, p: &str) -
                     continue;
                 }
                 mut pc => {
-                    if ((!CASE_INSENSITIVE && pc == ESCAPE)
-                        || (CASE_INSENSITIVE && pc.eq_ignore_ascii_case(&ESCAPE)))
+                    if ((!CASE_INSENSITIVE && pc == escape)
+                        || (CASE_INSENSITIVE && pc.eq_ignore_ascii_case(&escape)))
                         && px + 1 < pbytes.len()
                     {
                         px += 1;
@@ -66,12 +75,51 @@ fn like_impl<const ESCAPE: u8, const CASE_INSENSITIVE: bool>(s: &str, p: &str) -
 
 #[function("like(varchar, varchar) -> boolean")]
 pub fn like_default(s: &str, p: &str) -> bool {
-    like_impl::<b'\\', false>(s, p)
+    like_impl_escape::<false, b'\\'>(s, p)
 }
 
 #[function("i_like(varchar, varchar) -> boolean")]
 pub fn i_like_default(s: &str, p: &str) -> bool {
-    like_impl::<b'\\', true>(s, p)
+    like_impl_escape::<true, b'\\'>(s, p)
+}
+
+#[function(
+    "like(varchar, varchar, varchar) -> boolean",
+    prebuild = "EscapeChar::from_str($2)?"
+)]
+fn like(s: &str, p: &str, escape: &EscapeChar) -> bool {
+    like_impl::<false>(s, p, escape.0)
+}
+
+// TODO: We should support '' as escape character.
+// TODO: We should support any UTF-8 character as escape character.
+#[derive(Copy, Clone, Debug)]
+struct EscapeChar(u8);
+
+impl EscapeChar {
+    fn from_str(escape: &str) -> Result<Self> {
+        escape
+            .chars()
+            .exactly_one()
+            .ok()
+            .and_then(|c| c.as_ascii().map(|c| c.to_u8()))
+            .ok_or_else(|| ExprError::InvalidParam {
+                name: "escape",
+                reason: "only single ascii character is supported now".into(),
+            })
+            .and_then(|c| {
+                // TODO: This is a temporary restriction since we don't output same result as PostgreSQL.
+                if c == b'_' {
+                    Err(ExprError::InvalidParam {
+                        name: "escape",
+                        reason: "`_` is not allowed as escape character now".into(),
+                    })
+                } else {
+                    Ok(c)
+                }
+            })
+            .map(Self)
+    }
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -230,7 +230,7 @@ mod tests {
         let fields = &proj_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);
 
-        let expected = vec![DataChunk::from_pretty(
+        let expected = [DataChunk::from_pretty(
             "I i     i i
              0 1     1 2
              1 1     1 2
