@@ -102,7 +102,7 @@ impl CompactorContext {
         }
     }
 
-    pub fn acquire_task_quota(&self, parallelism: u32) -> bool {
+    pub fn acquire_task_quota(&self, parallelism: u32) -> Option<ReleaseGuard> {
         let mut running_u32 = self.running_task_parallelism.load(Ordering::SeqCst);
         let max_u32 = self.max_task_parallelism.load(Ordering::SeqCst);
 
@@ -114,7 +114,10 @@ impl CompactorContext {
                 Ordering::SeqCst,
             ) {
                 Ok(_) => {
-                    return true;
+                    return Some(ReleaseGuard::new(
+                        self.running_task_parallelism.clone(),
+                        parallelism,
+                    ));
                 }
                 Err(old_running_u32) => {
                     running_u32 = old_running_u32;
@@ -122,7 +125,7 @@ impl CompactorContext {
             }
         }
 
-        false
+        None
     }
 
     pub fn release_task_quota(&self, parallelism: u32) {
@@ -148,5 +151,35 @@ impl CompactorContext {
         } else {
             0
         }
+    }
+}
+
+pub struct ReleaseGuard {
+    running_task_parallelism: Arc<AtomicU32>,
+    release_parallelism: u32,
+}
+
+impl ReleaseGuard {
+    fn new(running_task_parallelism: Arc<AtomicU32>, release_parallelism: u32) -> Self {
+        Self {
+            running_task_parallelism,
+            release_parallelism,
+        }
+    }
+}
+
+impl Drop for ReleaseGuard {
+    fn drop(&mut self) {
+        let prev = self
+            .running_task_parallelism
+            .fetch_sub(self.release_parallelism, Ordering::SeqCst);
+
+        assert_ge!(
+            prev,
+            self.release_parallelism,
+            "running {} parallelism {}",
+            prev,
+            self.release_parallelism
+        );
     }
 }

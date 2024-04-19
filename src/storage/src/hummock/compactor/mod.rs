@@ -80,9 +80,7 @@ use super::{
 use crate::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManager, StaticFilterKeyExtractorManager,
 };
-use crate::hummock::compactor::compaction_utils::{
-    generate_splits_for_task, optimize_by_copy_block,
-};
+use crate::hummock::compactor::compaction_utils::calculate_task_parallelism;
 use crate::hummock::compactor::compactor_runner::{compact_and_build_sst, compact_done};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::SplitTableOutput;
@@ -459,61 +457,58 @@ pub fn start_compactor(
                         let filter_key_extractor_manager = filter_key_extractor_manager.clone();
 
                         match event {
-                            ResponseEvent::CompactTask(mut compact_task) => {
-                                // let mut is_task_fail = false;
-                                let optimize_by_copy_block =
-                                    optimize_by_copy_block(&compact_task, &context);
-                                if !generate_splits_for_task(
-                                    &mut compact_task,
-                                    &context,
-                                    optimize_by_copy_block,
-                                )
-                                .await
+                            ResponseEvent::CompactTask(compact_task) => {
+                                let parallelism =
+                                    calculate_task_parallelism(&compact_task, &context);
+
+                                assert_ne!(parallelism, 0, "splits cannot be empty");
+                                let release_guard = match context
+                                    .acquire_task_quota(parallelism as u32)
                                 {
-                                    let (compact_task, table_stats) = compact_done(
-                                        compact_task,
-                                        context.clone(),
-                                        vec![],
-                                        TaskStatus::ExecuteFailed,
-                                    );
-                                    if let Err(e) =
-                                        request_sender.send(SubscribeCompactionEventRequest {
-                                            event: Some(RequestEvent::ReportTask(ReportTask {
-                                                task_id: compact_task.task_id,
-                                                task_status: compact_task.task_status,
-                                                sorted_output_ssts: compact_task
-                                                    .sorted_output_ssts
-                                                    .clone(),
-                                                table_stats_change: to_prost_table_stats_map(
-                                                    table_stats,
-                                                ),
-                                            })),
-                                            create_at: SystemTime::now()
-                                                .duration_since(std::time::UNIX_EPOCH)
-                                                .expect("Clock may have gone backwards")
-                                                .as_millis()
-                                                as u64,
-                                        })
-                                    {
-                                        let task_id = compact_task.task_id;
-                                        tracing::warn!(error = %e.as_report(), "Failed to report task {task_id:?}");
-                                    }
-
-                                    continue 'start_stream;
-                                }
-
-                                let scopeguard = scopeguard::guard(
-                                    (compact_task.clone(), context.clone()),
-                                    |(compact_task, context)| {
-                                        context.running_task_parallelism.fetch_sub(
-                                            compact_task.splits.len() as u32,
-                                            Ordering::SeqCst,
+                                    Some(release_guard) => release_guard,
+                                    None => {
+                                        tracing::warn!(
+                                                "Not enough core parallelism to serve the task {} task_parallelism {} running_task_parallelism {} max_task_parallelism {}",
+                                                compact_task.task_id,
+                                                parallelism,
+                                                context.running_task_parallelism.load(Ordering::Relaxed),
+                                                context.max_task_parallelism.load(Ordering::Relaxed),
+                                            );
+                                        let (compact_task, table_stats) = compact_done(
+                                            compact_task,
+                                            context.clone(),
+                                            vec![],
+                                            TaskStatus::NoAvailCpuResourceCanceled,
                                         );
-                                    },
-                                );
 
+                                        if let Err(e) =
+                                            request_sender.send(SubscribeCompactionEventRequest {
+                                                event: Some(RequestEvent::ReportTask(ReportTask {
+                                                    task_id: compact_task.task_id,
+                                                    task_status: compact_task.task_status,
+                                                    sorted_output_ssts: compact_task
+                                                        .sorted_output_ssts
+                                                        .clone(),
+                                                    table_stats_change: to_prost_table_stats_map(
+                                                        table_stats,
+                                                    ),
+                                                })),
+                                                create_at: SystemTime::now()
+                                                    .duration_since(std::time::UNIX_EPOCH)
+                                                    .expect("Clock may have gone backwards")
+                                                    .as_millis()
+                                                    as u64,
+                                            })
+                                        {
+                                            let task_id = compact_task.task_id;
+                                            tracing::warn!(error = %e.as_report(), "Failed to report task {task_id:?}");
+                                        }
+
+                                        continue 'start_stream;
+                                    }
+                                };
                                 executor.spawn(async move {
-                                    let _scopeguard = scopeguard;
+                                    let _release_guard = release_guard;
                                     let (tx, rx) = tokio::sync::oneshot::channel();
                                     let task_id = compact_task.task_id;
                                     shutdown.lock().unwrap().insert(task_id, tx);

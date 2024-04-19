@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BinaryHeap, HashMap, HashSet};
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
@@ -40,7 +39,7 @@ use super::task_progress::TaskProgress;
 use super::{CompactionStatistics, TaskConfig};
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
 use crate::hummock::compactor::compaction_utils::{
-    build_multi_compaction_filter, estimate_task_output_capacity, generate_splits,
+    build_multi_compaction_filter, estimate_task_output_capacity, generate_splits_for_task,
     metrics_report_for_task, optimize_by_copy_block,
 };
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
@@ -347,71 +346,23 @@ pub async fn compact(
     };
 
     let mut task_status = TaskStatus::Success;
-    // skip sst related to non-existent able_id to reduce io
-    let sstable_infos = compact_task
-        .input_ssts
-        .iter()
-        .flat_map(|level| level.table_infos.iter())
-        .filter(|table_info| {
-            let table_ids = &table_info.table_ids;
-            table_ids
-                .iter()
-                .any(|table_id| existing_table_ids.contains(table_id))
-        })
-        .cloned()
-        .collect_vec();
-    let compaction_size = sstable_infos
-        .iter()
-        .map(|table_info| table_info.file_size)
-        .sum::<u64>();
-
     let optimize_by_copy_block = optimize_by_copy_block(&compact_task, &context);
 
-    if !optimize_by_copy_block {
-        match generate_splits(&sstable_infos, compaction_size, context.clone()).await {
-            Ok(splits) => {
-                if !splits.is_empty() {
-                    compact_task.splits = splits;
-                }
-            }
-            Err(e) => {
-                tracing::warn!(error = %e.as_report(), "Failed to generate_splits");
-                task_status = TaskStatus::ExecuteFailed;
-                return (
-                    compact_done(compact_task, context.clone(), vec![], task_status),
-                    None,
-                );
-            }
-        }
-    }
-    let compact_task_statistics = statistics_compact_task(&compact_task);
-    // Number of splits (key ranges) is equal to number of compaction tasks
-    let parallelism = compact_task.splits.len();
-    assert_ne!(parallelism, 0, "splits cannot be empty");
-    if !context.acquire_task_quota(parallelism as u32) {
-        tracing::warn!(
-            "Not enough core parallelism to serve the task {} task_parallelism {} running_task_parallelism {} max_task_parallelism {}",
-            compact_task.task_id,
-            parallelism,
-            context.running_task_parallelism.load(Ordering::Relaxed),
-            context.max_task_parallelism.load(Ordering::Relaxed),
-        );
+    if let Err(e) =
+        generate_splits_for_task(&mut compact_task, &context, optimize_by_copy_block).await
+    {
+        tracing::warn!(error = %e.as_report(), "Failed to generate_splits");
+        task_status = TaskStatus::ExecuteFailed;
         return (
-            compact_done(
-                compact_task,
-                context.clone(),
-                vec![],
-                TaskStatus::NoAvailCpuResourceCanceled,
-            ),
+            compact_done(compact_task, context.clone(), vec![], task_status),
             None,
         );
     }
 
-    let _release_quota_guard =
-        scopeguard::guard((parallelism, context.clone()), |(parallelism, context)| {
-            context.release_task_quota(parallelism as u32);
-        });
-
+    let compact_task_statistics = statistics_compact_task(&compact_task);
+    // Number of splits (key ranges) is equal to number of compaction tasks
+    let parallelism = compact_task.splits.len();
+    assert_ne!(parallelism, 0, "splits cannot be empty");
     let mut output_ssts = Vec::with_capacity(parallelism);
     let mut compaction_futures = vec![];
     let mut abort_handles = vec![];

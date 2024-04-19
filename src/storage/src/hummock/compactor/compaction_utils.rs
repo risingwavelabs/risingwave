@@ -31,7 +31,6 @@ use risingwave_pb::hummock::{
     compact_task, BloomFilterType, CompactTask, KeyRange as KeyRange_vec, LevelType, SstableInfo,
     TableSchema,
 };
-use thiserror_ext::AsReport;
 use tokio::time::Instant;
 
 pub use super::context::CompactorContext;
@@ -176,11 +175,10 @@ pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompact
 }
 
 const MAX_FILE_COUNT: usize = 32;
-
 fn generate_splits_fast(
     sstable_infos: &Vec<SstableInfo>,
     compaction_size: u64,
-    context: CompactorContext,
+    context: &CompactorContext,
 ) -> HummockResult<Vec<KeyRange_vec>> {
     let worker_num = context.compaction_executor.worker_num();
     let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
@@ -214,9 +212,6 @@ fn generate_splits_fast(
     }
     indexes.sort_by(|a, b| KeyComparator::compare_encoded_full_key(a.as_ref(), b.as_ref()));
     indexes.dedup();
-    if indexes.len() <= parallelism {
-        return Ok(vec![]);
-    }
     let mut splits = vec![];
     splits.push(KeyRange_vec::new(vec![], vec![]));
     let parallel_key_count = indexes.len() / parallelism;
@@ -235,7 +230,7 @@ fn generate_splits_fast(
 pub async fn generate_splits(
     sstable_infos: &Vec<SstableInfo>,
     compaction_size: u64,
-    context: CompactorContext,
+    context: &CompactorContext,
 ) -> HummockResult<Vec<KeyRange_vec>> {
     let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
     if compaction_size > parallel_compact_size {
@@ -560,7 +555,7 @@ pub async fn generate_splits_for_task(
     compact_task: &mut CompactTask,
     context: &CompactorContext,
     optimize_by_copy_block: bool,
-) -> bool {
+) -> HummockResult<()> {
     let sstable_infos = compact_task
         .input_ssts
         .iter()
@@ -579,22 +574,14 @@ pub async fn generate_splits_for_task(
         .sum::<u64>();
 
     if !optimize_by_copy_block {
-        match generate_splits(&sstable_infos, compaction_size, context.clone()).await {
-            Ok(splits) => {
-                if !splits.is_empty() {
-                    compact_task.splits = splits;
-                }
-
-                return true;
-            }
-            Err(e) => {
-                tracing::warn!(error = %e.as_report(), "Failed to generate_splits");
-                return false;
-            }
+        let splits = generate_splits(&sstable_infos, compaction_size, context).await?;
+        if !splits.is_empty() {
+            compact_task.splits = splits;
         }
+        return Ok(());
     }
 
-    true
+    Ok(())
 }
 
 pub fn metrics_report_for_task(compact_task: &CompactTask, context: &CompactorContext) {
@@ -639,4 +626,33 @@ pub fn metrics_report_for_task(compact_task: &CompactTask, context: &CompactorCo
         .compact_read_sstn_next_level
         .with_label_values(&[&group_label, next_level_label.as_str()])
         .inc_by(target_table_infos.len() as u64);
+}
+
+pub fn calculate_task_parallelism(compact_task: &CompactTask, context: &CompactorContext) -> usize {
+    let optimize_by_copy_block = optimize_by_copy_block(compact_task, context);
+
+    if optimize_by_copy_block {
+        return 1;
+    }
+
+    let sstable_infos = compact_task
+        .input_ssts
+        .iter()
+        .flat_map(|level| level.table_infos.iter())
+        .filter(|table_info| {
+            let table_ids = &table_info.table_ids;
+            table_ids
+                .iter()
+                .any(|table_id| compact_task.existing_table_ids.contains(table_id))
+        })
+        .cloned()
+        .collect_vec();
+    let compaction_size = sstable_infos
+        .iter()
+        .map(|table_info| table_info.file_size)
+        .sum::<u64>();
+
+    generate_splits_fast(&sstable_infos, compaction_size, context)
+        .unwrap()
+        .len()
 }
