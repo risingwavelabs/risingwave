@@ -5472,16 +5472,16 @@ dependencies = [
 
 [[package]]
 name = "google-cloud-auth"
-version = "0.13.0"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af1087f1fbd2dd3f58c17c7574ddd99cd61cbbbc2c4dc81114b8687209b196cb"
+checksum = "fe54dd8b6eb2bcd5390998238bcc39d1daed4dbb70df2845832532540384fc41"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
  "google-cloud-metadata",
  "google-cloud-token",
  "home",
- "jsonwebtoken 8.3.0",
+ "jsonwebtoken",
  "reqwest 0.11.20",
  "serde",
  "serde_json",
@@ -5532,9 +5532,9 @@ dependencies = [
 
 [[package]]
 name = "google-cloud-pubsub"
-version = "0.23.0"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1da196da473976944d408a91213bafe078e7223e10694d3f8ed36b6e210fa130"
+checksum = "0b2184a5c70b994e6d77eb1c140e193e7f5fe6015e9115322fac24f7e33f003c"
 dependencies = [
  "async-channel",
  "async-stream",
@@ -6486,27 +6486,13 @@ dependencies = [
 
 [[package]]
 name = "jsonwebtoken"
-version = "8.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6971da4d9c3aa03c3d8f3ff0f4155b534aad021292003895a469716b2a230378"
-dependencies = [
- "base64 0.21.7",
- "pem 1.1.1",
- "ring 0.16.20",
- "serde",
- "serde_json",
- "simple_asn1",
-]
-
-[[package]]
-name = "jsonwebtoken"
 version = "9.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9ae10193d25051e74945f1ea2d0b42e03cc3b890f7e4cc5faa44997d808193f"
 dependencies = [
  "base64 0.21.7",
  "js-sys",
- "pem 3.0.2",
+ "pem",
  "ring 0.17.5",
  "serde",
  "serde_json",
@@ -7316,7 +7302,7 @@ dependencies = [
  "mysql_common",
  "native-tls",
  "once_cell",
- "pem 3.0.2",
+ "pem",
  "percent-encoding",
  "pin-project",
  "rand",
@@ -8345,15 +8331,6 @@ dependencies = [
 
 [[package]]
 name = "pem"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8835c273a76a90455d7344889b0964598e3316e2a79ede8e36f16bdcf2228b8"
-dependencies = [
- "base64 0.13.1",
-]
-
-[[package]]
-name = "pem"
 version = "3.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3163d2912b7c3b52d651a055f2c7eec9ba5cd22d26ef75b8dd3a59980b185923"
@@ -8408,7 +8385,7 @@ dependencies = [
  "bytes",
  "futures",
  "itertools 0.12.1",
- "jsonwebtoken 9.3.0",
+ "jsonwebtoken",
  "madsim-tokio",
  "openssl",
  "panic-message",
@@ -9229,7 +9206,7 @@ dependencies = [
  "nom",
  "oauth2",
  "openidconnect",
- "pem 3.0.2",
+ "pem",
  "prost 0.11.9",
  "prost-build 0.11.9",
  "prost-derive 0.11.9",
@@ -9643,7 +9620,7 @@ dependencies = [
  "hmac",
  "home",
  "http 0.2.9",
- "jsonwebtoken 9.3.0",
+ "jsonwebtoken",
  "log",
  "once_cell",
  "percent-encoding",
@@ -10402,7 +10379,7 @@ dependencies = [
  "itertools 0.12.1",
  "jni",
  "jsonschema-transpiler",
- "jsonwebtoken 9.3.0",
+ "jsonwebtoken",
  "madsim-rdkafka",
  "madsim-tokio",
  "madsim-tonic",
