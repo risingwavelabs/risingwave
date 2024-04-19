@@ -196,7 +196,9 @@ pub async fn standalone(
             tracing::warn!("meta is stopped, shutdown all nodes");
         });
         // wait for the service to be ready
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        while !risingwave_meta_node::is_server_started() {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
     }
     if let Some(opts) = compute_opts {
         tracing::info!("starting compute-node thread with cli args: {:?}", opts);
