@@ -13,12 +13,9 @@
 // limitations under the License.
 
 use std::future::Future;
-use std::num::NonZeroU32;
 
 use futures::{pin_mut, Stream};
 use futures_async_stream::try_stream;
-use governor::clock::MonotonicClock;
-use governor::{Quota, RateLimiter};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::row::OwnedRow;
@@ -36,7 +33,7 @@ pub trait UpstreamTableRead {
         limit: u32,
     ) -> impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + Send + '_;
 
-    fn current_binlog_offset(
+    fn current_cdc_offset(
         &self,
     ) -> impl Future<Output = StreamExecutorResult<Option<CdcOffset>>> + Send + '_;
 }
@@ -152,32 +149,15 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
         let mut builder = DataChunkBuilder::new(self.inner.schema().data_types(), args.chunk_size);
         let chunk_stream = iter_chunks(row_stream, &mut builder);
 
-        if args.chunk_size == 0 {
-            // If limit is 0, we should not read any data from the upstream table.
-            // Keep waiting util the stream is rebuilt.
-            let future = futures::future::pending::<()>();
-            future.await;
-        }
-        let limiter = {
-            let quota = Quota::per_second(NonZeroU32::new(args.chunk_size as u32).unwrap());
-            let clock = MonotonicClock;
-            RateLimiter::direct_with_clock(quota, &clock)
-        };
         #[for_await]
         for chunk in chunk_stream {
             let chunk = chunk?;
-            if chunk.cardinality() != 0 {
-                limiter
-                    .until_n_ready(NonZeroU32::new(chunk.cardinality() as u32).unwrap())
-                    .await
-                    .unwrap();
-            }
             yield Some(chunk);
         }
         yield None;
     }
 
-    async fn current_binlog_offset(&self) -> StreamExecutorResult<Option<CdcOffset>> {
+    async fn current_cdc_offset(&self) -> StreamExecutorResult<Option<CdcOffset>> {
         let binlog = self.inner.table_reader().current_cdc_offset();
         let binlog = binlog.await?;
         Ok(Some(binlog))

@@ -105,6 +105,8 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             state_table,
             backfill_chunk_size,
             disable_backfill,
+            1,
+            1000,
         );
         Ok((params.info, exec).into())
     }

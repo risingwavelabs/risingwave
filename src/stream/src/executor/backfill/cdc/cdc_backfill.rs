@@ -79,6 +79,8 @@ pub struct CdcBackfillExecutor<S: StateStore> {
     disable_backfill: bool,
 
     snapshot_interval: u32,
+
+    snapshot_read_limit: u32,
 }
 
 impl<S: StateStore> CdcBackfillExecutor<S> {
@@ -93,6 +95,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         state_table: StateTable<S>,
         chunk_size: usize,
         disable_backfill: bool,
+        snapshot_interval: u32,
+        snapshot_read_limit: u32,
     ) -> Self {
         let pk_in_output_indices = external_table.pk_in_output_indices().clone().unwrap();
         let upstream_table_id = external_table.table_id().table_id;
@@ -113,7 +117,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             chunk_size,
             disable_backfill,
             // TODO: make this option configuable in the WITH clause
-            snapshot_interval: 5,
+            snapshot_interval,
+            snapshot_read_limit,
         }
     }
 
@@ -184,11 +189,10 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
         // Keep track of rows from the snapshot.
         let mut total_snapshot_row_count = state.row_count as u64;
-        // let mut snapshot_read_epoch;
 
         let mut last_binlog_offset: Option<CdcOffset> = state
             .last_cdc_offset
-            .map_or(upstream_table_reader.current_binlog_offset().await?, Some);
+            .map_or(upstream_table_reader.current_cdc_offset().await?, Some);
 
         let offset_parse_func = upstream_table_reader
             .inner()
@@ -251,6 +255,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 }
             }
 
+            println!(
+                "start cdc backfill loop, initial_binlog_offset {:?}",
+                last_binlog_offset
+            );
+
             tracing::info!(upstream_table_id,
                 upstream_table_name,
                 initial_binlog_offset = ?last_binlog_offset,
@@ -258,7 +267,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 "start cdc backfill loop");
 
             // TODO: make the limit configurable
-            let snapshot_read_limit: usize = 1000;
+            // let snapshot_read_limit: usize = 1000;
 
             // the buffer will be drained when a barrier comes
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
@@ -274,7 +283,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 );
 
                 let right_snapshot = pin!(upstream_table_reader
-                    .snapshot_read_full_table(read_args, snapshot_read_limit as u32)
+                    .snapshot_read_full_table(read_args, self.snapshot_read_limit as u32)
                     .map(Either::Right));
 
                 let (right_snapshot, valve) = pausable(right_snapshot);
@@ -414,12 +423,10 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         ?current_pk_pos,
                                         "snapshot read stream ends"
                                     );
-                                    // If the snapshot read stream ends with less than `limit` rows,
-                                    // it means all historical data has been loaded.
+                                    // If the snapshot read stream ends, it means all historical
+                                    // data has been loaded.
                                     // We should not mark the chunk anymore,
                                     // otherwise, we will ignore some rows in the buffer.
-                                    // Here we choose to never mark the chunk.
-                                    // Consume with the renaming stream buffer chunk without mark.
                                     for chunk in upstream_chunk_buffer.drain(..) {
                                         yield Message::Chunk(mapping_chunk(
                                             chunk,
