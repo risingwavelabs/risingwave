@@ -15,6 +15,7 @@
 use std::str::FromStr;
 use std::sync::LazyLock;
 
+use bytes::BytesMut;
 use chrono::{NaiveDate, Utc};
 use pg_bigdecimal::PgNumeric;
 use risingwave_common::catalog::Schema;
@@ -26,7 +27,7 @@ use risingwave_common::types::{
 };
 use rust_decimal::Decimal as RustDecimal;
 use thiserror_ext::AsReport;
-use tokio_postgres::types::Type;
+use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql, Type};
 
 static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
 
@@ -163,40 +164,19 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                     }
                 }
                 DataType::Varchar => {
-                    match *row.columns()[i].type_() {
-                        // Since we don't support UUID natively, adapt it to a VARCHAR column
-                        Type::UUID => {
-                            let res = row.try_get::<_, Option<uuid::Uuid>>(i);
+                    match row.columns()[i].type_().kind() {
+                        // enum type needs to be handled separately
+                        Kind::Enum(_) => {
+                            let res = row.try_get::<_, Option<EnumParser>>(i);
                             match res {
-                                Ok(val) => val.map(|v| ScalarImpl::from(v.to_string())),
+                                Ok(val) => val.map(|v| ScalarImpl::from(v.value)),
                                 Err(err) => {
                                     if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                                         tracing::error!(
                                             suppressed_count,
                                             column = name,
                                             error = %err.as_report(),
-                                            "parse uuid column failed",
-                                        );
-                                    }
-                                    None
-                                }
-                            }
-                        }
-                        // we support converting NUMERIC to VARCHAR implicitly
-                        Type::NUMERIC => {
-                            // Currently in order to handle the decimal beyond RustDecimal,
-                            // we use the PgNumeric type to convert the decimal to a string.
-                            // Note: It's only used to map the numeric type in upstream Postgres to RisingWave's varchar.
-                            let res = row.try_get::<_, Option<PgNumeric>>(i);
-                            match res {
-                                Ok(val) => pg_numeric_to_varchar(val),
-                                Err(err) => {
-                                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                        tracing::error!(
-                                            column = name,
-                                            error = %err.as_report(),
-                                            suppressed_count,
-                                            "parse numeric column as pg_numeric failed",
+                                            "parse enum column failed",
                                         );
                                     }
                                     None
@@ -204,7 +184,50 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                             }
                         }
                         _ => {
-                            handle_data_type!(row, i, name, String)
+                            match *row.columns()[i].type_() {
+                                // Since we don't support UUID natively, adapt it to a VARCHAR column
+                                Type::UUID => {
+                                    let res = row.try_get::<_, Option<uuid::Uuid>>(i);
+                                    match res {
+                                        Ok(val) => val.map(|v| ScalarImpl::from(v.to_string())),
+                                        Err(err) => {
+                                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                                                tracing::error!(
+                                                    suppressed_count,
+                                                    column = name,
+                                                    error = %err.as_report(),
+                                                    "parse uuid column failed",
+                                                );
+                                            }
+                                            None
+                                        }
+                                    }
+                                }
+                                // we support converting NUMERIC to VARCHAR implicitly
+                                Type::NUMERIC => {
+                                    // Currently in order to handle the decimal beyond RustDecimal,
+                                    // we use the PgNumeric type to convert the decimal to a string.
+                                    // Note: It's only used to map the numeric type in upstream Postgres to RisingWave's varchar.
+                                    let res = row.try_get::<_, Option<PgNumeric>>(i);
+                                    match res {
+                                        Ok(val) => pg_numeric_to_varchar(val),
+                                        Err(err) => {
+                                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                                                tracing::error!(
+                                                    column = name,
+                                                    error = %err.as_report(),
+                                                    suppressed_count,
+                                                    "parse numeric column as pg_numeric failed",
+                                                );
+                                            }
+                                            None
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    handle_data_type!(row, i, name, String)
+                                }
+                            }
                         }
                     }
                 }
@@ -245,6 +268,35 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                 }
                 DataType::List(dtype) => {
                     let mut builder = dtype.create_array_builder(0);
+                    // enum list needs to be handled separately
+                    match row.columns()[i].type_().kind() {
+                        Kind::Array(item_type) => match item_type.kind() {
+                            Kind::Enum(_) => {
+                                let res = row.try_get::<_, Option<Vec<EnumParser>>>(i);
+                                match res {
+                                    Ok(val) => {
+                                        if let Some(v) = val {
+                                            v.into_iter().for_each(|val| {
+                                                builder.append(Some(ScalarImpl::from(val.value)))
+                                            });
+                                        }
+                                    }
+                                    Err(err) => {
+                                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                                            tracing::error!(
+                                                suppressed_count,
+                                                column = name,
+                                                error = %err.as_report(),
+                                                "parse enum column failed",
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {}
+                        },
+                        _ => {}
+                    }
                     match **dtype {
                         DataType::Boolean => {
                             handle_list_data_type!(row, i, name, bool, builder);
@@ -462,5 +514,112 @@ fn pg_numeric_to_string(val: Option<PgNumeric>) -> Option<String> {
     } else {
         // NULL
         None
+    }
+}
+
+#[derive(Clone, Debug)]
+struct EnumParser {
+    value: String,
+}
+
+impl<'a> FromSql<'a> for EnumParser {
+    fn from_sql(
+        _ty: &Type,
+        raw: &'a [u8],
+    ) -> Result<Self, Box<dyn std::error::Error + 'static + Sync + Send>> {
+        Ok(EnumParser {
+            value: String::from_utf8_lossy(raw).into_owned(),
+        })
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(ty.kind(), Kind::Enum(_))
+    }
+}
+
+impl ToSql for EnumParser {
+    to_sql_checked!();
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(ty.kind(), Kind::Enum(_))
+    }
+
+    fn to_sql(
+        &self,
+        ty: &Type,
+        out: &mut BytesMut,
+    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>>
+    where
+        Self: Sized,
+    {
+        match ty.kind() {
+            Kind::Enum(e) => {
+                if e.contains(&self.value) {
+                    out.extend_from_slice(self.value.as_bytes());
+                    return Ok(IsNull::No);
+                }
+            }
+            _ => {
+                return Err("EnumParser can only be used with ENUM types".into());
+            }
+        }
+        out.extend_from_slice(self.value.as_bytes());
+        Ok(IsNull::No)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use postgres::{Client, NoTls};
+
+    use crate::parser::postgres::EnumParser;
+
+    const DB: &str = "postgres";
+    const USER: &str = "kexiang";
+
+    #[ignore]
+    #[test]
+    fn enum_parser_integration_test() {
+        let connect = format!(
+            "host=localhost port=5432 user={} password={} dbname={}",
+            USER, DB, DB
+        );
+        let mut dbconn = Client::connect(connect.as_str(), NoTls).unwrap();
+        // allow type existed
+        let _ = dbconn.execute("CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy')", &[]);
+        dbconn
+            .execute(
+                "CREATE TABLE IF NOT EXISTS person(id int PRIMARY KEY, current_mood mood)",
+                &[],
+            )
+            .unwrap();
+        dbconn.execute("DELETE FROM person;", &[]).unwrap();
+        dbconn
+            .execute("INSERT INTO person VALUES (1, 'happy')", &[])
+            .unwrap();
+
+        // test from_sql
+        let got: EnumParser = dbconn
+            .query_one("SELECT * FROM person", &[])
+            .unwrap()
+            .get::<usize, Option<EnumParser>>(1)
+            .unwrap();
+        assert_eq!("happy", got.value.as_str());
+
+        dbconn.execute("DELETE FROM person;", &[]).unwrap();
+
+        // test to_sql
+        dbconn
+            .execute("INSERT INTO foobar VALUES ($1)", &[&got])
+            .unwrap();
+
+        let got_new: EnumParser = dbconn
+            .query_one("SELECT * FROM person", &[])
+            .unwrap()
+            .get::<usize, Option<EnumParser>>(1)
+            .unwrap();
+        assert_eq!("happy", got_new.value.as_str());
+        dbconn.execute("DROP TABLE person", &[]).unwrap();
+        dbconn.execute("DROP TYPE mood", &[]).unwrap();
     }
 }
