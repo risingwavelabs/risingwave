@@ -1785,7 +1785,7 @@ pub mod default {
 
         // init + upload_part + finish
         pub fn object_store_streaming_upload_attempt_timeout_ms() -> u64 {
-            3 * 1000 // 3s
+            5 * 1000 // 5s
         }
 
         pub fn object_store_streaming_upload_retry_attempts() -> usize {
