@@ -280,7 +280,7 @@ impl ControlStreamManager {
                             command_context.curr_epoch.span(),
                         )
                         .to_protobuf(),
-                        kind: command_context.kind as i32,
+                        kind: command_context.kind.to_protobuf() as i32,
                         passed_actors: vec![],
                     };
 

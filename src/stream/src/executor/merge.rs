@@ -18,16 +18,14 @@ use std::task::{Context, Poll};
 
 use anyhow::Context as _;
 use futures::stream::{FusedStream, FuturesUnordered, StreamFuture};
-use futures::{pin_mut, Stream, StreamExt};
-use futures_async_stream::try_stream;
+use futures::StreamExt;
 use tokio::time::Instant;
 
-use super::error::StreamExecutorError;
 use super::exchange::input::BoxedInput;
 use super::watermark::*;
 use super::*;
 use crate::executor::exchange::input::new_input;
-use crate::executor::monitor::StreamingMetrics;
+use crate::executor::prelude::*;
 use crate::executor::utils::ActorInputMetrics;
 use crate::task::{FragmentId, SharedContext};
 

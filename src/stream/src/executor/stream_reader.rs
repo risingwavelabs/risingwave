@@ -137,7 +137,8 @@ mod tests {
     use tokio::sync::mpsc;
 
     use super::*;
-    use crate::executor::{barrier_to_message_stream, Barrier, StreamExecutorError};
+    use crate::executor::source::barrier_to_message_stream;
+    use crate::executor::{Barrier, StreamExecutorError};
 
     const TEST_TRANSACTION_ID1: TxnId = 0;
     const TEST_TRANSACTION_ID2: TxnId = 1;

@@ -19,7 +19,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{
-    ColumnCatalog, ConflictBehavior, CreateType, TableId, OBJECT_ID_PLACEHOLDER,
+    ColumnCatalog, ConflictBehavior, CreateType, StreamJobStatus, TableId, OBJECT_ID_PLACEHOLDER,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
@@ -260,6 +260,7 @@ impl StreamMaterialize {
             initialized_at_epoch: None,
             cleaned_by_watermark: false,
             create_type: CreateType::Foreground, // Will be updated in the handler itself.
+            stream_job_status: StreamJobStatus::Creating,
             description: None,
             incoming_sinks: vec![],
             initialized_at_cluster_version: None,

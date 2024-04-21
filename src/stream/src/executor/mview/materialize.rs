@@ -17,17 +17,15 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 use std::ops::{Deref, Index};
-use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::{stream, StreamExt};
-use futures_async_stream::try_stream;
+use futures::stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::Op;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, TableId};
 use risingwave_common::row::{CompactedRow, OwnedRow, RowDeserializer};
-use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
+use risingwave_common::types::DefaultOrd;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -35,18 +33,12 @@ use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerializer};
 use risingwave_pb::catalog::Table;
 use risingwave_storage::mem_table::KeyOp;
 use risingwave_storage::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
-use risingwave_storage::StateStore;
 
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTableInner;
-use crate::executor::error::StreamExecutorError;
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{
-    expect_first_barrier, ActorContext, ActorContextRef, AddMutation, BoxedMessageStream, Execute,
-    Executor, Message, Mutation, StreamExecutorResult, UpdateMutation,
-};
-use crate::task::{ActorId, AtomicU64Ref};
+use crate::executor::prelude::*;
+use crate::executor::{AddMutation, UpdateMutation};
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
 pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
@@ -790,9 +782,9 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::batch_table::storage_table::StorageTable;
 
+    use super::*;
     use crate::executor::test_utils::prelude::StateTable;
     use crate::executor::test_utils::*;
-    use crate::executor::*;
 
     #[tokio::test]
     async fn test_materialize_executor() {

@@ -21,7 +21,7 @@ impl Rule for SourceToKafkaScanRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let source: &LogicalSource = plan.as_logical_source()?;
         if source.core.is_kafka_connector() {
-            Some(LogicalKafkaScan::new(source).into())
+            Some(LogicalKafkaScan::create(source))
         } else {
             None
         }

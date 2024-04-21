@@ -141,9 +141,9 @@ sqllogictest -p 4566 -d dev './e2e_test/generated/**/*.slt' --junit "generated-$
 echo "--- Kill cluster"
 cluster_stop
 
-echo "--- e2e, $mode, error ui"
+echo "--- e2e, ci-3cn-1fe-with-recovery, error ui"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cluster_start
+risedev ci-start ci-3cn-1fe-with-recovery
 sqllogictest -p 4566 -d dev './e2e_test/error_ui/simple/**/*.slt'
 sqllogictest -p 4566 -d dev -e postgres-extended './e2e_test/error_ui/extended/**/*.slt'
 

@@ -13,17 +13,13 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::iter::repeat_with;
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
 
-use await_tree::InstrumentAwait;
-use futures::{Stream, StreamExt, TryStreamExt};
-use futures_async_stream::try_stream;
+use futures::TryStreamExt;
 use itertools::Itertools;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::Op;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
 use risingwave_common::metrics::LabelGuardedIntCounter;
@@ -35,11 +31,10 @@ use tokio::time::Instant;
 use tracing::{event, Instrument};
 
 use super::exchange::output::{new_output, BoxedOutput};
-use super::{AddMutation, Executor, TroublemakerExecutor, UpdateMutation, Watermark};
-use crate::error::StreamResult;
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{Barrier, Message, Mutation, StreamConsumer};
-use crate::task::{ActorId, DispatcherId, SharedContext};
+use super::{AddMutation, TroublemakerExecutor, UpdateMutation};
+use crate::executor::prelude::*;
+use crate::executor::StreamConsumer;
+use crate::task::{DispatcherId, SharedContext};
 
 /// [`DispatchExecutor`] consumes messages and send them into downstream actors. Usually,
 /// data chunks will be dispatched with some specified policy, while control message
