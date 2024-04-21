@@ -164,69 +164,66 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                     }
                 }
                 DataType::Varchar => {
-                    match row.columns()[i].type_().kind() {
+                    if let Kind::Enum(_) = row.columns()[i].type_().kind() {
                         // enum type needs to be handled separately
-                        Kind::Enum(_) => {
-                            let res = row.try_get::<_, Option<EnumParser>>(i);
-                            match res {
-                                Ok(val) => val.map(|v| ScalarImpl::from(v.value)),
-                                Err(err) => {
-                                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                        tracing::error!(
-                                            suppressed_count,
-                                            column = name,
-                                            error = %err.as_report(),
-                                            "parse enum column failed",
-                                        );
-                                    }
-                                    None
+                        let res = row.try_get::<_, Option<EnumParser>>(i);
+                        match res {
+                            Ok(val) => val.map(|v| ScalarImpl::from(v.value)),
+                            Err(err) => {
+                                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                                    tracing::error!(
+                                        suppressed_count,
+                                        column = name,
+                                        error = %err.as_report(),
+                                        "parse enum column failed",
+                                    );
                                 }
+                                None
                             }
                         }
-                        _ => {
-                            match *row.columns()[i].type_() {
-                                // Since we don't support UUID natively, adapt it to a VARCHAR column
-                                Type::UUID => {
-                                    let res = row.try_get::<_, Option<uuid::Uuid>>(i);
-                                    match res {
-                                        Ok(val) => val.map(|v| ScalarImpl::from(v.to_string())),
-                                        Err(err) => {
-                                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                                tracing::error!(
-                                                    suppressed_count,
-                                                    column = name,
-                                                    error = %err.as_report(),
-                                                    "parse uuid column failed",
-                                                );
-                                            }
-                                            None
+                    } else {
+                        match *row.columns()[i].type_() {
+                            // Since we don't support UUID natively, adapt it to a VARCHAR column
+                            Type::UUID => {
+                                let res = row.try_get::<_, Option<uuid::Uuid>>(i);
+                                match res {
+                                    Ok(val) => val.map(|v| ScalarImpl::from(v.to_string())),
+                                    Err(err) => {
+                                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                                            tracing::error!(
+                                                suppressed_count,
+                                                column = name,
+                                                error = %err.as_report(),
+                                                "parse uuid column failed",
+                                            );
                                         }
+                                        None
                                     }
                                 }
-                                // we support converting NUMERIC to VARCHAR implicitly
-                                Type::NUMERIC => {
-                                    // Currently in order to handle the decimal beyond RustDecimal,
-                                    // we use the PgNumeric type to convert the decimal to a string.
-                                    // Note: It's only used to map the numeric type in upstream Postgres to RisingWave's varchar.
-                                    let res = row.try_get::<_, Option<PgNumeric>>(i);
-                                    match res {
-                                        Ok(val) => pg_numeric_to_varchar(val),
-                                        Err(err) => {
-                                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                                tracing::error!(
-                                                    column = name,
-                                                    error = %err.as_report(),
-                                                    suppressed_count,
-                                                    "parse numeric column as pg_numeric failed",
-                                                );
-                                            }
-                                            None
+                            }
+                            // we support converting NUMERIC to VARCHAR implicitly
+                            Type::NUMERIC => {
+                                // Currently in order to handle the decimal beyond RustDecimal,
+                                // we use the PgNumeric type to convert the decimal to a string.
+                                // Note: It's only used to map the numeric type in upstream Postgres to RisingWave's varchar.
+                                let res = row.try_get::<_, Option<PgNumeric>>(i);
+                                match res {
+                                    Ok(val) => pg_numeric_to_varchar(val),
+                                    Err(err) => {
+                                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                                            tracing::error!(
+                                                column = name,
+                                                error = %err.as_report(),
+                                                suppressed_count,
+                                                "parse numeric column as pg_numeric failed",
+                                            );
                                         }
+                                        None
                                     }
                                 }
-                                _ => {
-                                    handle_data_type!(row, i, name, String)
-                                }
+                            }
+                            _ => {
+                                handle_data_type!(row, i, name, String)
                             }
                         }
                     }
@@ -269,33 +266,29 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                 DataType::List(dtype) => {
                     let mut builder = dtype.create_array_builder(0);
                     // enum list needs to be handled separately
-                    match row.columns()[i].type_().kind() {
-                        Kind::Array(item_type) => match item_type.kind() {
-                            Kind::Enum(_) => {
-                                let res = row.try_get::<_, Option<Vec<EnumParser>>>(i);
-                                match res {
-                                    Ok(val) => {
-                                        if let Some(v) = val {
-                                            v.into_iter().for_each(|val| {
-                                                builder.append(Some(ScalarImpl::from(val.value)))
-                                            });
-                                        }
+                    if let Kind::Array(item_type) = row.columns()[i].type_().kind() {
+                        if let Kind::Enum(_) = item_type.kind() {
+                            let res = row.try_get::<_, Option<Vec<EnumParser>>>(i);
+                            match res {
+                                Ok(val) => {
+                                    if let Some(v) = val {
+                                        v.into_iter().for_each(|val| {
+                                            builder.append(Some(ScalarImpl::from(val.value)))
+                                        });
                                     }
-                                    Err(err) => {
-                                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                            tracing::error!(
-                                                suppressed_count,
-                                                column = name,
-                                                error = %err.as_report(),
-                                                "parse enum column failed",
-                                            );
-                                        }
+                                }
+                                Err(err) => {
+                                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                                        tracing::error!(
+                                            suppressed_count,
+                                            column = name,
+                                            error = %err.as_report(),
+                                            "parse enum column failed",
+                                        );
                                     }
                                 }
                             }
-                            _ => {}
-                        },
-                        _ => {}
+                        }
                     }
                     match **dtype {
                         DataType::Boolean => {
