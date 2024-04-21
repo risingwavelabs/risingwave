@@ -132,7 +132,7 @@ impl Execute for MockOffsetGenExecutor {
 }
 
 #[tokio::test]
-async fn test_cdc_backfill_basic() -> StreamResult<()> {
+async fn test_cdc_backfill() -> StreamResult<()> {
     use risingwave_common::types::DataType;
     let memory_state_store = MemoryStateStore::new();
 

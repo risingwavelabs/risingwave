@@ -40,9 +40,7 @@ pub trait UpstreamTableRead {
 
 #[derive(Debug, Clone, Default)]
 pub struct SnapshotReadArgs {
-    pub epoch: u64,
     pub current_pos: Option<OwnedRow>,
-    pub ordered: bool,
     pub chunk_size: usize,
     pub pk_in_output_indices: Vec<usize>,
 }
@@ -54,9 +52,7 @@ impl SnapshotReadArgs {
         pk_in_output_indices: Vec<usize>,
     ) -> Self {
         Self {
-            epoch: INVALID_EPOCH,
             current_pos,
-            ordered: false,
             chunk_size,
             pk_in_output_indices,
         }
@@ -83,12 +79,12 @@ impl<T> UpstreamTableReader<T> {
 impl UpstreamTableReader<ExternalStorageTable> {
     /// Continuously read the rows from the upstream table until reaching the end of the table
     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
-    pub async fn snapshot_read_full_table(&self, args: SnapshotReadArgs, limit: u32) {
+    pub async fn snapshot_read_full_table(&self, args: SnapshotReadArgs, batch_size: u32) {
         let mut read_args = args;
 
         loop {
             let mut read_count: usize = 0;
-            let chunk_stream = self.snapshot_read(read_args.clone(), limit);
+            let chunk_stream = self.snapshot_read(read_args.clone(), batch_size);
             let mut current_pk_pos = read_args.current_pos.clone().unwrap_or_default();
             #[for_await]
             for chunk in chunk_stream {
@@ -102,7 +98,7 @@ impl UpstreamTableReader<ExternalStorageTable> {
                     }
                     None => {
                         // reach the end of the table
-                        if read_count < limit as _ {
+                        if read_count < batch_size as _ {
                             tracing::debug!("finished loading of table snapshot");
                             yield None;
                             unreachable!("snapshot stream is ended, should not reach here");

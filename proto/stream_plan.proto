@@ -561,6 +561,18 @@ message StreamScanNode {
   catalog.Table arrangement_table = 10;
 }
 
+
+
+// Config options for CDC backfill
+message StreamCdcScanOptions {
+  // Whether skip the backfill and only consume from upstream.
+  bool disable_backfill = 1;
+
+  uint32 snapshot_barrier_interval = 2;
+
+  uint32 snapshot_batch_size = 3;
+}
+
 message StreamCdcScanNode {
   uint32 table_id = 1;
 
@@ -580,8 +592,10 @@ message StreamCdcScanNode {
   // The rate limit for the stream cdc scan node.
   optional uint32 rate_limit = 6;
 
-  // Whether skip the backfill and only consume from upstream.
-  bool disable_backfill = 7;
+  reserved 7;
+  reserved "disable_backfill";
+
+  StreamCdcScanOptions options = 8;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.

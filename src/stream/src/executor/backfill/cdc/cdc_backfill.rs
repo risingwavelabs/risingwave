@@ -78,12 +78,12 @@ pub struct CdcBackfillExecutor<S: StateStore> {
 
     chunk_size: usize,
 
+    /// Whether to disable backfill
     disable_backfill: bool,
-
-    // TODO: make these options configurable
+    /// Barreir interval to start a new snapshot read
     snapshot_interval: u32,
-
-    snapshot_read_limit: u32,
+    /// Batch size for a snapshot read query
+    snapshot_batch_size: u32,
 }
 
 impl<S: StateStore> CdcBackfillExecutor<S> {
@@ -99,7 +99,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         chunk_size: usize,
         disable_backfill: bool,
         snapshot_interval: u32,
-        snapshot_read_limit: u32,
+        snapshot_batch_size: u32,
     ) -> Self {
         let pk_in_output_indices = external_table.pk_in_output_indices().clone().unwrap();
         let upstream_table_id = external_table.table_id().table_id;
@@ -120,7 +120,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             chunk_size,
             disable_backfill,
             snapshot_interval,
-            snapshot_read_limit,
+            snapshot_batch_size,
         }
     }
 
@@ -208,10 +208,10 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             initial_binlog_offset = ?last_binlog_offset,
             ?current_pk_pos,
             is_finished = state.is_finished,
-            disable_backfill = self.disable_backfill,
             snapshot_row_count = total_snapshot_row_count,
             chunk_size = self.chunk_size,
-            "start cdc backfill"
+            "start cdc backfill. options: disable_backfill: {}, snapshot_barrier_interval: {}, snapshot_batch_size: {}",
+            self.disable_backfill, self.snapshot_interval, self.snapshot_batch_size
         );
 
         // CDC Backfill Algorithm:
@@ -277,7 +277,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 );
 
                 let right_snapshot = pin!(upstream_table_reader
-                    .snapshot_read_full_table(read_args, self.snapshot_read_limit)
+                    .snapshot_read_full_table(read_args, self.snapshot_batch_size)
                     .map(Either::Right));
 
                 let (right_snapshot, valve) = pausable(right_snapshot);

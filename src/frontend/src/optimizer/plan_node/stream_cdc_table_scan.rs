@@ -247,6 +247,7 @@ impl StreamCdcTableScan {
             "stream cdc table scan output indices"
         );
 
+        let options = self.core.options.to_proto();
         let stream_scan_body = PbNodeBody::StreamCdcScan(StreamCdcScanNode {
             table_id: upstream_source_id,
             upstream_column_ids,
@@ -255,7 +256,7 @@ impl StreamCdcTableScan {
             state_table: Some(catalog),
             cdc_table_desc: Some(self.core.cdc_table_desc.to_protobuf()),
             rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
-            disable_backfill: self.core.disable_backfill,
+            options: Some(options),
         });
 
         // plan: merge -> filter -> exchange(simple) -> stream_scan

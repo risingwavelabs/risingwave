@@ -14,7 +14,6 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -32,7 +31,6 @@ use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_connector::source::cdc::external::{
     DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
-use risingwave_connector::source::cdc::CDC_BACKFILL_ENABLE_KEY;
 use risingwave_connector::{source, WithPropertiesExt};
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, Table, WatermarkDesc};
@@ -62,7 +60,7 @@ use crate::handler::create_source::{
     check_source_schema, handle_addition_columns, validate_compatibility, UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::generic::SourceNodeKind;
+use crate::optimizer::plan_node::generic::{CdcScanOptions, SourceNodeKind};
 use crate::optimizer::plan_node::{LogicalCdcScan, LogicalSource};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
@@ -850,20 +848,13 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
 
     tracing::debug!(?cdc_table_desc, "create cdc table");
 
-    // disable backfill if 'snapshot=false'
-    let disable_backfill = match context.with_options().get(CDC_BACKFILL_ENABLE_KEY) {
-        None => false,
-        Some(v) => {
-            !(bool::from_str(v)
-                .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_ENABLE_KEY))?)
-        }
-    };
+    let options = CdcScanOptions::from_with_options(context.with_options())?;
 
     let logical_scan = LogicalCdcScan::create(
         external_table_name,
         Rc::new(cdc_table_desc),
         context.clone(),
-        disable_backfill,
+        options,
     );
 
     let scan_node: PlanRef = logical_scan.into();
