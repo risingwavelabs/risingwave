@@ -232,7 +232,7 @@ async fn test_cdc_backfill_basic() -> StreamResult<()> {
             4, // 4 rows in a snapshot chunk
             false,
             1,
-            1,
+            4,
         )
         .boxed(),
     );

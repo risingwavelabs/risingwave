@@ -70,6 +70,8 @@ pub struct CdcBackfillExecutor<S: StateStore> {
     /// State table of the `CdcBackfill` executor
     state_impl: CdcBackfillState<S>,
 
+    // TODO: introduce a CdcBackfillProgress to report finish to Meta
+    // This object is just a stub right now
     progress: Option<CreateMviewProgress>,
 
     metrics: Arc<StreamingMetrics>,
@@ -78,6 +80,7 @@ pub struct CdcBackfillExecutor<S: StateStore> {
 
     disable_backfill: bool,
 
+    // TODO: make these options configurable
     snapshot_interval: u32,
 
     snapshot_read_limit: u32,
@@ -116,7 +119,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             metrics,
             chunk_size,
             disable_backfill,
-            // TODO: make this option configuable in the WITH clause
             snapshot_interval,
             snapshot_read_limit,
         }
@@ -255,19 +257,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 }
             }
 
-            println!(
-                "start cdc backfill loop, initial_binlog_offset {:?}",
-                last_binlog_offset
-            );
-
             tracing::info!(upstream_table_id,
                 upstream_table_name,
                 initial_binlog_offset = ?last_binlog_offset,
                 ?current_pk_pos,
                 "start cdc backfill loop");
-
-            // TODO: make the limit configurable
-            // let snapshot_read_limit: usize = 1000;
 
             // the buffer will be drained when a barrier comes
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
@@ -283,7 +277,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 );
 
                 let right_snapshot = pin!(upstream_table_reader
-                    .snapshot_read_full_table(read_args, self.snapshot_read_limit as u32)
+                    .snapshot_read_full_table(read_args, self.snapshot_read_limit)
                     .map(Either::Right));
 
                 let (right_snapshot, valve) = pausable(right_snapshot);
@@ -309,6 +303,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                         Either::Left(msg) => {
                             match msg? {
                                 Message::Barrier(barrier) => {
+                                    // increase the barrier count and check whether need to start a new snapshot
                                     barrier_count += 1;
                                     let can_start_new_snapshot =
                                         barrier_count == self.snapshot_interval;
@@ -368,7 +363,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                             ?snapshot_read_row_cnt,
                                             "Prepare to start a new snapshot"
                                         );
-                                        // Break the for loop and prepare to start a new snapshot
+                                        // Break the loop for consuming snapshot and prepare to start a new snapshot
                                         break;
                                     } else {
                                         // emit barrier and continue consume the backfill stream

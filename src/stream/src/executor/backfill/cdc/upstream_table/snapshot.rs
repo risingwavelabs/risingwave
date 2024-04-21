@@ -89,7 +89,7 @@ impl UpstreamTableReader<ExternalStorageTable> {
         loop {
             let mut read_count: usize = 0;
             let chunk_stream = self.snapshot_read(read_args.clone(), limit);
-            let mut current_pk_pos = read_args.current_pos.clone().unwrap_or(OwnedRow::default());
+            let mut current_pk_pos = read_args.current_pos.clone().unwrap_or_default();
             #[for_await]
             for chunk in chunk_stream {
                 let chunk = chunk?;
