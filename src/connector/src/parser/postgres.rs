@@ -266,199 +266,210 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                 DataType::List(dtype) => {
                     let mut builder = dtype.create_array_builder(0);
                     // enum list needs to be handled separately
-                    if let Kind::Array(item_type) = row.columns()[i].type_().kind() {
-                        if let Kind::Enum(_) = item_type.kind() {
-                            let res = row.try_get::<_, Option<Vec<EnumParser>>>(i);
-                            match res {
-                                Ok(val) => {
-                                    if let Some(v) = val {
-                                        v.into_iter().for_each(|val| {
-                                            builder.append(Some(ScalarImpl::from(val.value)))
-                                        });
-                                    }
+                    if let Kind::Array(item_type) = row.columns()[i].type_().kind()
+                        && let Kind::Enum(_) = item_type.kind()
+                    {
+                        let res = row.try_get::<_, Option<Vec<EnumParser>>>(i);
+                        match res {
+                            Ok(val) => {
+                                if let Some(v) = val {
+                                    v.into_iter().for_each(|val| {
+                                        builder.append(Some(ScalarImpl::from(val.value)))
+                                    });
                                 }
-                                Err(err) => {
-                                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                        tracing::error!(
-                                            suppressed_count,
-                                            column = name,
-                                            error = %err.as_report(),
-                                            "parse enum column failed",
-                                        );
-                                    }
+                            }
+                            Err(err) => {
+                                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                                    tracing::error!(
+                                        suppressed_count,
+                                        column = name,
+                                        error = %err.as_report(),
+                                        "parse enum column failed",
+                                    );
                                 }
                             }
                         }
+                    } else {
+                        match **dtype {
+                            DataType::Boolean => {
+                                handle_list_data_type!(row, i, name, bool, builder);
+                            }
+                            DataType::Int16 => {
+                                handle_list_data_type!(row, i, name, i16, builder);
+                            }
+                            DataType::Int32 => {
+                                handle_list_data_type!(row, i, name, i32, builder);
+                            }
+                            DataType::Int64 => {
+                                handle_list_data_type!(row, i, name, i64, builder);
+                            }
+                            DataType::Float32 => {
+                                handle_list_data_type!(row, i, name, f32, builder);
+                            }
+                            DataType::Float64 => {
+                                handle_list_data_type!(row, i, name, f64, builder);
+                            }
+                            DataType::Decimal => {
+                                handle_list_data_type!(row, i, name, RustDecimal, builder, Decimal);
+                            }
+                            DataType::Date => {
+                                handle_list_data_type!(row, i, name, NaiveDate, builder, Date);
+                            }
+                            DataType::Varchar => {
+                                match *row.columns()[i].type_() {
+                                    // Since we don't support UUID natively, adapt it to a VARCHAR column
+                                    Type::UUID_ARRAY => {
+                                        let res = row.try_get::<_, Option<Vec<uuid::Uuid>>>(i);
+                                        match res {
+                                            Ok(val) => {
+                                                if let Some(v) = val {
+                                                    v.into_iter().for_each(|val| {
+                                                        builder.append(Some(ScalarImpl::from(
+                                                            val.to_string(),
+                                                        )))
+                                                    });
+                                                }
+                                            }
+                                            Err(err) => {
+                                                if let Ok(suppressed_count) = LOG_SUPPERSSER.check()
+                                                {
+                                                    tracing::error!(
+                                                        suppressed_count,
+                                                        column = name,
+                                                        error = %err.as_report(),
+                                                        "parse uuid column failed",
+                                                    );
+                                                }
+                                            }
+                                        };
+                                    }
+                                    Type::NUMERIC_ARRAY => {
+                                        let res = row.try_get::<_, Option<Vec<PgNumeric>>>(i);
+                                        match res {
+                                            Ok(val) => {
+                                                if let Some(v) = val {
+                                                    v.into_iter().for_each(|val| {
+                                                        builder.append(pg_numeric_to_varchar(Some(
+                                                            val,
+                                                        )))
+                                                    });
+                                                }
+                                            }
+                                            Err(err) => {
+                                                if let Ok(suppressed_count) = LOG_SUPPERSSER.check()
+                                                {
+                                                    tracing::error!(
+                                                        suppressed_count,
+                                                        column = name,
+                                                        error = %err.as_report(),
+                                                        "parse numeric list column as pg_numeric list failed",
+                                                    );
+                                                }
+                                            }
+                                        };
+                                    }
+                                    _ => {
+                                        handle_list_data_type!(row, i, name, String, builder);
+                                    }
+                                }
+                            }
+                            DataType::Time => {
+                                handle_list_data_type!(
+                                    row,
+                                    i,
+                                    name,
+                                    chrono::NaiveTime,
+                                    builder,
+                                    Time
+                                );
+                            }
+                            DataType::Timestamp => {
+                                handle_list_data_type!(
+                                    row,
+                                    i,
+                                    name,
+                                    chrono::NaiveDateTime,
+                                    builder,
+                                    Timestamp
+                                );
+                            }
+                            DataType::Timestamptz => {
+                                handle_list_data_type!(
+                                    row,
+                                    i,
+                                    name,
+                                    chrono::DateTime<Utc>,
+                                    builder,
+                                    Timestamptz
+                                );
+                            }
+                            DataType::Interval => {
+                                handle_list_data_type!(row, i, name, Interval, builder);
+                            }
+                            DataType::Jsonb => {
+                                handle_list_data_type!(
+                                    row,
+                                    i,
+                                    name,
+                                    serde_json::Value,
+                                    builder,
+                                    JsonbVal
+                                );
+                            }
+                            DataType::Bytea => {
+                                let res = row.try_get::<_, Option<Vec<Vec<u8>>>>(i);
+                                match res {
+                                    Ok(val) => {
+                                        if let Some(v) = val {
+                                            v.into_iter().for_each(|val| {
+                                                builder.append(Some(ScalarImpl::from(
+                                                    val.into_boxed_slice(),
+                                                )))
+                                            })
+                                        }
+                                    }
+                                    Err(err) => {
+                                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                                            tracing::error!(
+                                                suppressed_count,
+                                                column = name,
+                                                error = %err.as_report(),
+                                                "parse column failed",
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                            DataType::Int256 => {
+                                let res = row.try_get::<_, Option<Vec<PgNumeric>>>(i);
+                                match res {
+                                    Ok(val) => {
+                                        if let Some(v) = val {
+                                            v.into_iter().for_each(|val| {
+                                                builder.append(pg_numeric_to_rw_int256(Some(val)))
+                                            });
+                                        }
+                                    }
+                                    Err(err) => {
+                                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                                            tracing::error!(
+                                                suppressed_count,
+                                                column = name,
+                                                error = %err.as_report(),
+                                                "parse numeric list column as pg_numeric list failed",
+                                            );
+                                        }
+                                    }
+                                };
+                            }
+                            DataType::Struct(_) | DataType::List(_) | DataType::Serial => {
+                                tracing::warn!(
+                                    "unsupported List data type {:?}, set the List to empty",
+                                    **dtype
+                                );
+                            }
+                        };
                     }
-                    match **dtype {
-                        DataType::Boolean => {
-                            handle_list_data_type!(row, i, name, bool, builder);
-                        }
-                        DataType::Int16 => {
-                            handle_list_data_type!(row, i, name, i16, builder);
-                        }
-                        DataType::Int32 => {
-                            handle_list_data_type!(row, i, name, i32, builder);
-                        }
-                        DataType::Int64 => {
-                            handle_list_data_type!(row, i, name, i64, builder);
-                        }
-                        DataType::Float32 => {
-                            handle_list_data_type!(row, i, name, f32, builder);
-                        }
-                        DataType::Float64 => {
-                            handle_list_data_type!(row, i, name, f64, builder);
-                        }
-                        DataType::Decimal => {
-                            handle_list_data_type!(row, i, name, RustDecimal, builder, Decimal);
-                        }
-                        DataType::Date => {
-                            handle_list_data_type!(row, i, name, NaiveDate, builder, Date);
-                        }
-                        DataType::Varchar => {
-                            match *row.columns()[i].type_() {
-                                // Since we don't support UUID natively, adapt it to a VARCHAR column
-                                Type::UUID_ARRAY => {
-                                    let res = row.try_get::<_, Option<Vec<uuid::Uuid>>>(i);
-                                    match res {
-                                        Ok(val) => {
-                                            if let Some(v) = val {
-                                                v.into_iter().for_each(|val| {
-                                                    builder.append(Some(ScalarImpl::from(
-                                                        val.to_string(),
-                                                    )))
-                                                });
-                                            }
-                                        }
-                                        Err(err) => {
-                                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                                tracing::error!(
-                                                    suppressed_count,
-                                                    column = name,
-                                                    error = %err.as_report(),
-                                                    "parse uuid column failed",
-                                                );
-                                            }
-                                        }
-                                    };
-                                }
-                                Type::NUMERIC_ARRAY => {
-                                    let res = row.try_get::<_, Option<Vec<PgNumeric>>>(i);
-                                    match res {
-                                        Ok(val) => {
-                                            if let Some(v) = val {
-                                                v.into_iter().for_each(|val| {
-                                                    builder.append(pg_numeric_to_varchar(Some(val)))
-                                                });
-                                            }
-                                        }
-                                        Err(err) => {
-                                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                                tracing::error!(
-                                                    suppressed_count,
-                                                    column = name,
-                                                    error = %err.as_report(),
-                                                    "parse numeric list column as pg_numeric list failed",
-                                                );
-                                            }
-                                        }
-                                    };
-                                }
-                                _ => {
-                                    handle_list_data_type!(row, i, name, String, builder);
-                                }
-                            }
-                        }
-                        DataType::Time => {
-                            handle_list_data_type!(row, i, name, chrono::NaiveTime, builder, Time);
-                        }
-                        DataType::Timestamp => {
-                            handle_list_data_type!(
-                                row,
-                                i,
-                                name,
-                                chrono::NaiveDateTime,
-                                builder,
-                                Timestamp
-                            );
-                        }
-                        DataType::Timestamptz => {
-                            handle_list_data_type!(
-                                row,
-                                i,
-                                name,
-                                chrono::DateTime<Utc>,
-                                builder,
-                                Timestamptz
-                            );
-                        }
-                        DataType::Interval => {
-                            handle_list_data_type!(row, i, name, Interval, builder);
-                        }
-                        DataType::Jsonb => {
-                            handle_list_data_type!(
-                                row,
-                                i,
-                                name,
-                                serde_json::Value,
-                                builder,
-                                JsonbVal
-                            );
-                        }
-                        DataType::Bytea => {
-                            let res = row.try_get::<_, Option<Vec<Vec<u8>>>>(i);
-                            match res {
-                                Ok(val) => {
-                                    if let Some(v) = val {
-                                        v.into_iter().for_each(|val| {
-                                            builder.append(Some(ScalarImpl::from(
-                                                val.into_boxed_slice(),
-                                            )))
-                                        })
-                                    }
-                                }
-                                Err(err) => {
-                                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                        tracing::error!(
-                                            suppressed_count,
-                                            column = name,
-                                            error = %err.as_report(),
-                                            "parse column failed",
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                        DataType::Int256 => {
-                            let res = row.try_get::<_, Option<Vec<PgNumeric>>>(i);
-                            match res {
-                                Ok(val) => {
-                                    if let Some(v) = val {
-                                        v.into_iter().for_each(|val| {
-                                            builder.append(pg_numeric_to_rw_int256(Some(val)))
-                                        });
-                                    }
-                                }
-                                Err(err) => {
-                                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                        tracing::error!(
-                                            suppressed_count,
-                                            column = name,
-                                            error = %err.as_report(),
-                                            "parse numeric list column as pg_numeric list failed",
-                                        );
-                                    }
-                                }
-                            };
-                        }
-                        DataType::Struct(_) | DataType::List(_) | DataType::Serial => {
-                            tracing::warn!(
-                                "unsupported List data type {:?}, set the List to empty",
-                                **dtype
-                            );
-                        }
-                    };
-
                     Some(ScalarImpl::from(ListValue::new(builder.finish())))
                 }
                 DataType::Struct(_) | DataType::Serial => {
