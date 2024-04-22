@@ -411,7 +411,7 @@ pub mod test_utils {
         let mut store: HashMap<TableKey<Bytes>, Bytes> = HashMap::new();
         let mut rng = thread_rng();
         let mut logs = Vec::new();
-        for epoch_idx in 1..=epoch_count {
+        for epoch_idx in 1..=(epoch_count - 1) {
             let mut epoch_logs = Vec::new();
             let epoch = test_epoch(epoch_idx as _);
             for key_idx in 0..key_count {
@@ -436,6 +436,15 @@ pub mod test_utils {
                     }
                     store.insert(key, value);
                 }
+            }
+            logs.push((epoch, epoch_logs));
+        }
+        // at the end add an epoch with only delete
+        {
+            let mut epoch_logs = Vec::new();
+            let epoch = test_epoch(epoch_count as _);
+            for (key, value) in store {
+                epoch_logs.push((key, KeyOp::Delete(value)));
             }
             logs.push((epoch, epoch_logs));
         }
