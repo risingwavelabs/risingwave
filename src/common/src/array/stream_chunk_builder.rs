@@ -33,10 +33,15 @@ pub struct StreamChunkBuilder {
     /// Data types of columns
     data_types: Vec<DataType>,
 
-    /// Maximum capacity of column builder
-    capacity: usize,
+    /// Max number of rows in a chunk. When it's `Some(n)`, the chunk builder will, if necessary,
+    /// yield a chunk of which the size is strictly less than or equal to `n` when appending records.
+    /// When it's `None`, the chunk builder will yield chunks only when `take` is called.
+    max_chunk_size: Option<usize>,
 
-    /// Size of column builder
+    /// The initial capacity of `ops` and `ArrayBuilder`s.
+    initial_capacity: usize,
+
+    /// Number of currently pending `Op`s.
     size: usize,
 }
 
@@ -52,40 +57,49 @@ impl Drop for StreamChunkBuilder {
     }
 }
 
-impl StreamChunkBuilder {
-    pub fn new(chunk_size: usize, data_types: Vec<DataType>) -> Self {
-        assert!(chunk_size > 0);
+const MAX_INITIAL_CAPACITY: usize = 4096;
+const DEFAULT_INITIAL_CAPACITY: usize = 64;
 
-        let ops = Vec::with_capacity(chunk_size);
+impl StreamChunkBuilder {
+    /// Create a new `StreamChunkBuilder` with a fixed max chunk size.
+    /// The max chunk size must be at least 2, otherwise it cannot produce
+    /// any chunk with `UpdateDelete + UpdateInsert`.
+    pub fn new(max_chunk_size: usize, data_types: Vec<DataType>) -> Self {
+        assert!(max_chunk_size >= 2);
+
+        let initial_capacity = max_chunk_size.min(MAX_INITIAL_CAPACITY);
+
+        let ops = Vec::with_capacity(initial_capacity);
         let column_builders = data_types
             .iter()
-            .map(|datatype| datatype.create_array_builder(chunk_size))
+            .map(|datatype| datatype.create_array_builder(initial_capacity))
             .collect();
         Self {
             ops,
             column_builders,
             data_types,
             vis_builder: BitmapBuilder::default(),
-            capacity: chunk_size,
+            max_chunk_size: Some(max_chunk_size),
+            initial_capacity,
             size: 0,
         }
     }
 
-    /// Increase chunk size
-    ///
-    /// A [`StreamChunk`] will be returned when `size == capacity`
-    #[must_use]
-    fn inc_size(&mut self) -> Option<StreamChunk> {
-        self.size += 1;
-
-        // Take a chunk when capacity is exceeded. Splitting `UpdateDelete` and `UpdateInsert`
-        // should be avoided, so when the last one is `UpdateDelete`, we delay the chunk until
-        // `UpdateInsert` comes. This means the output chunk size may exceed the given `chunk_size`,
-        // and theoretically at most `chunk_size + 1` if inputs are consistent.
-        if self.size >= self.capacity && !self.ops[self.ops.len() - 1].is_update_delete() {
-            self.take()
-        } else {
-            None
+    /// Create a new `StreamChunkBuilder` with unlimited chunk size.
+    /// The builder will only yield chunks when `take` is called.
+    pub fn unlimited(data_types: Vec<DataType>, initial_capacity: Option<usize>) -> Self {
+        let initial_capacity = initial_capacity.unwrap_or(DEFAULT_INITIAL_CAPACITY);
+        Self {
+            ops: Vec::with_capacity(initial_capacity),
+            column_builders: data_types
+                .iter()
+                .map(|datatype| datatype.create_array_builder(initial_capacity))
+                .collect(),
+            data_types,
+            vis_builder: BitmapBuilder::default(),
+            max_chunk_size: None,
+            initial_capacity,
+            size: 0,
         }
     }
 
@@ -100,20 +114,6 @@ impl StreamChunkBuilder {
         iter: impl IntoIterator<Item = (usize, DatumRef<'a>)>,
     ) -> Option<StreamChunk> {
         self.append_iter_inner::<true>(op, iter)
-    }
-
-    #[must_use]
-    fn append_iter_inner<'a, const VIS: bool>(
-        &mut self,
-        op: Op,
-        iter: impl IntoIterator<Item = (usize, DatumRef<'a>)>,
-    ) -> Option<StreamChunk> {
-        self.ops.push(op);
-        for (i, datum) in iter {
-            self.column_builders[i].append(datum);
-        }
-        self.vis_builder.append(VIS);
-        self.inc_size()
     }
 
     /// Append a row to the builder, return a chunk if the builder is full.
@@ -142,29 +142,70 @@ impl StreamChunkBuilder {
         }
     }
 
+    /// Take all the pending data and return a chunk. If there is no pending data, return `None`.
+    /// Note that if this is an unlimited chunk builder, the only way to get a chunk is to call
+    /// `take`.
     #[must_use]
     pub fn take(&mut self) -> Option<StreamChunk> {
         if self.size == 0 {
             return None;
         }
-
         self.size = 0;
-        let new_columns = self
+
+        let ops = std::mem::replace(&mut self.ops, Vec::with_capacity(self.initial_capacity));
+        let columns = self
             .column_builders
             .iter_mut()
             .zip_eq_fast(&self.data_types)
             .map(|(builder, datatype)| {
-                std::mem::replace(builder, datatype.create_array_builder(self.capacity)).finish()
+                std::mem::replace(
+                    builder,
+                    datatype.create_array_builder(self.initial_capacity),
+                )
+                .finish()
             })
             .map(Into::into)
             .collect::<Vec<_>>();
-
         let vis = std::mem::take(&mut self.vis_builder).finish();
 
-        Some(StreamChunk::with_visibility(
-            std::mem::replace(&mut self.ops, Vec::with_capacity(self.capacity)),
-            new_columns,
-            vis,
-        ))
+        Some(StreamChunk::with_visibility(ops, columns, vis))
+    }
+
+    #[must_use]
+    fn append_iter_inner<'a, const VIS: bool>(
+        &mut self,
+        op: Op,
+        iter: impl IntoIterator<Item = (usize, DatumRef<'a>)>,
+    ) -> Option<StreamChunk> {
+        let res = if let Some(max_chunk_size) = self.max_chunk_size
+            && self.size == max_chunk_size - 1
+            && op.is_update_delete()
+        {
+            // Let's ensure chunk size is really <= `max_chunk_size`.
+            // If we are appending an `Update`, and the size will exceed the `max_chunk_size` after
+            // appending `U-` and `U+`, we should take the existing data first, ensuring we have
+            // space for the new `U-` and `U+`.
+            self.take()
+        } else {
+            None
+        };
+
+        self.ops.push(op);
+        for (i, datum) in iter {
+            self.column_builders[i].append(datum);
+        }
+        self.vis_builder.append(VIS);
+        self.size += 1;
+
+        if res.is_some() {
+            assert_eq!(self.size, 1);
+            res
+        } else if let Some(max_chunk_size) = self.max_chunk_size
+            && self.size == max_chunk_size
+        {
+            self.take()
+        } else {
+            None
+        }
     }
 }
