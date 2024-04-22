@@ -1067,7 +1067,7 @@ impl HummockUploader {
             // flush large data at first to avoid generate small files.
             unseal_epochs.sort_by_key(|item| item.0);
             for (_, epoch) in unseal_epochs.iter().rev() {
-                let task_count =  self.context.stats.uploader_uploading_task_count.get() as u64;
+                let task_count = self.context.stats.uploader_uploading_task_count.get() as u64;
                 if task_count >= self.context.max_upload_task_number {
                     break;
                 }

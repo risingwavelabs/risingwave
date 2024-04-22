@@ -37,7 +37,7 @@ use risingwave_hummock_sdk::table_watermark::{
 };
 use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, LocalSstableInfo};
-use risingwave_pb::hummock::LevelType;
+use risingwave_pb::hummock::{LevelType, SstableInfo};
 use sync_point::sync_point;
 
 use crate::error::StorageResult;
@@ -48,12 +48,13 @@ use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::{
-    prune_nonoverlapping_ssts, prune_overlapping_ssts, range_overlap, search_sst_idx,
+    filter_single_sst, prune_nonoverlapping_ssts, prune_overlapping_ssts, range_overlap,
+    search_sst_idx,
 };
 use crate::hummock::{
     get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, HummockError, HummockResult,
-    HummockStorageIterator, HummockStorageIteratorInner, LocalHummockStorageIterator,
-    ReadVersionTuple, Sstable, SstableIterator,
+    HummockStorageIterator, HummockStorageIteratorInner, LocalHummockStorageIterator, Sstable,
+    SstableIterator,
 };
 use crate::mem_table::{ImmId, ImmutableMemtable, MemTableHummockIterator};
 use crate::monitor::{
@@ -305,11 +306,15 @@ impl HummockReadVersion {
 
                     let mut intersect_imm_ids: HashSet<u64> = HashSet::default();
                     let mut check_consecutive = false;
-                    for data in &self.staging.data {
+                    let mut first_pos = 0;
+                    for (idx, data) in self.staging.data.iter().enumerate() {
                         if let Some(imm) = data.to_imm()
                             && sst_imm_ids.contains(&imm.batch_id())
                         {
                             assert!(intersect_imm_ids.is_empty() || check_consecutive);
+                            if intersect_imm_ids.is_empty() {
+                                first_pos = idx;
+                            }
                             intersect_imm_ids.insert(imm.batch_id());
                             check_consecutive = true;
                         } else {
@@ -319,14 +324,15 @@ impl HummockReadVersion {
 
                     if !intersect_imm_ids.is_empty() {
                         // Check 2)
+                        self.staging
+                            .data
+                            .insert(first_pos, StagingData::Sst(staging_sst_ref));
                         self.staging.data.retain(|data| match data {
                             StagingData::ImmMem(imm) => {
                                 !intersect_imm_ids.contains(&imm.batch_id())
                             }
                             StagingData::Sst(_) => true,
                         });
-                        self.staging.data.push(StagingData::Sst(staging_sst_ref));
-                        self.staging.data.sort_by_key(|data| data.min_epoch());
                     }
                 }
             },
@@ -1068,12 +1074,19 @@ impl HummockVersionReader {
             .await?;
             Ok::<_, HummockError>(MergeIterator::new(iters))
         }
+        let user_key_range = bound_table_key_range(options.table_id, &key_range);
+        let user_key_range_ref = (
+            user_key_range.0.as_ref().map(UserKey::as_ref),
+            user_key_range.1.as_ref().map(UserKey::as_ref),
+        );
 
         let new_value_iter = make_iter(
             change_log
                 .iter()
                 .flat_map(|log| log.new_value.iter())
-                .filter(|sst| filter_single_sst(sst, options.table_id, &key_range)),
+                .filter(|sst| {
+                    filter_single_sst(sst, options.table_id.table_id(), user_key_range_ref)
+                }),
             &self.sstable_store,
             read_options.clone(),
         )
@@ -1082,7 +1095,9 @@ impl HummockVersionReader {
             change_log
                 .iter()
                 .flat_map(|log| log.old_value.iter())
-                .filter(|sst| filter_single_sst(sst, options.table_id, &key_range)),
+                .filter(|sst| {
+                    filter_single_sst(sst, options.table_id.table_id(), user_key_range_ref)
+                }),
             &self.sstable_store,
             read_options.clone(),
         )

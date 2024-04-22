@@ -29,7 +29,6 @@ use risingwave_hummock_sdk::key::{
 };
 use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
 use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
-use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::oneshot;
