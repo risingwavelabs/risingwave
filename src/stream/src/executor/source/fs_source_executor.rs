@@ -417,6 +417,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                                 Mutation::Throttle(actor_to_apply) => {
                                     if let Some(new_rate_limit) =
                                         actor_to_apply.get(&self.actor_ctx.id)
+                                        && *new_rate_limit != self.rate_limit_rps
                                     {
                                         self.rate_limit_rps = *new_rate_limit;
                                         self.rebuild_stream_reader(&source_desc, &mut stream)

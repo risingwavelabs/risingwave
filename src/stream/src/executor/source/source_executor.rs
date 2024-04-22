@@ -512,8 +512,10 @@ impl<S: StateStore> SourceExecutor<S> {
                                 .await?;
                             }
                             Mutation::Throttle(actor_to_apply) => {
-                                if let Some(throttle) = actor_to_apply.get(&self.actor_ctx.id) {
-                                    self.rate_limit_rps = *throttle;
+                                if let Some(new_rate_limit) = actor_to_apply.get(&self.actor_ctx.id)
+                                    && *new_rate_limit != self.rate_limit_rps
+                                {
+                                    self.rate_limit_rps = *new_rate_limit;
                                     // recreate from latest_split_info
                                     self.rebuild_stream_reader(&source_desc, &mut stream)
                                         .await?;

@@ -248,6 +248,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                             Mutation::Throttle(actor_to_apply) => {
                                                 if let Some(new_rate_limit) =
                                                     actor_to_apply.get(&self.actor_ctx.id)
+                                                    && *new_rate_limit != self.rate_limit_rps
                                                 {
                                                     self.rate_limit_rps = *new_rate_limit;
                                                     need_rebuild_reader = true;
