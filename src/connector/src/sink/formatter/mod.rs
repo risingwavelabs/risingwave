@@ -326,7 +326,7 @@ macro_rules! dispatch_sink_formatter_str_key_impl {
 
             SinkFormatterImpl::UpsertJson($name) => $body,
             SinkFormatterImpl::UpsertTextJson($name) => $body,
-            SinkFormatterImpl::UpsertAvro($name) => $body,
+            SinkFormatterImpl::UpsertAvro(_) => unreachable!(),
             SinkFormatterImpl::UpsertTextAvro($name) => $body,
             SinkFormatterImpl::DebeziumJson($name) => $body,
             SinkFormatterImpl::AppendOnlyTextTemplate($name) => $body,
