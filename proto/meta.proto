@@ -387,7 +387,8 @@ message SubscribeRequest {
 message MetaSnapshot {
   message SnapshotVersion {
     uint64 catalog_version = 1;
-    reserved 2; // for old parallel_unit_mapping_version
+    reserved 2;
+    reserved "parallel_unit_mapping_version";
     uint64 worker_node_version = 3;
     uint64 streaming_worker_mapping_version = 4;
   }
@@ -402,14 +403,16 @@ message MetaSnapshot {
   repeated catalog.Connection connections = 17;
   repeated catalog.Subscription subscriptions = 19;
   repeated user.UserInfo users = 8;
-  reserved 9; // for old parallel_unit_mapping
+  reserved 9;
+  reserved "parallel_unit_mappings";
   GetSessionParamsResponse session_params = 20;
   repeated common.WorkerNode nodes = 10;
   hummock.HummockSnapshot hummock_snapshot = 11;
   hummock.HummockVersion hummock_version = 12;
   backup_service.MetaBackupManifestId meta_backup_manifest_id = 14;
   hummock.WriteLimits hummock_write_limits = 16;
-  reserved 18; // for old serving_parallel_unit_mappings
+  reserved 18;
+  reserved "serving_parallel_unit_mappings";
 
   // for streaming
   repeated FragmentWorkerMapping streaming_worker_mappings = 21;
@@ -640,6 +643,8 @@ service SessionParamService {
 message GetServingVnodeMappingsRequest {}
 
 message GetServingVnodeMappingsResponse {
+  reserved 1;
+  reserved "mappings";
   map<uint32, uint32> fragment_to_table = 2;
   repeated FragmentWorkerMapping worker_mappings = 3;
 }
