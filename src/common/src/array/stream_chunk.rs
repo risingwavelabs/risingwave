@@ -133,11 +133,7 @@ impl StreamChunk {
     /// Should prefer using [`StreamChunkBuilder`] instead to avoid unnecessary
     /// allocation of rows.
     pub fn from_rows(rows: &[(Op, impl Row)], data_types: &[DataType]) -> Self {
-        // `append_row` will cause the builder to finish immediately once capacity is met.
-        // Hence, we allocate an extra row here, to avoid the builder finishing prematurely.
-        // This just makes the code cleaner, since we can loop through all rows, and consume it finally.
-        // TODO: introduce `new_unlimited` to decouple memory reservation from builder capacity.
-        let mut builder = StreamChunkBuilder::new(rows.len() + 1, data_types.to_vec());
+        let mut builder = StreamChunkBuilder::unlimited(data_types.to_vec(), Some(rows.len()));
 
         for (op, row) in rows {
             let none = builder.append_row(*op, row);
@@ -180,7 +176,6 @@ impl StreamChunk {
     /// the last new chunk will be the remainder.
     ///
     /// For consecutive `UpdateDelete` and `UpdateInsert`, they will be kept in one chunk.
-    /// As a result, some chunks may have `size + 1` rows.
     pub fn split(&self, size: usize) -> Vec<Self> {
         let mut builder = StreamChunkBuilder::new(size, self.data_types());
         let mut outputs = Vec::new();
@@ -659,11 +654,7 @@ impl StreamChunk {
         let data_types = chunks[0].data_types();
         let size = chunks.iter().map(|c| c.cardinality()).sum::<usize>();
 
-        // `append_row` will cause the builder to finish immediately once capacity is met.
-        // Hence, we allocate an extra row here, to avoid the builder finishing prematurely.
-        // This just makes the code cleaner, since we can loop through all rows, and consume it finally.
-        // TODO: introduce `new_unlimited` to decouple memory reservation from builder capacity.
-        let mut builder = StreamChunkBuilder::new(size + 1, data_types);
+        let mut builder = StreamChunkBuilder::unlimited(data_types, Some(size));
 
         for chunk in chunks {
             // TODO: directly append chunks.
@@ -813,18 +804,24 @@ mod tests {
              - 2 .",
         );
         let results = chunk.split(2);
-        assert_eq!(2, results.len());
+        assert_eq!(3, results.len());
         assert_eq!(
             results[0].to_pretty().to_string(),
             "\
++---+---+---+
+| + | 1 | 6 |
++---+---+---+"
+        );
+        assert_eq!(
+            results[1].to_pretty().to_string(),
+            "\
 +----+---+---+
-|  + | 1 | 6 |
 | U- | 3 | 7 |
 | U+ | 4 |   |
 +----+---+---+"
         );
         assert_eq!(
-            results[1].to_pretty().to_string(),
+            results[2].to_pretty().to_string(),
             "\
 +---+---+---+
 | - | 2 |   |

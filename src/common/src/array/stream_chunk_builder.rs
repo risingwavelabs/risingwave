@@ -41,7 +41,7 @@ pub struct StreamChunkBuilder {
     /// The initial capacity of `ops` and `ArrayBuilder`s.
     initial_capacity: usize,
 
-    /// Number of currently pending `Op`s.
+    /// Number of currently pending rows.
     size: usize,
 }
 
