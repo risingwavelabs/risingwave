@@ -12,20 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::{Debug, Formatter};
-use std::sync::Arc;
-
-use futures::StreamExt;
-use futures_async_stream::try_stream;
-use risingwave_common::array::{Array, ArrayImpl, Op, StreamChunk};
+use risingwave_common::array::{Array, ArrayImpl, Op};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::NonStrictExpression;
 
-use super::{
-    ActorContextRef, BoxedMessageStream, Execute, Executor, Message, StreamExecutorError,
-    StreamExecutorResult,
-};
+use crate::executor::prelude::*;
 
 /// `FilterExecutor` filters data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a boolean array on whether each item should be retained. And then,

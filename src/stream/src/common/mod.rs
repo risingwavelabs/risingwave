@@ -13,7 +13,6 @@
 // limitations under the License.
 
 pub use column_mapping::*;
-pub use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 
 pub mod cache;
 mod column_mapping;

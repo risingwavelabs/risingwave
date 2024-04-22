@@ -244,7 +244,7 @@ func main() {
 			},
 			cli.StringFlag{
 				Name:        "mode",
-				Usage:       "ad-click | ad-ctr | twitter | cdn-metrics | clickstream | ecommerce | delivery | livestream",
+				Usage:       "ad-click | ad-ctr | twitter | cdn-metrics | clickstream | ecommerce | delivery | livestream | compatible-data",
 				Required:    true,
 				Destination: &cfg.Mode,
 			},
@@ -266,6 +266,13 @@ func main() {
 				Usage:       "The topic to filter. If not specified, all topics will be used.",
 				Required:    false,
 				Destination: &cfg.Topic,
+			},
+			cli.Int64Flag{
+				Name:        "total_event",
+				Usage:       "The total number of events to generate. If not specified, the generator will run indefinitely.",
+				Value:       0,
+				Required:    false,
+				Destination: &cfg.TotalEvents,
 			},
 		},
 	}

@@ -27,6 +27,7 @@
 
 mod key_cmp;
 use std::cmp::Ordering;
+use std::collections::HashMap;
 
 pub use key_cmp::*;
 use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
@@ -37,6 +38,7 @@ use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
 use crate::table_stats::{to_prost_table_stats_map, PbTableStatsMap, TableStatsMap};
 
+pub mod change_log;
 pub mod compact;
 pub mod compaction_group;
 pub mod key;
@@ -47,6 +49,9 @@ pub mod table_watermark;
 pub mod version;
 
 pub use compact::*;
+use risingwave_common::catalog::TableId;
+
+use crate::table_watermark::TableWatermarks;
 
 pub type HummockSstableObjectId = u64;
 pub type HummockSstableId = u64;
@@ -86,6 +91,16 @@ macro_rules! info_in_release {
             }
         }
     }
+}
+
+#[derive(Default, Debug)]
+pub struct SyncResult {
+    /// The size of all synced shared buffers.
+    pub sync_size: usize,
+    /// The `sst_info` of sync.
+    pub uncommitted_ssts: Vec<LocalSstableInfo>,
+    /// The collected table watermarks written by state tables.
+    pub table_watermarks: HashMap<TableId, TableWatermarks>,
 }
 
 #[derive(Debug, Clone)]

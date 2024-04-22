@@ -212,7 +212,7 @@ pub mod verify {
     use bytes::Bytes;
     use risingwave_common::buffer::Bitmap;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
-    use risingwave_hummock_sdk::HummockReadEpoch;
+    use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
     use tracing::log::warn;
 
     use crate::error::StorageResult;
@@ -733,7 +733,7 @@ pub mod boxed_state_store {
     use dyn_clone::{clone_trait_object, DynClone};
     use risingwave_common::buffer::Bitmap;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
-    use risingwave_hummock_sdk::HummockReadEpoch;
+    use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
 
     use crate::error::StorageResult;
     use crate::hummock::HummockStorage;

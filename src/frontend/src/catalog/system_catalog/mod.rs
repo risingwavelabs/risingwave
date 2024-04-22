@@ -19,8 +19,7 @@ pub mod rw_catalog;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
-use async_trait::async_trait;
-use futures::future::BoxFuture;
+use futures::stream::BoxStream;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
@@ -142,7 +141,7 @@ pub struct BuiltinTable {
     schema: &'static str,
     columns: Vec<SystemCatalogColumnsDef<'static>>,
     pk: &'static [usize],
-    function: for<'a> fn(&'a SysCatalogReaderImpl) -> BoxFuture<'a, Result<DataChunk, BoxedError>>,
+    function: for<'a> fn(&'a SysCatalogReaderImpl) -> BoxStream<'a, Result<DataChunk, BoxedError>>,
 }
 
 pub struct BuiltinView {
@@ -340,18 +339,15 @@ pub static SYS_CATALOGS: LazyLock<SystemCatalog> = LazyLock::new(|| {
 #[linkme::distributed_slice]
 pub static SYS_CATALOGS_SLICE: [fn() -> BuiltinCatalog];
 
-#[async_trait]
 impl SysCatalogReader for SysCatalogReaderImpl {
-    async fn read_table(&self, table_id: &TableId) -> Result<DataChunk, BoxedError> {
+    fn read_table(&self, table_id: TableId) -> BoxStream<'_, Result<DataChunk, BoxedError>> {
         let table_name = SYS_CATALOGS
             .catalogs
             .get((table_id.table_id - SYS_CATALOG_START_ID as u32) as usize)
             .unwrap();
         match table_name {
-            BuiltinCatalog::Table(t) => (t.function)(self).await,
-            BuiltinCatalog::View(_) => {
-                panic!("read_table should not be called on a view")
-            }
+            BuiltinCatalog::Table(t) => (t.function)(self),
+            BuiltinCatalog::View(_) => panic!("read_table should not be called on a view"),
         }
     }
 }

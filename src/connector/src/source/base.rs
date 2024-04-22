@@ -138,31 +138,36 @@ pub struct SourceCtrlOpts {
     pub rate_limit: Option<u32>,
 }
 
-impl Default for SourceCtrlOpts {
-    fn default() -> Self {
-        Self {
-            chunk_size: MAX_CHUNK_SIZE,
-            rate_limit: None,
-        }
-    }
-}
+// The options in `SourceCtrlOpts` are so important that we don't want to impl `Default` for it,
+// so that we can prevent any unintentional use of the default value.
+impl !Default for SourceCtrlOpts {}
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SourceEnumeratorContext {
     pub info: SourceEnumeratorInfo,
     pub metrics: Arc<EnumeratorMetrics>,
 }
 
-#[derive(Clone, Debug, Default)]
+impl SourceEnumeratorContext {
+    /// Create a dummy `SourceEnumeratorContext` for testing purpose, or for the situation
+    /// where the real context doesn't matter.
+    pub fn dummy() -> SourceEnumeratorContext {
+        SourceEnumeratorContext {
+            info: SourceEnumeratorInfo { source_id: 0 },
+            metrics: Arc::new(EnumeratorMetrics::default()),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct SourceEnumeratorInfo {
     pub source_id: u32,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SourceContext {
     pub actor_id: u32,
     pub source_id: TableId,
-    // There should be a 1-1 mapping between `source_id` & `fragment_id`
     pub fragment_id: u32,
     pub source_name: String,
     pub metrics: Arc<SourceMetrics>,
@@ -175,10 +180,10 @@ impl SourceContext {
         actor_id: u32,
         source_id: TableId,
         fragment_id: u32,
+        source_name: String,
         metrics: Arc<SourceMetrics>,
         source_ctrl_opts: SourceCtrlOpts,
         connector_props: ConnectorProperties,
-        source_name: String,
     ) -> Self {
         Self {
             actor_id,
@@ -189,6 +194,23 @@ impl SourceContext {
             source_ctrl_opts,
             connector_props,
         }
+    }
+
+    /// Create a dummy `SourceContext` for testing purpose, or for the situation
+    /// where the real context doesn't matter.
+    pub fn dummy() -> Self {
+        Self::new(
+            0,
+            TableId::new(0),
+            0,
+            "dummy".to_string(),
+            Arc::new(SourceMetrics::default()),
+            SourceCtrlOpts {
+                chunk_size: MAX_CHUNK_SIZE,
+                rate_limit: None,
+            },
+            ConnectorProperties::default(),
+        )
     }
 }
 

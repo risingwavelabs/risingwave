@@ -16,17 +16,13 @@ use std::collections::BTreeMap;
 use std::mem;
 
 use either::Either;
-use futures::{StreamExt, TryStreamExt};
-use futures_async_stream::try_stream;
-use risingwave_common::array::StreamChunk;
+use futures::TryStreamExt;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableVersionId};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;
 use risingwave_dml::dml_manager::DmlManagerRef;
 
-use super::error::StreamExecutorError;
-use super::{expect_first_barrier, BoxedMessageStream, Execute, Executor, Message, Mutation};
-use crate::common::StreamChunkBuilder;
+use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
 
 /// [`DmlExecutor`] accepts both stream data and batch data for data manipulation on a specific

@@ -18,7 +18,9 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use itertools::Itertools;
-use risingwave_common::catalog::{TableOption, DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
+use risingwave_common::catalog::{
+    is_subscription_internal_table, TableOption, DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS,
+};
 use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_common::{bail, current_cluster_version};
@@ -908,10 +910,10 @@ impl CatalogController {
             .all(&txn)
             .await?;
         let mut relations = internal_table_objs
-            .into_iter()
+            .iter()
             .map(|(table, obj)| PbRelation {
                 relation_info: Some(PbRelationInfo::Table(
-                    ObjectModel(table, obj.unwrap()).into(),
+                    ObjectModel(table.clone(), obj.clone().unwrap()).into(),
                 )),
             })
             .collect_vec();
@@ -954,11 +956,21 @@ impl CatalogController {
                 });
             }
             ObjectType::Subscription => {
-                let (subscription, obj) = Subscription::find_by_id(job_id)
+                let (mut subscription, obj) = Subscription::find_by_id(job_id)
                     .find_also_related(Object)
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("subscription", job_id))?;
+                let log_store_names: Vec<_> = internal_table_objs
+                    .iter()
+                    .filter(|a| is_subscription_internal_table(&subscription.name, &a.0.name))
+                    .map(|a| &a.0.name)
+                    .collect();
+                if log_store_names.len() != 1 {
+                    bail!("A subscription can only have one log_store_name");
+                }
+                subscription.subscription_internal_table_name =
+                    log_store_names.get(0).cloned().cloned();
                 relations.push(PbRelation {
                     relation_info: Some(PbRelationInfo::Subscription(
                         ObjectModel(subscription, obj.unwrap()).into(),

@@ -15,13 +15,10 @@
 use std::marker::PhantomData;
 use std::ops::Bound;
 
-use futures::StreamExt;
-use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::{ArrayRef, Op, StreamChunk};
-use risingwave_common::catalog::Schema;
-use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common::array::{ArrayRef, Op};
+use risingwave_common::row::RowExt;
 use risingwave_common::types::{ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
@@ -33,16 +30,10 @@ use risingwave_expr::window_function::{
     create_window_state, StateEvictHint, StateKey, WindowFuncCall, WindowStates,
 };
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::StateStore;
 
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
-use crate::common::table::state_table::StateTable;
-use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, Message,
-    StreamExecutorError, StreamExecutorResult,
-};
-use crate::task::AtomicU64Ref;
+use crate::executor::prelude::*;
 
 struct Partition {
     states: WindowStates,
