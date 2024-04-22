@@ -21,7 +21,5 @@ use crate::handler::HandlerArgs;
 // RisingWave does not yet support any session-internal objects, such as temporary tables.
 // Do nothing for this command.
 pub fn handle_discard(_: HandlerArgs) -> Result<RwPgResponse> {
-    // let session = handler_args.session;
-
     Ok(PgResponse::empty_result(StatementType::DISCARD))
 }
