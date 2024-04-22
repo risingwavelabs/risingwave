@@ -196,7 +196,12 @@ pub async fn standalone(
             tracing::warn!("meta is stopped, shutdown all nodes");
         });
         // wait for the service to be ready
+        let mut tries = 0;
         while !risingwave_meta_node::is_server_started() {
+            if tries % 50 == 0 {
+                tracing::info!("waiting for meta service to be ready...");
+            }
+            tries += 1;
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
     }

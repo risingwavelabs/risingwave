@@ -107,6 +107,8 @@ use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
 use crate::{hummock, serving, MetaError, MetaResult};
 
+/// Used for standalone mode checking the status of the meta service.
+/// This can be easier and more accurate than checking the TCP connection.
 pub mod started {
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering::Relaxed;

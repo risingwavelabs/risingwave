@@ -521,6 +521,11 @@ impl Endpoint {
 #[cfg(not(madsim))]
 #[easy_ext::ext(RouterExt)]
 impl<L> tonic::transport::server::Router<L> {
+    /// Serve the given service while monitoring the connection.
+    ///
+    /// Calling the function will first bind the given service to the given address. Awaiting the
+    /// returned future will then start the server and keep it running until the given signal
+    /// future resolves.
     pub fn monitored_serve_with_shutdown<ResBody>(
         self,
         listen_addr: std::net::SocketAddr,
