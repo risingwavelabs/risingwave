@@ -612,11 +612,13 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             media_type,
             res?,
             self.object_store_metrics.clone(),
-            if self.config.retry.streaming_upload_timeout_ms == 0 {
-                None
-            } else {
+            if self.config.retry.streaming_upload_timeout_ms != UNLIMITED_MAX_TIMEOUT {
                 Some(Duration::from_millis(
                     self.config.retry.streaming_upload_timeout_ms,
+                ))
+            } else {
+                Some(Duration::from_millis(
+                    self.config.retry.streaming_upload_attempt_timeout_ms,
                 ))
             },
         ))
@@ -705,11 +707,13 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             media_type,
             res?,
             self.object_store_metrics.clone(),
-            if self.config.retry.streaming_read_timeout_ms == 0 {
-                None
-            } else {
+            if self.config.retry.streaming_read_timeout_ms != UNLIMITED_MAX_TIMEOUT {
                 Some(Duration::from_millis(
                     self.config.retry.streaming_read_timeout_ms,
+                ))
+            } else {
+                Some(Duration::from_millis(
+                    self.config.retry.streaming_read_attempt_timeout_ms,
                 ))
             },
         ))
