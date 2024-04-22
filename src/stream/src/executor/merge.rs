@@ -305,15 +305,14 @@ impl Stream for SelectReceivers {
                         }
                     }
                 }
-                // If one upstream is finished, we finish the whole stream with an error. This
-                // should not happen normally as we use the barrier as the control message.
-                Some((None, r)) => {
-                    return Poll::Ready(Some(Err(StreamExecutorError::channel_closed(format!(
-                        "exchange from actor {} to actor {} closed unexpectedly",
-                        r.actor_id(),
-                        self.actor_id
-                    )))))
-                }
+                // We use barrier as the control message of the stream. That is, we always stop the
+                // actors actively when we receive a `Stop` mutation, instead of relying on the stream
+                // termination.
+                //
+                // Besides, in abnormal cases when the other side of the `Input` closes unexpectedly,
+                // we also yield an `Err(ExchangeChannelClosed)`, which will hit the `Err` arm above.
+                // So this branch will never be reached in all cases.
+                Some((None, _)) => unreachable!(),
                 // There's no active upstreams. Process the barrier and resume the blocked ones.
                 None => break,
             }
