@@ -217,7 +217,7 @@ impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
     }
 }
 
-enum InternalMessage {
+pub(super)enum InternalMessage {
     Chunk(StreamChunk),
     Barrier(Vec<StreamChunk>, Barrier),
     WaterMark(Watermark),
@@ -262,7 +262,7 @@ async fn internal_messages_until_barrier(stream: impl MessageStream, expected_ba
 // any number of `InternalMessage::Chunk(left_chunk)` and followed by
 // `InternalMessage::Barrier(right_chunks, barrier)`.
 #[try_stream(ok = InternalMessage, error = StreamExecutorError)]
-async fn align_input(left: Executor, right: Executor) {
+pub(super) async fn align_input<const YIELD_RIGHT_CHUNKS: bool>(left: Executor, right: Executor) {
     let mut left = pin!(left.execute());
     let mut right = pin!(right.execute());
     // Keep producing intervals until stream exhaustion or errors.
@@ -277,12 +277,16 @@ async fn align_input(left: Executor, right: Executor) {
             );
             match combined.next().await {
                 Some(Either::Left(Ok(Message::Chunk(c)))) => yield InternalMessage::Chunk(c),
-                Some(Either::Right(Ok(Message::Chunk(c)))) => right_chunks.push(c),
+                Some(Either::Right(Ok(Message::Chunk(c)))) => if YIELD_RIGHT_CHUNKS {
+                    right_chunks.push(c);
+                },
                 Some(Either::Left(Ok(Message::Barrier(b)))) => {
                     let mut remain = chunks_until_barrier(right.by_ref(), b.clone())
                         .try_collect()
                         .await?;
-                    right_chunks.append(&mut remain);
+                    if YIELD_RIGHT_CHUNKS {
+                        right_chunks.append(&mut remain);
+                    }
                     yield InternalMessage::Barrier(right_chunks, b);
                     break 'inner;
                 }
@@ -309,7 +313,18 @@ async fn align_input(left: Executor, right: Executor) {
     }
 }
 
-mod phase1 {
+pub(super) fn apply_indices_map(chunk: StreamChunk, indices: &[usize]) -> StreamChunk {
+    let (data_chunk, ops) = chunk.into_parts();
+    let (columns, vis) = data_chunk.into_parts();
+    let output_columns = indices
+        .iter()
+        .cloned()
+        .map(|idx| columns[idx].clone())
+        .collect();
+    StreamChunk::with_visibility(ops, output_columns, vis)
+}
+
+pub(super) mod phase1 {
     use futures_async_stream::try_stream;
     use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
     use risingwave_common::array::{Op, StreamChunk};
@@ -322,7 +337,7 @@ mod phase1 {
 
     use super::{StreamExecutorError, TemporalSide};
 
-    pub(super) trait Phase1Evaluation {
+    pub trait Phase1Evaluation {
         /// Called when a matched row is found.
         #[must_use = "consume chunk if produced"]
         fn append_matched_row(
@@ -343,9 +358,9 @@ mod phase1 {
         ) -> Option<StreamChunk>;
     }
 
-    pub(super) struct Inner;
-    pub(super) struct LeftOuter;
-    pub(super) struct LeftOuterWithCond;
+    pub struct Inner;
+    pub struct LeftOuter;
+    pub struct LeftOuterWithCond;
 
     impl Phase1Evaluation for Inner {
         fn append_matched_row(
@@ -532,17 +547,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
         }
     }
 
-    fn apply_indices_map(chunk: StreamChunk, indices: &[usize]) -> StreamChunk {
-        let (data_chunk, ops) = chunk.into_parts();
-        let (columns, vis) = data_chunk.into_parts();
-        let output_columns = indices
-            .iter()
-            .cloned()
-            .map(|idx| columns[idx].clone())
-            .collect();
-        StreamChunk::with_visibility(ops, output_columns, vis)
-    }
-
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(mut self) {
         let right_size = self.right.schema().len();
@@ -573,7 +577,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
             .collect();
 
         #[for_await]
-        for msg in align_input(self.left, self.right) {
+        for msg in align_input::<true>(self.left, self.right) {
             self.right_table.cache.evict();
             self.ctx
                 .streaming_metrics
@@ -616,7 +620,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                                 chunk
                             };
                             let new_chunk =
-                                Self::apply_indices_map(new_chunk, &self.output_indices);
+                                apply_indices_map(new_chunk, &self.output_indices);
                             yield Message::Chunk(new_chunk);
                         }
                     } else if let Some(ref cond) = self.condition {
@@ -661,7 +665,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                                 };
                                 new_vis.append(vis);
                             }
-                            let new_chunk = Self::apply_indices_map(
+                            let new_chunk = apply_indices_map(
                                 StreamChunk::with_visibility(ops, columns, new_vis.finish()),
                                 &self.output_indices,
                             );
@@ -683,7 +687,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                         #[for_await]
                         for chunk in st1 {
                             let chunk = chunk?;
-                            let new_chunk = Self::apply_indices_map(chunk, &self.output_indices);
+                            let new_chunk = apply_indices_map(chunk, &self.output_indices);
                             yield Message::Chunk(new_chunk);
                         }
                     }

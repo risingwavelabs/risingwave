@@ -99,6 +99,7 @@ mod values;
 mod watermark;
 mod watermark_filter;
 mod wrapper;
+mod nested_loop_temporal_join;
 
 #[cfg(test)]
 mod integration_tests;
@@ -142,7 +143,7 @@ pub use sort::*;
 pub use source::*;
 pub use stateless_simple_agg::StatelessSimpleAggExecutor;
 pub use subscription::SubscriptionExecutor;
-pub use temporal_join::*;
+pub use temporal_join::TemporalJoinExecutor;
 pub use top_n::{
     AppendOnlyGroupTopNExecutor, AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor,
 };
