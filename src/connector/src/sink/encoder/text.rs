@@ -12,19 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::Schema;
+
 use super::RowEncoder;
 
-pub struct TextEncoder {}
+pub struct TextEncoder {
+    pub schema: Schema,
+    // the column must contain only one element
+    pub col_indices: Option<Vec<usize>>,
+}
+
+impl TextEncoder {
+    pub fn new(schema: Schema, col_indices: Option<Vec<usize>>) -> Self {
+        Self {
+            schema,
+            col_indices,
+        }
+    }
+}
 
 impl RowEncoder for TextEncoder {
     type Output = String;
 
     fn schema(&self) -> &risingwave_common::catalog::Schema {
-        unimplemented!()
+        &self.schema
     }
 
     fn col_indices(&self) -> Option<&[usize]> {
-        unimplemented!()
+        self.col_indices.as_ref().map(Vec::as_ref)
     }
 
     fn encode(&self, row: impl risingwave_common::row::Row) -> crate::sink::Result<Self::Output> {
