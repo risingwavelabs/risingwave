@@ -902,6 +902,18 @@ pub async fn handle(
             name,
             operation: AlterSourceOperation::RefreshSchema,
         } => alter_source_with_sr::handler_refresh_schema(handler_args, name).await,
+        Statement::AlterSource {
+            name,
+            operation: AlterSourceOperation::SetStreamingRateLimit { rate_limit },
+        } => {
+            alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                handler_args,
+                PbThrottleTarget::Source,
+                name,
+                rate_limit,
+            )
+                .await
+        }
         Statement::AlterFunction {
             name,
             args,

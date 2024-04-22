@@ -194,6 +194,7 @@ pub enum AlterSourceOperation {
     SetSchema { new_schema_name: ObjectName },
     FormatEncode { connector_schema: ConnectorSchema },
     RefreshSchema,
+    SetStreamingRateLimit { rate_limit: i32 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -434,6 +435,9 @@ impl fmt::Display for AlterSourceOperation {
             }
             AlterSourceOperation::RefreshSchema => {
                 write!(f, "REFRESH SCHEMA")
+            }
+            AlterSourceOperation::SetStreamingRateLimit { rate_limit } => {
+                write!(f, "SET STREAMING_RATE_LIMIT TO {}", rate_limit)
             }
         }
     }

@@ -3402,7 +3402,7 @@ impl Parser {
                     && self.expect_token(&Token::Eq).is_err()
                 {
                     return self.expected(
-                        "TO or = after ALTER TABLE SET PARALLELISM",
+                        "TO or = after ALTER MATERIALIZED VIEW SET STREAMING_RATE_LIMIT",
                         self.peek_token(),
                     );
                 }
@@ -3570,6 +3570,26 @@ impl Parser {
             } else {
                 return self.expected("SCHEMA after SET", self.peek_token());
             }
+        } else if self.parse_keyword(Keyword::STREAMING_RATE_LIMIT) {
+            if self.expect_keyword(Keyword::TO).is_err()
+                && self.expect_token(&Token::Eq).is_err()
+            {
+                return self.expected(
+                    "TO or = after ALTER SOURCE SET STREAMING_RATE_LIMIT",
+                    self.peek_token(),
+                );
+            }
+            let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
+                -1
+            } else {
+                let s = self.parse_number_value()?;
+                if let Ok(n) = s.parse::<i32>() {
+                    n
+                } else {
+                    return self.expected("number or DEFAULT", self.peek_token());
+                }
+            };
+            AlterSourceOperation::SetStreamingRateLimit { rate_limit }
         } else if self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
             let connector_schema = self.parse_schema()?.unwrap();
             AlterSourceOperation::FormatEncode { connector_schema }
