@@ -8,7 +8,8 @@
     "lint": "prettier --check . && next lint",
     "format": "prettier --write . && next lint --fix",
     "mock-server": "node ./mock-server.js",
-    "postinstall": "npm run gen-proto",
+    "vendor-monaco": "rsync -av node_modules/monaco-editor/min/vs/ public/monaco/",
+    "postinstall": "npm run gen-proto && npm run vendor-monaco",
     "clean": "rm -rf .next/ && rm -rf out/"
   },
   "dependencies": {
