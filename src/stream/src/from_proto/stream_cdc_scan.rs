@@ -23,7 +23,7 @@ use risingwave_pb::stream_plan::StreamCdcScanNode;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::{CdcBackfillExecutor, Executor, ExternalStorageTable, FlowControlExecutor};
+use crate::executor::{CdcBackfillExecutor, Executor, ExternalStorageTable};
 
 pub struct StreamCdcScanExecutorBuilder;
 
@@ -105,14 +105,6 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             state_table,
             backfill_chunk_size,
             disable_backfill,
-        );
-        let mut info = params.info.clone();
-        info.identity = format!("{} (flow controlled)", info.identity);
-
-        let exec = FlowControlExecutor::new(
-            (info, exec).into(),
-            params.actor_context,
-            node.rate_limit.map(|x| x as _),
         );
         Ok((params.info, exec).into())
     }

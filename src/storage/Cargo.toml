@@ -18,7 +18,7 @@ ahash = "0.8"
 anyhow = "1"
 arc-swap = "1"
 async-trait = "0.1"
-auto_enums = { version = "0.8", features = ["futures03"] }
+auto_enums = { workspace = true }
 await-tree = { workspace = true }
 bytes = { version = "1", features = ["serde"] }
 crossbeam = "0.8.2"
@@ -31,18 +31,19 @@ foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"
-itertools = "0.12"
+itertools = { workspace = true }
 libc = "0.2"
 lz4 = "1.24.0"
 memcomparable = "0.2"
 more-asserts = "0.3"
 num-integer = "0.1"
-parking_lot = "0.12"
+parking_lot = { workspace = true }
 prometheus = { version = "0.13", features = ["process"] }
 prost = { workspace = true }
-rand = "0.8"
+rand = { workspace = true }
 risingwave_backup = { workspace = true }
 risingwave_common = { workspace = true }
+risingwave_common_estimate_size = { workspace = true }
 risingwave_common_service = { workspace = true }
 risingwave_expr = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
@@ -113,7 +114,7 @@ harness = false
 # debug = true
 
 [[bench]]
-name = "bench_lru_cache"
+name = "bench_block_cache"
 harness = false
 
 [[bench]]
@@ -142,6 +143,10 @@ harness = false
 
 [[bench]]
 name = "bench_imm_compact"
+harness = false
+
+[[bench]]
+name = "bench_table_watermarks"
 harness = false
 
 [lints]

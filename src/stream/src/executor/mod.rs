@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod prelude;
+
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -65,7 +67,6 @@ mod dynamic_filter;
 pub mod error;
 mod expand;
 mod filter;
-mod flow_control;
 mod hash_agg;
 pub mod hash_join;
 mod hop_window;
@@ -93,6 +94,7 @@ mod subscription;
 pub mod subtask;
 mod temporal_join;
 mod top_n;
+mod troublemaker;
 mod union;
 mod values;
 mod watermark;
@@ -118,7 +120,6 @@ pub use dynamic_filter::DynamicFilterExecutor;
 pub use error::{StreamExecutorError, StreamExecutorResult};
 pub use expand::ExpandExecutor;
 pub use filter::FilterExecutor;
-pub use flow_control::FlowControlExecutor;
 pub use hash_agg::HashAggExecutor;
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
@@ -138,13 +139,13 @@ use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 pub use simple_agg::SimpleAggExecutor;
 pub use sink::SinkExecutor;
 pub use sort::*;
-pub use source::*;
 pub use stateless_simple_agg::StatelessSimpleAggExecutor;
 pub use subscription::SubscriptionExecutor;
 pub use temporal_join::*;
 pub use top_n::{
     AppendOnlyGroupTopNExecutor, AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor,
 };
+pub use troublemaker::TroublemakerExecutor;
 pub use union::UnionExecutor;
 pub use utils::DummyExecutor;
 pub use values::ValuesExecutor;

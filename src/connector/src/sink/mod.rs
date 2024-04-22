@@ -33,6 +33,8 @@ pub mod nats;
 pub mod pulsar;
 pub mod redis;
 pub mod remote;
+pub mod snowflake;
+pub mod snowflake_connector;
 pub mod starrocks;
 pub mod test_sink;
 pub mod trivial;
@@ -52,6 +54,7 @@ use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
 };
+use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::error::RpcError;
@@ -90,6 +93,7 @@ macro_rules! for_all_sinks {
                 { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },
+                { Snowflake, $crate::sink::snowflake::SnowflakeSink },
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
                 { Test, $crate::sink::test_sink::TestSink },
@@ -331,8 +335,12 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     type LogSinker: LogSinker;
     type Coordinator: SinkCommitCoordinator;
 
-    fn default_sink_decouple(_desc: &SinkDesc) -> bool {
-        false
+    /// `user_specified` is the value of `sink_decouple` config.
+    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+        match user_specified {
+            SinkDecouple::Disable | SinkDecouple::Default => Ok(false),
+            SinkDecouple::Enable => Ok(true),
+        }
     }
 
     async fn validate(&self) -> Result<()>;
@@ -533,6 +541,8 @@ pub enum SinkError {
     ),
     #[error("Starrocks error: {0}")]
     Starrocks(String),
+    #[error("Snowflake error: {0}")]
+    Snowflake(String),
     #[error("Pulsar error: {0}")]
     Pulsar(
         #[source]

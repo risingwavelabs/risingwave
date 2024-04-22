@@ -28,6 +28,7 @@ use risingwave_common::catalog::{
     FunctionId, IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
     DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME,
 };
+use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
@@ -194,6 +195,7 @@ impl LocalFrontend {
                 6666,
             ))
             .into(),
+            Default::default(),
         ))
     }
 }
@@ -986,6 +988,14 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(Some(SystemParams::default().into()))
     }
 
+    async fn get_session_params(&self) -> RpcResult<SessionConfig> {
+        Ok(Default::default())
+    }
+
+    async fn set_session_param(&self, _param: String, _value: Option<String>) -> RpcResult<String> {
+        Ok("".to_string())
+    }
+
     async fn list_ddl_progress(&self) -> RpcResult<Vec<DdlProgress>> {
         Ok(vec![])
     }
@@ -1043,6 +1053,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn list_compact_task_progress(&self) -> RpcResult<Vec<CompactTaskProgress>> {
+        unimplemented!()
+    }
+
+    async fn recover(&self) -> RpcResult<()> {
         unimplemented!()
     }
 }

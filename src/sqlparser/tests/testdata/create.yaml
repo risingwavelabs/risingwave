@@ -52,6 +52,22 @@
   error_msg: 'sql parser error: syntax error at or near FULL at line:1, column:21'
 - input: CREATE TABLE T ("FULL" INT)
   formatted_sql: CREATE TABLE T ("FULL" INT)
+- input: CREATE TABLE T ("FULL" INT) ON CONFLICT OVERWRITE WITH VERSION COLUMN("FULL")
+  formatted_sql: CREATE TABLE T ("FULL" INT) ON CONFLICT OVERWRITE WITH VERSION COLUMN(FULL)
+- input: CREATE TABLE T ("FULL" INT) ON CONFLICT IGNORE
+  formatted_sql: CREATE TABLE T ("FULL" INT) ON CONFLICT IGNORE
+- input: CREATE TABLE T ("FULL" INT) ON CONFLICT OVERWRITE WITH VERSION COLUMN
+  error_msg: |-
+    sql parser error: Expected (, found: EOF at the end
+    Near " CONFLICT OVERWRITE WITH VERSION COLUMN"
+- input: CREATE TABLE T ("FULL" INT) ON CONFLICT OVERWRITE WITH VERSION COLUMN(FULL
+  error_msg: 'sql parser error: syntax error at or near FULL at line:1, column:75'
+- input: CREATE TABLE T ("FULL" INT) ON CONFLICT OVERWRITE WITH VERSION COLUMNFULL)
+  error_msg: |-
+    sql parser error: Expected (, found: VERSION at line:1, column:63
+    Near "INT) ON CONFLICT OVERWRITE WITH"
+- input: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE IF NOT NULL
+  formatted_sql: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE IF NOT NULL
 - input: CREATE USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
   formatted_sql: CREATE USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
 - input: CREATE SINK snk

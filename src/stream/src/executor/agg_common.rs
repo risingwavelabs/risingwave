@@ -16,13 +16,9 @@ use std::collections::HashMap;
 
 use risingwave_expr::aggregate::AggCall;
 use risingwave_pb::stream_plan::PbAggNodeVersion;
-use risingwave_storage::StateStore;
 
 use super::aggregation::AggStateStorage;
-use super::{Executor, ExecutorInfo};
-use crate::common::table::state_table::StateTable;
-use crate::executor::ActorContextRef;
-use crate::task::AtomicU64Ref;
+use crate::executor::prelude::*;
 
 /// Arguments needed to construct an `XxxAggExecutor`.
 pub struct AggExecutorArgs<S: StateStore, E: AggExecutorExtraArgs> {

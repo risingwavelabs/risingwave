@@ -40,11 +40,11 @@ impl SplitMetaData for PulsarSplit {
         serde_json::to_value(self.clone()).unwrap().into()
     }
 
-    fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
-        let start_offset = if start_offset.is_empty() {
+    fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
+        let start_offset = if last_seen_offset.is_empty() {
             PulsarEnumeratorOffset::Earliest
         } else {
-            PulsarEnumeratorOffset::MessageId(start_offset)
+            PulsarEnumeratorOffset::MessageId(last_seen_offset)
         };
 
         self.start_offset = start_offset;

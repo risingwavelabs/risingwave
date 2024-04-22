@@ -45,13 +45,14 @@ type VersionHolder = (
 
 async fn create_snapshot_store(
     config: &StoreConfig,
+    object_store_config: &ObjectStoreConfig,
 ) -> StorageResult<ObjectStoreMetaSnapshotStorage> {
     let backup_object_store = Arc::new(
         build_remote_object_store(
             &config.0,
             Arc::new(ObjectStoreMetrics::unused()),
             "Meta Backup",
-            ObjectStoreConfig::default(),
+            object_store_config.clone(),
         )
         .await,
     );
@@ -69,26 +70,38 @@ pub struct BackupReader {
     inflight_request: parking_lot::Mutex<HashMap<MetaSnapshotId, InflightRequest>>,
     store: ArcSwap<(ObjectStoreMetaSnapshotStorage, StoreConfig)>,
     refresh_tx: tokio::sync::mpsc::UnboundedSender<u64>,
+    object_store_config: ObjectStoreConfig,
 }
 
 impl BackupReader {
-    pub async fn new(storage_url: &str, storage_directory: &str) -> StorageResult<BackupReaderRef> {
+    pub async fn new(
+        storage_url: &str,
+        storage_directory: &str,
+        object_store_config: &ObjectStoreConfig,
+    ) -> StorageResult<BackupReaderRef> {
         let config = (storage_url.to_string(), storage_directory.to_string());
-        let store = create_snapshot_store(&config).await?;
+        let store = create_snapshot_store(&config, object_store_config).await?;
         tracing::info!(
             "backup reader is initialized: url={}, dir={}",
             config.0,
             config.1
         );
-        Ok(Self::with_store((store, config)))
+        Ok(Self::with_store(
+            (store, config),
+            object_store_config.clone(),
+        ))
     }
 
-    fn with_store(store: (ObjectStoreMetaSnapshotStorage, StoreConfig)) -> BackupReaderRef {
+    fn with_store(
+        store: (ObjectStoreMetaSnapshotStorage, StoreConfig),
+        object_store_config: ObjectStoreConfig,
+    ) -> BackupReaderRef {
         let (refresh_tx, refresh_rx) = tokio::sync::mpsc::unbounded_channel();
         let instance = Arc::new(Self {
             store: ArcSwap::from_pointee(store),
             versions: Default::default(),
             inflight_request: Default::default(),
+            object_store_config,
             refresh_tx,
         });
         tokio::spawn(Self::start_manifest_refresher(instance.clone(), refresh_rx));
@@ -96,14 +109,17 @@ impl BackupReader {
     }
 
     pub async fn unused() -> BackupReaderRef {
-        Self::with_store((
-            risingwave_backup::storage::unused().await,
-            StoreConfig::default(),
-        ))
+        Self::with_store(
+            (
+                risingwave_backup::storage::unused().await,
+                StoreConfig::default(),
+            ),
+            ObjectStoreConfig::default(),
+        )
     }
 
     async fn set_store(&self, config: StoreConfig) -> StorageResult<()> {
-        let new_store = create_snapshot_store(&config).await?;
+        let new_store = create_snapshot_store(&config, &self.object_store_config).await?;
         tracing::info!(
             "backup reader is updated: url={}, dir={}",
             config.0,

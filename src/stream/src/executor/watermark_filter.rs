@@ -14,14 +14,10 @@
 
 use std::cmp;
 use std::ops::Deref;
-use std::sync::Arc;
 
 use futures::future::{try_join, try_join_all};
-use futures::StreamExt;
-use futures_async_stream::try_stream;
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
+use risingwave_common::types::{DefaultOrd, ScalarImpl};
 use risingwave_common::{bail, row};
 use risingwave_expr::expr::{
     build_func_non_strict, ExpressionBoxExt, InputRefExpression, LiteralExpression,
@@ -32,13 +28,9 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableDistribution;
-use risingwave_storage::StateStore;
 
-use super::error::StreamExecutorError;
 use super::filter::FilterExecutor;
-use super::{ActorContextRef, Execute, Executor, Message, StreamExecutorResult};
-use crate::common::table::state_table::StateTable;
-use crate::executor::{expect_first_barrier, Watermark};
+use crate::executor::prelude::*;
 use crate::task::ActorEvalErrorReport;
 
 /// The executor will generate a `Watermark` after each chunk.

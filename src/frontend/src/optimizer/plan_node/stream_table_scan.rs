@@ -42,14 +42,14 @@ use crate::{Explain, TableCatalog};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamTableScan {
     pub base: PlanBase<Stream>,
-    core: generic::Scan,
+    core: generic::TableScan,
     batch_plan_id: PlanNodeId,
     stream_scan_type: StreamScanType,
 }
 
 impl StreamTableScan {
     pub fn new_with_stream_scan_type(
-        core: generic::Scan,
+        core: generic::TableScan,
         stream_scan_type: StreamScanType,
     ) -> Self {
         let batch_plan_id = core.ctx.next_plan_node_id();
@@ -87,7 +87,7 @@ impl StreamTableScan {
         &self.core.table_name
     }
 
-    pub fn core(&self) -> &generic::Scan {
+    pub fn core(&self) -> &generic::TableScan {
         &self.core
     }
 
@@ -115,7 +115,7 @@ impl StreamTableScan {
         self.stream_scan_type
     }
 
-    // TODO: Add note to reviewer about safety, because of `generic::Scan` limitation.
+    // TODO: Add note to reviewer about safety, because of `generic::TableScan` limitation.
     fn get_upstream_state_table(&self) -> &TableCatalog {
         self.core.table_catalog.as_ref()
     }
@@ -170,16 +170,10 @@ impl StreamTableScan {
         }
 
         // `backfill_finished` column
-        catalog_builder.add_column(&Field::with_name(
-            DataType::Boolean,
-            format!("{}_backfill_finished", self.table_name()),
-        ));
+        catalog_builder.add_column(&Field::with_name(DataType::Boolean, "backfill_finished"));
 
         // `row_count` column
-        catalog_builder.add_column(&Field::with_name(
-            DataType::Int64,
-            format!("{}_row_count", self.table_name()),
-        ));
+        catalog_builder.add_column(&Field::with_name(DataType::Int64, "row_count"));
 
         // Reuse the state store pk (vnode) as the vnode as well.
         catalog_builder.set_vnode_col_idx(0);
@@ -205,9 +199,19 @@ impl Distill for StreamTableScan {
 
         if verbose {
             vec.push(("stream_scan_type", Pretty::debug(&self.stream_scan_type)));
-            let pk = IndicesDisplay {
+            let stream_key = IndicesDisplay {
                 indices: self.stream_key().unwrap_or_default(),
                 schema: self.base.schema(),
+            };
+            vec.push(("stream_key", stream_key.distill()));
+            let pk = IndicesDisplay {
+                indices: &self
+                    .core
+                    .primary_key()
+                    .iter()
+                    .map(|x| x.column_index)
+                    .collect_vec(),
+                schema: &self.core.table_catalog.column_schema(),
             };
             vec.push(("pk", pk.distill()));
             let dist = Pretty::display(&DistributionDisplay {

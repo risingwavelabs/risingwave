@@ -12,26 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Formatter;
-use std::sync::Arc;
-
 use anyhow::anyhow;
 use either::Either;
-use futures::{StreamExt, TryStreamExt};
+use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::Op;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::SourceCtrlOpts;
-use risingwave_connector::ConnectorParams;
-use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use crate::executor::error::StreamExecutorError;
-use crate::executor::monitor::StreamingMetrics;
+use super::{barrier_to_message_stream, StreamSourceCore};
+use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::executor::*;
 
 const CHUNK_SIZE: usize = 1024;
 
@@ -53,9 +47,6 @@ pub struct FsListExecutor<S: StateStore> {
 
     // control options for connector level
     source_ctrl_opts: SourceCtrlOpts,
-
-    // config for the connector node
-    connector_params: ConnectorParams,
 }
 
 impl<S: StateStore> FsListExecutor<S> {
@@ -67,7 +58,6 @@ impl<S: StateStore> FsListExecutor<S> {
         barrier_receiver: UnboundedReceiver<Barrier>,
         system_params: SystemParamsReaderRef,
         source_ctrl_opts: SourceCtrlOpts,
-        connector_params: ConnectorParams,
     ) -> Self {
         Self {
             actor_ctx,
@@ -76,7 +66,6 @@ impl<S: StateStore> FsListExecutor<S> {
             barrier_receiver: Some(barrier_receiver),
             system_params,
             source_ctrl_opts,
-            connector_params,
         }
     }
 
@@ -96,7 +85,7 @@ impl<S: StateStore> FsListExecutor<S> {
             let rows = chunk
                 .into_iter()
                 .map(|item| {
-                    let page_item = item.unwrap();
+                    let page_item = item.expect("list file failed, please check whether the source connector is configured correctly.");
                     (
                         Op::Insert,
                         OwnedRow::new(vec![

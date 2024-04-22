@@ -24,8 +24,10 @@ use futures::{FutureExt, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pgwire::pg_server::BoxedError;
+use risingwave_batch::error::BatchError;
 use risingwave_batch::executor::ExecutorBuilder;
 use risingwave_batch::task::{ShutdownToken, TaskId};
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::hash::ParallelUnitMapping;
@@ -50,7 +52,6 @@ use crate::error::RwError;
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
-use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::{ReadSnapshot, SchedulerError, SchedulerResult};
 use crate::session::{FrontendEnv, SessionImpl};
 
@@ -471,7 +472,9 @@ impl LocalQueryExecution {
                     node_body: Some(node_body),
                 })
             }
-            PlanNodeType::BatchSource => {
+            PlanNodeType::BatchSource
+            | PlanNodeType::BatchKafkaScan
+            | PlanNodeType::BatchIcebergScan => {
                 let mut node_body = execution_plan_node.node.clone();
                 match &mut node_body {
                     NodeBody::Source(ref mut source_node) => {
@@ -578,6 +581,7 @@ impl LocalQueryExecution {
         self.worker_node_manager
             .manager
             .get_streaming_fragment_mapping(fragment_id)
+            .map_err(|e| e.into())
     }
 
     fn choose_worker(&self, stage: &Arc<QueryStage>) -> SchedulerResult<Vec<WorkerNode>> {
@@ -591,7 +595,7 @@ impl LocalQueryExecution {
                     .manager
                     .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
                 if candidates.is_empty() {
-                    return Err(SchedulerError::EmptyWorkerNodes);
+                    return Err(BatchError::EmptyWorkerNodes.into());
                 }
                 candidates[stage.session_id.0 as usize % candidates.len()].clone()
             };

@@ -101,19 +101,16 @@ impl Executor for SysRowSeqScanExecutor {
     }
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
-        self.do_executor()
+        self.do_execute()
     }
 }
 
 impl SysRowSeqScanExecutor {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
-    async fn do_executor(self: Box<Self>) {
-        let chunk = self
-            .sys_catalog_reader
-            .read_table(&self.table_id)
-            .await
-            .map_err(BatchError::SystemTable)?;
-        if chunk.cardinality() != 0 {
+    async fn do_execute(self: Box<Self>) {
+        #[for_await]
+        for chunk in self.sys_catalog_reader.read_table(self.table_id) {
+            let chunk = chunk.map_err(BatchError::SystemTable)?;
             yield chunk.project(&self.column_indices);
         }
     }

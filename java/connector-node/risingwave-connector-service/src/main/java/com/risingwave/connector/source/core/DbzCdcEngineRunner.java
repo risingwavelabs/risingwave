@@ -28,15 +28,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** Single-thread engine runner */
-public class DbzCdcEngineRunner implements CdcEngineRunner {
+public class DbzCdcEngineRunner {
     static final Logger LOG = LoggerFactory.getLogger(DbzCdcEngineRunner.class);
 
     private final ExecutorService executor;
     private final AtomicBoolean running = new AtomicBoolean(false);
-    private CdcEngine engine;
+    private DbzCdcEngine engine;
     private final DbzConnectorConfig config;
 
-    public static CdcEngineRunner newCdcEngineRunner(
+    public static DbzCdcEngineRunner newCdcEngineRunner(
             DbzConnectorConfig config, StreamObserver<GetEventStreamResponse> responseObserver) {
         DbzCdcEngineRunner runner = null;
         try {
@@ -69,7 +69,7 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
         return runner;
     }
 
-    public static CdcEngineRunner create(DbzConnectorConfig config, long channelPtr) {
+    public static DbzCdcEngineRunner create(DbzConnectorConfig config, long channelPtr) {
         DbzCdcEngineRunner runner = new DbzCdcEngineRunner(config);
         try {
             var sourceId = config.getSourceId();
@@ -86,7 +86,9 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
                                             message,
                                             error);
                                     String errorMsg =
-                                            (error != null ? error.getMessage() : message);
+                                            (error != null && error.getMessage() != null
+                                                    ? error.getMessage()
+                                                    : message);
                                     if (!Binding.sendCdcSourceErrorToChannel(
                                             channelPtr, errorMsg)) {
                                         LOG.warn(
@@ -121,7 +123,7 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
         this.config = config;
     }
 
-    private void withEngine(CdcEngine engine) {
+    private void withEngine(DbzCdcEngine engine) {
         this.engine = engine;
     }
 
@@ -158,14 +160,16 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
         }
     }
 
-    @Override
-    public CdcEngine getEngine() {
+    public DbzCdcEngine getEngine() {
         return engine;
     }
 
-    @Override
     public boolean isRunning() {
         return running.get();
+    }
+
+    public DbzChangeEventConsumer getChangeEventConsumer() {
+        return engine.getChangeEventConsumer();
     }
 
     private void cleanUp() {

@@ -27,7 +27,9 @@ use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_hummock_sdk::key::{
     gen_key_from_bytes, prefixed_range_with_vnode, FullKey, TableKey, UserKey, TABLE_PREFIX_LEN,
 };
-use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
+use risingwave_hummock_sdk::table_watermark::{
+    TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
+};
 use risingwave_hummock_sdk::EpochWithGap;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
@@ -532,7 +534,7 @@ async fn test_state_store_sync() {
     let res = test_env.storage.seal_and_sync_epoch(epoch1).await.unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch1, res.uncommitted_ssts)
+        .commit_epoch(epoch1, res)
         .await
         .unwrap();
     test_env.storage.try_wait_epoch_for_test(epoch1).await;
@@ -573,7 +575,7 @@ async fn test_state_store_sync() {
     let res = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch2, res.uncommitted_ssts)
+        .commit_epoch(epoch2, res)
         .await
         .unwrap();
     test_env.storage.try_wait_epoch_for_test(epoch2).await;
@@ -776,7 +778,7 @@ async fn test_delete_get() {
     let res = test_env.storage.seal_and_sync_epoch(epoch1).await.unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch1, res.uncommitted_ssts)
+        .commit_epoch(epoch1, res)
         .await
         .unwrap();
     let epoch2 = epoch1.next_epoch();
@@ -798,7 +800,7 @@ async fn test_delete_get() {
     let res = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch2, res.uncommitted_ssts)
+        .commit_epoch(epoch2, res)
         .await
         .unwrap();
     test_env.storage.try_wait_epoch_for_test(epoch2).await;
@@ -956,13 +958,13 @@ async fn test_multiple_epoch_sync() {
 
     test_env
         .meta_client
-        .commit_epoch(epoch2, sync_result2.uncommitted_ssts)
+        .commit_epoch(epoch2, sync_result2)
         .await
         .unwrap();
 
     test_env
         .meta_client
-        .commit_epoch(epoch3, sync_result3.uncommitted_ssts)
+        .commit_epoch(epoch3, sync_result3)
         .await
         .unwrap();
     test_env.storage.try_wait_epoch_for_test(epoch3).await;
@@ -1110,12 +1112,12 @@ async fn test_iter_with_min_epoch() {
         let sync_result2 = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
         test_env
             .meta_client
-            .commit_epoch(epoch1, sync_result1.uncommitted_ssts)
+            .commit_epoch(epoch1, sync_result1)
             .await
             .unwrap();
         test_env
             .meta_client
-            .commit_epoch(epoch2, sync_result2.uncommitted_ssts)
+            .commit_epoch(epoch2, sync_result2)
             .await
             .unwrap();
         test_env.storage.try_wait_epoch_for_test(epoch2).await;
@@ -1386,7 +1388,7 @@ async fn test_hummock_version_reader() {
             let sync_result1 = test_env.storage.seal_and_sync_epoch(epoch1).await.unwrap();
             test_env
                 .meta_client
-                .commit_epoch(epoch1, sync_result1.uncommitted_ssts)
+                .commit_epoch(epoch1, sync_result1)
                 .await
                 .unwrap();
             test_env.storage.try_wait_epoch_for_test(epoch1).await;
@@ -1394,7 +1396,7 @@ async fn test_hummock_version_reader() {
             let sync_result2 = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
             test_env
                 .meta_client
-                .commit_epoch(epoch2, sync_result2.uncommitted_ssts)
+                .commit_epoch(epoch2, sync_result2)
                 .await
                 .unwrap();
             test_env.storage.try_wait_epoch_for_test(epoch2).await;
@@ -1402,7 +1404,7 @@ async fn test_hummock_version_reader() {
             let sync_result3 = test_env.storage.seal_and_sync_epoch(epoch3).await.unwrap();
             test_env
                 .meta_client
-                .commit_epoch(epoch3, sync_result3.uncommitted_ssts)
+                .commit_epoch(epoch3, sync_result3)
                 .await
                 .unwrap();
             test_env.storage.try_wait_epoch_for_test(epoch3).await;
@@ -1773,12 +1775,12 @@ async fn test_get_with_min_epoch() {
     let sync_result2 = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch1, sync_result1.uncommitted_ssts)
+        .commit_epoch(epoch1, sync_result1)
         .await
         .unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch2, sync_result2.uncommitted_ssts)
+        .commit_epoch(epoch2, sync_result2)
         .await
         .unwrap();
 
@@ -2182,21 +2184,23 @@ async fn test_table_watermark() {
     let (local1, local2) = test_after_epoch2(local1, local2).await;
 
     let check_version_table_watermark = |version: PinnedVersion| {
-        let table_watermarks = version.table_watermark_index().get(&TEST_TABLE_ID).unwrap();
-        assert_eq!(WatermarkDirection::Ascending, table_watermarks.direction());
-        let index = table_watermarks.index();
-        assert_eq!(2, index.len());
-        let vnode1_watermark = index.get(&vnode1).unwrap();
-        assert_eq!(1, vnode1_watermark.len());
-        assert_eq!(
-            &gen_inner_key(watermark1),
-            vnode1_watermark.get(&epoch1).unwrap()
+        let table_watermarks = TableWatermarksIndex::new_committed(
+            version
+                .version()
+                .table_watermarks
+                .get(&TEST_TABLE_ID)
+                .unwrap()
+                .clone(),
+            version.max_committed_epoch(),
         );
-        let vnode2_watermark = index.get(&vnode2).unwrap();
-        assert_eq!(1, vnode2_watermark.len());
+        assert_eq!(WatermarkDirection::Ascending, table_watermarks.direction());
         assert_eq!(
-            &gen_inner_key(watermark1),
-            vnode2_watermark.get(&epoch1).unwrap()
+            gen_inner_key(watermark1),
+            table_watermarks.read_watermark(vnode1, epoch1).unwrap()
+        );
+        assert_eq!(
+            gen_inner_key(watermark1),
+            table_watermarks.read_watermark(vnode2, epoch1).unwrap()
         );
     };
 

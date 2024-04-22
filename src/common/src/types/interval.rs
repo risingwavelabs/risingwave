@@ -26,12 +26,12 @@ use chrono::Timelike;
 use num_traits::{CheckedAdd, CheckedNeg, CheckedSub, Zero};
 use postgres_types::{to_sql_checked, FromSql};
 use regex::Regex;
+use risingwave_common_estimate_size::ZeroHeapSize;
 use risingwave_pb::data::PbInterval;
 use rust_decimal::prelude::Decimal;
 
 use super::to_binary::ToBinary;
 use super::*;
-use crate::estimate_size::ZeroHeapSize;
 
 /// Every interval can be represented by a `Interval`.
 ///

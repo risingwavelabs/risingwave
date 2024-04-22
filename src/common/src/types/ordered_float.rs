@@ -1012,13 +1012,13 @@ mod impl_into_ordered {
 }
 
 pub use impl_into_ordered::IntoOrdered;
+use risingwave_common_estimate_size::ZeroHeapSize;
 use serde::Serialize;
-
-use crate::estimate_size::ZeroHeapSize;
 
 #[cfg(test)]
 mod tests {
-    use crate::estimate_size::EstimateSize;
+    use risingwave_common_estimate_size::EstimateSize;
+
     use crate::types::ordered_float::OrderedFloat;
     use crate::types::IntoOrdered;
 

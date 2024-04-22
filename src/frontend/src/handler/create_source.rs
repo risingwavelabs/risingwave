@@ -32,7 +32,7 @@ use risingwave_connector::parser::additional_columns::{
 };
 use risingwave_connector::parser::{
     schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
-    SpecificParserConfig, DEBEZIUM_IGNORE_KEY,
+    SpecificParserConfig, TimestamptzHandling, DEBEZIUM_IGNORE_KEY,
 };
 use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
@@ -68,7 +68,7 @@ use thiserror_ext::AsReport;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::error::ErrorCode::{self, InvalidInputSyntax, NotSupported, ProtocolError};
+use crate::error::ErrorCode::{self, Deprecated, InvalidInputSyntax, NotSupported, ProtocolError};
 use crate::error::{Result, RwError};
 use crate::expr::Expr;
 use crate::handler::create_table::{
@@ -438,6 +438,21 @@ pub(crate) async fn bind_columns_from_source(
             Format::Plain | Format::Upsert | Format::Maxwell | Format::Canal | Format::Debezium,
             Encode::Json,
         ) => {
+            if matches!(
+                source_schema.format,
+                Format::Plain | Format::Upsert | Format::Debezium
+            ) {
+                // Parse the value but throw it away.
+                // It would be too late to report error in `SpecificParserConfig::new`,
+                // which leads to recovery loop.
+                TimestamptzHandling::from_options(&format_encode_options_to_consume)
+                    .map_err(|err| InvalidInputSyntax(err.message))?;
+                try_consume_string_from_options(
+                    &mut format_encode_options_to_consume,
+                    TimestamptzHandling::OPTION_KEY,
+                );
+            }
+
             let schema_config = get_json_schema_location(&mut format_encode_options_to_consume)?;
             stream_source_info.use_schema_registry =
                 json_schema_infer_use_schema_registry(&schema_config);
@@ -512,6 +527,7 @@ fn bind_columns_from_source_for_cdc(
         format_encode_options,
         use_schema_registry: json_schema_infer_use_schema_registry(&schema_config),
         cdc_source_job: true,
+        is_distributed: false,
         ..Default::default()
     };
     if !format_encode_options_to_consume.is_empty() {
@@ -1061,6 +1077,13 @@ pub fn validate_compatibility(
         }
     }
 
+    if connector == S3_CONNECTOR {
+        return Err(RwError::from(Deprecated(
+            S3_CONNECTOR.to_string(),
+            OPENDAL_S3_CONNECTOR.to_string(),
+        )));
+    }
+
     let compatible_encodes = compatible_formats
         .get(&source_schema.format)
         .ok_or_else(|| {
@@ -1301,24 +1324,26 @@ pub async fn handle_create_source(
 
     let source_schema = stmt.source_schema.into_v2_with_warning();
 
-    let mut with_properties = handler_args
-        .with_options
-        .clone()
-        .into_inner()
-        .into_iter()
-        .collect();
+    let mut with_properties = handler_args.with_options.clone().into_connector_props();
     validate_compatibility(&source_schema, &mut with_properties)?;
 
     ensure_table_constraints_supported(&stmt.constraints)?;
     let sql_pk_names = bind_sql_pk_names(&stmt.columns, &stmt.constraints)?;
 
-    let create_cdc_source_job = with_properties.is_backfillable_cdc_connector();
+    let create_cdc_source_job = with_properties.is_shareable_cdc_connector();
+    let is_shared = create_cdc_source_job
+        || (with_properties.is_kafka_connector() && session.config().rw_enable_shared_source());
 
-    let (columns_from_resolve_source, source_info) = if create_cdc_source_job {
+    let (columns_from_resolve_source, mut source_info) = if create_cdc_source_job {
         bind_columns_from_source_for_cdc(&session, &source_schema, &with_properties)?
     } else {
         bind_columns_from_source(&session, &source_schema, &with_properties).await?
     };
+    if is_shared {
+        // Note: this field should be called is_shared. Check field doc for more details.
+        source_info.cdc_source_job = true;
+        source_info.is_distributed = !create_cdc_source_job;
+    }
     let columns_from_sql = bind_sql_columns(&stmt.columns)?;
 
     let mut columns = bind_all_columns(
@@ -1415,18 +1440,16 @@ pub async fn handle_create_source(
 
     let catalog_writer = session.catalog_writer()?;
 
-    if create_cdc_source_job {
-        // create a streaming job for the cdc source, which will mark as *singleton* in the Fragmenter
+    if is_shared {
         let graph = {
             let context = OptimizerContext::from_handler_args(handler_args);
-            // cdc source is an append-only source in plain json format
             let source_node = LogicalSource::with_catalog(
                 Rc::new(SourceCatalog::from(&source)),
-                SourceNodeKind::CreateSourceWithStreamjob,
+                SourceNodeKind::CreateSharedSource,
                 context.into(),
+                None,
             )?;
 
-            // generate stream graph for cdc source job
             let stream_plan = source_node.to_stream(&mut ToStreamContext::new(false))?;
             let mut graph = build_graph(stream_plan)?;
             graph.parallelism =

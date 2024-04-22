@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches::assert_matches;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -21,17 +20,13 @@ use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::DefaultParallelism;
-use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_meta_model_v2::StreamingParallelism;
-use risingwave_pb::common::{ActorInfo, WorkerNode};
+use risingwave_pb::common::ActorInfo;
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::State;
-use risingwave_pb::meta::PausedReason;
-use risingwave_pb::stream_plan::barrier::BarrierKind;
+use risingwave_pb::meta::{PausedReason, Recovery};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
-use risingwave_pb::stream_service::{
-    streaming_control_stream_response, StreamingControlStreamResponse,
-};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -45,12 +40,12 @@ use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::schedule::ScheduledBarriers;
 use crate::barrier::state::BarrierManagerState;
-use crate::barrier::{Command, GlobalBarrierManager, GlobalBarrierManagerContext};
+use crate::barrier::{BarrierKind, Command, GlobalBarrierManager, GlobalBarrierManagerContext};
 use crate::controller::catalog::ReleaseContext;
-use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, MetadataManager, WorkerId};
+use crate::manager::{ActiveStreamingWorkerNodes, MetadataManager, WorkerId};
 use crate::model::{MetadataModel, MigrationPlan, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, RescheduleOptions, TableResizePolicy};
-use crate::MetaResult;
+use crate::{model, MetaResult};
 
 impl GlobalBarrierManager {
     // Retry base interval in milliseconds.
@@ -91,18 +86,10 @@ impl GlobalBarrierManagerContext {
                     .collect();
                 debug!("clean dirty table fragments: {:?}", to_drop_streaming_ids);
 
-                let unregister_table_ids = mgr
+                let _unregister_table_ids = mgr
                     .fragment_manager
                     .drop_table_fragments_vec(&to_drop_streaming_ids)
                     .await?;
-
-                // unregister compaction group for dirty table fragments.
-                self.env
-                    .notification_manager()
-                    .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
-                        unregister_table_ids,
-                    ))
-                    .await;
 
                 // clean up source connector dirty changes.
                 self.source_manager
@@ -110,22 +97,8 @@ impl GlobalBarrierManagerContext {
                     .await;
             }
             MetadataManager::V2(mgr) => {
-                let ReleaseContext {
-                    state_table_ids,
-                    source_ids,
-                    ..
-                } = mgr.catalog_controller.clean_dirty_creating_jobs().await?;
-
-                // unregister compaction group for cleaned state tables.
-                self.env
-                    .notification_manager()
-                    .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
-                        state_table_ids
-                            .into_iter()
-                            .map(|id| id as StateTableId)
-                            .collect_vec(),
-                    ))
-                    .await;
+                let ReleaseContext { source_ids, .. } =
+                    mgr.catalog_controller.clean_dirty_creating_jobs().await?;
 
                 // unregister cleaned sources.
                 self.source_manager
@@ -134,6 +107,27 @@ impl GlobalBarrierManagerContext {
             }
         }
 
+        Ok(())
+    }
+
+    async fn purge_state_table_from_hummock(&self) -> MetaResult<()> {
+        let all_state_table_ids = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr
+                .catalog_manager
+                .list_tables()
+                .await
+                .into_iter()
+                .map(|t| t.id)
+                .collect_vec(),
+            MetadataManager::V2(mgr) => mgr
+                .catalog_controller
+                .list_all_state_table_ids()
+                .await?
+                .into_iter()
+                .map(|id| id as u32)
+                .collect_vec(),
+        };
+        self.hummock_manager.purge(&all_state_table_ids).await?;
         Ok(())
     }
 
@@ -317,27 +311,30 @@ impl GlobalBarrierManagerContext {
         let (dropped_actors, cancelled) = scheduled_barriers.pre_apply_drop_cancel_scheduled();
         let applied = !dropped_actors.is_empty() || !cancelled.is_empty();
         if !cancelled.is_empty() {
-            match &self.metadata_manager {
+            let unregister_table_ids = match &self.metadata_manager {
                 MetadataManager::V1(mgr) => {
-                    let unregister_table_ids = mgr
-                        .fragment_manager
+                    mgr.fragment_manager
                         .drop_table_fragments_vec(&cancelled)
-                        .await?;
-                    self.env
-                        .notification_manager()
-                        .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
-                            unregister_table_ids,
-                        ))
-                        .await;
+                        .await?
                 }
                 MetadataManager::V2(mgr) => {
+                    let mut unregister_table_ids = Vec::new();
                     for job_id in cancelled {
-                        mgr.catalog_controller
+                        let (_, table_ids_to_unregister) = mgr
+                            .catalog_controller
                             .try_abort_creating_streaming_job(job_id.table_id as _, true)
                             .await?;
+                        unregister_table_ids.extend(table_ids_to_unregister);
                     }
+                    unregister_table_ids
+                        .into_iter()
+                        .map(|table_id| table_id as u32)
+                        .collect()
                 }
-            }
+            };
+            self.hummock_manager
+                .unregister_table_ids(&unregister_table_ids)
+                .await?;
         }
         Ok(applied)
     }
@@ -364,21 +361,7 @@ impl GlobalBarrierManager {
             .abort_and_mark_blocked("cluster is under recovering");
 
         tracing::info!("recovery start!");
-        self.context
-            .clean_dirty_streaming_jobs()
-            .await
-            .expect("clean dirty streaming jobs");
-
-        self.context.sink_manager.reset().await;
         let retry_strategy = Self::get_retry_strategy();
-
-        // Mview progress needs to be recovered.
-        tracing::info!("recovering mview progress");
-        self.context
-            .recover_background_mv_progress()
-            .await
-            .expect("recover mview progress should not fail");
-        tracing::info!("recovered mview progress");
 
         // We take retry into consideration because this is the latency user sees for a cluster to
         // get recovered.
@@ -387,22 +370,34 @@ impl GlobalBarrierManager {
         let new_state = tokio_retry::Retry::spawn(retry_strategy, || {
             async {
                 let recovery_result: MetaResult<_> = try {
+                    self.context
+                        .clean_dirty_streaming_jobs()
+                        .await
+                        .context("clean dirty streaming jobs")?;
+
+                    self.context
+                        .purge_state_table_from_hummock()
+                        .await
+                        .context("purge state table from hummock")?;
+
+                    // Mview progress needs to be recovered.
+                    tracing::info!("recovering mview progress");
+                    self.context
+                        .recover_background_mv_progress()
+                        .await
+                        .context("recover mview progress should not fail")?;
+                    tracing::info!("recovered mview progress");
+
                     // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
                     let _ = self
                         .context
                         .pre_apply_drop_cancel(&self.scheduled_barriers)
                         .await?;
 
-                    let active_streaming_nodes = ActiveStreamingWorkerNodes::new_snapshot(
+                    let mut active_streaming_nodes = ActiveStreamingWorkerNodes::new_snapshot(
                         self.context.metadata_manager.clone(),
                     )
                     .await?;
-
-                    let all_nodes = active_streaming_nodes
-                        .current()
-                        .values()
-                        .cloned()
-                        .collect_vec();
 
                     let background_streaming_jobs = self
                         .context
@@ -417,14 +412,14 @@ impl GlobalBarrierManager {
                         && background_streaming_jobs.is_empty()
                     {
                         self.context
-                            .scale_actors(all_nodes.clone())
+                            .scale_actors(&active_streaming_nodes)
                             .await
                             .inspect_err(|err| {
                                 warn!(error = %err.as_report(), "scale actors failed");
                             })?;
 
                         self.context
-                            .resolve_actor_info(all_nodes.clone())
+                            .resolve_actor_info(&active_streaming_nodes)
                             .await
                             .inspect_err(|err| {
                                 warn!(error = %err.as_report(), "resolve actor info failed");
@@ -432,7 +427,7 @@ impl GlobalBarrierManager {
                     } else {
                         // Migrate actors in expired CN to newly joined one.
                         self.context
-                            .migrate_actors(all_nodes.clone())
+                            .migrate_actors(&mut active_streaming_nodes)
                             .await
                             .inspect_err(|err| {
                                 warn!(error = %err.as_report(), "migrate actors failed");
@@ -449,6 +444,8 @@ impl GlobalBarrierManager {
                             warn!(error = %err.as_report(), "reset compute nodes failed");
                         })?;
 
+                    self.context.sink_manager.reset().await;
+
                     if self
                         .context
                         .pre_apply_drop_cancel(&self.scheduled_barriers)
@@ -456,7 +453,7 @@ impl GlobalBarrierManager {
                     {
                         info = self
                             .context
-                            .resolve_actor_info(all_nodes.clone())
+                            .resolve_actor_info(&active_streaming_nodes)
                             .await
                             .inspect_err(|err| {
                                 warn!(error = %err.as_report(), "resolve actor info failed");
@@ -500,15 +497,10 @@ impl GlobalBarrierManager {
                     let mut node_to_collect =
                         control_stream_manager.inject_barrier(command_ctx.clone())?;
                     while !node_to_collect.is_empty() {
-                        let (worker_id, _, resp) = control_stream_manager.next_response().await?;
-                        assert_matches!(
-                            resp,
-                            StreamingControlStreamResponse {
-                                response: Some(
-                                    streaming_control_stream_response::Response::CompleteBarrier(_)
-                                )
-                            }
-                        );
+                        let (worker_id, prev_epoch, _) = control_stream_manager
+                            .next_complete_barrier_response()
+                            .await?;
+                        assert_eq!(prev_epoch, command_ctx.prev_epoch.value().0);
                         assert!(node_to_collect.remove(&worker_id));
                     }
 
@@ -542,19 +534,29 @@ impl GlobalBarrierManager {
             paused = ?self.state.paused_reason(),
             "recovery success"
         );
+
+        self.env
+            .notification_manager()
+            .notify_frontend_without_version(Operation::Update, Info::Recovery(Recovery {}));
     }
 }
 
 impl GlobalBarrierManagerContext {
     /// Migrate actors in expired CNs to newly joined ones, return true if any actor is migrated.
-    async fn migrate_actors(&self, all_nodes: Vec<WorkerNode>) -> MetaResult<InflightActorInfo> {
+    async fn migrate_actors(
+        &self,
+        active_nodes: &mut ActiveStreamingWorkerNodes,
+    ) -> MetaResult<InflightActorInfo> {
         match &self.metadata_manager {
-            MetadataManager::V1(_) => self.migrate_actors_v1(all_nodes).await,
-            MetadataManager::V2(_) => self.migrate_actors_v2(all_nodes).await,
+            MetadataManager::V1(_) => self.migrate_actors_v1(active_nodes).await,
+            MetadataManager::V2(_) => self.migrate_actors_v2(active_nodes).await,
         }
     }
 
-    async fn migrate_actors_v2(&self, all_nodes: Vec<WorkerNode>) -> MetaResult<InflightActorInfo> {
+    async fn migrate_actors_v2(
+        &self,
+        active_nodes: &mut ActiveStreamingWorkerNodes,
+    ) -> MetaResult<InflightActorInfo> {
         let mgr = self.metadata_manager.as_v2_ref();
 
         let all_inuse_parallel_units: HashSet<_> = mgr
@@ -564,8 +566,9 @@ impl GlobalBarrierManagerContext {
             .into_iter()
             .collect();
 
-        let active_parallel_units: HashSet<_> = all_nodes
-            .iter()
+        let active_parallel_units: HashSet<_> = active_nodes
+            .current()
+            .values()
             .flat_map(|node| node.parallel_units.iter().map(|pu| pu.id as i32))
             .collect();
 
@@ -575,7 +578,7 @@ impl GlobalBarrierManagerContext {
             .collect();
         if expired_parallel_units.is_empty() {
             debug!("no expired parallel units, skipping.");
-            return self.resolve_actor_info(all_nodes.clone()).await;
+            return self.resolve_actor_info(active_nodes).await;
         }
 
         debug!("start migrate actors.");
@@ -592,8 +595,9 @@ impl GlobalBarrierManagerContext {
         let start = Instant::now();
         let mut plan = HashMap::new();
         'discovery: while !to_migrate_parallel_units.is_empty() {
-            let new_parallel_units = all_nodes
-                .iter()
+            let new_parallel_units = active_nodes
+                .current()
+                .values()
                 .flat_map(|node| {
                     node.parallel_units
                         .iter()
@@ -616,26 +620,44 @@ impl GlobalBarrierManagerContext {
                     }
                 }
             }
-            warn!(
-                "waiting for new workers to join, elapsed: {}s",
-                start.elapsed().as_secs()
-            );
+
+            if to_migrate_parallel_units.is_empty() {
+                break;
+            }
+
             // wait to get newly joined CN
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            let changed = active_nodes
+                .wait_changed(Duration::from_millis(5000), |active_nodes| {
+                    let current_nodes = active_nodes
+                        .current()
+                        .values()
+                        .map(|node| (node.id, &node.host, &node.parallel_units))
+                        .collect_vec();
+                    warn!(
+                        current_nodes = ?current_nodes,
+                        "waiting for new workers to join, elapsed: {}s",
+                        start.elapsed().as_secs()
+                    );
+                })
+                .await;
+            warn!(?changed, "get worker changed. Retry migrate");
         }
 
         mgr.catalog_controller.migrate_actors(plan).await?;
 
         debug!("migrate actors succeed.");
 
-        self.resolve_actor_info(all_nodes).await
+        self.resolve_actor_info(active_nodes).await
     }
 
     /// Migrate actors in expired CNs to newly joined ones, return true if any actor is migrated.
-    async fn migrate_actors_v1(&self, all_nodes: Vec<WorkerNode>) -> MetaResult<InflightActorInfo> {
+    async fn migrate_actors_v1(
+        &self,
+        active_nodes: &mut ActiveStreamingWorkerNodes,
+    ) -> MetaResult<InflightActorInfo> {
         let mgr = self.metadata_manager.as_v1_ref();
 
-        let info = self.resolve_actor_info(all_nodes.clone()).await?;
+        let info = self.resolve_actor_info(active_nodes).await?;
 
         // 1. get expired workers.
         let expired_workers: HashSet<WorkerId> = info
@@ -651,30 +673,38 @@ impl GlobalBarrierManagerContext {
 
         debug!("start migrate actors.");
         let migration_plan = self
-            .generate_migration_plan(expired_workers, &all_nodes)
+            .generate_migration_plan(expired_workers, active_nodes)
             .await?;
         // 2. start to migrate fragment one-by-one.
         mgr.fragment_manager
             .migrate_fragment_actors(&migration_plan)
             .await?;
         // 3. remove the migration plan.
-        migration_plan.delete(self.env.meta_store_checked()).await?;
+        migration_plan.delete(self.env.meta_store().as_kv()).await?;
         debug!("migrate actors succeed.");
 
-        self.resolve_actor_info(all_nodes).await
+        self.resolve_actor_info(active_nodes).await
     }
 
-    async fn scale_actors(&self, all_nodes: Vec<WorkerNode>) -> MetaResult<()> {
-        let _guard = self.scale_controller.reschedule_lock.write().await;
+    async fn scale_actors(&self, active_nodes: &ActiveStreamingWorkerNodes) -> MetaResult<()> {
+        let Ok(_guard) = self.scale_controller.reschedule_lock.try_write() else {
+            return Err(anyhow!("scale_actors failed to acquire reschedule_lock").into());
+        };
         match &self.metadata_manager {
-            MetadataManager::V1(_) => self.scale_actors_v1(all_nodes).await,
-            MetadataManager::V2(_) => self.scale_actors_v2(all_nodes).await,
+            MetadataManager::V1(_) => self.scale_actors_v1(active_nodes).await,
+            MetadataManager::V2(_) => self.scale_actors_v2(active_nodes).await,
         }
     }
 
-    async fn scale_actors_v2(&self, workers: Vec<WorkerNode>) -> MetaResult<()> {
+    async fn scale_actors_v2(&self, active_nodes: &ActiveStreamingWorkerNodes) -> MetaResult<()> {
         let mgr = self.metadata_manager.as_v2_ref();
         debug!("start resetting actors distribution");
+
+        let available_parallelism = active_nodes
+            .current()
+            .values()
+            .flat_map(|worker_node| worker_node.parallel_units.iter())
+            .count();
 
         let table_parallelisms: HashMap<_, _> = {
             let streaming_parallelisms = mgr
@@ -682,22 +712,45 @@ impl GlobalBarrierManagerContext {
                 .get_all_created_streaming_parallelisms()
                 .await?;
 
-            streaming_parallelisms
-                .into_iter()
-                .map(|(table_id, parallelism)| {
-                    // no custom for sql backend
-                    let table_parallelism = match parallelism {
-                        StreamingParallelism::Adaptive => TableParallelism::Adaptive,
-                        StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n),
-                    };
+            let mut result = HashMap::new();
 
-                    (table_id as u32, table_parallelism)
-                })
-                .collect()
+            for (object_id, streaming_parallelism) in streaming_parallelisms {
+                let actual_fragment_parallelism = mgr
+                    .catalog_controller
+                    .get_actual_job_fragment_parallelism(object_id)
+                    .await?;
+
+                let table_parallelism = match streaming_parallelism {
+                    StreamingParallelism::Adaptive => model::TableParallelism::Adaptive,
+                    StreamingParallelism::Custom => model::TableParallelism::Custom,
+                    StreamingParallelism::Fixed(n) => model::TableParallelism::Fixed(n as _),
+                };
+
+                let target_parallelism = Self::derive_target_parallelism(
+                    available_parallelism,
+                    table_parallelism,
+                    actual_fragment_parallelism,
+                    self.env.opts.default_parallelism,
+                );
+
+                if target_parallelism != table_parallelism {
+                    tracing::info!(
+                        "resetting table {} parallelism from {:?} to {:?}",
+                        object_id,
+                        table_parallelism,
+                        target_parallelism
+                    );
+                }
+
+                result.insert(object_id as u32, target_parallelism);
+            }
+
+            result
         };
 
-        let schedulable_worker_ids = workers
-            .iter()
+        let schedulable_worker_ids = active_nodes
+            .current()
+            .values()
             .filter(|worker| {
                 !worker
                     .property
@@ -804,8 +857,8 @@ impl GlobalBarrierManagerContext {
         }
     }
 
-    async fn scale_actors_v1(&self, workers: Vec<WorkerNode>) -> MetaResult<()> {
-        let info = self.resolve_actor_info(workers.clone()).await?;
+    async fn scale_actors_v1(&self, active_nodes: &ActiveStreamingWorkerNodes) -> MetaResult<()> {
+        let info = self.resolve_actor_info(active_nodes).await?;
 
         let mgr = self.metadata_manager.as_v1_ref();
         debug!("start resetting actors distribution");
@@ -850,8 +903,9 @@ impl GlobalBarrierManagerContext {
                 .collect()
         };
 
-        let schedulable_worker_ids: BTreeSet<_> = workers
-            .iter()
+        let schedulable_worker_ids: BTreeSet<_> = active_nodes
+            .current()
+            .values()
             .filter(|worker| {
                 !worker
                     .property
@@ -926,11 +980,11 @@ impl GlobalBarrierManagerContext {
     async fn generate_migration_plan(
         &self,
         expired_workers: HashSet<WorkerId>,
-        all_nodes: &Vec<WorkerNode>,
+        active_nodes: &mut ActiveStreamingWorkerNodes,
     ) -> MetaResult<MigrationPlan> {
         let mgr = self.metadata_manager.as_v1_ref();
 
-        let mut cached_plan = MigrationPlan::get(self.env.meta_store_checked()).await?;
+        let mut cached_plan = MigrationPlan::get(self.env.meta_store().as_kv()).await?;
 
         let all_worker_parallel_units = mgr.fragment_manager.all_worker_parallel_units().await;
 
@@ -976,8 +1030,9 @@ impl GlobalBarrierManagerContext {
         let start = Instant::now();
         // if in-used expire parallel units are not empty, should wait for newly joined worker.
         'discovery: while !to_migrate_parallel_units.is_empty() {
-            let mut new_parallel_units = all_nodes
-                .iter()
+            let mut new_parallel_units = active_nodes
+                .current()
+                .values()
                 .flat_map(|worker| worker.parallel_units.iter().cloned())
                 .collect_vec();
             new_parallel_units.retain(|pu| !inuse_parallel_units.contains(&pu.id));
@@ -999,12 +1054,27 @@ impl GlobalBarrierManagerContext {
                     }
                 }
             }
-            warn!(
-                "waiting for new workers to join, elapsed: {}s",
-                start.elapsed().as_secs()
-            );
+
+            if to_migrate_parallel_units.is_empty() {
+                break;
+            }
+
             // wait to get newly joined CN
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            let changed = active_nodes
+                .wait_changed(Duration::from_millis(5000), |active_nodes| {
+                    let current_nodes = active_nodes
+                        .current()
+                        .values()
+                        .map(|node| (node.id, &node.host, &node.parallel_units))
+                        .collect_vec();
+                    warn!(
+                        current_nodes = ?current_nodes,
+                        "waiting for new workers to join, elapsed: {}s",
+                        start.elapsed().as_secs()
+                    );
+                })
+                .await;
+            warn!(?changed, "get worker changed. Retry migrate");
         }
 
         // update migration plan, if there is a chain in the plan, update it.
@@ -1027,7 +1097,7 @@ impl GlobalBarrierManagerContext {
             new_plan.parallel_unit_plan
         );
 
-        new_plan.insert(self.env.meta_store_checked()).await?;
+        new_plan.insert(self.env.meta_store().as_kv()).await?;
         Ok(new_plan)
     }
 

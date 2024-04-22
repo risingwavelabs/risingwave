@@ -167,6 +167,10 @@ impl Ident {
             _ => self.value.to_lowercase(),
         }
     }
+
+    pub fn quote_style(&self) -> Option<char> {
+        self.quote_style
+    }
 }
 
 impl From<&str> for Ident {
@@ -256,6 +260,30 @@ impl fmt::Display for Array {
     }
 }
 
+/// An escape character, to represent '' or a single character.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct EscapeChar(Option<char>);
+
+impl EscapeChar {
+    pub fn escape(ch: char) -> Self {
+        Self(Some(ch))
+    }
+
+    pub fn empty() -> Self {
+        Self(None)
+    }
+}
+
+impl fmt::Display for EscapeChar {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            Some(ch) => write!(f, "{}", ch),
+            None => f.write_str(""),
+        }
+    }
+}
+
 /// An SQL expression of any type.
 ///
 /// The parser does not distinguish between expressions of different types
@@ -329,12 +357,26 @@ pub enum Expr {
         low: Box<Expr>,
         high: Box<Expr>,
     },
+    /// LIKE
+    Like {
+        negated: bool,
+        expr: Box<Expr>,
+        pattern: Box<Expr>,
+        escape_char: Option<EscapeChar>,
+    },
+    /// ILIKE (case-insensitive LIKE)
+    ILike {
+        negated: bool,
+        expr: Box<Expr>,
+        pattern: Box<Expr>,
+        escape_char: Option<EscapeChar>,
+    },
     /// `<expr> [ NOT ] SIMILAR TO <pat> ESCAPE <esc_text>`
     SimilarTo {
-        expr: Box<Expr>,
         negated: bool,
-        pat: Box<Expr>,
-        esc_text: Option<Box<Expr>>,
+        expr: Box<Expr>,
+        pattern: Box<Expr>,
+        escape_char: Option<EscapeChar>,
     },
     /// Binary operation e.g. `1 + 1` or `foo > bar`
     BinaryOp {
@@ -535,24 +577,72 @@ impl fmt::Display for Expr {
                 low,
                 high
             ),
-            Expr::SimilarTo {
-                expr,
+            Expr::Like {
                 negated,
-                pat,
-                esc_text,
-            } => {
-                write!(
+                expr,
+                pattern,
+                escape_char,
+            } => match escape_char {
+                Some(ch) => write!(
+                    f,
+                    "{} {}LIKE {} ESCAPE '{}'",
+                    expr,
+                    if *negated { "NOT " } else { "" },
+                    pattern,
+                    ch
+                ),
+                _ => write!(
+                    f,
+                    "{} {}LIKE {}",
+                    expr,
+                    if *negated { "NOT " } else { "" },
+                    pattern
+                ),
+            },
+            Expr::ILike {
+                negated,
+                expr,
+                pattern,
+                escape_char,
+            } => match escape_char {
+                Some(ch) => write!(
+                    f,
+                    "{} {}ILIKE {} ESCAPE '{}'",
+                    expr,
+                    if *negated { "NOT " } else { "" },
+                    pattern,
+                    ch
+                ),
+                _ => write!(
+                    f,
+                    "{} {}ILIKE {}",
+                    expr,
+                    if *negated { "NOT " } else { "" },
+                    pattern
+                ),
+            },
+            Expr::SimilarTo {
+                negated,
+                expr,
+                pattern,
+                escape_char,
+            } => match escape_char {
+                Some(ch) => write!(
+                    f,
+                    "{} {}SIMILAR TO {} ESCAPE '{}'",
+                    expr,
+                    if *negated { "NOT " } else { "" },
+                    pattern,
+                    ch
+                ),
+                _ => write!(
                     f,
                     "{} {}SIMILAR TO {}",
                     expr,
                     if *negated { "NOT " } else { "" },
-                    pat,
-                )?;
-                if let Some(et) = esc_text {
-                    write!(f, "ESCAPE {}", et)?;
-                }
-                Ok(())
-            }
+                    pattern
+                ),
+            },
             Expr::BinaryOp { left, op, right } => write!(f, "{} {} {}", left, op, right),
             Expr::SomeOp(expr) => write!(f, "SOME({})", expr),
             Expr::AllOp(expr) => write!(f, "ALL({})", expr),
@@ -1133,6 +1223,10 @@ pub enum Statement {
         source_watermarks: Vec<SourceWatermark>,
         /// Append only table.
         append_only: bool,
+        /// On conflict behavior
+        on_conflict: Option<OnConflict>,
+        /// with_version_column behind on conflict
+        with_version_column: Option<String>,
         /// `AS ( query )`
         query: Option<Box<Query>>,
         /// `FROM cdc_source TABLE database_name.table_name`
@@ -1192,6 +1286,22 @@ pub enum Statement {
         append_only: bool,
         params: CreateFunctionBody,
     },
+
+    /// DECLARE CURSOR
+    DeclareCursor {
+        stmt: DeclareCursorStatement,
+    },
+
+    // FETCH CURSOR
+    FetchCursor {
+        stmt: FetchCursorStatement,
+    },
+
+    // CLOSE CURSOR
+    CloseCursor {
+        stmt: CloseCursorStatement,
+    },
+
     /// ALTER DATABASE
     AlterDatabase {
         name: ObjectName,
@@ -1410,6 +1520,8 @@ pub enum Statement {
     /// WAIT for ALL running stream jobs to finish.
     /// It will block the current session the condition is met.
     Wait,
+    /// Trigger stream job recover
+    Recover,
 }
 
 impl fmt::Display for Statement {
@@ -1634,6 +1746,8 @@ impl fmt::Display for Statement {
                 source_schema,
                 source_watermarks,
                 append_only,
+                on_conflict,
+                with_version_column,
                 query,
                 cdc_table_info,
                 include_column_options,
@@ -1661,6 +1775,14 @@ impl fmt::Display for Statement {
                 }
                 if *append_only {
                     write!(f, " APPEND ONLY")?;
+                }
+
+
+                if let Some(on_conflict_behavior) = on_conflict {
+                    write!(f, " ON CONFLICT {}", on_conflict_behavior)?;
+                }
+                if let Some(version_column) = with_version_column {
+                    write!(f, " WITH VERSION COLUMN({})", version_column)?;
                 }
                 if !include_column_options.is_empty() { // (Ident, Option<Ident>)
                     write!(f, "{}", display_comma_separated(
@@ -1733,6 +1855,9 @@ impl fmt::Display for Statement {
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
             Statement::CreateSubscription { stmt } => write!(f, "CREATE SUBSCRIPTION {}", stmt,),
             Statement::CreateConnection { stmt } => write!(f, "CREATE CONNECTION {}", stmt,),
+            Statement::DeclareCursor { stmt } => write!(f, "DECLARE {}", stmt,),
+            Statement::FetchCursor { stmt } => write!(f, "FETCH {}", stmt),
+            Statement::CloseCursor { stmt } => write!(f, "CLOSE {}", stmt),
             Statement::AlterDatabase { name, operation } => {
                 write!(f, "ALTER DATABASE {} {}", name, operation)
             }
@@ -1970,6 +2095,10 @@ impl fmt::Display for Statement {
             }
             Statement::Kill(process_id) => {
                 write!(f, "KILL {}", process_id)?;
+                Ok(())
+            }
+            Statement::Recover => {
+                write!(f, "RECOVER")?;
                 Ok(())
             }
         }
@@ -2444,6 +2573,24 @@ impl fmt::Display for EmitMode {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum OnConflict {
+    OverWrite,
+    Ignore,
+    DoUpdateIfNotNull,
+}
+
+impl fmt::Display for OnConflict {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            OnConflict::OverWrite => "OVERWRITE",
+            OnConflict::Ignore => "IGNORE",
+            OnConflict::DoUpdateIfNotNull => "DO UPDATE IF NOT NULL",
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SetTimeZoneValue {
     Ident(Ident),
     Literal(Value),
@@ -2737,6 +2884,9 @@ impl fmt::Display for TableColumnDef {
 pub struct CreateFunctionBody {
     /// LANGUAGE lang_name
     pub language: Option<Ident>,
+
+    pub runtime: Option<FunctionRuntime>,
+
     /// IMMUTABLE | STABLE | VOLATILE
     pub behavior: Option<FunctionBehavior>,
     /// AS 'definition'
@@ -2747,6 +2897,8 @@ pub struct CreateFunctionBody {
     pub return_: Option<Expr>,
     /// USING ...
     pub using: Option<CreateFunctionUsing>,
+
+    pub function_type: Option<CreateFunctionType>,
 }
 
 impl fmt::Display for CreateFunctionBody {
@@ -2754,6 +2906,11 @@ impl fmt::Display for CreateFunctionBody {
         if let Some(language) = &self.language {
             write!(f, " LANGUAGE {language}")?;
         }
+
+        if let Some(runtime) = &self.runtime {
+            write!(f, " RUNTIME {runtime}")?;
+        }
+
         if let Some(behavior) = &self.behavior {
             write!(f, " {behavior}")?;
         }
@@ -2765,6 +2922,9 @@ impl fmt::Display for CreateFunctionBody {
         }
         if let Some(using) = &self.using {
             write!(f, " {using}")?;
+        }
+        if let Some(function_type) = &self.function_type {
+            write!(f, " {function_type}")?;
         }
         Ok(())
     }
@@ -2840,6 +3000,42 @@ impl fmt::Display for CreateFunctionUsing {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum FunctionRuntime {
+    QuickJs,
+    Deno,
+}
+
+impl fmt::Display for FunctionRuntime {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FunctionRuntime::QuickJs => write!(f, "quickjs"),
+            FunctionRuntime::Deno => write!(f, "deno"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum CreateFunctionType {
+    Sync,
+    Async,
+    Generator,
+    AsyncGenerator,
+}
+
+impl fmt::Display for CreateFunctionType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CreateFunctionType::Sync => write!(f, "SYNC"),
+            CreateFunctionType::Async => write!(f, "ASYNC"),
+            CreateFunctionType::Generator => write!(f, "SYNC GENERATOR"),
+            CreateFunctionType::AsyncGenerator => write!(f, "ASYNC GENERATOR"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SetVariableValue {
@@ -2888,6 +3084,30 @@ impl fmt::Display for SetVariableValueSingle {
         match self {
             Ident(ident) => write!(f, "{}", ident),
             Literal(literal) => write!(f, "{}", literal),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum AsOf {
+    ProcessTime,
+    // the number of seconds that have elapsed since the Unix epoch, which is January 1, 1970 at 00:00:00 Coordinated Universal Time (UTC).
+    TimestampNum(i64),
+    TimestampString(String),
+    VersionNum(i64),
+    VersionString(String),
+}
+
+impl fmt::Display for AsOf {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use AsOf::*;
+        match self {
+            ProcessTime => write!(f, " FOR SYSTEM_TIME AS OF PROCTIME()"),
+            TimestampNum(ts) => write!(f, " FOR SYSTEM_TIME AS OF {}", ts),
+            TimestampString(ts) => write!(f, " FOR SYSTEM_TIME AS OF '{}'", ts),
+            VersionNum(v) => write!(f, " FOR SYSTEM_VERSION AS OF {}", v),
+            VersionString(v) => write!(f, " FOR SYSTEM_VERSION AS OF '{}'", v),
         }
     }
 }
@@ -3035,6 +3255,8 @@ mod tests {
                 as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
                 return_: None,
                 using: None,
+                runtime: None,
+                function_type: None,
             },
             with_options: CreateFunctionWithOptions {
                 always_retry_on_network_error: None,
@@ -3056,6 +3278,8 @@ mod tests {
                 as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
                 return_: None,
                 using: None,
+                runtime: None,
+                function_type: None,
             },
             with_options: CreateFunctionWithOptions {
                 always_retry_on_network_error: Some(true),
@@ -3063,6 +3287,30 @@ mod tests {
         };
         assert_eq!(
             "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1' WITH ( ALWAYS_RETRY_NETWORK_ERRORS = true )",
+            format!("{}", create_function)
+        );
+
+        let create_function = Statement::CreateFunction {
+            temporary: false,
+            or_replace: false,
+            name: ObjectName(vec![Ident::new_unchecked("foo")]),
+            args: Some(vec![OperateFunctionArg::unnamed(DataType::Int)]),
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
+            params: CreateFunctionBody {
+                language: Some(Ident::new_unchecked("javascript")),
+                behavior: None,
+                as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
+                return_: None,
+                using: None,
+                runtime: Some(FunctionRuntime::Deno),
+                function_type: Some(CreateFunctionType::AsyncGenerator),
+            },
+            with_options: CreateFunctionWithOptions {
+                always_retry_on_network_error: None,
+            },
+        };
+        assert_eq!(
+            "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE javascript RUNTIME deno AS 'SELECT 1' ASYNC GENERATOR",
             format!("{}", create_function)
         );
     }

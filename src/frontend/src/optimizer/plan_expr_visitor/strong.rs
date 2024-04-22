@@ -285,6 +285,8 @@ impl Strong {
             | ExprType::JsonbPathMatch
             | ExprType::JsonbPathQueryArray
             | ExprType::JsonbPathQueryFirst
+            | ExprType::JsonbPopulateRecord
+            | ExprType::JsonbToRecord
             | ExprType::Vnode
             | ExprType::Proctime
             | ExprType::PgSleep
@@ -298,7 +300,9 @@ impl Strong {
             | ExprType::PgIndexesSize
             | ExprType::PgRelationSize
             | ExprType::PgGetSerialSequence
-            | ExprType::IcebergTransform => false,
+            | ExprType::IcebergTransform
+            | ExprType::InetAton
+            | ExprType::InetNtoa => false,
             ExprType::Unspecified => unreachable!(),
         }
     }

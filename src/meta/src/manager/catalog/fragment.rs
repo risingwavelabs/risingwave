@@ -124,7 +124,7 @@ pub type FragmentManagerRef = Arc<FragmentManager>;
 
 impl FragmentManager {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let table_fragments = TableFragments::list(env.meta_store_checked()).await?;
+        let table_fragments = TableFragments::list(env.meta_store().as_kv()).await?;
 
         // `expr_context` of `StreamActor` is introduced in 1.6.0.
         // To ensure compatibility, we fill it for table fragments that were created with older versions.
@@ -133,7 +133,7 @@ impl FragmentManager {
             .map(|tf| (tf.table_id(), tf.fill_expr_context()))
             .collect();
 
-        let table_revision = TableRevision::get(env.meta_store_checked()).await?;
+        let table_revision = TableRevision::get(env.meta_store().as_kv()).await?;
 
         Ok(Self {
             env,
@@ -952,15 +952,24 @@ impl FragmentManager {
         let mut fragment_to_apply = HashMap::new();
 
         for fragment in fragment.fragments.values_mut() {
-            if (fragment.get_fragment_type_mask() & FragmentTypeFlag::StreamScan as u32) != 0 {
+            if (fragment.get_fragment_type_mask() & FragmentTypeFlag::StreamScan as u32) != 0
+                || (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0
+            {
                 let mut actor_to_apply = Vec::new();
                 for actor in &mut fragment.actors {
                     if let Some(node) = actor.nodes.as_mut() {
-                        visit_stream_node(node, |node_body| {
-                            if let NodeBody::StreamScan(ref mut node) = node_body {
+                        visit_stream_node(node, |node_body| match node_body {
+                            NodeBody::StreamScan(ref mut node) => {
                                 node.rate_limit = rate_limit;
                                 actor_to_apply.push(actor.actor_id);
                             }
+                            NodeBody::Source(ref mut node) => {
+                                if let Some(ref mut node_inner) = node.source_inner {
+                                    node_inner.rate_limit = rate_limit;
+                                    actor_to_apply.push(actor.actor_id);
+                                }
+                            }
+                            _ => {}
                         })
                     };
                 }
@@ -1021,6 +1030,30 @@ impl FragmentManager {
                     .filter(|a| table_fragment.actor_status[a].state == ActorState::Running as i32)
                     .collect();
                 return Ok(running_actor_ids);
+            }
+        }
+
+        bail!("fragment not found: {}", fragment_id)
+    }
+
+    /// Get the actor ids, and each actor's upstream actor ids of the fragment with `fragment_id` with `Running` status.
+    pub async fn get_running_actors_and_upstream_of_fragment(
+        &self,
+        fragment_id: FragmentId,
+    ) -> MetaResult<HashSet<(ActorId, Vec<ActorId>)>> {
+        let map = &self.core.read().await.table_fragments;
+
+        for table_fragment in map.values() {
+            if let Some(fragment) = table_fragment.fragments.get(&fragment_id) {
+                let running_actors = fragment
+                    .actors
+                    .iter()
+                    .filter(|a| {
+                        table_fragment.actor_status[&a.actor_id].state == ActorState::Running as i32
+                    })
+                    .map(|a| (a.actor_id, a.upstream_actor_id.clone()))
+                    .collect();
+                return Ok(running_actors);
             }
         }
 

@@ -878,7 +878,7 @@ impl FunctionAttr {
                 use risingwave_common::types::*;
                 use risingwave_common::bail;
                 use risingwave_common::buffer::Bitmap;
-                use risingwave_common::estimate_size::EstimateSize;
+                use risingwave_common_estimate_size::EstimateSize;
 
                 use risingwave_expr::expr::Context;
                 use risingwave_expr::Result;
@@ -1037,10 +1037,10 @@ impl FunctionAttr {
             .map(|ty| format_ident!("{}Builder", types::array_type(ty)))
             .collect_vec();
         let return_types = if return_types.len() == 1 {
-            vec![quote! { self.return_type.clone() }]
+            vec![quote! { self.context.return_type.clone() }]
         } else {
             (0..return_types.len())
-                .map(|i| quote! { self.return_type.as_struct().types().nth(#i).unwrap().clone() })
+                .map(|i| quote! { self.context.return_type.as_struct().types().nth(#i).unwrap().clone() })
                 .collect()
         };
         #[allow(clippy::disallowed_methods)]
@@ -1060,14 +1060,15 @@ impl FunctionAttr {
         } else {
             quote! {
                 let value_array = StructArray::new(
-                    self.return_type.as_struct().clone(),
+                    self.context.return_type.as_struct().clone(),
                     value_arrays.to_vec(),
                     Bitmap::ones(len),
                 ).into_ref();
             }
         };
+        let context = user_fn.context.then(|| quote! { &self.context, });
         let prebuilt_arg = match &self.prebuild {
-            Some(_) => quote! { &self.prebuilt_arg },
+            Some(_) => quote! { &self.prebuilt_arg, },
             None => quote! {},
         };
         let prebuilt_arg_type = match &self.prebuild {
@@ -1081,12 +1082,32 @@ impl FunctionAttr {
                 .expect("invalid prebuild syntax"),
             None => quote! { () },
         };
-        let iter = match user_fn.return_type_kind {
-            ReturnTypeKind::T => quote! { iter },
-            ReturnTypeKind::Option => quote! { if let Some(it) = iter { it } else { continue; } },
-            ReturnTypeKind::Result => quote! { iter? },
+        let iter = quote! { #fn_name(#(#inputs,)* #prebuilt_arg #context) };
+        let mut iter = match user_fn.return_type_kind {
+            ReturnTypeKind::T => quote! { #iter },
+            ReturnTypeKind::Result => quote! { #iter? },
+            ReturnTypeKind::Option => quote! { if let Some(it) = #iter { it } else { continue; } },
             ReturnTypeKind::ResultOption => {
-                quote! { if let Some(it) = iter? { it } else { continue; } }
+                quote! { if let Some(it) = #iter? { it } else { continue; } }
+            }
+        };
+        // if user function accepts non-option arguments, we assume the function
+        // returns empty on null input, so we need to unwrap the inputs before calling.
+        #[allow(clippy::disallowed_methods)] // allow zip
+        let some_inputs = inputs
+            .iter()
+            .zip(user_fn.args_option.iter())
+            .map(|(input, opt)| {
+                if *opt {
+                    quote! { #input }
+                } else {
+                    quote! { Some(#input) }
+                }
+            });
+        iter = quote! {
+            match (#(#inputs,)*) {
+                (#(#some_inputs,)*) => #iter,
+                _ => continue,
             }
         };
         let iterator_item_type = user_fn.iterator_item_kind.clone().ok_or_else(|| {
@@ -1108,11 +1129,18 @@ impl FunctionAttr {
                 use risingwave_common::types::*;
                 use risingwave_common::buffer::Bitmap;
                 use risingwave_common::util::iter_util::ZipEqFast;
-                use risingwave_expr::expr::BoxedExpression;
+                use risingwave_expr::expr::{BoxedExpression, Context};
                 use risingwave_expr::{Result, ExprError};
                 use risingwave_expr::codegen::*;
 
                 risingwave_expr::ensure!(children.len() == #num_args);
+
+                let context = Context {
+                    return_type: return_type.clone(),
+                    arg_types: children.iter().map(|c| c.return_type()).collect(),
+                    variadic: false,
+                };
+
                 let mut iter = children.into_iter();
                 #(let #all_child = iter.next().unwrap();)*
                 #(
@@ -1126,7 +1154,7 @@ impl FunctionAttr {
 
                 #[derive(Debug)]
                 struct #struct_name {
-                    return_type: DataType,
+                    context: Context,
                     chunk_size: usize,
                     #(#child: BoxedExpression,)*
                     prebuilt_arg: #prebuilt_arg_type,
@@ -1134,7 +1162,7 @@ impl FunctionAttr {
                 #[async_trait]
                 impl risingwave_expr::table_function::TableFunction for #struct_name {
                     fn return_type(&self) -> DataType {
-                        self.return_type.clone()
+                        self.context.return_type.clone()
                     }
                     async fn eval<'a>(&'a self, input: &'a DataChunk) -> BoxStream<'a, Result<DataChunk>> {
                         self.eval_inner(input)
@@ -1151,23 +1179,23 @@ impl FunctionAttr {
                         let mut index_builder = I32ArrayBuilder::new(self.chunk_size);
                         #(let mut #builders = #builder_types::with_type(self.chunk_size, #return_types);)*
 
-                        for (i, (row, visible)) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.visibility().iter()).enumerate() {
-                            if let (#(Some(#inputs),)*) = row && visible {
-                                let iter = #fn_name(#(#inputs,)* #prebuilt_arg);
-                                for output in #iter {
-                                    index_builder.append(Some(i as i32));
-                                    match #output {
-                                        Some((#(#outputs),*)) => { #(#builders.append(#optioned_outputs);)* }
-                                        None => { #(#builders.append_null();)* }
-                                    }
+                        for (i, ((#(#inputs,)*), visible)) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.visibility().iter()).enumerate() {
+                            if !visible {
+                                continue;
+                            }
+                            for output in #iter {
+                                index_builder.append(Some(i as i32));
+                                match #output {
+                                    Some((#(#outputs),*)) => { #(#builders.append(#optioned_outputs);)* }
+                                    None => { #(#builders.append_null();)* }
+                                }
 
-                                    if index_builder.len() == self.chunk_size {
-                                        let len = index_builder.len();
-                                        let index_array = std::mem::replace(&mut index_builder, I32ArrayBuilder::new(self.chunk_size)).finish().into_ref();
-                                        let value_arrays = [#(std::mem::replace(&mut #builders, #builder_types::with_type(self.chunk_size, #return_types)).finish().into_ref()),*];
-                                        #build_value_array
-                                        yield DataChunk::new(vec![index_array, value_array], self.chunk_size);
-                                    }
+                                if index_builder.len() == self.chunk_size {
+                                    let len = index_builder.len();
+                                    let index_array = std::mem::replace(&mut index_builder, I32ArrayBuilder::new(self.chunk_size)).finish().into_ref();
+                                    let value_arrays = [#(std::mem::replace(&mut #builders, #builder_types::with_type(self.chunk_size, #return_types)).finish().into_ref()),*];
+                                    #build_value_array
+                                    yield DataChunk::new(vec![index_array, value_array], self.chunk_size);
                                 }
                             }
                         }
@@ -1183,7 +1211,7 @@ impl FunctionAttr {
                 }
 
                 Ok(Box::new(#struct_name {
-                    return_type,
+                    context,
                     chunk_size,
                     #(#child,)*
                     prebuilt_arg: #prebuilt_arg_value,

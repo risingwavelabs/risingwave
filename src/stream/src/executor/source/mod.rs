@@ -12,14 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod executor_core;
 use std::collections::HashMap;
 
 use await_tree::InstrumentAwait;
-pub use executor_core::StreamSourceCore;
-mod fs_source_executor;
-#[expect(deprecated)]
-pub use fs_source_executor::*;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
@@ -28,18 +23,27 @@ use risingwave_connector::source::{SourceColumnDesc, SplitId};
 use risingwave_pb::plan_common::additional_column::ColumnType;
 use risingwave_pb::plan_common::AdditionalColumn;
 pub use state_table_handler::*;
-pub mod fetch_executor;
+
+mod executor_core;
+pub use executor_core::StreamSourceCore;
+
+mod fs_source_executor;
+#[expect(deprecated)]
+pub use fs_source_executor::*;
+mod source_executor;
+pub use source_executor::*;
+mod source_backfill_executor;
+pub use source_backfill_executor::*;
+mod list_executor;
+pub use list_executor::*;
+mod fetch_executor;
 pub use fetch_executor::*;
 
-pub mod source_backfill_executor;
-pub mod source_backfill_state_table;
+mod source_backfill_state_table;
 pub use source_backfill_state_table::BackfillStateTableHandler;
-pub mod source_executor;
 
-pub mod list_executor;
 pub mod state_table_handler;
 use futures_async_stream::try_stream;
-pub use list_executor::*;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::executor::error::StreamExecutorError;
@@ -60,7 +64,9 @@ pub fn get_split_offset_mapping_from_chunk(
     offset_idx: usize,
 ) -> Option<HashMap<SplitId, String>> {
     let mut split_offset_mapping = HashMap::new();
-    for (_, row) in chunk.rows() {
+    // All rows (including those visible or invisible) will be used to update the source offset.
+    for i in 0..chunk.capacity() {
+        let (_, row, _) = chunk.row_at(i);
         let split_id = row.datum_at(split_idx).unwrap().into_utf8().into();
         let offset = row.datum_at(offset_idx).unwrap().into_utf8();
         split_offset_mapping.insert(split_id, offset.to_string());

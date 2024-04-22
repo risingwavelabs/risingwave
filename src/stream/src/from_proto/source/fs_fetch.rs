@@ -24,10 +24,8 @@ use risingwave_pb::stream_plan::StreamFsFetchNode;
 use risingwave_storage::StateStore;
 
 use crate::error::StreamResult;
-use crate::executor::{
-    Execute, Executor, FlowControlExecutor, FsFetchExecutor, SourceStateTableHandler,
-    StreamSourceCore,
-};
+use crate::executor::source::{FsFetchExecutor, SourceStateTableHandler, StreamSourceCore};
+use crate::executor::{Execute, Executor};
 use crate::from_proto::ExecutorBuilder;
 use crate::task::ExecutorParams;
 
@@ -96,7 +94,6 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                     stream_source_core,
                     upstream,
                     source_ctrl_opts,
-                    params.env.connector_params(),
                 )
                 .boxed()
             }
@@ -106,7 +103,6 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                     stream_source_core,
                     upstream,
                     source_ctrl_opts,
-                    params.env.connector_params(),
                 )
                 .boxed()
             }
@@ -116,17 +112,11 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                     stream_source_core,
                     upstream,
                     source_ctrl_opts,
-                    params.env.connector_params(),
                 )
                 .boxed()
             }
             _ => unreachable!(),
         };
-        let mut info = params.info.clone();
-        info.identity = format!("{} (flow controlled)", info.identity);
-
-        let rate_limit = source.rate_limit.map(|x| x as _);
-        let exec = FlowControlExecutor::new((info, exec).into(), params.actor_context, rate_limit);
         Ok((params.info, exec).into())
     }
 }

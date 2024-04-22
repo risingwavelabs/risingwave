@@ -45,7 +45,9 @@ pub use compaction_filter::{
     CompactionFilter, DummyCompactionFilter, MultiCompactionFilter, StateCleanUpCompactionFilter,
     TtlCompactionFilter,
 };
-pub use context::{new_compaction_await_tree_reg_ref, CompactionAwaitTreeRegRef, CompactorContext};
+pub use context::{
+    await_tree_key, new_compaction_await_tree_reg_ref, CompactionAwaitTreeRegRef, CompactorContext,
+};
 use futures::{pin_mut, StreamExt};
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
 use more_asserts::assert_ge;

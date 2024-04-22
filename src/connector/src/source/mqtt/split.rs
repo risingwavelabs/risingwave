@@ -38,7 +38,7 @@ impl SplitMetaData for MqttSplit {
         serde_json::to_value(self.clone()).unwrap().into()
     }
 
-    fn update_with_offset(&mut self, _start_sequence: String) -> ConnectorResult<()> {
+    fn update_offset(&mut self, _last_seen_offset: String) -> ConnectorResult<()> {
         Ok(())
     }
 }

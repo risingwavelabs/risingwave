@@ -20,6 +20,8 @@ use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
+use postgres_openssl::MakeTlsConnector;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::DatumRef;
@@ -30,9 +32,11 @@ use tokio_postgres::NoTls;
 
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::postgres_row_to_owned_row;
+#[cfg(not(madsim))]
+use crate::source::cdc::external::maybe_tls_connector::MaybeMakeTlsConnector;
 use crate::source::cdc::external::{
     CdcOffset, CdcOffsetParseFunc, DebeziumOffset, ExternalTableConfig, ExternalTableReader,
-    SchemaTableName,
+    SchemaTableName, SslMode,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -129,11 +133,40 @@ impl PostgresExternalTableReader {
         .context("failed to extract postgres connector properties")?;
 
         let database_url = format!(
-            "postgresql://{}:{}@{}:{}/{}",
-            config.username, config.password, config.host, config.port, config.database
+            "postgresql://{}:{}@{}:{}/{}?sslmode={}",
+            config.username,
+            config.password,
+            config.host,
+            config.port,
+            config.database,
+            config.sslmode
         );
 
-        let (client, connection) = tokio_postgres::connect(&database_url, NoTls).await?;
+        #[cfg(not(madsim))]
+        let connector = match config.sslmode {
+            SslMode::Disable => MaybeMakeTlsConnector::NoTls(NoTls),
+            SslMode::Prefer => match SslConnector::builder(SslMethod::tls()) {
+                Ok(mut builder) => {
+                    // disable certificate verification for `prefer`
+                    builder.set_verify(SslVerifyMode::NONE);
+                    MaybeMakeTlsConnector::Tls(MakeTlsConnector::new(builder.build()))
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e.as_report(), "SSL connector error");
+                    MaybeMakeTlsConnector::NoTls(NoTls)
+                }
+            },
+            SslMode::Require => {
+                let mut builder = SslConnector::builder(SslMethod::tls())?;
+                // disable certificate verification for `require`
+                builder.set_verify(SslVerifyMode::NONE);
+                MaybeMakeTlsConnector::Tls(MakeTlsConnector::new(builder.build()))
+            }
+        };
+        #[cfg(madsim)]
+        let connector = NoTls;
+
+        let (client, connection) = tokio_postgres::connect(&database_url, connector).await?;
 
         tokio::spawn(async move {
             if let Err(e) = connection.await {

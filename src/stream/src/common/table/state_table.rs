@@ -78,6 +78,17 @@ const WATERMARK_CACHE_ENTRIES: usize = 16;
 
 type DefaultWatermarkBufferStrategy = WatermarkBufferByEpoch<STATE_CLEANING_PERIOD_EPOCH>;
 
+/// This macro is used to mark a point where we want to randomly discard the operation and early
+/// return, only in insane mode.
+macro_rules! insane_mode_discard_point {
+    () => {{
+        use rand::Rng;
+        if crate::consistency::insane() && rand::thread_rng().gen_bool(0.3) {
+            return;
+        }
+    }};
+}
+
 /// `StateTableInner` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
 #[derive(Clone)]
@@ -200,6 +211,10 @@ where
             .now_or_never()
             .expect("non-replicated state store should start immediately.")
             .expect("non-replicated state store should not wait_for_epoch, and fail because of it.")
+    }
+
+    pub fn state_store(&self) -> &S {
+        &self.store
     }
 }
 
@@ -351,6 +366,13 @@ where
             )
         };
 
+        let is_consistent_op = if crate::consistency::insane() {
+            // In insane mode, we will have inconsistent operations applied on the table, even if
+            // our executor code do not expect that.
+            false
+        } else {
+            is_consistent_op
+        };
         let op_consistency_level = if is_consistent_op {
             let row_serde = make_row_serde();
             consistent_old_value_op(row_serde)
@@ -870,12 +892,14 @@ where
     }
 
     fn insert_inner(&mut self, key: TableKey<Bytes>, value_bytes: Bytes) {
+        insane_mode_discard_point!();
         self.local_store
             .insert(key, value_bytes, None)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
     }
 
     fn delete_inner(&mut self, key: TableKey<Bytes>, value_bytes: Bytes) {
+        insane_mode_discard_point!();
         self.local_store
             .delete(key, value_bytes)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
@@ -887,6 +911,7 @@ where
         old_value_bytes: Option<Bytes>,
         new_value_bytes: Bytes,
     ) {
+        insane_mode_discard_point!();
         self.local_store
             .insert(key_bytes, new_value_bytes, old_value_bytes)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));

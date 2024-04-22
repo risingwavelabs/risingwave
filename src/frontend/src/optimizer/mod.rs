@@ -31,6 +31,7 @@ mod plan_visitor;
 pub use plan_visitor::{
     ExecutionModeDecider, PlanVisitor, RelationCollectorVisitor, SysTableVisitor,
 };
+use risingwave_sqlparser::ast::OnConflict;
 
 mod logical_optimization;
 mod optimizer_context;
@@ -51,6 +52,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId, UserId,
 };
+use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::sink::catalog::SinkFormatDesc;
@@ -170,7 +172,7 @@ impl PlanRoot {
     pub fn into_array_agg(self) -> Result<PlanRef> {
         use generic::Agg;
         use plan_node::PlanAggCall;
-        use risingwave_common::types::{DataType, ListValue};
+        use risingwave_common::types::ListValue;
         use risingwave_expr::aggregate::AggKind;
 
         use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
@@ -529,6 +531,8 @@ impl PlanRoot {
         pk_column_ids: Vec<ColumnId>,
         row_id_index: Option<usize>,
         append_only: bool,
+        on_conflict: Option<OnConflict>,
+        with_version_column: Option<String>,
         watermark_descs: Vec<WatermarkDesc>,
         version: Option<TableVersion>,
         with_external_source: bool,
@@ -612,6 +616,12 @@ impl PlanRoot {
             .map(|c| c.column_desc.clone())
             .collect();
 
+        let version_column_index = if let Some(version_column) = with_version_column {
+            find_version_column_index(&columns, version_column)?
+        } else {
+            None
+        };
+
         let union_inputs = if with_external_source {
             let mut external_source_node = stream_plan;
             external_source_node =
@@ -633,6 +643,7 @@ impl PlanRoot {
                 row_id_index,
                 SourceNodeKind::CreateTable,
                 context.clone(),
+                None,
             )
             .and_then(|s| s.to_stream(&mut ToStreamContext::new(false)))?;
 
@@ -708,10 +719,25 @@ impl PlanRoot {
             }
         }
 
-        let conflict_behavior = match append_only {
-            true => ConflictBehavior::NoCheck,
-            false => ConflictBehavior::Overwrite,
+        let conflict_behavior = match on_conflict {
+            Some(on_conflict) => match on_conflict {
+                OnConflict::OverWrite => ConflictBehavior::Overwrite,
+                OnConflict::Ignore => ConflictBehavior::IgnoreConflict,
+                OnConflict::DoUpdateIfNotNull => ConflictBehavior::DoUpdateIfNotNull,
+            },
+            None => match append_only {
+                true => ConflictBehavior::NoCheck,
+                false => ConflictBehavior::Overwrite,
+            },
         };
+
+        if let ConflictBehavior::IgnoreConflict = conflict_behavior
+            && version_column_index.is_some()
+        {
+            Err(ErrorCode::InvalidParameterValue(
+                "The with version column syntax cannot be used with the ignore behavior of on conflict".to_string(),
+            ))?
+        }
 
         let table_required_dist = {
             let mut bitset = FixedBitSet::with_capacity(columns.len());
@@ -731,6 +757,7 @@ impl PlanRoot {
             columns,
             definition,
             conflict_behavior,
+            version_column_index,
             pk_column_indices,
             row_id_index,
             version,
@@ -880,6 +907,30 @@ impl PlanRoot {
     }
 }
 
+fn find_version_column_index(
+    column_catalog: &Vec<ColumnCatalog>,
+    version_column_name: String,
+) -> Result<Option<usize>> {
+    for (index, column) in column_catalog.iter().enumerate() {
+        if column.column_desc.name == version_column_name {
+            if let &DataType::Jsonb
+            | &DataType::List(_)
+            | &DataType::Struct(_)
+            | &DataType::Bytea
+            | &DataType::Boolean = column.data_type()
+            {
+                Err(ErrorCode::InvalidParameterValue(
+                    "The specified version column data type is invalid.".to_string(),
+                ))?
+            }
+            return Ok(Some(index));
+        }
+    }
+    Err(ErrorCode::InvalidParameterValue(
+        "The specified version column name is not in the current columns.".to_string(),
+    ))?
+}
+
 fn const_eval_exprs(plan: PlanRef) -> Result<PlanRef> {
     let mut const_eval_rewriter = ConstEvalRewriter { error: None };
 
@@ -923,6 +974,8 @@ fn require_additional_exchange_on_root_in_distributed_mode(plan: PlanRef) -> boo
 
     fn is_source(plan: &PlanRef) -> bool {
         plan.node_type() == PlanNodeType::BatchSource
+            || plan.node_type() == PlanNodeType::BatchKafkaScan
+            || plan.node_type() == PlanNodeType::BatchIcebergScan
     }
 
     fn is_insert(plan: &PlanRef) -> bool {
@@ -954,6 +1007,8 @@ fn require_additional_exchange_on_root_in_local_mode(plan: PlanRef) -> bool {
 
     fn is_source(plan: &PlanRef) -> bool {
         plan.node_type() == PlanNodeType::BatchSource
+            || plan.node_type() == PlanNodeType::BatchKafkaScan
+            || plan.node_type() == PlanNodeType::BatchIcebergScan
     }
 
     fn is_insert(plan: &PlanRef) -> bool {

@@ -171,11 +171,10 @@ impl SourceExecutor {
             u32::MAX,
             self.source_id,
             u32::MAX,
+            "NA".to_owned(), // source name was not passed in batch plan
             self.metrics,
             self.source_ctrl_opts.clone(),
-            None,
             ConnectorProperties::default(),
-            "NA".to_owned(), // source name was not passed in batch plan
         ));
         let stream = self
             .source

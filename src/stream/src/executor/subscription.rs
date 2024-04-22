@@ -16,19 +16,14 @@ use core::str::FromStr;
 use core::time::Duration;
 use std::collections::HashMap;
 
-use futures::prelude::stream::StreamExt;
-use futures_async_stream::try_stream;
 use risingwave_common::types::{Interval, Timestamptz};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_storage::store::LocalStateStore;
 use tokio::time::Instant;
 
-use super::{
-    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, Message,
-    StreamExecutorError, StreamExecutorResult,
-};
 use crate::common::log_store_impl::kv_log_store::ReaderTruncationOffsetType;
 use crate::common::log_store_impl::subscription_log_store::SubscriptionLogStoreWriter;
+use crate::executor::prelude::*;
 
 const EXECUTE_GC_INTERVAL: u64 = 3600;
 const MAX_RETENTION_DAYS: i32 = 365;
@@ -114,11 +109,7 @@ impl<LS: LocalStateStore> SubscriptionExecutor<LS> {
                         None
                     };
                     self.log_store
-                        .flush_current_epoch(
-                            barrier.epoch.curr,
-                            barrier.kind.is_checkpoint(),
-                            truncate_offset,
-                        )
+                        .flush_current_epoch(barrier.epoch.curr, truncate_offset)
                         .await?;
 
                     if let Some(vnode_bitmap) =

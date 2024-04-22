@@ -17,9 +17,9 @@ use std::hash::Hash;
 
 use bytes::BytesMut;
 use postgres_types::{accepts, to_sql_checked, IsNull, ToSql, Type};
+use risingwave_common_estimate_size::ZeroHeapSize;
 use serde::{Serialize, Serializer};
 
-use crate::estimate_size::ZeroHeapSize;
 use crate::util::row_id::RowId;
 
 // Serial is an alias for i64

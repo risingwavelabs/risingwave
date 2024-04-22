@@ -22,6 +22,7 @@ use risingwave_pb::plan_common::{JoinType as JoinTypeProto, StorageTableDesc};
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 
 use super::*;
+use crate::common::table::state_table::StateTable;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, JoinType, TemporalJoinExecutor};
 use crate::task::AtomicU64Ref;
@@ -45,9 +46,9 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
                 .collect_vec();
 
             StorageTable::new_partial(
-                store,
+                store.clone(),
                 column_ids,
-                params.vnode_bitmap.map(Into::into),
+                params.vnode_bitmap.clone().map(Into::into),
                 table_desc,
             )
         };
@@ -99,6 +100,23 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
             .map(|idx| source_l.schema().fields[*idx].data_type())
             .collect_vec();
 
+        let memo_table = node.get_memo_table();
+        let memo_table = match memo_table {
+            Ok(memo_table) => {
+                let vnodes = Arc::new(
+                    params
+                        .vnode_bitmap
+                        .expect("vnodes not set for temporal join"),
+                );
+                Some(
+                    StateTable::from_table_catalog(memo_table, store.clone(), Some(vnodes.clone()))
+                        .await,
+                )
+            }
+            Err(_) => None,
+        };
+        let append_only = memo_table.is_none();
+
         let dispatcher_args = TemporalJoinExecutorDispatcherArgs {
             ctx: params.actor_context,
             info: params.info.clone(),
@@ -117,6 +135,8 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
             metrics: params.executor_stats,
             join_type_proto: node.get_join_type()?,
             join_key_data_types,
+            memo_table,
+            append_only,
         };
 
         Ok((params.info, dispatcher_args.dispatch()?).into())
@@ -141,6 +161,8 @@ struct TemporalJoinExecutorDispatcherArgs<S: StateStore> {
     metrics: Arc<StreamingMetrics>,
     join_type_proto: JoinTypeProto,
     join_key_data_types: Vec<DataType>,
+    memo_table: Option<StateTable<S>>,
+    append_only: bool,
 }
 
 impl<S: StateStore> HashKeyDispatcher for TemporalJoinExecutorDispatcherArgs<S> {
@@ -149,11 +171,12 @@ impl<S: StateStore> HashKeyDispatcher for TemporalJoinExecutorDispatcherArgs<S> 
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
         /// This macro helps to fill the const generic type parameter.
         macro_rules! build {
-            ($join_type:ident) => {
+            ($join_type:ident, $append_only:ident) => {
                 Ok(Box::new(TemporalJoinExecutor::<
                     K,
                     S,
                     { JoinType::$join_type },
+                    { $append_only },
                 >::new(
                     self.ctx,
                     self.info,
@@ -171,12 +194,25 @@ impl<S: StateStore> HashKeyDispatcher for TemporalJoinExecutorDispatcherArgs<S> 
                     self.metrics,
                     self.chunk_size,
                     self.join_key_data_types,
+                    self.memo_table,
                 )))
             };
         }
         match self.join_type_proto {
-            JoinTypeProto::Inner => build!(Inner),
-            JoinTypeProto::LeftOuter => build!(LeftOuter),
+            JoinTypeProto::Inner => {
+                if self.append_only {
+                    build!(Inner, true)
+                } else {
+                    build!(Inner, false)
+                }
+            }
+            JoinTypeProto::LeftOuter => {
+                if self.append_only {
+                    build!(LeftOuter, true)
+                } else {
+                    build!(LeftOuter, false)
+                }
+            }
             _ => unreachable!(),
         }
     }

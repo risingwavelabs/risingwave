@@ -12,32 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::{pin_mut, StreamExt};
-use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::RowRef;
-use risingwave_common::catalog::{ColumnDesc, Schema};
-use risingwave_common::estimate_size::VecWithKvSize;
-use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common_estimate_size::collections::EstimatedVec;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
-use risingwave_storage::StateStore;
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
 use crate::cache::cache_may_stale;
 use crate::common::metrics::MetricsInfo;
-use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor::lookup::LookupExecutor;
-use crate::executor::{ActorContextRef, Barrier, Executor, ExecutorInfo, Message};
-use crate::task::AtomicU64Ref;
+use crate::executor::prelude::*;
 
 /// Parameters for [`LookupExecutor`].
 pub struct LookupExecutorParams<S: StateStore> {
@@ -370,7 +364,7 @@ impl<S: StateStore> LookupExecutor<S> {
 
         tracing::debug!(target: "events::stream::lookup::lookup_row", "{:?}", lookup_row);
 
-        let mut all_rows = VecWithKvSize::new();
+        let mut all_rows = EstimatedVec::new();
         // Drop the stream.
         {
             let all_data_iter = match self.arrangement.use_current_epoch {
