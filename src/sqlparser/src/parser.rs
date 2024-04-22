@@ -3323,8 +3323,8 @@ impl Parser {
         })
     }
 
-    /// STREAMING_RATE_LIMIT = default | <number>
-    /// STREAMING_RATE_LIMIT TO default | <number>
+    /// STREAMING_RATE_LIMIT = default | NUMBER
+    /// STREAMING_RATE_LIMIT TO default | NUMBER
     pub fn parse_alter_streaming_rate_limit(&mut self) -> Result<Option<i32>, ParserError> {
         if !self.parse_keyword(Keyword::STREAMING_RATE_LIMIT) {
             return Ok(None);
