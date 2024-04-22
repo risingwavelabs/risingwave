@@ -24,13 +24,13 @@ with error as (
     order by timestamp desc
     limit 1
 )
-select (regexp_matches(
-    error,
-    'Actor \d+ exited unexpectedly: (.*);'
-))[1] as error
+select
+case when error like '%Actor % exited unexpectedly: Executor error: Chunk operation error: Division by zero%' then 'ok'
+     else error
+end as result
 from error;
 ----
-Executor error: Chunk operation error: Division by zero
+ok
 
 statement ok
 drop table t cascade;
