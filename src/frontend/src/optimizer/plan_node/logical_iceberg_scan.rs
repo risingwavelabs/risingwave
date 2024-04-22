@@ -54,6 +54,18 @@ impl LogicalIcebergScan {
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
         self.core.catalog.clone()
     }
+
+    pub fn clone_with_required_cols(&self, required_cols: &[usize]) -> Self {
+        assert!(!required_cols.is_empty());
+        let mut core = self.core.clone();
+        core.column_catalog = required_cols
+            .iter()
+            .map(|idx| core.column_catalog[*idx].clone())
+            .collect();
+        let base = PlanBase::new_logical_with_core(&core);
+
+        LogicalIcebergScan { base, core }
+    }
 }
 
 impl_plan_tree_node_for_leaf! {LogicalIcebergScan}
@@ -74,9 +86,14 @@ impl Distill for LogicalIcebergScan {
 
 impl ColPrunable for LogicalIcebergScan {
     fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
-        // TODO: support column pruning for iceberg scan
-        let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
-        LogicalProject::with_mapping(self.clone().into(), mapping).into()
+        if required_cols.is_empty() {
+            let mapping =
+                ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
+            // If reuqiured_cols is empty, we use the first column of iceberg to avoid the empty schema.
+            LogicalProject::with_mapping(self.clone_with_required_cols(&[0]).into(), mapping).into()
+        } else {
+            self.clone_with_required_cols(required_cols).into()
+        }
     }
 }
 
