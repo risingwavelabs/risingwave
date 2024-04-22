@@ -1095,6 +1095,11 @@ impl HummockManager {
                     compact_task.table_watermarks = current_version
                         .safe_epoch_table_watermarks(&compact_task.existing_table_ids);
 
+                    // do not split sst by vnode partition when target_level > base_level
+                    if compact_task.target_level > compact_task.base_level {
+                        compact_task.table_vnode_partition.clear();
+                    }
+
                     if self.env.opts.enable_dropped_column_reclaim {
                         // TODO: get all table schemas for all tables in once call to avoid acquiring lock and await.
                         compact_task.table_schemas = match self.metadata_manager() {
