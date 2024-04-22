@@ -50,19 +50,19 @@ pub async fn handle_alter_streaming_rate_limit(
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "\"{table_name}\" is not a materialized view",
                 ))
-                    .into());
+                .into());
             }
             session.check_privilege_for_drop_alter(schema_name, &**table)?;
             (StatementType::ALTER_MATERIALIZED_VIEW, table.id.table_id)
-        },
+        }
         PbThrottleTarget::Source => {
             let reader = session.env().catalog_reader().read_guard();
             let (source, schema_name) =
                 reader.get_source_by_name(db_name, schema_path, &real_table_name)?;
             session.check_privilege_for_drop_alter(schema_name, &**source)?;
             (StatementType::ALTER_SOURCE, source.id)
-        },
-        _ => bail!("Unsupported throttle target: {:?}", kind)
+        }
+        _ => bail!("Unsupported throttle target: {:?}", kind),
     };
 
     let meta_client = session.env().meta_client();
@@ -73,9 +73,7 @@ pub async fn handle_alter_streaming_rate_limit(
         Some(rate_limit as u32)
     };
 
-    meta_client
-        .apply_throttle(kind, id, rate_limit)
-        .await?;
+    meta_client.apply_throttle(kind, id, rate_limit).await?;
 
     Ok(PgResponse::empty_result(stmt_type))
 }

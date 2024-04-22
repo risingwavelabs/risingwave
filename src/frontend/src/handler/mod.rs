@@ -27,9 +27,9 @@ use pgwire::types::{Format, Row};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::types::Fields;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_pb::meta::PbThrottleTarget;
 use risingwave_sqlparser::ast::*;
 
-use risingwave_pb::meta::PbThrottleTarget;
 use self::util::{DataChunkToRowSetAdapter, SourceSchemaCompatExt};
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result};
