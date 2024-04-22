@@ -19,10 +19,8 @@ use anyhow::{anyhow, Context};
 use google_cloud_googleapis::pubsub::v1::PubsubMessage;
 use google_cloud_pubsub::client::{Client, ClientConfig};
 use google_cloud_pubsub::publisher::Publisher;
-use google_cloud_pubsub::topic::Topic;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::Row;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
@@ -30,16 +28,14 @@ use tonic::Status;
 use with_options::WithOptions;
 
 use super::catalog::desc::SinkDesc;
-use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
-use super::encoder::{
-    AvroEncoder, DateHandlingMode, JsonEncoder, RowEncoder, SerTo, TimeHandlingMode,
-    TimestampHandlingMode, TimestamptzHandlingMode,
-};
+use super::catalog::{SinkEncode, SinkFormatDesc};
+use super::formatter::SinkFormatterImpl;
 use super::log_store::DeliveryFutureManagerAddFuture;
 use super::writer::{
-    AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
+    AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt, FormattedSink,
 };
 use super::{DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SinkWriterParam};
+use crate::dispatch_sink_formatter_str_key_impl;
 
 pub const PUBSUB_SINK: &str = "google_pubsub";
 
@@ -98,10 +94,13 @@ impl GooglePubSubConfig {
 #[derive(Clone, Debug)]
 pub struct GooglePubSubSink {
     pub config: GooglePubSubConfig,
-    schema: Schema,
-    format_desc: SinkFormatDesc,
-    name: String,
     is_append_only: bool,
+
+    schema: Schema,
+    pk_indices: Vec<usize>,
+    format_desc: SinkFormatDesc,
+    db_name: String,
+    sink_from_name: String,
 }
 
 impl Sink for GooglePubSubSink {
@@ -133,7 +132,7 @@ impl Sink for GooglePubSubSink {
         let conf = &self.config;
         if matches!((&conf.emulator_host, &conf.credentials), (None, None)) {
             return Err(SinkError::GooglePubSub(anyhow!(
-                "Configure at least one of `emulator_host` and `credentials` in the Google Pub/Sub sink"
+                "Configure at least one of `pubsub.emulator_host` and `pubsub.credentials` in the Google Pub/Sub sink"
             )));
         }
 
@@ -141,15 +140,16 @@ impl Sink for GooglePubSubSink {
     }
 
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        Ok(
-            GooglePubSubSinkWriter::new(
-                self.config.clone(),
-                self.schema.clone(),
-                &self.format_desc,
-            )
-            .await?
-            .into_log_sinker(usize::MAX),
+        Ok(GooglePubSubSinkWriter::new(
+            self.config.clone(),
+            self.schema.clone(),
+            self.pk_indices.clone(),
+            &self.format_desc,
+            self.db_name.clone(),
+            self.sink_from_name.clone(),
         )
+        .await?
+        .into_log_sinker(usize::MAX))
     }
 }
 
@@ -159,14 +159,19 @@ impl TryFrom<SinkParam> for GooglePubSubSink {
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
         let config = GooglePubSubConfig::from_hashmap(param.properties)?;
+
+        let format_desc = param
+            .format_desc
+            .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?;
         Ok(Self {
             config,
-            schema,
-            name: param.sink_name,
-            format_desc: param
-                .format_desc
-                .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?,
             is_append_only: param.sink_type.is_append_only(),
+
+            schema,
+            pk_indices: param.downstream_pk,
+            format_desc,
+            db_name: param.db_name,
+            sink_from_name: param.sink_from_name,
         })
     }
 }
@@ -174,7 +179,6 @@ impl TryFrom<SinkParam> for GooglePubSubSink {
 // ===
 
 struct GooglePubSubPayloadWriter {
-    topic: Topic,
     publisher: Publisher,
 }
 
@@ -182,7 +186,10 @@ impl GooglePubSubSinkWriter {
     pub async fn new(
         config: GooglePubSubConfig,
         schema: Schema,
+        pk_indices: Vec<usize>,
         format_desc: &SinkFormatDesc,
+        db_name: String,
+        sink_from_name: String,
     ) -> Result<Self> {
         config.initialize_env();
 
@@ -208,48 +215,29 @@ impl GooglePubSubSinkWriter {
         .await
         .map_err(|e: Status| SinkError::GooglePubSub(anyhow!(e)))?;
 
-        let timestamptz_mode = TimestamptzHandlingMode::from_options(&format_desc.options)?;
-        let encoder = match format_desc.format {
-            SinkFormat::AppendOnly => match format_desc.encode {
-                SinkEncode::Json => RowEncoderWrapper::Json(JsonEncoder::new(
-                    schema,
-                    None,
-                    DateHandlingMode::FromCe,
-                    TimestampHandlingMode::Milli,
-                    timestamptz_mode,
-                    TimeHandlingMode::Milli,
-                )),
-                // TODO: support append-only Avro
-                // note: update `CONNECTORS_COMPATIBLE_FORMATS`
-                // in src/frontend/src/handler/create_sink.rs
-                // SinkEncode::Avro => { },
-                _ => {
-                    return Err(SinkError::Config(anyhow!(
-                        "Google Pub/Sub sink encode unsupported: {:?}",
-                        format_desc.encode,
-                    )))
-                }
-            },
-            _ => {
-                return Err(SinkError::Config(anyhow!(
-                    "Google Pub/Sub sink only support append-only mode"
-                )))
-            }
-        };
+        let formatter = SinkFormatterImpl::new(
+            format_desc,
+            schema,
+            pk_indices,
+            db_name,
+            sink_from_name,
+            topic.fully_qualified_name(),
+        )
+        .await?;
 
         let publisher = topic.new_publisher(None);
-        let payload_writer = GooglePubSubPayloadWriter { topic, publisher };
+        let payload_writer = GooglePubSubPayloadWriter { publisher };
 
         Ok(Self {
             payload_writer,
-            encoder,
+            formatter,
         })
     }
 }
 
 pub struct GooglePubSubSinkWriter {
     payload_writer: GooglePubSubPayloadWriter,
-    encoder: RowEncoderWrapper,
+    formatter: SinkFormatterImpl,
 }
 
 impl AsyncTruncateSinkWriter for GooglePubSubSinkWriter {
@@ -258,74 +246,38 @@ impl AsyncTruncateSinkWriter for GooglePubSubSinkWriter {
         chunk: StreamChunk,
         _add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
-        self.payload_writer.write_chunk(chunk, &self.encoder).await
+        dispatch_sink_formatter_str_key_impl!(
+            &self.formatter,
+            formatter,
+            self.payload_writer.write_chunk(chunk, formatter).await
+        )
     }
 }
 
-impl GooglePubSubPayloadWriter {
-    async fn write_chunk(&mut self, chunk: StreamChunk, encoder: &RowEncoderWrapper) -> Result<()> {
-        for (op, row) in chunk.rows() {
-            if op != Op::Insert {
-                continue;
+impl FormattedSink for GooglePubSubPayloadWriter {
+    type K = String;
+    type V = Vec<u8>;
+
+    async fn write_one(&mut self, k: Option<Self::K>, v: Option<Self::V>) -> Result<()> {
+        let ordering_key = k.unwrap_or_default();
+        match v {
+            Some(data) => {
+                let msg = PubsubMessage {
+                    data,
+                    ordering_key,
+                    ..Default::default()
+                };
+                let awaiter = self.publisher.publish(msg).await;
+                awaiter
+                    .get()
+                    .await
+                    .context("Google Pub/Sub sink error")
+                    .map_err(SinkError::GooglePubSub)
+                    .map(|_| ())
             }
-
-            let data = encoder.encode(row)?;
-
-            let msg = PubsubMessage {
-                data,
-                ..Default::default()
-            };
-            let awaiter = self.publisher.publish(msg).await;
-            _ = awaiter
-                .get()
-                .await
-                .context("Google Pub/Sub sink error")
-                .map_err(SinkError::GooglePubSub)?;
-        }
-
-        Ok(())
-    }
-}
-
-// ===
-
-pub enum RowEncoderWrapper {
-    Json(JsonEncoder),
-    Avro(AvroEncoder),
-}
-
-impl RowEncoder for RowEncoderWrapper {
-    type Output = Vec<u8>;
-
-    fn encode_cols(
-        &self,
-        row: impl Row,
-        col_indices: impl Iterator<Item = usize>,
-    ) -> Result<Self::Output> {
-        match self {
-            RowEncoderWrapper::Json(json) => json.encode_cols(row, col_indices)?.ser_to(),
-            RowEncoderWrapper::Avro(avro) => avro.encode_cols(row, col_indices)?.ser_to(),
-        }
-    }
-
-    fn schema(&self) -> &Schema {
-        match self {
-            RowEncoderWrapper::Json(json) => json.schema(),
-            RowEncoderWrapper::Avro(avro) => avro.schema(),
-        }
-    }
-
-    fn col_indices(&self) -> Option<&[usize]> {
-        match self {
-            RowEncoderWrapper::Json(json) => json.col_indices(),
-            RowEncoderWrapper::Avro(avro) => avro.col_indices(),
-        }
-    }
-
-    fn encode(&self, row: impl Row) -> Result<Self::Output> {
-        match self {
-            RowEncoderWrapper::Json(json) => json.encode(row)?.ser_to(),
-            RowEncoderWrapper::Avro(avro) => avro.encode(row)?.ser_to(),
+            None => Err(SinkError::GooglePubSub(anyhow!(
+                "Google Pub/Sub sink error: missing value to publish"
+            ))),
         }
     }
 }
