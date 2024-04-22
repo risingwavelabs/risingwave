@@ -28,7 +28,6 @@ use risingwave_batch::executor::{Executor as BatchExecutor, RowSeqScanExecutor, 
 use risingwave_common::array::{
     Array, ArrayBuilder, DataChunk, DataChunkTestExt, Op, StreamChunk, Utf8ArrayBuilder,
 };
-use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId};
 use risingwave_common::types::{Datum, JsonbVal};
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
