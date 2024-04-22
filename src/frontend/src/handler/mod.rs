@@ -29,6 +29,7 @@ use risingwave_common::types::Fields;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::*;
 
+use risingwave_pb::meta::PbThrottleTarget;
 use self::util::{DataChunkToRowSetAdapter, SourceSchemaCompatExt};
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result};
@@ -758,7 +759,7 @@ pub async fn handle(
         } if materialized => {
             alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                 handler_args,
-                PbThrottleType::Mv,
+                PbThrottleTarget::Mv,
                 name,
                 rate_limit,
             )
