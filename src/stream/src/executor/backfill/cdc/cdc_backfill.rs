@@ -379,7 +379,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     let chunk_binlog_offset =
                                         get_cdc_chunk_last_offset(&offset_parse_func, &chunk)?;
 
-                                    tracing::debug!(
+                                    tracing::trace!(
                                         "recv changelog chunk: chunk_offset {:?}, capactiy {}",
                                         chunk_binlog_offset,
                                         chunk.capacity()
@@ -392,7 +392,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         if let Some(chunk_offset) = chunk_binlog_offset
                                             && chunk_offset < *last_binlog_offset
                                         {
-                                            tracing::debug!(
+                                            tracing::trace!(
                                                 "skip changelog chunk: chunk_offset {:?}, capacity {}",
                                                 chunk_offset,
                                                 chunk.capacity()

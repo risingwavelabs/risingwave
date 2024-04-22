@@ -28,7 +28,6 @@ use risingwave_batch::executor::{Executor as BatchExecutor, RowSeqScanExecutor, 
 use risingwave_common::array::{
     Array, ArrayBuilder, DataChunk, DataChunkTestExt, Op, StreamChunk, Utf8ArrayBuilder,
 };
-use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId};
 use risingwave_common::types::{Datum, JsonbVal};
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
@@ -132,7 +131,7 @@ impl Execute for MockOffsetGenExecutor {
 }
 
 #[tokio::test]
-async fn test_cdc_backfill_basic() -> StreamResult<()> {
+async fn test_cdc_backfill() -> StreamResult<()> {
     use risingwave_common::types::DataType;
     let memory_state_store = MemoryStateStore::new();
 
