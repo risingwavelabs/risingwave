@@ -4,3 +4,5 @@ src/tests/regress/data/** linguist-vendored
 scripts/source/test_data/** linguist-vendored
 # generated grafana dashboard
 grafana/risingwave-dashboard.json linguist-generated
+# vendored monaco editor
+dashboard/public/monaco/** linguist-vendored
