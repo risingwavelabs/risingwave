@@ -12,23 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::executor::prelude::*;
+use super::{BoxedRule, Rule};
+use crate::optimizer::plan_node::{LogicalIcebergScan, LogicalSource};
+use crate::optimizer::PlanRef;
 
-/// No-op executor directly forwards the input stream. Currently used to break the multiple edges in
-/// the fragment graph.
-pub struct NoOpExecutor {
-    _ctx: ActorContextRef,
-    input: Executor,
-}
-
-impl NoOpExecutor {
-    pub fn new(ctx: ActorContextRef, input: Executor) -> Self {
-        Self { _ctx: ctx, input }
+pub struct SourceToIcebergScanRule {}
+impl Rule for SourceToIcebergScanRule {
+    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+        let source: &LogicalSource = plan.as_logical_source()?;
+        if source.core.is_iceberg_connector() {
+            Some(LogicalIcebergScan::new(source).into())
+        } else {
+            None
+        }
     }
 }
 
-impl Execute for NoOpExecutor {
-    fn execute(self: Box<Self>) -> BoxedMessageStream {
-        self.input.execute()
+impl SourceToIcebergScanRule {
+    pub fn create() -> BoxedRule {
+        Box::new(SourceToIcebergScanRule {})
     }
 }

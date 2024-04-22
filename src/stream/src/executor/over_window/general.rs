@@ -15,18 +15,14 @@
 use std::collections::{btree_map, BTreeMap, HashSet};
 use std::marker::PhantomData;
 use std::ops::RangeInclusive;
-use std::sync::Arc;
 
 use delta_btree_map::{Change, PositionType};
-use futures::StreamExt;
-use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::{Op, RowRef, StreamChunk};
-use risingwave_common::catalog::Schema;
-use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common::array::Op;
+use risingwave_common::row::RowExt;
 use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
-use risingwave_common::types::{DataType, DefaultOrdered};
+use risingwave_common::types::DefaultOrdered;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
 use risingwave_common::util::sort_util::OrderType;
@@ -43,14 +39,9 @@ use super::over_partition::{
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
-use crate::common::StreamChunkBuilder;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::over_window::over_partition::AffectedRange;
-use crate::executor::{
-    expect_first_barrier, ActorContextRef, Execute, Executor, Message, StreamExecutorError,
-    StreamExecutorResult,
-};
-use crate::task::AtomicU64Ref;
+use crate::executor::prelude::*;
 
 /// [`OverWindowExecutor`] consumes retractable input stream and produces window function outputs.
 /// One [`OverWindowExecutor`] can handle one combination of partition key and order key.
