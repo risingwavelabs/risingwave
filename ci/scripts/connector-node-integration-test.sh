@@ -86,7 +86,7 @@ tar xf java-binding-integration-test.tar.zst bin
 
 echo "--- prepare integration tests"
 cd "${RISINGWAVE_ROOT}"/java/connector-node
-pip3 install grpcio grpcio-tools psycopg2 psycopg2-binary pyspark==3.3 black
+pip3 install --break-system-packages grpcio grpcio-tools psycopg2 psycopg2-binary pyspark==3.3 black
 cd python-client && bash gen-stub.sh && bash format-python.sh --check
 export PYTHONPATH=proto
 

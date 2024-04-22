@@ -40,9 +40,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
-use risingwave_pb::stream_service::{
-    streaming_control_stream_response, BarrierCompleteResponse, StreamingControlStreamResponse,
-};
+use risingwave_pb::stream_service::BarrierCompleteResponse;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::sync::Mutex;
@@ -57,6 +55,7 @@ use crate::barrier::notifier::BarrierInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::state::BarrierManagerState;
+use crate::error::MetaErrorInner;
 use crate::hummock::{CommitEpochInfo, HummockManagerRef, NewTableFragmentInfo};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
@@ -118,6 +117,8 @@ enum RecoveryReason {
     Bootstrap,
     /// After failure.
     Failover(MetaError),
+    /// Manually triggered
+    Adhoc,
 }
 
 /// Status of barrier manager.
@@ -651,26 +652,26 @@ impl GlobalBarrierManager {
                     }
                 }
 
-                // Checkpoint frequency changes.
                 notification = local_notification_rx.recv() => {
                     let notification = notification.unwrap();
-                    // Handle barrier interval and checkpoint frequency changes
-                    if let LocalNotification::SystemParamsChange(p) = &notification {
-                        self.scheduled_barriers.set_min_interval(Duration::from_millis(p.barrier_interval_ms() as u64));
-                        self.scheduled_barriers
-                            .set_checkpoint_frequency(p.checkpoint_frequency() as usize)
+                    match notification {
+                        // Handle barrier interval and checkpoint frequency changes.
+                        LocalNotification::SystemParamsChange(p) => {
+                            self.scheduled_barriers.set_min_interval(Duration::from_millis(p.barrier_interval_ms() as u64));
+                            self.scheduled_barriers
+                                .set_checkpoint_frequency(p.checkpoint_frequency() as usize)
+                        },
+                        // Handle adhoc recovery triggered by user.
+                        LocalNotification::AdhocRecovery => {
+                            self.adhoc_recovery().await;
+                        }
+                        _ => {}
                     }
                 }
-                resp_result = self.control_stream_manager.next_response() => {
+                resp_result = self.control_stream_manager.next_complete_barrier_response() => {
                     match resp_result {
                         Ok((worker_id, prev_epoch, resp)) => {
-                            let resp: StreamingControlStreamResponse = resp;
-                            match resp.response {
-                                Some(streaming_control_stream_response::Response::CompleteBarrier(resp)) => {
-                                    self.checkpoint_control.barrier_collected(worker_id, prev_epoch, resp);
-                                },
-                                resp => unreachable!("invalid response: {:?}", resp),
-                            }
+                            self.checkpoint_control.barrier_collected(worker_id, prev_epoch, resp);
 
                         }
                         Err(e) => {
@@ -788,9 +789,34 @@ impl GlobalBarrierManager {
                     err.clone(),
                 )));
             let latest_snapshot = self.context.hummock_manager.latest_snapshot();
-            let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recovery from the committed epoch
+            let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recover from the committed epoch
             let span = tracing::info_span!(
                 "failure_recovery",
+                error = %err.as_report(),
+                prev_epoch = prev_epoch.value().0
+            );
+
+            // No need to clean dirty tables for barrier recovery,
+            // The foreground stream job should cleanup their own tables.
+            self.recovery(None).instrument(span).await;
+            self.context.set_status(BarrierManagerStatus::Running);
+        } else {
+            panic!("failed to execute barrier: {}", err.as_report());
+        }
+    }
+
+    async fn adhoc_recovery(&mut self) {
+        let err = MetaErrorInner::AdhocRecovery.into();
+        self.context.tracker.lock().await.abort_all(&err);
+        self.checkpoint_control.clear_on_err(&err).await;
+
+        if self.enable_recovery {
+            self.context
+                .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Adhoc));
+            let latest_snapshot = self.context.hummock_manager.latest_snapshot();
+            let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recover from the committed epoch
+            let span = tracing::info_span!(
+                "adhoc_recovery",
                 error = %err.as_report(),
                 prev_epoch = prev_epoch.value().0
             );
@@ -1030,6 +1056,9 @@ impl GlobalBarrierManagerContext {
             }
             BarrierManagerStatus::Recovering(RecoveryReason::Failover(e)) => {
                 Err(anyhow::anyhow!(e.clone()).context("The cluster is recovering"))?
+            }
+            BarrierManagerStatus::Recovering(RecoveryReason::Adhoc) => {
+                bail!("The cluster is recovering-adhoc")
             }
             BarrierManagerStatus::Running => Ok(()),
         }

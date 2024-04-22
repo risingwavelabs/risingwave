@@ -90,7 +90,7 @@ impl<S: StateStore> FsListExecutor<S> {
             let rows = chunk
                 .into_iter()
                 .map(|item| {
-                    let page_item = item.unwrap();
+                    let page_item = item.expect("list file failed, please check whether the source connector is configured correctly.");
                     (
                         Op::Insert,
                         OwnedRow::new(vec![
