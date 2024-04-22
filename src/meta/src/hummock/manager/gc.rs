@@ -121,14 +121,14 @@ impl HummockManager {
             let versioning_guard = read_lock!(self, versioning).await;
             let versioning: &Versioning = &versioning_guard;
 
-            // object ids in current version
-            let mut tracked_object_ids = versioning.current_version.get_object_ids();
-            // add object ids removed between checkpoint version and current version
+            // object ids in checkpoint version
+            let mut tracked_object_ids = versioning.checkpoint.version.get_object_ids();
+            // add object ids added between checkpoint version and current version
             for (_, delta) in versioning.hummock_version_deltas.range((
                 Excluded(versioning.checkpoint.version.id),
                 Included(versioning.current_version.id),
             )) {
-                tracked_object_ids.extend(delta.gc_object_ids.iter().cloned());
+                tracked_object_ids.extend(delta.newly_added_object_ids());
             }
             // add stale object ids before the checkpoint version
             let min_pinned_version_id = versioning.min_pinned_version_id();

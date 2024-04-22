@@ -21,7 +21,7 @@ use itertools::Itertools;
 use pretty_xmlish::{Pretty, Str, StrAssocArr, XmlNode};
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Field, FieldDisplay, Schema,
-    OBJECT_ID_PLACEHOLDER,
+    StreamJobStatus, OBJECT_ID_PLACEHOLDER,
 };
 use risingwave_common::constants::log_store::v2::{
     KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, VNODE_COLUMN_INDEX,
@@ -176,6 +176,7 @@ impl TableCatalogBuilder {
             // NOTE(kwannoel): This may not match the create type of the materialized table.
             // It should be ignored for internal tables.
             create_type: CreateType::Foreground,
+            stream_job_status: StreamJobStatus::Creating,
             description: None,
             incoming_sinks: vec![],
             initialized_at_cluster_version: None,
@@ -355,17 +356,7 @@ pub fn infer_kv_log_store_table_catalog_inner(
 
     let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
 
-    let payload_indices = table_catalog_builder.extend_columns(
-        &columns
-            .iter()
-            .map(|column| {
-                // make payload hidden column visible in kv log store batch query
-                let mut column = column.clone();
-                column.is_hidden = false;
-                column
-            })
-            .collect_vec(),
-    );
+    let payload_indices = table_catalog_builder.extend_columns(columns);
 
     value_indices.extend(payload_indices);
     table_catalog_builder.set_value_indices(value_indices);

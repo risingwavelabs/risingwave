@@ -68,7 +68,7 @@ use thiserror_ext::AsReport;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::error::ErrorCode::{self, InvalidInputSyntax, NotSupported, ProtocolError};
+use crate::error::ErrorCode::{self, Deprecated, InvalidInputSyntax, NotSupported, ProtocolError};
 use crate::error::{Result, RwError};
 use crate::expr::Expr;
 use crate::handler::create_table::{
@@ -1077,6 +1077,13 @@ pub fn validate_compatibility(
         }
     }
 
+    if connector == S3_CONNECTOR {
+        return Err(RwError::from(Deprecated(
+            S3_CONNECTOR.to_string(),
+            OPENDAL_S3_CONNECTOR.to_string(),
+        )));
+    }
+
     let compatible_encodes = compatible_formats
         .get(&source_schema.format)
         .ok_or_else(|| {
@@ -1317,12 +1324,7 @@ pub async fn handle_create_source(
 
     let source_schema = stmt.source_schema.into_v2_with_warning();
 
-    let mut with_properties = handler_args
-        .with_options
-        .clone()
-        .into_inner()
-        .into_iter()
-        .collect();
+    let mut with_properties = handler_args.with_options.clone().into_connector_props();
     validate_compatibility(&source_schema, &mut with_properties)?;
 
     ensure_table_constraints_supported(&stmt.constraints)?;

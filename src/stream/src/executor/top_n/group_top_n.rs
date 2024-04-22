@@ -13,28 +13,21 @@
 // limitations under the License.
 
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
 
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::Op;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_storage::StateStore;
 
 use super::top_n_cache::TopNCacheTrait;
 use super::utils::*;
 use super::{ManagedTopNState, TopNCache};
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
-use crate::common::table::state_table::StateTable;
-use crate::error::StreamResult;
-use crate::executor::error::StreamExecutorResult;
-use crate::executor::{ActorContextRef, Executor, PkIndices, Watermark};
-use crate::task::AtomicU64Ref;
+use crate::executor::prelude::*;
 
 pub type GroupTopNExecutor<K, S, const WITH_TIES: bool> =
     TopNExecutorWrapper<InnerGroupTopNExecutor<K, S, WITH_TIES>>;

@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common::array::Op;
+use risingwave_common::row::RowExt;
 use risingwave_common_estimate_size::collections::{EstimatedHashSet, EstimatedVec};
 
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::consistency::consistency_panic;
-use crate::task::AtomicU64Ref;
+use crate::executor::prelude::*;
 
 pub type LookupEntryState = EstimatedHashSet<OwnedRow>;
 

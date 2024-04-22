@@ -54,7 +54,9 @@ use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::TableId;
 use crate::error::RwError;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
-use crate::optimizer::plan_node::{BatchSource, PlanNodeId, PlanNodeType};
+use crate::optimizer::plan_node::{
+    BatchIcebergScan, BatchKafkaScan, BatchSource, PlanNodeId, PlanNodeType,
+};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
 use crate::scheduler::SchedulerResult;
@@ -294,7 +296,7 @@ impl SourceScanInfo {
         match fetch_info.connector {
             ConnectorProperties::Kafka(prop) => {
                 let mut kafka_enumerator =
-                    KafkaSplitEnumerator::new(*prop, SourceEnumeratorContext::default().into())
+                    KafkaSplitEnumerator::new(*prop, SourceEnumeratorContext::dummy().into())
                         .await?;
                 let split_info = kafka_enumerator
                     .list_splits_batch(fetch_info.timebound.0, fetch_info.timebound.1)
@@ -329,7 +331,7 @@ impl SourceScanInfo {
             }
             ConnectorProperties::Iceberg(prop) => {
                 let iceberg_enumerator =
-                    IcebergSplitEnumerator::new(*prop, SourceEnumeratorContext::default().into())
+                    IcebergSplitEnumerator::new(*prop, SourceEnumeratorContext::dummy().into())
                         .await?;
 
                 let time_travel_info = match fetch_info.as_of {
@@ -1003,7 +1005,38 @@ impl BatchPlanFragmenter {
             return Ok(None);
         }
 
-        if let Some(source_node) = node.as_batch_source() {
+        if let Some(batch_kafka_node) = node.as_batch_kafka_scan() {
+            let batch_kafka_scan: &BatchKafkaScan = batch_kafka_node;
+            let source_catalog = batch_kafka_scan.source_catalog();
+            if let Some(source_catalog) = source_catalog {
+                let property = ConnectorProperties::extract(
+                    source_catalog.with_properties.clone().into_iter().collect(),
+                    false,
+                )?;
+                let timestamp_bound = batch_kafka_scan.kafka_timestamp_range_value();
+                return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
+                    connector: property,
+                    timebound: timestamp_bound,
+                    as_of: None,
+                })));
+            }
+        } else if let Some(batch_iceberg_scan) = node.as_batch_iceberg_scan() {
+            let batch_iceberg_scan: &BatchIcebergScan = batch_iceberg_scan;
+            let source_catalog = batch_iceberg_scan.source_catalog();
+            if let Some(source_catalog) = source_catalog {
+                let property = ConnectorProperties::extract(
+                    source_catalog.with_properties.clone().into_iter().collect(),
+                    false,
+                )?;
+                let as_of = batch_iceberg_scan.as_of();
+                return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
+                    connector: property,
+                    timebound: (None, None),
+                    as_of,
+                })));
+            }
+        } else if let Some(source_node) = node.as_batch_source() {
+            // TODO: use specific batch operator instead of batch source.
             let source_node: &BatchSource = source_node;
             let source_catalog = source_node.source_catalog();
             if let Some(source_catalog) = source_catalog {
@@ -1011,11 +1044,10 @@ impl BatchPlanFragmenter {
                     source_catalog.with_properties.clone().into_iter().collect(),
                     false,
                 )?;
-                let timestamp_bound = source_node.kafka_timestamp_range_value();
                 let as_of = source_node.as_of();
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
                     connector: property,
-                    timebound: timestamp_bound,
+                    timebound: (None, None),
                     as_of,
                 })));
             }

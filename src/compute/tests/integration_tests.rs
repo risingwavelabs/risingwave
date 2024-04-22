@@ -53,7 +53,7 @@ use risingwave_stream::error::StreamResult;
 use risingwave_stream::executor::dml::DmlExecutor;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::row_id_gen::RowIdGenExecutor;
-use risingwave_stream::executor::source_executor::SourceExecutor;
+use risingwave_stream::executor::source::SourceExecutor;
 use risingwave_stream::executor::{
     ActorContext, Barrier, Execute, Executor, ExecutorInfo, MaterializeExecutor, Message, PkIndices,
 };
@@ -173,7 +173,10 @@ async fn test_table_materialize() -> StreamResult<()> {
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
             system_params_manager.get_params(),
-            SourceCtrlOpts::default(),
+            SourceCtrlOpts {
+                chunk_size: 1024,
+                rate_limit: None,
+            },
         )
         .boxed(),
     );

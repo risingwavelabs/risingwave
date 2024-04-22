@@ -14,35 +14,32 @@
 
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
-use std::fmt::Formatter;
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use anyhow::anyhow;
 use either::Either;
 use futures::stream::{select_with_strategy, PollNext};
-use futures::StreamExt;
-use futures_async_stream::try_stream;
+use itertools::Itertools;
 use prometheus::IntCounter;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
-use risingwave_common::row::Row;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::JsonbVal;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
-    BoxChunkSourceStream, SourceContext, SourceCtrlOpts, SplitId, SplitMetaData,
+    BoxChunkSourceStream, SourceContext, SourceCtrlOpts, SplitId, SplitImpl, SplitMetaData,
 };
-use risingwave_storage::StateStore;
 use serde::{Deserialize, Serialize};
-use source_backfill_executor::source_executor::WAIT_BARRIER_MULTIPLE_TIMES;
 use thiserror_ext::AsReport;
 
 use super::executor_core::StreamSourceCore;
 use super::source_backfill_state_table::BackfillStateTableHandler;
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::source_executor::apply_rate_limit;
-use crate::executor::*;
+use crate::executor::prelude::*;
+use crate::executor::source::source_executor::WAIT_BARRIER_MULTIPLE_TIMES;
+use crate::executor::source::{apply_rate_limit, get_split_offset_col_idx};
+use crate::executor::{AddMutation, UpdateMutation};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum BackfillState {
@@ -210,10 +207,10 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             self.actor_ctx.id,
             self.stream_source_core.source_id,
             self.actor_ctx.fragment_id,
+            self.stream_source_core.source_name.clone(),
             source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
             source_desc.source.config.clone(),
-            self.stream_source_core.source_name.clone(),
         );
         let stream = source_desc
             .source

@@ -1026,6 +1026,8 @@ impl Binder {
                 ("decrypt", raw_call(ExprType::Decrypt)),
                 ("left", raw_call(ExprType::Left)),
                 ("right", raw_call(ExprType::Right)),
+                ("inet_aton", raw_call(ExprType::InetAton)),
+                ("inet_ntoa", raw_call(ExprType::InetNtoa)),
                 ("int8send", raw_call(ExprType::PgwireSend)),
                 ("int8recv", guard_by_len(1, raw(|_binder, mut inputs| {
                     // Similar to `cast` from string, return type is set explicitly rather than inferred.
@@ -1121,6 +1123,7 @@ impl Binder {
                 ("to_jsonb", raw_call(ExprType::ToJsonb)),
                 ("jsonb_build_array", raw_call(ExprType::JsonbBuildArray)),
                 ("jsonb_build_object", raw_call(ExprType::JsonbBuildObject)),
+                ("jsonb_populate_record", raw_call(ExprType::JsonbPopulateRecord)),
                 ("jsonb_path_match", raw_call(ExprType::JsonbPathMatch)),
                 ("jsonb_path_exists", raw_call(ExprType::JsonbPathExists)),
                 ("jsonb_path_query_array", raw_call(ExprType::JsonbPathQueryArray)),

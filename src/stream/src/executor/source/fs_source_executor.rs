@@ -15,32 +15,32 @@
 #![deprecated = "will be replaced by new fs source (list + fetch)"]
 #![expect(deprecated)]
 
-use std::fmt::{Debug, Formatter};
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::anyhow;
 use either::Either;
-use futures::{StreamExt, TryStreamExt};
-use futures_async_stream::try_stream;
+use futures::TryStreamExt;
+use itertools::Itertools;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::reader::desc::{FsSourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
     BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
     SplitMetaData,
 };
-use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
-use crate::error::StreamResult;
-use crate::executor::error::StreamExecutorError;
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::source_executor::apply_rate_limit;
+use crate::executor::prelude::*;
+use crate::executor::source::{
+    apply_rate_limit, barrier_to_message_stream, get_split_offset_col_idx,
+    get_split_offset_mapping_from_chunk, prune_additional_cols,
+};
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::executor::*;
+use crate::executor::{AddMutation, UpdateMutation};
 
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
@@ -100,10 +100,10 @@ impl<S: StateStore> FsSourceExecutor<S> {
             self.actor_ctx.id,
             self.stream_source_core.source_id,
             self.actor_ctx.fragment_id,
+            self.stream_source_core.source_name.clone(),
             source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
             source_desc.source.config.clone(),
-            self.stream_source_core.source_name.clone(),
         );
         let stream = source_desc
             .source

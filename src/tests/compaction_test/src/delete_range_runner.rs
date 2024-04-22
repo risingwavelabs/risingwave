@@ -377,7 +377,7 @@ async fn run_compare_result(
         // let checkpoint = epoch % 10 == 0;
         let ret = hummock.seal_and_sync_epoch(epoch).await.unwrap();
         meta_client
-            .commit_epoch(epoch, ret.uncommitted_ssts)
+            .commit_epoch(epoch, ret)
             .await
             .map_err(|e| format!("{:?}", e))?;
         if (epoch / test_epoch(1)) % 200 == 0 {

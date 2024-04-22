@@ -356,8 +356,15 @@ impl DdlController {
         &self,
         table_id: u32,
         parallelism: PbTableParallelism,
-        deferred: bool,
+        mut deferred: bool,
     ) -> MetaResult<()> {
+        if self.barrier_manager.check_status_running().is_err() {
+            tracing::info!(
+                "alter parallelism is set to deferred mode because the system is in recovery state"
+            );
+            deferred = true;
+        }
+
         if !deferred
             && !self
                 .metadata_manager
@@ -774,8 +781,11 @@ impl DdlController {
             }
         };
 
-        match create_type {
-            CreateType::Foreground | CreateType::Unspecified => {
+        match (create_type, &stream_job) {
+            (CreateType::Foreground, _)
+            | (CreateType::Unspecified, _)
+            // FIXME(kwannoel): Unify background stream's creation path with MV below.
+            | (CreateType::Background, &StreamingJob::Sink(_, _)) => {
                 self.create_streaming_job_inner(
                     mgr,
                     stream_job,
@@ -785,7 +795,7 @@ impl DdlController {
                 )
                 .await
             }
-            CreateType::Background => {
+            (CreateType::Background, _) => {
                 let ctrl = self.clone();
                 let mgr = mgr.clone();
                 let stream_job_id = stream_job.id();
@@ -835,7 +845,7 @@ impl DdlController {
         async fn new_enumerator_for_validate<P: SourceProperties>(
             source_props: P,
         ) -> Result<P::SplitEnumerator, ConnectorError> {
-            P::SplitEnumerator::new(source_props, SourceEnumeratorContext::default().into()).await
+            P::SplitEnumerator::new(source_props, SourceEnumeratorContext::dummy().into()).await
         }
 
         for actor in &stream_scan_fragment.actors {

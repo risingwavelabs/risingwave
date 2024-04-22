@@ -1,0 +1,107 @@
+# This file contains commands used by the tests.
+
+[tasks.source-test-hook]
+private = true
+dependencies = ["check-risedev-env-file"]
+env_files = ["${PREFIX_CONFIG}/risedev-env"]
+
+# Note about the Kafka CLI tooling:
+# - Built-in Kafka console tools:
+#       Java based.
+#       Style example: kafka-topics.sh --bootstrap-server localhost:9092 --topic t --create
+#       Some limitations: cannot disable logging easily, cannot consume to end and then exit.
+# - kcat:
+#       C based (rdkafka)
+#       Some limitations: cannot do admin operations, only consume/produce.
+# - rpk:
+#       Golang based.
+#       Style example: RPK_BROKERS=localhost:9092 rpk topic create t
+[tasks.kafka-hook]
+private = true
+description = "Check if Kafka is started by RiseDev"
+dependencies = ["source-test-hook"]
+script = '''
+#!/usr/bin/env sh
+set -e
+
+if [ ! -d "${PREFIX_BIN}/kafka" ]; then
+    echo "Kafka is not installed in ${PREFIX_BIN}/kafka. Did you enable Kafka using $(tput setaf 4)\`./risedev configure\`$(tput sgr0)?"
+    exit 1
+fi
+
+if [ -z "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" ]; then
+    echo "RISEDEV_KAFKA_BOOTSTRAP_SERVERS is not set in risedev-env file. Did you start Kafka using $(tput setaf 4)\`./risedev d\`$(tput sgr0)?"
+    exit 1
+fi
+'''
+
+[tasks.clean-kafka]
+category = "RiseDev - Test - Source Test - Kafka"
+description = "Delete all kafka topics."
+dependencies = ["kafka-hook"]
+command = "rpk"
+args = ["topic", "delete", "-r", "*"]
+
+[tasks.kafka-topics]
+category = "RiseDev - Test - Source Test - Kafka"
+dependencies = ["kafka-hook"]
+script = """
+#!/usr/bin/env sh
+set -e
+${PREFIX_BIN}/kafka/bin/kafka-topics.sh --bootstrap-server ${RISEDEV_KAFKA_BOOTSTRAP_SERVERS} "$@"
+"""
+
+[tasks.kafka-produce]
+category = "RiseDev - Test - Source Test - Kafka"
+dependencies = ["kafka-hook"]
+script = """
+#!/usr/bin/env sh
+set -e
+${PREFIX_BIN}/kafka/bin/kafka-console-producer.sh --bootstrap-server ${RISEDEV_KAFKA_BOOTSTRAP_SERVERS} "$@"
+"""
+
+[tasks.kafka-consume]
+category = "RiseDev - Test - Source Test - Kafka"
+dependencies = ["kafka-hook"]
+script = """
+#!/usr/bin/env sh
+set -e
+${PREFIX_BIN}/kafka/bin/kafka-console-consumer.sh --bootstrap-server ${RISEDEV_KAFKA_BOOTSTRAP_SERVERS} "$@"
+"""
+
+[tasks.kafka-consumer-groups]
+category = "RiseDev - Test - Source Test - Kafka"
+dependencies = ["kafka-hook"]
+script = """
+#!/usr/bin/env sh
+set -e
+${PREFIX_BIN}/kafka/bin/kafka-consumer-groups.sh --bootstrap-server ${RISEDEV_KAFKA_BOOTSTRAP_SERVERS} "$@"
+"""
+
+# rpk tools
+[tasks.rpk]
+category = "RiseDev - Test - Source Test - Kafka"
+dependencies = ["kafka-hook"]
+# check https://docs.redpanda.com/current/reference/rpk/rpk-x-options/ or rpk -X help/list for options
+script = """
+#!/usr/bin/env sh
+set -e
+
+if [ -z "$(which rpk)" ]; then
+    echo "rpk is not installed. Install it via https://docs.redpanda.com/current/get-started/rpk-install/"
+    exit 1
+fi
+
+rpk "$@"
+"""
+
+[tasks.redpanda-console]
+category = "RiseDev - Test - Source Test - Kafka"
+description = "Start Redpanda console (Kafka GUI) at localhost:8080."
+dependencies = ["kafka-hook"]
+script = '''
+#!/usr/bin/env sh
+set -e
+echo "$(tput setaf 2)Start Redpanda console at http://localhost:8080$(tput sgr0)"
+docker run --network host -e KAFKA_BROKERS=$RPK_BROKERS docker.redpanda.com/redpandadata/console:latest
+'''

@@ -20,6 +20,7 @@ use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_storage::error::StorageError;
 
+use crate::executor::exchange::error::ExchangeChannelClosed;
 use crate::executor::{Barrier, StreamExecutorError};
 use crate::task::ActorId;
 
@@ -29,12 +30,12 @@ pub type StreamResult<T> = std::result::Result<T, StreamError>;
 /// The error type for streaming tasks.
 #[derive(
     thiserror::Error,
-    Debug,
+    thiserror_ext::ReportDebug,
     thiserror_ext::Arc,
     thiserror_ext::ContextInto,
     thiserror_ext::Construct,
 )]
-#[thiserror_ext(newtype(name = StreamError, backtrace, report_debug))]
+#[thiserror_ext(newtype(name = StreamError, backtrace))]
 pub enum ErrorKind {
     #[error("Storage error: {0}")]
     Storage(
@@ -104,6 +105,12 @@ impl From<PbFieldNotFound> for StreamError {
 
 impl From<ConnectorError> for StreamError {
     fn from(err: ConnectorError) -> Self {
+        StreamExecutorError::from(err).into()
+    }
+}
+
+impl From<ExchangeChannelClosed> for StreamError {
+    fn from(err: ExchangeChannelClosed) -> Self {
         StreamExecutorError::from(err).into()
     }
 }

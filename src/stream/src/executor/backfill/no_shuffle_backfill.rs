@@ -12,37 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::pin::pin;
-use std::sync::Arc;
-
 use either::Either;
+use futures::stream;
 use futures::stream::select_with_strategy;
-use futures::{stream, StreamExt};
-use futures_async_stream::try_stream;
-use risingwave_common::array::{DataChunk, Op, StreamChunk};
+use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::{bail, row};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::StateStore;
 
-use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
     compute_bounds, construct_initial_finished_state, create_builder, create_limiter, get_new_pos,
     mapping_chunk, mapping_message, mark_chunk, owned_row_iter, BackfillRateLimiter,
     METADATA_STATE_LEN,
 };
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{
-    expect_first_barrier, Barrier, BoxedMessageStream, Execute, Executor, Message, Mutation,
-    StreamExecutorError, StreamExecutorResult,
-};
-use crate::task::{ActorId, CreateMviewProgress};
+use crate::executor::prelude::*;
+use crate::task::CreateMviewProgress;
 
 /// Schema: | vnode | pk ... | `backfill_finished` | `row_count` |
 /// We can decode that into `BackfillState` on recovery.
@@ -477,7 +465,7 @@ where
                                     rate_limit = new_rate_limit;
                                     tracing::info!(
                                         id = self.actor_id,
-                                        new_rate_limit = ?self.rate_limit,
+                                        new_rate_limit = ?rate_limit,
                                         "actor rate limit changed",
                                     );
                                     // The builder is emptied above via `DataChunkBuilder::consume_all`.
@@ -656,7 +644,7 @@ where
         if paused {
             #[for_await]
             for _ in tokio_stream::pending() {
-                yield None;
+                bail!("BUG: paused stream should not yield");
             }
         } else {
             // Checked the rate limit is not zero.

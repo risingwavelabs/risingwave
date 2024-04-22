@@ -36,7 +36,7 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [x, y] }
-      └─BatchSource { source: s, columns: [x, y, _rw_kafka_timestamp, _row_id], filter: (None, None) }
+      └─BatchKafkaScan { source: s, columns: [x, y, _rw_kafka_timestamp, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [x, y, _row_id] }
@@ -52,7 +52,7 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [x, y] }
-      └─BatchSource { source: s, columns: [x, y, _rw_kafka_timestamp, _row_id], filter: (None, None) }
+      └─BatchKafkaScan { source: s, columns: [x, y, _rw_kafka_timestamp, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [x, y, _row_id] }
@@ -68,7 +68,7 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [x, y] }
-      └─BatchSource { source: s, columns: [x, y, _rw_kafka_timestamp, _row_id], filter: (None, None) }
+      └─BatchKafkaScan { source: s, columns: [x, y, _rw_kafka_timestamp, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [x, y, _row_id] }
@@ -84,7 +84,7 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [x, y] }
-      └─BatchSource { source: s, columns: [x, y, _rw_kafka_timestamp, _row_id], filter: (None, None) }
+      └─BatchKafkaScan { source: s, columns: [x, y, _rw_kafka_timestamp, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [x, y, _row_id] }

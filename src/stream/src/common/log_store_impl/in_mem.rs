@@ -319,7 +319,7 @@ mod tests {
     use std::task::Poll;
 
     use futures::FutureExt;
-    use risingwave_common::array::Op;
+    use risingwave_common::array::{Op, StreamChunkBuilder};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::{test_epoch, EpochPair};
     use risingwave_connector::sink::log_store::{
@@ -327,7 +327,6 @@ mod tests {
     };
 
     use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
-    use crate::common::StreamChunkBuilder;
 
     #[tokio::test]
     async fn test_in_memory_log_store() {

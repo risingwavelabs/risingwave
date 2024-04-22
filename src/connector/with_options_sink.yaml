@@ -564,7 +564,7 @@ SnowflakeConfig:
     required: true
   - name: snowflake.s3_path
     field_type: String
-    comments: The optional s3 path to be specified  the actual file location would be `<s3_bucket>://<s3_path>/<rw_auto_gen_file_name>`  if this field is specified by user(s)  otherwise it would be `<s3_bucket>://<rw_auto_gen_file_name>`
+    comments: The optional s3 path to be specified  the actual file location would be `s3://<s3_bucket>/<s3_path>/<rw_auto_gen_intermediate_file_name>`  if this field is specified by user(s)  otherwise it would be `s3://<s3_bucket>/<rw_auto_gen_intermediate_file_name>`
     required: false
   - name: snowflake.aws_access_key_id
     field_type: String
@@ -577,10 +577,6 @@ SnowflakeConfig:
   - name: snowflake.aws_region
     field_type: String
     comments: The s3 region, e.g., us-east-2
-    required: true
-  - name: snowflake.max_batch_row_num
-    field_type: String
-    comments: The configurable max row(s) to batch,  which should be *explicitly* specified by user(s)
     required: true
 StarrocksConfig:
   fields:
