@@ -63,7 +63,7 @@ impl Default for CdcScanOptions {
     fn default() -> Self {
         Self {
             disable_backfill: false,
-            snapshot_barrier_interval: 1,
+            snapshot_barrier_interval: 5,
             snapshot_batch_size: 1000,
         }
     }
@@ -71,33 +71,28 @@ impl Default for CdcScanOptions {
 
 impl CdcScanOptions {
     pub fn from_with_options(with_options: &WithOptions) -> Result<Self> {
+        // unspecified option will use default values
+        let mut scan_options = Self::default();
+
         // disable backfill if 'snapshot=false'
-        let disable_backfill = match with_options.get(CDC_BACKFILL_ENABLE_KEY) {
-            None => false,
-            Some(v) => {
-                !(bool::from_str(v)
-                    .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_ENABLE_KEY))?)
-            }
+        if let Some(snapshot) = with_options.get(CDC_BACKFILL_ENABLE_KEY) {
+            scan_options.disable_backfill = !(bool::from_str(snapshot)
+                .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_ENABLE_KEY))?);
         };
 
-        let snapshot_barrier_interval = match with_options.get(CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY) {
-            None => 1,
-            Some(v) => u32::from_str(v)
-                .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY))?,
+        if let Some(snapshot_interval) = with_options.get(CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY) {
+            scan_options.snapshot_barrier_interval = u32::from_str(snapshot_interval)
+                .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY))?;
         };
 
-        let snapshot_batch_size = match with_options.get(CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY) {
-            None => 1000,
-            Some(v) => u32::from_str(v).map_err(|_| {
-                anyhow!("Invalid value for {}", CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY)
-            })?,
+        if let Some(snapshot_batch_size) = with_options.get(CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY) {
+            scan_options.snapshot_batch_size =
+                u32::from_str(snapshot_batch_size).map_err(|_| {
+                    anyhow!("Invalid value for {}", CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY)
+                })?;
         };
 
-        Ok(Self {
-            disable_backfill,
-            snapshot_barrier_interval,
-            snapshot_batch_size,
-        })
+        Ok(scan_options)
     }
 
     pub fn to_proto(&self) -> StreamCdcScanOptions {
