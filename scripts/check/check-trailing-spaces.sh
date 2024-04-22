@@ -43,10 +43,7 @@ done
 temp_file=$(mktemp)
 
 echo -ne "${BLUE}"
-git grep -nIP --untracked '[[:space:]]+$' -- \
-    ':!src/tests/regress/data' \
-    ':!dashboard/public/monaco' \
-| tee $temp_file || true
+git grep -nIP --untracked '[[:space:]]+$' -- ':!src/tests/regress/data' | tee $temp_file || true
 echo -ne "${NONE}"
 
 bad_files=$(cat $temp_file | cut -f1 -d ':' | sort -u)

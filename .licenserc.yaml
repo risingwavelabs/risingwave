@@ -20,6 +20,5 @@ header:
     - "java/connector-node/risingwave-sink-iceberg/src/main/java/org/apache/iceberg/**/*.java"
     - "src/meta/model_v2/migration/**/*.rs"
     - "lints/ui/**"
-    - "dashboard/public/monaco/**"
 
   comment: on-failure
