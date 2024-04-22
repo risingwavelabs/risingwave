@@ -141,14 +141,17 @@ sqllogictest -p 4566 -d dev './e2e_test/generated/**/*.slt' --junit "generated-$
 echo "--- Kill cluster"
 cluster_stop
 
-echo "--- e2e, ci-3cn-1fe-with-recovery, error ui"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-risedev ci-start ci-3cn-1fe-with-recovery
-sqllogictest -p 4566 -d dev './e2e_test/error_ui/simple/**/*.slt'
-sqllogictest -p 4566 -d dev -e postgres-extended './e2e_test/error_ui/extended/**/*.slt'
+# only run if mode is not single-node or standalone
+if [[ "$mode" != "single-node" && "$mode" != "standalone" ]]; then
+  echo "--- e2e, ci-3cn-1fe-with-recovery, error ui"
+  RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+  risedev ci-start ci-3cn-1fe-with-recovery
+  sqllogictest -p 4566 -d dev './e2e_test/error_ui/simple/**/*.slt'
+  sqllogictest -p 4566 -d dev -e postgres-extended './e2e_test/error_ui/extended/**/*.slt'
 
-echo "--- Kill cluster"
-risedev ci-kill
+  echo "--- Kill cluster"
+  risedev ci-kill
+fi
 
 echo "--- e2e, $mode, extended query"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
