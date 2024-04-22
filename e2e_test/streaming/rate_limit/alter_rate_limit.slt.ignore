@@ -1,3 +1,5 @@
+-- This test is ignored until alter mv rate limit is fully supported.
+
 statement ok
 CREATE TABLE t (v1 int);
 
