@@ -21,9 +21,11 @@ use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version::PbLevels;
 use risingwave_pb::hummock::hummock_version_delta::GroupDeltas as PbGroupDeltas;
-use risingwave_pb::hummock::{PbHummockVersion, PbHummockVersionDelta};
+use risingwave_pb::hummock::{
+    HummockVersionDelta as PbHummockVersionDelta, PbHummockVersion, SstableInfo,
+};
 
-use crate::change_log::TableChangeLog;
+use crate::change_log::{EpochNewChangeLog, TableChangeLog};
 use crate::table_watermark::TableWatermarks;
 use crate::{CompactionGroupId, HummockSstableObjectId};
 
@@ -138,6 +140,7 @@ pub struct HummockVersionDelta {
     pub trivial_move: bool,
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
     pub removed_table_ids: Vec<TableId>,
+    pub new_change_log: HashMap<TableId, EpochNewChangeLog>,
 }
 
 impl Default for HummockVersionDelta {
@@ -182,6 +185,16 @@ impl HummockVersionDelta {
                 .iter()
                 .map(|table_id| TableId::new(*table_id))
                 .collect(),
+            new_change_log: delta
+                .new_change_log
+                .iter()
+                .map(|(table_id, new_log)| {
+                    (
+                        TableId::new(*table_id),
+                        EpochNewChangeLog::from_protobuf(new_log),
+                    )
+                })
+                .collect(),
         }
     }
 
@@ -203,6 +216,11 @@ impl HummockVersionDelta {
                 .iter()
                 .map(|table_id| table_id.table_id)
                 .collect(),
+            new_change_log: self
+                .new_change_log
+                .iter()
+                .map(|(table_id, new_log)| (table_id.table_id, new_log.to_protobuf()))
+                .collect(),
         }
     }
 }
@@ -213,27 +231,30 @@ impl HummockVersionDelta {
     /// Note: the result can be false positive because we only collect the set of sst object ids in the `inserted_table_infos`,
     /// but it is possible that the object is moved or split from other compaction groups or levels.
     pub fn newly_added_object_ids(&self) -> HashSet<HummockSstableObjectId> {
-        let mut ret = HashSet::new();
-        for group_deltas in self.group_deltas.values() {
-            for group_delta in &group_deltas.group_deltas {
-                if let Some(delta_type) = &group_delta.delta_type {
-                    match delta_type {
-                        DeltaType::IntraLevel(level_delta) => {
-                            ret.extend(
-                                level_delta
-                                    .inserted_table_infos
-                                    .iter()
-                                    .map(|sst| sst.object_id),
-                            );
-                        }
-                        DeltaType::GroupConstruct(_)
-                        | DeltaType::GroupDestroy(_)
-                        | DeltaType::GroupMetaChange(_)
-                        | DeltaType::GroupTableChange(_) => {}
-                    }
-                }
-            }
-        }
-        ret
+        self.group_deltas
+            .values()
+            .flat_map(|group_deltas| {
+                group_deltas.group_deltas.iter().flat_map(|group_delta| {
+                    group_delta.delta_type.iter().flat_map(|delta_type| {
+                        static EMPTY_VEC: Vec<SstableInfo> = Vec::new();
+                        let sst_slice = match delta_type {
+                            DeltaType::IntraLevel(level_delta) => &level_delta.inserted_table_infos,
+                            DeltaType::GroupConstruct(_)
+                            | DeltaType::GroupDestroy(_)
+                            | DeltaType::GroupMetaChange(_)
+                            | DeltaType::GroupTableChange(_) => &EMPTY_VEC,
+                        };
+                        sst_slice.iter().map(|sst| sst.object_id)
+                    })
+                })
+            })
+            .chain(self.new_change_log.values().flat_map(|new_log| {
+                new_log
+                    .new_value
+                    .iter()
+                    .map(|sst| sst.object_id)
+                    .chain(new_log.old_value.iter().map(|sst| sst.object_id))
+            }))
+            .collect()
     }
 }

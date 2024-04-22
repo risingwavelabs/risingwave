@@ -21,6 +21,7 @@ use async_trait::async_trait;
 use fail::fail_point;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
+use risingwave_hummock_sdk::change_log::build_table_new_change_log;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
@@ -162,7 +163,18 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), self.context_id))
             .collect();
         let new_table_watermark = sync_result.table_watermarks;
-
+        let table_change_log = build_table_new_change_log(
+            sync_result
+                .old_value_ssts
+                .into_iter()
+                .map(|sst| sst.sst_info),
+            sync_result.uncommitted_ssts.iter().map(|sst| &sst.sst_info),
+            &vec![epoch],
+            sync_result
+                .log_store_table_ids
+                .iter()
+                .map(|table_id| table_id.table_id),
+        );
         self.hummock_manager
             .commit_epoch(
                 epoch,
@@ -175,6 +187,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                     new_table_watermark,
                     sst_to_worker,
                     None,
+                    table_change_log,
                 ),
             )
             .await

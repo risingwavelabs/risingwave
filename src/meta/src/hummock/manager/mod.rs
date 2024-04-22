@@ -263,6 +263,7 @@ pub struct CommitEpochInfo {
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
     pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
     pub new_table_fragment_info: Option<NewTableFragmentInfo>,
+    pub new_change_log: HashMap<TableId, EpochNewChangeLog>,
 }
 
 impl CommitEpochInfo {
@@ -271,12 +272,14 @@ impl CommitEpochInfo {
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
         sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
         new_table_fragment_info: Option<NewTableFragmentInfo>,
+        new_change_log: HashMap<TableId, EpochNewChangeLog>,
     ) -> Self {
         Self {
             sstables,
             new_table_watermarks,
             sst_to_context,
             new_table_fragment_info,
+            new_change_log,
         }
     }
 
@@ -290,6 +293,7 @@ impl CommitEpochInfo {
             HashMap::new(),
             sst_to_context,
             None,
+            HashMap::new(),
         )
     }
 }
@@ -1624,6 +1628,7 @@ impl HummockManager {
             new_table_watermarks,
             sst_to_context,
             new_table_fragment_info,
+            new_change_log,
         } = commit_info;
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
@@ -1659,6 +1664,7 @@ impl HummockManager {
         );
         new_version_delta.max_committed_epoch = epoch;
         new_version_delta.new_table_watermarks = new_table_watermarks;
+        new_version_delta.new_change_log = new_change_log;
 
         let mut table_compaction_group_mapping = old_version.build_compaction_group_info();
 
@@ -3473,6 +3479,7 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
 }
 
 type CompactionRequestChannelItem = (CompactionGroupId, compact_task::TaskType);
+use risingwave_hummock_sdk::change_log::EpochNewChangeLog;
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::HummockVersion;
 use tokio::sync::mpsc::error::SendError;

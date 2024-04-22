@@ -12,13 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::hummock::{PbEpochNewChangeLog, PbTableChangeLog, SstableInfo};
+use std::collections::{HashMap, HashSet};
+
+use risingwave_common::catalog::TableId;
+use risingwave_pb::hummock::{
+    EpochNewChangeLog as PbEpochNewChangeLog, PbTableChangeLog, SstableInfo,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EpochNewChangeLog {
     pub new_value: Vec<SstableInfo>,
     pub old_value: Vec<SstableInfo>,
     pub epochs: Vec<u64>,
+}
+
+impl EpochNewChangeLog {
+    pub fn to_protobuf(&self) -> PbEpochNewChangeLog {
+        PbEpochNewChangeLog {
+            epochs: self.epochs.clone(),
+            new_value: self.new_value.clone(),
+            old_value: self.old_value.clone(),
+        }
+    }
+
+    pub fn from_protobuf(epoch_new_log: &PbEpochNewChangeLog) -> Self {
+        Self {
+            epochs: epoch_new_log.epochs.clone(),
+            new_value: epoch_new_log.new_value.clone(),
+            old_value: epoch_new_log.old_value.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -42,11 +65,7 @@ impl TableChangeLog {
             change_logs: self
                 .0
                 .iter()
-                .map(|epoch_new_log| PbEpochNewChangeLog {
-                    epochs: epoch_new_log.epochs.clone(),
-                    new_value: epoch_new_log.new_value.clone(),
-                    old_value: epoch_new_log.old_value.clone(),
-                })
+                .map(|epoch_new_log| epoch_new_log.to_protobuf())
                 .collect(),
         }
     }
@@ -55,14 +74,50 @@ impl TableChangeLog {
         Self(
             val.change_logs
                 .iter()
-                .map(|epoch_new_log| EpochNewChangeLog {
-                    epochs: epoch_new_log.epochs.clone(),
-                    new_value: epoch_new_log.new_value.clone(),
-                    old_value: epoch_new_log.old_value.clone(),
-                })
+                .map(EpochNewChangeLog::from_protobuf)
                 .collect(),
         )
     }
+}
+
+pub fn build_table_new_change_log<'a>(
+    old_value_ssts: impl Iterator<Item = SstableInfo>,
+    new_value_ssts: impl Iterator<Item = &'a SstableInfo>,
+    epochs: &Vec<u64>,
+    log_store_table_ids: impl Iterator<Item = u32>,
+) -> HashMap<TableId, EpochNewChangeLog> {
+    let log_store_table_ids: HashSet<u32> = log_store_table_ids.collect();
+    let mut table_change_log = HashMap::new();
+    for sst in old_value_ssts {
+        for table_id in &sst.table_ids {
+            assert!(log_store_table_ids.contains(table_id), "old value sst has table_id not enabled log store: log store tables: {:?} sst: {:?}", log_store_table_ids, sst);
+            table_change_log
+                .entry(TableId::from(*table_id))
+                .or_insert_with(|| EpochNewChangeLog {
+                    new_value: vec![],
+                    old_value: vec![],
+                    epochs: epochs.clone(),
+                })
+                .old_value
+                .push(sst.clone());
+        }
+    }
+    for sst in new_value_ssts {
+        for table_id in &sst.table_ids {
+            if log_store_table_ids.contains(table_id) {
+                table_change_log
+                    .entry(TableId::from(*table_id))
+                    .or_insert_with(|| EpochNewChangeLog {
+                        new_value: vec![],
+                        old_value: vec![],
+                        epochs: epochs.clone(),
+                    })
+                    .new_value
+                    .push(sst.clone());
+            }
+        }
+    }
+    table_change_log
 }
 
 #[cfg(test)]

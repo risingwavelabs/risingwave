@@ -43,9 +43,8 @@ use sync_point::sync_point;
 
 use super::StagingDataIterator;
 use crate::error::StorageResult;
-use crate::hummock::iterator::{
-    ChangeLogIterator, ConcatIterator, HummockIteratorUnion, MergeIterator, UserIterator,
-};
+use crate::hummock::iterator::change_log::ChangeLogIterator;
+use crate::hummock::iterator::{ConcatIterator, HummockIteratorUnion, MergeIterator, UserIterator};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
@@ -75,6 +74,7 @@ pub type CommittedVersion = PinnedVersion;
 pub struct StagingSstableInfo {
     // newer data comes first
     sstable_infos: Vec<LocalSstableInfo>,
+    old_value_sstable_infos: Vec<LocalSstableInfo>,
     /// Epochs whose data are included in the Sstable. The newer epoch comes first.
     /// The field must not be empty.
     epochs: Vec<HummockEpoch>,
@@ -85,6 +85,7 @@ pub struct StagingSstableInfo {
 impl StagingSstableInfo {
     pub fn new(
         sstable_infos: Vec<LocalSstableInfo>,
+        old_value_sstable_infos: Vec<LocalSstableInfo>,
         epochs: Vec<HummockEpoch>,
         imm_ids: Vec<ImmId>,
         imm_size: usize,
@@ -93,6 +94,7 @@ impl StagingSstableInfo {
         assert!(epochs.is_sorted_by(|epoch1, epoch2| epoch2.partial_cmp(epoch1)));
         Self {
             sstable_infos,
+            old_value_sstable_infos,
             epochs,
             imm_ids,
             imm_size,
@@ -101,6 +103,10 @@ impl StagingSstableInfo {
 
     pub fn sstable_infos(&self) -> &Vec<LocalSstableInfo> {
         &self.sstable_infos
+    }
+
+    pub fn old_value_sstable_infos(&self) -> &Vec<LocalSstableInfo> {
+        &self.old_value_sstable_infos
     }
 
     pub fn imm_size(&self) -> usize {

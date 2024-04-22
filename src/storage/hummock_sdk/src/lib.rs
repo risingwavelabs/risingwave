@@ -27,7 +27,7 @@
 
 mod key_cmp;
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub use key_cmp::*;
 use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
@@ -101,6 +101,10 @@ pub struct SyncResult {
     pub uncommitted_ssts: Vec<LocalSstableInfo>,
     /// The collected table watermarks written by state tables.
     pub table_watermarks: HashMap<TableId, TableWatermarks>,
+    /// Sstable that holds the uncommitted old value
+    pub old_value_ssts: Vec<LocalSstableInfo>,
+    /// Set of table id that has enabled log store
+    pub log_store_table_ids: HashSet<TableId>,
 }
 
 #[derive(Debug, Clone)]
