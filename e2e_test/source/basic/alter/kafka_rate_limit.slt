@@ -64,6 +64,10 @@ query I
 alter table kafka_source set streaming_rate_limit to 1000;
 
 skipif in-memory
+query I
+alter table kafka_source set streaming_rate_limit to default;
+
+skipif in-memory
 statement ok
 flush;
 
