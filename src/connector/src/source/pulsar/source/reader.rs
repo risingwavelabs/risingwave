@@ -233,7 +233,7 @@ impl SplitReader for PulsarBrokerReader {
 impl CommonSplitReader for PulsarBrokerReader {
     #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     async fn into_data_stream(self) {
-        let max_chunk_size = self.source_ctx.source_ctrl_opts.chunk_size;
+        let max_chunk_size = self.source_ctx.source_ctrl_opts.max_chunk_size;
         #[for_await]
         for msgs in self.consumer.ready_chunks(max_chunk_size) {
             let mut res = Vec::with_capacity(msgs.len());
@@ -281,7 +281,7 @@ impl PulsarIcebergReader {
         let schema = table.current_table_metadata().current_schema()?;
         tracing::debug!("Created iceberg pulsar table, schema is: {:?}", schema,);
 
-        let max_chunk_size = self.source_ctx.source_ctrl_opts.chunk_size;
+        let max_chunk_size = self.source_ctx.source_ctrl_opts.max_chunk_size;
 
         let partition_value = match &self.split.topic.partition_index {
             Some(partition_id) => {
