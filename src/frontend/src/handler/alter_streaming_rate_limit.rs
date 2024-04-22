@@ -55,6 +55,13 @@ pub async fn handle_alter_streaming_rate_limit(
             session.check_privilege_for_drop_alter(schema_name, &**table)?;
             (StatementType::ALTER_MATERIALIZED_VIEW, table.id.table_id)
         },
+        PbThrottleTarget::Source => {
+            let reader = session.env().catalog_reader().read_guard();
+            let (source, schema_name) =
+                reader.get_source_by_name(db_name, schema_path, &real_table_name)?;
+            session.check_privilege_for_drop_alter(schema_name, &**source)?;
+            (StatementType::ALTER_SOURCE, source.id)
+        },
         _ => bail!("Unsupported throttle target: {:?}", kind)
     };
 
