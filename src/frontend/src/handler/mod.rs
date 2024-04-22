@@ -67,6 +67,7 @@ pub mod create_user;
 pub mod create_view;
 pub mod declare_cursor;
 pub mod describe;
+pub mod discard;
 mod drop_connection;
 mod drop_database;
 pub mod drop_function;
@@ -379,6 +380,7 @@ pub async fn handle(
             handle_privilege::handle_revoke_privilege(handler_args, stmt).await
         }
         Statement::Describe { name } => describe::handle_describe(handler_args, name),
+        Statement::Discard(..) => discard::handle_discard(handler_args),
         Statement::ShowObjects {
             object: show_object,
             filter,

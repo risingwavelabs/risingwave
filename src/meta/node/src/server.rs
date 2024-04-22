@@ -107,6 +107,25 @@ use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
 use crate::{hummock, serving, MetaError, MetaResult};
 
+/// Used for standalone mode checking the status of the meta service.
+/// This can be easier and more accurate than checking the TCP connection.
+pub mod started {
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering::Relaxed;
+
+    static STARTED: AtomicBool = AtomicBool::new(false);
+
+    /// Mark the meta service as started.
+    pub(crate) fn set() {
+        STARTED.store(true, Relaxed);
+    }
+
+    /// Check if the meta service has started.
+    pub fn get() -> bool {
+        STARTED.load(Relaxed)
+    }
+}
+
 pub async fn rpc_serve(
     address_info: AddressInfo,
     meta_store_backend: MetaStoreBackend,
@@ -334,7 +353,8 @@ pub async fn start_service_as_election_follower(
     });
 
     let health_srv = HealthServiceImpl::new();
-    tonic::transport::Server::builder()
+
+    let server = tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(Arc::new(
             GLOBAL_META_METRICS.clone(),
         )))
@@ -366,8 +386,9 @@ pub async fn start_service_as_election_follower(
                     },
                 }
             },
-        )
-        .await;
+        );
+    started::set();
+    server.await;
 }
 
 /// Starts all services needed for the meta leader node
@@ -777,7 +798,7 @@ pub async fn start_service_as_election_leader(
         risingwave_pb::meta::event_log::Event::MetaNodeStart(event),
     ]);
 
-    tonic::transport::Server::builder()
+    let server = tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))
         .layer(TracingExtractLayer::new())
         .add_service(HeartbeatServiceServer::new(heartbeat_srv))
@@ -822,8 +843,9 @@ pub async fn start_service_as_election_leader(
                     },
                 }
             },
-        )
-        .await;
+        );
+    started::set();
+    server.await;
 
     #[cfg(not(madsim))]
     if let Some(dashboard_task) = dashboard_task {

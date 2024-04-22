@@ -18,7 +18,7 @@ use risingwave_common_estimate_size::EstimateSize;
 
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
-use crate::task::AtomicU64Ref;
+use crate::executor::prelude::*;
 
 /// [`DedupCache`] is used for key deduplication. Currently, the cache behaves like a set that only
 /// accepts a key without a value. This could be refined in the future to support k-v pairs.

@@ -168,7 +168,6 @@ pub struct SourceEnumeratorInfo {
 pub struct SourceContext {
     pub actor_id: u32,
     pub source_id: TableId,
-    // There should be a 1-1 mapping between `source_id` & `fragment_id`
     pub fragment_id: u32,
     pub source_name: String,
     pub metrics: Arc<SourceMetrics>,

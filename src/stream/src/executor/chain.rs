@@ -12,12 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::StreamExt;
-use futures_async_stream::try_stream;
-
-use super::error::StreamExecutorError;
-use super::{expect_first_barrier, Execute, Executor, Message};
-use crate::task::{ActorId, CreateMviewProgress};
+use crate::executor::prelude::*;
+use crate::task::CreateMviewProgress;
 
 /// [`ChainExecutor`] is an executor that enables synchronization between the existing stream and
 /// newly appended executors. Currently, [`ChainExecutor`] is mainly used to implement MV on MV

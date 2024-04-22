@@ -15,21 +15,17 @@
 use std::alloc::Global;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::pin::pin;
-use std::sync::Arc;
 
 use either::Either;
 use futures::stream::{self, PollNext};
-use futures::{pin_mut, StreamExt, TryStreamExt};
-use futures_async_stream::{for_await, try_stream};
+use futures::TryStreamExt;
 use itertools::Itertools;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use lru::DefaultHasher;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::Op;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::hash::{HashKey, NullBitmap};
-use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::DataType;
+use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common_estimate_size::{EstimateSize, KvSize};
 use risingwave_expr::expr::NonStrictExpression;
@@ -37,20 +33,12 @@ use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
-use risingwave_storage::StateStore;
 
 use super::join::{JoinType, JoinTypePrimitive};
-use super::{
-    Barrier, Execute, ExecutorInfo, Message, MessageStream, StreamExecutorError,
-    StreamExecutorResult,
-};
 use crate::cache::{cache_may_stale, new_with_hasher_in, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
-use crate::common::table::state_table::StateTable;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{ActorContextRef, Executor, Watermark};
-use crate::task::AtomicU64Ref;
+use crate::executor::prelude::*;
 
 pub struct TemporalJoinExecutor<
     K: HashKey,
