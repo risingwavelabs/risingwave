@@ -13,11 +13,8 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-
 use risingwave_common::bail;
-
 use risingwave_pb::meta::PbThrottleTarget;
-
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::{HandlerArgs, RwPgResponse};
