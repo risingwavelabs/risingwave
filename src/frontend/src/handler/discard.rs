@@ -12,7 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod error;
-pub mod input;
-pub mod output;
-pub mod permit;
+use pgwire::pg_response::{PgResponse, StatementType};
+
+use super::RwPgResponse;
+use crate::error::Result;
+use crate::handler::HandlerArgs;
+
+// RisingWave does not yet support any session-internal objects, such as temporary tables.
+// Do nothing for this command.
+pub fn handle_discard(_: HandlerArgs) -> Result<RwPgResponse> {
+    Ok(PgResponse::empty_result(StatementType::DISCARD))
+}
