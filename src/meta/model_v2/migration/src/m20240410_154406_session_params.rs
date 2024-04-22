@@ -20,7 +20,7 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(ColumnDef::new(SessionParameter::Value).string().not_null())
-                    .col(ColumnDef::new(SessionParameter::Description).string())
+                    .col(ColumnDef::new(SessionParameter::Description).text())
                     .to_owned(),
             )
             .await?;
