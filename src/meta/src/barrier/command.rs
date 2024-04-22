@@ -23,10 +23,11 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorMapping;
 use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_pb::catalog::CreateType;
 use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
-use risingwave_pb::stream_plan::barrier::BarrierKind;
+use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
@@ -164,6 +165,7 @@ pub enum Command {
         init_split_assignment: SplitAssignment,
         definition: String,
         ddl_type: DdlType,
+        create_type: CreateType,
         replace_table: Option<ReplaceTablePlan>,
     },
     /// `CancelStreamingJob` command generates a `Stop` barrier including the actors of the given
@@ -299,6 +301,40 @@ impl Command {
     pub fn need_checkpoint(&self) -> bool {
         // todo! Reviewing the flow of different command to reduce the amount of checkpoint
         !matches!(self, Command::Plain(None) | Command::Resume(_))
+    }
+}
+
+#[derive(Debug)]
+pub enum BarrierKind {
+    Initial,
+    Barrier,
+    /// Hold a list of previous non-checkpoint prev-epoch + current prev-epoch
+    Checkpoint(Vec<u64>),
+}
+
+impl BarrierKind {
+    pub fn to_protobuf(&self) -> PbBarrierKind {
+        match self {
+            BarrierKind::Initial => PbBarrierKind::Initial,
+            BarrierKind::Barrier => PbBarrierKind::Barrier,
+            BarrierKind::Checkpoint(_) => PbBarrierKind::Checkpoint,
+        }
+    }
+
+    pub fn is_checkpoint(&self) -> bool {
+        matches!(self, BarrierKind::Checkpoint(_))
+    }
+
+    pub fn is_initial(&self) -> bool {
+        matches!(self, BarrierKind::Initial)
+    }
+
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            BarrierKind::Initial => "Initial",
+            BarrierKind::Barrier => "Barrier",
+            BarrierKind::Checkpoint(_) => "Checkpoint",
+        }
     }
 }
 

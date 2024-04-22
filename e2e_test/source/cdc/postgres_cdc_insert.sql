@@ -11,3 +11,12 @@ insert into abs.t1 values (2, 2.2, 'bbb', '1234.5431');
 SELECT pg_current_wal_lsn();
 select * from pg_publication_tables where pubname='rw_publication';
 select * from public.person order by id;
+
+insert into numeric_table values(102, 57896044618658097711785492504343953926634992332820282019728792003956564819967);
+--- 2^255
+insert into numeric_table values(103, 57896044618658097711785492504343953926634992332820282019728792003956564819968);
+--- 2^256
+insert into numeric_table values(104, 115792089237316195423570985008687907853269984665640564039457584007913129639936);
+insert into numeric_table values(105, 115792089237316195423570985008687907853269984665640564039457584007913129639936.555555);
+insert into numeric_table values(106, 'NaN'::numeric);
+insert into numeric_table values(107, 'Infinity'::numeric);

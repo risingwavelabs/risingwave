@@ -12,33 +12,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Formatter;
+use std::collections::HashMap;
+use std::num::NonZeroU32;
 use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use either::Either;
-use futures::{StreamExt, TryStreamExt};
-use futures_async_stream::try_stream;
+use futures::TryStreamExt;
+use governor::clock::MonotonicClock;
+use governor::{Quota, RateLimiter};
+use itertools::Itertools;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_common::util::epoch::{Epoch, EpochPair};
+use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::cdc::jni_source;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
-    BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitMetaData,
+    BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
+    SplitMetaData,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
-use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
-use crate::executor::monitor::StreamingMetrics;
+use crate::executor::prelude::*;
+use crate::executor::source::{
+    barrier_to_message_stream, get_split_offset_col_idx, get_split_offset_mapping_from_chunk,
+    prune_additional_cols,
+};
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::executor::*;
+use crate::executor::{AddMutation, UpdateMutation};
 
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
@@ -61,6 +70,54 @@ pub struct SourceExecutor<S: StateStore> {
 
     // control options for connector level
     source_ctrl_opts: SourceCtrlOpts,
+}
+
+#[try_stream(ok = StreamChunk, error = ConnectorError)]
+pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit: Option<u32>) {
+    if let Some(limit) = rate_limit
+        && limit == 0
+    {
+        // block the stream until the rate limit is reset
+        let future = futures::future::pending::<()>();
+        future.await;
+    }
+    let get_rate_limiter = |rate_limit: u32| {
+        let quota = Quota::per_second(NonZeroU32::new(rate_limit).unwrap());
+        let clock = MonotonicClock;
+        RateLimiter::direct_with_clock(quota, &clock)
+    };
+    let limiter = rate_limit.map(get_rate_limiter);
+    if rate_limit.is_some() {
+        tracing::info!(rate_limit = ?rate_limit, "applied rate limit");
+    }
+    #[for_await]
+    for batch in stream {
+        let chunk: StreamChunk = batch?;
+        let chunk_cardinality = chunk.cardinality();
+        let Some(n) = NonZeroU32::new(chunk_cardinality as u32) else {
+            // pass empty chunk
+            yield chunk;
+            continue;
+        };
+        if let Some(limiter) = &limiter {
+            let limit = NonZeroU32::new(rate_limit.unwrap()).unwrap();
+            if n <= limit {
+                // `InsufficientCapacity` should never happen because we have done the check
+                limiter.until_n_ready(n).await.unwrap();
+                yield chunk;
+            } else {
+                // Cut the chunk into smaller chunks
+                for chunk in chunk.split(limit.get() as usize) {
+                    let n = NonZeroU32::new(chunk.cardinality() as u32).unwrap();
+                    // Ditto.
+                    limiter.until_n_ready(n).await.unwrap();
+                    yield chunk;
+                }
+            }
+        } else {
+            yield chunk;
+        }
+    }
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -108,20 +165,22 @@ impl<S: StateStore> SourceExecutor<S> {
             self.actor_ctx.id,
             self.stream_source_core.as_ref().unwrap().source_id,
             self.actor_ctx.fragment_id,
-            source_desc.metrics.clone(),
-            self.source_ctrl_opts.clone(),
-            source_desc.source.config.clone(),
             self.stream_source_core
                 .as_ref()
                 .unwrap()
                 .source_name
                 .clone(),
+            source_desc.metrics.clone(),
+            self.source_ctrl_opts.clone(),
+            source_desc.source.config.clone(),
         );
-        source_desc
+        let stream = source_desc
             .source
             .to_stream(state, column_ids, Arc::new(source_ctx))
             .await
-            .map_err(StreamExecutorError::connector_error)
+            .map_err(StreamExecutorError::connector_error);
+
+        Ok(apply_rate_limit(stream?, self.source_ctrl_opts.rate_limit).boxed())
     }
 
     /// `source_id | source_name | actor_id | fragment_id`
@@ -500,6 +559,14 @@ impl<S: StateStore> SourceExecutor<S> {
                                 )
                                 .await?;
                             }
+                            Mutation::Throttle(actor_to_apply) => {
+                                if let Some(throttle) = actor_to_apply.get(&self.actor_ctx.id) {
+                                    self.source_ctrl_opts.rate_limit = *throttle;
+                                    // recreate from latest_split_info
+                                    self.rebuild_stream_reader(&source_desc, &mut stream)
+                                        .await?;
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -707,6 +774,7 @@ impl<S: StateStore> WaitEpochWorker<S> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::time::Duration;
 
     use futures::StreamExt;
@@ -726,6 +794,7 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::executor::source::{default_source_internal_table, SourceStateTableHandler};
     use crate::executor::ActorContext;
 
     const MOCK_SOURCE_NAME: &str = "mock_source";
@@ -777,7 +846,10 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
             system_params_manager.get_params(),
-            SourceCtrlOpts::default(),
+            SourceCtrlOpts {
+                chunk_size: 1024,
+                rate_limit: None,
+            },
         );
         let mut executor = executor.boxed().execute();
 
@@ -865,7 +937,10 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
             system_params_manager.get_params(),
-            SourceCtrlOpts::default(),
+            SourceCtrlOpts {
+                chunk_size: 1024,
+                rate_limit: None,
+            },
         );
         let mut handler = executor.boxed().execute();
 

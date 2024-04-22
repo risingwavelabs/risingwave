@@ -35,10 +35,10 @@ use risingwave_storage::panic_store::PanicStateStore;
 use tokio::sync::mpsc::unbounded_channel;
 
 use super::*;
-use crate::executor::source::{FsListExecutor, StreamSourceCore};
-use crate::executor::source_executor::SourceExecutor;
-use crate::executor::state_table_handler::SourceStateTableHandler;
-use crate::executor::{FlowControlExecutor, TroublemakerExecutor};
+use crate::executor::source::{
+    FsListExecutor, SourceExecutor, SourceStateTableHandler, StreamSourceCore,
+};
+use crate::executor::TroublemakerExecutor;
 
 const FS_CONNECTORS: &[&str] = &["s3"];
 pub struct SourceExecutorBuilder;
@@ -213,7 +213,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
 
                 if is_fs_connector {
                     #[expect(deprecated)]
-                    crate::executor::FsSourceExecutor::new(
+                    crate::executor::source::FsSourceExecutor::new(
                         params.actor_context.clone(),
                         stream_source_core,
                         params.executor_stats,
@@ -244,12 +244,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     .boxed()
                 }
             };
-            let mut info = params.info.clone();
-            info.identity = format!("{} (flow controlled)", info.identity);
-
-            let rate_limit = source.rate_limit.map(|x| x as _);
-            let exec =
-                FlowControlExecutor::new((info, exec).into(), params.actor_context, rate_limit);
 
             if crate::consistency::insane() {
                 let mut info = params.info.clone();
@@ -275,7 +269,10 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 barrier_receiver,
                 system_params,
                 // we don't expect any data in, so no need to set chunk_sizes
-                SourceCtrlOpts::default(),
+                SourceCtrlOpts {
+                    chunk_size: 0,
+                    rate_limit: None,
+                },
             );
             Ok((params.info, exec).into())
         }

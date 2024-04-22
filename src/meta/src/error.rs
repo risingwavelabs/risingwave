@@ -26,8 +26,10 @@ use crate::storage::MetaStoreError;
 
 pub type MetaResult<T> = std::result::Result<T, MetaError>;
 
-#[derive(thiserror::Error, Debug, thiserror_ext::Arc, thiserror_ext::Construct)]
-#[thiserror_ext(newtype(name = MetaError, backtrace, report_debug))]
+#[derive(
+    thiserror::Error, thiserror_ext::ReportDebug, thiserror_ext::Arc, thiserror_ext::Construct,
+)]
+#[thiserror_ext(newtype(name = MetaError, backtrace))]
 pub enum MetaErrorInner {
     #[error("MetaStore transaction error: {0}")]
     TransactionError(
@@ -119,6 +121,10 @@ pub enum MetaErrorInner {
         #[backtrace]
         anyhow::Error,
     ),
+
+    // Indicates that recovery was triggered manually.
+    #[error("adhoc recovery triggered")]
+    AdhocRecovery,
 }
 
 impl MetaError {

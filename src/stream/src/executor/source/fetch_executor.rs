@@ -12,20 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::ops::Bound;
-use std::sync::Arc;
 
 use either::Either;
-use futures::stream::{self, StreamExt};
-use futures::{pin_mut, TryStreamExt};
-use futures_async_stream::try_stream;
-use risingwave_common::array::StreamChunk;
+use futures::{stream, TryStreamExt};
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{ScalarRef, ScalarRefImpl};
+use risingwave_common::types::ScalarRef;
 use risingwave_connector::source::filesystem::opendal_source::{
     OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
 };
@@ -35,16 +29,14 @@ use risingwave_connector::source::{
     BoxChunkSourceStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
 };
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 
-use super::{get_split_offset_col_idx, SourceStateTableHandler};
-use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::executor::{
-    expect_first_barrier, get_split_offset_mapping_from_chunk, prune_additional_cols,
-    ActorContextRef, BoxedMessageStream, Execute, Executor, Message, Mutation, StreamExecutorError,
-    StreamExecutorResult, StreamSourceCore,
+use super::{get_split_offset_col_idx, SourceStateTableHandler, StreamSourceCore};
+use crate::executor::prelude::*;
+use crate::executor::source::{
+    apply_rate_limit, get_split_offset_mapping_from_chunk, prune_additional_cols,
 };
+use crate::executor::stream_reader::StreamReaderWithPause;
 
 const SPLIT_BATCH_SIZE: usize = 1000;
 
@@ -152,11 +144,13 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         source_desc: &SourceDesc,
         batch: SplitBatch,
     ) -> StreamExecutorResult<BoxChunkSourceStream> {
-        source_desc
+        let rate_limit = source_ctx.source_ctrl_opts.rate_limit;
+        let stream = source_desc
             .source
             .to_stream(batch, column_ids, Arc::new(source_ctx))
             .await
-            .map_err(StreamExecutorError::connector_error)
+            .map_err(StreamExecutorError::connector_error)?;
+        Ok(apply_rate_limit(stream, rate_limit).boxed())
     }
 
     fn build_source_ctx(
@@ -169,10 +163,10 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             self.actor_ctx.id,
             source_id,
             self.actor_ctx.fragment_id,
+            source_name.to_owned(),
             source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
             source_desc.source.config.clone(),
-            source_name.to_owned(),
         )
     }
 
@@ -234,10 +228,20 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                         Either::Left(msg) => {
                             match &msg {
                                 Message::Barrier(barrier) => {
+                                    let mut need_rebuild_reader = false;
+
                                     if let Some(mutation) = barrier.mutation.as_deref() {
                                         match mutation {
                                             Mutation::Pause => stream.pause_stream(),
                                             Mutation::Resume => stream.resume_stream(),
+                                            Mutation::Throttle(actor_to_apply) => {
+                                                if let Some(throttle) =
+                                                    actor_to_apply.get(&self.actor_ctx.id)
+                                                {
+                                                    self.source_ctrl_opts.rate_limit = *throttle;
+                                                    need_rebuild_reader = true;
+                                                }
+                                            }
                                             _ => (),
                                         }
                                     }
@@ -261,7 +265,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         }
                                     }
 
-                                    if splits_on_fetch == 0 {
+                                    if splits_on_fetch == 0 || need_rebuild_reader {
                                         Self::replace_with_new_batch_reader(
                                             &mut splits_on_fetch,
                                             &state_store_handler,

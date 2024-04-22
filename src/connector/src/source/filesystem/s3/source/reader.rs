@@ -266,7 +266,9 @@ mod tests {
     };
     use crate::source::filesystem::s3::S3PropertiesCommon;
     use crate::source::filesystem::S3SplitEnumerator;
-    use crate::source::{SourceColumnDesc, SourceEnumeratorContext, SplitEnumerator};
+    use crate::source::{
+        SourceColumnDesc, SourceContext, SourceEnumeratorContext, SplitEnumerator,
+    };
 
     #[tokio::test]
     #[ignore]
@@ -281,7 +283,7 @@ mod tests {
         }
         .into();
         let mut enumerator =
-            S3SplitEnumerator::new(props.clone(), SourceEnumeratorContext::default().into())
+            S3SplitEnumerator::new(props.clone(), SourceEnumeratorContext::dummy().into())
                 .await
                 .unwrap();
         let splits = enumerator.list_splits().await.unwrap();
@@ -307,7 +309,7 @@ mod tests {
             },
         };
 
-        let reader = S3FileReader::new(props, splits, config, Default::default(), None)
+        let reader = S3FileReader::new(props, splits, config, SourceContext::dummy().into(), None)
             .await
             .unwrap();
 

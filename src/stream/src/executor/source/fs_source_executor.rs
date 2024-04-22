@@ -15,31 +15,32 @@
 #![deprecated = "will be replaced by new fs source (list + fetch)"]
 #![expect(deprecated)]
 
-use std::fmt::{Debug, Formatter};
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::anyhow;
 use either::Either;
-use futures::{StreamExt, TryStreamExt};
-use futures_async_stream::try_stream;
+use futures::TryStreamExt;
+use itertools::Itertools;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::reader::desc::{FsSourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
     BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
     SplitMetaData,
 };
-use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
-use crate::error::StreamResult;
-use crate::executor::error::StreamExecutorError;
-use crate::executor::monitor::StreamingMetrics;
+use crate::executor::prelude::*;
+use crate::executor::source::{
+    apply_rate_limit, barrier_to_message_stream, get_split_offset_col_idx,
+    get_split_offset_mapping_from_chunk, prune_additional_cols,
+};
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::executor::*;
+use crate::executor::{AddMutation, UpdateMutation};
 
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
@@ -99,16 +100,38 @@ impl<S: StateStore> FsSourceExecutor<S> {
             self.actor_ctx.id,
             self.stream_source_core.source_id,
             self.actor_ctx.fragment_id,
+            self.stream_source_core.source_name.clone(),
             source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
             source_desc.source.config.clone(),
-            self.stream_source_core.source_name.clone(),
         );
-        source_desc
+        let stream = source_desc
             .source
             .to_stream(state, column_ids, Arc::new(source_ctx))
             .await
-            .map_err(StreamExecutorError::connector_error)
+            .map_err(StreamExecutorError::connector_error)?;
+
+        Ok(apply_rate_limit(stream, self.source_ctrl_opts.rate_limit).boxed())
+    }
+
+    async fn rebuild_stream_reader<const BIASED: bool>(
+        &mut self,
+        source_desc: &FsSourceDesc,
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
+    ) -> StreamExecutorResult<()> {
+        let target_state: Vec<SplitImpl> = self
+            .stream_source_core
+            .latest_split_info
+            .values()
+            .cloned()
+            .collect();
+        let reader = self
+            .build_stream_source_reader(source_desc, Some(target_state))
+            .await?
+            .map_err(StreamExecutorError::connector_error);
+        stream.replace_data_stream(reader);
+
+        Ok(())
     }
 
     async fn apply_split_change<const BIASED: bool>(
@@ -386,6 +409,13 @@ impl<S: StateStore> FsSourceExecutor<S> {
                                         actor_splits,
                                     )
                                     .await?;
+                                }
+                                Mutation::Throttle(actor_to_apply) => {
+                                    if let Some(throttle) = actor_to_apply.get(&self.actor_ctx.id) {
+                                        self.source_ctrl_opts.rate_limit = *throttle;
+                                        self.rebuild_stream_reader(&source_desc, &mut stream)
+                                            .await?;
+                                    }
                                 }
                                 _ => {}
                             }

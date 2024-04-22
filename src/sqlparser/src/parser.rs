@@ -241,8 +241,12 @@ impl Parser {
                     self.prev_token();
                     Ok(Statement::Query(Box::new(self.parse_query()?)))
                 }
+                Keyword::DECLARE => Ok(self.parse_declare()?),
+                Keyword::FETCH => Ok(self.parse_fetch_cursor()?),
+                Keyword::CLOSE => Ok(self.parse_close_cursor()?),
                 Keyword::TRUNCATE => Ok(self.parse_truncate()?),
                 Keyword::CREATE => Ok(self.parse_create()?),
+                Keyword::DISCARD => Ok(self.parse_discard()?),
                 Keyword::DROP => Ok(self.parse_drop()?),
                 Keyword::DELETE => Ok(self.parse_delete()?),
                 Keyword::INSERT => Ok(self.parse_insert()?),
@@ -278,11 +282,9 @@ impl Parser {
                 Keyword::EXECUTE => Ok(self.parse_execute()?),
                 Keyword::PREPARE => Ok(self.parse_prepare()?),
                 Keyword::COMMENT => Ok(self.parse_comment()?),
-                Keyword::DECLARE => Ok(self.parse_declare_cursor()?),
-                Keyword::FETCH => Ok(self.parse_fetch_cursor()?),
-                Keyword::CLOSE => Ok(self.parse_close_cursor()?),
                 Keyword::FLUSH => Ok(Statement::Flush),
                 Keyword::WAIT => Ok(Statement::Wait),
+                Keyword::RECOVER => Ok(Statement::Recover),
                 _ => self.expected(
                     "an SQL statement",
                     Token::Word(w).with_location(token.location),
@@ -2361,6 +2363,24 @@ impl Parser {
         })
     }
 
+    pub fn parse_declare(&mut self) -> Result<Statement, ParserError> {
+        Ok(Statement::DeclareCursor {
+            stmt: DeclareCursorStatement::parse_to(self)?,
+        })
+    }
+
+    pub fn parse_fetch_cursor(&mut self) -> Result<Statement, ParserError> {
+        Ok(Statement::FetchCursor {
+            stmt: FetchCursorStatement::parse_to(self)?,
+        })
+    }
+
+    pub fn parse_close_cursor(&mut self) -> Result<Statement, ParserError> {
+        Ok(Statement::CloseCursor {
+            stmt: CloseCursorStatement::parse_to(self)?,
+        })
+    }
+
     fn parse_table_column_def(&mut self) -> Result<TableColumnDef, ParserError> {
         Ok(TableColumnDef {
             name: self.parse_identifier_non_reserved()?,
@@ -2421,6 +2441,9 @@ impl Parser {
             } else if self.parse_keyword(Keyword::LANGUAGE) {
                 ensure_not_set(&body.language, "LANGUAGE")?;
                 body.language = Some(self.parse_identifier()?);
+            } else if self.parse_keyword(Keyword::RUNTIME) {
+                ensure_not_set(&body.runtime, "RUNTIME")?;
+                body.runtime = Some(self.parse_function_runtime()?);
             } else if self.parse_keyword(Keyword::IMMUTABLE) {
                 ensure_not_set(&body.behavior, "IMMUTABLE | STABLE | VOLATILE")?;
                 body.behavior = Some(FunctionBehavior::Immutable);
@@ -2436,6 +2459,15 @@ impl Parser {
             } else if self.parse_keyword(Keyword::USING) {
                 ensure_not_set(&body.using, "USING")?;
                 body.using = Some(self.parse_create_function_using()?);
+            } else if self.parse_keyword(Keyword::SYNC) {
+                ensure_not_set(&body.function_type, "SYNC | ASYNC")?;
+                body.function_type = Some(self.parse_function_type(false, false)?);
+            } else if self.parse_keyword(Keyword::ASYNC) {
+                ensure_not_set(&body.function_type, "SYNC | ASYNC")?;
+                body.function_type = Some(self.parse_function_type(true, false)?);
+            } else if self.parse_keyword(Keyword::GENERATOR) {
+                ensure_not_set(&body.function_type, "SYNC | ASYNC")?;
+                body.function_type = Some(self.parse_function_type(false, true)?);
             } else {
                 return Ok(body);
             }
@@ -2458,6 +2490,36 @@ impl Parser {
         }
     }
 
+    fn parse_function_runtime(&mut self) -> Result<FunctionRuntime, ParserError> {
+        let ident = self.parse_identifier()?;
+        match ident.value.to_lowercase().as_str() {
+            "deno" => Ok(FunctionRuntime::Deno),
+            "quickjs" => Ok(FunctionRuntime::QuickJs),
+            r => Err(ParserError::ParserError(format!(
+                "Unsupported runtime: {r}"
+            ))),
+        }
+    }
+
+    fn parse_function_type(
+        &mut self,
+        is_async: bool,
+        is_generator: bool,
+    ) -> Result<CreateFunctionType, ParserError> {
+        let is_generator = if is_generator {
+            true
+        } else {
+            self.parse_keyword(Keyword::GENERATOR)
+        };
+
+        match (is_async, is_generator) {
+            (false, false) => Ok(CreateFunctionType::Sync),
+            (true, false) => Ok(CreateFunctionType::Async),
+            (false, true) => Ok(CreateFunctionType::Generator),
+            (true, true) => Ok(CreateFunctionType::AsyncGenerator),
+        }
+    }
+
     // CREATE USER name [ [ WITH ] option [ ... ] ]
     // where option can be:
     //       SUPERUSER | NOSUPERUSER
@@ -2473,6 +2535,12 @@ impl Parser {
         Ok(self
             .parse_options_with_preceding_keyword(Keyword::WITH)?
             .to_vec())
+    }
+
+    pub fn parse_discard(&mut self) -> Result<Statement, ParserError> {
+        self.expect_keyword(Keyword::ALL)
+            .map_err(|_| ParserError::ParserError("only DISCARD ALL is supported".to_string()))?;
+        Ok(Statement::Discard(DiscardType::All))
     }
 
     pub fn parse_drop(&mut self) -> Result<Statement, ParserError> {
@@ -2987,6 +3055,44 @@ impl Parser {
         Ok(SqlOption { name, value })
     }
 
+    pub fn parse_since(&mut self) -> Result<Option<Since>, ParserError> {
+        if self.parse_keyword(Keyword::SINCE) {
+            let token = self.next_token();
+            match token.token {
+                Token::Word(w) => {
+                    let ident = w.to_ident()?;
+                    // Backward compatibility for now.
+                    if ident.real_value() == "proctime" || ident.real_value() == "now" {
+                        self.expect_token(&Token::LParen)?;
+                        self.expect_token(&Token::RParen)?;
+                        Ok(Some(Since::ProcessTime))
+                    } else if ident.real_value() == "begin" {
+                        self.expect_token(&Token::LParen)?;
+                        self.expect_token(&Token::RParen)?;
+                        Ok(Some(Since::Begin))
+                    } else {
+                        parser_err!(format!(
+                            "Expected proctime(), begin() or now(), found: {}",
+                            ident.real_value()
+                        ))
+                    }
+                }
+                Token::Number(s) => {
+                    let num = s.parse::<u64>().map_err(|e| {
+                        ParserError::ParserError(format!("Could not parse '{}' as u64: {}", s, e))
+                    });
+                    Ok(Some(Since::TimestampMsNum(num?)))
+                }
+                unexpected => self.expected(
+                    "proctime(), begin() , now(), Number",
+                    unexpected.with_location(token.location),
+                ),
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn parse_emit_mode(&mut self) -> Result<Option<EmitMode>, ParserError> {
         if self.parse_keyword(Keyword::EMIT) {
             match self.parse_one_of_keywords(&[Keyword::IMMEDIATELY, Keyword::ON]) {
@@ -3393,7 +3499,6 @@ impl Parser {
                         self.peek_token(),
                     );
                 }
-
                 let value = self.parse_set_variable()?;
                 let deferred = self.parse_keyword(Keyword::DEFERRED);
 
@@ -5425,40 +5530,6 @@ impl Parser {
             object_name,
             comment,
         })
-    }
-
-    /// Parse a SQL DECLARE statement
-    pub fn parse_declare_cursor(&mut self) -> Result<Statement, ParserError> {
-        let cursor_name = self.parse_object_name()?;
-        self.expect_keyword(Keyword::CURSOR)?;
-        self.expect_keyword(Keyword::FOR)?;
-        let query = Box::new(self.parse_query()?);
-        Ok(Statement::DeclareCursor { cursor_name, query })
-    }
-
-    /// Parse a SQL FETCH statement
-    pub fn parse_fetch_cursor(&mut self) -> Result<Statement, ParserError> {
-        let count = if self.parse_keyword(Keyword::NEXT) {
-            None
-        } else {
-            let count_str = self.parse_number_value()?;
-            Some(count_str.parse::<i32>().map_err(|e| {
-                ParserError::ParserError(format!("Could not parse '{}' as i32: {}", count_str, e))
-            })?)
-        };
-        self.expect_keyword(Keyword::FROM)?;
-        let cursor_name = self.parse_object_name()?;
-        Ok(Statement::FetchCursor { cursor_name, count })
-    }
-
-    /// Parse a SQL CLOSE statement
-    pub fn parse_close_cursor(&mut self) -> Result<Statement, ParserError> {
-        let cursor_name = if self.parse_keyword(Keyword::ALL) {
-            None
-        } else {
-            Some(self.parse_object_name()?)
-        };
-        Ok(Statement::CloseCursor { cursor_name })
     }
 }
 

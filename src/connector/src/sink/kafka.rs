@@ -363,7 +363,7 @@ impl Sink for KafkaSink {
         // use enumerator to validate broker reachability and existence of topic
         let check = KafkaSplitEnumerator::new(
             KafkaProperties::from(self.config.clone()),
-            Arc::new(SourceEnumeratorContext::default()),
+            Arc::new(SourceEnumeratorContext::dummy()),
         )
         .await?;
         if !check.check_reachability().await {

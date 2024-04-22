@@ -159,7 +159,7 @@ impl CloudService for CloudServiceImpl {
         async fn new_enumerator<P: SourceProperties>(
             props: P,
         ) -> ConnectorResult<P::SplitEnumerator> {
-            P::SplitEnumerator::new(props, SourceEnumeratorContext::default().into()).await
+            P::SplitEnumerator::new(props, SourceEnumeratorContext::dummy().into()).await
         }
 
         dispatch_source_prop!(props.unwrap(), props, {

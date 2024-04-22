@@ -34,7 +34,10 @@ use risingwave_frontend_macro::system_catalog;
             false AS atthasdef,
             false AS attisdropped,
             ''::varchar AS attidentity,
-            ''::varchar AS attgenerated,
+            CASE
+              WHEN c.is_generated THEN 's'::varchar
+              ELSE ''::varchar
+            END AS attgenerated,
             -1 AS atttypmod,
             0 AS attcollation
         FROM rw_catalog.rw_columns c

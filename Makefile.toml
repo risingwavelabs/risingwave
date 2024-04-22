@@ -15,6 +15,7 @@ extend = [
   { path = "src/storage/backup/integration_tests/Makefile.toml" },
   { path = "src/java_binding/make-java-binding.toml" },
   { path = "src/stream/tests/integration_tests/integration_test.toml" },
+  { path = "e2e_test/source_inline/commands.toml" },
 ]
 
 env_files = ["./risedev-components.user.env"]
@@ -34,6 +35,7 @@ is_release = get_env ENABLE_RELEASE_PROFILE
 is_not_release = not ${is_release}
 is_dynamic_linking = get_env ENABLE_DYNAMIC_LINKING
 is_hummock_trace = get_env ENABLE_HUMMOCK_TRACE
+is_deno_udf_enabled = get_env ENABLE_DENO_UDF
 is_python_udf_enabled = get_env ENABLE_PYTHON_UDF
 
 if ${is_sanitizer_enabled}
@@ -55,6 +57,11 @@ if ${is_not_release} and ${is_dynamic_linking}
   set_env RISINGWAVE_FEATURE_FLAGS "--features rw-dynamic-link --no-default-features"
 else
   set_env RISINGWAVE_FEATURE_FLAGS "--features rw-static-link"
+end
+
+if ${is_deno_udf_enabled}
+  flags = get_env RISINGWAVE_FEATURE_FLAGS
+  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features embedded-deno-udf"
 end
 
 if ${is_python_udf_enabled}
@@ -83,9 +90,9 @@ if ${is_not_ci}
   no_rust_log = not ${rust_log}
 
   if ${no_rust_log}
-    set_env RUST_LOG "pgwire_query_log=info,hyper::client::connect::http=info"
+    set_env RUST_LOG "pgwire_query_log=info"
   else
-    set_env RUST_LOG "pgwire_query_log=info,hyper::client::connect::http=info,${rust_log}"
+    set_env RUST_LOG "pgwire_query_log=info,${rust_log}"
   end
 end
 
@@ -121,6 +128,17 @@ rm -rf "${PREFIX_CONFIG}"
 rm -rf "${PREFIX_PROFILING}"
 '''
 
+[tasks.reset-rw]
+category = "RiseDev - Start/Stop"
+description = "Clean all data in the default database dev of the running RisingWave"
+dependencies = ["check-risedev-env-file"]
+env_files = ["${PREFIX_CONFIG}/risedev-env"]
+script = '''
+#!/usr/bin/env bash
+psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root -d dev -c "CREATE DATABASE risedev_tmp;"
+psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root -d risedev_tmp -c "DROP DATABASE dev; CREATE DATABASE dev;"
+psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root -d dev -c "DROP DATABASE risedev_tmp;"
+'''
 
 [tasks.l]
 alias = "logs"
@@ -658,7 +676,7 @@ if [[ $ENABLE_COREDUMP == "true" ]]; then
 fi
 
 set -x
-target/${BUILD_MODE_DIR}/risedev-dev ${@}
+target/debug/risedev-dev ${@}
 '''
 
 [tasks.kill-risedev]
@@ -1292,7 +1310,7 @@ echo "All processes has exited."
 [tasks.slt]
 env = { SLT_HOST = "${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS}", SLT_PORT = "${RISEDEV_RW_FRONTEND_PORT}", SLT_DB = "dev" }
 category = "RiseDev - Test - SQLLogicTest"
-install_crate = { version = "0.20.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { version = "0.20.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
   "--help",
 ], install_command = "binstall" }
 dependencies = ["check-risedev-env-file"]

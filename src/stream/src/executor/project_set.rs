@@ -12,23 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::{Debug, Formatter};
-
 use either::Either;
-use futures::StreamExt;
-use futures_async_stream::try_stream;
 use multimap::MultiMap;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::Op;
 use risingwave_common::bail;
-use risingwave_common::row::{Row, RowExt};
-use risingwave_common::types::{DataType, Datum, DatumRef, ToOwnedDatum};
+use risingwave_common::row::RowExt;
+use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{LogReport, NonStrictExpression};
 use risingwave_expr::table_function::ProjectSetSelectItem;
 
-use super::error::StreamExecutorError;
-use super::{ActorContextRef, Execute, Executor, Message, StreamExecutorResult, Watermark};
-use crate::common::StreamChunkBuilder;
+use crate::executor::prelude::*;
 
 const PROJ_ROW_ID_OFFSET: usize = 1;
 
