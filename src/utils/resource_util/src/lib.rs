@@ -299,13 +299,16 @@ pub mod cpu {
         max_value: f32,
     ) -> Result<f32, std::io::Error> {
         let content = std::fs::read_to_string(quota_path)?;
-        if content.trim() == super::DEFAULT_CGROUP_MAX_INDICATOR {
-            return Ok(max_value);
-        }
         let cpu_quota = content
             .trim()
-            .parse::<usize>()
+            .parse::<i64>()
             .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "not a number"))?;
+        // According to the kernel documentation, if the value is negative, it means no limit.
+        // https://docs.kernel.org/scheduler/sched-bwc.html#management
+        if cpu_quota < 0 {
+            return Ok(max_value);
+        }
+
         let cpu_period = super::util::read_usize(period_path)?;
 
         Ok((cpu_quota as f32) / (cpu_period as f32))
@@ -594,6 +597,15 @@ mod util {
 
             let test_cases = HashMap::from([
                 (
+                    "default-values",
+                    TestCase {
+                        file_exists: true,
+                        value_in_quota_file: String::from("-1"),
+                        value_in_period_file: String::from("10000"),
+                        expected: Ok(thread::available_parallelism().unwrap().get() as f32),
+                    },
+                ),
+                (
                     "valid-values-in-file",
                     TestCase {
                         file_exists: true,
@@ -627,10 +639,10 @@ mod util {
                     },
                 ),
                 (
-                    "max-value-in-file",
+                    "negative-value-in-file",
                     TestCase {
                         file_exists: true,
-                        value_in_quota_file: String::from("max"),
+                        value_in_quota_file: String::from("-2"),
                         value_in_period_file: String::from("20000"),
                         expected: Ok(thread::available_parallelism().unwrap().get() as f32),
                     },

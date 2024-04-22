@@ -838,7 +838,7 @@ converts!(TimestamptzArray, arrow_array::TimestampMicrosecondArray, @map);
 converts!(IntervalArray, arrow_array::IntervalMonthDayNanoArray, @map);
 
 /// Converts RisingWave value from and into Arrow value.
-trait FromIntoArrow {
+pub trait FromIntoArrow {
     /// The corresponding element type in the Arrow array.
     type ArrowType;
     fn from_arrow(value: Self::ArrowType) -> Self;
