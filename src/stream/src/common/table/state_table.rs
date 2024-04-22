@@ -218,10 +218,7 @@ where
     }
 }
 
-fn consistent_old_value_op(
-    row_serde: impl ValueRowSerde,
-    is_log_store: bool,
-) -> OpConsistencyLevel {
+fn consistent_old_value_op(row_serde: impl ValueRowSerde) -> OpConsistencyLevel {
     OpConsistencyLevel::ConsistentOldValue {
         check_old_value: Arc::new(move |first: &Bytes, second: &Bytes| {
             if first == second {
@@ -248,7 +245,7 @@ fn consistent_old_value_op(
                 true
             }
         }),
-        is_log_store,
+        is_log_store: false,
     }
 }
 
@@ -381,7 +378,7 @@ where
         };
         let op_consistency_level = if is_consistent_op {
             let row_serde = make_row_serde();
-            consistent_old_value_op(row_serde, false)
+            consistent_old_value_op(row_serde)
         } else {
             OpConsistencyLevel::Inconsistent
         };
@@ -605,7 +602,7 @@ where
         };
         let op_consistency_level = if is_consistent_op {
             let row_serde = make_row_serde();
-            consistent_old_value_op(row_serde, false)
+            consistent_old_value_op(row_serde)
         } else {
             OpConsistencyLevel::Inconsistent
         };
@@ -1100,7 +1097,7 @@ where
             assert_ne!(self.is_consistent_op, enable_consistent_op);
             self.is_consistent_op = enable_consistent_op;
             if enable_consistent_op {
-                consistent_old_value_op(self.row_serde.clone(), false)
+                consistent_old_value_op(self.row_serde.clone())
             } else {
                 OpConsistencyLevel::Inconsistent
             }
