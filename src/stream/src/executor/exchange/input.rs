@@ -21,10 +21,9 @@ use futures_async_stream::try_stream;
 use pin_project::pin_project;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_pb::task_service::{permits, GetStreamResponse};
-use risingwave_rpc_client::error::TonicStatusWrapper;
 use risingwave_rpc_client::ComputeClientPool;
-use thiserror_ext::AsReport;
 
+use super::error::ExchangeChannelClosed;
 use super::permit::Receiver;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorError;
@@ -82,6 +81,9 @@ impl LocalInput {
         while let Some(msg) = channel.recv().verbose_instrument_await(span.clone()).await {
             yield msg;
         }
+        // Always emit an error outside the loop. This is because we use barrier as the control
+        // message to stop the stream. Reaching here means the channel is closed unexpectedly.
+        Err(ExchangeChannelClosed::local_input(actor_id))?
     }
 }
 
@@ -213,15 +215,14 @@ impl RemoteInput {
                     }
                     yield msg;
                 }
-                Err(e) => {
-                    // TODO(error-handling): maintain the source chain
-                    return Err(StreamExecutorError::channel_closed(format!(
-                        "RemoteInput tonic error: {}",
-                        TonicStatusWrapper::new(e).as_report()
-                    )));
-                }
+
+                Err(e) => Err(ExchangeChannelClosed::remote_input(up_down_ids.0, Some(e)))?,
             }
         }
+
+        // Always emit an error outside the loop. This is because we use barrier as the control
+        // message to stop the stream. Reaching here means the channel is closed unexpectedly.
+        Err(ExchangeChannelClosed::remote_input(up_down_ids.0, None))?
     }
 }
 
