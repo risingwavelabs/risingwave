@@ -293,14 +293,6 @@ impl NonOverlapSubLevelPicker {
                     add_files_count += 1;
                 }
 
-                // When size / file count has exceeded the limit, we need to abandon this plan, it cannot be expanded to the last sub_level
-                if max_select_level_count > 1
-                    && (add_files_size >= self.max_compaction_bytes
-                        || add_files_count >= self.max_file_count as usize)
-                {
-                    break 'expand_new_level;
-                }
-
                 overlap_levels.push((reverse_index, overlap_files_range.clone()));
                 select_level_count += 1;
             }
@@ -308,6 +300,14 @@ impl NonOverlapSubLevelPicker {
             if select_level_count > max_select_level_count {
                 max_select_level_count = select_level_count;
                 pick_levels_range = overlap_levels;
+            }
+
+            // When size / file count has exceeded the limit, we need to abandon this plan, it cannot be expanded to the last sub_level
+            if max_select_level_count > 1
+                && (add_files_size >= self.max_compaction_bytes
+                    || add_files_count >= self.max_file_count as usize)
+            {
+                break 'expand_new_level;
             }
         }
 
