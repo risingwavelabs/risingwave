@@ -62,6 +62,19 @@ pub async fn handle_alter_streaming_rate_limit(
             session.check_privilege_for_drop_alter(schema_name, &**source)?;
             (StatementType::ALTER_SOURCE, source.id)
         }
+        PbThrottleTarget::TableWithSource => {
+            let reader = session.env().catalog_reader().read_guard();
+            let (table, schema_name) =
+                reader.get_table_by_name(db_name, schema_path, &real_table_name)?;
+            session.check_privilege_for_drop_alter(schema_name, &**table)?;
+            // Get the corresponding source catalog.
+            let source_id = if let Some(id) = table.associated_source_id {
+                id.table_id()
+            } else {
+                bail!("ALTER STREAMING_RATE_LIMIT is not for table without source")
+            };
+            (StatementType::ALTER_SOURCE, source_id)
+        }
         _ => bail!("Unsupported throttle target: {:?}", kind),
     };
 

@@ -648,6 +648,18 @@ pub async fn handle(
             name,
             operation: AlterTableOperation::RefreshSchema,
         } => alter_table_with_sr::handle_refresh_schema(handler_args, name).await,
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::SetStreamingRateLimit { rate_limit },
+        } => {
+            alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                handler_args,
+                PbThrottleTarget::TableWithSource,
+                name,
+                rate_limit,
+            )
+            .await
+        }
         Statement::AlterIndex {
             name,
             operation: AlterIndexOperation::RenameIndex { index_name },
@@ -912,7 +924,7 @@ pub async fn handle(
                 name,
                 rate_limit,
             )
-                .await
+            .await
         }
         Statement::AlterFunction {
             name,
