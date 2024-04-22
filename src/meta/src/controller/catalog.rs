@@ -30,11 +30,10 @@ use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::table::TableType;
 use risingwave_meta_model_v2::{
     actor, connection, database, fragment, function, index, object, object_dependency, schema,
-    sink, source, streaming_job, subscription, table, user_privilege, view, worker_property,
-    ActorId, ActorUpstreamActors, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId,
-    FragmentId, FunctionId, I32Array, IndexId, JobStatus, ObjectId, PrivateLinkService, Property,
-    SchemaId, SinkId, SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, TableId,
-    UserId, WorkerId,
+    sink, source, streaming_job, subscription, table, user_privilege, view, ActorId,
+    ActorUpstreamActors, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId,
+    FunctionId, I32Array, IndexId, JobStatus, ObjectId, PrivateLinkService, Property, SchemaId,
+    SinkId, SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, TableId, UserId,
 };
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
@@ -56,9 +55,9 @@ use risingwave_pb::user::PbUserInfo;
 use sea_orm::sea_query::{Expr, SimpleExpr};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, DatabaseTransaction,
-    EntityTrait, IntoActiveModel, JoinType, PaginatorTrait, QueryFilter, QuerySelect,
-    RelationTrait, TransactionTrait, Value,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
+    IntoActiveModel, JoinType, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait,
+    TransactionTrait, Value,
 };
 use tokio::sync::{RwLock, RwLockReadGuard};
 
@@ -67,9 +66,9 @@ use crate::controller::utils::{
     check_connection_name_duplicate, check_database_name_duplicate,
     check_function_signature_duplicate, check_relation_name_duplicate, check_schema_name_duplicate,
     ensure_object_id, ensure_object_not_refer, ensure_schema_empty, ensure_user_id,
-    get_fragment_mappings, get_fragment_mappings_by_jobs, get_referring_objects,
-    get_referring_objects_cascade, get_user_privilege, list_user_info_by_ids,
-    resolve_source_register_info_for_jobs, PartialObject,
+    get_fragment_mappings, get_fragment_mappings_by_jobs, get_parallel_unit_to_worker_map,
+    get_referring_objects, get_referring_objects_cascade, get_user_privilege,
+    list_user_info_by_ids, resolve_source_register_info_for_jobs, PartialObject,
 };
 use crate::controller::ObjectModel;
 use crate::manager::{Catalog, MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
@@ -279,7 +278,7 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
-        let parallel_unit_to_worker = Self::get_parallel_unit_to_worker_map(&txn).await?;
+        let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
 
         let fragment_mappings = get_fragment_mappings_by_jobs(&txn, streaming_jobs.clone()).await?;
 
@@ -335,33 +334,6 @@ impl CatalogController {
             },
             version,
         ))
-    }
-
-    pub(crate) async fn get_parallel_unit_to_worker_map<C>(db: &C) -> MetaResult<HashMap<u32, u32>>
-    where
-        C: ConnectionTrait,
-    {
-        let worker_parallel_units = WorkerProperty::find()
-            .select_only()
-            .columns([
-                worker_property::Column::WorkerId,
-                worker_property::Column::ParallelUnitIds,
-            ])
-            .into_tuple::<(WorkerId, I32Array)>()
-            .all(db)
-            .await?;
-
-        let parallel_unit_to_worker = worker_parallel_units
-            .into_iter()
-            .flat_map(|(worker_id, parallel_unit_ids)| {
-                parallel_unit_ids
-                    .into_inner()
-                    .into_iter()
-                    .map(move |parallel_unit_id| (parallel_unit_id as u32, worker_id as u32))
-            })
-            .collect::<HashMap<_, _>>();
-
-        Ok(parallel_unit_to_worker)
     }
 
     pub async fn create_schema(&self, schema: PbSchema) -> MetaResult<NotificationVersion> {
@@ -2144,7 +2116,7 @@ impl CatalogController {
         }
         let user_infos = list_user_info_by_ids(to_update_user_ids, &txn).await?;
 
-        let parallel_unit_to_worker = Self::get_parallel_unit_to_worker_map(&txn).await?;
+        let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
 
         txn.commit().await?;
 

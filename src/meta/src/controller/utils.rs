@@ -24,9 +24,9 @@ use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
-    object_dependency, schema, sink, source, table, user, user_privilege, view, ActorId,
-    DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId, PrivilegeId,
-    SchemaId, SourceId, StreamNode, UserId,
+    object_dependency, schema, sink, source, table, user, user_privilege, view, worker_property,
+    ActorId, DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId,
+    PrivilegeId, SchemaId, SourceId, StreamNode, UserId, WorkerId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction};
 use risingwave_pb::meta::{PbFragmentParallelUnitMapping, PbFragmentWorkerMapping};
@@ -43,7 +43,6 @@ use sea_orm::{
     Order, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, Statement,
 };
 
-use crate::controller::catalog::CatalogController;
 use crate::{MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
@@ -795,7 +794,7 @@ pub async fn get_fragment_mappings<C>(
 where
     C: ConnectionTrait,
 {
-    let parallel_unit_to_worker = CatalogController::get_parallel_unit_to_worker_map(db).await?;
+    let parallel_unit_to_worker = get_parallel_unit_to_worker_map(db).await?;
 
     let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
         .select_only()
@@ -929,4 +928,31 @@ where
     }
 
     Ok((source_fragment_ids, actors.into_iter().collect()))
+}
+
+pub(crate) async fn get_parallel_unit_to_worker_map<C>(db: &C) -> MetaResult<HashMap<u32, u32>>
+where
+    C: ConnectionTrait,
+{
+    let worker_parallel_units = WorkerProperty::find()
+        .select_only()
+        .columns([
+            worker_property::Column::WorkerId,
+            worker_property::Column::ParallelUnitIds,
+        ])
+        .into_tuple::<(WorkerId, I32Array)>()
+        .all(db)
+        .await?;
+
+    let parallel_unit_to_worker = worker_parallel_units
+        .into_iter()
+        .flat_map(|(worker_id, parallel_unit_ids)| {
+            parallel_unit_ids
+                .into_inner()
+                .into_iter()
+                .map(move |parallel_unit_id| (parallel_unit_id as u32, worker_id as u32))
+        })
+        .collect::<HashMap<_, _>>();
+
+    Ok(parallel_unit_to_worker)
 }

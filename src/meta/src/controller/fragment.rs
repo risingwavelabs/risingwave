@@ -49,7 +49,8 @@ use sea_orm::{
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::utils::{
-    get_actor_dispatchers, FragmentDesc, PartialActorLocation, PartialFragmentStateTables,
+    get_actor_dispatchers, get_parallel_unit_to_worker_map, FragmentDesc, PartialActorLocation,
+    PartialFragmentStateTables,
 };
 use crate::manager::{ActorInfos, LocalNotification};
 use crate::model::TableParallelism;
@@ -73,8 +74,7 @@ impl CatalogControllerInner {
             .all(&txn)
             .await?;
 
-        let parallel_unit_to_worker =
-            CatalogController::get_parallel_unit_to_worker_map(&txn).await?;
+        let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
 
         Ok(fragment_mappings
             .into_iter()
@@ -947,7 +947,7 @@ impl CatalogController {
             .await?;
         }
 
-        let parallel_unit_to_worker = Self::get_parallel_unit_to_worker_map(&txn).await?;
+        let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
 
         txn.commit().await?;
 

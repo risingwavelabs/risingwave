@@ -63,7 +63,7 @@ use crate::controller::catalog::CatalogController;
 use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
     check_relation_name_duplicate, check_sink_into_table_cycle, ensure_object_id, ensure_user_id,
-    get_fragment_actor_ids, get_fragment_mappings,
+    get_fragment_actor_ids, get_fragment_mappings, get_parallel_unit_to_worker_map,
 };
 use crate::controller::ObjectModel;
 use crate::manager::{NotificationVersion, SinkId, StreamingJob};
@@ -1031,7 +1031,7 @@ impl CatalogController {
 
         let txn = inner.db.begin().await?;
 
-        let parallel_unit_to_worker = Self::get_parallel_unit_to_worker_map(&txn).await?;
+        let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
 
         let mut fragment_mapping_to_notify = vec![];
 
