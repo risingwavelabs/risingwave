@@ -1097,6 +1097,8 @@ pub enum Statement {
         /// RETURNING
         returning: Vec<SelectItem>,
     },
+    /// DISCARD
+    Discard(DiscardType),
     /// CREATE VIEW
     CreateView {
         or_replace: bool,
@@ -1765,6 +1767,7 @@ impl fmt::Display for Statement {
             Statement::AlterConnection { name, operation } => {
                 write!(f, "ALTER CONNECTION {} {}", name, operation)
             }
+            Statement::Discard(t) => write!(f, "DISCARD {}", t),
             Statement::Drop(stmt) => write!(f, "DROP {}", stmt),
             Statement::DropFunction {
                 if_exists,
@@ -2899,6 +2902,45 @@ impl fmt::Display for SetVariableValueSingle {
         match self {
             Ident(ident) => write!(f, "{}", ident),
             Literal(literal) => write!(f, "{}", literal),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum AsOf {
+    ProcessTime,
+    // the number of seconds that have elapsed since the Unix epoch, which is January 1, 1970 at 00:00:00 Coordinated Universal Time (UTC).
+    TimestampNum(i64),
+    TimestampString(String),
+    VersionNum(i64),
+    VersionString(String),
+}
+
+impl fmt::Display for AsOf {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use AsOf::*;
+        match self {
+            ProcessTime => write!(f, " FOR SYSTEM_TIME AS OF PROCTIME()"),
+            TimestampNum(ts) => write!(f, " FOR SYSTEM_TIME AS OF {}", ts),
+            TimestampString(ts) => write!(f, " FOR SYSTEM_TIME AS OF '{}'", ts),
+            VersionNum(v) => write!(f, " FOR SYSTEM_VERSION AS OF {}", v),
+            VersionString(v) => write!(f, " FOR SYSTEM_VERSION AS OF '{}'", v),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum DiscardType {
+    All,
+}
+
+impl fmt::Display for DiscardType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use DiscardType::*;
+        match self {
+            All => write!(f, "ALL"),
         }
     }
 }

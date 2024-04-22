@@ -241,6 +241,7 @@ impl Parser {
                 }
                 Keyword::TRUNCATE => Ok(self.parse_truncate()?),
                 Keyword::CREATE => Ok(self.parse_create()?),
+                Keyword::DISCARD => Ok(self.parse_discard()?),
                 Keyword::DROP => Ok(self.parse_drop()?),
                 Keyword::DELETE => Ok(self.parse_delete()?),
                 Keyword::INSERT => Ok(self.parse_insert()?),
@@ -2392,6 +2393,12 @@ impl Parser {
         Ok(self
             .parse_options_with_preceding_keyword(Keyword::WITH)?
             .to_vec())
+    }
+
+    pub fn parse_discard(&mut self) -> Result<Statement, ParserError> {
+        self.expect_keyword(Keyword::ALL)
+            .map_err(|_| ParserError::ParserError("only DISCARD ALL is supported".to_string()))?;
+        Ok(Statement::Discard(DiscardType::All))
     }
 
     pub fn parse_drop(&mut self) -> Result<Statement, ParserError> {

@@ -193,6 +193,7 @@ define_keywords!(
     DESCRIBE,
     DETERMINISTIC,
     DIRECTORY,
+    DISCARD,
     DISCONNECT,
     DISTINCT,
     DISTRIBUTED,
