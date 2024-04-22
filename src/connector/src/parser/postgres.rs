@@ -560,15 +560,17 @@ impl ToSql for EnumParser {
             Kind::Enum(e) => {
                 if e.contains(&self.value) {
                     out.extend_from_slice(self.value.as_bytes());
-                    return Ok(IsNull::No);
+                    Ok(IsNull::No)
+                } else {
+                    Err(format!(
+                        "EnumParser value {} is not in the enum type {:?}",
+                        self.value, e
+                    )
+                    .into())
                 }
             }
-            _ => {
-                return Err("EnumParser can only be used with ENUM types".into());
-            }
+            _ => Err("EnumParser can only be used with ENUM types".into()),
         }
-        out.extend_from_slice(self.value.as_bytes());
-        Ok(IsNull::No)
     }
 }
 
