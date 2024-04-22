@@ -75,6 +75,7 @@ mod lookup;
 mod lookup_union;
 mod merge;
 mod mview;
+mod nested_loop_temporal_join;
 mod no_op;
 mod now;
 mod over_window;
@@ -100,7 +101,6 @@ mod values;
 mod watermark;
 mod watermark_filter;
 mod wrapper;
-mod nested_loop_temporal_join;
 
 #[cfg(test)]
 mod integration_tests;

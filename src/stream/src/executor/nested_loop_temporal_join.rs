@@ -29,15 +29,12 @@ use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::StateStore;
 
 use super::join::{JoinType, JoinTypePrimitive};
-use super::{
-    Execute, ExecutorInfo, Message, StreamExecutorError,
-};
+use super::temporal_join::{align_input, apply_indices_map, phase1, InternalMessage};
+use super::{Execute, ExecutorInfo, Message, StreamExecutorError};
 use crate::common::metrics::MetricsInfo;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, Executor};
-use super::temporal_join::{align_input, apply_indices_map, phase1, InternalMessage};
-
 
 pub struct NestedLoopTemporalJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
     ctx: ActorContextRef,
@@ -58,47 +55,51 @@ struct TemporalSide<S: StateStore> {
     source: StorageTable<S>,
 }
 
-impl<S: StateStore> TemporalSide<S> {
-
-
-}
+impl<S: StateStore> TemporalSide<S> {}
 
 #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
 #[allow(clippy::too_many_arguments)]
-async fn phase1_handle_chunk<'a, S: StateStore, E: phase1::Phase1Evaluation>(
-        chunk_size: usize,
-        right_size: usize,
-        full_schema: Vec<DataType>,
-        epoch: HummockEpoch,
-        right_table: &'a mut TemporalSide<S>,
-        chunk: StreamChunk,
-    ) {
-        let mut builder = StreamChunkBuilder::new(chunk_size, full_schema);
-        
-        for (op, left_row) in chunk.rows() {
-            let mut matched = false;
-            #[for_await]
-            for keyed_row in right_table.source.batch_iter(HummockReadEpoch::NoWait(epoch), false, PrefetchOptions::prefetch_for_large_range_scan()).await? {
-                let keyed_row = keyed_row?;
-                let right_row = keyed_row.row();
-                matched = true;
-                if let Some(chunk) =
-                    E::append_matched_row(op, &mut builder, left_row, right_row)
-                {
-                    yield chunk;
-                }
-            }
-            if let Some(chunk) = E::match_end(&mut builder, op, left_row, right_size, matched) {
+async fn phase1_handle_chunk<S: StateStore, E: phase1::Phase1Evaluation>(
+    chunk_size: usize,
+    right_size: usize,
+    full_schema: Vec<DataType>,
+    epoch: HummockEpoch,
+    right_table: &mut TemporalSide<S>,
+    chunk: StreamChunk,
+) {
+    let mut builder = StreamChunkBuilder::new(chunk_size, full_schema);
+
+    for (op, left_row) in chunk.rows() {
+        let mut matched = false;
+        #[for_await]
+        for keyed_row in right_table
+            .source
+            .batch_iter(
+                HummockReadEpoch::NoWait(epoch),
+                false,
+                PrefetchOptions::prefetch_for_large_range_scan(),
+            )
+            .await?
+        {
+            let keyed_row = keyed_row?;
+            let right_row = keyed_row.row();
+            matched = true;
+            if let Some(chunk) = E::append_matched_row(op, &mut builder, left_row, right_row) {
                 yield chunk;
             }
         }
-        if let Some(chunk) = builder.take() {
+        if let Some(chunk) = E::match_end(&mut builder, op, left_row, right_size, matched) {
             yield chunk;
         }
     }
+    if let Some(chunk) = builder.take() {
+        yield chunk;
+    }
+}
 
 impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopTemporalJoinExecutor<S, T> {
     #[allow(clippy::too_many_arguments)]
+    #[expect(dead_code)]
     pub fn new(
         ctx: ActorContextRef,
         info: ExecutorInfo,
@@ -122,9 +123,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopTemporalJoinExecutor<S
             info,
             left,
             right,
-            right_table: TemporalSide {
-                source: table,
-            },
+            right_table: TemporalSide { source: table },
             condition,
             output_indices,
             chunk_size,
@@ -189,8 +188,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopTemporalJoinExecutor<S
                             } else {
                                 chunk
                             };
-                            let new_chunk =
-                                apply_indices_map(new_chunk, &self.output_indices);
+                            let new_chunk = apply_indices_map(new_chunk, &self.output_indices);
                             yield Message::Chunk(new_chunk);
                         }
                     } else if let Some(ref cond) = self.condition {
@@ -271,9 +269,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopTemporalJoinExecutor<S
     }
 }
 
-impl<S: StateStore, const T: JoinTypePrimitive> Execute
-    for NestedLoopTemporalJoinExecutor<S, T>
-{
+impl<S: StateStore, const T: JoinTypePrimitive> Execute for NestedLoopTemporalJoinExecutor<S, T> {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.into_stream().boxed()
     }

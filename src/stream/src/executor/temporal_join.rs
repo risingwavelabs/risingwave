@@ -210,7 +210,7 @@ impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
     }
 }
 
-pub(super)enum InternalMessage {
+pub(super) enum InternalMessage {
     Chunk(StreamChunk),
     Barrier(Vec<StreamChunk>, Barrier),
     WaterMark(Watermark),
@@ -270,9 +270,11 @@ pub(super) async fn align_input<const YIELD_RIGHT_CHUNKS: bool>(left: Executor, 
             );
             match combined.next().await {
                 Some(Either::Left(Ok(Message::Chunk(c)))) => yield InternalMessage::Chunk(c),
-                Some(Either::Right(Ok(Message::Chunk(c)))) => if YIELD_RIGHT_CHUNKS {
-                    right_chunks.push(c);
-                },
+                Some(Either::Right(Ok(Message::Chunk(c)))) => {
+                    if YIELD_RIGHT_CHUNKS {
+                        right_chunks.push(c);
+                    }
+                }
                 Some(Either::Left(Ok(Message::Barrier(b)))) => {
                     let mut remain = chunks_until_barrier(right.by_ref(), b.clone())
                         .try_collect()
@@ -739,8 +741,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const A: bool>
                             } else {
                                 chunk
                             };
-                            let new_chunk =
-                                apply_indices_map(new_chunk, &self.output_indices);
+                            let new_chunk = apply_indices_map(new_chunk, &self.output_indices);
                             yield Message::Chunk(new_chunk);
                         }
                     } else if let Some(ref cond) = self.condition {
