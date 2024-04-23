@@ -7,7 +7,9 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import java.util.List;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.Objects;
 
 @SpringBootApplication
 public class JdbcExample {
@@ -23,26 +25,72 @@ public class JdbcExample {
         return args -> {
             createTable();
             SpringTest alice = new SpringTest(1, "Alice");
-            SpringTest bob = new SpringTest(2, "Bob");
+            SpringTest bob = new SpringTest(2, true, (short) 10, 100, 1000, (float) 1.1, -9.99, "Bob", OffsetDateTime.of(2024, 1, 1, 10, 0, 59, 0, ZoneOffset.UTC));
             repository.save(alice);
             repository.save(bob);
-            repository.save(new SpringTest(3, "Bob"));
+            flush();
 
-            SpringTest tmp = repository.findById(1);
-            assert tmp.getName().equals("Alice");
+            SpringTest alice_tmp = repository.findById(alice.getId()).get();
+            check(alice, alice_tmp);
 
-            List<SpringTest> tmp2 = repository.findByName("Bob");
-            for (SpringTest st : tmp2) {
-                System.out.println(st.getId()+st.getName());
-            }
-            System.out.println(tmp2.size());
+            SpringTest bob_tmp = repository.findByName(bob.getName()).get(0);
+            check(bob, bob_tmp);
 
+            // update
+            alice.setInteger(-1);
+            alice.setDouble(9999.9999);
+            repository.save(alice);
+            flush();
+            alice_tmp = repository.findById(alice.getId()).get();
+            check(alice, alice_tmp);
+
+            // delete
+            repository.deleteById(alice.getId());
+            assert repository.findById(alice.getId()).isEmpty();
+            dropTable();
             System.out.println("done");
         };
     }
 
+    private void check(SpringTest origin, SpringTest target) {
+        assert origin.getId() == target.getId();
+        assert Objects.equals(origin.getName(), target.getName());
+        assert origin.getBoolean() == target.getBoolean();
+        assert origin.getSmallint() == target.getSmallint();
+        assert origin.getInteger() == target.getInteger();
+        assert origin.getBigint() == target.getBigint();
+        assert origin.getFloat() == target.getFloat();
+        assert origin.getDouble() == target.getDouble();
+        assert origin.getTimestampTZ().equals(target.getTimestampTZ());
+    }
+
+    private void flush() {
+        String sql = "FLUSH;";
+        jdbcTemplate.execute(sql);
+    }
+
+    private void dropTable() {
+        String sql = "DROP TABLE IF EXISTS springtest;";
+        System.out.println("running query: "+sql);
+        jdbcTemplate.execute(sql);
+        System.out.println("drop table done");
+    }
+
     private void createTable() {
-        String sql = "CREATE TABLE springtest (id INT, name VARCHAR);";
+        String sql = """
+        CREATE TABLE springtest (
+          id INT,
+          cboolean boolean,
+          csmallint smallint,
+          cinteger integer,
+          cbigint bigint,
+          cfloat real,
+          cdouble double precision,
+          name varchar,
+          ctimestamptz timestamptz,
+          PRIMARY KEY (id)
+          );
+        """;
         System.out.println("running query: "+sql);
         jdbcTemplate.execute(sql);
         System.out.println("create table done");
