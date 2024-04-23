@@ -16,14 +16,12 @@ use std::mem;
 
 use anyhow::anyhow;
 use futures::stream::select;
-use futures::{pin_mut, FutureExt, StreamExt, TryFutureExt, TryStreamExt};
-use futures_async_stream::try_stream;
+use futures::{FutureExt, TryFutureExt, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::StreamChunkMut;
-use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
+use risingwave_common::array::Op;
+use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
-use risingwave_common::types::DataType;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::SinkType;
 use risingwave_connector::sink::log_store::{
@@ -34,13 +32,8 @@ use risingwave_connector::sink::{
 };
 use thiserror_ext::AsReport;
 
-use super::error::{StreamExecutorError, StreamExecutorResult};
-use super::{Execute, Executor, ExecutorInfo, Message, PkIndices};
 use crate::common::compact_chunk::{merge_chunk_row, StreamChunkCompactor};
-use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedMessageStream, MessageStream, Mutation,
-};
-use crate::task::ActorId;
+use crate::executor::prelude::*;
 
 pub struct SinkExecutor<F: LogStoreFactory> {
     actor_context: ActorContextRef,

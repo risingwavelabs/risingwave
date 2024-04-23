@@ -26,6 +26,7 @@ use risingwave_rpc_client::error::RpcError;
 use risingwave_storage::error::StorageError;
 use strum_macros::AsRefStr;
 
+use super::exchange::error::ExchangeChannelClosed;
 use super::Barrier;
 
 /// A specialized Result type for streaming executors.
@@ -83,6 +84,13 @@ pub enum ErrorKind {
 
     #[error("Channel closed: {0}")]
     ChannelClosed(String),
+
+    #[error(transparent)]
+    ExchangeChannelClosed(
+        #[from]
+        #[backtrace]
+        ExchangeChannelClosed,
+    ),
 
     #[error("Failed to align barrier: expected `{0:?}` but got `{1:?}`")]
     AlignBarrier(Box<Barrier>, Box<Barrier>),

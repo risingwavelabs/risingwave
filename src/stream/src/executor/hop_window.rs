@@ -14,17 +14,13 @@
 
 use std::num::NonZeroUsize;
 
-use futures::StreamExt;
-use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::types::Interval;
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_expr::ExprError;
 
-use super::error::StreamExecutorError;
-use super::{ActorContextRef, Execute, Executor, Message};
-use crate::common::StreamChunkBuilder;
+use crate::executor::prelude::*;
 
 pub struct HopWindowExecutor {
     _ctx: ActorContextRef,

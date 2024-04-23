@@ -12,19 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::StreamExt;
-use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::Op;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::{
     build_retractable, AggCall, AggregateState, BoxedAggregateFunction,
 };
 
 use super::aggregation::agg_call_filter_res;
-use super::error::StreamExecutorError;
-use super::*;
-use crate::error::StreamResult;
+use crate::executor::prelude::*;
 
 pub struct StatelessSimpleAggExecutor {
     _ctx: ActorContextRef,

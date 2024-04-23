@@ -12,14 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::StreamExt;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-use super::{
-    ActorContext, ActorContextRef, Barrier, BoxedMessageStream, Execute, Message,
-    StreamExecutorError,
-};
+use crate::executor::prelude::*;
 
 /// The executor only for receiving barrier from the meta service. It always resides in the leaves
 /// of the streaming graph.

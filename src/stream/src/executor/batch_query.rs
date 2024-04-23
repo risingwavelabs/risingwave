@@ -12,20 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use await_tree::InstrumentAwait;
-use futures::{pin_mut, StreamExt};
-use futures_async_stream::try_stream;
-use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::Schema;
+use risingwave_common::array::Op;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::collect_data_chunk;
-use risingwave_storage::StateStore;
 
-use super::error::StreamExecutorError;
-use super::{Execute, Message};
-use crate::executor::BoxedMessageStream;
+use crate::executor::prelude::*;
 
 pub struct BatchQueryExecutor<S: StateStore> {
     /// The [`StorageTable`] that needs to be queried
