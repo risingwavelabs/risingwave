@@ -18,6 +18,7 @@ use std::sync::Arc;
 use function_name::named;
 use futures::future::Shared;
 use itertools::Itertools;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId};
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::hummock_version::Levels;
@@ -28,7 +29,7 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
     Event as ResponseEvent, PullTaskAck,
 };
 use risingwave_pb::hummock::{
-    CompactStatus as PbCompactStatus, CompactTaskAssignment, CompactionConfig,
+    CompactStatus as PbCompactStatus, CompactTask, CompactTaskAssignment, CompactionConfig,
 };
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -257,6 +258,81 @@ impl HummockManager {
                     }
                 }
             } => {}
+        }
+    }
+
+    pub(crate) async fn calculate_vnode_partition(
+        &self,
+        compact_task: &mut CompactTask,
+        compaction_config: &CompactionConfig,
+    ) {
+        if compaction_config.split_weight_by_vnode > 0 {
+            for table_id in &compact_task.existing_table_ids {
+                compact_task
+                    .table_vnode_partition
+                    .insert(*table_id, compact_task.split_weight_by_vnode);
+            }
+        } else {
+            let mut table_size: HashMap<u32, u64> = HashMap::default();
+            let mut existing_table_ids: HashSet<u32> = HashSet::default();
+            for input_ssts in &compact_task.input_ssts {
+                for sst in &input_ssts.table_infos {
+                    existing_table_ids.extend(sst.table_ids.iter());
+                    if sst.table_ids.len() == 1 {
+                        *table_size.entry(sst.table_ids[0]).or_default() += sst.file_size;
+                    }
+                }
+            }
+            compact_task
+                .existing_table_ids
+                .retain(|table_id| existing_table_ids.contains(table_id));
+
+            let hybrid_vnode_count = self.env.opts.hybird_partition_vnode_count;
+            for (table_id, compact_table_size) in table_size {
+                let default_partition_count = self.env.opts.partition_vnode_count;
+                if compact_table_size > compaction_config.max_compaction_bytes / 2 {
+                    compact_task
+                        .table_vnode_partition
+                        .insert(table_id, default_partition_count);
+                } else if compact_table_size > compaction_config.max_bytes_for_level_base / 2 {
+                    compact_task
+                        .table_vnode_partition
+                        .insert(table_id, hybrid_vnode_count);
+                } else if compact_table_size > compaction_config.target_file_size_base {
+                    compact_task.table_vnode_partition.insert(table_id, 1);
+                }
+            }
+            let params = self.env.system_params_reader().await;
+            let barrier_interval_ms = params.barrier_interval_ms() as u64;
+            let checkpoint_secs = std::cmp::max(
+                1,
+                params.checkpoint_frequency() * barrier_interval_ms / 1000,
+            );
+            let history_table_throughput = self.history_table_throughput.read();
+            for table_id in &existing_table_ids {
+                let write_throughput = history_table_throughput
+                    .get(table_id)
+                    .map(|que| que.back().cloned().unwrap_or(0))
+                    .unwrap_or(0)
+                    / checkpoint_secs;
+                if write_throughput > self.env.opts.table_write_throughput_threshold
+                    && compact_task.table_vnode_partition.contains_key(table_id)
+                {
+                    // only split vnode for table with large data in input.
+                    compact_task
+                        .table_vnode_partition
+                        .entry(*table_id)
+                        .or_insert(hybrid_vnode_count);
+                } else if write_throughput > self.env.opts.min_table_split_write_throughput {
+                    compact_task
+                        .table_vnode_partition
+                        .entry(*table_id)
+                        .or_insert(1);
+                }
+            }
+            compact_task
+                .table_vnode_partition
+                .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
         }
     }
 }
