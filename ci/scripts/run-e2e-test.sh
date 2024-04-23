@@ -148,7 +148,7 @@ sqllogictest -p 4566 -d dev './e2e_test/error_ui/simple/**/*.slt'
 sqllogictest -p 4566 -d dev -e postgres-extended './e2e_test/error_ui/extended/**/*.slt'
 
 echo "--- Kill cluster"
-cluster_stop
+risedev ci-kill
 
 echo "--- e2e, $mode, extended query"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
