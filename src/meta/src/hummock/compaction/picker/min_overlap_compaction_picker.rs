@@ -293,14 +293,6 @@ impl NonOverlapSubLevelPicker {
                     add_files_count += 1;
                 }
 
-                // When size / file count has exceeded the limit, we need to abandon this plan, it cannot be expanded to the last sub_level
-                if max_select_level_count > 1
-                    && (add_files_size >= self.max_compaction_bytes
-                        || add_files_count >= self.max_file_count as usize)
-                {
-                    break 'expand_new_level;
-                }
-
                 overlap_levels.push((reverse_index, overlap_files_range.clone()));
                 select_level_count += 1;
             }
@@ -308,6 +300,14 @@ impl NonOverlapSubLevelPicker {
             if select_level_count > max_select_level_count {
                 max_select_level_count = select_level_count;
                 pick_levels_range = overlap_levels;
+            }
+
+            // When size / file count has exceeded the limit, we need to abandon this plan, it cannot be expanded to the last sub_level
+            if max_select_level_count > 1
+                && (add_files_size >= self.max_compaction_bytes
+                    || add_files_count >= self.max_file_count as usize)
+            {
+                break 'expand_new_level;
             }
         }
 
@@ -335,6 +335,33 @@ impl NonOverlapSubLevelPicker {
         }
 
         ret.sstable_infos.retain(|ssts| !ssts.is_empty());
+
+        // To check whether the level count is expected
+
+        if ret.sstable_infos.len() > MAX_COMPACT_LEVEL_COUNT {
+            // rotate the sstables to meet the max_size and count
+
+            let mut total_file_count = 0;
+            let mut total_file_size = 0;
+
+            let mut level_index = 0;
+
+            for (index, sstables) in ret.sstable_infos.iter().enumerate() {
+                total_file_count += sstables.len();
+                total_file_size += sstables.iter().map(|sst| sst.file_size).sum::<u64>();
+
+                if index > 0
+                    && (total_file_count as u64 > self.max_file_count
+                        || total_file_size > self.max_compaction_bytes)
+                {
+                    level_index = index;
+                    break;
+                }
+            }
+
+            ret.sstable_infos.truncate(level_index + 1);
+        }
+
         ret
     }
 
