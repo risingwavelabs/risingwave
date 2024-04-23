@@ -25,7 +25,6 @@ use risingwave_common::types::{
     DataType, Date, Decimal, Int256, Interval, JsonbVal, ListValue, ScalarImpl, Time, Timestamp,
     Timestamptz,
 };
-use rust_decimal::Decimal as RustDecimal;
 use thiserror_ext::AsReport;
 use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql, Type};
 
@@ -114,7 +113,7 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                     handle_data_type!(row, i, name, f64)
                 }
                 DataType::Decimal => {
-                    handle_data_type!(row, i, name, RustDecimal, Decimal)
+                    handle_data_type!(row, i, name, Decimal)
                 }
                 DataType::Int256 => {
                     // Currently in order to handle the decimal beyond RustDecimal,
@@ -252,7 +251,19 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                 handle_list_data_type!(row, i, name, f64, builder);
                             }
                             DataType::Decimal => {
-                                handle_list_data_type!(row, i, name, RustDecimal, builder, Decimal);
+                                let res = row.try_get::<_, Option<Vec<Option<PgNumeric>>>>(i);
+                                match res {
+                                    Ok(val) => {
+                                        if let Some(v) = val {
+                                            v.into_iter().for_each(|val| {
+                                                builder.append(pg_numeric_to_numeric(val, name))
+                                            })
+                                        }
+                                    }
+                                    Err(err) => {
+                                        log_error!(name, err, "parse column failed");
+                                    }
+                                }
                             }
                             DataType::Date => {
                                 handle_list_data_type!(row, i, name, NaiveDate, builder, Date);
@@ -404,36 +415,58 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
     OwnedRow::new(datums)
 }
 
+fn pg_numeric_to_numeric(num: Option<PgNumeric>, name: &str) -> Option<ScalarImpl> {
+    match num {
+        Some(num) => match num {
+            PgNumeric::NegativeInf => Some(ScalarImpl::from(Decimal::NegativeInf)),
+            PgNumeric::PositiveInf => Some(ScalarImpl::from(Decimal::PositiveInf)),
+            PgNumeric::NaN => Some(ScalarImpl::from(Decimal::NaN)),
+            PgNumeric::Normalized(d) => match Decimal::from_str(d.to_string().as_str()) {
+                Ok(d) => Some(ScalarImpl::from(d)),
+                Err(err) => {
+                    log_error!(name, err, "parse pg-numeric as rw-numeric failed");
+                    None
+                }
+            },
+        },
+        // NULL
+        None => None,
+    }
+}
+
 fn pg_numeric_to_rw_int256(val: Option<PgNumeric>, name: &str) -> Option<ScalarImpl> {
-    let string = pg_numeric_to_string(val)?;
-    match Int256::from_str(string.as_str()) {
-        Ok(num) => Some(ScalarImpl::from(num)),
-        Err(err) => {
-            log_error!(name, err, "parse numeric string as rw_int256 failed");
-            None
-        }
+    match val {
+        Some(pg_numeric) => {
+            match pg_numeric {
+                PgNumeric::Normalized(big_decimal) => {match Int256::from_str(big_decimal.to_string().as_str()) {
+                    Ok(num) => Some(ScalarImpl::from(num)),
+                    Err(err) => {
+                        log_error!(name, err, "parse numeric string as rw_int256 failed");
+                        None
+                    }
+                }},
+                _ => None,
+            }
+        },
+        // NULL
+        None => None
     }
 }
 
 fn pg_numeric_to_varchar(val: Option<PgNumeric>) -> Option<ScalarImpl> {
-    pg_numeric_to_string(val).map(ScalarImpl::from)
-}
-
-fn pg_numeric_to_string(val: Option<PgNumeric>) -> Option<String> {
-    if let Some(pg_numeric) = val {
-        // TODO(kexiang): NEGATIVE_INFINITY -> -Infinity, POSITIVE_INFINITY -> Infinity, NAN -> NaN
+    val.map(|pg_numeric| 
+        // FIXME(kexiang): NEGATIVE_INFINITY -> -Infinity, POSITIVE_INFINITY -> Infinity, NAN -> NaN
+        // https://github.com/risingwavelabs/risingwave/issues/16395
         // The current implementation is to ensure consistency with the behavior of cdc event parsor.
         match pg_numeric {
-            PgNumeric::NegativeInf => Some(String::from("NEGATIVE_INFINITY")),
-            PgNumeric::Normalized(big_decimal) => Some(big_decimal.to_string()),
-            PgNumeric::PositiveInf => Some(String::from("POSITIVE_INFINITY")),
-            PgNumeric::NaN => Some(String::from("NAN")),
+            PgNumeric::NegativeInf => String::from("NEGATIVE_INFINITY"),
+            PgNumeric::Normalized(big_decimal) => big_decimal.to_string(),
+            PgNumeric::PositiveInf => String::from("POSITIVE_INFINITY"),
+            PgNumeric::NaN => String::from("NAN"),
         }
-    } else {
-        // NULL
-        None
-    }
+    ).map(ScalarImpl::from)
 }
+
 
 #[derive(Clone, Debug)]
 struct EnumString(String);

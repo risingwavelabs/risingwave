@@ -284,6 +284,13 @@ CREATE TABLE numeric_to_varchar_shared (
 ) FROM pg_source TABLE 'public.numeric_table';
 
 statement ok
+CREATE TABLE numeric_to_numeric_shared (
+    id int,
+    num numeric,
+    PRIMARY KEY (id)
+) FROM pg_source TABLE 'public.numeric_table';
+
+statement ok
 CREATE TABLE numeric_list_to_rw_int256_list_shared (
     id int,
     num rw_int256[],
@@ -294,6 +301,13 @@ statement ok
 CREATE TABLE numeric_list_to_varchar_list_shared (
     id int,
     num varchar[],
+    PRIMARY KEY (id)
+) FROM pg_source TABLE 'public.numeric_list';
+
+statement ok
+CREATE TABLE numeric_list_to_numeric_list_shared (
+    id int,
+    num numeric[],
     PRIMARY KEY (id)
 ) FROM pg_source TABLE 'public.numeric_list';
 
@@ -366,6 +380,23 @@ select * from numeric_to_rw_int256_shared order by id;
 106 NULL
 107 NULL
 
+query II
+select * from numeric_to_numeric_shared order by id;
+----
+1   3.14
+2   NULL
+3   NULL
+4   NULL
+5   NULL
+6   NaN
+7   Infinity
+102 NULL
+103 NULL
+104 NULL
+105 NULL
+106 NaN
+107 Infinity
+
 system ok
 psql -c "
 DELETE FROM numeric_table WHERE id IN (102, 103, 104, 105, 106, 107);
@@ -382,6 +413,12 @@ select * from numeric_list_to_rw_int256_list_shared order by id;
 ----
 1 {NULL,6,57896044618658097711785492504343953926634992332820282019728792003956564819967,NULL,NULL}
 2 {NULL,NULL,NULL}
+
+query II
+select * from numeric_list_to_numeric_list_shared order by id;
+----
+1 {NULL,6,NULL,NULL,NULL}
+2 {NaN,Infinity,-Infinity}
 
 query II
 select * from enum_to_varchar_shared order by id;

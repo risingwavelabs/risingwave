@@ -13,14 +13,15 @@
 // limitations under the License.
 
 use std::fmt::Debug;
-use std::io::{Read, Write};
+use std::io::{Cursor, Read, Write};
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
+use byteorder::{BigEndian, ReadBytesExt};
 use bytes::{BufMut, Bytes, BytesMut};
 use num_traits::{
     CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Zero,
 };
-use postgres_types::{accepts, to_sql_checked, IsNull, ToSql, Type};
+use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
 use risingwave_common_estimate_size::ZeroHeapSize;
 use rust_decimal::prelude::FromStr;
 use rust_decimal::{Decimal as RustDecimal, Error, MathematicalOps as _, RoundingStrategy};
@@ -142,6 +143,28 @@ impl ToSql for Decimal {
             }
         }
         Ok(IsNull::No)
+    }
+}
+
+impl<'a> FromSql<'a> for Decimal {
+    fn from_sql(
+        ty: &Type,
+        raw: &'a [u8],
+    ) -> Result<Self, Box<dyn std::error::Error + 'static + Sync + Send>> {
+        let mut rdr = Cursor::new(raw);
+        let _n_digits = rdr.read_u16::<BigEndian>()?;
+        let _weight = rdr.read_i16::<BigEndian>()?;
+        let sign = rdr.read_u16::<BigEndian>()?;
+        match sign {
+            0xC000 => Ok(Self::NaN),
+            0xD000 => Ok(Self::PositiveInf),
+            0xF000 => Ok(Self::NegativeInf),
+            _ => RustDecimal::from_sql(ty, raw).map(Self::Normalized),
+        }
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(*ty, Type::NUMERIC)
     }
 }
 
