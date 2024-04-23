@@ -125,30 +125,58 @@ query II
 select id, my_int from list_with_null_shared order by id;
 ----
 1 {1,2,NULL}
-2 {NULL,-1,-2}
+2 {NULL,3,4}
+3 {NULL,-3,-4}
+4 {-4,-5,-6}
 
-# will fix in https://github.com/risingwavelabs/risingwave/pull/16416
+# my_num: varchar[]
 query II
 select id, my_num from list_with_null_shared order by id;
 ----
-1 {1.1,POSITIVE_INFINITY,NULL}
+1 NULL
+2 {2.2,0,NULL}
+3 NULL
+4 {NULL,-99999999999999999.9999}
+
+# my_num1: numeric[]
+query II
+select id, my_num_1 from list_with_null_shared order by id;
+----
+1 NULL
+2 {2.2,0,NULL}
+3 NULL
+4 {NULL,-99999999999999999.9999}
+
+# my_num2: rw_int256[]
+query II
+select id, my_num_2 from list_with_null_shared order by id;
+----
+1 NULL
 2 NULL
+3 NULL
+4 NULL
 
 # Due to the bug in Debezium, if a enum list contains `NULL`, the list will be converted to `NULL`
 query II
 select id, my_mood from list_with_null_shared order by id;
 ----
 1 NULL
-2 NULL
+2 {happy,ok,sad}
+3 NULL
+4 NULL
 
 query II
 select id, my_uuid from list_with_null_shared order by id;
 ----
 1 {bb488f9b-330d-4012-b849-12adeb49e57e,bb488f9b-330d-4012-b849-12adeb49e57f,NULL}
-2 {NULL,471acecf-a4b4-4ed3-a211-7fb2291f159f,9bc35adf-fb11-4130-944c-e7eadb96b829}
+2 {2de296df-eda7-4202-a81f-1036100ef4f6,2977afbc-0b12-459c-a36f-f623fc9e9840}
+3 {NULL,471acecf-a4b4-4ed3-a211-7fb2291f159f,9bc35adf-fb11-4130-944c-e7eadb96b829}
+4 {b2e4636d-fa03-4ad4-bf16-029a79dca3e2}
 
 query II
 select id, my_bytea from list_with_null_shared order by id;
 ----
 1 {"\\x00","\\x01",NULL}
-2 {NULL,"\\x99","\\xaa"}
+2 {"\\x00","\\x01","\\x02"}
+3 {NULL,"\\x99","\\xaa"}
+4 {"\\x88","\\x99","\\xaa"}
