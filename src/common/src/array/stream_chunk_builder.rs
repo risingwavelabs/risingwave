@@ -62,10 +62,13 @@ const DEFAULT_INITIAL_CAPACITY: usize = 64;
 
 impl StreamChunkBuilder {
     /// Create a new `StreamChunkBuilder` with a fixed max chunk size.
-    /// The max chunk size must be at least 2, otherwise it cannot produce
-    /// any chunk with `UpdateDelete + UpdateInsert`.
+    /// The max chunk size must be at least 3, see code comment for more.
     pub fn new(max_chunk_size: usize, data_types: Vec<DataType>) -> Self {
-        assert!(max_chunk_size >= 2);
+        // Ensure that the max chunk size is at least 3. Otherwise, when we already have
+        // `max_chunk_size - 1` rows and `apply_record(Update(..))` is called, we cannot
+        // produce exactly one chunk (containing the existing `max_chunk_size - 1` rows
+        // before appending `U-` and `U+`).
+        assert!(max_chunk_size >= 3);
 
         let initial_capacity = max_chunk_size.min(MAX_INITIAL_CAPACITY);
 
@@ -135,9 +138,13 @@ impl StreamChunkBuilder {
             Record::Insert { new_row } => self.append_row(Op::Insert, new_row),
             Record::Delete { old_row } => self.append_row(Op::Delete, old_row),
             Record::Update { old_row, new_row } => {
-                let none = self.append_row(Op::UpdateDelete, old_row);
-                debug_assert!(none.is_none());
-                self.append_row(Op::UpdateInsert, new_row)
+                let res1 = self.append_row(Op::UpdateDelete, old_row);
+                let res2 = self.append_row(Op::UpdateInsert, new_row);
+                // Because the max chunk size is at least 3, either we get a chunk after appending
+                // `U-` (when the previous size is `max_chunk_size - 1`), or we get a chunk after
+                // appending `U+` (when the previous size is `max_chunk_size - 2`), or get nothing.
+                assert!(!(res1.is_some() && res2.is_some()));
+                res1.or(res2)
             }
         }
     }

@@ -774,7 +774,7 @@ mod tests {
             U- 3 7
             U+ 4 .",
         );
-        let results = chunk.split(2);
+        let results = chunk.split(3);
         assert_eq!(2, results.len());
         assert_eq!(
             results[0].to_pretty().to_string(),
@@ -803,25 +803,19 @@ mod tests {
             U+ 4 .
              - 2 .",
         );
-        let results = chunk.split(2);
-        assert_eq!(3, results.len());
+        let results = chunk.split(3);
+        assert_eq!(2, results.len());
         assert_eq!(
             results[0].to_pretty().to_string(),
             "\
-+---+---+---+
-| + | 1 | 6 |
-+---+---+---+"
-        );
-        assert_eq!(
-            results[1].to_pretty().to_string(),
-            "\
 +----+---+---+
+|  + | 1 | 6 |
 | U- | 3 | 7 |
 | U+ | 4 |   |
 +----+---+---+"
         );
         assert_eq!(
-            results[2].to_pretty().to_string(),
+            results[1].to_pretty().to_string(),
             "\
 +---+---+---+
 | - | 2 |   |
