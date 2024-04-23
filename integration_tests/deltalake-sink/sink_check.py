@@ -31,4 +31,5 @@ run_query('data-types-query')
 with open(query_output_file_name, 'r') as f:
     all_lines = f.readlines()
     last_line = all_lines[-1]
+    print("rows of data_types: ", last_line)
     assert last_line.strip() == '3'
