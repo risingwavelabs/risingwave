@@ -89,8 +89,6 @@ impl GooglePubSubConfig {
     }
 }
 
-// ===
-
 #[derive(Clone, Debug)]
 pub struct GooglePubSubSink {
     pub config: GooglePubSubConfig,
@@ -175,8 +173,6 @@ impl TryFrom<SinkParam> for GooglePubSubSink {
         })
     }
 }
-
-// ===
 
 struct GooglePubSubPayloadWriter {
     publisher: Publisher,
