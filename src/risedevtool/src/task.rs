@@ -36,7 +36,7 @@ mod utils;
 mod zookeeper_service;
 
 use std::env;
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::Arc;
@@ -255,7 +255,11 @@ where
 
     /// Wait for a user-managed service to be available
     pub fn wait_tcp_user(&mut self, server: impl AsRef<str>) -> anyhow::Result<()> {
-        let addr = server.as_ref().parse()?;
+        let addr = server
+            .as_ref()
+            .to_socket_addrs()?
+            .next()
+            .expect(format!("failed to resolve {}", server.as_ref()).as_str());
         wait(
             || {
                 TcpStream::connect_timeout(&addr, Duration::from_secs(1))?;
