@@ -17,14 +17,10 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use futures::stream::{FusedStream, FuturesUnordered};
-use futures::{Stream, StreamExt};
-use futures_async_stream::try_stream;
 use pin_project::pin_project;
 
 use super::watermark::BufferedWatermarks;
-use super::{
-    Barrier, BoxedMessageStream, Execute, Executor, Message, MessageStreamItem, StreamExecutorError,
-};
+use crate::executor::prelude::*;
 
 /// `UnionExecutor` merges data from multiple inputs.
 pub struct UnionExecutor {

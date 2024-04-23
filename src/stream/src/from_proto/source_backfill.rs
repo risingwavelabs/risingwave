@@ -17,12 +17,10 @@ use risingwave_connector::source::SourceCtrlOpts;
 use risingwave_pb::stream_plan::SourceBackfillNode;
 
 use super::*;
-use crate::executor::source::StreamSourceCore;
-use crate::executor::source_backfill_executor::{
-    SourceBackfillExecutor, SourceBackfillExecutorInner,
+use crate::executor::source::{
+    BackfillStateTableHandler, SourceBackfillExecutor, SourceBackfillExecutorInner,
+    SourceStateTableHandler, StreamSourceCore,
 };
-use crate::executor::state_table_handler::SourceStateTableHandler;
-use crate::executor::BackfillStateTableHandler;
 
 pub struct SourceBackfillExecutorBuilder;
 

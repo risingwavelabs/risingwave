@@ -45,6 +45,7 @@ impl OpendalObjectStore {
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .finish();
+
         Ok(Self {
             op,
             engine_type: EngineType::S3,
@@ -103,5 +104,48 @@ impl OpendalObjectStore {
         }
 
         Ok(HttpClient::build(client_builder)?)
+    }
+
+    /// currently used by snowflake sink,
+    /// especially when sinking to the intermediate s3 bucket.
+    pub fn new_s3_engine_with_credentials(
+        bucket: &str,
+        object_store_config: ObjectStoreConfig,
+        aws_access_key_id: &str,
+        aws_secret_access_key: &str,
+        aws_region: &str,
+    ) -> ObjectResult<Self> {
+        // Create s3 builder with credentials.
+        let mut builder = S3::default();
+
+        // set credentials for s3 sink
+        builder.bucket(bucket);
+        builder.access_key_id(aws_access_key_id);
+        builder.secret_access_key(aws_secret_access_key);
+        builder.region(aws_region);
+
+        let http_client = Self::new_http_client(&object_store_config)?;
+        builder.http_client(http_client);
+
+        let op: Operator = Operator::new(builder)?
+            .layer(LoggingLayer::default())
+            .layer(
+                RetryLayer::new()
+                    .with_min_delay(Duration::from_millis(
+                        object_store_config.s3.object_store_req_retry_interval_ms,
+                    ))
+                    .with_max_delay(Duration::from_millis(
+                        object_store_config.s3.object_store_req_retry_max_delay_ms,
+                    ))
+                    .with_max_times(object_store_config.s3.object_store_req_retry_max_attempts)
+                    .with_factor(1.1)
+                    .with_jitter(),
+            )
+            .finish();
+
+        Ok(Self {
+            op,
+            engine_type: EngineType::S3,
+        })
     }
 }

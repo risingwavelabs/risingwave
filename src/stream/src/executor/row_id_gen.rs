@@ -12,20 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::StreamExt;
-use futures_async_stream::try_stream;
 use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayRef, Op, SerialArrayBuilder, StreamChunk,
-};
+use risingwave_common::array::{Array, ArrayBuilder, ArrayRef, Op, SerialArrayBuilder};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::types::Serial;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::row_id::RowIdGenerator;
 
-use super::{expect_first_barrier, ActorContextRef, Execute, Executor};
-use crate::executor::{Message, StreamExecutorError};
+use crate::executor::prelude::*;
 
 /// [`RowIdGenExecutor`] generates row id for data, where the user has not specified a pk.
 pub struct RowIdGenExecutor {

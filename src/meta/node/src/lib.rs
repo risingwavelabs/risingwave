@@ -32,6 +32,7 @@ use risingwave_meta::*;
 use risingwave_meta_service::*;
 pub use rpc::{ElectionClient, ElectionMember, EtcdElectionClient};
 use server::rpc_serve;
+pub use server::started::get as is_server_started;
 
 use crate::manager::MetaOpts;
 

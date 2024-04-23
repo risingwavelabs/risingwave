@@ -66,8 +66,6 @@ impl SplitReader for KafkaSplitReader {
 
         // disable partition eof
         config.set("enable.partition.eof", "false");
-        // change to `RdKafkaPropertiesConsumer::enable_auto_commit` to enable auto commit
-        // config.set("enable.auto.commit", "false");
         config.set("auto.offset.reset", "smallest");
         config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
         config.set("bootstrap.servers", bootstrap_servers);
@@ -77,10 +75,7 @@ impl SplitReader for KafkaSplitReader {
 
         config.set(
             "group.id",
-            format!(
-                "rw-consumer-{}-{}",
-                source_ctx.fragment_id, source_ctx.actor_id
-            ),
+            format!("rw-consumer-{}", source_ctx.fragment_id),
         );
 
         let client_ctx = PrivateLinkConsumerContext::new(

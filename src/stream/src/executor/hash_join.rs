@@ -13,40 +13,27 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashSet};
-use std::sync::Arc;
 use std::time::Duration;
 
-use await_tree::InstrumentAwait;
-use futures::{pin_mut, Stream, StreamExt};
-use futures_async_stream::try_stream;
 use itertools::Itertools;
 use multimap::MultiMap;
-use risingwave_common::array::{Op, RowRef, StreamChunk};
+use risingwave_common::array::{Op, RowRef};
 use risingwave_common::hash::{HashKey, NullBitmap};
-use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{DataType, DefaultOrd, ToOwnedDatum};
+use risingwave_common::types::{DefaultOrd, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_expr::ExprError;
-use risingwave_storage::StateStore;
 use tokio::time::Instant;
 
 use self::builder::JoinChunkBuilder;
 use super::barrier_align::*;
-use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::join::hash_join::*;
 use super::join::row::JoinRow;
 use super::join::{JoinTypePrimitive, SideTypePrimitive, *};
-use super::monitor::StreamingMetrics;
 use super::watermark::*;
-use super::{
-    ActorContextRef, BoxedMessageStream, Execute, Executor, ExecutorInfo, Message, Watermark,
-};
-use crate::common::table::state_table::StateTable;
-use crate::executor::expect_first_barrier_from_aligned_stream;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
-use crate::task::AtomicU64Ref;
+use crate::executor::prelude::*;
 
 /// Evict the cache every n rows.
 const EVICT_EVERY_N_ROWS: u32 = 16;

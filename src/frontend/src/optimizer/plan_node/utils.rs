@@ -21,7 +21,7 @@ use itertools::Itertools;
 use pretty_xmlish::{Pretty, Str, StrAssocArr, XmlNode};
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Field, FieldDisplay, Schema,
-    OBJECT_ID_PLACEHOLDER,
+    StreamJobStatus, OBJECT_ID_PLACEHOLDER,
 };
 use risingwave_common::constants::log_store::v2::{
     KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, VNODE_COLUMN_INDEX,
@@ -176,6 +176,7 @@ impl TableCatalogBuilder {
             // NOTE(kwannoel): This may not match the create type of the materialized table.
             // It should be ignored for internal tables.
             create_type: CreateType::Foreground,
+            stream_job_status: StreamJobStatus::Creating,
             description: None,
             incoming_sinks: vec![],
             initialized_at_cluster_version: None,

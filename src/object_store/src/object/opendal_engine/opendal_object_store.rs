@@ -39,6 +39,7 @@ pub struct OpendalObjectStore {
 
     pub(crate) config: Arc<ObjectStoreConfig>,
 }
+
 #[derive(Clone)]
 pub enum EngineType {
     Memory,
