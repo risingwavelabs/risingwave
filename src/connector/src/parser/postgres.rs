@@ -29,6 +29,8 @@ use rust_decimal::Decimal as RustDecimal;
 use thiserror_ext::AsReport;
 use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql, Type};
 
+use crate::parser::util::log_error;
+
 static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
 
 macro_rules! handle_list_data_type {
@@ -42,14 +44,7 @@ macro_rules! handle_list_data_type {
                 }
             }
             Err(err) => {
-                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                    tracing::error!(
-                        column = $name,
-                        error = %err.as_report(),
-                        suppressed_count,
-                        "parse column failed",
-                    );
-                }
+                log_error!($name, err, "parse column failed");
             }
         }
     };
@@ -64,14 +59,7 @@ macro_rules! handle_list_data_type {
                 }
             }
             Err(err) => {
-                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                    tracing::error!(
-                        column = $name,
-                        error = %err.as_report(),
-                        suppressed_count,
-                        "parse column failed",
-                    );
-                }
+                log_error!($name, err, "parse column failed");
             }
         }
     };
@@ -83,14 +71,7 @@ macro_rules! handle_data_type {
         match res {
             Ok(val) => val.map(|v| ScalarImpl::from(v)),
             Err(err) => {
-                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                    tracing::error!(
-                        column = $name,
-                        error = %err.as_report(),
-                        suppressed_count,
-                        "parse column failed",
-                    );
-                }
+                log_error!($name, err, "parse column failed");
                 None
             }
         }
@@ -100,14 +81,7 @@ macro_rules! handle_data_type {
         match res {
             Ok(val) => val.map(|v| ScalarImpl::from(<$rw_type>::from(v))),
             Err(err) => {
-                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                    tracing::error!(
-                        column = $name,
-                        error = %err.as_report(),
-                        suppressed_count,
-                        "parse column failed",
-                    );
-                }
+                log_error!($name, err, "parse column failed");
                 None
             }
         }
@@ -149,16 +123,9 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                     // Note: It's only used to map the numeric type in upstream Postgres to RisingWave's rw_int256.
                     let res = row.try_get::<_, Option<PgNumeric>>(i);
                     match res {
-                        Ok(val) => pg_numeric_to_rw_int256(val),
+                        Ok(val) => pg_numeric_to_rw_int256(val, name),
                         Err(err) => {
-                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                tracing::error!(
-                                    column = name,
-                                    error = %err.as_report(),
-                                    suppressed_count,
-                                    "parse numeric column as pg_numeric failed",
-                                );
-                            }
+                            log_error!(name, err, "parse numeric column as pg_numeric failed");
                             None
                         }
                     }
@@ -170,14 +137,7 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                         match res {
                             Ok(val) => val.map(|v| ScalarImpl::from(v.0)),
                             Err(err) => {
-                                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                    tracing::error!(
-                                        suppressed_count,
-                                        column = name,
-                                        error = %err.as_report(),
-                                        "parse enum column failed",
-                                    );
-                                }
+                                log_error!(name, err, "parse enum column failed");
                                 None
                             }
                         }
@@ -189,14 +149,7 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                 match res {
                                     Ok(val) => val.map(|v| ScalarImpl::from(v.to_string())),
                                     Err(err) => {
-                                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                            tracing::error!(
-                                                suppressed_count,
-                                                column = name,
-                                                error = %err.as_report(),
-                                                "parse uuid column failed",
-                                            );
-                                        }
+                                        log_error!(name, err, "parse uuid column failed");
                                         None
                                     }
                                 }
@@ -210,14 +163,11 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                 match res {
                                     Ok(val) => pg_numeric_to_varchar(val),
                                     Err(err) => {
-                                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                            tracing::error!(
-                                                column = name,
-                                                error = %err.as_report(),
-                                                suppressed_count,
-                                                "parse numeric column as pg_numeric failed",
-                                            );
-                                        }
+                                        log_error!(
+                                            name,
+                                            err,
+                                            "parse numeric column as pg_numeric failed"
+                                        );
                                         None
                                     }
                                 }
@@ -245,14 +195,7 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                     match res {
                         Ok(val) => val.map(|v| ScalarImpl::from(v.into_boxed_slice())),
                         Err(err) => {
-                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                tracing::error!(
-                                    suppressed_count,
-                                    column = name,
-                                    error = %err.as_report(),
-                                    "parse column failed",
-                                );
-                            }
+                            log_error!(name, err, "parse column failed");
                             None
                         }
                     }
@@ -279,14 +222,7 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                 }
                             }
                             Err(err) => {
-                                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                    tracing::error!(
-                                        suppressed_count,
-                                        column = name,
-                                        error = %err.as_report(),
-                                        "parse enum column failed",
-                                    );
-                                }
+                                log_error!(name, err, "parse enum column failed");
                             }
                         }
                     } else {
@@ -331,15 +267,7 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                                 }
                                             }
                                             Err(err) => {
-                                                if let Ok(suppressed_count) = LOG_SUPPERSSER.check()
-                                                {
-                                                    tracing::error!(
-                                                        suppressed_count,
-                                                        column = name,
-                                                        error = %err.as_report(),
-                                                        "parse uuid column failed",
-                                                    );
-                                                }
+                                                log_error!(name, err, "parse uuid column failed");
                                             }
                                         };
                                     }
@@ -356,15 +284,11 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                                 }
                                             }
                                             Err(err) => {
-                                                if let Ok(suppressed_count) = LOG_SUPPERSSER.check()
-                                                {
-                                                    tracing::error!(
-                                                        suppressed_count,
-                                                        column = name,
-                                                        error = %err.as_report(),
-                                                        "parse numeric list column as pg_numeric list failed",
-                                                    );
-                                                }
+                                                log_error!(
+                                                    name,
+                                                    err,
+                                                    "parse numeric list column as pg_numeric list failed"
+                                                );
                                             }
                                         };
                                     }
@@ -429,14 +353,7 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                         }
                                     }
                                     Err(err) => {
-                                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                            tracing::error!(
-                                                suppressed_count,
-                                                column = name,
-                                                error = %err.as_report(),
-                                                "parse column failed",
-                                            );
-                                        }
+                                        log_error!(name, err, "parse column failed");
                                     }
                                 }
                             }
@@ -446,19 +363,19 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                     Ok(val) => {
                                         if let Some(v) = val {
                                             v.into_iter().for_each(|val| {
-                                                builder.append(pg_numeric_to_rw_int256(Some(val)))
+                                                builder.append(pg_numeric_to_rw_int256(
+                                                    Some(val),
+                                                    name,
+                                                ))
                                             });
                                         }
                                     }
                                     Err(err) => {
-                                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                            tracing::error!(
-                                                suppressed_count,
-                                                column = name,
-                                                error = %err.as_report(),
-                                                "parse numeric list column as pg_numeric list failed",
-                                            );
-                                        }
+                                        log_error!(
+                                            name,
+                                            err,
+                                            "parse numeric list column as pg_numeric list failed"
+                                        );
                                     }
                                 };
                             }
@@ -484,18 +401,12 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
     OwnedRow::new(datums)
 }
 
-fn pg_numeric_to_rw_int256(val: Option<PgNumeric>) -> Option<ScalarImpl> {
+fn pg_numeric_to_rw_int256(val: Option<PgNumeric>, name: &str) -> Option<ScalarImpl> {
     let string = pg_numeric_to_string(val)?;
     match Int256::from_str(string.as_str()) {
         Ok(num) => Some(ScalarImpl::from(num)),
         Err(err) => {
-            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                tracing::error!(
-                    error = %err.as_report(),
-                    suppressed_count,
-                    "parse numeric string as rw_int256 failed",
-                );
-            }
+            log_error!(name, err, "parse numeric string as rw_int256 failed");
             None
         }
     }
