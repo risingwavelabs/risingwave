@@ -14,10 +14,12 @@
 
 package com.risingwave.connector.jdbc;
 
+import java.util.List;
+
 public class MySqlDialectFactory implements JdbcDialectFactory {
 
     @Override
-    public JdbcDialect create(int[] columnSqlTypes) {
+    public JdbcDialect create(List<Integer> columnSqlTypes, List<Integer> pkIndices) {
         return new MySqlDialect();
     }
 }

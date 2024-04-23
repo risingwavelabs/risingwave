@@ -100,12 +100,4 @@ public class MySqlDialect implements JdbcDialect {
             }
         }
     }
-
-    @Override
-    public void bindDeleteStatement(PreparedStatement stmt, Connection conn, TableSchema tableSchema, SinkRow row) throws SQLException {
-        int placeholderIdx = 1;
-        for (int i = 0; i < row.size(); i++) {
-            stmt.setObject(placeholderIdx++, row.get(i));
-        }
-    }
 }
