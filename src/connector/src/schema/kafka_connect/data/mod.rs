@@ -15,6 +15,7 @@
 mod date;
 mod decimal;
 mod schema;
+mod schema_projector;
 mod struct_;
 mod time;
 mod timestamp;

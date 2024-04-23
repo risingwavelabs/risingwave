@@ -86,15 +86,15 @@ impl PrimitiveSchema {
 
 #[derive(Debug, Clone)]
 pub struct ArraySchema {
-    base: SchemaBase,
-    val_schema: Box<ConnectSchema>,
+    pub base: SchemaBase,
+    pub val_schema: Box<ConnectSchema>,
 }
 
 #[derive(Debug, Clone)]
 pub struct MapSchema {
-    base: SchemaBase,
-    key_schema: Box<ConnectSchema>,
-    val_schema: Box<ConnectSchema>,
+    pub base: SchemaBase,
+    pub key_schema: Box<ConnectSchema>,
+    pub val_schema: Box<ConnectSchema>,
 }
 
 #[derive(Debug, Clone)]
@@ -186,6 +186,19 @@ pub enum Value {
     Struct(super::struct_::Struct),
     List(Vec<Option<Value>>),
     Map(std::collections::HashMap<Value, Value>),
+}
+
+impl PartialEq for Value {
+    fn eq(&self, _other: &Self) -> bool {
+        todo!()
+    }
+}
+impl Eq for Value {}
+
+impl std::hash::Hash for Value {
+    fn hash<H: std::hash::Hasher>(&self, _state: &mut H) {
+        todo!()
+    }
 }
 
 /// Rust `TypeId`?

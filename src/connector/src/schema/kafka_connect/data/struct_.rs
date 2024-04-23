@@ -55,18 +55,22 @@ impl Struct {
     pub fn put_by_name(
         &mut self,
         field_name: &str,
-        val: Value,
+        val: Option<Value>,
     ) -> Result<&mut Self, DataException> {
         let field = self.lookup_field(field_name)?.clone(); // TODO: avoid clone
         self.put_by_field(&field, val)
     }
 
-    pub fn put_by_field(&mut self, field: &Field, val: Value) -> Result<&mut Self, DataException> {
+    pub fn put_by_field(
+        &mut self,
+        field: &Field,
+        val: Option<Value>,
+    ) -> Result<&mut Self, DataException> {
         field
             .schema
-            .validate_value(Some(&val))
+            .validate_value(val.as_ref())
             .map_err(|e| DataException::new(format!("{}: {e}", field.name)))?;
-        self.values[field.index].replace(val);
+        self.values[field.index] = val;
         Ok(self)
     }
 

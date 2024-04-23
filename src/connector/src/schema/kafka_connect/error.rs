@@ -25,3 +25,17 @@ impl DataException {
         }
     }
 }
+
+pub struct SchemaProjectorException {
+    message: Box<str>,
+    cause: Option<Box<dyn std::error::Error>>,
+}
+
+impl SchemaProjectorException {
+    pub fn new(m: impl std::fmt::Display) -> Self {
+        Self {
+            message: m.to_string().into(),
+            cause: None,
+        }
+    }
+}
