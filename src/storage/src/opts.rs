@@ -77,8 +77,6 @@ pub struct StorageOpts {
     /// Max sub compaction task numbers
     pub max_sub_compaction: u32,
     pub max_concurrent_compaction_task_number: u64,
-    /// the number of max upload task can be running in parallel.
-    pub max_upload_task_number: u64,
     pub max_version_pinning_duration_sec: u64,
     pub compactor_iter_max_io_retry_times: usize,
 
@@ -188,7 +186,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             min_sst_size_for_streaming_upload: c.storage.min_sst_size_for_streaming_upload,
             max_sub_compaction: c.storage.max_sub_compaction,
             max_concurrent_compaction_task_number: c.storage.max_concurrent_compaction_task_number,
-            max_upload_task_number: c.storage.max_upload_task_number,
             max_version_pinning_duration_sec: c.storage.max_version_pinning_duration_sec,
             data_file_cache_dir: c.storage.data_file_cache.dir.clone(),
             data_file_cache_capacity_mb: c.storage.data_file_cache.capacity_mb,

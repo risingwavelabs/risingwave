@@ -777,7 +777,6 @@ impl HummockEventHandler {
                 unreachable!("This feature has been removed");
             }
         }
-        self.uploader.may_flush();
     }
 
     /// Gracefully shutdown if returns `true`.

@@ -687,9 +687,6 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::max_concurrent_compaction_task_number")]
     pub max_concurrent_compaction_task_number: u64,
 
-    #[serde(default = "default::storage::max_upload_task_number")]
-    pub max_upload_task_number: u64,
-
     #[serde(default = "default::storage::max_preload_wait_time_mill")]
     pub max_preload_wait_time_mill: u64,
 
@@ -1330,11 +1327,6 @@ pub mod default {
         pub fn max_concurrent_compaction_task_number() -> u64 {
             16
         }
-
-        pub fn max_upload_task_number() -> u64 {
-            4
-        }
-
         pub fn max_preload_wait_time_mill() -> u64 {
             0
         }

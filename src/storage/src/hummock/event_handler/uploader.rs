@@ -701,8 +701,6 @@ struct UploaderContext {
     /// merging tasks to merge them.
     imm_merge_threshold: usize,
 
-    max_upload_task_number: u64,
-
     stats: Arc<HummockStateStoreMetrics>,
 }
 
@@ -721,7 +719,6 @@ impl UploaderContext {
             spawn_merging_task,
             buffer_tracker,
             imm_merge_threshold: config.imm_merge_threshold,
-            max_upload_task_number: config.max_upload_task_number,
             stats,
         }
     }
@@ -1067,10 +1064,6 @@ impl HummockUploader {
             // flush large data at first to avoid generate small files.
             unseal_epochs.sort_by_key(|item| item.0);
             for (_, epoch) in unseal_epochs.iter().rev() {
-                let task_count = self.context.stats.uploader_uploading_task_count.get() as u64;
-                if task_count >= self.context.max_upload_task_number {
-                    break;
-                }
                 let unsealed_data = self.unsealed_data.get_mut(epoch).unwrap();
                 unsealed_data.flush(&self.context);
                 if !self.context.buffer_tracker.need_more_flush() {
