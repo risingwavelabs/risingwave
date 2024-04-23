@@ -43,7 +43,6 @@ CASES_MAP = {
     'pinot-sink': ['json'],
     'presto-trino': ['json'],
     'client-library': ['none'],
-    'kafka-cdc': ['json'],
 }
 
 def gen_pipeline_steps():
