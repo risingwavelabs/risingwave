@@ -140,6 +140,7 @@ pub fn table(name: impl Into<String>) -> TableFactor {
         name: ObjectName(vec![Ident::new_unchecked(name.into())]),
         as_of: None,
         alias: None,
+        query_log: false,
     }
 }
 

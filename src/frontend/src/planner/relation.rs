@@ -22,15 +22,15 @@ use risingwave_common::types::{DataType, Interval, ScalarImpl};
 use risingwave_sqlparser::ast::AsOf;
 
 use crate::binder::{
-    BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
-    BoundWindowTableFunction, Relation, WindowTableFunctionKind,
+    BoundBaseTable, BoundJoin, BoundLogTable, BoundShare, BoundSource, BoundSystemTable,
+    BoundWatermark, BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{
-    LogicalApply, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalShare,
-    LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalValues, PlanRef,
+    LogicalApply, LogicalHopWindow, LogicalJoin, LogicalLogScan, LogicalProject, LogicalScan,
+    LogicalShare, LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalValues, PlanRef,
 };
 use crate::optimizer::property::Cardinality;
 use crate::planner::Planner;
@@ -43,6 +43,7 @@ impl Planner {
     pub fn plan_relation(&mut self, relation: Relation) -> Result<PlanRef> {
         match relation {
             Relation::BaseTable(t) => self.plan_base_table(&t),
+            Relation::LogTable(t) => self.plan_log_table(&t),
             Relation::SystemTable(st) => self.plan_sys_table(*st),
             // TODO: order is ignored in the subquery
             Relation::Subquery(q) => Ok(self.plan_query(q.query)?.into_unordered_subplan()),
@@ -69,6 +70,15 @@ impl Planner {
             Rc::new(sys_table.sys_table_catalog.table_desc()),
             self.ctx(),
             Cardinality::unknown(), // TODO(card): cardinality of system table
+        )
+        .into())
+    }
+
+    pub(crate) fn plan_log_table(&mut self, log_table: &BoundLogTable) -> Result<PlanRef> {
+        Ok(LogicalLogScan::create(
+            log_table.table_catalog.name().to_string(),
+            Rc::new(log_table.table_catalog.table_desc()),
+            self.ctx(),
         )
         .into())
     }

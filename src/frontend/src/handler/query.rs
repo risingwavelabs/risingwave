@@ -173,7 +173,6 @@ fn gen_batch_query_plan(
     let mut logical = planner.plan(bound)?;
     let schema = logical.schema();
     let batch_plan = logical.gen_batch_plan()?;
-
     let dependent_relations =
         RelationCollectorVisitor::collect_with(dependent_relations, batch_plan.clone());
 
@@ -200,6 +199,7 @@ fn gen_batch_query_plan(
         QueryMode::Local => logical.gen_batch_local_plan(batch_plan)?,
         QueryMode::Distributed => logical.gen_batch_distributed_plan(batch_plan)?,
     };
+    println!("batch_plan {:?}",physical);
 
     Ok(BatchQueryPlanResult {
         plan: physical,
@@ -468,6 +468,7 @@ async fn distribute_execute(
     query: Query,
     can_timeout_cancel: bool,
 ) -> Result<DistributedQueryStream> {
+    println!("distribute_execute,{:?}",query);
     let timeout = if cfg!(madsim) {
         None
     } else if can_timeout_cancel {

@@ -4975,7 +4975,12 @@ impl Parser {
             } else {
                 let as_of = self.parse_as_of()?;
                 let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
-                Ok(TableFactor::Table { name, alias, as_of })
+                Ok(TableFactor::Table {
+                    name,
+                    alias,
+                    as_of,
+                    query_log: false,
+                })
             }
         }
     }

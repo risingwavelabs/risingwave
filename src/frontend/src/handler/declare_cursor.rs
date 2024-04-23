@@ -12,13 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures::StreamExt;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_sqlparser::ast::{DeclareCursorStatement, ObjectName, Query, Since, Statement};
 
 use super::query::{gen_batch_plan_by_statement, gen_batch_plan_fragmenter};
-use super::util::{convert_epoch_to_logstore_i64, convert_unix_millis_to_logstore_i64};
+use super::util::{
+    convert_epoch_to_logstore_i64, convert_unix_millis_to_logstore_i64,
+    gen_query_from_logstore_ge_rw_timestamp,
+};
 use super::RwPgResponse;
 use crate::error::{ErrorCode, Result};
 use crate::handler::query::create_stream;
@@ -58,6 +62,14 @@ async fn handle_declare_subscription_cursor(
     let cursor_from_subscription_name = sub_name.0.last().unwrap().real_value().clone();
     let subscription =
         session.get_subscription_by_name(schema_name, &cursor_from_subscription_name)?;
+    let a = gen_query_from_logstore_ge_rw_timestamp(&subscription.subscription_from_name, 0);
+    let mut a = create_stream_for_cursor(handle_args.clone(), Statement::Query(Box::new(a)))
+        .await
+        .unwrap();
+    println!("23156{:?}", a.1);
+    while let Some(a) = a.0.next().await {
+        println!("{:?}", a);
+    }
     // Start the first query of cursor, which includes querying the table and querying the subscription's logstore
     let start_rw_timestamp = match rw_timestamp {
         Some(risingwave_sqlparser::ast::Since::TimestampMsNum(start_rw_timestamp)) => {

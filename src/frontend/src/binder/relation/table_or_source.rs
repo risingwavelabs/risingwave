@@ -43,6 +43,12 @@ pub struct BoundBaseTable {
 }
 
 #[derive(Debug, Clone)]
+pub struct BoundLogTable {
+    pub table_id: TableId,
+    pub table_catalog: Arc<TableCatalog>,
+}
+
+#[derive(Debug, Clone)]
 pub struct BoundSystemTable {
     pub table_id: TableId,
     pub sys_table_catalog: Arc<SystemTableCatalog>,
@@ -72,6 +78,7 @@ impl Binder {
         table_name: &str,
         alias: Option<TableAlias>,
         as_of: Option<AsOf>,
+        query_log: bool,
     ) -> Result<Relation> {
         // define some helper functions converting catalog to bound relation
         let resolve_sys_table_relation = |sys_table_catalog: &Arc<SystemTableCatalog>| {
@@ -82,6 +89,21 @@ impl Binder {
             (
                 Relation::SystemTable(Box::new(table)),
                 sys_table_catalog
+                    .columns
+                    .iter()
+                    .map(|c| (c.is_hidden, Field::from(&c.column_desc)))
+                    .collect_vec(),
+            )
+        };
+
+        let resolve_log_table_relation = |log_table_catalog: &Arc<TableCatalog>| {
+            let table = BoundLogTable {
+                table_id: log_table_catalog.id(),
+                table_catalog: log_table_catalog.clone(),
+            };
+            (
+                Relation::LogTable(Box::new(table)),
+                log_table_catalog
                     .columns
                     .iter()
                     .map(|c| (c.is_hidden, Field::from(&c.column_desc)))
@@ -123,7 +145,13 @@ impl Binder {
                         self.catalog
                             .get_table_by_name(&self.db_name, schema_path, table_name)
                     {
-                        self.resolve_table_relation(table_catalog.clone(), schema_name, as_of)?
+                        if query_log{
+                            resolve_log_table_relation(
+                                table_catalog
+                            )
+                        }else{
+                            self.resolve_table_relation(table_catalog.clone(), schema_name, as_of)?
+                        }
                     } else if let Ok((source_catalog, _)) =
                         self.catalog
                             .get_source_by_name(&self.db_name, schema_path, table_name)
@@ -162,12 +190,20 @@ impl Binder {
                             if let Ok(schema) =
                                 self.catalog.get_schema_by_name(&self.db_name, schema_name)
                             {
-                                if let Some(table_catalog) = schema.get_table_by_name(table_name) {
-                                    return self.resolve_table_relation(
-                                        table_catalog.clone(),
-                                        &schema_name.clone(),
-                                        as_of,
-                                    );
+                                if let Some(table_catalog) =
+                                    schema.get_table_by_name(table_name)
+                                {
+                                    if query_log{
+                                        return Ok(resolve_log_table_relation(
+                                            table_catalog
+                                        ));
+                                    }else{
+                                        return self.resolve_table_relation(
+                                            table_catalog.clone(),
+                                            &schema_name.clone(),
+                                            as_of,
+                                        );
+                                    }
                                 } else if let Some(source_catalog) =
                                     schema.get_source_by_name(table_name)
                                 {

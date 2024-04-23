@@ -463,6 +463,15 @@ impl LocalQueryExecution {
                         }
                     }
                     NodeBody::SysRowSeqScan(_) => {}
+                    NodeBody::LogRowSeqScan(ref mut scan_node) => {
+                        if let Some(partition) = partition {
+                            let partition = partition
+                                .into_table()
+                                .expect("PartitionInfo should be TablePartitionInfo here");
+                            scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
+                            scan_node.scan_ranges = partition.scan_ranges;
+                        }
+                    }
                     _ => unreachable!(),
                 }
 

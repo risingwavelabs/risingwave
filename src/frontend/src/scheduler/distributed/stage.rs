@@ -987,6 +987,23 @@ impl StageRunner {
                     node_body: Some(NodeBody::RowSeqScan(scan_node)),
                 }
             }
+            PlanNodeType::BatchLogSeqScan => {
+                let node_body = execution_plan_node.node.clone();
+                let NodeBody::LogRowSeqScan(mut scan_node) = node_body else {
+                    unreachable!();
+                };
+                let partition = partition
+                    .expect("no partition info for seq scan")
+                    .into_table()
+                    .expect("PartitionInfo should be TablePartitionInfo");
+                scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
+                scan_node.scan_ranges = partition.scan_ranges;
+                PlanNodePb {
+                    children: vec![],
+                    identity,
+                    node_body: Some(NodeBody::LogRowSeqScan(scan_node)),
+                }
+            }
             PlanNodeType::BatchSource | PlanNodeType::BatchKafkaScan => {
                 let node_body = execution_plan_node.node.clone();
                 let NodeBody::Source(mut source_node) = node_body else {

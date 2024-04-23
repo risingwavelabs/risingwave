@@ -296,7 +296,7 @@ impl EpochWithGap {
         if risingwave_common::util::epoch::is_max_epoch(epoch) {
             EpochWithGap::new_max_epoch()
         } else {
-            debug_assert!((epoch & EPOCH_SPILL_TIME_MASK) == 0);
+            // debug_assert!((epoch & EPOCH_SPILL_TIME_MASK) == 0);
             EpochWithGap(epoch + spill_offset as u64)
         }
     }

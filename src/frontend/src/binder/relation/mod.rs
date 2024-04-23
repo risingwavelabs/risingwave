@@ -46,7 +46,7 @@ mod window_table_function;
 pub use join::BoundJoin;
 pub use share::BoundShare;
 pub use subquery::BoundSubquery;
-pub use table_or_source::{BoundBaseTable, BoundSource, BoundSystemTable};
+pub use table_or_source::{BoundBaseTable, BoundLogTable, BoundSource, BoundSystemTable};
 pub use watermark::BoundWatermark;
 pub use window_table_function::{BoundWindowTableFunction, WindowTableFunctionKind};
 
@@ -58,6 +58,7 @@ use crate::expr::{CorrelatedId, Depth};
 pub enum Relation {
     Source(Box<BoundSource>),
     BaseTable(Box<BoundBaseTable>),
+    LogTable(Box<BoundLogTable>),
     SystemTable(Box<BoundSystemTable>),
     Subquery(Box<BoundSubquery>),
     Join(Box<BoundJoin>),
@@ -342,6 +343,7 @@ impl Binder {
         name: ObjectName,
         alias: Option<TableAlias>,
         as_of: Option<AsOf>,
+        query_log: bool,
     ) -> Result<Relation> {
         let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
 
@@ -399,7 +401,13 @@ impl Binder {
                 }
             }
         } else {
-            self.bind_relation_by_name_inner(schema_name.as_deref(), &table_name, alias, as_of)
+            self.bind_relation_by_name_inner(
+                schema_name.as_deref(),
+                &table_name,
+                alias,
+                as_of,
+                query_log,
+            )
         }
     }
 
@@ -419,7 +427,7 @@ impl Binder {
         }?;
 
         Ok((
-            self.bind_relation_by_name(table_name.clone(), None, None)?,
+            self.bind_relation_by_name(table_name.clone(), None, None, false)?,
             table_name,
         ))
     }
@@ -469,14 +477,17 @@ impl Binder {
             .map_or(DEFAULT_SCHEMA_NAME.to_string(), |arg| arg.to_string());
 
         let table_name = self.catalog.get_table_name_by_id(table_id)?;
-        self.bind_relation_by_name_inner(Some(&schema), &table_name, alias, None)
+        self.bind_relation_by_name_inner(Some(&schema), &table_name, alias, None, false)
     }
 
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
         match table_factor {
-            TableFactor::Table { name, alias, as_of } => {
-                self.bind_relation_by_name(name, alias, as_of)
-            }
+            TableFactor::Table {
+                name,
+                alias,
+                as_of,
+                query_log,
+            } => self.bind_relation_by_name(name, alias, as_of, query_log),
             TableFactor::TableFunction {
                 name,
                 alias,

@@ -75,6 +75,7 @@ pub(crate) fn create_table_factor_from_table(table: &Table) -> TableFactor {
         name: ObjectName(vec![Ident::new_unchecked(&table.name)]),
         alias: None,
         as_of: None,
+        query_log: false,
     }
 }
 

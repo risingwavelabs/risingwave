@@ -381,6 +381,7 @@ pub enum TableFactor {
         name: ObjectName,
         alias: Option<TableAlias>,
         as_of: Option<AsOf>,
+        query_log: bool,
     },
     Derived {
         lateral: bool,
@@ -408,7 +409,9 @@ pub enum TableFactor {
 impl fmt::Display for TableFactor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TableFactor::Table { name, alias, as_of } => {
+            TableFactor::Table {
+                name, alias, as_of, ..
+            } => {
                 write!(f, "{}", name)?;
                 match as_of {
                     Some(as_of) => write!(f, "{}", as_of)?,

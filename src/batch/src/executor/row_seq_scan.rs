@@ -161,6 +161,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
+        println!("222");
         ensure!(
             inputs.is_empty(),
             "Row sequential scan should not have input executor!"

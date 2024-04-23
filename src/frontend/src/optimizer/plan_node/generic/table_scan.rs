@@ -369,6 +369,7 @@ impl GenericPlanNode for TableScan {
 
     fn functional_dependency(&self) -> FunctionalDependencySet {
         let pk_indices = self.stream_key();
+        println!("pk_indices111 {:?}",pk_indices);
         let col_num = self.output_col_idx.len();
         match &pk_indices {
             Some(pk_indices) => FunctionalDependencySet::with_key(col_num, pk_indices),

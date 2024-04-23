@@ -71,7 +71,7 @@ message FilterNode {
   expr.ExprNode search_condition = 1;
 }
 
-message LogStoreRowSeqScanNode{
+message LogRowSeqScanNode{
   plan_common.StorageTableDesc table_desc = 1;
   repeated int32 column_ids = 2;
   // All the ranges need to be read. i.e., they are OR'ed.
@@ -339,7 +339,7 @@ message PlanNode {
     SourceNode source = 34;
     SortOverWindowNode sort_over_window = 35;
     MaxOneRowNode max_one_row = 36;
-    LogStoreRowSeqScanNode log_store_row_seq_scan = 37;
+    LogRowSeqScanNode log_row_seq_scan = 37;
     // The following nodes are used for testing.
     bool block_executor = 100;
     bool busy_loop_executor = 101;

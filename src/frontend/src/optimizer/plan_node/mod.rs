@@ -827,6 +827,7 @@ mod batch_hash_join;
 mod batch_hop_window;
 mod batch_insert;
 mod batch_limit;
+mod batch_log_seq_scan;
 mod batch_lookup_join;
 mod batch_max_one_row;
 mod batch_nested_loop_join;
@@ -858,6 +859,7 @@ mod logical_intersect;
 mod logical_join;
 mod logical_kafka_scan;
 mod logical_limit;
+mod logical_log_scan;
 mod logical_max_one_row;
 mod logical_multi_join;
 mod logical_now;
@@ -923,6 +925,7 @@ pub use batch_hop_window::BatchHopWindow;
 pub use batch_insert::BatchInsert;
 pub use batch_kafka_scan::BatchKafkaScan;
 pub use batch_limit::BatchLimit;
+pub use batch_log_seq_scan::BatchLogSeqScan;
 pub use batch_lookup_join::BatchLookupJoin;
 pub use batch_max_one_row::BatchMaxOneRow;
 pub use batch_nested_loop_join::BatchNestedLoopJoin;
@@ -954,6 +957,7 @@ pub use logical_intersect::LogicalIntersect;
 pub use logical_join::LogicalJoin;
 pub use logical_kafka_scan::LogicalKafkaScan;
 pub use logical_limit::LogicalLimit;
+pub use logical_log_scan::LogicalLogScan;
 pub use logical_max_one_row::LogicalMaxOneRow;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
 pub use logical_now::LogicalNow;
@@ -1036,6 +1040,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Scan }
             , { Logical, CdcScan }
             , { Logical, SysScan }
+            , { Logical, LogScan }
             , { Logical, Source }
             , { Logical, Insert }
             , { Logical, Delete }
@@ -1068,6 +1073,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, Update }
             , { Batch, SeqScan }
             , { Batch, SysSeqScan }
+            , { Batch, LogSeqScan }
             , { Batch, HashJoin }
             , { Batch, NestedLoopJoin }
             , { Batch, Values }
@@ -1136,6 +1142,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Scan }
             , { Logical, CdcScan }
             , { Logical, SysScan }
+            , { Logical, LogScan }
             , { Logical, Source }
             , { Logical, Insert }
             , { Logical, Delete }
@@ -1174,6 +1181,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, Filter }
             , { Batch, SeqScan }
             , { Batch, SysSeqScan }
+            , { Batch, LogSeqScan }
             , { Batch, HashJoin }
             , { Batch, NestedLoopJoin }
             , { Batch, Values }

@@ -24,6 +24,7 @@ mod iceberg_scan;
 mod insert;
 mod join;
 mod limit;
+mod log_row_seq_scan;
 mod managed;
 mod max_one_row;
 mod merge_sort_exchange;
@@ -35,7 +36,6 @@ mod sort_agg;
 mod sort_over_window;
 mod source;
 mod sys_row_seq_scan;
-mod log_store_row_seq_scan;
 mod table_function;
 pub mod test_utils;
 mod top_n;
@@ -81,7 +81,7 @@ pub use update::*;
 pub use utils::*;
 pub use values::*;
 
-use self::log_store_row_seq_scan::LogStoreRowSeqScanExecutorBuilder;
+use self::log_row_seq_scan::LogStoreRowSeqScanExecutorBuilder;
 use self::test_utils::{BlockExecutorBuilder, BusyLoopExecutorBuilder};
 use crate::error::Result;
 use crate::executor::sys_row_seq_scan::SysRowSeqScanExecutorBuilder;
@@ -203,6 +203,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
     #[async_recursion]
     async fn try_build(&self) -> Result<BoxedExecutor> {
         let mut inputs = Vec::with_capacity(self.plan_node.children.len());
+        println!("input_node: {:?}", self.plan_node);
         for input_node in &self.plan_node.children {
             let input = self.clone_for_plan(input_node).build().await?;
             inputs.push(input);
@@ -241,7 +242,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             // Follow NodeBody only used for test
             NodeBody::BlockExecutor => BlockExecutorBuilder,
             NodeBody::BusyLoopExecutor => BusyLoopExecutorBuilder,
-            NodeBody::LogStoreRowSeqScan => LogStoreRowSeqScanExecutorBuilder,
+            NodeBody::LogRowSeqScan => LogStoreRowSeqScanExecutorBuilder,
         }
         .await?;
 
