@@ -112,10 +112,5 @@ public interface JdbcDialect {
             throws SQLException;
 
     /** Bind the values of primary key fields to the {@code DELETE} statement. */
-    default void bindDeleteStatement(PreparedStatement stmt, SinkRow row) throws SQLException {
-        int placeholderIdx = 1;
-        for (int i = 0; i < row.size(); i++) {
-            stmt.setObject(placeholderIdx++, row.get(i));
-        }
-    }
+    void bindDeleteStatement(PreparedStatement stmt, SinkRow row) throws SQLException;
 }

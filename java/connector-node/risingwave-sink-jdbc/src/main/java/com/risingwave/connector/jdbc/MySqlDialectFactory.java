@@ -20,6 +20,6 @@ public class MySqlDialectFactory implements JdbcDialectFactory {
 
     @Override
     public JdbcDialect create(List<Integer> columnSqlTypes, List<Integer> pkIndices) {
-        return new MySqlDialect();
+        return new MySqlDialect(columnSqlTypes, pkIndices);
     }
 }
