@@ -289,50 +289,14 @@ impl Binder {
             let table_name = alias.name.real_value();
 
             if with.recursive {
-                let Query {
-                    with,
-                    body,
-                    order_by,
-                    limit,
-                    offset,
-                    fetch,
-                } = query;
-
-                /// the input clause should not be supported.
-                fn should_be_empty<T>(v: Option<T>, clause: &str) -> Result<()> {
-                    if v.is_some() {
-                        return Err(ErrorCode::BindError(format!(
-                            "`{clause}` is not supported in recursive CTE"
-                        ))
-                        .into());
-                    }
-                    Ok(())
-                }
-
-                should_be_empty(order_by.first(), "ORDER BY")?;
-                should_be_empty(limit, "LIMIT")?;
-                should_be_empty(offset, "OFFSET")?;
-                should_be_empty(fetch, "FETCH")?;
-
-                let SetExpr::SetOperation {
+                let (SetExpr::SetOperation {
                     op: SetOperator::Union,
                     all,
                     left,
                     right,
-                } = body
-                else {
-                    return Err(ErrorCode::BindError(
-                        "`UNION` is required in recursive CTE".to_string(),
-                    )
-                    .into());
+                }, with) = Self::validate_rcte(query)? else {
+                    return Err(ErrorCode::BindError("expect `SetOperation` as the return type of validation".into()).into());
                 };
-
-                if !all {
-                    return Err(ErrorCode::BindError(
-                        "only `UNION ALL` is supported in recursive CTE now".to_string(),
-                    )
-                    .into());
-                }
 
                 let entry = self
                     .context
@@ -346,47 +310,7 @@ impl Binder {
                     .get()
                     .clone();
 
-                self.push_context();
-                if let Some(with) = with {
-                    self.bind_with(with)?;
-                }
-
-                // We assume `left` is the base term, otherwise the implementation may be very hard.
-                // The behavior is the same as PostgreSQL's.
-                // reference: <https://www.postgresql.org/docs/16/sql-select.html#:~:text=the%20recursive%20self%2Dreference%20must%20appear%20on%20the%20right%2Dhand%20side%20of%20the%20UNION>
-                let mut base = self.bind_set_expr(*left)?;
-
-                entry.borrow_mut().state = BindingCteState::BaseResolved {
-                    schema: base.schema().clone(),
-                };
-
-                // Reset context for right side, but keep `cte_to_relation`.
-                let new_context = std::mem::take(&mut self.context);
-                self.context
-                    .cte_to_relation
-                    .clone_from(&new_context.cte_to_relation);
-                // bind the rest of the recursive cte
-                let mut recursive = self.bind_set_expr(*right)?;
-                // Reset context for the set operation.
-                self.context = Default::default();
-                self.context.cte_to_relation = new_context.cte_to_relation;
-
-                Self::align_schema(&mut base, &mut recursive, SetOperator::Union)?;
-                let schema = base.schema().clone();
-
-                let recursive_union = RecursiveUnion {
-                    all,
-                    base: Box::new(base),
-                    recursive: Box::new(recursive),
-                    schema,
-                };
-
-                entry.borrow_mut().state = BindingCteState::Bound {
-                    query: either::Either::Right(recursive_union),
-                };
-                // TODO: This does not execute during early return by `?`
-                // We shall extract it similar to `bind_query` and `bind_query_inner`.
-                self.pop_context()?;
+                self.bind_rcte(with, entry, left, right, all)?;
             } else {
                 let bound_query = self.bind_query(query)?;
                 self.context.cte_to_relation.insert(
@@ -401,6 +325,105 @@ impl Binder {
                 );
             }
         }
+        Ok(())
+    }
+
+    /// syntactically validate the recursive cte ast with the current support features in rw.
+    fn validate_rcte(query: Query) -> Result<(SetExpr, Option<With>)> {
+        let Query {
+            with,
+            body,
+            order_by,
+            limit,
+            offset,
+            fetch,
+        } = query;
+
+        /// the input clause should not be supported.
+        fn should_be_empty<T>(v: Option<T>, clause: &str) -> Result<()> {
+            if v.is_some() {
+                return Err(ErrorCode::BindError(format!(
+                    "`{clause}` is not supported in recursive CTE"
+                ))
+                .into());
+            }
+            Ok(())
+        }
+
+        should_be_empty(order_by.first(), "ORDER BY")?;
+        should_be_empty(limit, "LIMIT")?;
+        should_be_empty(offset, "OFFSET")?;
+        should_be_empty(fetch, "FETCH")?;
+
+        let SetExpr::SetOperation {
+            op: SetOperator::Union,
+            all,
+            left,
+            right,
+        } = body
+        else {
+            return Err(ErrorCode::BindError(
+                "`UNION` is required in recursive CTE".to_string(),
+            )
+            .into());
+        };
+
+        if !all {
+            return Err(ErrorCode::BindError(
+                "only `UNION ALL` is supported in recursive CTE now".to_string(),
+            )
+            .into());
+        }
+
+        Ok((SetExpr::SetOperation { op: SetOperator::Union, all, left, right }, with))
+    }
+
+    fn bind_rcte(&mut self, with: Option<With>, entry: Rc<RefCell<BindingCte>>, left: Box<SetExpr>, right: Box<SetExpr>, all: bool) -> Result<()> {
+        self.push_context();
+        let result = self.bind_rcte_inner(with, entry, left, right, all);
+        self.pop_context()?;
+        result
+    }
+
+    fn bind_rcte_inner(&mut self, with: Option<With>, entry: Rc<RefCell<BindingCte>>, left: Box<SetExpr>, right: Box<SetExpr>, all: bool) -> Result<()> {
+        if let Some(with) = with {
+            self.bind_with(with)?;
+        }
+
+        // We assume `left` is the base term, otherwise the implementation may be very hard.
+        // The behavior is the same as PostgreSQL's.
+        // reference: <https://www.postgresql.org/docs/16/sql-select.html#:~:text=the%20recursive%20self%2Dreference%20must%20appear%20on%20the%20right%2Dhand%20side%20of%20the%20UNION>
+        let mut base = self.bind_set_expr(*left)?;
+
+        entry.borrow_mut().state = BindingCteState::BaseResolved {
+            schema: base.schema().clone(),
+        };
+
+        // Reset context for right side, but keep `cte_to_relation`.
+        let new_context = std::mem::take(&mut self.context);
+        self.context
+            .cte_to_relation
+            .clone_from(&new_context.cte_to_relation);
+        // bind the rest of the recursive cte
+        let mut recursive = self.bind_set_expr(*right)?;
+        // Reset context for the set operation.
+        self.context = Default::default();
+        self.context.cte_to_relation = new_context.cte_to_relation;
+
+        Self::align_schema(&mut base, &mut recursive, SetOperator::Union)?;
+        let schema = base.schema().clone();
+
+        let recursive_union = RecursiveUnion {
+            all,
+            base: Box::new(base),
+            recursive: Box::new(recursive),
+            schema,
+        };
+
+        entry.borrow_mut().state = BindingCteState::Bound {
+            query: either::Either::Right(recursive_union),
+        };
+
         Ok(())
     }
 }
