@@ -193,7 +193,9 @@ pub fn create_compaction_task(
 ) -> CompactionTask {
     let target_file_size = if input.target_level == 0 {
         compaction_config.target_file_size_base
-    } else if input.target_level == base_level {
+    } else if input.target_level == base_level
+        && input.target_input_size <= compaction_config.max_bytes_for_level_base * 2
+    {
         // This is just a temporary optimization measure. We hope to reduce the size of SST as much
         // as possible to reduce the amount of data blocked by a single task during compaction,
         // but too many files will increase computing overhead.
