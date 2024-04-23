@@ -35,12 +35,12 @@ static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::de
 
 macro_rules! handle_list_data_type {
     ($row:expr, $i:expr, $name:expr, $type:ty, $builder:expr) => {
-        let res = $row.try_get::<_, Option<Vec<$type>>>($i);
+        let res = $row.try_get::<_, Option<Vec<Option<$type>>>>($i);
         match res {
             Ok(val) => {
                 if let Some(v) = val {
                     v.into_iter()
-                        .for_each(|val| $builder.append(Some(ScalarImpl::from(val))))
+                        .for_each(|val| $builder.append(val.map(ScalarImpl::from)))
                 }
             }
             Err(err) => {
@@ -49,12 +49,12 @@ macro_rules! handle_list_data_type {
         }
     };
     ($row:expr, $i:expr, $name:expr, $type:ty, $builder:expr, $rw_type:ty) => {
-        let res = $row.try_get::<_, Option<Vec<$type>>>($i);
+        let res = $row.try_get::<_, Option<Vec<Option<$type>>>>($i);
         match res {
             Ok(val) => {
                 if let Some(v) = val {
                     v.into_iter().for_each(|val| {
-                        $builder.append(Some(ScalarImpl::from(<$rw_type>::from(val))))
+                        $builder.append(val.map(|v| ScalarImpl::from(<$rw_type>::from(v))))
                     })
                 }
             }
@@ -212,12 +212,16 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                     if let Kind::Array(item_type) = row.columns()[i].type_().kind()
                         && let Kind::Enum(_) = item_type.kind()
                     {
+                        // FIXME(Kexiang): The null of enum list is not supported in Debezium.
+                        // As `NULL` in enum list is not supported in Debezium, we use `EnumString`
+                        // instead of `Option<EnumString>` to handle enum to keep the behaivor aligned.
+                        // An enum list contains `NULL` will be converted to `NULL`.
                         let res = row.try_get::<_, Option<Vec<EnumString>>>(i);
                         match res {
                             Ok(val) => {
                                 if let Some(v) = val {
                                     v.into_iter().for_each(|val| {
-                                        builder.append(Some(ScalarImpl::from(val.0)))
+                                        builder.append(Some(ScalarImpl::from(val.0)));
                                     });
                                 }
                             }
@@ -255,14 +259,15 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                 match *row.columns()[i].type_() {
                                     // Since we don't support UUID natively, adapt it to a VARCHAR column
                                     Type::UUID_ARRAY => {
-                                        let res = row.try_get::<_, Option<Vec<uuid::Uuid>>>(i);
+                                        let res =
+                                            row.try_get::<_, Option<Vec<Option<uuid::Uuid>>>>(i);
                                         match res {
                                             Ok(val) => {
                                                 if let Some(v) = val {
                                                     v.into_iter().for_each(|val| {
-                                                        builder.append(Some(ScalarImpl::from(
-                                                            val.to_string(),
-                                                        )))
+                                                        builder.append(val.map(|v| {
+                                                            ScalarImpl::from(v.to_string())
+                                                        }))
                                                     });
                                                 }
                                             }
@@ -272,14 +277,13 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                         };
                                     }
                                     Type::NUMERIC_ARRAY => {
-                                        let res = row.try_get::<_, Option<Vec<PgNumeric>>>(i);
+                                        let res =
+                                            row.try_get::<_, Option<Vec<Option<PgNumeric>>>>(i);
                                         match res {
                                             Ok(val) => {
                                                 if let Some(v) = val {
                                                     v.into_iter().for_each(|val| {
-                                                        builder.append(pg_numeric_to_varchar(Some(
-                                                            val,
-                                                        )))
+                                                        builder.append(pg_numeric_to_varchar(val))
                                                     });
                                                 }
                                             }
@@ -341,14 +345,14 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                 );
                             }
                             DataType::Bytea => {
-                                let res = row.try_get::<_, Option<Vec<Vec<u8>>>>(i);
+                                let res = row.try_get::<_, Option<Vec<Option<Vec<u8>>>>>(i);
                                 match res {
                                     Ok(val) => {
                                         if let Some(v) = val {
                                             v.into_iter().for_each(|val| {
-                                                builder.append(Some(ScalarImpl::from(
-                                                    val.into_boxed_slice(),
-                                                )))
+                                                builder.append(val.map(|v| {
+                                                    ScalarImpl::from(v.into_boxed_slice())
+                                                }))
                                             })
                                         }
                                     }
@@ -358,15 +362,12 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                 }
                             }
                             DataType::Int256 => {
-                                let res = row.try_get::<_, Option<Vec<PgNumeric>>>(i);
+                                let res = row.try_get::<_, Option<Vec<Option<PgNumeric>>>>(i);
                                 match res {
                                     Ok(val) => {
                                         if let Some(v) = val {
                                             v.into_iter().for_each(|val| {
-                                                builder.append(pg_numeric_to_rw_int256(
-                                                    Some(val),
-                                                    name,
-                                                ))
+                                                builder.append(pg_numeric_to_rw_int256(val, name))
                                             });
                                         }
                                     }
