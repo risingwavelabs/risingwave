@@ -19,7 +19,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use prometheus::HistogramTimer;
 
 pub mod mem;
 pub use mem::*;
@@ -312,6 +311,7 @@ pub struct MonitoredStreamingUploader {
     operation_size: usize,
     media_type: &'static str,
     streaming_upload_timeout: Option<Duration>,
+    streaming_upload_finish_timeout: Option<Duration>,
 }
 
 impl MonitoredStreamingUploader {
@@ -320,6 +320,7 @@ impl MonitoredStreamingUploader {
         handle: BoxedStreamingUploader,
         object_store_metrics: Arc<ObjectStoreMetrics>,
         streaming_upload_timeout: Option<Duration>,
+        streaming_upload_finish_timeout: Option<Duration>,
     ) -> Self {
         Self {
             inner: handle,
@@ -327,6 +328,7 @@ impl MonitoredStreamingUploader {
             operation_size: 0,
             media_type,
             streaming_upload_timeout,
+            streaming_upload_finish_timeout,
         }
     }
 }
@@ -385,17 +387,13 @@ impl MonitoredStreamingUploader {
             .with_label_values(&[self.media_type, operation_type_str])
             .start_timer();
 
-        let streaming_upload_finish_timeout = self
-            .streaming_upload_timeout
-            .map(|timeout| Duration::from_millis(timeout.as_millis() as u64 * 3));
-
         let future = async {
             self.inner
                 .finish()
                 .verbose_instrument_await(operation_type_str)
                 .await
         };
-        let res = match streaming_upload_finish_timeout.as_ref() {
+        let res = match self.streaming_upload_finish_timeout.as_ref() {
             None => future.await,
             Some(timeout) => tokio::time::timeout(*timeout, future)
                 .await
@@ -421,8 +419,8 @@ pub struct MonitoredStreamingReader {
     object_store_metrics: Arc<ObjectStoreMetrics>,
     operation_size: usize,
     media_type: &'static str,
-    timer: Option<HistogramTimer>,
     streaming_read_timeout: Option<Duration>,
+    operation_type_str: &'static str,
 }
 
 impl MonitoredStreamingReader {
@@ -432,32 +430,26 @@ impl MonitoredStreamingReader {
         object_store_metrics: Arc<ObjectStoreMetrics>,
         streaming_read_timeout: Option<Duration>,
     ) -> Self {
-        let timer = object_store_metrics
-            .operation_latency
-            .with_label_values(&[media_type, OperationType::StreamingRead.as_str()])
-            .start_timer();
         Self {
             inner: handle,
             object_store_metrics,
             operation_size: 0,
             media_type,
-            timer: Some(timer),
             streaming_read_timeout,
+            operation_type_str: OperationType::StreamingRead.as_str(),
         }
     }
 
     pub async fn read_bytes(&mut self) -> Option<ObjectResult<Bytes>> {
-        let operation_type = OperationType::StreamingRead;
-        let operation_type_str = operation_type.as_str();
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type, operation_type_str])
+            .with_label_values(&[self.media_type, self.operation_type_str])
             .start_timer();
         let future = async {
             self.inner
                 .next()
-                .verbose_instrument_await(operation_type_str)
+                .verbose_instrument_await(self.operation_type_str)
                 .await
         };
         let res = match self.streaming_read_timeout.as_ref() {
@@ -467,20 +459,20 @@ impl MonitoredStreamingReader {
                 .unwrap_or_else(|_| {
                     Some(Err(ObjectError::timeout(format!(
                         "{} timeout",
-                        operation_type_str
+                        self.operation_type_str
                     ))))
                 }),
         };
 
         if let Some(ret) = &res {
-            try_update_failure_metric(&self.object_store_metrics, ret, operation_type_str);
+            try_update_failure_metric(&self.object_store_metrics, ret, self.operation_type_str);
         }
         if let Some(Ok(data)) = &res {
             let data_len = data.len();
             self.object_store_metrics.read_bytes.inc_by(data_len as u64);
             self.object_store_metrics
                 .operation_size
-                .with_label_values(&[operation_type_str])
+                .with_label_values(&[self.operation_type_str])
                 .observe(data_len as f64);
             self.operation_size += data_len;
         }
@@ -490,12 +482,10 @@ impl MonitoredStreamingReader {
 
 impl Drop for MonitoredStreamingReader {
     fn drop(&mut self) {
-        let operation_type = OperationType::StreamingRead;
         self.object_store_metrics
             .operation_size
-            .with_label_values(&[operation_type.as_str()])
+            .with_label_values(&[self.operation_type_str])
             .observe(self.operation_size as f64);
-        self.timer.take().unwrap().observe_duration();
     }
 }
 
@@ -608,19 +598,21 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let res = retry_request(builder, &self.config, operation_type, retry_condition).await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
+        let streaming_upload_timeout_ms =
+            if self.config.retry.streaming_upload_timeout_ms != UNLIMITED_MAX_TIMEOUT {
+                self.config.retry.streaming_upload_timeout_ms
+            } else {
+                self.config.retry.streaming_upload_attempt_timeout_ms
+            };
+
         Ok(MonitoredStreamingUploader::new(
             media_type,
             res?,
             self.object_store_metrics.clone(),
-            if self.config.retry.streaming_upload_timeout_ms != UNLIMITED_MAX_TIMEOUT {
-                Some(Duration::from_millis(
-                    self.config.retry.streaming_upload_timeout_ms,
-                ))
-            } else {
-                Some(Duration::from_millis(
-                    self.config.retry.streaming_upload_attempt_timeout_ms,
-                ))
-            },
+            Some(Duration::from_millis(streaming_upload_timeout_ms)),
+            Some(Duration::from_millis(
+                self.config.retry.streaming_upload_finish_attempt_timeout_ms,
+            )),
         ))
     }
 
@@ -1076,9 +1068,12 @@ fn get_retry_attempts_by_type(config: &ObjectStoreConfig, operation_type: Operat
 fn get_attempt_timeout_by_type(config: &ObjectStoreConfig, operation_type: OperationType) -> u64 {
     match operation_type {
         OperationType::Upload => config.retry.upload_attempt_timeout_ms,
-        OperationType::StreamingUploadInit
-        | OperationType::StreamingUpload
-        | OperationType::StreamingUploadFinish => config.retry.streaming_upload_attempt_timeout_ms,
+        OperationType::StreamingUploadInit | OperationType::StreamingUpload => {
+            config.retry.streaming_upload_attempt_timeout_ms
+        }
+        OperationType::StreamingUploadFinish => {
+            config.retry.streaming_upload_finish_attempt_timeout_ms
+        }
         OperationType::Read => config.retry.read_attempt_timeout_ms,
         OperationType::StreamingReadInit | OperationType::StreamingRead => {
             config.retry.streaming_read_attempt_timeout_ms
