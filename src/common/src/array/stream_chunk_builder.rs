@@ -216,3 +216,102 @@ impl StreamChunkBuilder {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::array::{Datum, StreamChunkTestExt};
+    use crate::row::OwnedRow;
+
+    #[test]
+    fn test_stream_chunk_builder() {
+        let row = OwnedRow::new(vec![Datum::None, Datum::None]);
+        let mut builder = StreamChunkBuilder::new(3, vec![DataType::Int32, DataType::Int32]);
+        let res = builder.append_row(Op::Delete, row.clone());
+        assert!(res.is_none());
+        let res = builder.append_row(Op::Insert, row.clone());
+        assert!(res.is_none());
+        let res = builder.append_row(Op::Insert, row.clone());
+        assert_eq!(
+            res,
+            Some(StreamChunk::from_pretty(
+                "  i i
+                 - . .
+                 + . .
+                 + . ."
+            ))
+        );
+        let res = builder.take();
+        assert!(res.is_none());
+
+        let res = builder.append_row_invisible(Op::Delete, row.clone());
+        assert!(res.is_none());
+        let res = builder.append_iter(Op::Delete, row.clone().iter().enumerate());
+        assert!(res.is_none());
+        let res = builder.append_record(Record::Insert {
+            new_row: row.clone(),
+        });
+        assert_eq!(
+            res,
+            Some(StreamChunk::from_pretty(
+                "  i i
+                 - . . D
+                 - . .
+                 + . ."
+            ))
+        );
+
+        let res = builder.append_row(Op::UpdateDelete, row.clone());
+        assert!(res.is_none());
+        let res = builder.append_row(Op::UpdateInsert, row.clone());
+        assert!(res.is_none());
+        let res = builder.append_record(Record::Update {
+            old_row: row.clone(),
+            new_row: row.clone(),
+        });
+        assert_eq!(
+            res,
+            Some(StreamChunk::from_pretty(
+                "  i i
+                U- . .
+                U+ . ."
+            ))
+        );
+        let res = builder.take();
+        assert_eq!(
+            res,
+            Some(StreamChunk::from_pretty(
+                "  i i
+                U- . .
+                U+ . ."
+            ))
+        );
+    }
+
+    #[test]
+    fn test_unlimited_stream_chunk_builder() {
+        let row = OwnedRow::new(vec![Datum::None, Datum::None]);
+        let mut builder =
+            StreamChunkBuilder::unlimited(vec![DataType::Int32, DataType::Int32], None);
+
+        let res = builder.append_row(Op::Delete, row.clone());
+        assert!(res.is_none());
+        let res = builder.append_row(Op::Insert, row.clone());
+        assert!(res.is_none());
+        let res = builder.append_row(Op::UpdateDelete, row.clone());
+        assert!(res.is_none());
+        let res = builder.append_row(Op::UpdateInsert, row.clone());
+        assert!(res.is_none());
+
+        for _ in 0..2048 {
+            let res = builder.append_record(Record::Update {
+                old_row: row.clone(),
+                new_row: row.clone(),
+            });
+            assert!(res.is_none());
+        }
+
+        let res = builder.take();
+        assert_eq!(res.unwrap().capacity(), 2048 * 2 + 4);
+    }
+}
