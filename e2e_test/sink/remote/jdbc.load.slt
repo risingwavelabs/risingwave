@@ -169,10 +169,10 @@ statement ok
 CREATE TABLE t1_test_uuid_delete (id varchar, primary key(id));
 
 statement ok
-INSERT INTO t1_test_uuid_delete VALUES ('fb48ecc1-917f-4f4b-ab6d-d8e37809caf8', '21189447-8736-44bd-b254-26b5dec91da9');
+INSERT INTO t1_test_uuid_delete VALUES ('fb48ecc1-917f-4f4b-ab6d-d8e37809caf8'), ('21189447-8736-44bd-b254-26b5dec91da9');
 
 statement ok
-CREATE SINK s1_uuid FROM t1_uuid WITH (
+CREATE SINK sk_t1_uuid FROM t1_test_uuid_delete WITH (
     connector='jdbc',
     jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
     table.name='sk_t1_uuid',
