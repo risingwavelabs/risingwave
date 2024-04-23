@@ -289,13 +289,20 @@ impl Binder {
             let table_name = alias.name.real_value();
 
             if with.recursive {
-                let (SetExpr::SetOperation {
-                    op: SetOperator::Union,
-                    all,
-                    left,
-                    right,
-                }, with) = Self::validate_rcte(query)? else {
-                    return Err(ErrorCode::BindError("expect `SetOperation` as the return type of validation".into()).into());
+                let (
+                    SetExpr::SetOperation {
+                        op: SetOperator::Union,
+                        all,
+                        left,
+                        right,
+                    },
+                    with,
+                ) = Self::validate_rcte(query)?
+                else {
+                    return Err(ErrorCode::BindError(
+                        "expect `SetOperation` as the return type of validation".into(),
+                    )
+                    .into());
                 };
 
                 let entry = self
@@ -362,10 +369,9 @@ impl Binder {
             right,
         } = body
         else {
-            return Err(ErrorCode::BindError(
-                "`UNION` is required in recursive CTE".to_string(),
-            )
-            .into());
+            return Err(
+                ErrorCode::BindError("`UNION` is required in recursive CTE".to_string()).into(),
+            );
         };
 
         if !all {
@@ -375,17 +381,39 @@ impl Binder {
             .into());
         }
 
-        Ok((SetExpr::SetOperation { op: SetOperator::Union, all, left, right }, with))
+        Ok((
+            SetExpr::SetOperation {
+                op: SetOperator::Union,
+                all,
+                left,
+                right,
+            },
+            with,
+        ))
     }
 
-    fn bind_rcte(&mut self, with: Option<With>, entry: Rc<RefCell<BindingCte>>, left: Box<SetExpr>, right: Box<SetExpr>, all: bool) -> Result<()> {
+    fn bind_rcte(
+        &mut self,
+        with: Option<With>,
+        entry: Rc<RefCell<BindingCte>>,
+        left: Box<SetExpr>,
+        right: Box<SetExpr>,
+        all: bool,
+    ) -> Result<()> {
         self.push_context();
         let result = self.bind_rcte_inner(with, entry, left, right, all);
         self.pop_context()?;
         result
     }
 
-    fn bind_rcte_inner(&mut self, with: Option<With>, entry: Rc<RefCell<BindingCte>>, left: Box<SetExpr>, right: Box<SetExpr>, all: bool) -> Result<()> {
+    fn bind_rcte_inner(
+        &mut self,
+        with: Option<With>,
+        entry: Rc<RefCell<BindingCte>>,
+        left: Box<SetExpr>,
+        right: Box<SetExpr>,
+        all: bool,
+    ) -> Result<()> {
         if let Some(with) = with {
             self.bind_with(with)?;
         }
