@@ -53,7 +53,7 @@ use risingwave_stream::error::StreamResult;
 use risingwave_stream::executor::dml::DmlExecutor;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::row_id_gen::RowIdGenExecutor;
-use risingwave_stream::executor::source_executor::SourceExecutor;
+use risingwave_stream::executor::source::SourceExecutor;
 use risingwave_stream::executor::{
     ActorContext, Barrier, Execute, Executor, ExecutorInfo, MaterializeExecutor, Message, PkIndices,
 };

@@ -1004,7 +1004,9 @@ impl StageRunner {
                     node_body: Some(NodeBody::LogRowSeqScan(scan_node)),
                 }
             }
-            PlanNodeType::BatchSource | PlanNodeType::BatchKafkaScan => {
+            PlanNodeType::BatchSource
+            | PlanNodeType::BatchKafkaScan
+            | PlanNodeType::BatchIcebergScan => {
                 let node_body = execution_plan_node.node.clone();
                 let NodeBody::Source(mut source_node) = node_body else {
                     unreachable!();

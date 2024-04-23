@@ -474,7 +474,8 @@ pub(crate) mod tests {
         WorkerNodeManager, WorkerNodeSelector,
     };
     use risingwave_common::catalog::{
-        ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, DEFAULT_SUPER_USER_ID,
+        ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, StreamJobStatus,
+        DEFAULT_SUPER_USER_ID,
     };
     use risingwave_common::hash::ParallelUnitMapping;
     use risingwave_common::types::DataType;
@@ -590,6 +591,7 @@ pub(crate) mod tests {
             cleaned_by_watermark: false,
             created_at_epoch: None,
             initialized_at_epoch: None,
+            stream_job_status: StreamJobStatus::Creating,
             create_type: CreateType::Foreground,
             description: None,
             incoming_sinks: vec![],

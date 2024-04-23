@@ -54,7 +54,9 @@ use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::TableId;
 use crate::error::RwError;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
-use crate::optimizer::plan_node::{BatchKafkaScan, BatchSource, PlanNodeId, PlanNodeType};
+use crate::optimizer::plan_node::{
+    BatchIcebergScan, BatchKafkaScan, BatchSource, PlanNodeId, PlanNodeType,
+};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
 use crate::scheduler::SchedulerResult;
@@ -1016,6 +1018,21 @@ impl BatchPlanFragmenter {
                     connector: property,
                     timebound: timestamp_bound,
                     as_of: None,
+                })));
+            }
+        } else if let Some(batch_iceberg_scan) = node.as_batch_iceberg_scan() {
+            let batch_iceberg_scan: &BatchIcebergScan = batch_iceberg_scan;
+            let source_catalog = batch_iceberg_scan.source_catalog();
+            if let Some(source_catalog) = source_catalog {
+                let property = ConnectorProperties::extract(
+                    source_catalog.with_properties.clone().into_iter().collect(),
+                    false,
+                )?;
+                let as_of = batch_iceberg_scan.as_of();
+                return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
+                    connector: property,
+                    timebound: (None, None),
+                    as_of,
                 })));
             }
         } else if let Some(source_node) = node.as_batch_source() {

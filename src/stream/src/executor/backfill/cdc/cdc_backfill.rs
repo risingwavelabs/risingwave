@@ -12,19 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::pin::{pin, Pin};
-use std::sync::Arc;
+use std::pin::Pin;
 
 use either::Either;
+use futures::stream;
 use futures::stream::select_with_strategy;
-use futures::{pin_mut, stream, StreamExt};
-use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{DataChunk, StreamChunk};
+use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
-use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{DataType, ScalarRefImpl};
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::parser::{
     DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties, ProtocolProperties,
@@ -32,10 +29,8 @@ use risingwave_connector::parser::{
 };
 use risingwave_connector::source::cdc::external::CdcOffset;
 use risingwave_connector::source::{SourceColumnDesc, SourceContext};
-use risingwave_storage::StateStore;
 use rw_futures_util::pausable;
 
-use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::cdc::state::CdcBackfillState;
 use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::cdc::upstream_table::snapshot::{
@@ -44,11 +39,7 @@ use crate::executor::backfill::cdc::upstream_table::snapshot::{
 use crate::executor::backfill::utils::{
     get_cdc_chunk_last_offset, get_new_pos, mapping_chunk, mapping_message, mark_cdc_chunk,
 };
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, Message,
-    StreamExecutorError, StreamExecutorResult,
-};
+use crate::executor::prelude::*;
 use crate::task::CreateMviewProgress;
 
 /// `split_id`, `is_finished`, `row_count`, `cdc_offset` all occupy 1 column each.

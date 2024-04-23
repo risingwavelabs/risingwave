@@ -35,9 +35,9 @@ use risingwave_storage::panic_store::PanicStateStore;
 use tokio::sync::mpsc::unbounded_channel;
 
 use super::*;
-use crate::executor::source::{FsListExecutor, StreamSourceCore};
-use crate::executor::source_executor::SourceExecutor;
-use crate::executor::state_table_handler::SourceStateTableHandler;
+use crate::executor::source::{
+    FsListExecutor, SourceExecutor, SourceStateTableHandler, StreamSourceCore,
+};
 use crate::executor::TroublemakerExecutor;
 
 const FS_CONNECTORS: &[&str] = &["s3"];
@@ -213,7 +213,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
 
                 if is_fs_connector {
                     #[expect(deprecated)]
-                    crate::executor::FsSourceExecutor::new(
+                    crate::executor::source::FsSourceExecutor::new(
                         params.actor_context.clone(),
                         stream_source_core,
                         params.executor_stats,

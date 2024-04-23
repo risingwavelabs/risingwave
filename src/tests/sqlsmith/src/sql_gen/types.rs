@@ -186,6 +186,8 @@ pub(crate) static AGG_FUNC_TABLE: LazyLock<HashMap<DataType, Vec<&'static FuncSi
                         AggKind::PercentileDisc,
                         AggKind::Mode,
                         AggKind::JsonbObjectAgg, // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
+                        AggKind::StddevSamp, // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
+                        AggKind::VarSamp, // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
                     ]
                     .contains(&func.name.as_aggregate())
                     // Exclude 2 phase agg global sum.

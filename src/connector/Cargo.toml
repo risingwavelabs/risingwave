@@ -109,6 +109,7 @@ reqwest = { version = "0.12.2", features = ["json", "stream"] }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_jni_core = { workspace = true }
+risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 rumqttc = { version = "0.24.0", features = ["url"] }

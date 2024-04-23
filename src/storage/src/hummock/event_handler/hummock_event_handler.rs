@@ -28,7 +28,7 @@ use prometheus::core::{AtomicU64, GenericGauge};
 use prometheus::{Histogram, IntGauge};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
-use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo, SyncResult};
 use thiserror_ext::AsReport;
 use tokio::spawn;
 use tokio::sync::mpsc::error::SendError;
@@ -60,7 +60,6 @@ use crate::hummock::{
 };
 use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
-use crate::store::SyncResult;
 
 #[derive(Clone)]
 pub struct BufferTracker {
