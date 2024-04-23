@@ -31,6 +31,12 @@ buildkite-agent artifact download risingwave-connector.tar.gz ./
 mkdir ./connector-node
 tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
+echo "--- e2e, inline test"
+risedev ci-start ci-inline-source-test
+risedev slt './e2e_test/source_inline/**/*.slt'
+echo "--- Kill cluster"
+risedev ci-kill
+
 echo "--- Prepare data"
 cp src/connector/src/test_data/simple-schema.avsc ./avro-simple-schema.avsc
 cp src/connector/src/test_data/complex-schema.avsc ./avro-complex-schema.avsc
@@ -162,9 +168,3 @@ risedev slt './e2e_test/source/basic/alter/kafka_after_new_data_2.slt'
 echo "--- Run CH-benCHmark"
 risedev slt './e2e_test/ch_benchmark/batch/ch_benchmark.slt'
 risedev slt './e2e_test/ch_benchmark/streaming/*.slt'
-
-echo "--- Kill cluster"
-risedev ci-kill
-echo "--- e2e, inline test"
-risedev ci-start ci-inline-source-test
-risedev slt './e2e_test/source_inline/**/*.slt'

@@ -54,7 +54,7 @@ mysql -e "
     INSERT INTO tt3 VALUES (3, '2023-10-23 12:00:00');
     INSERT INTO tt4 VALUES (4, '2023-10-23 13:00:00');
     INSERT INTO tt5 VALUES (5, '2023-10-23 14:00:00');
-"
+" testdb1
 
 statement ok
 create table tt1 (v1 int,
