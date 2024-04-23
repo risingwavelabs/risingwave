@@ -82,15 +82,6 @@ echo "--- cdc share source test"
 export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
 risedev slt './e2e_test/source/cdc/cdc.share_stream.slt'
 
-# create a share source and check whether heartbeat message is received
-risedev slt './e2e_test/source/cdc/cdc.create_source_job.slt'
-table_id=$(psql -U root -h localhost -p 4566 -d dev -t -c "select id from rw_internal_tables where name like '%mysql_source%';" | xargs);
-table_count=$(psql -U root -h localhost -p 4566 -d dev -t -c "select count(*) from rw_table(${table_id}, public);" | xargs);
-if [ "$table_count" -eq 0 ]; then
-    echo "ERROR: internal table of cdc share source is empty!"
-    exit 1
-fi
-
 echo "--- mysql & postgres load and check"
 risedev slt './e2e_test/source/cdc/cdc.load.slt'
 # wait for cdc loading
@@ -168,9 +159,12 @@ echo "--- e2e, kafka alter source again"
 ./scripts/source/prepare_data_after_alter.sh 3
 risedev slt './e2e_test/source/basic/alter/kafka_after_new_data_2.slt'
 
-echo "--- e2e, inline test"
-risedev slt './e2e_test/source_inline/**/*.slt'
-
 echo "--- Run CH-benCHmark"
 risedev slt './e2e_test/ch_benchmark/batch/ch_benchmark.slt'
 risedev slt './e2e_test/ch_benchmark/streaming/*.slt'
+
+echo "--- Kill cluster"
+risedev ci-kill
+echo "--- e2e, inline test"
+risedev ci-start ci-inline-source-test
+risedev slt './e2e_test/source_inline/**/*.slt'

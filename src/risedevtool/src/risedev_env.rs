@@ -77,6 +77,13 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 writeln!(env, r#"RISEDEV_KAFKA_WITH_OPTIONS_COMMON="connector='kafka',properties.bootstrap.server='{brokers}'""#).unwrap();
                 writeln!(env, r#"RPK_BROKERS="{brokers}""#).unwrap();
             }
+            ServiceConfig::MySql(c) => {
+                let host = &c.address;
+                let port = &c.port;
+                writeln!(env, r#"MYSQL_HOST="{host}""#,).unwrap();
+                writeln!(env, r#"MYSQL_TCP_PORT="{port}""#,).unwrap();
+                writeln!(env, r#"RISEDEV_MYSQL_WITH_OPTIONS_COMMON="connector='mysql-cdc',hostname='{host}',port='{port}'""#,).unwrap();
+            }
             _ => {}
         }
     }
