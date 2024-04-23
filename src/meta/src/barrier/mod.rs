@@ -16,6 +16,7 @@ use std::assert_matches::assert_matches;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::pending;
+use std::iter::empty;
 use std::mem::{replace, take};
 use std::sync::Arc;
 use std::time::Duration;
@@ -30,7 +31,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
-use risingwave_hummock_sdk::change_log::build_table_new_change_log;
+use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::table_watermark::{
     merge_multiple_new_table_watermarks, TableWatermarks,
 };
@@ -1182,11 +1183,12 @@ fn collect_commit_epoch_info(
         None
     };
 
-    let table_new_change_log = build_table_new_change_log(
+    let table_new_change_log = build_table_change_log_delta(
         old_value_ssts.into_iter(),
         synced_ssts.iter().map(|sst| &sst.sst_info),
         epochs,
-        command_ctx.log_store_table_ids.iter().map(|t| t.table_id),
+        // TODO: pass log store table id and the corresponding truncate_epoch
+        empty(),
     );
 
     CommitEpochInfo::new(

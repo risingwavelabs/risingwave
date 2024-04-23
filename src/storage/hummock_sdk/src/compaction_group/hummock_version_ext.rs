@@ -623,7 +623,8 @@ impl HummockVersion {
                 .insert(table_id, Arc::new(table_watermarks));
         }
 
-        for (table_id, new_change_log) in &version_delta.new_change_log {
+        for (table_id, change_log_delta) in &version_delta.change_log_delta {
+            let new_change_log = change_log_delta.new_log.as_ref().unwrap();
             match self.table_change_log.entry(*table_id) {
                 Entry::Occupied(entry) => {
                     let change_log = entry.into_mut();
@@ -644,6 +645,17 @@ impl HummockVersion {
         for table_id in &version_delta.removed_table_ids {
             let _ = self.table_watermarks.remove(table_id);
             let _ = self.table_change_log.remove(table_id);
+        }
+
+        // If a table has no new change log entry (even an empty one), it means we have stopped maintained
+        // the change log for the table
+        self.table_change_log
+            .retain(|table_id, _| version_delta.change_log_delta.contains_key(table_id));
+
+        for (table_id, change_log_delta) in &version_delta.change_log_delta {
+            if let Some(change_log) = self.table_change_log.get_mut(table_id) {
+                change_log.truncate(change_log_delta.truncate_epoch);
+            }
         }
 
         sst_split_info
@@ -1097,7 +1109,7 @@ pub fn build_version_delta_after_version(version: &HummockVersion) -> HummockVer
         group_deltas: Default::default(),
         new_table_watermarks: HashMap::new(),
         removed_table_ids: vec![],
-        new_change_log: HashMap::new(),
+        change_log_delta: HashMap::new(),
     }
 }
 

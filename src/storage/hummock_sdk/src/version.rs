@@ -20,12 +20,12 @@ use prost::Message;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version::Levels as PbLevels;
-use risingwave_pb::hummock::hummock_version_delta::GroupDeltas as PbGroupDeltas;
+use risingwave_pb::hummock::hummock_version_delta::{ChangeLogDelta, GroupDeltas as PbGroupDeltas};
 use risingwave_pb::hummock::{
     HummockVersionDelta as PbHummockVersionDelta, PbHummockVersion, SstableInfo,
 };
 
-use crate::change_log::{EpochNewChangeLog, TableChangeLog};
+use crate::change_log::TableChangeLog;
 use crate::table_watermark::TableWatermarks;
 use crate::{CompactionGroupId, HummockSstableObjectId};
 
@@ -140,7 +140,7 @@ pub struct HummockVersionDelta {
     pub trivial_move: bool,
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
     pub removed_table_ids: Vec<TableId>,
-    pub new_change_log: HashMap<TableId, EpochNewChangeLog>,
+    pub change_log_delta: HashMap<TableId, ChangeLogDelta>,
 }
 
 impl Default for HummockVersionDelta {
@@ -185,13 +185,16 @@ impl HummockVersionDelta {
                 .iter()
                 .map(|table_id| TableId::new(*table_id))
                 .collect(),
-            new_change_log: delta
-                .new_change_log
+            change_log_delta: delta
+                .change_log_delta
                 .iter()
-                .map(|(table_id, new_log)| {
+                .map(|(table_id, log_delta)| {
                     (
                         TableId::new(*table_id),
-                        EpochNewChangeLog::from_protobuf(new_log),
+                        ChangeLogDelta {
+                            new_log: log_delta.new_log.clone(),
+                            truncate_epoch: log_delta.truncate_epoch,
+                        },
                     )
                 })
                 .collect(),
@@ -216,10 +219,10 @@ impl HummockVersionDelta {
                 .iter()
                 .map(|table_id| table_id.table_id)
                 .collect(),
-            new_change_log: self
-                .new_change_log
+            change_log_delta: self
+                .change_log_delta
                 .iter()
-                .map(|(table_id, new_log)| (table_id.table_id, new_log.to_protobuf()))
+                .map(|(table_id, log_delta)| (table_id.table_id, log_delta.clone()))
                 .collect(),
         }
     }
@@ -248,7 +251,8 @@ impl HummockVersionDelta {
                     })
                 })
             })
-            .chain(self.new_change_log.values().flat_map(|new_log| {
+            .chain(self.change_log_delta.values().flat_map(|delta| {
+                let new_log = delta.new_log.as_ref().unwrap();
                 new_log
                     .new_value
                     .iter()
