@@ -259,7 +259,7 @@ where
             .as_ref()
             .to_socket_addrs()?
             .next()
-            .expect(format!("failed to resolve {}", server.as_ref()).as_str());
+            .unwrap_or_else(|| panic!("failed to resolve {}", server.as_ref()));
         wait(
             || {
                 TcpStream::connect_timeout(&addr, Duration::from_secs(1))?;

@@ -39,8 +39,16 @@ fi
 category = "RiseDev - Test - Source Test - Kafka"
 description = "Delete all kafka topics."
 dependencies = ["kafka-hook"]
-command = "rpk"
-args = ["topic", "delete", "-r", "*"]
+script = '''
+#!/usr/bin/env sh
+set -e
+if [ -n "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" ]; then
+    echo "Deleting all Kafka topics..."
+    rpk topic delete -r "*"
+else
+    echo "No Kafka to clean."
+fi
+'''
 
 [tasks.kafka-topics]
 category = "RiseDev - Test - Source Test - Kafka"
