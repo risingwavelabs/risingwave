@@ -999,7 +999,6 @@ fn to_sync_result(result: &HummockResult<SyncedData>) -> HummockResult<SyncResul
                         staging_sstable_info.old_value_sstable_infos().clone()
                     })
                     .collect(),
-                log_store_table_ids: sync_data.log_store_table_ids.iter().cloned().collect(),
             })
         }
         Err(e) => Err(HummockError::other(format!(

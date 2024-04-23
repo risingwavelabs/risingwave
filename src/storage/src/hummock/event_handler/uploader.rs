@@ -23,7 +23,6 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, LazyLock};
 use std::task::{ready, Context, Poll};
 
-use ahash::HashSet;
 use futures::future::{try_join_all, TryJoinAll};
 use futures::FutureExt;
 use itertools::Itertools;
@@ -398,7 +397,6 @@ struct UnsealedEpochData {
     spilled_data: SpilledData,
 
     table_watermarks: HashMap<TableId, (WatermarkDirection, Vec<VnodeWatermark>, BitmapBuilder)>,
-    log_store_table_ids: HashSet<TableId>,
 }
 
 impl UnsealedEpochData {
@@ -479,8 +477,6 @@ struct SealedData {
     spilled_data: SpilledData,
 
     table_watermarks: HashMap<TableId, TableWatermarks>,
-
-    log_store_table_ids: HashSet<TableId>,
 }
 
 impl SealedData {
@@ -565,8 +561,6 @@ impl SealedData {
                 }
             };
         }
-        self.log_store_table_ids
-            .extend(unseal_epoch_data.log_store_table_ids);
     }
 
     fn add_merged_imm(&mut self, merged_imm: &ImmutableMemtable) {
@@ -689,7 +683,6 @@ struct SyncingData {
     // newer data at the front
     uploaded: VecDeque<StagingSstableInfo>,
     table_watermarks: HashMap<TableId, TableWatermarks>,
-    log_store_table_ids: HashSet<TableId>,
 }
 
 impl SyncingData {
@@ -701,7 +694,6 @@ impl SyncingData {
 pub struct SyncedData {
     pub staging_ssts: Vec<StagingSstableInfo>,
     pub table_watermarks: HashMap<TableId, TableWatermarks>,
-    pub log_store_table_ids: HashSet<TableId>,
 }
 
 // newer staging sstable info at the front
@@ -849,9 +841,6 @@ impl HummockUploader {
             self.max_sealed_epoch
         );
         let unsealed_data = self.unsealed_data.entry(epoch).or_default();
-        if imm.has_old_value() {
-            unsealed_data.log_store_table_ids.insert(imm.table_id);
-        }
         unsealed_data.imms.push_front(imm);
     }
 
@@ -990,7 +979,6 @@ impl HummockUploader {
                     uploaded_data,
                 },
             table_watermarks,
-            log_store_table_ids,
             ..
         } = self.sealed_data.drain();
 
@@ -1012,7 +1000,6 @@ impl HummockUploader {
             uploading_tasks: try_join_all_upload_task,
             uploaded: uploaded_data,
             table_watermarks,
-            log_store_table_ids,
         });
 
         self.context
@@ -1143,7 +1130,6 @@ impl HummockUploader {
                 SyncedData {
                     staging_ssts: sstable_infos,
                     table_watermarks: syncing_data.table_watermarks,
-                    log_store_table_ids: syncing_data.log_store_table_ids,
                 }
             });
             self.add_synced_data(epoch, result);

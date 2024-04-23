@@ -1151,7 +1151,6 @@ fn collect_commit_epoch_info(
     let mut synced_ssts: Vec<ExtendedSstableInfo> = vec![];
     let mut table_watermarks = Vec::with_capacity(resps.len());
     let mut old_value_ssts = Vec::with_capacity(resps.len());
-    let mut log_store_table_ids = HashSet::new();
     for resp in resps {
         let ssts_iter = resp.synced_sstables.into_iter().map(|grouped| {
             let sst_info = grouped.sst.expect("field not None");
@@ -1165,7 +1164,6 @@ fn collect_commit_epoch_info(
         synced_ssts.extend(ssts_iter);
         table_watermarks.push(resp.table_watermarks);
         old_value_ssts.extend(resp.old_value_sstables);
-        log_store_table_ids.extend(resp.log_store_table_ids);
     }
     let new_table_fragment_info = if let Command::CreateStreamingJob {
         table_fragments, ..
@@ -1188,7 +1186,7 @@ fn collect_commit_epoch_info(
         old_value_ssts.into_iter(),
         synced_ssts.iter().map(|sst| &sst.sst_info),
         epochs,
-        log_store_table_ids.into_iter(),
+        command_ctx.log_store_table_ids.iter().map(|t| t.table_id),
     );
 
     CommitEpochInfo::new(

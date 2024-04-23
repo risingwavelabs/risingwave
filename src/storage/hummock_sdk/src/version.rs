@@ -19,7 +19,7 @@ use std::sync::Arc;
 use prost::Message;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::group_delta::DeltaType;
-use risingwave_pb::hummock::hummock_version::PbLevels;
+use risingwave_pb::hummock::hummock_version::Levels as PbLevels;
 use risingwave_pb::hummock::hummock_version_delta::GroupDeltas as PbGroupDeltas;
 use risingwave_pb::hummock::{
     HummockVersionDelta as PbHummockVersionDelta, PbHummockVersion, SstableInfo,

@@ -523,13 +523,12 @@ impl LocalBarrierWorker {
             sync_result,
         } = result;
 
-        let (synced_sstables, table_watermarks, old_value_ssts, log_store_table_ids) = sync_result
+        let (synced_sstables, table_watermarks, old_value_ssts) = sync_result
             .map(|sync_result| {
                 (
                     sync_result.uncommitted_ssts,
                     sync_result.table_watermarks,
                     sync_result.old_value_ssts,
-                    sync_result.log_store_table_ids,
                 )
             })
             .unwrap_or_default();
@@ -563,10 +562,6 @@ impl LocalBarrierWorker {
                         old_value_sstables: old_value_ssts
                             .into_iter()
                             .map(|sst| sst.sst_info)
-                            .collect(),
-                        log_store_table_ids: log_store_table_ids
-                            .into_iter()
-                            .map(|table_id| table_id.table_id)
                             .collect(),
                     },
                 ),

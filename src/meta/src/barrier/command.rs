@@ -355,6 +355,8 @@ pub struct CommandContext {
 
     barrier_manager_context: GlobalBarrierManagerContext,
 
+    pub log_store_table_ids: HashSet<TableId>,
+
     /// The tracing span of this command.
     ///
     /// Differs from [`TracedEpoch`], this span focuses on the lifetime of the corresponding
@@ -382,6 +384,8 @@ impl CommandContext {
             current_paused_reason,
             command,
             kind,
+            // TODO: maintain the set of log store table ids
+            log_store_table_ids: HashSet::new(),
             barrier_manager_context,
             span,
         }

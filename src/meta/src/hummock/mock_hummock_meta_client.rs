@@ -157,6 +157,7 @@ impl HummockMetaClient for MockHummockMetaClient {
     }
 
     async fn commit_epoch(&self, epoch: HummockEpoch, sync_result: SyncResult) -> Result<()> {
+        let version: HummockVersion = self.hummock_manager.get_current_version().await;
         let sst_to_worker = sync_result
             .uncommitted_ssts
             .iter()
@@ -170,10 +171,11 @@ impl HummockMetaClient for MockHummockMetaClient {
                 .map(|sst| sst.sst_info),
             sync_result.uncommitted_ssts.iter().map(|sst| &sst.sst_info),
             &vec![epoch],
-            sync_result
-                .log_store_table_ids
-                .iter()
-                .map(|table_id| table_id.table_id),
+            version
+                .levels
+                .values()
+                .flat_map(|group| group.member_table_ids.iter())
+                .cloned(),
         );
         self.hummock_manager
             .commit_epoch(
