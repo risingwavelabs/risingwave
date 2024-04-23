@@ -637,7 +637,7 @@ mod tests {
             .unwrap()
             .get::<usize, Option<EnumString>>(1)
             .unwrap();
-        assert_eq!("happy", got_new.value.as_str());
+        assert_eq!("happy", got_new.0.as_str());
         client.execute("DROP TABLE person", &[]).await.unwrap();
         client.execute("DROP TYPE mood", &[]).await.unwrap();
     }
