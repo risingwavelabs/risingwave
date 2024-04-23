@@ -42,6 +42,7 @@ pub enum StatementType {
     FETCH,
     COPY,
     EXPLAIN,
+    CLOSE_CURSOR,
     CREATE_TABLE,
     CREATE_MATERIALIZED_VIEW,
     CREATE_VIEW,
@@ -55,8 +56,10 @@ pub enum StatementType {
     CREATE_FUNCTION,
     CREATE_CONNECTION,
     COMMENT,
+    DECLARE_CURSOR,
     DESCRIBE,
     GRANT_PRIVILEGE,
+    DISCARD,
     DROP_TABLE,
     DROP_MATERIALIZED_VIEW,
     DROP_VIEW,
@@ -100,8 +103,10 @@ pub enum StatementType {
     ROLLBACK,
     SET_TRANSACTION,
     CANCEL_COMMAND,
+    FETCH_CURSOR,
     WAIT,
     KILL,
+    RECOVER,
 }
 
 impl std::fmt::Display for StatementType {
@@ -257,6 +262,7 @@ impl StatementType {
             Statement::AlterTable { .. } => Ok(StatementType::ALTER_TABLE),
             Statement::AlterSystem { .. } => Ok(StatementType::ALTER_SYSTEM),
             Statement::DropFunction { .. } => Ok(StatementType::DROP_FUNCTION),
+            Statement::Discard(..) => Ok(StatementType::DISCARD),
             Statement::SetVariable { .. } => Ok(StatementType::SET_VARIABLE),
             Statement::ShowVariable { .. } => Ok(StatementType::SHOW_VARIABLE),
             Statement::StartTransaction { .. } => Ok(StatementType::START_TRANSACTION),
@@ -290,6 +296,9 @@ impl StatementType {
                 }
             },
             Statement::Explain { .. } => Ok(StatementType::EXPLAIN),
+            Statement::DeclareCursor { .. } => Ok(StatementType::DECLARE_CURSOR),
+            Statement::FetchCursor { .. } => Ok(StatementType::FETCH_CURSOR),
+            Statement::CloseCursor { .. } => Ok(StatementType::CLOSE_CURSOR),
             Statement::Flush => Ok(StatementType::FLUSH),
             Statement::Wait => Ok(StatementType::WAIT),
             _ => Err("unsupported statement type".to_string()),
@@ -336,6 +345,7 @@ impl StatementType {
                 | StatementType::DELETE_RETURNING
                 | StatementType::UPDATE_RETURNING
                 | StatementType::CANCEL_COMMAND
+                | StatementType::FETCH_CURSOR
         )
     }
 

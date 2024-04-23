@@ -3,10 +3,9 @@ FROM ubuntu:22.04 AS base
 ENV LANG en_US.utf8
 
 RUN apt-get update \
-  && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-11-jdk
+  && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-11-jdk software-properties-common
 
 # Install Python 3.12
-RUN apt-get -y install software-properties-common
 RUN add-apt-repository ppa:deadsnakes/ppa -y && \
     apt-get update -yy && \
     DEBIAN_FRONTEND=noninteractive apt-get install python3.12 python3.12-dev -yy
@@ -76,7 +75,7 @@ WORKDIR /risingwave
 ENV ENABLE_BUILD_DASHBOARD=1
 
 RUN cargo fetch && \
-  cargo build -p risingwave_cmd_all --release --features "rw-static-link" --features embedded-python-udf && \
+  cargo build -p risingwave_cmd_all --release --features "rw-static-link" --features embedded-deno-udf --features embedded-python-udf && \
   mkdir -p /risingwave/bin && \
     mv /risingwave/target/release/risingwave /risingwave/bin/ && \
     mv /risingwave/target/release/risingwave.dwp /risingwave/bin/ && \

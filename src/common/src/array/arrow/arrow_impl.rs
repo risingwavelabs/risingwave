@@ -52,6 +52,7 @@ use crate::util::iter_util::ZipEqFast;
 
 /// Converts RisingWave array to Arrow array with the schema.
 /// This function will try to convert the array if the type is not same with the schema.
+#[allow(dead_code)]
 pub fn to_record_batch_with_schema(
     schema: arrow_schema::SchemaRef,
     chunk: &DataChunk,
@@ -837,7 +838,7 @@ converts!(TimestamptzArray, arrow_array::TimestampMicrosecondArray, @map);
 converts!(IntervalArray, arrow_array::IntervalMonthDayNanoArray, @map);
 
 /// Converts RisingWave value from and into Arrow value.
-trait FromIntoArrow {
+pub trait FromIntoArrow {
     /// The corresponding element type in the Arrow array.
     type ArrowType;
     fn from_arrow(value: Self::ArrowType) -> Self;

@@ -28,7 +28,7 @@ use prometheus::core::{AtomicU64, GenericGauge};
 use prometheus::{Histogram, IntGauge};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
-use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo, SyncResult};
 use thiserror_ext::AsReport;
 use tokio::spawn;
 use tokio::sync::mpsc::error::SendError;
@@ -39,7 +39,7 @@ use tracing::{debug, error, info, trace, warn};
 use super::refiller::{CacheRefillConfig, CacheRefiller};
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::filter_key_extractor::FilterKeyExtractorManager;
-use crate::hummock::compactor::{compact, CompactorContext};
+use crate::hummock::compactor::{await_tree_key, compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::refiller::{CacheRefillerEvent, SpawnRefillTask};
 use crate::hummock::event_handler::uploader::{
@@ -60,7 +60,6 @@ use crate::hummock::{
 };
 use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
-use crate::store::SyncResult;
 
 #[derive(Clone)]
 pub struct BufferTracker {
@@ -245,8 +244,8 @@ impl HummockEventHandler {
                     LazyLock::new(|| AtomicUsize::new(0));
                 let tree_root = upload_compactor_context.await_tree_reg.as_ref().map(|reg| {
                     let upload_task_id = NEXT_UPLOAD_TASK_ID.fetch_add(1, Relaxed);
-                    reg.write().register(
-                        format!("spawn_upload_task/{}", upload_task_id),
+                    reg.register(
+                        await_tree_key::SpawnUploadTask { id: upload_task_id },
                         format!("Spawn Upload Task: {}", task_info),
                     )
                 });

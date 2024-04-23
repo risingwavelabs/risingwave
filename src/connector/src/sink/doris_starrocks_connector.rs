@@ -15,17 +15,17 @@
 use core::mem;
 use core::time::Duration;
 use std::collections::HashMap;
+use std::convert::Infallible;
 
 use anyhow::Context;
 use base64::engine::general_purpose;
 use base64::Engine;
 use bytes::{BufMut, Bytes, BytesMut};
-use http::request::Builder;
-use hyper::body::{Body, Sender};
-use hyper::client::HttpConnector;
-use hyper::{body, Client, Request, StatusCode};
-use hyper_tls::HttpsConnector;
+use futures::StreamExt;
+use reqwest::{redirect, Body, Client, RequestBuilder, StatusCode};
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
+use url::Url;
 
 use super::{Result, SinkError};
 
@@ -40,6 +40,8 @@ const WAIT_HANDDLE_TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const DORIS: &str = "doris";
 const STARROCKS: &str = "starrocks";
+const LOCALHOST: &str = "localhost";
+const LOCALHOST_IP: &str = "127.0.0.1";
 pub struct HeaderBuilder {
     header: HashMap<String, String>,
 }
@@ -158,45 +160,54 @@ pub struct InserterInnerBuilder {
     url: String,
     header: HashMap<String, String>,
     sender: Option<Sender>,
+    fe_host: String,
 }
 impl InserterInnerBuilder {
-    pub fn new(url: String, db: String, table: String, header: HashMap<String, String>) -> Self {
+    pub fn new(
+        url: String,
+        db: String,
+        table: String,
+        header: HashMap<String, String>,
+    ) -> Result<Self> {
+        let fe_host = Url::parse(&url)
+            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?
+            .host_str()
+            .ok_or_else(|| {
+                SinkError::DorisStarrocksConnect(anyhow::anyhow!("Can't get fe host from url"))
+            })?
+            .to_string();
         let url = format!("{}/api/{}/{}/_stream_load", url, db, table);
 
-        Self {
+        Ok(Self {
             url,
             sender: None,
             header,
-        }
+            fe_host,
+        })
     }
 
-    fn build_request_and_client(
-        &self,
-        uri: String,
-    ) -> (Builder, Client<HttpsConnector<HttpConnector>>) {
-        let mut builder = Request::put(uri);
+    fn build_request(&self, uri: String) -> RequestBuilder {
+        let client = Client::builder()
+            .pool_idle_timeout(POOL_IDLE_TIMEOUT)
+            .redirect(redirect::Policy::none()) // we handle redirect by ourselves
+            .build()
+            .unwrap();
+
+        let mut builder = client.put(uri);
         for (k, v) in &self.header {
             builder = builder.header(k, v);
         }
-
-        let connector = HttpsConnector::new();
-        let client = Client::builder()
-            .pool_idle_timeout(POOL_IDLE_TIMEOUT)
-            .build(connector);
-
-        (builder, client)
+        builder
     }
 
     pub async fn build(&self) -> Result<InserterInner> {
-        let (builder, client) = self.build_request_and_client(self.url.clone());
-        let request_get_url = builder
-            .body(Body::empty())
-            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
-        let resp = client
-            .request(request_get_url)
+        let builder = self.build_request(self.url.clone());
+        let resp = builder
+            .send()
             .await
             .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
-        let be_url = if resp.status() == StatusCode::TEMPORARY_REDIRECT {
+        // TODO: shall we let `reqwest` handle the redirect?
+        let mut be_url = if resp.status() == StatusCode::TEMPORARY_REDIRECT {
             resp.headers()
                 .get("location")
                 .ok_or_else(|| {
@@ -207,29 +218,49 @@ impl InserterInnerBuilder {
                 .to_str()
                 .context("Can't get doris BE url in header")
                 .map_err(SinkError::DorisStarrocksConnect)?
+                .to_string()
         } else {
             return Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!(
                 "Can't get doris BE url",
             )));
         };
 
-        let (builder, client) = self.build_request_and_client(be_url.to_string());
-        let (sender, body) = Body::channel();
-        let request = builder
-            .body(body)
-            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
-        let future = client.request(request);
+        if self.fe_host != LOCALHOST && self.fe_host != LOCALHOST_IP {
+            let mut parsed_be_url =
+                Url::parse(&be_url).map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
+            let be_host = parsed_be_url.host_str().ok_or_else(|| {
+                SinkError::DorisStarrocksConnect(anyhow::anyhow!("Can't get be host from url"))
+            })?;
+
+            if be_host == LOCALHOST || be_host == LOCALHOST_IP {
+                // if be host is 127.0.0.1, we may can't connect to it directly,
+                // so replace it with fe host
+                parsed_be_url
+                    .set_host(Some(self.fe_host.as_str()))
+                    .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
+                be_url = parsed_be_url.as_str().into();
+            }
+        }
+
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let body = Body::wrap_stream(
+            tokio_stream::wrappers::UnboundedReceiverStream::new(receiver).map(Ok::<_, Infallible>),
+        );
+        let builder = self.build_request(be_url).body(body);
 
         let handle: JoinHandle<Result<Vec<u8>>> = tokio::spawn(async move {
-            let response = future
+            let response = builder
+                .send()
                 .await
                 .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
             let status = response.status();
-            let raw = body::to_bytes(response.into_body())
+            let raw = response
+                .bytes()
                 .await
                 .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?
-                .to_vec();
-            if status == StatusCode::OK && !raw.is_empty() {
+                .into();
+
+            if status == StatusCode::OK {
                 Ok(raw)
             } else {
                 Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!(
@@ -243,6 +274,8 @@ impl InserterInnerBuilder {
         Ok(InserterInner::new(sender, handle))
     }
 }
+
+type Sender = UnboundedSender<Bytes>;
 
 pub struct InserterInner {
     sender: Option<Sender>,
@@ -265,35 +298,16 @@ impl InserterInner {
 
         let chunk = mem::replace(&mut self.buffer, BytesMut::with_capacity(BUFFER_SIZE));
 
-        let is_timed_out = match tokio::time::timeout(
-            SEND_CHUNK_TIMEOUT,
-            self.sender.as_mut().unwrap().send_data(chunk.into()),
-        )
-        .await
-        {
-            Ok(Ok(_)) => return Ok(()),
-            Ok(Err(_)) => false,
-            Err(_) => true,
-        };
-        self.abort()?;
+        if let Err(_e) = self.sender.as_mut().unwrap().send(chunk.freeze()) {
+            self.sender.take();
+            self.wait_handle().await?;
 
-        let res = self.wait_handle().await;
-
-        if is_timed_out {
-            Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!("timeout")))
-        } else {
-            res?;
             Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!(
                 "channel closed"
             )))
+        } else {
+            Ok(())
         }
-    }
-
-    fn abort(&mut self) -> Result<()> {
-        if let Some(sender) = self.sender.take() {
-            sender.abort();
-        }
-        Ok(())
     }
 
     pub async fn write(&mut self, data: Bytes) -> Result<()> {

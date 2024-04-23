@@ -32,6 +32,7 @@ use risingwave_meta::*;
 use risingwave_meta_service::*;
 pub use rpc::{ElectionClient, ElectionMember, EtcdElectionClient};
 use server::rpc_serve;
+pub use server::started::get as is_server_started;
 
 use crate::manager::MetaOpts;
 
@@ -361,8 +362,10 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .developer
                     .enable_check_task_level_overlap,
                 enable_dropped_column_reclaim: config.meta.enable_dropped_column_reclaim,
+                object_store_config: config.storage.object_store,
             },
             config.system.into_init_system_params(),
+            Default::default(),
         )
         .await
         .unwrap();

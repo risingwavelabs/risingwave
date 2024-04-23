@@ -67,7 +67,6 @@ use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
 use crate::cache::cache_may_stale;
 use crate::common::cache::{StateCache, StateCacheFiller};
 use crate::common::table::state_table_cache::StateTableWatermarkCache;
-use crate::consistency::insane;
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 /// This num is arbitrary and we may want to improve this choice in the future.
@@ -212,6 +211,10 @@ where
             .now_or_never()
             .expect("non-replicated state store should start immediately.")
             .expect("non-replicated state store should not wait_for_epoch, and fail because of it.")
+    }
+
+    pub fn state_store(&self) -> &S {
+        &self.store
     }
 }
 
@@ -363,7 +366,7 @@ where
             )
         };
 
-        let is_consistent_op = if insane() {
+        let is_consistent_op = if crate::consistency::insane() {
             // In insane mode, we will have inconsistent operations applied on the table, even if
             // our executor code do not expect that.
             false

@@ -12,20 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::StreamExt;
-use futures_async_stream::try_stream;
 use rand::Rng;
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::stream_record::{Record, RecordType};
 use risingwave_common::array::Op;
 use risingwave_common::field_generator::{FieldGeneratorImpl, VarcharProperty};
-use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use smallvec::SmallVec;
 
-use super::{BoxedMessageStream, Execute, Executor, Message, StreamExecutorError};
 use crate::consistency::insane;
+use crate::executor::prelude::*;
 
 /// [`TroublemakerExecutor`] is used to make some trouble in the stream graph. Specifically,
 /// it is attached to `StreamScan` and `Source` executors in **insane mode**. It randomly
@@ -110,7 +106,10 @@ impl TroublemakerExecutor {
                     }
                 }
                 Message::Barrier(barrier) => {
-                    assert!(vars.chunk_builder.take().is_none(), "we don't merge chunks");
+                    assert!(
+                        vars.chunk_builder.take().is_none(),
+                        "we don't merge chunks across barriers"
+                    );
                     yield Message::Barrier(barrier);
                 }
                 _ => yield msg,

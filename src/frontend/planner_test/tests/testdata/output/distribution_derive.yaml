@@ -20,8 +20,8 @@
     StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden)], stream_key: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_columns: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(ak1.a._row_id, ak1.k1, bk1.b._row_id) }
       └─StreamDeltaJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v, ak1.a._row_id, ak1.k1, bk1.b._row_id] }
-        ├─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: Backfill, pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
-        └─StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], stream_scan_type: UpstreamOnly, pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) }
+        ├─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: Backfill, stream_key: [ak1.a._row_id], pk: [k1, a._row_id], dist: UpstreamHashShard(ak1.k1) }
+        └─StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], stream_scan_type: UpstreamOnly, stream_key: [bk1.b._row_id], pk: [k1, b._row_id], dist: UpstreamHashShard(bk1.k1) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden)], stream_key: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_columns: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_conflict: NoCheck }
@@ -34,12 +34,12 @@
     └── StreamExchange Hash([2, 4, 3]) from 5
 
     Fragment 2
-    StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: Backfill, pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) } { tables: [ StreamScan: 0 ] }
+    StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: Backfill, stream_key: [ak1.a._row_id], pk: [k1, a._row_id], dist: UpstreamHashShard(ak1.k1) } { tables: [ StreamScan: 0 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 3
-    StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], stream_scan_type: UpstreamOnly, pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) } { tables: [ StreamScan: 1 ] }
+    StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], stream_scan_type: UpstreamOnly, stream_key: [bk1.b._row_id], pk: [k1, b._row_id], dist: UpstreamHashShard(bk1.k1) } { tables: [ StreamScan: 1 ] }
     ├── Upstream
     └── BatchPlanNode
 
@@ -72,8 +72,8 @@
     StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden)], stream_key: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_columns: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(ak1.a._row_id, ak1.k1, bk1.b._row_id) }
       └─StreamDeltaJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v, ak1.a._row_id, ak1.k1, bk1.b._row_id] }
-        ├─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: Backfill, pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
-        └─StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], stream_scan_type: UpstreamOnly, pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) }
+        ├─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: Backfill, stream_key: [ak1.a._row_id], pk: [k1, a._row_id], dist: UpstreamHashShard(ak1.k1) }
+        └─StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], stream_scan_type: UpstreamOnly, stream_key: [bk1.b._row_id], pk: [k1, b._row_id], dist: UpstreamHashShard(bk1.k1) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden)], stream_key: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_columns: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_conflict: NoCheck }
@@ -86,12 +86,12 @@
     └── StreamExchange Hash([2, 4, 3]) from 5
 
     Fragment 2
-    StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: Backfill, pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) } { tables: [ StreamScan: 0 ] }
+    StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: Backfill, stream_key: [ak1.a._row_id], pk: [k1, a._row_id], dist: UpstreamHashShard(ak1.k1) } { tables: [ StreamScan: 0 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 3
-    StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], stream_scan_type: UpstreamOnly, pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) } { tables: [ StreamScan: 1 ] }
+    StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], stream_scan_type: UpstreamOnly, stream_key: [bk1.b._row_id], pk: [k1, b._row_id], dist: UpstreamHashShard(bk1.k1) } { tables: [ StreamScan: 1 ] }
     ├── Upstream
     └── BatchPlanNode
 
@@ -124,8 +124,8 @@
     StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden)], stream_key: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_columns: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(ak1.a._row_id, ak1.k1, bk1.b._row_id) }
       └─StreamDeltaJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v, ak1.a._row_id, ak1.k1, bk1.b._row_id] }
-        ├─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: Backfill, pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
-        └─StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], stream_scan_type: UpstreamOnly, pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) }
+        ├─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: Backfill, stream_key: [ak1.a._row_id], pk: [k1, a._row_id], dist: UpstreamHashShard(ak1.k1) }
+        └─StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], stream_scan_type: UpstreamOnly, stream_key: [bk1.b._row_id], pk: [k1, b._row_id], dist: UpstreamHashShard(bk1.k1) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden)], stream_key: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_columns: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_conflict: NoCheck }
@@ -138,12 +138,12 @@
     └── StreamExchange Hash([2, 4, 3]) from 5
 
     Fragment 2
-    StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: Backfill, pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) } { tables: [ StreamScan: 0 ] }
+    StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: Backfill, stream_key: [ak1.a._row_id], pk: [k1, a._row_id], dist: UpstreamHashShard(ak1.k1) } { tables: [ StreamScan: 0 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 3
-    StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], stream_scan_type: UpstreamOnly, pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) } { tables: [ StreamScan: 1 ] }
+    StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], stream_scan_type: UpstreamOnly, stream_key: [bk1.b._row_id], pk: [k1, b._row_id], dist: UpstreamHashShard(bk1.k1) } { tables: [ StreamScan: 1 ] }
     ├── Upstream
     └── BatchPlanNode
 
@@ -176,8 +176,8 @@
     StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden)], stream_key: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_columns: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(ak1.a._row_id, ak1.k1, bk1.b._row_id) }
       └─StreamDeltaJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v, ak1.a._row_id, ak1.k1, bk1.b._row_id] }
-        ├─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: Backfill, pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
-        └─StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], stream_scan_type: UpstreamOnly, pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) }
+        ├─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: Backfill, stream_key: [ak1.a._row_id], pk: [k1, a._row_id], dist: UpstreamHashShard(ak1.k1) }
+        └─StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], stream_scan_type: UpstreamOnly, stream_key: [bk1.b._row_id], pk: [k1, b._row_id], dist: UpstreamHashShard(bk1.k1) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden)], stream_key: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_columns: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_conflict: NoCheck }
@@ -190,12 +190,12 @@
     └── StreamExchange Hash([2, 4, 3]) from 5
 
     Fragment 2
-    StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: Backfill, pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) } { tables: [ StreamScan: 0 ] }
+    StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: Backfill, stream_key: [ak1.a._row_id], pk: [k1, a._row_id], dist: UpstreamHashShard(ak1.k1) } { tables: [ StreamScan: 0 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 3
-    StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], stream_scan_type: UpstreamOnly, pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) } { tables: [ StreamScan: 1 ] }
+    StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], stream_scan_type: UpstreamOnly, stream_key: [bk1.b._row_id], pk: [k1, b._row_id], dist: UpstreamHashShard(bk1.k1) } { tables: [ StreamScan: 1 ] }
     ├── Upstream
     └── BatchPlanNode
 
@@ -233,7 +233,7 @@
     └─StreamProject { exprs: [max(a.v), a.k1] }
       └─StreamHashAgg { group_key: [a.k1], aggs: [max(a.v), count] }
         └─StreamExchange { dist: HashShard(a.k1) }
-          └─StreamTableScan { table: a, columns: [a.k1, a.v, a._row_id], stream_scan_type: ArrangementBackfill, pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
+          └─StreamTableScan { table: a, columns: [a.k1, a.v, a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [a._row_id], pk: [_row_id], dist: UpstreamHashShard(a._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [max_v, a.k1(hidden)], stream_key: [a.k1], pk_columns: [a.k1], pk_conflict: NoCheck }
@@ -244,17 +244,12 @@
             └── StreamExchange Hash([0]) from 1
 
     Fragment 1
-    StreamTableScan { table: a, columns: [a.k1, a.v, a._row_id], stream_scan_type: ArrangementBackfill, pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
+    StreamTableScan { table: a, columns: [a.k1, a.v, a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [a._row_id], pk: [_row_id], dist: UpstreamHashShard(a._row_id) }
     ├── tables: [ StreamScan: 2 ]
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0
-    ├── columns: [ a_k1, a_v, a__row_id ]
-    ├── primary key: [ $0 ASC, $1 DESC, $2 ASC ]
-    ├── value indices: [ 1, 2 ]
-    ├── distribution key: [ 0 ]
-    └── read pk prefix len hint: 1
+    Table 0 { columns: [ a_k1, a_v, a__row_id ], primary key: [ $0 ASC, $1 DESC, $2 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 1 { columns: [ a_k1, max(a_v), count ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -284,13 +279,13 @@
     StreamMaterialize { columns: [max_v, ak1.k1(hidden)], stream_key: [ak1.k1], pk_columns: [ak1.k1], pk_conflict: NoCheck }
     └─StreamProject { exprs: [max(ak1.v), ak1.k1] }
       └─StreamHashAgg { group_key: [ak1.k1], aggs: [max(ak1.v), count] }
-        └─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: ArrangementBackfill, pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
+        └─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [ak1.a._row_id], pk: [k1, a._row_id], dist: UpstreamHashShard(ak1.k1) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [max_v, ak1.k1(hidden)], stream_key: [ak1.k1], pk_columns: [ak1.k1], pk_conflict: NoCheck } { tables: [ Materialize: 4294967294 ] }
     └── StreamProject { exprs: [max(ak1.v), ak1.k1] }
         └── StreamHashAgg { group_key: [ak1.k1], aggs: [max(ak1.v), count] } { tables: [ HashAggState: 1, HashAggCall0: 0 ] }
-            └── StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: ArrangementBackfill, pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
+            └── StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [ak1.a._row_id], pk: [k1, a._row_id], dist: UpstreamHashShard(ak1.k1) }
                 ├── tables: [ StreamScan: 2 ]
                 ├── Upstream
                 └── BatchPlanNode
@@ -299,13 +294,7 @@
 
     Table 1 { columns: [ ak1_k1, max(ak1_v), count ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 2
-    ├── columns: [ vnode, k1, a__row_id, backfill_finished, row_count ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3, 4 ]
-    ├── distribution key: [ 0 ]
-    ├── read pk prefix len hint: 1
-    └── vnode column idx: 0
+    Table 2 { columns: [ vnode, k1, a__row_id, backfill_finished, row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294 { columns: [ max_v, ak1.k1 ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
@@ -325,13 +314,13 @@
     StreamMaterialize { columns: [max_v, ak1k2.k1(hidden)], stream_key: [ak1k2.k1], pk_columns: [ak1k2.k1], pk_conflict: NoCheck }
     └─StreamProject { exprs: [max(ak1k2.v), ak1k2.k1] }
       └─StreamHashAgg { group_key: [ak1k2.k1], aggs: [max(ak1k2.v), count] }
-        └─StreamTableScan { table: ak1k2, columns: [ak1k2.k1, ak1k2.v, ak1k2.k2, ak1k2.a._row_id], stream_scan_type: ArrangementBackfill, pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1) }
+        └─StreamTableScan { table: ak1k2, columns: [ak1k2.k1, ak1k2.v, ak1k2.k2, ak1k2.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [ak1k2.a._row_id], pk: [k1, k2, a._row_id], dist: UpstreamHashShard(ak1k2.k1) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [max_v, ak1k2.k1(hidden)], stream_key: [ak1k2.k1], pk_columns: [ak1k2.k1], pk_conflict: NoCheck } { tables: [ Materialize: 4294967294 ] }
     └── StreamProject { exprs: [max(ak1k2.v), ak1k2.k1] }
         └── StreamHashAgg { group_key: [ak1k2.k1], aggs: [max(ak1k2.v), count] } { tables: [ HashAggState: 1, HashAggCall0: 0 ] }
-            └── StreamTableScan { table: ak1k2, columns: [ak1k2.k1, ak1k2.v, ak1k2.k2, ak1k2.a._row_id], stream_scan_type: ArrangementBackfill, pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1) }
+            └── StreamTableScan { table: ak1k2, columns: [ak1k2.k1, ak1k2.v, ak1k2.k2, ak1k2.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [ak1k2.a._row_id], pk: [k1, k2, a._row_id], dist: UpstreamHashShard(ak1k2.k1) }
                 ├── tables: [ StreamScan: 2 ]
                 ├── Upstream
                 └── BatchPlanNode
@@ -340,13 +329,7 @@
 
     Table 1 { columns: [ ak1k2_k1, max(ak1k2_v), count ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 2
-    ├── columns: [ vnode, k1, k2, a__row_id, backfill_finished, row_count ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3, 4, 5 ]
-    ├── distribution key: [ 0 ]
-    ├── read pk prefix len hint: 1
-    └── vnode column idx: 0
+    Table 2 { columns: [ vnode, k1, k2, a__row_id, backfill_finished, row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294 { columns: [ max_v, ak1k2.k1 ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
@@ -368,7 +351,7 @@
     └─StreamProject { exprs: [max(ak1k2.v), ak1k2.k2] }
       └─StreamHashAgg { group_key: [ak1k2.k2], aggs: [max(ak1k2.v), count] }
         └─StreamExchange { dist: HashShard(ak1k2.k2) }
-          └─StreamTableScan { table: ak1k2, columns: [ak1k2.k2, ak1k2.v, ak1k2.k1, ak1k2.a._row_id], stream_scan_type: ArrangementBackfill, pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1) }
+          └─StreamTableScan { table: ak1k2, columns: [ak1k2.k2, ak1k2.v, ak1k2.k1, ak1k2.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [ak1k2.a._row_id], pk: [k1, k2, a._row_id], dist: UpstreamHashShard(ak1k2.k1) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [max_v, ak1k2.k2(hidden)], stream_key: [ak1k2.k2], pk_columns: [ak1k2.k2], pk_conflict: NoCheck }
@@ -378,7 +361,7 @@
             └── StreamExchange Hash([0]) from 1
 
     Fragment 1
-    StreamTableScan { table: ak1k2, columns: [ak1k2.k2, ak1k2.v, ak1k2.k1, ak1k2.a._row_id], stream_scan_type: ArrangementBackfill, pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1) }
+    StreamTableScan { table: ak1k2, columns: [ak1k2.k2, ak1k2.v, ak1k2.k1, ak1k2.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [ak1k2.a._row_id], pk: [k1, k2, a._row_id], dist: UpstreamHashShard(ak1k2.k1) }
     ├── tables: [ StreamScan: 2 ]
     ├── Upstream
     └── BatchPlanNode
@@ -387,13 +370,7 @@
 
     Table 1 { columns: [ ak1k2_k2, max(ak1k2_v), count ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 2
-    ├── columns: [ vnode, k1, k2, a__row_id, backfill_finished, row_count ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3, 4, 5 ]
-    ├── distribution key: [ 0 ]
-    ├── read pk prefix len hint: 1
-    └── vnode column idx: 0
+    Table 2 { columns: [ vnode, k1, k2, a__row_id, backfill_finished, row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294 { columns: [ max_v, ak1k2.k2 ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
@@ -413,27 +390,20 @@
     StreamMaterialize { columns: [sum_v, ak1k2.k1(hidden), ak1k2.k2(hidden)], stream_key: [ak1k2.k1, ak1k2.k2], pk_columns: [ak1k2.k1, ak1k2.k2], pk_conflict: NoCheck }
     └─StreamProject { exprs: [sum(ak1k2.v), ak1k2.k1, ak1k2.k2] }
       └─StreamHashAgg { group_key: [ak1k2.k1, ak1k2.k2], aggs: [sum(ak1k2.v), count] }
-        └─StreamTableScan { table: ak1k2, columns: [ak1k2.k1, ak1k2.k2, ak1k2.v, ak1k2.a._row_id], stream_scan_type: ArrangementBackfill, pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1) }
+        └─StreamTableScan { table: ak1k2, columns: [ak1k2.k1, ak1k2.k2, ak1k2.v, ak1k2.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [ak1k2.a._row_id], pk: [k1, k2, a._row_id], dist: UpstreamHashShard(ak1k2.k1) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [sum_v, ak1k2.k1(hidden), ak1k2.k2(hidden)], stream_key: [ak1k2.k1, ak1k2.k2], pk_columns: [ak1k2.k1, ak1k2.k2], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
+    StreamMaterialize { columns: [sum_v, ak1k2.k1(hidden), ak1k2.k2(hidden)], stream_key: [ak1k2.k1, ak1k2.k2], pk_columns: [ak1k2.k1, ak1k2.k2], pk_conflict: NoCheck } { tables: [ Materialize: 4294967294 ] }
     └── StreamProject { exprs: [sum(ak1k2.v), ak1k2.k1, ak1k2.k2] }
         └── StreamHashAgg { group_key: [ak1k2.k1, ak1k2.k2], aggs: [sum(ak1k2.v), count] } { tables: [ HashAggState: 0 ] }
-            └── StreamTableScan { table: ak1k2, columns: [ak1k2.k1, ak1k2.k2, ak1k2.v, ak1k2.a._row_id], stream_scan_type: ArrangementBackfill, pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1) }
+            └── StreamTableScan { table: ak1k2, columns: [ak1k2.k1, ak1k2.k2, ak1k2.v, ak1k2.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [ak1k2.a._row_id], pk: [k1, k2, a._row_id], dist: UpstreamHashShard(ak1k2.k1) }
                 ├── tables: [ StreamScan: 1 ]
                 ├── Upstream
                 └── BatchPlanNode
 
     Table 0 { columns: [ ak1k2_k1, ak1k2_k2, sum(ak1k2_v), count ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
-    Table 1
-    ├── columns: [ vnode, k1, k2, a__row_id, backfill_finished, row_count ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3, 4, 5 ]
-    ├── distribution key: [ 0 ]
-    ├── read pk prefix len hint: 1
-    └── vnode column idx: 0
+    Table 1 { columns: [ vnode, k1, k2, a__row_id, backfill_finished, row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294 { columns: [ sum_v, ak1k2.k1, ak1k2.k2 ], primary key: [ $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1 ], read pk prefix len hint: 2 }
 
@@ -453,27 +423,20 @@
     StreamMaterialize { columns: [sum_v, ak1.k1(hidden), ak1.k2(hidden)], stream_key: [ak1.k1, ak1.k2], pk_columns: [ak1.k1, ak1.k2], pk_conflict: NoCheck }
     └─StreamProject { exprs: [sum(ak1.v), ak1.k1, ak1.k2] }
       └─StreamHashAgg { group_key: [ak1.k1, ak1.k2], aggs: [sum(ak1.v), count] }
-        └─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.k2, ak1.v, ak1.a._row_id], stream_scan_type: ArrangementBackfill, pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
+        └─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.k2, ak1.v, ak1.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [ak1.a._row_id], pk: [k1, a._row_id], dist: UpstreamHashShard(ak1.k1) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [sum_v, ak1.k1(hidden), ak1.k2(hidden)], stream_key: [ak1.k1, ak1.k2], pk_columns: [ak1.k1, ak1.k2], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
+    StreamMaterialize { columns: [sum_v, ak1.k1(hidden), ak1.k2(hidden)], stream_key: [ak1.k1, ak1.k2], pk_columns: [ak1.k1, ak1.k2], pk_conflict: NoCheck } { tables: [ Materialize: 4294967294 ] }
     └── StreamProject { exprs: [sum(ak1.v), ak1.k1, ak1.k2] }
         └── StreamHashAgg { group_key: [ak1.k1, ak1.k2], aggs: [sum(ak1.v), count] } { tables: [ HashAggState: 0 ] }
-            └── StreamTableScan { table: ak1, columns: [ak1.k1, ak1.k2, ak1.v, ak1.a._row_id], stream_scan_type: ArrangementBackfill, pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
+            └── StreamTableScan { table: ak1, columns: [ak1.k1, ak1.k2, ak1.v, ak1.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [ak1.a._row_id], pk: [k1, a._row_id], dist: UpstreamHashShard(ak1.k1) }
                 ├── tables: [ StreamScan: 1 ]
                 ├── Upstream
                 └── BatchPlanNode
 
     Table 0 { columns: [ ak1_k1, ak1_k2, sum(ak1_v), count ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
-    Table 1
-    ├── columns: [ vnode, k1, a__row_id, backfill_finished, row_count ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3, 4 ]
-    ├── distribution key: [ 0 ]
-    ├── read pk prefix len hint: 1
-    └── vnode column idx: 0
+    Table 1 { columns: [ vnode, k1, a__row_id, backfill_finished, row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294 { columns: [ sum_v, ak1.k1, ak1.k2 ], primary key: [ $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1 ], read pk prefix len hint: 2 }
 
@@ -503,7 +466,7 @@
       └─StreamHashAgg { group_key: [a.k1], aggs: [max(count), count] }
         └─StreamHashAgg { group_key: [a.k1], aggs: [count] }
           └─StreamExchange { dist: HashShard(a.k1) }
-            └─StreamTableScan { table: a, columns: [a.k1, a._row_id], stream_scan_type: ArrangementBackfill, pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
+            └─StreamTableScan { table: a, columns: [a.k1, a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [a._row_id], pk: [_row_id], dist: UpstreamHashShard(a._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [max_num, a.k1(hidden)], stream_key: [a.k1], pk_columns: [a.k1], pk_conflict: NoCheck }
@@ -515,19 +478,14 @@
                 └── StreamExchange Hash([0]) from 1
 
     Fragment 1
-    StreamTableScan { table: a, columns: [a.k1, a._row_id], stream_scan_type: ArrangementBackfill, pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
+    StreamTableScan { table: a, columns: [a.k1, a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [a._row_id], pk: [_row_id], dist: UpstreamHashShard(a._row_id) }
     ├── tables: [ StreamScan: 3 ]
     ├── Upstream
     └── BatchPlanNode
 
     Table 0 { columns: [ a_k1, count ], primary key: [ $0 ASC, $1 DESC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 1
-    ├── columns: [ a_k1, max(count), count ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
-    ├── distribution key: [ 0 ]
-    └── read pk prefix len hint: 1
+    Table 1 { columns: [ a_k1, max(count), count ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 2 { columns: [ a_k1, count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -539,12 +497,7 @@
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294
-    ├── columns: [ max_num, a.k1 ]
-    ├── primary key: [ $1 ASC ]
-    ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 1 ]
-    └── read pk prefix len hint: 1
+    Table 4294967294 { columns: [ max_num, a.k1 ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
 - id: aggk1_from_aggk1k2
   before:
@@ -587,7 +540,7 @@
         └─StreamExchange { dist: HashShard(a.k1) }
           └─StreamHashAgg { group_key: [a.k1, a.k2], aggs: [count] }
             └─StreamExchange { dist: HashShard(a.k1, a.k2) }
-              └─StreamTableScan { table: a, columns: [a.k1, a.k2, a._row_id], stream_scan_type: ArrangementBackfill, pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
+              └─StreamTableScan { table: a, columns: [a.k1, a.k2, a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [a._row_id], pk: [_row_id], dist: UpstreamHashShard(a._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [max_num, a.k1(hidden)], stream_key: [a.k1], pk_columns: [a.k1], pk_conflict: NoCheck }
@@ -602,17 +555,12 @@
     └── StreamExchange Hash([0, 1]) from 2
 
     Fragment 2
-    StreamTableScan { table: a, columns: [a.k1, a.k2, a._row_id], stream_scan_type: ArrangementBackfill, pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
+    StreamTableScan { table: a, columns: [a.k1, a.k2, a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [a._row_id], pk: [_row_id], dist: UpstreamHashShard(a._row_id) }
     ├── tables: [ StreamScan: 3 ]
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0
-    ├── columns: [ a_k1, count, a_k2 ]
-    ├── primary key: [ $0 ASC, $1 DESC, $2 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
-    ├── distribution key: [ 0 ]
-    └── read pk prefix len hint: 1
+    Table 0 { columns: [ a_k1, count, a_k2 ], primary key: [ $0 ASC, $1 DESC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 1 { columns: [ a_k1, max(count), count ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -669,7 +617,7 @@
         └─StreamExchange { dist: HashShard(a.k2) }
           └─StreamHashAgg { group_key: [a.k1, a.k2], aggs: [count] }
             └─StreamExchange { dist: HashShard(a.k1, a.k2) }
-              └─StreamTableScan { table: a, columns: [a.k1, a.k2, a._row_id], stream_scan_type: ArrangementBackfill, pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
+              └─StreamTableScan { table: a, columns: [a.k1, a.k2, a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [a._row_id], pk: [_row_id], dist: UpstreamHashShard(a._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [max_num, a.k2(hidden)], stream_key: [a.k2], pk_columns: [a.k2], pk_conflict: NoCheck }
@@ -684,17 +632,12 @@
     └── StreamExchange Hash([0, 1]) from 2
 
     Fragment 2
-    StreamTableScan { table: a, columns: [a.k1, a.k2, a._row_id], stream_scan_type: ArrangementBackfill, pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
+    StreamTableScan { table: a, columns: [a.k1, a.k2, a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [a._row_id], pk: [_row_id], dist: UpstreamHashShard(a._row_id) }
     ├── tables: [ StreamScan: 3 ]
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0
-    ├── columns: [ a_k2, count, a_k1 ]
-    ├── primary key: [ $0 ASC, $1 DESC, $2 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
-    ├── distribution key: [ 0 ]
-    └── read pk prefix len hint: 1
+    Table 0 { columns: [ a_k2, count, a_k1 ], primary key: [ $0 ASC, $1 DESC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 1 { columns: [ a_k2, max(count), count ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -736,7 +679,7 @@
       └─StreamHashAgg { group_key: [a.k1, a.k2], aggs: [max(count), count] }
         └─StreamHashAgg { group_key: [a.k1, a.k2], aggs: [count] }
           └─StreamExchange { dist: HashShard(a.k1, a.k2) }
-            └─StreamTableScan { table: a, columns: [a.k1, a.k2, a._row_id], stream_scan_type: ArrangementBackfill, pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
+            └─StreamTableScan { table: a, columns: [a.k1, a.k2, a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [a._row_id], pk: [_row_id], dist: UpstreamHashShard(a._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [max_num, a.k1(hidden), a.k2(hidden)], stream_key: [a.k1, a.k2], pk_columns: [a.k1, a.k2], pk_conflict: NoCheck }
@@ -747,24 +690,14 @@
                 └── StreamExchange Hash([0, 1]) from 1
 
     Fragment 1
-    StreamTableScan { table: a, columns: [a.k1, a.k2, a._row_id], stream_scan_type: ArrangementBackfill, pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
+    StreamTableScan { table: a, columns: [a.k1, a.k2, a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [a._row_id], pk: [_row_id], dist: UpstreamHashShard(a._row_id) }
     ├── tables: [ StreamScan: 3 ]
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0
-    ├── columns: [ a_k1, a_k2, count ]
-    ├── primary key: [ $0 ASC, $1 ASC, $2 DESC ]
-    ├── value indices: [ 0, 1, 2 ]
-    ├── distribution key: [ 0, 1 ]
-    └── read pk prefix len hint: 2
+    Table 0 { columns: [ a_k1, a_k2, count ], primary key: [ $0 ASC, $1 ASC, $2 DESC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
-    Table 1
-    ├── columns: [ a_k1, a_k2, max(count), count ]
-    ├── primary key: [ $0 ASC, $1 ASC ]
-    ├── value indices: [ 2, 3 ]
-    ├── distribution key: [ 0, 1 ]
-    └── read pk prefix len hint: 2
+    Table 1 { columns: [ a_k1, a_k2, max(count), count ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
     Table 2 { columns: [ a_k1, a_k2, count ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
@@ -776,12 +709,7 @@
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294
-    ├── columns: [ max_num, a.k1, a.k2 ]
-    ├── primary key: [ $1 ASC, $2 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
-    ├── distribution key: [ 1, 2 ]
-    └── read pk prefix len hint: 2
+    Table 4294967294 { columns: [ max_num, a.k1, a.k2 ], primary key: [ $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1, 2 ], read pk prefix len hint: 2 }
 
 - id: Ak1_join_aggk1_onk1
   before:
@@ -816,10 +744,10 @@
     └─StreamExchange { dist: HashShard(ak1.a._row_id, ak1.k1) }
       └─StreamHashJoin { type: Inner, predicate: ak1.k1 = a.k1, output: [ak1.v, count, ak1.a._row_id, ak1.k1, a.k1] }
         ├─StreamExchange { dist: HashShard(ak1.k1) }
-        │ └─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: ArrangementBackfill, pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
+        │ └─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [ak1.a._row_id], pk: [k1, a._row_id], dist: UpstreamHashShard(ak1.k1) }
         └─StreamHashAgg { group_key: [a.k1], aggs: [count] }
           └─StreamExchange { dist: HashShard(a.k1) }
-            └─StreamTableScan { table: a, columns: [a.k1, a._row_id], stream_scan_type: ArrangementBackfill, pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
+            └─StreamTableScan { table: a, columns: [a.k1, a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [a._row_id], pk: [_row_id], dist: UpstreamHashShard(a._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), a.k1(hidden)], stream_key: [ak1.a._row_id, ak1.k1], pk_columns: [ak1.a._row_id, ak1.k1], pk_conflict: NoCheck }
@@ -834,13 +762,14 @@
         └── StreamExchange Hash([0]) from 3
 
     Fragment 2
-    StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: ArrangementBackfill, pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
+    StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [ak1.a._row_id], pk: [k1, a._row_id], dist: UpstreamHashShard(ak1.k1) }
     ├── tables: [ StreamScan: 4 ]
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 3
-    StreamTableScan { table: a, columns: [a.k1, a._row_id], stream_scan_type: ArrangementBackfill, pk: [a._row_id], dist: UpstreamHashShard(a._row_id) } { tables: [ StreamScan: 6 ] }
+    StreamTableScan { table: a, columns: [a.k1, a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [a._row_id], pk: [_row_id], dist: UpstreamHashShard(a._row_id) }
+    ├── tables: [ StreamScan: 6 ]
     ├── Upstream
     └── BatchPlanNode
 
@@ -870,12 +799,7 @@
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294
-    ├── columns: [ v, bv, ak1.a._row_id, ak1.k1, a.k1 ]
-    ├── primary key: [ $2 ASC, $3 ASC ]
-    ├── value indices: [ 0, 1, 2, 3, 4 ]
-    ├── distribution key: [ 2, 3 ]
-    └── read pk prefix len hint: 2
+    Table 4294967294 { columns: [ v, bv, ak1.a._row_id, ak1.k1, a.k1 ], primary key: [ $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 2, 3 ], read pk prefix len hint: 2 }
 
 - id: aggk1_join_Ak1_onk1
   before:
@@ -910,9 +834,9 @@
       └─StreamHashJoin { type: Inner, predicate: a.k1 = ak1.k1, output: [ak1.v, count, a.k1, ak1.a._row_id] }
         ├─StreamHashAgg { group_key: [a.k1], aggs: [count] }
         │ └─StreamExchange { dist: HashShard(a.k1) }
-        │   └─StreamTableScan { table: a, columns: [a.k1, a._row_id], stream_scan_type: ArrangementBackfill, pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
+        │   └─StreamTableScan { table: a, columns: [a.k1, a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [a._row_id], pk: [_row_id], dist: UpstreamHashShard(a._row_id) }
         └─StreamExchange { dist: HashShard(ak1.k1) }
-          └─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: ArrangementBackfill, pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
+          └─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [ak1.a._row_id], pk: [k1, a._row_id], dist: UpstreamHashShard(ak1.k1) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [v, bv, a.k1(hidden), ak1.a._row_id(hidden)], stream_key: [a.k1, ak1.a._row_id], pk_columns: [a.k1, ak1.a._row_id], pk_conflict: NoCheck }
@@ -927,13 +851,13 @@
     └── StreamExchange Hash([0]) from 3
 
     Fragment 2
-    StreamTableScan { table: a, columns: [a.k1, a._row_id], stream_scan_type: ArrangementBackfill, pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
+    StreamTableScan { table: a, columns: [a.k1, a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [a._row_id], pk: [_row_id], dist: UpstreamHashShard(a._row_id) }
     ├── tables: [ StreamScan: 5 ]
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 3
-    StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: ArrangementBackfill, pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
+    StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [ak1.a._row_id], pk: [k1, a._row_id], dist: UpstreamHashShard(ak1.k1) }
     ├── tables: [ StreamScan: 6 ]
     ├── Upstream
     └── BatchPlanNode
@@ -964,12 +888,7 @@
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294
-    ├── columns: [ v, bv, a.k1, ak1.a._row_id ]
-    ├── primary key: [ $2 ASC, $3 ASC ]
-    ├── value indices: [ 0, 1, 2, 3 ]
-    ├── distribution key: [ 2, 3 ]
-    └── read pk prefix len hint: 2
+    Table 4294967294 { columns: [ v, bv, a.k1, ak1.a._row_id ], primary key: [ $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 2, 3 ], read pk prefix len hint: 2 }
 
 - id: aggk1_join_aggk1_onk1
   before:
@@ -1015,10 +934,10 @@
       └─StreamHashJoin { type: Inner, predicate: a.k1 = b.k1, output: [count, count, a.k1, b.k1] }
         ├─StreamHashAgg { group_key: [a.k1], aggs: [count] }
         │ └─StreamExchange { dist: HashShard(a.k1) }
-        │   └─StreamTableScan { table: a, columns: [a.k1, a._row_id], stream_scan_type: ArrangementBackfill, pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
+        │   └─StreamTableScan { table: a, columns: [a.k1, a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [a._row_id], pk: [_row_id], dist: UpstreamHashShard(a._row_id) }
         └─StreamHashAgg { group_key: [b.k1], aggs: [count] }
           └─StreamExchange { dist: HashShard(b.k1) }
-            └─StreamTableScan { table: b, columns: [b.k1, b._row_id], stream_scan_type: ArrangementBackfill, pk: [b._row_id], dist: UpstreamHashShard(b._row_id) }
+            └─StreamTableScan { table: b, columns: [b.k1, b._row_id], stream_scan_type: ArrangementBackfill, stream_key: [b._row_id], pk: [_row_id], dist: UpstreamHashShard(b._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [num, bv, a.k1(hidden), b.k1(hidden)], stream_key: [a.k1], pk_columns: [a.k1], pk_conflict: NoCheck }
@@ -1034,13 +953,13 @@
         └── StreamExchange Hash([0]) from 3
 
     Fragment 2
-    StreamTableScan { table: a, columns: [a.k1, a._row_id], stream_scan_type: ArrangementBackfill, pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
+    StreamTableScan { table: a, columns: [a.k1, a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [a._row_id], pk: [_row_id], dist: UpstreamHashShard(a._row_id) }
     ├── tables: [ StreamScan: 5 ]
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 3
-    StreamTableScan { table: b, columns: [b.k1, b._row_id], stream_scan_type: ArrangementBackfill, pk: [b._row_id], dist: UpstreamHashShard(b._row_id) }
+    StreamTableScan { table: b, columns: [b.k1, b._row_id], stream_scan_type: ArrangementBackfill, stream_key: [b._row_id], pk: [_row_id], dist: UpstreamHashShard(b._row_id) }
     ├── tables: [ StreamScan: 7 ]
     ├── Upstream
     └── BatchPlanNode
@@ -1073,12 +992,7 @@
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294
-    ├── columns: [ num, bv, a.k1, b.k1 ]
-    ├── primary key: [ $2 ASC ]
-    ├── value indices: [ 0, 1, 2, 3 ]
-    ├── distribution key: [ 2 ]
-    └── read pk prefix len hint: 1
+    Table 4294967294 { columns: [ num, bv, a.k1, b.k1 ], primary key: [ $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
 
 - sql: |
     create table t1 (row_id int, uid int, v int, created_at timestamp);
@@ -1100,14 +1014,15 @@
     StreamMaterialize { columns: [row_id, uid, v, created_at, window_start, window_end, t1._row_id(hidden)], stream_key: [t1._row_id, window_start, window_end], pk_columns: [t1._row_id, window_start, window_end], pk_conflict: NoCheck }
     └─StreamHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: [t1.row_id, t1.uid, t1.v, t1.created_at, window_start, window_end, t1._row_id] }
       └─StreamFilter { predicate: IsNotNull(t1.created_at) }
-        └─StreamTableScan { table: t1, columns: [t1.row_id, t1.uid, t1.v, t1.created_at, t1._row_id], stream_scan_type: ArrangementBackfill, pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamTableScan { table: t1, columns: [t1.row_id, t1.uid, t1.v, t1.created_at, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [row_id, uid, v, created_at, window_start, window_end, t1._row_id(hidden)], stream_key: [t1._row_id, window_start, window_end], pk_columns: [t1._row_id, window_start, window_end], pk_conflict: NoCheck }
     ├── tables: [ Materialize: 4294967294 ]
     └── StreamHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: [t1.row_id, t1.uid, t1.v, t1.created_at, window_start, window_end, t1._row_id] }
         └── StreamFilter { predicate: IsNotNull(t1.created_at) }
-            └── StreamTableScan { table: t1, columns: [t1.row_id, t1.uid, t1.v, t1.created_at, t1._row_id], stream_scan_type: ArrangementBackfill, pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) } { tables: [ StreamScan: 0 ] }
+            └── StreamTableScan { table: t1, columns: [t1.row_id, t1.uid, t1.v, t1.created_at, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+                ├── tables: [ StreamScan: 0 ]
                 ├── Upstream
                 └── BatchPlanNode
 

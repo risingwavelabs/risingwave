@@ -216,9 +216,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target("sled", Level::INFO)
             .with_target("cranelift", Level::INFO)
             .with_target("wasmtime", Level::INFO)
-            .with_target("sqlx", Level::WARN)
-            // Expose hyper connection socket addr log.
-            .with_target("hyper::client::connect::http", Level::DEBUG);
+            .with_target("sqlx", Level::WARN);
 
         // For all other crates, apply default level depending on the deployment and `debug_assertions` flag.
         let default_level = match deployment {
@@ -274,7 +272,10 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                 .compact()
                 .with_filter(FilterFn::new(|metadata| metadata.is_event())) // filter-out all span-related info
                 .boxed(),
-            Deployment::Cloud => fmt_layer.json().boxed(),
+            Deployment::Cloud => fmt_layer
+                .json()
+                .map_event_format(|e| e.with_current_span(false)) // avoid duplication as there's a span list field
+                .boxed(),
             Deployment::Other => fmt_layer.boxed(),
         };
 

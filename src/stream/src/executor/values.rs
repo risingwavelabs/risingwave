@@ -14,17 +14,13 @@
 
 use std::vec;
 
-use await_tree::InstrumentAwait;
-use futures::StreamExt;
-use futures_async_stream::try_stream;
-use risingwave_common::array::{DataChunk, Op, StreamChunk};
-use risingwave_common::catalog::Schema;
+use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::ensure;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::NonStrictExpression;
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use super::{ActorContextRef, Barrier, BoxedMessageStream, Execute, Message, StreamExecutorError};
+use crate::executor::prelude::*;
 use crate::task::CreateMviewProgress;
 
 const DEFAULT_CHUNK_SIZE: usize = 1024;

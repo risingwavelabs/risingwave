@@ -24,7 +24,7 @@ use std::num::NonZeroUsize;
 use anyhow::Context;
 use clap::ValueEnum;
 use educe::Educe;
-use foyer::memory::{LfuConfig, LruConfig};
+use foyer::memory::{LfuConfig, LruConfig, S3FifoConfig};
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
@@ -500,6 +500,10 @@ pub struct BatchConfig {
     #[serde(default = "default::batch::frontend_compute_runtime_worker_threads")]
     /// frontend compute runtime worker threads
     pub frontend_compute_runtime_worker_threads: usize,
+
+    /// This is the secs used to mask a worker unavailable temporarily.
+    #[serde(default = "default::batch::mask_worker_temporary_secs")]
+    pub mask_worker_temporary_secs: usize,
 }
 
 /// The section `[streaming]` in `risingwave.toml`.
@@ -571,6 +575,9 @@ pub enum CacheEvictionConfig {
         protected_capacity_ratio_in_percent: Option<usize>,
         cmsketch_eps: Option<f64>,
         cmsketch_confidence: Option<f64>,
+    },
+    S3Fifo {
+        small_queue_capacity_ratio_in_percent: Option<usize>,
     },
 }
 
@@ -792,9 +799,6 @@ pub struct FileCacheConfig {
 
     #[serde(default = "default::file_cache::insert_rate_limit_mb")]
     pub insert_rate_limit_mb: usize,
-
-    #[serde(default = "default::file_cache::ring_buffer_capacity_mb")]
-    pub ring_buffer_capacity_mb: usize,
 
     #[serde(default = "default::file_cache::catalog_bits")]
     pub catalog_bits: usize,
@@ -1111,7 +1115,7 @@ pub mod default {
         }
 
         pub fn max_heartbeat_interval_sec() -> u32 {
-            300
+            60
         }
 
         pub fn meta_leader_lease_secs() -> u64 {
@@ -1266,14 +1270,21 @@ pub mod default {
         pub fn window_capacity_ratio_in_percent() -> usize {
             10
         }
+
         pub fn protected_capacity_ratio_in_percent() -> usize {
             80
         }
+
         pub fn cmsketch_eps() -> f64 {
             0.002
         }
+
         pub fn cmsketch_confidence() -> f64 {
             0.95
+        }
+
+        pub fn small_queue_capacity_ratio_in_percent() -> usize {
+            10
         }
 
         pub fn meta_cache_capacity_mb() -> usize {
@@ -1437,10 +1448,6 @@ pub mod default {
             0
         }
 
-        pub fn ring_buffer_capacity_mb() -> usize {
-            256
-        }
-
         pub fn catalog_bits() -> usize {
             6
         }
@@ -1588,6 +1595,10 @@ pub mod default {
         pub fn frontend_compute_runtime_worker_threads() -> usize {
             4
         }
+
+        pub fn mask_worker_temporary_secs() -> usize {
+            30
+        }
     }
 
     pub mod compaction_config {
@@ -1721,7 +1732,7 @@ pub mod default {
             }
 
             pub mod developer {
-                use crate::util::env_var::env_var_is_false_or;
+                use crate::util::env_var::env_var_is_true_or;
                 const RW_USE_OPENDAL_FOR_S3: &str = "RW_USE_OPENDAL_FOR_S3";
 
                 pub fn object_store_retry_unknown_service_error() -> bool {
@@ -1737,7 +1748,7 @@ pub mod default {
                     // The reason why we use !env_var_is_false_or(RW_USE_OPENDAL_FOR_S3, false) here is
                     // 1. Maintain compatibility so that there is no behavior change in cluster with RW_USE_OPENDAL_FOR_S3 set.
                     // 2. Change the default behavior to use opendal for s3 if RW_USE_OPENDAL_FOR_S3 is not set.
-                    !env_var_is_false_or(RW_USE_OPENDAL_FOR_S3, false)
+                    env_var_is_true_or(RW_USE_OPENDAL_FOR_S3, false)
                 }
             }
         }
@@ -1748,6 +1759,7 @@ pub mod default {
 pub enum EvictionConfig {
     Lru(LruConfig),
     Lfu(LfuConfig),
+    S3Fifo(S3FifoConfig),
 }
 
 impl EvictionConfig {
@@ -1764,8 +1776,6 @@ pub struct StorageMemoryConfig {
     pub meta_cache_capacity_mb: usize,
     pub meta_cache_shard_num: usize,
     pub shared_buffer_capacity_mb: usize,
-    pub data_file_cache_ring_buffer_capacity_mb: usize,
-    pub meta_file_cache_ring_buffer_capacity_mb: usize,
     pub compactor_memory_limit_mb: usize,
     pub prefetch_buffer_capacity_mb: usize,
     pub block_cache_eviction_config: EvictionConfig,
@@ -1808,43 +1818,51 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         }
         shard_bits
     });
-    let data_file_cache_ring_buffer_capacity_mb = s.storage.data_file_cache.ring_buffer_capacity_mb;
-    let meta_file_cache_ring_buffer_capacity_mb = s.storage.meta_file_cache.ring_buffer_capacity_mb;
     let compactor_memory_limit_mb = s
         .storage
         .compactor_memory_limit_mb
         .unwrap_or(default::storage::compactor_memory_limit_mb());
 
-    let get_eviction_config = |c: &CacheEvictionConfig| match c {
-        CacheEvictionConfig::Lru {
-            high_priority_ratio_in_percent,
-        } => EvictionConfig::Lru(LruConfig {
-            high_priority_pool_ratio: high_priority_ratio_in_percent.unwrap_or(
-                // adapt to old version
-                s.storage
-                    .high_priority_ratio_in_percent
-                    .unwrap_or(default::storage::high_priority_ratio_in_percent()),
-            ) as f64
-                / 100.0,
-        }),
-        CacheEvictionConfig::Lfu {
-            window_capacity_ratio_in_percent,
-            protected_capacity_ratio_in_percent,
-            cmsketch_eps,
-            cmsketch_confidence,
-        } => EvictionConfig::Lfu(LfuConfig {
-            window_capacity_ratio: window_capacity_ratio_in_percent
-                .unwrap_or(default::storage::window_capacity_ratio_in_percent())
-                as f64
-                / 100.0,
-            protected_capacity_ratio: protected_capacity_ratio_in_percent
-                .unwrap_or(default::storage::protected_capacity_ratio_in_percent())
-                as f64
-                / 100.0,
-            cmsketch_eps: cmsketch_eps.unwrap_or(default::storage::cmsketch_eps()),
-            cmsketch_confidence: cmsketch_confidence
-                .unwrap_or(default::storage::cmsketch_confidence()),
-        }),
+    let get_eviction_config = |c: &CacheEvictionConfig| {
+        match c {
+            CacheEvictionConfig::Lru {
+                high_priority_ratio_in_percent,
+            } => EvictionConfig::Lru(LruConfig {
+                high_priority_pool_ratio: high_priority_ratio_in_percent.unwrap_or(
+                    // adapt to old version
+                    s.storage
+                        .high_priority_ratio_in_percent
+                        .unwrap_or(default::storage::high_priority_ratio_in_percent()),
+                ) as f64
+                    / 100.0,
+            }),
+            CacheEvictionConfig::Lfu {
+                window_capacity_ratio_in_percent,
+                protected_capacity_ratio_in_percent,
+                cmsketch_eps,
+                cmsketch_confidence,
+            } => EvictionConfig::Lfu(LfuConfig {
+                window_capacity_ratio: window_capacity_ratio_in_percent
+                    .unwrap_or(default::storage::window_capacity_ratio_in_percent())
+                    as f64
+                    / 100.0,
+                protected_capacity_ratio: protected_capacity_ratio_in_percent
+                    .unwrap_or(default::storage::protected_capacity_ratio_in_percent())
+                    as f64
+                    / 100.0,
+                cmsketch_eps: cmsketch_eps.unwrap_or(default::storage::cmsketch_eps()),
+                cmsketch_confidence: cmsketch_confidence
+                    .unwrap_or(default::storage::cmsketch_confidence()),
+            }),
+            CacheEvictionConfig::S3Fifo {
+                small_queue_capacity_ratio_in_percent,
+            } => EvictionConfig::S3Fifo(S3FifoConfig {
+                small_queue_capacity_ratio: small_queue_capacity_ratio_in_percent
+                    .unwrap_or(default::storage::small_queue_capacity_ratio_in_percent())
+                    as f64
+                    / 100.0,
+            }),
+        }
     };
 
     let block_cache_eviction_config = get_eviction_config(&s.storage.cache.block_cache_eviction);
@@ -1860,6 +1878,9 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
                 EvictionConfig::Lfu(lfu) => {
                     ((1.0 - lfu.protected_capacity_ratio) * block_cache_capacity_mb as f64) as usize
                 }
+                EvictionConfig::S3Fifo(s3fifo) => {
+                    (s3fifo.small_queue_capacity_ratio * block_cache_capacity_mb as f64) as usize
+                }
             });
 
     StorageMemoryConfig {
@@ -1868,8 +1889,6 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         meta_cache_capacity_mb,
         meta_cache_shard_num,
         shared_buffer_capacity_mb,
-        data_file_cache_ring_buffer_capacity_mb,
-        meta_file_cache_ring_buffer_capacity_mb,
         compactor_memory_limit_mb,
         prefetch_buffer_capacity_mb,
         block_cache_eviction_config,

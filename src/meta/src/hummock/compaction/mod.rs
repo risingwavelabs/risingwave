@@ -32,7 +32,8 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactTask, CompactionConfig, LevelType};
 pub use selector::CompactionSelector;
 
-use self::selector::LocalSelectorStatistic;
+use self::selector::{EmergencySelector, LocalSelectorStatistic};
+use super::check_cg_write_limit;
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
 use crate::hummock::compaction::picker::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
@@ -101,15 +102,34 @@ impl CompactStatus {
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
         // layer must be larger.
-        selector.pick_compaction(
+        if let Some(task) = selector.pick_compaction(
             task_id,
             group,
             levels,
             &mut self.level_handlers,
             stats,
-            table_id_to_options,
-            developer_config,
-        )
+            table_id_to_options.clone(),
+            developer_config.clone(),
+        ) {
+            return Some(task);
+        } else {
+            let compaction_group_config = &group.compaction_config;
+            if check_cg_write_limit(levels, compaction_group_config.as_ref()).is_write_stop()
+                && compaction_group_config.enable_emergency_picker
+            {
+                return EmergencySelector::default().pick_compaction(
+                    task_id,
+                    group,
+                    levels,
+                    &mut self.level_handlers,
+                    stats,
+                    table_id_to_options,
+                    developer_config,
+                );
+            }
+        }
+
+        None
     }
 
     pub fn is_trivial_move_task(task: &CompactTask) -> bool {

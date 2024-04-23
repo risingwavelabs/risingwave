@@ -25,13 +25,14 @@ use parking_lot::Mutex;
 use risingwave_pb::stream_service::barrier_complete_response::{
     GroupedSstableInfo, PbCreateMviewProgress,
 };
+use risingwave_rpc_client::error::{ToTonicStatus, TonicStatusWrapper};
 use rw_futures_util::{pending_on_none, AttachedFuture};
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use tonic::Status;
+use tonic::{Code, Status};
 
 use self::managed_state::ManagedBarrierState;
 use crate::error::{IntoUnexpectedExit, StreamError, StreamResult};
@@ -47,7 +48,7 @@ mod tests;
 pub use progress::CreateMviewProgress;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
-use risingwave_hummock_sdk::LocalSstableInfo;
+use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
@@ -57,11 +58,10 @@ use risingwave_pb::stream_service::{
     streaming_control_stream_response, BarrierCompleteResponse, StreamingControlStreamRequest,
     StreamingControlStreamResponse,
 };
-use risingwave_storage::store::SyncResult;
 
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{Actor, Barrier, DispatchExecutor, Mutation};
+use crate::executor::{Actor, Barrier, DispatchExecutor, Mutation, StreamExecutorError};
 use crate::task::barrier_manager::progress::BackfillState;
 
 /// If enabled, all actors will be grouped in the same tracing span within one epoch.
@@ -102,7 +102,11 @@ impl ControlStreamHandle {
 
     fn reset_stream_with_err(&mut self, err: Status) {
         if let Some((sender, _)) = self.pair.take() {
-            warn!("control stream reset with: {:?}", err.as_report());
+            // Note: `TonicStatusWrapper` provides a better error report.
+            let err = TonicStatusWrapper::new(err);
+            warn!(error = %err.as_report(), "control stream reset with error");
+
+            let err = err.into_inner();
             if sender.send(Err(err)).is_err() {
                 warn!("failed to notify finish of control stream");
             }
@@ -111,7 +115,7 @@ impl ControlStreamHandle {
 
     fn inspect_result(&mut self, result: StreamResult<()>) {
         if let Err(e) = result {
-            self.reset_stream_with_err(Status::internal(format!("get error: {:?}", e.as_report())));
+            self.reset_stream_with_err(e.to_status_unnamed(Code::Internal));
         }
     }
 
@@ -132,10 +136,11 @@ impl ControlStreamHandle {
                 Some(Ok(request)) => {
                     return request;
                 }
-                Some(Err(e)) => self.reset_stream_with_err(Status::internal(format!(
-                    "failed to get request: {:?}",
-                    e.as_report()
-                ))),
+                Some(Err(e)) => self.reset_stream_with_err(
+                    anyhow!(TonicStatusWrapper::new(e)) // wrap the status to provide better error report
+                        .context("failed to get request")
+                        .to_status_unnamed(Code::Internal),
+                ),
                 None => self.reset_stream_with_err(Status::internal("end of stream")),
             }
         }
@@ -287,7 +292,7 @@ pub(crate) struct StreamActorManager {
     pub(super) watermark_epoch: AtomicU64Ref,
 
     /// Manages the await-trees of all actors.
-    pub(super) await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
+    pub(super) await_tree_reg: Option<await_tree::Registry>,
 
     /// Runtime for the streaming actors.
     pub(super) runtime: BackgroundShutdownRuntime,
@@ -322,10 +327,7 @@ pub(super) struct LocalBarrierWorker {
 }
 
 impl LocalBarrierWorker {
-    pub(super) fn new(
-        actor_manager: Arc<StreamActorManager>,
-        barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
-    ) -> Self {
+    pub(super) fn new(actor_manager: Arc<StreamActorManager>) -> Self {
         let (event_tx, event_rx) = unbounded_channel();
         let (failure_tx, failure_rx) = unbounded_channel();
         let shared_context = Arc::new(SharedContext::new(
@@ -342,7 +344,7 @@ impl LocalBarrierWorker {
             state: ManagedBarrierState::new(
                 actor_manager.env.state_store(),
                 actor_manager.streaming_metrics.clone(),
-                barrier_await_tree_reg,
+                actor_manager.await_tree_reg.clone(),
             ),
             control_stream_handle: ControlStreamHandle::empty(),
             actor_manager,
@@ -678,10 +680,7 @@ impl LocalBarrierWorker {
 
     /// Reset all internal states.
     pub(super) fn reset_state(&mut self) {
-        *self = Self::new(
-            self.actor_manager.clone(),
-            self.state.reset_and_take_barrier_await_tree_reg(),
-        );
+        *self = Self::new(self.actor_manager.clone());
     }
 
     /// When a [`crate::executor::StreamConsumer`] (typically [`crate::executor::DispatchExecutor`]) get a barrier, it should report
@@ -694,20 +693,22 @@ impl LocalBarrierWorker {
     /// will notice actor's exit while collecting.
     async fn notify_failure(&mut self, actor_id: ActorId, err: StreamError) {
         self.add_failure(actor_id, err.clone());
-        let root_err = self.try_find_root_failure(err).await;
+        let root_err = self.try_find_root_failure().await;
+
         let failed_epochs = self.state.epochs_await_on_actor(actor_id).collect_vec();
         if !failed_epochs.is_empty() {
-            self.control_stream_handle
-                .reset_stream_with_err(Status::internal(format!(
-                    "failed to collect barrier. epoch: {:?}, err: {:?}",
-                    failed_epochs,
-                    root_err.as_report()
-                )));
+            self.control_stream_handle.reset_stream_with_err(
+                anyhow!(root_err)
+                    .context(format!(
+                        "failed to collect barrier for epoch {:?}",
+                        failed_epochs
+                    ))
+                    .to_status_unnamed(Code::Internal),
+            );
         }
     }
 
     fn add_failure(&mut self, actor_id: ActorId, err: StreamError) {
-        let err = err.into_unexpected_exit(actor_id);
         if let Some(prev_err) = self.failure_actors.insert(actor_id, err) {
             warn!(
                 actor_id,
@@ -717,7 +718,7 @@ impl LocalBarrierWorker {
         }
     }
 
-    async fn try_find_root_failure(&mut self, default_err: StreamError) -> StreamError {
+    async fn try_find_root_failure(&mut self) -> StreamError {
         if let Some(root_failure) = &self.root_failure {
             return root_failure.clone();
         }
@@ -729,7 +730,10 @@ impl LocalBarrierWorker {
         })
         .await;
         self.root_failure = try_find_root_actor_failure(self.failure_actors.values());
-        self.root_failure.clone().unwrap_or(default_err)
+
+        self.root_failure
+            .clone()
+            .expect("failure actors should not be empty")
     }
 }
 
@@ -744,8 +748,7 @@ impl LocalBarrierWorker {
     pub fn spawn(
         env: StreamEnvironment,
         streaming_metrics: Arc<StreamingMetrics>,
-        await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
-        barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
+        await_tree_reg: Option<await_tree::Registry>,
         watermark_epoch: AtomicU64Ref,
         actor_op_rx: UnboundedReceiver<LocalActorOperation>,
     ) -> JoinHandle<()> {
@@ -768,7 +771,7 @@ impl LocalBarrierWorker {
             await_tree_reg,
             runtime: runtime.into(),
         });
-        let worker = LocalBarrierWorker::new(actor_manager, barrier_await_tree_reg);
+        let worker = LocalBarrierWorker::new(actor_manager);
         tokio::spawn(worker.run(actor_op_rx))
     }
 }
@@ -816,7 +819,9 @@ impl LocalBarrierManager {
     /// When a actor exit unexpectedly, it should report this event using this function, so meta
     /// will notice actor's exit while collecting.
     pub fn notify_failure(&self, actor_id: ActorId, err: StreamError) {
-        let _ = self.actor_failure_sender.send((actor_id, err));
+        let _ = self
+            .actor_failure_sender
+            .send((actor_id, err.into_unexpected_exit(actor_id)));
     }
 
     /// When a `RemoteInput` get a barrier, it should wait and read the barrier mutation from the barrier manager.
@@ -838,26 +843,30 @@ impl LocalBarrierManager {
 pub fn try_find_root_actor_failure<'a>(
     actor_errors: impl IntoIterator<Item = &'a StreamError>,
 ) -> Option<StreamError> {
-    use crate::executor::StreamExecutorError;
-    let stream_executor_error_score = |e: &StreamExecutorError| {
+    fn stream_executor_error_score(e: &StreamExecutorError) -> i32 {
         use crate::executor::error::ErrorKind;
         match e.inner() {
-            ErrorKind::ChannelClosed(_) => 0,
+            ErrorKind::ChannelClosed(_) | ErrorKind::ExchangeChannelClosed(_) => 0,
             ErrorKind::Internal(_) => 1,
             _ => 999,
         }
-    };
-    let stream_error_score = |e: &&StreamError| {
+    }
+
+    fn stream_error_score(e: &StreamError) -> i32 {
         use crate::error::ErrorKind;
         match e.inner() {
+            // `UnexpectedExit` wraps the original error. Score on the inner error.
+            ErrorKind::UnexpectedExit { source, .. } => stream_error_score(source),
+
             ErrorKind::Internal(_) => 1000,
             ErrorKind::Executor(ee) => 2000 + stream_executor_error_score(ee),
             _ => 3000,
         }
-    };
+    }
+
     actor_errors
         .into_iter()
-        .max_by_key(stream_error_score)
+        .max_by_key(|&e| stream_error_score(e))
         .cloned()
 }
 
@@ -869,7 +878,6 @@ impl LocalBarrierManager {
         let _join_handle = LocalBarrierWorker::spawn(
             StreamEnvironment::for_test(),
             Arc::new(StreamingMetrics::unused()),
-            None,
             None,
             Arc::new(AtomicU64::new(0)),
             rx,

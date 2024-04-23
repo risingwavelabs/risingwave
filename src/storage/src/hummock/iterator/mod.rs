@@ -41,6 +41,8 @@ use risingwave_hummock_sdk::EpochWithGap;
 
 use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Third};
 
+mod change_log;
+pub use change_log::*;
 mod concat_delete_range_iterator;
 mod delete_range_iterator;
 mod skip_watermark;
@@ -66,7 +68,7 @@ pub struct ValueMeta {
 /// After creating the iterator instance,
 /// - if you want to iterate from the beginning, you need to then call its `rewind` method.
 /// - if you want to iterate from some specific position, you need to then call its `seek` method.
-pub trait HummockIterator: Send + Sync {
+pub trait HummockIterator: Send {
     type Direction: HummockIteratorDirection;
     /// Moves a valid iterator to the next key.
     ///

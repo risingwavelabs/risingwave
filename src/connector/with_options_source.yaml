@@ -208,7 +208,7 @@ KafkaProperties:
     required: false
   - name: properties.enable.auto.commit
     field_type: bool
-    comments: 'Automatically and periodically commit offsets in the background.  Note: setting this to false does not prevent the consumer from fetching previously committed start offsets.  To circumvent this behaviour set specific start offsets per partition in the call to assign().  default: true'
+    comments: 'Whether to automatically and periodically commit offsets in the background.   Note that RisingWave does NOT rely on committed offsets. Committing offset is only for exposing the  progress for monitoring. Setting this to false can avoid creating consumer groups.   default: true'
     required: false
   - name: broker.rewrite.endpoints
     field_type: HashMap<String,String>
@@ -261,10 +261,6 @@ MqttProperties:
     field_type: String
     comments: The url of the broker to connect to. e.g. tcp://localhost.  Must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,  to denote the protocol for establishing a connection with the broker.  `mqtts://`, `ssl://` will use the native certificates if no ca is specified
     required: true
-  - name: topic
-    field_type: String
-    comments: The topic name to subscribe or publish to. When subscribing, it can be a wildcard topic. e.g /topic/#
-    required: true
   - name: qos
     field_type: QualityOfService
     comments: The quality of service to use when publishing messages. Defaults to at_most_once.  Could be at_most_once, at_least_once or exactly_once
@@ -302,6 +298,10 @@ MqttProperties:
     field_type: String
     comments: Path to client's private key file (PEM). Required for client authentication.  Can be a file path under fs:// or a string with the private key content.
     required: false
+  - name: topic
+    field_type: String
+    comments: The topic name to subscribe or publish to. When subscribing, it can be a wildcard topic. e.g /topic/#
+    required: true
   - name: qos
     field_type: MqttQualityOfService
     comments: The quality of service to use when publishing messages. Defaults to at_most_once.  Could be at_most_once, at_least_once or exactly_once

@@ -13,17 +13,13 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::iter::repeat_with;
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
 
-use await_tree::InstrumentAwait;
-use futures::{Stream, StreamExt, TryStreamExt};
-use futures_async_stream::try_stream;
+use futures::TryStreamExt;
 use itertools::Itertools;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::Op;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
 use risingwave_common::metrics::LabelGuardedIntCounter;
@@ -35,11 +31,10 @@ use tokio::time::Instant;
 use tracing::{event, Instrument};
 
 use super::exchange::output::{new_output, BoxedOutput};
-use super::{AddMutation, Executor, UpdateMutation, Watermark};
-use crate::error::StreamResult;
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{Barrier, Message, Mutation, StreamConsumer};
-use crate::task::{ActorId, DispatcherId, SharedContext};
+use super::{AddMutation, TroublemakerExecutor, UpdateMutation};
+use crate::executor::prelude::*;
+use crate::executor::StreamConsumer;
+use crate::task::{DispatcherId, SharedContext};
 
 /// [`DispatchExecutor`] consumes messages and send them into downstream actors. Usually,
 /// data chunks will be dispatched with some specified policy, while control message
@@ -341,13 +336,22 @@ impl DispatchExecutorInner {
 
 impl DispatchExecutor {
     pub fn new(
-        input: Executor,
+        mut input: Executor,
         dispatchers: Vec<DispatcherImpl>,
         actor_id: u32,
         fragment_id: u32,
         context: Arc<SharedContext>,
         metrics: Arc<StreamingMetrics>,
+        chunk_size: usize,
     ) -> Self {
+        if crate::consistency::insane() {
+            // make some trouble before dispatching to avoid generating invalid dist key.
+            let mut info = input.info().clone();
+            info.identity = format!("{} (embedded trouble)", info.identity);
+            let troublemaker = TroublemakerExecutor::new(input, chunk_size);
+            input = (info, troublemaker).into();
+        }
+
         let actor_id_str = actor_id.to_string();
         let fragment_id_str = fragment_id.to_string();
         let actor_out_record_cnt = metrics
@@ -1033,6 +1037,7 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
     use risingwave_common::catalog::Schema;
+    use risingwave_common::config;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::hash_util::Crc32FastBuilder;
@@ -1204,6 +1209,7 @@ mod tests {
             fragment_id,
             ctx.clone(),
             metrics,
+            config::default::developer::stream_chunk_size(),
         ))
         .execute();
         pin_mut!(executor);

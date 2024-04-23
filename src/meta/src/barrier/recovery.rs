@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches::assert_matches;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -23,14 +22,11 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_meta_model_v2::StreamingParallelism;
 use risingwave_pb::common::ActorInfo;
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::State;
-use risingwave_pb::meta::PausedReason;
-use risingwave_pb::stream_plan::barrier::BarrierKind;
+use risingwave_pb::meta::{PausedReason, Recovery};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
-use risingwave_pb::stream_service::{
-    streaming_control_stream_response, StreamingControlStreamResponse,
-};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -44,12 +40,12 @@ use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::schedule::ScheduledBarriers;
 use crate::barrier::state::BarrierManagerState;
-use crate::barrier::{Command, GlobalBarrierManager, GlobalBarrierManagerContext};
+use crate::barrier::{BarrierKind, Command, GlobalBarrierManager, GlobalBarrierManagerContext};
 use crate::controller::catalog::ReleaseContext;
 use crate::manager::{ActiveStreamingWorkerNodes, MetadataManager, WorkerId};
 use crate::model::{MetadataModel, MigrationPlan, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, RescheduleOptions, TableResizePolicy};
-use crate::MetaResult;
+use crate::{model, MetaResult};
 
 impl GlobalBarrierManager {
     // Retry base interval in milliseconds.
@@ -501,15 +497,10 @@ impl GlobalBarrierManager {
                     let mut node_to_collect =
                         control_stream_manager.inject_barrier(command_ctx.clone())?;
                     while !node_to_collect.is_empty() {
-                        let (worker_id, _, resp) = control_stream_manager.next_response().await?;
-                        assert_matches!(
-                            resp,
-                            StreamingControlStreamResponse {
-                                response: Some(
-                                    streaming_control_stream_response::Response::CompleteBarrier(_)
-                                )
-                            }
-                        );
+                        let (worker_id, prev_epoch, _) = control_stream_manager
+                            .next_complete_barrier_response()
+                            .await?;
+                        assert_eq!(prev_epoch, command_ctx.prev_epoch.value().0);
                         assert!(node_to_collect.remove(&worker_id));
                     }
 
@@ -543,6 +534,10 @@ impl GlobalBarrierManager {
             paused = ?self.state.paused_reason(),
             "recovery success"
         );
+
+        self.env
+            .notification_manager()
+            .notify_frontend_without_version(Operation::Update, Info::Recovery(Recovery {}));
     }
 }
 
@@ -685,7 +680,7 @@ impl GlobalBarrierManagerContext {
             .migrate_fragment_actors(&migration_plan)
             .await?;
         // 3. remove the migration plan.
-        migration_plan.delete(self.env.meta_store_checked()).await?;
+        migration_plan.delete(self.env.meta_store().as_kv()).await?;
         debug!("migrate actors succeed.");
 
         self.resolve_actor_info(active_nodes).await
@@ -705,24 +700,52 @@ impl GlobalBarrierManagerContext {
         let mgr = self.metadata_manager.as_v2_ref();
         debug!("start resetting actors distribution");
 
+        let available_parallelism = active_nodes
+            .current()
+            .values()
+            .flat_map(|worker_node| worker_node.parallel_units.iter())
+            .count();
+
         let table_parallelisms: HashMap<_, _> = {
             let streaming_parallelisms = mgr
                 .catalog_controller
                 .get_all_created_streaming_parallelisms()
                 .await?;
 
-            streaming_parallelisms
-                .into_iter()
-                .map(|(table_id, parallelism)| {
-                    // no custom for sql backend
-                    let table_parallelism = match parallelism {
-                        StreamingParallelism::Adaptive => TableParallelism::Adaptive,
-                        StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n),
-                    };
+            let mut result = HashMap::new();
 
-                    (table_id as u32, table_parallelism)
-                })
-                .collect()
+            for (object_id, streaming_parallelism) in streaming_parallelisms {
+                let actual_fragment_parallelism = mgr
+                    .catalog_controller
+                    .get_actual_job_fragment_parallelism(object_id)
+                    .await?;
+
+                let table_parallelism = match streaming_parallelism {
+                    StreamingParallelism::Adaptive => model::TableParallelism::Adaptive,
+                    StreamingParallelism::Custom => model::TableParallelism::Custom,
+                    StreamingParallelism::Fixed(n) => model::TableParallelism::Fixed(n as _),
+                };
+
+                let target_parallelism = Self::derive_target_parallelism(
+                    available_parallelism,
+                    table_parallelism,
+                    actual_fragment_parallelism,
+                    self.env.opts.default_parallelism,
+                );
+
+                if target_parallelism != table_parallelism {
+                    tracing::info!(
+                        "resetting table {} parallelism from {:?} to {:?}",
+                        object_id,
+                        table_parallelism,
+                        target_parallelism
+                    );
+                }
+
+                result.insert(object_id as u32, target_parallelism);
+            }
+
+            result
         };
 
         let schedulable_worker_ids = active_nodes
@@ -961,7 +984,7 @@ impl GlobalBarrierManagerContext {
     ) -> MetaResult<MigrationPlan> {
         let mgr = self.metadata_manager.as_v1_ref();
 
-        let mut cached_plan = MigrationPlan::get(self.env.meta_store_checked()).await?;
+        let mut cached_plan = MigrationPlan::get(self.env.meta_store().as_kv()).await?;
 
         let all_worker_parallel_units = mgr.fragment_manager.all_worker_parallel_units().await;
 
@@ -1074,7 +1097,7 @@ impl GlobalBarrierManagerContext {
             new_plan.parallel_unit_plan
         );
 
-        new_plan.insert(self.env.meta_store_checked()).await?;
+        new_plan.insert(self.env.meta_store().as_kv()).await?;
         Ok(new_plan)
     }
 

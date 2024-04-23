@@ -14,34 +14,32 @@
 
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
-use std::fmt::Formatter;
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use anyhow::anyhow;
 use either::Either;
 use futures::stream::{select_with_strategy, PollNext};
-use futures::StreamExt;
-use futures_async_stream::try_stream;
+use itertools::Itertools;
 use prometheus::IntCounter;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
-use risingwave_common::row::Row;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::JsonbVal;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
-    BoxChunkSourceStream, SourceContext, SourceCtrlOpts, SplitId, SplitMetaData,
+    BoxChunkSourceStream, SourceContext, SourceCtrlOpts, SplitId, SplitImpl, SplitMetaData,
 };
-use risingwave_storage::StateStore;
 use serde::{Deserialize, Serialize};
-use source_backfill_executor::source_executor::WAIT_BARRIER_MULTIPLE_TIMES;
 use thiserror_ext::AsReport;
 
 use super::executor_core::StreamSourceCore;
 use super::source_backfill_state_table::BackfillStateTableHandler;
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::*;
+use crate::executor::prelude::*;
+use crate::executor::source::source_executor::WAIT_BARRIER_MULTIPLE_TIMES;
+use crate::executor::source::{apply_rate_limit, get_split_offset_col_idx};
+use crate::executor::{AddMutation, UpdateMutation};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum BackfillState {
@@ -209,16 +207,17 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             self.actor_ctx.id,
             self.stream_source_core.source_id,
             self.actor_ctx.fragment_id,
+            self.stream_source_core.source_name.clone(),
             source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
             source_desc.source.config.clone(),
-            self.stream_source_core.source_name.clone(),
         );
-        source_desc
+        let stream = source_desc
             .source
             .to_stream(Some(splits), column_ids, Arc::new(source_ctx))
             .await
-            .map_err(StreamExecutorError::connector_error)
+            .map_err(StreamExecutorError::connector_error)?;
+        Ok(apply_rate_limit(stream, self.source_ctrl_opts.rate_limit).boxed())
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -512,11 +511,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                     // backfill
                     Either::Right(msg) => {
                         let chunk = msg?;
-                        // TODO(optimize): actually each msg is from one split. We can
-                        // include split from the message and avoid iterating over all rows.
-                        let split_offset_mapping =
-                            get_split_offset_mapping_from_chunk(&chunk, split_idx, offset_idx)
-                                .unwrap();
+
                         if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
                             // Exceeds the max wait barrier time, the source will be paused.
                             // Currently we can guarantee the
@@ -538,8 +533,17 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                 self.system_params.load().barrier_interval_ms() as u128
                                     * WAIT_BARRIER_MULTIPLE_TIMES;
                         }
-                        split_offset_mapping.iter().for_each(|(split_id, offset)| {
+                        // TODO(optimize): actually each msg is from one split. We can
+                        // include split from the message and avoid iterating over all rows.
+                        let mut new_vis = BitmapBuilder::zeroed(chunk.visibility().len());
+
+                        for (i, (_, row)) in chunk.rows().enumerate() {
+                            let split_id: Arc<str> =
+                                row.datum_at(split_idx).unwrap().into_utf8().into();
+                            let offset: String =
+                                row.datum_at(offset_idx).unwrap().into_utf8().into();
                             // update backfill progress
+                            let mut vis = true;
                             match backfill_stage.states.entry(split_id.clone()) {
                                 Entry::Occupied(mut entry) => {
                                     let state = entry.get_mut();
@@ -551,6 +555,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                         BackfillState::SourceCachingUp(_)
                                         | BackfillState::Finished => {
                                             // backfilling stopped. ignore
+                                            vis = false
                                         }
                                     }
                                 }
@@ -558,11 +563,16 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     entry.insert(BackfillState::Backfilling(Some(offset.clone())));
                                 }
                             }
-                        });
+                            new_vis.set(i, vis);
+                        }
 
-                        source_backfill_row_count.inc_by(chunk.cardinality() as u64);
-
-                        yield Message::Chunk(chunk);
+                        let new_vis = new_vis.finish();
+                        let card = new_vis.count_ones();
+                        if card != 0 {
+                            let new_chunk = chunk.clone_with_vis(new_vis);
+                            yield Message::Chunk(new_chunk);
+                            source_backfill_row_count.inc_by(card as u64);
+                        }
                     }
                 }
             }
@@ -603,11 +613,11 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                             }
                             _ => {}
                         }
-                        self.backfill_state_store
-                            .state_store
-                            .commit(barrier.epoch)
-                            .await?;
                     }
+                    self.backfill_state_store
+                        .state_store
+                        .commit(barrier.epoch)
+                        .await?;
                     yield Message::Barrier(barrier);
                 }
                 Message::Chunk(chunk) => {
@@ -717,11 +727,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         }
 
         if split_changed {
-            tracing::info!(
-                state = ?target_state,
-                "apply split change"
-            );
-
             stage
                 .unfinished_splits
                 .retain(|split| target_state.get(split.id().as_ref()).is_some());
@@ -735,7 +740,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                 // trim dropped splits' state
                 self.backfill_state_store.trim_state(dropped_splits).await?;
             }
-
+            tracing::info!(old_state=?stage.states, new_state=?target_state, "finish split change");
             stage.states = target_state;
         }
 
