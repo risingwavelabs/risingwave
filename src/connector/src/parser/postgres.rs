@@ -168,7 +168,7 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                         // enum type needs to be handled separately
                         let res = row.try_get::<_, Option<EnumString>>(i);
                         match res {
-                            Ok(val) => val.map(|v| ScalarImpl::from(v.value)),
+                            Ok(val) => val.map(|v| ScalarImpl::from(v.0)),
                             Err(err) => {
                                 if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                                     tracing::error!(
@@ -274,7 +274,7 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                             Ok(val) => {
                                 if let Some(v) = val {
                                     v.into_iter().for_each(|val| {
-                                        builder.append(Some(ScalarImpl::from(val.value)))
+                                        builder.append(Some(ScalarImpl::from(val.0)))
                                     });
                                 }
                             }
@@ -522,18 +522,14 @@ fn pg_numeric_to_string(val: Option<PgNumeric>) -> Option<String> {
 }
 
 #[derive(Clone, Debug)]
-struct EnumString {
-    value: String,
-}
+struct EnumString(String);
 
 impl<'a> FromSql<'a> for EnumString {
     fn from_sql(
         _ty: &Type,
         raw: &'a [u8],
     ) -> Result<Self, Box<dyn std::error::Error + 'static + Sync + Send>> {
-        Ok(EnumString {
-            value: String::from_utf8_lossy(raw).into_owned(),
-        })
+        Ok(EnumString(String::from_utf8_lossy(raw).into_owned()))
     }
 
     fn accepts(ty: &Type) -> bool {
@@ -558,13 +554,13 @@ impl ToSql for EnumString {
     {
         match ty.kind() {
             Kind::Enum(e) => {
-                if e.contains(&self.value) {
-                    out.extend_from_slice(self.value.as_bytes());
+                if e.contains(&self.0) {
+                    out.extend_from_slice(self.0.as_bytes());
                     Ok(IsNull::No)
                 } else {
                     Err(format!(
                         "EnumString value {} is not in the enum type {:?}",
-                        self.value, e
+                        self.0, e
                     )
                     .into())
                 }
@@ -625,7 +621,7 @@ mod tests {
             .unwrap()
             .get::<usize, Option<EnumString>>(1)
             .unwrap();
-        assert_eq!("happy", got.value.as_str());
+        assert_eq!("happy", got.0.as_str());
 
         client.execute("DELETE FROM person", &[]).await.unwrap();
 
