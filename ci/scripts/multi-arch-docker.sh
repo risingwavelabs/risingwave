@@ -57,8 +57,20 @@ echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 echo "--- dockerhub login"
 echo "$DOCKER_TOKEN" | docker login -u "risingwavelabs" --password-stdin
 
+if [[ -n "${ORIGINAL_IMAGE_TAG+x}" ]] && [[ -n "${NEW_IMAGE_TAG+x}" ]]; then
+  echo "--- retag docker image"
+  echo "push to gchr, image tag: ${ghcraddr}:${NEW_IMAGE_TAG}"
+  args=()
+  for arch in "${arches[@]}"
+  do
+    args+=( --amend "${ghcraddr}:${NEW_IMAGE_TAG}-${arch}" )
+  done
+  docker manifest create --insecure "${ghcraddr}:${NEW_IMAGE_TAG}" "${args[@]}"
+  docker manifest push --insecure "${ghcraddr}:${NEW_IMAGE_TAG}"
+  return
+fi
 
-echo "--- multi arch image create "
+echo "--- multi arch image create"
 if [[ "${#BUILDKITE_COMMIT}" = 40 ]]; then
   # If the commit is 40 characters long, it's probably a SHA.
   TAG="git-${BUILDKITE_COMMIT}"
