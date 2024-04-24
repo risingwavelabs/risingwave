@@ -176,6 +176,7 @@ impl StreamChunk {
     /// the last new chunk will be the remainder.
     ///
     /// For consecutive `UpdateDelete` and `UpdateInsert`, they will be kept in one chunk.
+    /// As a result, some chunks may have `size + 1` rows.
     pub fn split(&self, size: usize) -> Vec<Self> {
         let mut builder = StreamChunkBuilder::new(size, self.data_types());
         let mut outputs = Vec::new();
@@ -774,7 +775,7 @@ mod tests {
             U- 3 7
             U+ 4 .",
         );
-        let results = chunk.split(3);
+        let results = chunk.split(2);
         assert_eq!(2, results.len());
         assert_eq!(
             results[0].to_pretty().to_string(),
@@ -803,7 +804,7 @@ mod tests {
             U+ 4 .
              - 2 .",
         );
-        let results = chunk.split(3);
+        let results = chunk.split(2);
         assert_eq!(2, results.len());
         assert_eq!(
             results[0].to_pretty().to_string(),

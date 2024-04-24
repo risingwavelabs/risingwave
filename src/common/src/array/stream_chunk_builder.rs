@@ -62,10 +62,10 @@ const DEFAULT_INITIAL_CAPACITY: usize = 64;
 
 impl StreamChunkBuilder {
     /// Create a new `StreamChunkBuilder` with a fixed max chunk size.
-    /// The max chunk size must be at least 2, otherwise we cannot build chunks containing
-    /// `Update` records.
+    /// Note that in the case of ending with `Update`, the builder may yield a chunk with size
+    /// `max_chunk_size + 1`.
     pub fn new(max_chunk_size: usize, data_types: Vec<DataType>) -> Self {
-        assert!(max_chunk_size >= 2);
+        assert!(max_chunk_size > 0);
 
         let initial_capacity = max_chunk_size.min(MAX_INITIAL_CAPACITY);
 
@@ -113,19 +113,19 @@ impl StreamChunkBuilder {
         op: Op,
         iter: impl IntoIterator<Item = (usize, DatumRef<'a>)>,
     ) -> Option<StreamChunk> {
-        self.append_iter_inner::<true>(op, iter, false)
+        self.append_iter_inner::<true>(op, iter)
     }
 
     /// Append a row to the builder, return a chunk if the builder is full.
     #[must_use]
     pub fn append_row(&mut self, op: Op, row: impl Row) -> Option<StreamChunk> {
-        self.append_iter_inner::<true>(op, row.iter().enumerate(), false)
+        self.append_iter_inner::<true>(op, row.iter().enumerate())
     }
 
     /// Append an invisible row to the builder, return a chunk if the builder is full.
     #[must_use]
     pub fn append_row_invisible(&mut self, op: Op, row: impl Row) -> Option<StreamChunk> {
-        self.append_iter_inner::<false>(op, row.iter().enumerate(), false)
+        self.append_iter_inner::<false>(op, row.iter().enumerate())
     }
 
     /// Append a record to the builder, return a chunk if the builder is full.
@@ -133,27 +133,16 @@ impl StreamChunkBuilder {
     pub fn append_record(&mut self, record: Record<impl Row>) -> Option<StreamChunk> {
         match record {
             Record::Insert { new_row } => {
-                self.append_iter_inner::<true>(Op::Insert, new_row.iter().enumerate(), false)
+                self.append_iter_inner::<true>(Op::Insert, new_row.iter().enumerate())
             }
             Record::Delete { old_row } => {
-                self.append_iter_inner::<true>(Op::Delete, old_row.iter().enumerate(), false)
+                self.append_iter_inner::<true>(Op::Delete, old_row.iter().enumerate())
             }
             Record::Update { old_row, new_row } => {
-                let res1 = self.append_iter_inner::<true>(
-                    Op::UpdateDelete,
-                    old_row.iter().enumerate(),
-                    false,
-                );
-                let res2 = self.append_iter_inner::<true>(
-                    Op::UpdateInsert,
-                    new_row.iter().enumerate(),
-                    // If we got a chunk after appending `U-`, we have to delay the next chunk.
-                    // This only makes difference when the max chunk size is 2, and we are appending
-                    // an `Update` to a chunk builder with 1 pending row.
-                    res1.is_some(),
-                );
-                assert!(!(res1.is_some() && res2.is_some()));
-                res1.or(res2)
+                let none =
+                    self.append_iter_inner::<true>(Op::UpdateDelete, old_row.iter().enumerate());
+                assert!(none.is_none());
+                self.append_iter_inner::<true>(Op::UpdateInsert, new_row.iter().enumerate())
             }
         }
     }
@@ -192,29 +181,7 @@ impl StreamChunkBuilder {
         &mut self,
         op: Op,
         iter: impl IntoIterator<Item = (usize, DatumRef<'a>)>,
-        delay_when_full: bool,
     ) -> Option<StreamChunk> {
-        let res = if let Some(max_chunk_size) = self.max_chunk_size {
-            if (self.size == max_chunk_size - 1 && op.is_update_delete())
-                || self.size == max_chunk_size
-            {
-                // Two situations here:
-                // 1. `self.size == max_chunk_size - 1 && op == Op::UpdateDelete`
-                //    If we are appending an `Update`, and the size will exceed the `max_chunk_size` after
-                //    appending `U-` and `U+`, we should take the existing data first, ensuring we have
-                //    space for the new `U-` and `U+`.
-                // 2. `self.size == max_chunk_size`
-                //    If the chunk builder is already full, it's because we had `delay_when_full` in last
-                //    append, and we should take the existing data first.
-                self.take()
-            } else {
-                None
-            }
-        } else {
-            // unlimited
-            None
-        };
-
         self.ops.push(op);
         for (i, datum) in iter {
             self.column_builders[i].append(datum);
@@ -223,18 +190,20 @@ impl StreamChunkBuilder {
         self.size += 1;
 
         if let Some(max_chunk_size) = self.max_chunk_size {
-            if res.is_some() {
-                assert_eq!(self.size, 1); // which is less than `max_chunk_size`
-                res
-            } else if self.size == max_chunk_size && !delay_when_full {
+            if self.size == max_chunk_size && !op.is_update_delete() || self.size > max_chunk_size {
+                // Two situations here:
+                // 1. `self.size == max_chunk_size && op == Op::UpdateDelete`
+                //    We should wait for next `UpdateInsert` to join the chunk.
+                // 2. `self.size > max_chunk_size`
+                //    Here we assert that `self.size == max_chunk_size + 1`. It's possible that
+                //    the `Op` after `UpdateDelete` is not `UpdateInsert`, if something inconsistent
+                //    happens, we should still take the existing data.
                 self.take()
             } else {
-                assert!(self.size < max_chunk_size || delay_when_full);
                 None
             }
         } else {
             // unlimited
-            assert!(res.is_none());
             None
         }
     }
@@ -297,33 +266,33 @@ mod tests {
             Some(StreamChunk::from_pretty(
                 "  i i
                 U- . .
-                U+ . ."
-            ))
-        );
-        let res = builder.take();
-        assert_eq!(
-            res,
-            Some(StreamChunk::from_pretty(
-                "  i i
+                U+ . .
                 U- . .
                 U+ . ."
             ))
         );
+        let res = builder.take();
+        assert!(res.is_none());
     }
 
     #[test]
-    fn test_stream_chunk_builder_with_max_size_2() {
+    fn test_stream_chunk_builder_with_max_size_1() {
         let row = OwnedRow::new(vec![Datum::None, Datum::None]);
-        let mut builder = StreamChunkBuilder::new(2, vec![DataType::Int32, DataType::Int32]);
+        let mut builder = StreamChunkBuilder::new(1, vec![DataType::Int32, DataType::Int32]);
 
         let res = builder.append_row(Op::Delete, row.clone());
-        assert!(res.is_none());
+        assert_eq!(
+            res,
+            Some(StreamChunk::from_pretty(
+                "  i i
+                 - . ."
+            ))
+        );
         let res = builder.append_row(Op::Insert, row.clone());
         assert_eq!(
             res,
             Some(StreamChunk::from_pretty(
                 "  i i
-                 - . .
                  + . ."
             ))
         );
@@ -341,44 +310,15 @@ mod tests {
             ))
         );
 
-        _ = builder.append_row(Op::Insert, row.clone());
-        let res = builder.append_record(Record::Update {
-            old_row: row.clone(),
-            new_row: row.clone(),
-        });
-        assert_eq!(
-            res,
-            Some(StreamChunk::from_pretty(
-                "  i i
-                 + . ."
-            ))
-        );
-        let res = builder.take();
-        assert_eq!(
-            res,
-            Some(StreamChunk::from_pretty(
-                "  i i
-                U- . .
-                U+ . ."
-            ))
-        );
-
-        _ = builder.append_row(Op::Insert, row.clone());
         let res = builder.append_row(Op::UpdateDelete, row.clone());
-        assert_eq!(
-            res,
-            Some(StreamChunk::from_pretty(
-                "  i i
-                 + . ."
-            ))
-        );
-        let res = builder.append_row(Op::UpdateInsert, row.clone());
+        assert!(res.is_none());
+        let res = builder.append_row(Op::UpdateDelete, row.clone()); // note this is an inconsistency
         assert_eq!(
             res,
             Some(StreamChunk::from_pretty(
                 "  i i
                 U- . .
-                U+ . ."
+                U- . ."
             ))
         );
     }
