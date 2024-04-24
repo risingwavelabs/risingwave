@@ -742,7 +742,7 @@ mod tests {
 
     use futures::{Stream, TryStreamExt};
     use risingwave_common::catalog::TableId;
-    use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
+    use risingwave_common::hash::{ParallelUnitMapping, WorkerSlotId, WorkerSlotMapping};
     use risingwave_common::system_param::reader::SystemParamsRead;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::add_worker_node_request::Property;
