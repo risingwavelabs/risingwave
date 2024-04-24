@@ -133,7 +133,7 @@ pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Opti
         )
     });
 
-    fn effective_chunk_size_of(chunk: &StreamChunk, limit: usize) -> usize {
+    fn compute_chunk_permits(chunk: &StreamChunk, limit: usize) -> usize {
         let chunk_size = chunk.capacity();
         let ends_with_update = if chunk_size >= 2 {
             // Note we have to check if the 2nd last is `U-` to be consistenct with `StreamChunkBuilder`.
@@ -143,8 +143,8 @@ pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Opti
             false
         };
         if chunk_size == limit + 1 && ends_with_update {
-            // If the chunk size exceed limit because of the last `UpdateDelete` operation,
-            // we should not split the chunk (actually we cannot with `split(limit)`).
+            // If the chunk size exceed limit because of the last `Update` operation,
+            // we should minus 1 to make sure the permits consumed is within the limit (max burst).
             chunk_size - 1
         } else {
             chunk_size
@@ -165,7 +165,7 @@ pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Opti
         let limiter = limiter.as_ref().unwrap();
         let limit = rate_limit_rps.unwrap() as usize;
 
-        let chunk_size = effective_chunk_size_of(&chunk, limit);
+        let chunk_size = compute_chunk_permits(&chunk, limit);
         if chunk_size <= limit {
             let n = NonZeroU32::new(chunk_size as u32).unwrap();
             // `InsufficientCapacity` should never happen because we have check the cardinality
@@ -174,7 +174,7 @@ pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Opti
         } else {
             // Cut the chunk into smaller chunks
             for chunk in chunk.split(limit) {
-                let n = NonZeroU32::new(effective_chunk_size_of(&chunk, limit) as u32).unwrap();
+                let n = NonZeroU32::new(compute_chunk_permits(&chunk, limit) as u32).unwrap();
                 // chunks split should have effective chunk size <= limit
                 limiter.until_n_ready(n).await.unwrap();
                 yield chunk;
