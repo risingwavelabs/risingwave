@@ -165,9 +165,9 @@ pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Opti
         let limiter = limiter.as_ref().unwrap();
         let limit = rate_limit_rps.unwrap() as usize;
 
-        let chunk_size = compute_chunk_permits(&chunk, limit);
-        if chunk_size <= limit {
-            let n = NonZeroU32::new(chunk_size as u32).unwrap();
+        let required_permits = compute_chunk_permits(&chunk, limit);
+        if required_permits <= limit {
+            let n = NonZeroU32::new(required_permits as u32).unwrap();
             // `InsufficientCapacity` should never happen because we have check the cardinality
             limiter.until_n_ready(n).await.unwrap();
             yield chunk;
