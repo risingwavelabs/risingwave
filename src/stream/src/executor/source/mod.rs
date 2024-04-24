@@ -135,7 +135,14 @@ pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Opti
 
     fn effective_chunk_size_of(chunk: &StreamChunk, limit: usize) -> usize {
         let chunk_size = chunk.capacity();
-        if chunk_size == limit + 1 && chunk.ends_with_update() {
+        let ends_with_update = if chunk_size >= 2 {
+            // Note we have to check if the 2nd last is `U-` to be consistenct with `StreamChunkBuilder`.
+            // If something inconsistent happens in the stream, we may not have `U+` after this `U-`.
+            chunk.ops()[chunk_size - 2].is_update_delete()
+        } else {
+            false
+        };
+        if chunk_size == limit + 1 && ends_with_update {
             // If the chunk size exceed limit because of the last `UpdateDelete` operation,
             // we should not split the chunk (actually we cannot with `split(limit)`).
             chunk_size - 1

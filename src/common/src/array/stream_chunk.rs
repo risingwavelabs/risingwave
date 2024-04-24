@@ -152,16 +152,6 @@ impl StreamChunk {
         &self.data
     }
 
-    pub fn ends_with_update(&self) -> bool {
-        if self.ops.len() >= 2 {
-            // Note we have to check if the 2nd last is `U-` to be consistenct with `StreamChunkBuilder`.
-            // If something inconsistent happens in the stream, we may not have `U+` after this `U-`.
-            self.ops[self.ops.len() - 2].is_update_delete()
-        } else {
-            false
-        }
-    }
-
     /// compact the `StreamChunk` with its visibility map
     pub fn compact(self) -> Self {
         if self.is_compacted() {
