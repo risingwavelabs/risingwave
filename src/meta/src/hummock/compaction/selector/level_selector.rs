@@ -184,7 +184,7 @@ impl DynamicLevelSelectorCore {
                 ctx.base_level -= 1;
                 cur_level_size /= self.config.max_bytes_for_level_multiplier;
             }
-            cur_level_size
+            std::cmp::max(cur_level_size, base_bytes_max)
         };
 
         let level_multiplier = self.config.max_bytes_for_level_multiplier as f64;
