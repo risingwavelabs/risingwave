@@ -469,6 +469,10 @@ message SubscribeResponse {
     FragmentWorkerMapping streaming_worker_mapping = 27;
     FragmentWorkerMappings serving_worker_mappings = 28;
   }
+  reserved 12;
+  reserved "parallel_unit_mapping";
+  reserved 23;
+  reserved "serving_parallel_unit_mappings";
 }
 
 service NotificationService {
