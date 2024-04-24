@@ -422,21 +422,22 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
 
 fn make_cluster_info() -> StreamingClusterInfo {
     let parallel_units = (0..8)
-        .map(|id| {
-            (
-                id,
-                ParallelUnit {
-                    id,
-                    worker_node_id: 0,
-                },
-            )
+        .map(|id| ParallelUnit {
+            id,
+            worker_node_id: 0,
         })
+        .collect_vec();
+
+    let parallel_unit_map = parallel_units
+        .iter()
+        .map(|parallel_unit| (parallel_unit.id, parallel_unit.clone()))
         .collect();
 
     let worker_nodes = std::iter::once((
         0,
         WorkerNode {
             id: 0,
+            parallel_units,
             ..Default::default()
         },
     ))
@@ -444,7 +445,7 @@ fn make_cluster_info() -> StreamingClusterInfo {
     let unschedulable_parallel_units = Default::default();
     StreamingClusterInfo {
         worker_nodes,
-        parallel_units,
+        parallel_units: parallel_unit_map,
         unschedulable_parallel_units,
     }
 }

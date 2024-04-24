@@ -22,7 +22,6 @@ use itertools::Itertools;
 use risingwave_pb::common::{
     ParallelUnit, ParallelUnitMapping as ParallelUnitMappingProto, PbWorkerMapping,
 };
-
 use risingwave_pb::stream_plan::ActorMapping as ActorMappingProto;
 
 use super::bitmap::VnodeBitmapExt;
