@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use anyhow::anyhow;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model_v2::{
@@ -25,6 +27,7 @@ use risingwave_pb::catalog::{
     PbSchema, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbSubscription, PbTable, PbView,
 };
 use sea_orm::{DatabaseConnection, ModelTrait};
+use serde_json::Value;
 
 use crate::MetaError;
 
@@ -183,6 +186,13 @@ impl From<ObjectModel<source::Model>> for PbSource {
 
 impl From<ObjectModel<sink::Model>> for PbSink {
     fn from(value: ObjectModel<sink::Model>) -> Self {
+        let mut secret_ref_hashmap: HashMap<String, u32> = HashMap::new();
+        if let Some(secret_ref) = value.0.secret_ref.as_ref() {
+            let json_value: Value = serde_json::from_str(&secret_ref).unwrap();
+            json_value.as_object().unwrap().iter().for_each(|(k, v)| {
+                secret_ref_hashmap.insert(k.to_string(), v.as_u64().unwrap() as u32);
+            });
+        }
         Self {
             id: value.0.sink_id as _,
             schema_id: value.1.schema_id.unwrap() as _,
@@ -212,7 +222,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             create_type: PbCreateType::Foreground as _,
-            secret_ref: value.0.secret_ref.into_iter().collect(),
+            secret_ref: secret_ref_hashmap,
         }
     }
 }

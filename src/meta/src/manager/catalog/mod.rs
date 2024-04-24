@@ -328,7 +328,8 @@ impl CatalogManager {
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
         let mut functions = BTreeMapTransaction::new(&mut database_core.functions);
         let mut connections = BTreeMapTransaction::new(&mut database_core.connections);
-        let mut secrets = BTreeMapTransaction::new(&mut database_core.secrets);
+        let mut secrets: BTreeMapTransaction<'_, u32, risingwave_pb::catalog::Secret, Transaction> =
+            BTreeMapTransaction::new(&mut database_core.secrets);
 
         /// `drop_by_database_id` provides a wrapper for dropping relations by database id, it will
         /// return the relation ids that dropped.
@@ -350,7 +351,7 @@ impl CatalogManager {
         }
 
         let database = databases.remove(database_id);
-        let connections_dropped;
+        let connections_dropped = vec![];
         if let Some(database) = database {
             let schemas_to_drop = drop_by_database_id!(schemas, database_id);
             let sources_to_drop = drop_by_database_id!(sources, database_id);

@@ -27,10 +27,11 @@ use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::table::TableType;
 use risingwave_meta_model_v2::{
     actor, connection, database, fragment, function, index, object, object_dependency, schema,
-    sink, source, streaming_job, subscription, table, user_privilege, view, ActorId,
+    secret, sink, source, streaming_job, subscription, table, user_privilege, view, ActorId,
     ActorUpstreamActors, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId,
     FunctionId, I32Array, IndexId, JobStatus, ObjectId, PrivateLinkService, Property, SchemaId,
-    SinkId, SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, TableId, UserId,
+    SecretId, SinkId, SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, TableId,
+    UserId,
 };
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
@@ -3031,7 +3032,14 @@ impl CatalogControllerInner {
     }
 
     async fn list_secrets(&self) -> MetaResult<Vec<PbSecret>> {
-        todo!()
+        let secret_objs = Secret::find()
+            .find_also_related(Object)
+            .all(&self.db)
+            .await?;
+        Ok(secret_objs
+            .into_iter()
+            .map(|(secret, obj)| ObjectModel(secret, obj.unwrap()).into())
+            .collect())
     }
 
     async fn list_functions(&self) -> MetaResult<Vec<PbFunction>> {

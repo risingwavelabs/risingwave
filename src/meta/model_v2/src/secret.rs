@@ -12,49 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::catalog::PbSecret;
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "secret")]
 pub struct Model {
-    pub secret_id: u32,
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub secret_id: i32,
     pub name: String,
+    #[sea_orm(column_type = "Binary(BlobSize::Blob(None))")]
+    pub value: Vec<u8>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::object::Entity",
-        from = "Column::SecretId",
-        to = "super::object::Column::Oid",
-        on_update = "NoAction",
-        on_delete = "Cascade"
-    )]
-    Object,
-    // #[sea_orm(
-    //     belongs_to = "super"
-    // )]
-    // Sink,
-    // #[sea_orm(has_many = "super::source::Entity")]
-    // Source,
-}
+pub enum Relation {}
 
-impl Related<super::object::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Object.def()
+impl ActiveModelBehavior for ActiveModel {}
+
+impl From<PbSecret> for ActiveModel {
+    fn from(secret: PbSecret) -> Self {
+        Self {
+            secret_id: Set(secret.id as _),
+            name: Set(secret.name),
+            value: Set(secret.value),
+        }
     }
 }
-
-// impl Related<super::sink::Entity> for Entity {
-//     fn to() -> RelationDef {
-//         Relation::Sink.def()
-//     }
-// }
-
-// impl Related<super::source::Entity> for Entity {
-//     fn to() -> RelationDef {
-//         Relation::Source.def()
-//     }
-// }
-

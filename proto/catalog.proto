@@ -429,6 +429,7 @@ message Secret {
   uint32 id = 1;
   string name = 2;
   uint32 database_id = 3;
+  // The secret here is encrypted to bytes.
   bytes value = 4;
   uint32 owner = 5;
 

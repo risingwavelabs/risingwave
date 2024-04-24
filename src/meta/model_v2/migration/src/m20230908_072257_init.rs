@@ -1222,7 +1222,7 @@ enum Function {
 }
 
 #[derive(DeriveIden)]
-enum Object {
+pub enum Object {
     Table,
     Oid,
     ObjType,

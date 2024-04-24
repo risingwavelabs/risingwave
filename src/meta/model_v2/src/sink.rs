@@ -71,6 +71,8 @@ pub struct Model {
     pub sink_from_name: String,
     pub sink_format_desc: Option<SinkFormatDesc>,
     pub target_table: Option<TableId>,
+    // `secret_ref` stores a json string, mapping from property name to secret id.
+    pub secret_ref: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -126,6 +128,13 @@ impl From<PbSink> for ActiveModel {
             sink_from_name: Set(pb_sink.sink_from_name),
             sink_format_desc: Set(pb_sink.format_desc.as_ref().map(|x| x.into())),
             target_table: Set(pb_sink.target_table.map(|x| x as _)),
+            secret_ref: Set({
+                if pb_sink.secret_ref.is_empty() {
+                    None
+                } else {
+                    Some(serde_json::to_string(&pb_sink.secret_ref).unwrap())
+                }
+            }),
         }
     }
 }
