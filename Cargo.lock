@@ -5372,7 +5372,7 @@ dependencies = [
  "hyper 0.14.27",
  "hyper-rustls 0.24.2",
  "log",
- "reqwest 0.11.20",
+ "reqwest 0.11.27",
  "serde",
  "serde_json",
  "thiserror",
@@ -5504,7 +5504,7 @@ dependencies = [
  "google-cloud-token",
  "home",
  "jsonwebtoken",
- "reqwest 0.11.20",
+ "reqwest 0.11.27",
  "serde",
  "serde_json",
  "thiserror",
@@ -5547,7 +5547,7 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc279bfb50487d7bcd900e8688406475fc750fe474a835b2ab9ade9eb1fc90e2"
 dependencies = [
- "reqwest 0.11.20",
+ "reqwest 0.11.27",
  "thiserror",
  "tokio",
 ]
@@ -6126,7 +6126,7 @@ dependencies = [
  "parquet 50.0.0",
  "prometheus",
  "regex",
- "reqwest 0.11.20",
+ "reqwest 0.11.27",
  "rust_decimal",
  "serde",
  "serde_bytes",
@@ -7696,7 +7696,7 @@ dependencies = [
  "getrandom",
  "http 0.2.9",
  "rand",
- "reqwest 0.11.20",
+ "reqwest 0.11.27",
  "serde",
  "serde_json",
  "serde_path_to_error",
@@ -7735,7 +7735,7 @@ dependencies = [
  "percent-encoding",
  "quick-xml 0.30.0",
  "rand",
- "reqwest 0.11.20",
+ "reqwest 0.11.27",
  "ring 0.16.20",
  "rustls-pemfile 1.0.4",
  "serde",
@@ -7788,7 +7788,7 @@ dependencies = [
  "prometheus",
  "quick-xml 0.31.0",
  "reqsign",
- "reqwest 0.11.20",
+ "reqwest 0.11.27",
  "serde",
  "serde_json",
  "sha2",
@@ -9017,7 +9017,7 @@ checksum = "e7849dd7319357e220886589ea0a0760ff138cde2eedfbbfd2708caee0b15dfc"
 dependencies = [
  "enum-as-inner 0.6.0",
  "mime",
- "reqwest 0.11.20",
+ "reqwest 0.11.27",
  "serde",
  "time",
  "url",
@@ -9268,7 +9268,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.12.1",
+ "parking_lot 0.11.2",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
@@ -9661,7 +9661,7 @@ dependencies = [
  "percent-encoding",
  "quick-xml 0.31.0",
  "rand",
- "reqwest 0.11.20",
+ "reqwest 0.11.27",
  "rsa",
  "rust-ini",
  "serde",
@@ -9672,9 +9672,9 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.11.20"
+version = "0.11.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e9ad3fe7488d7e34558a2033d45a0c90b72d97b4f80705666fea71472e2e6a1"
+checksum = "dd67538700a17451e7cba03ac727fb961abb7607553461627b97de0b89cf4a62"
 dependencies = [
  "base64 0.21.7",
  "bytes",
@@ -9701,6 +9701,8 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
+ "sync_wrapper",
+ "system-configuration",
  "tokio",
  "tokio-native-tls",
  "tokio-rustls 0.24.1",
@@ -9709,7 +9711,7 @@ dependencies = [
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
- "wasm-streams 0.3.0",
+ "wasm-streams",
  "web-sys",
  "webpki-roots 0.25.2",
  "winreg",
@@ -9761,7 +9763,7 @@ dependencies = [
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
- "wasm-streams 0.4.0",
+ "wasm-streams",
  "web-sys",
  "webpki-roots 0.26.1",
  "winreg",
@@ -11111,7 +11113,7 @@ dependencies = [
  "madsim-tokio",
  "opendal",
  "prometheus",
- "reqwest 0.11.20",
+ "reqwest 0.12.2",
  "risingwave_common",
  "rustls 0.23.5",
  "spin 0.9.8",
@@ -15315,19 +15317,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9c7d2731df60006819b013f64ccc2019691deccf6e11a1804bc850cd6748f1a"
 dependencies = [
  "leb128",
-]
-
-[[package]]
-name = "wasm-streams"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4609d447824375f43e1ffbc051b50ad8f4b3ae8219680c94452ea05eb240ac7"
-dependencies = [
- "futures-util",
- "js-sys",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
 ]
 
 [[package]]

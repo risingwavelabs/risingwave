@@ -30,7 +30,7 @@ itertools = { workspace = true }
 madsim = "0.2.22"
 opendal = "0.45.1"
 prometheus = { version = "0.13", features = ["process"] }
-reqwest = "0.11" # required by opendal
+reqwest = "0.12" # required by opendal
 risingwave_common = { workspace = true }
 rustls = "0.23.5"
 spin = "0.9"
