@@ -13,7 +13,7 @@ ENV PYO3_PYTHON=python3.12
 
 FROM base AS rust-base
 
-RUN apt-get update && apt-get -y install make cmake protobuf-compiler curl bash lld unzip
+RUN apt-get update && apt-get -y install make cmake protobuf-compiler curl bash lld unzip rsync
 
 # Install Node.js as dependency for building the dashboard.
 # Bump version together with `dashboard/.node-version`.

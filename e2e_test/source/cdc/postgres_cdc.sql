@@ -88,3 +88,11 @@ insert into numeric_table values(7, 'Infinity'::numeric);
 create table numeric_list(id int primary key, num numeric[]);
 insert into numeric_list values(1, '{3.14, 6, 57896044618658097711785492504343953926634992332820282019728792003956564819967, 57896044618658097711785492504343953926634992332820282019728792003956564819968, 115792089237316195423570985008687907853269984665640564039457584007913129639936.555555}');
 insert into numeric_list values(2, '{nan, infinity, -infinity}');
+
+--- for https://github.com/risingwavelabs/risingwave/issues/16392
+CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy');
+CREATE TABLE enum_table (
+    id int PRIMARY KEY,
+    current_mood mood
+);
+INSERT INTO enum_table VALUES (1, 'happy');
