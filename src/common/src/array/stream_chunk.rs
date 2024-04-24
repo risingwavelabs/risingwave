@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::{fmt, mem};
 
 use either::Either;
+use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
@@ -40,7 +41,7 @@ use crate::types::{DataType, DefaultOrdered, ToText};
 /// but always appear in pairs to represent an update operation.
 /// For example, table source, aggregation and outer join can generate updates by themselves,
 /// while most of the other operators only pass through updates with best effort.
-#[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Hash, EnumAsInner)]
 pub enum Op {
     Insert,
     Delete,
@@ -149,6 +150,16 @@ impl StreamChunk {
     /// Get the reference of the underlying data chunk.
     pub fn data_chunk(&self) -> &DataChunk {
         &self.data
+    }
+
+    pub fn ends_with_update(&self) -> bool {
+        if self.ops.len() >= 2 {
+            // Note we have to check if the 2nd last is `U-` to be consistenct with `StreamChunkBuilder`.
+            // If we have something inconsistent happens in the stream, we may not have `U+` after this `U-`.
+            self.ops[self.ops.len() - 2].is_update_delete()
+        } else {
+            false
+        }
     }
 
     /// compact the `StreamChunk` with its visibility map

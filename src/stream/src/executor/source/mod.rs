@@ -133,28 +133,42 @@ pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Opti
         )
     });
 
+    fn effective_chunk_size_of(chunk: &StreamChunk, limit: usize) -> usize {
+        let chunk_size = chunk.capacity();
+        if chunk_size == limit + 1 && chunk.ends_with_update() {
+            // If the chunk size exceed limit because of the last `UpdateDelete` operation,
+            // we should not split the chunk (actually we cannot with `split(limit)`).
+            chunk_size - 1
+        } else {
+            chunk_size
+        }
+    }
+
     #[for_await]
     for chunk in stream {
         let chunk = chunk?;
-        let cardinality = chunk.cardinality();
+        let chunk_size = chunk.capacity();
 
-        if rate_limit_rps.is_none() || cardinality == 0 {
+        if rate_limit_rps.is_none() || chunk_size == 0 {
             // no limit, or empty chunk
             yield chunk;
             continue;
         }
 
         let limiter = limiter.as_ref().unwrap();
-        let limit = rate_limit_rps.unwrap();
-        if cardinality <= limit as usize {
-            let n = NonZeroU32::new(cardinality as u32).unwrap();
+        let limit = rate_limit_rps.unwrap() as usize;
+
+        let chunk_size = effective_chunk_size_of(&chunk, limit);
+        if chunk_size <= limit as usize {
+            let n = NonZeroU32::new(chunk_size as u32).unwrap();
             // `InsufficientCapacity` should never happen because we have check the cardinality
             limiter.until_n_ready(n).await.unwrap();
             yield chunk;
         } else {
             // Cut the chunk into smaller chunks
             for chunk in chunk.split(limit as usize) {
-                let n = NonZeroU32::new(chunk.cardinality() as u32).unwrap();
+                let n = NonZeroU32::new(effective_chunk_size_of(&chunk, limit) as u32).unwrap();
+                // chunks split should have effective chunk size <= limit
                 limiter.until_n_ready(n).await.unwrap();
                 yield chunk;
             }

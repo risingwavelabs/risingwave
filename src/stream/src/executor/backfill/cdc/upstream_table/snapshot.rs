@@ -131,9 +131,9 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
         #[for_await]
         for chunk in chunk_stream {
             let chunk = chunk?;
-            let cardinality = chunk.cardinality();
+            let chunk_size = chunk.capacity();
 
-            if args.rate_limit_rps.is_none() || cardinality == 0 {
+            if args.rate_limit_rps.is_none() || chunk_size == 0 {
                 // no limit, or empty chunk
                 yield Some(chunk);
                 continue;
@@ -143,11 +143,14 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
             // May be should be refactored to a common function later.
             let limiter = limiter.as_ref().unwrap();
             let limit = args.rate_limit_rps.unwrap();
-            assert!(cardinality <= limit as usize); // because we produce chunks with limited-sized data chunk builder.
+
+            // Because we produce chunks with limited-sized data chunk builder and all rows
+            // are `Insert`s, the chunk size should never exceed the limit.
+            assert!(chunk_size <= limit as usize);
 
             // `InsufficientCapacity` should never happen because we have check the cardinality
             limiter
-                .until_n_ready(NonZeroU32::new(cardinality as u32).unwrap())
+                .until_n_ready(NonZeroU32::new(chunk_size as u32).unwrap())
                 .await
                 .unwrap();
             yield Some(chunk);
