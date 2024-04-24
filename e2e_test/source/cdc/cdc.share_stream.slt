@@ -297,6 +297,12 @@ CREATE TABLE numeric_list_to_varchar_list_shared (
     PRIMARY KEY (id)
 ) FROM pg_source TABLE 'public.numeric_list';
 
+statement ok
+CREATE TABLE enum_to_varchar_shared (
+    id int,
+    current_mood varchar,
+    PRIMARY KEY (id)
+) FROM pg_source TABLE 'public.enum_table';
 
 system ok
 psql -c "
@@ -308,6 +314,7 @@ insert into numeric_table values(104, 115792089237316195423570985008687907853269
 insert into numeric_table values(105, 115792089237316195423570985008687907853269984665640564039457584007913129639936.555555);
 insert into numeric_table values(106, 'NaN'::numeric);
 insert into numeric_table values(107, 'Infinity'::numeric);
+INSERT INTO enum_table VALUES (2, 'ok');
 "
 
 sleep 3s
@@ -363,3 +370,9 @@ select * from numeric_list_to_rw_int256_list_shared order by id;
 ----
 1 {NULL,6,57896044618658097711785492504343953926634992332820282019728792003956564819967,NULL,NULL}
 2 {NULL,NULL,NULL}
+
+query II
+select * from enum_to_varchar_shared order by id;
+----
+1 happy
+2 ok

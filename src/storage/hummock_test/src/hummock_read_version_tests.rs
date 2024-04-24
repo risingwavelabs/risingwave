@@ -52,9 +52,8 @@ async fn test_read_version_basic() {
 
     {
         // single imm
-        let kv_pairs = gen_dummy_batch(1);
-        let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
-        let size = SharedBufferBatch::measure_batch_size(&sorted_items);
+        let sorted_items = gen_dummy_batch(1);
+        let size = SharedBufferBatch::measure_batch_size(&sorted_items, None);
         let imm = SharedBufferBatch::build_shared_buffer_batch_for_test(
             epoch,
             0,
@@ -86,9 +85,8 @@ async fn test_read_version_basic() {
         // several epoch
         for i in 0..5 {
             epoch.inc_epoch();
-            let kv_pairs = gen_dummy_batch(i + 2);
-            let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
-            let size = SharedBufferBatch::measure_batch_size(&sorted_items);
+            let sorted_items = gen_dummy_batch(i + 2);
+            let size = SharedBufferBatch::measure_batch_size(&sorted_items, None);
             let imm = SharedBufferBatch::build_shared_buffer_batch_for_test(
                 epoch,
                 0,
@@ -173,6 +171,7 @@ async fn test_read_version_basic() {
                     ..Default::default()
                 }),
             ],
+            vec![],
             epoch_id_vec_for_clear,
             batch_id_vec_for_clear,
             1,
@@ -273,9 +272,8 @@ async fn test_read_filter_basic() {
 
     {
         // single imm
-        let kv_pairs = gen_dummy_batch(epoch);
-        let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
-        let size = SharedBufferBatch::measure_batch_size(&sorted_items);
+        let sorted_items = gen_dummy_batch(epoch);
+        let size = SharedBufferBatch::measure_batch_size(&sorted_items, None);
         let imm = SharedBufferBatch::build_shared_buffer_batch_for_test(
             epoch,
             0,

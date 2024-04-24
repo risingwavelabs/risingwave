@@ -31,11 +31,12 @@ use risingwave_connector::source::{
 use risingwave_storage::store::PrefetchOptions;
 use thiserror_ext::AsReport;
 
-use super::{get_split_offset_col_idx, SourceStateTableHandler, StreamSourceCore};
-use crate::executor::prelude::*;
-use crate::executor::source::{
-    apply_rate_limit, get_split_offset_mapping_from_chunk, prune_additional_cols,
+use super::{
+    apply_rate_limit, get_split_offset_col_idx, get_split_offset_mapping_from_chunk,
+    prune_additional_cols, SourceStateTableHandler, StreamSourceCore,
 };
+use crate::common::rate_limit::limited_chunk_size;
+use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
 
 const SPLIT_BATCH_SIZE: usize = 1000;
@@ -51,8 +52,8 @@ pub struct FsFetchExecutor<S: StateStore, Src: OpendalSource> {
     /// Upstream list executor.
     upstream: Option<Executor>,
 
-    // control options for connector level
-    source_ctrl_opts: SourceCtrlOpts,
+    /// Rate limit in rows/s.
+    rate_limit_rps: Option<u32>,
 
     _marker: PhantomData<Src>,
 }
@@ -62,13 +63,13 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         actor_ctx: ActorContextRef,
         stream_source_core: StreamSourceCore<S>,
         upstream: Executor,
-        source_ctrl_opts: SourceCtrlOpts,
+        rate_limit_rps: Option<u32>,
     ) -> Self {
         Self {
             actor_ctx,
             stream_source_core: Some(stream_source_core),
             upstream: Some(upstream),
-            source_ctrl_opts,
+            rate_limit_rps,
             _marker: PhantomData,
         }
     }
@@ -80,6 +81,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         source_ctx: SourceContext,
         source_desc: &SourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
+        rate_limit_rps: Option<u32>,
     ) -> StreamExecutorResult<()> {
         let mut batch = Vec::with_capacity(SPLIT_BATCH_SIZE);
         'vnodes: for vnode in state_store_handler.state_table.vnodes().iter_vnodes() {
@@ -128,10 +130,15 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             stream.replace_data_stream(stream::pending().boxed());
         } else {
             *splits_on_fetch += batch.len();
-            let batch_reader =
-                Self::build_batched_stream_reader(column_ids, source_ctx, source_desc, Some(batch))
-                    .await?
-                    .map_err(StreamExecutorError::connector_error);
+            let batch_reader = Self::build_batched_stream_reader(
+                column_ids,
+                source_ctx,
+                source_desc,
+                Some(batch),
+                rate_limit_rps,
+            )
+            .await?
+            .map_err(StreamExecutorError::connector_error);
             stream.replace_data_stream(batch_reader);
         }
 
@@ -143,14 +150,14 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         source_ctx: SourceContext,
         source_desc: &SourceDesc,
         batch: SplitBatch,
+        rate_limit_rps: Option<u32>,
     ) -> StreamExecutorResult<BoxChunkSourceStream> {
-        let rate_limit = source_ctx.source_ctrl_opts.rate_limit;
         let stream = source_desc
             .source
             .to_stream(batch, column_ids, Arc::new(source_ctx))
             .await
             .map_err(StreamExecutorError::connector_error)?;
-        Ok(apply_rate_limit(stream, rate_limit).boxed())
+        Ok(apply_rate_limit(stream, rate_limit_rps).boxed())
     }
 
     fn build_source_ctx(
@@ -165,7 +172,10 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             self.actor_ctx.fragment_id,
             source_name.to_owned(),
             source_desc.metrics.clone(),
-            self.source_ctrl_opts.clone(),
+            SourceCtrlOpts {
+                chunk_size: limited_chunk_size(self.rate_limit_rps),
+                rate_limit: self.rate_limit_rps,
+            },
             source_desc.source.config.clone(),
         )
     }
@@ -211,6 +221,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             self.build_source_ctx(&source_desc, core.source_id, &core.source_name),
             &source_desc,
             &mut stream,
+            self.rate_limit_rps,
         )
         .await?;
 
@@ -235,10 +246,11 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                             Mutation::Pause => stream.pause_stream(),
                                             Mutation::Resume => stream.resume_stream(),
                                             Mutation::Throttle(actor_to_apply) => {
-                                                if let Some(throttle) =
+                                                if let Some(new_rate_limit) =
                                                     actor_to_apply.get(&self.actor_ctx.id)
+                                                    && *new_rate_limit != self.rate_limit_rps
                                                 {
-                                                    self.source_ctrl_opts.rate_limit = *throttle;
+                                                    self.rate_limit_rps = *new_rate_limit;
                                                     need_rebuild_reader = true;
                                                 }
                                             }
@@ -277,6 +289,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                             ),
                                             &source_desc,
                                             &mut stream,
+                                            self.rate_limit_rps,
                                         )
                                         .await?;
                                     }

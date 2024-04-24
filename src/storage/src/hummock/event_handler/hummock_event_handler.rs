@@ -28,7 +28,7 @@ use prometheus::core::{AtomicU64, GenericGauge};
 use prometheus::{Histogram, IntGauge};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
-use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo, SyncResult};
+use risingwave_hummock_sdk::{HummockEpoch, SyncResult};
 use thiserror_ext::AsReport;
 use tokio::spawn;
 use tokio::sync::mpsc::error::SendError;
@@ -204,7 +204,7 @@ async fn flush_imms(
     compactor_context: CompactorContext,
     filter_key_extractor_manager: FilterKeyExtractorManager,
     sstable_object_id_manager: Arc<SstableObjectIdManager>,
-) -> HummockResult<Vec<LocalSstableInfo>> {
+) -> HummockResult<UploadTaskOutput> {
     for epoch in &task_info.epochs {
         let _ = sstable_object_id_manager
             .add_watermark_object_id(Some(*epoch))
@@ -262,7 +262,7 @@ impl HummockEventHandler {
                 spawn({
                     let future = async move {
                         let _timer = upload_task_latency.start_timer();
-                        let ssts = flush_imms(
+                        let mut output = flush_imms(
                             payload,
                             task_info,
                             upload_compactor_context.clone(),
@@ -270,10 +270,14 @@ impl HummockEventHandler {
                             sstable_object_id_manager.clone(),
                         )
                         .await?;
-                        Ok(UploadTaskOutput {
-                            ssts,
-                            wait_poll_timer: Some(wait_poll_latency.start_timer()),
-                        })
+                        assert!(
+                            output
+                                .wait_poll_timer
+                                .replace(wait_poll_latency.start_timer())
+                                .is_none(),
+                            "should not set timer before"
+                        );
+                        Ok(output)
                     };
                     if let Some(tree_root) = tree_root {
                         tree_root.instrument(future).left_future()
@@ -979,6 +983,13 @@ fn to_sync_result(result: &HummockResult<SyncedData>) -> HummockResult<SyncResul
                     .flat_map(|staging_sstable_info| staging_sstable_info.sstable_infos().clone())
                     .collect(),
                 table_watermarks: sync_data.table_watermarks.clone(),
+                old_value_ssts: sync_data
+                    .staging_ssts
+                    .iter()
+                    .flat_map(|staging_sstable_info| {
+                        staging_sstable_info.old_value_sstable_infos().clone()
+                    })
+                    .collect(),
             })
         }
         Err(e) => Err(HummockError::other(format!(

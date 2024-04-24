@@ -13,13 +13,17 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::num::NonZeroU32;
 
 use await_tree::InstrumentAwait;
+use governor::clock::MonotonicClock;
+use governor::{Quota, RateLimiter};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::row::Row;
-use risingwave_connector::source::{SourceColumnDesc, SplitId};
+use risingwave_connector::error::ConnectorError;
+use risingwave_connector::source::{BoxChunkSourceStream, SourceColumnDesc, SplitId};
 use risingwave_pb::plan_common::additional_column::ColumnType;
 use risingwave_pb::plan_common::AdditionalColumn;
 pub use state_table_handler::*;
@@ -110,4 +114,50 @@ pub fn prune_additional_cols(
             })
             .collect_vec(),
     )
+}
+
+#[try_stream(ok = StreamChunk, error = ConnectorError)]
+pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Option<u32>) {
+    if rate_limit_rps == Some(0) {
+        // block the stream until the rate limit is reset
+        let future = futures::future::pending::<()>();
+        future.await;
+        unreachable!();
+    }
+
+    let limiter = rate_limit_rps.map(|limit| {
+        tracing::info!(rate_limit = limit, "rate limit applied");
+        RateLimiter::direct_with_clock(
+            Quota::per_second(NonZeroU32::new(limit).unwrap()),
+            &MonotonicClock,
+        )
+    });
+
+    #[for_await]
+    for chunk in stream {
+        let chunk = chunk?;
+        let cardinality = chunk.cardinality();
+
+        if rate_limit_rps.is_none() || cardinality == 0 {
+            // no limit, or empty chunk
+            yield chunk;
+            continue;
+        }
+
+        let limiter = limiter.as_ref().unwrap();
+        let limit = rate_limit_rps.unwrap();
+        if cardinality <= limit as usize {
+            let n = NonZeroU32::new(cardinality as u32).unwrap();
+            // `InsufficientCapacity` should never happen because we have check the cardinality
+            limiter.until_n_ready(n).await.unwrap();
+            yield chunk;
+        } else {
+            // Cut the chunk into smaller chunks
+            for chunk in chunk.split(limit as usize) {
+                let n = NonZeroU32::new(chunk.cardinality() as u32).unwrap();
+                limiter.until_n_ready(n).await.unwrap();
+                yield chunk;
+            }
+        }
+    }
 }

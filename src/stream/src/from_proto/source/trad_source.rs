@@ -18,9 +18,7 @@ use risingwave_common::catalog::{
     default_key_column_name_version_mapping, TableId, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
-use risingwave_connector::source::{
-    should_copy_to_format_encode_options, SourceCtrlOpts, UPSTREAM_SOURCE_KEY,
-};
+use risingwave_connector::source::{should_copy_to_format_encode_options, UPSTREAM_SOURCE_KEY};
 use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::PbStreamSourceInfo;
 use risingwave_pb::data::data_type::TypeName as PbTypeName;
@@ -179,11 +177,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     source.with_properties.clone(),
                 );
 
-                let source_ctrl_opts = SourceCtrlOpts {
-                    chunk_size: params.env.config().developer.chunk_size,
-                    rate_limit: source.rate_limit.map(|x| x as _),
-                };
-
                 let source_column_ids: Vec<_> = source_desc_builder
                     .column_catalogs_to_source_column_descs()
                     .iter()
@@ -219,7 +212,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         params.executor_stats,
                         barrier_receiver,
                         system_params,
-                        source_ctrl_opts,
+                        source.rate_limit,
                     )?
                     .boxed()
                 } else if is_fs_v2_connector {
@@ -229,7 +222,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         params.executor_stats.clone(),
                         barrier_receiver,
                         system_params,
-                        source_ctrl_opts.clone(),
+                        source.rate_limit,
                     )
                     .boxed()
                 } else {
@@ -239,7 +232,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         params.executor_stats.clone(),
                         barrier_receiver,
                         system_params,
-                        source_ctrl_opts.clone(),
+                        source.rate_limit,
                     )
                     .boxed()
                 }
@@ -268,11 +261,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 params.executor_stats,
                 barrier_receiver,
                 system_params,
-                // we don't expect any data in, so no need to set chunk_sizes
-                SourceCtrlOpts {
-                    chunk_size: 0,
-                    rate_limit: None,
-                },
+                None,
             );
             Ok((params.info, exec).into())
         }
