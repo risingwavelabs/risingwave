@@ -325,14 +325,16 @@ impl SharedBufferBatch {
         batch_items
             .iter()
             .map(|(k, v)| {
-                k.len() + {
-                    match v {
-                        SharedBufferValue::Insert(val) | SharedBufferValue::Update(val) => {
-                            val.len()
+                k.len()
+                    + {
+                        match v {
+                            SharedBufferValue::Insert(val) | SharedBufferValue::Update(val) => {
+                                val.len()
+                            }
+                            SharedBufferValue::Delete => 0,
                         }
-                        SharedBufferValue::Delete => 0,
                     }
-                }
+                    + size_of_val(v)
             })
             .sum::<usize>()
             + old_values
