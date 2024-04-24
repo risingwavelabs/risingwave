@@ -1,0 +1,23 @@
+name: Example with Custom ENTRYPOINT and CMD
+
+on:
+  pull_request:
+    types: [opened, edited, labeled]
+
+jobs:
+  custom-entrypoint-cmd-job:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/risingwavelabs/risingwave:v1.8.1
+      ports:
+        - 4566:4566
+      options: >-
+        --entrypoint "/risingwave/bin/risingwave"
+        -- single_node
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v2
+
+      - name: Run custom command
+        run: |
+          echo "Running with custom ENTRYPOINT and CMD"
