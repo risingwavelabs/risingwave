@@ -21,6 +21,8 @@ use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorMapping;
+use risingwave_common::types::Timestamptz;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::catalog::CreateType;
@@ -31,9 +33,14 @@ use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
-use risingwave_pb::stream_plan::{AddMutation, BarrierMutation, CombinedMutation, CreateSubscriptionMutation, Dispatcher, Dispatchers, DropSubscriptionMutation, PauseMutation, ResumeMutation, SourceChangeSplitMutation, StopMutation, StreamActor, ThrottleMutation, UpdateMutation};
+use risingwave_pb::stream_plan::{
+    AddMutation, BarrierMutation, CombinedMutation, CreateSubscriptionMutation, Dispatcher,
+    Dispatchers, DropSubscriptionMutation, PauseMutation, ResumeMutation,
+    SourceChangeSplitMutation, StopMutation, StreamActor, ThrottleMutation, UpdateMutation,
+};
 use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use thiserror_ext::AsReport;
+use tracing::warn;
 
 use super::info::{ActorDesc, CommandActorChanges, InflightActorInfo};
 use super::trace::TracedEpoch;
@@ -201,6 +208,7 @@ pub enum Command {
     CreateSubscription {
         subscription_id: u32,
         upstream_mv_table_id: TableId,
+        retention_second: u64,
     },
 
     DropSubscription {
@@ -675,6 +683,7 @@ impl CommandContext {
                 Command::CreateSubscription {
                     upstream_mv_table_id,
                     subscription_id,
+                    ..
                 } => Some(Mutation::CreateSubscription(CreateSubscriptionMutation {
                     upstream_mv_table_id: upstream_mv_table_id.table_id,
                     subscription_id: *subscription_id,
@@ -1100,5 +1109,15 @@ impl CommandContext {
         }
 
         Ok(())
+    }
+
+    pub fn get_truncate_epoch(&self, retention_second: u64) -> Epoch {
+        let Some(truncate_timestamptz) = Timestamptz::from_secs(
+            self.prev_epoch.value().as_timestamptz().timestamp() - retention_second as i64,
+        ) else {
+            warn!(retention_second, prev_epoch = ?self.prev_epoch.value(), "invalid retention second value");
+            return self.prev_epoch.value();
+        };
+        Epoch::from_unix_millis(truncate_timestamptz.timestamp_millis() as u64)
     }
 }

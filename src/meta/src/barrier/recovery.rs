@@ -1171,6 +1171,7 @@ impl GlobalBarrierManagerContext {
                     let actors = actors.iter().cloned().collect();
                     (*node_id, actors)
                 }),
+                &info.mv_depended_subscriptions,
             )
             .await?;
 

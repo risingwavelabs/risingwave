@@ -850,6 +850,10 @@ impl ScaleController {
                                 .collect_vec(),
                         )
                     }),
+                &self
+                    .metadata_manager
+                    .get_mv_depended_subscriptions()
+                    .await?,
             )
             .await?;
 

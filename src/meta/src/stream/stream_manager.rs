@@ -372,6 +372,10 @@ impl GlobalStreamManager {
             .build_actors(
                 &building_locations.worker_locations,
                 building_worker_actors.into_iter(),
+                &self
+                    .metadata_manager
+                    .get_mv_depended_subscriptions()
+                    .await?,
             )
             .await?;
 
