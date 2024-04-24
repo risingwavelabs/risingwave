@@ -66,10 +66,12 @@ fn get_op_consistency_level(
     conflict_behavior: ConflictBehavior,
     may_have_downstream: bool,
 ) -> StateTableOpConsistencyLevel {
-    if may_have_downstream || !matches!(conflict_behavior, ConflictBehavior::Overwrite) {
-        StateTableOpConsistencyLevel::ConsistentOldValue
-    } else {
+    if !may_have_downstream && matches!(conflict_behavior, ConflictBehavior::Overwrite) {
+        // Table with overwrite conflict behavior could disable conflict check
+        // if no downstream mv depends on it, so we use a inconsistent_op to skip sanity check as well.
         StateTableOpConsistencyLevel::Inconsistent
+    } else {
+        StateTableOpConsistencyLevel::ConsistentOldValue
     }
 }
 
