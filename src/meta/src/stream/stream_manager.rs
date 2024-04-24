@@ -1159,10 +1159,13 @@ mod tests {
             .get_streaming_cluster_info()
             .await?;
 
-        let worker_slots = worker_nodes.iter().flat_map(|(worker_id, worker)| {
-            (0..worker.get_parallel_units().len())
-                .map(|slot_id| WorkerSlotId(*worker_id, slot_id as u32))
-        }).collect_vec();
+        let worker_slots = worker_nodes
+            .iter()
+            .flat_map(|(worker_id, worker)| {
+                (0..worker.get_parallel_units().len())
+                    .map(|slot_id| WorkerSlotId(*worker_id, slot_id as u32))
+            })
+            .collect_vec();
 
         let worker_slot_mapping = WorkerSlotMapping::new_uniform(worker_slots.into_iter());
 
