@@ -185,9 +185,8 @@ pub struct NonOverlapSubLevelPicker {
     min_depth: usize,
     max_file_count: u64,
     overlap_strategy: Arc<dyn OverlapStrategy>,
-    max_expected_level_count: usize,
-
     enable_check_task_level_overlap: bool,
+    max_expected_level_count: usize,
 }
 
 impl NonOverlapSubLevelPicker {
@@ -210,6 +209,7 @@ impl NonOverlapSubLevelPicker {
         }
     }
 
+    #[cfg(test)]
     pub fn for_test(
         min_compaction_bytes: u64,
         max_compaction_bytes: u64,
