@@ -17,14 +17,16 @@ use std::collections::HashMap;
 use anyhow::anyhow;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model_v2::{
-    connection, database, function, index, object, schema, sink, source, subscription, table, view,
+    connection, database, function, index, object, schema, secret, sink, source, subscription,
+    table, view,
 };
 use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableType};
 use risingwave_pb::catalog::{
     PbConnection, PbCreateType, PbDatabase, PbFunction, PbHandleConflictBehavior, PbIndex,
-    PbSchema, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbSubscription, PbTable, PbView,
+    PbSchema, PbSecret, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbSubscription, PbTable,
+    PbView,
 };
 use sea_orm::{DatabaseConnection, ModelTrait};
 use serde_json::Value;
@@ -79,6 +81,18 @@ impl From<ObjectModel<database::Model>> for PbDatabase {
         Self {
             id: value.0.database_id as _,
             name: value.0.name,
+            owner: value.1.owner_id as _,
+        }
+    }
+}
+
+impl From<ObjectModel<secret::Model>> for PbSecret {
+    fn from(value: ObjectModel<secret::Model>) -> Self {
+        Self {
+            id: value.0.secret_id as _,
+            name: value.0.name,
+            database_id: value.1.database_id.unwrap() as _,
+            value: value.0.value,
             owner: value.1.owner_id as _,
         }
     }
