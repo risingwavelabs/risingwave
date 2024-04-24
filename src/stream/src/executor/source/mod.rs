@@ -133,28 +133,49 @@ pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Opti
         )
     });
 
+    fn compute_chunk_permits(chunk: &StreamChunk, limit: usize) -> usize {
+        let chunk_size = chunk.capacity();
+        let ends_with_update = if chunk_size >= 2 {
+            // Note we have to check if the 2nd last is `U-` to be consistenct with `StreamChunkBuilder`.
+            // If something inconsistent happens in the stream, we may not have `U+` after this `U-`.
+            chunk.ops()[chunk_size - 2].is_update_delete()
+        } else {
+            false
+        };
+        if chunk_size == limit + 1 && ends_with_update {
+            // If the chunk size exceed limit because of the last `Update` operation,
+            // we should minus 1 to make sure the permits consumed is within the limit (max burst).
+            chunk_size - 1
+        } else {
+            chunk_size
+        }
+    }
+
     #[for_await]
     for chunk in stream {
         let chunk = chunk?;
-        let cardinality = chunk.cardinality();
+        let chunk_size = chunk.capacity();
 
-        if rate_limit_rps.is_none() || cardinality == 0 {
+        if rate_limit_rps.is_none() || chunk_size == 0 {
             // no limit, or empty chunk
             yield chunk;
             continue;
         }
 
         let limiter = limiter.as_ref().unwrap();
-        let limit = rate_limit_rps.unwrap();
-        if cardinality <= limit as usize {
-            let n = NonZeroU32::new(cardinality as u32).unwrap();
+        let limit = rate_limit_rps.unwrap() as usize;
+
+        let required_permits = compute_chunk_permits(&chunk, limit);
+        if required_permits <= limit {
+            let n = NonZeroU32::new(required_permits as u32).unwrap();
             // `InsufficientCapacity` should never happen because we have check the cardinality
             limiter.until_n_ready(n).await.unwrap();
             yield chunk;
         } else {
             // Cut the chunk into smaller chunks
-            for chunk in chunk.split(limit as usize) {
-                let n = NonZeroU32::new(chunk.cardinality() as u32).unwrap();
+            for chunk in chunk.split(limit) {
+                let n = NonZeroU32::new(compute_chunk_permits(&chunk, limit) as u32).unwrap();
+                // chunks split should have effective chunk size <= limit
                 limiter.until_n_ready(n).await.unwrap();
                 yield chunk;
             }
