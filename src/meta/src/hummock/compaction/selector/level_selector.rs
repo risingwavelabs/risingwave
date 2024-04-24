@@ -180,7 +180,7 @@ impl DynamicLevelSelectorCore {
             base_bytes_min + 1
         } else {
             ctx.base_level = first_non_empty_level;
-            while ctx.base_level > 1 && cur_level_size > base_bytes_max * 2 {
+            while ctx.base_level > 1 && cur_level_size > base_bytes_max {
                 ctx.base_level -= 1;
                 cur_level_size /= self.config.max_bytes_for_level_multiplier;
             }
@@ -485,6 +485,7 @@ pub mod tests {
     use risingwave_common::constants::hummock::CompactionFilterFlag;
     use risingwave_pb::hummock::compaction_config::CompactionMode;
     use risingwave_pb::hummock::hummock_version::Levels;
+    use risingwave_pb::hummock::OverlappingLevel;
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::selector::tests::{
@@ -739,17 +740,17 @@ pub mod tests {
         assert_eq!(15000, levels.levels.get(2).unwrap().total_file_size); // l3
         assert_eq!(10000, levels.levels.get(3).unwrap().total_file_size); // l4
 
-        assert_eq!(100, ctx.level_max_bytes[1]); // l1
-        assert_eq!(500, ctx.level_max_bytes[2]); // l2
-        assert_eq!(2500, ctx.level_max_bytes[3]); // l3
-        assert_eq!(12500, ctx.level_max_bytes[4]); // l4
+        assert_eq!(200, ctx.level_max_bytes[1]); // l1
+        assert_eq!(1000, ctx.level_max_bytes[2]); // l2
+        assert_eq!(5000, ctx.level_max_bytes[3]); // l3
+        assert_eq!(25000, ctx.level_max_bytes[4]); // l4
 
-        // l1 pending = (0 + 1000 - 100) * ((25000 / 1000) + 1) + 1000 = 24400
-        // l2 pending = (25000 + 900 - 500) * ((15000 / (25000 + 900)) + 1) = 40110
-        // l3 pending = (15000 + 25400 - 2500) * ((10000 / (15000 + 25400) + 1)) = 47281
+        // l1 pending = (0 + 1000 - 200) * ((25000 / 1000) + 1) + 1000 = 21800
+        // l2 pending = (25000 + 800 - 1000) * ((15000 / (25000 + 800)) + 1) = 39218
+        // l3 pending = (15000 + 24800 - 5000) * ((10000 / (15000 + 24800) + 1)) = 43543
 
         let compact_pending_bytes = dynamic_level_core.compact_pending_bytes_needed(&levels);
-        assert_eq!(24400 + 40110 + 47281, compact_pending_bytes);
+        assert_eq!(21800 + 39218 + 43543, compact_pending_bytes);
     }
 
     #[test]
@@ -771,12 +772,7 @@ pub mod tests {
         levels[5].total_file_size = 3125 * 2048 * 1024 * 1024;
         let levels = Levels {
             levels,
-            l0: Some(generate_l0_nonoverlapping_sublevels(generate_tables(
-                15..25,
-                0..600,
-                3,
-                100,
-            ))),
+            l0: Some(OverlappingLevel::default()),
             ..Default::default()
         };
         let config = Arc::new(config);
@@ -786,14 +782,10 @@ pub mod tests {
         );
         let ctx = dynamic_level_core.calculate_level_base_size(&levels);
         assert!(ctx.level_max_bytes[0] > config.max_bytes_for_level_base);
-        for (idx, sz) in ctx.level_max_bytes.iter().enumerate() {
-            println!("level[{}]: {}MB", idx, *sz / 1024 / 1024);
-        }
         let levels_handlers = (0..7).map(LevelHandler::new).collect_vec();
         let ctx = dynamic_level_core.get_priority_levels(&levels, &levels_handlers);
         for info in &ctx.score_levels {
             assert_eq!(info.score, 100);
         }
-
     }
 }
