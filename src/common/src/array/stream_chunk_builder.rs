@@ -82,7 +82,7 @@ impl StreamChunkBuilder {
         // should be avoided, so when the last one is `UpdateDelete`, we delay the chunk until
         // `UpdateInsert` comes. This means the output chunk size may exceed the given `chunk_size`,
         // and theoretically at most `chunk_size + 1` if inputs are consistent.
-        if self.size >= self.capacity && self.ops[self.ops.len() - 1].is_update_delete() {
+        if self.size >= self.capacity && !self.ops[self.ops.len() - 1].is_update_delete() {
             self.take()
         } else {
             None
