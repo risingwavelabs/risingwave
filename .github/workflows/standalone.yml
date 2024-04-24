@@ -8,7 +8,7 @@ jobs:
   custom-entrypoint-cmd-job:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/risingwavelabs/risingwave:v1.8.1
+      image: risingwavelabs/risingwave:v1.8.1
       ports:
         - 4566:4566
       options: >-
