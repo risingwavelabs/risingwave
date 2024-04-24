@@ -12,7 +12,8 @@ jobs:
       ports:
         - 4566:4566
       options: >-
-        --entrypoint "/risingwave/bin/risingwave single_node"
+        --entrypoint "/risingwave/bin/risingwave"
+        --single_node
     steps:
       - name: Check out code
         uses: actions/checkout@v2
