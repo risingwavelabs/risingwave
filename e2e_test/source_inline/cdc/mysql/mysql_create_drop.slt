@@ -33,7 +33,7 @@ statement ok
 create source s with (
   ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
   username = 'shared-cdc',
-  password = '123456',
+  password = 'abcdef',
   database.name = 'testdb1',
   server.id = '114514'
 );
