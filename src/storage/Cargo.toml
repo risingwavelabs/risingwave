@@ -28,6 +28,8 @@ either = "1"
 enum-as-inner = "0.6"
 fail = "0.5"
 foyer = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_bytes = "0.11"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"
@@ -95,6 +97,7 @@ moka = { version = "0.12", features = ["future"] }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_test_runner = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
+bincode = "1"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 fiemap = "0.1.1"
