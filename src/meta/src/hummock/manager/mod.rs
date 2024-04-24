@@ -921,7 +921,7 @@ impl HummockManager {
         let developer_config = Arc::new(CompactionDeveloperConfig::new_from_meta_opts(
             &self.env.opts,
         ));
-        const MAX_TRIVIAL_MOVE_TASK_COUNT: usize = 256;
+        const MAX_TRIVIAL_MOVE_TASK_COUNT: usize = 64;
         'outside: for compaction_group_id in compaction_groups {
             if pick_tasks.len() >= max_select_count {
                 break;

@@ -137,8 +137,14 @@ impl HummockManager {
                 let mut existed_groups = groups.clone();
                 let mut no_task_groups: HashSet<CompactionGroupId> = HashSet::default();
                 let mut failed_tasks = vec![];
+                const MAX_LOOP_TIMES: usize = 5;
+                let mut loop_times = 0;
 
-                while generated_task_count < pull_task_count && failed_tasks.is_empty() {
+                while generated_task_count < pull_task_count
+                    && failed_tasks.is_empty()
+                    && loop_times < MAX_LOOP_TIMES
+                {
+                    loop_times += 1;
                     let compact_ret = self
                         .get_compact_tasks(
                             existed_groups.clone(),
