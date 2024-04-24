@@ -32,7 +32,7 @@ mysql -e "
 statement ok
 create source s with (
   ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
-  username = 'non-shared-cdc',
+  username = 'shared-cdc',
   password = '123456',
   database.name = 'testdb1',
   server.id = '114514'
