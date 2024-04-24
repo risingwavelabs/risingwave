@@ -22,7 +22,7 @@ from
 ############## Source from kafka (rate_limit = 0)
 
 statement ok
-create table kafka_source (v1 int) with (
+create source kafka_source (v1 int) with (
   connector = 'kafka',
   topic = 'kafka_source',
   properties.bootstrap.server = 'localhost:29092',
@@ -38,48 +38,78 @@ flush;
 skipif in-memory
 sleep 3s
 
-skipif in-memory
+############## Create MV on source
+
+statement ok
+create materialized view mv1 as select count(*) from kafka_source;
+
+statement ok
+create materialized view mv2 as select count(*) from kafka_source;
+
+statement ok
+create materialized view mv3 as select count(*) from kafka_source;
+
+############## MVs should have 0 records, since source has (rate_limit = 0)
+
 query I
-select count(*) from kafka_source;
+select * from mv1;
 ----
 0
 
-############## Can still insert data when rate limit = 0
-
-statement ok
-insert into kafka_source values(1);
-
-statement ok
-flush;
-
 query I
-select count(*) from kafka_source;
+select * from mv2;
 ----
-1
+0
 
-############## Alter source (rate_limit = 0 --> rate_limit = 1000)
+query I
+select * from mv3;
+----
+0
+
+############## Alter Source (rate_limit = 0 --> rate_limit = 1000)
 
 skipif in-memory
 query I
-alter table kafka_source set streaming_rate_limit to 1000;
+alter source kafka_source set streaming_rate_limit to 1000;
 
 skipif in-memory
 query I
-alter table kafka_source set streaming_rate_limit to default;
+alter source kafka_source set streaming_rate_limit to default;
 
 skipif in-memory
 sleep 3s
 
 skipif in-memory
 query I
-select count(*) > 1 from kafka_source;
+select count(*) > 0 from mv1;
+----
+t
+
+skipif in-memory
+query I
+select count(*) > 0 from mv2;
+----
+t
+
+skipif in-memory
+query I
+select count(*) > 0 from mv3;
 ----
 t
 
 ############## Cleanup
 
 statement ok
-drop table kafka_source;
+drop materialized view mv1;
+
+statement ok
+drop materialized view mv2;
+
+statement ok
+drop materialized view mv3;
+
+statement ok
+drop source kafka_source;
 
 statement ok
 drop sink kafka_sink;
