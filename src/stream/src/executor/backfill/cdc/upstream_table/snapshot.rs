@@ -142,11 +142,11 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
             // Apply rate limit, see `risingwave_stream::executor::source::apply_rate_limit` for more.
             // May be should be refactored to a common function later.
             let limiter = limiter.as_ref().unwrap();
-            let limit = args.rate_limit_rps.unwrap();
+            let limit = args.rate_limit_rps.unwrap() as usize;
 
             // Because we produce chunks with limited-sized data chunk builder and all rows
             // are `Insert`s, the chunk size should never exceed the limit.
-            assert!(chunk_size <= limit as usize);
+            assert!(chunk_size <= limit);
 
             // `InsufficientCapacity` should never happen because we have check the cardinality
             limiter
