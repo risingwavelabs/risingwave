@@ -142,6 +142,7 @@ impl ObserverState for FrontendObserverNode {
             hummock_write_limits: _,
             session_params,
             version,
+            secrets,
         } = snapshot;
 
         for db in databases {
@@ -173,6 +174,9 @@ impl ObserverState for FrontendObserverNode {
         }
         for connection in connections {
             catalog_guard.create_connection(&connection)
+        }
+        for secret in secrets {
+            catalog_guard.create_secret(&secret)
         }
         for user in users {
             user_guard.create_user(user)

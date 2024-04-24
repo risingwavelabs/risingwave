@@ -432,5 +432,5 @@ message Secret {
   // The secret here is encrypted to bytes.
   bytes value = 4;
   uint32 owner = 5;
-
+  uint32 schema_id = 6;
 }

@@ -155,17 +155,25 @@ type ColumnsDefTuple = (
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Precedence {
     Zero = 0,
-    LogicalOr, // 5 in upstream
+    LogicalOr,
+    // 5 in upstream
     LogicalXor,
-    LogicalAnd, // 10 in upstream
-    UnaryNot,   // 15 in upstream
-    Is,         // 17 in upstream
+    LogicalAnd,
+    // 10 in upstream
+    UnaryNot,
+    // 15 in upstream
+    Is,
+    // 17 in upstream
     Cmp,
-    Like,    // 19 in upstream
-    Between, // 20 in upstream
+    Like,
+    // 19 in upstream
+    Between,
+    // 20 in upstream
     Other,
-    PlusMinus, // 30 in upstream
-    MulDiv,    // 40 in upstream
+    PlusMinus,
+    // 30 in upstream
+    MulDiv,
+    // 40 in upstream
     Exp,
     UnaryPosNeg,
     PostfixFactorial,
@@ -482,7 +490,7 @@ impl Parser {
                             ObjectName(id_parts),
                             self.parse_except()?,
                         ))
-                    }
+                    };
                 }
                 unexpected => {
                     return self.expected(
@@ -1927,7 +1935,7 @@ impl Parser {
                 _ => {
                     return token
                         .cloned()
-                        .unwrap_or(TokenWithLocation::wrap(Token::EOF))
+                        .unwrap_or(TokenWithLocation::wrap(Token::EOF));
                 }
             }
         }
@@ -2177,6 +2185,8 @@ impl Parser {
             self.parse_create_database()
         } else if self.parse_keyword(Keyword::USER) {
             self.parse_create_user()
+        } else if self.parse_keyword(Keyword::SECRET) {
+            self.parse_create_secret()
         } else {
             self.expected("an object type after CREATE", self.peek_token())
         }
@@ -2468,6 +2478,12 @@ impl Parser {
     //     | [ ENCRYPTED ] PASSWORD 'password' | PASSWORD NULL | OAUTH
     fn parse_create_user(&mut self) -> Result<Statement, ParserError> {
         Ok(Statement::CreateUser(CreateUserStatement::parse_to(self)?))
+    }
+
+    fn parse_create_secret(&mut self) -> Result<Statement, ParserError> {
+        Ok(Statement::CreateSecret {
+            stmt: CreateSecretStatement::parse_to(self)?,
+        })
     }
 
     pub fn parse_with_properties(&mut self) -> Result<Vec<SqlOption>, ParserError> {
@@ -3570,7 +3586,7 @@ impl Parser {
     }
 
     /// Parse a literal value (numbers, strings, date/time, booleans)
-    fn parse_value(&mut self) -> Result<Value, ParserError> {
+    pub fn parse_value(&mut self) -> Result<Value, ParserError> {
         let token = self.next_token();
         match token.token {
             Token::Word(w) => match w.keyword {

@@ -21,8 +21,8 @@ use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::catalog::{
-    PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbSubscription,
-    PbTable, PbView,
+    PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSecret, PbSink, PbSource,
+    PbSubscription, PbTable, PbView,
 };
 use risingwave_pb::hummock::HummockVersionStats;
 
@@ -30,7 +30,9 @@ use super::function_catalog::FunctionCatalog;
 use super::source_catalog::SourceCatalog;
 use super::subscription_catalog::SubscriptionCatalog;
 use super::view_catalog::ViewCatalog;
-use super::{CatalogError, CatalogResult, ConnectionId, SinkId, SourceId, SubscriptionId, ViewId};
+use super::{
+    CatalogError, CatalogResult, ConnectionId, SecretId, SinkId, SourceId, SubscriptionId, ViewId,
+};
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
@@ -199,6 +201,14 @@ impl Catalog {
             .get_schema_mut(proto.schema_id)
             .unwrap()
             .create_subscription(proto);
+    }
+
+    pub fn create_secret(&mut self, proto: &PbSecret) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .create_secret(proto);
     }
 
     pub fn create_view(&mut self, proto: &PbView) {
@@ -375,6 +385,14 @@ impl Catalog {
             .get_schema_mut(schema_id)
             .unwrap()
             .drop_sink(sink_id);
+    }
+
+    pub fn drop_secret(&mut self, db_id: DatabaseId, schema_id: SchemaId, secret_id: SecretId) {
+        self.get_database_mut(db_id)
+            .unwrap()
+            .get_schema_mut(schema_id)
+            .unwrap()
+            .drop_secret(secret_id);
     }
 
     pub fn update_sink(&mut self, proto: &PbSink) {

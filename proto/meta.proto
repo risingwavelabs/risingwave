@@ -392,6 +392,7 @@ message MetaSnapshot {
   repeated catalog.Subscription subscriptions = 19;
   repeated user.UserInfo users = 8;
   GetSessionParamsResponse session_params = 20;
+  repeated catalog.Secret secrets = 21;
   // for streaming
   repeated FragmentParallelUnitMapping parallel_unit_mappings = 9;
   repeated common.WorkerNode nodes = 10;

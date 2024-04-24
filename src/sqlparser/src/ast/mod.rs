@@ -1101,6 +1101,7 @@ pub struct ExplainOptions {
     // explain's plan type
     pub explain_type: ExplainType,
 }
+
 impl Default for ExplainOptions {
     fn default() -> Self {
         Self {
@@ -1110,6 +1111,7 @@ impl Default for ExplainOptions {
         }
     }
 }
+
 impl fmt::Display for ExplainOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let default = Self::default();
@@ -1260,6 +1262,9 @@ pub enum Statement {
     /// CREATE CONNECTION
     CreateConnection {
         stmt: CreateConnectionStatement,
+    },
+    CreateSecret {
+        stmt: CreateSecretStatement,
     },
     /// CREATE FUNCTION
     ///
@@ -1556,14 +1561,14 @@ impl fmt::Display for Statement {
                 write!(f, "DESCRIBE {}", name)?;
                 Ok(())
             }
-            Statement::ShowObjects{ object: show_object, filter} => {
+            Statement::ShowObjects { object: show_object, filter } => {
                 write!(f, "SHOW {}", show_object)?;
                 if let Some(filter) = filter {
                     write!(f, " {}", filter)?;
                 }
                 Ok(())
             }
-            Statement::ShowCreateObject{ create_type: show_type, name } => {
+            Statement::ShowCreateObject { create_type: show_type, name } => {
                 write!(f, "SHOW CREATE {} {}", show_type, name)?;
                 Ok(())
             }
@@ -1577,7 +1582,7 @@ impl fmt::Display for Statement {
                 source,
                 returning,
             } => {
-                write!(f, "INSERT INTO {table_name} ", table_name = table_name,)?;
+                write!(f, "INSERT INTO {table_name} ", table_name = table_name, )?;
                 if !columns.is_empty() {
                     write!(f, "({}) ", display_comma_separated(columns))?;
                 }
@@ -1787,18 +1792,18 @@ impl fmt::Display for Statement {
                     write!(f, "{}", display_comma_separated(
                         include_column_options.iter().map(|option_item: &IncludeOptionItem| {
                             format!("INCLUDE {}{}{}",
-                            option_item.column_type,
+                                    option_item.column_type,
                                     if let Some(inner_field) = &option_item.inner_field {
                                         format!(" {}", inner_field)
                                     } else {
                                         "".into()
                                     }
                                     , if let Some(alias) = &option_item.column_alias {
-                                        format!(" AS {}", alias)
-                                    } else {
-                                        "".into()
-                                    }
-                                )
+                                    format!(" AS {}", alias)
+                                } else {
+                                    "".into()
+                                }
+                            )
                         }).collect_vec().as_slice()
                     ))?;
                 }
@@ -1851,9 +1856,10 @@ impl fmt::Display for Statement {
                 "CREATE SOURCE {}",
                 stmt,
             ),
-            Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
-            Statement::CreateSubscription { stmt } => write!(f, "CREATE SUBSCRIPTION {}", stmt,),
-            Statement::CreateConnection { stmt } => write!(f, "CREATE CONNECTION {}", stmt,),
+            Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt, ),
+            Statement::CreateSubscription { stmt } => write!(f, "CREATE SUBSCRIPTION {}", stmt, ),
+            Statement::CreateConnection { stmt } => write!(f, "CREATE CONNECTION {}", stmt, ),
+            Statement::CreateSecret { stmt } => write!(f, "CREATE SECRET {}", stmt, ),
             Statement::AlterDatabase { name, operation } => {
                 write!(f, "ALTER DATABASE {} {}", name, operation)
             }
@@ -1965,10 +1971,10 @@ impl fmt::Display for Statement {
                 Ok(())
             }
             Statement::Commit { chain } => {
-                write!(f, "COMMIT{}", if *chain { " AND CHAIN" } else { "" },)
+                write!(f, "COMMIT{}", if *chain { " AND CHAIN" } else { "" }, )
             }
             Statement::Rollback { chain } => {
-                write!(f, "ROLLBACK{}", if *chain { " AND CHAIN" } else { "" },)
+                write!(f, "ROLLBACK{}", if *chain { " AND CHAIN" } else { "" }, )
             }
             Statement::CreateSchema {
                 schema_name,
@@ -2065,7 +2071,7 @@ impl fmt::Display for Statement {
             Statement::AlterUser(statement) => {
                 write!(f, "ALTER USER {}", statement)
             }
-            Statement::AlterSystem{param, value} => {
+            Statement::AlterSystem { param, value } => {
                 f.write_str("ALTER SYSTEM SET ")?;
                 write!(
                     f,
@@ -2074,14 +2080,14 @@ impl fmt::Display for Statement {
             }
             Statement::DeclareCursor { cursor_name, query } => {
                 write!(f, "DECLARE {} CURSOR FOR {}", cursor_name, query)
-            },
-            Statement::FetchCursor { cursor_name , count} => {
+            }
+            Statement::FetchCursor { cursor_name, count } => {
                 if let Some(count) = count {
                     write!(f, "FETCH {} FROM {}", count, cursor_name)
                 } else {
                     write!(f, "FETCH NEXT FROM {}", cursor_name)
                 }
-            },
+            }
             Statement::CloseCursor { cursor_name } => {
                 if let Some(name) = cursor_name {
                     write!(f, "CLOSE {}", name)
@@ -2929,6 +2935,7 @@ impl fmt::Display for CreateFunctionBody {
         Ok(())
     }
 }
+
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CreateFunctionWithOptions {

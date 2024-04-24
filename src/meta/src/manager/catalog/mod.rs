@@ -423,6 +423,7 @@ impl CatalogManager {
                         .iter()
                         .map(|connection| connection.owner),
                 )
+                .chain(secrets_to_drop.iter().map(|secret| secret.owner))
                 .for_each(|owner_id| user_core.decrease_ref(owner_id));
 
             // Update relation ref count.

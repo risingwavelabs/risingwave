@@ -94,6 +94,7 @@ impl From<ObjectModel<secret::Model>> for PbSecret {
             database_id: value.1.database_id.unwrap() as _,
             value: value.0.value,
             owner: value.1.owner_id as _,
+            schema_id: value.1.schema_id.unwrap() as _,
         }
     }
 }

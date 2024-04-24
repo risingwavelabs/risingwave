@@ -446,6 +446,7 @@ define_keywords!(
     SCROLL,
     SEARCH,
     SECOND,
+    SECRET,
     SELECT,
     SENSITIVE,
     SEQUENCE,

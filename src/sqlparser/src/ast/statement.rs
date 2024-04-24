@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use core::fmt;
+use core::fmt::Formatter;
 use std::fmt::Write;
 
 use itertools::Itertools;
@@ -21,7 +22,7 @@ use serde::{Deserialize, Serialize};
 
 use super::ddl::SourceWatermark;
 use super::legacy_source::{parse_source_schema, CompatibleSourceSchema};
-use super::{EmitMode, Ident, ObjectType, Query};
+use super::{EmitMode, Ident, ObjectType, Query, Value};
 use crate::ast::{
     display_comma_separated, display_separated, ColumnDef, ObjectName, SqlOption, TableConstraint,
 };
@@ -94,13 +95,19 @@ pub struct CreateSourceStatement {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Format {
     Native,
-    None,          // Keyword::NONE
-    Debezium,      // Keyword::DEBEZIUM
-    DebeziumMongo, // Keyword::DEBEZIUM_MONGO
-    Maxwell,       // Keyword::MAXWELL
-    Canal,         // Keyword::CANAL
-    Upsert,        // Keyword::UPSERT
-    Plain,         // Keyword::PLAIN
+    None,
+    // Keyword::NONE
+    Debezium,
+    // Keyword::DEBEZIUM
+    DebeziumMongo,
+    // Keyword::DEBEZIUM_MONGO
+    Maxwell,
+    // Keyword::MAXWELL
+    Canal,
+    // Keyword::CANAL
+    Upsert,
+    // Keyword::UPSERT
+    Plain, // Keyword::PLAIN
 }
 
 // TODO: unify with `from_keyword`
@@ -133,12 +140,12 @@ impl Format {
             "PLAIN" => Format::Plain,
             "UPSERT" => Format::Upsert,
             "NATIVE" => Format::Native, // used internally for schema change
-            "NONE" => Format::None, // used by iceberg
+            "NONE" => Format::None,     // used by iceberg
             _ => {
                 return Err(ParserError::ParserError(
                     "expected CANAL | PROTOBUF | DEBEZIUM | MAXWELL | PLAIN | NATIVE | NONE after FORMAT"
                         .to_string(),
-                ))
+                ));
             }
         })
     }
@@ -147,12 +154,18 @@ impl Format {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Encode {
-    Avro,     // Keyword::Avro
-    Csv,      // Keyword::CSV
-    Protobuf, // Keyword::PROTOBUF
-    Json,     // Keyword::JSON
-    Bytes,    // Keyword::BYTES
-    None,     // Keyword::None
+    Avro,
+    // Keyword::Avro
+    Csv,
+    // Keyword::CSV
+    Protobuf,
+    // Keyword::PROTOBUF
+    Json,
+    // Keyword::JSON
+    Bytes,
+    // Keyword::BYTES
+    None,
+    // Keyword::None
     Native,
     Template,
 }
@@ -623,6 +636,7 @@ impl ParseTo for CreateSubscriptionStatement {
         })
     }
 }
+
 impl fmt::Display for CreateSubscriptionStatement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut v: Vec<String> = vec![];
@@ -672,6 +686,38 @@ impl fmt::Display for CreateConnectionStatement {
         impl_fmt_display!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], v, self);
         impl_fmt_display!(connection_name, v, self);
         impl_fmt_display!(with_properties, v, self);
+        v.iter().join(" ").fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CreateSecretStatement {
+    pub if_not_exists: bool,
+    pub secret_name: ObjectName,
+    pub credential: Value,
+}
+
+impl ParseTo for CreateSecretStatement {
+    fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
+        impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], parser);
+        impl_parse_to!(secret_name: ObjectName, parser);
+        parser.expect_keyword(Keyword::AS)?;
+        // impl_parse_to!(credential: Value, parser);
+        let credential = parser.parse_value()?;
+        Ok(Self {
+            if_not_exists,
+            secret_name,
+            credential,
+        })
+    }
+}
+
+impl fmt::Display for CreateSecretStatement {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let mut v: Vec<String> = vec![];
+        impl_fmt_display!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], v, self);
+        impl_fmt_display!(secret_name, v, self);
         v.iter().join(" ").fmt(f)
     }
 }
