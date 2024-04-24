@@ -412,6 +412,8 @@ impl StreamRpcManager {
                     .build_actors(BuildActorsRequest {
                         request_id,
                         actor_id: actors,
+                        // TODO: pass the involved subscription when we enabled L0 log store subscription
+                        related_subscriptions: Default::default(),
                     })
                     .await
             },

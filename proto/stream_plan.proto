@@ -94,6 +94,16 @@ message CombinedMutation {
   repeated BarrierMutation mutations = 1;
 }
 
+message CreateSubscriptionMutation {
+  uint32 subscription_id = 1;
+  uint32 upstream_mv_table_id = 2;
+}
+
+message DropSubscriptionMutation {
+  uint32 subscription_id = 1;
+  uint32 upstream_mv_table_id = 2;
+}
+
 message BarrierMutation {
   oneof mutation {
     // Add new dispatchers to some actors, used for creating materialized views.
@@ -111,6 +121,10 @@ message BarrierMutation {
     ResumeMutation resume = 8;
     // Throttle specific source exec or chain exec.
     ThrottleMutation throttle = 10;
+    // Create subscription on mv
+    CreateSubscriptionMutation create_subscription = 11;
+    // Drop subscription on mv
+    DropSubscriptionMutation drop_subscription = 12;
     // Combined mutation.
     CombinedMutation combined = 100;
   }

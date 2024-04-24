@@ -25,7 +25,7 @@ use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
@@ -36,13 +36,14 @@ use risingwave_expr::expr::{Expression, NonStrictExpression};
 use risingwave_pb::data::PbEpoch;
 use risingwave_pb::expr::PbInputRef;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
-use risingwave_pb::stream_plan::barrier_mutation::PbMutation;
+use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
 use risingwave_pb::stream_plan::stream_message::StreamMessage;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    BarrierMutation, CombinedMutation, Dispatchers, PauseMutation, PbAddMutation, PbBarrier,
-    PbDispatcher, PbStreamMessage, PbUpdateMutation, PbWatermark, ResumeMutation,
-    SourceChangeSplitMutation, StopMutation, ThrottleMutation,
+    BarrierMutation, CombinedMutation, CreateSubscriptionMutation, Dispatchers,
+    DropSubscriptionMutation, PauseMutation, PbAddMutation, PbBarrier, PbDispatcher,
+    PbStreamMessage, PbUpdateMutation, PbWatermark, ResumeMutation, SourceChangeSplitMutation,
+    StopMutation, ThrottleMutation,
 };
 use smallvec::SmallVec;
 
@@ -285,6 +286,14 @@ pub enum Mutation {
     Resume,
     Throttle(HashMap<ActorId, Option<u32>>),
     AddAndUpdate(AddMutation, UpdateMutation),
+    CreateSubscription {
+        subscription_id: u32,
+        upstream_mv_table_id: TableId,
+    },
+    DropSubscription {
+        subscription_id: u32,
+        upstream_mv_table_id: TableId,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -550,6 +559,20 @@ impl Mutation {
                     },
                 ],
             }),
+            Mutation::CreateSubscription {
+                upstream_mv_table_id,
+                subscription_id,
+            } => PbMutation::CreateSubscription(CreateSubscriptionMutation {
+                upstream_mv_table_id: upstream_mv_table_id.table_id,
+                subscription_id: *subscription_id,
+            }),
+            Mutation::DropSubscription {
+                upstream_mv_table_id,
+                subscription_id,
+            } => PbMutation::DropSubscription(DropSubscriptionMutation {
+                upstream_mv_table_id: upstream_mv_table_id.table_id,
+                subscription_id: *subscription_id,
+            }),
         }
     }
 
@@ -647,7 +670,14 @@ impl Mutation {
                     .map(|(actor_id, limit)| (*actor_id, limit.rate_limit))
                     .collect(),
             ),
-
+            PbMutation::CreateSubscription(create) => Mutation::CreateSubscription {
+                upstream_mv_table_id: TableId::new(create.upstream_mv_table_id),
+                subscription_id: create.subscription_id,
+            },
+            PbMutation::DropSubscription(drop) => Mutation::DropSubscription {
+                upstream_mv_table_id: TableId::new(drop.upstream_mv_table_id),
+                subscription_id: drop.subscription_id,
+            },
             PbMutation::Combined(CombinedMutation { mutations }) => match &mutations[..] {
                 [BarrierMutation {
                     mutation: Some(add),

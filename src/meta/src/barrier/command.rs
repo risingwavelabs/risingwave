@@ -31,11 +31,7 @@ use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
-use risingwave_pb::stream_plan::{
-    AddMutation, BarrierMutation, CombinedMutation, Dispatcher, Dispatchers, PauseMutation,
-    ResumeMutation, SourceChangeSplitMutation, StopMutation, StreamActor, ThrottleMutation,
-    UpdateMutation,
-};
+use risingwave_pb::stream_plan::{AddMutation, BarrierMutation, CombinedMutation, CreateSubscriptionMutation, Dispatcher, Dispatchers, DropSubscriptionMutation, PauseMutation, ResumeMutation, SourceChangeSplitMutation, StopMutation, StreamActor, ThrottleMutation, UpdateMutation};
 use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use thiserror_ext::AsReport;
 
@@ -201,6 +197,16 @@ pub enum Command {
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
     /// the `rate_limit` of `FlowControl` Executor after `StreamScan` or Source.
     Throttle(ThrottleConfig),
+
+    CreateSubscription {
+        subscription_id: u32,
+        upstream_mv_table_id: TableId,
+    },
+
+    DropSubscription {
+        subscription_id: u32,
+        upstream_mv_table_id: TableId,
+    },
 }
 
 impl Command {
@@ -285,6 +291,8 @@ impl Command {
             Command::ReplaceTable(plan) => Some(plan.actor_changes()),
             Command::SourceSplitAssignment(_) => None,
             Command::Throttle(_) => None,
+            Command::CreateSubscription { .. } => None,
+            Command::DropSubscription { .. } => None,
         }
     }
 
@@ -663,6 +671,21 @@ impl CommandContext {
                     tracing::debug!("update mutation: {mutation:?}");
                     Some(mutation)
                 }
+
+                Command::CreateSubscription {
+                    upstream_mv_table_id,
+                    subscription_id,
+                } => Some(Mutation::CreateSubscription(CreateSubscriptionMutation {
+                    upstream_mv_table_id: upstream_mv_table_id.table_id,
+                    subscription_id: *subscription_id,
+                })),
+                Command::DropSubscription {
+                    upstream_mv_table_id,
+                    subscription_id,
+                } => Some(Mutation::DropSubscription(DropSubscriptionMutation {
+                    upstream_mv_table_id: upstream_mv_table_id.table_id,
+                    subscription_id: *subscription_id,
+                })),
             };
 
         mutation
@@ -1071,6 +1094,9 @@ impl CommandContext {
                     )
                     .await;
             }
+
+            Command::CreateSubscription { .. } => {}
+            Command::DropSubscription { .. } => {}
         }
 
         Ok(())

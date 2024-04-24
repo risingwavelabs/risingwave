@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use core::time::Duration;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::mem::take;
 use std::sync::atomic::AtomicU64;
@@ -25,7 +26,7 @@ use futures::FutureExt;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::config::MetricLevel;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan;
@@ -228,10 +229,15 @@ impl LocalStreamManager {
             .await?
     }
 
-    pub async fn build_actors(&self, actors: Vec<ActorId>) -> StreamResult<()> {
+    pub async fn build_actors(
+        &self,
+        actors: Vec<ActorId>,
+        related_subscriptions: HashMap<TableId, HashSet<u32>>,
+    ) -> StreamResult<()> {
         self.actor_op_tx
             .send_and_await(|result_sender| LocalActorOperation::BuildActors {
                 actors,
+                related_subscriptions,
                 result_sender,
             })
             .await?
@@ -310,6 +316,7 @@ impl LocalBarrierWorker {
     pub(super) fn start_create_actors(
         &mut self,
         actors: &[ActorId],
+        related_subscriptions: HashMap<TableId, HashSet<u32>>,
         result_sender: oneshot::Sender<StreamResult<()>>,
     ) {
         let actors = {
@@ -333,7 +340,11 @@ impl LocalBarrierWorker {
         let actor_manager = self.actor_manager.clone();
         let create_actors_fut = crate::CONFIG.scope(
             self.actor_manager.env.config().clone(),
-            actor_manager.create_actors(actors, self.current_shared_context.clone()),
+            actor_manager.create_actors(
+                actors,
+                self.current_shared_context.clone(),
+                related_subscriptions,
+            ),
         );
         let join_handle = self.actor_manager.runtime.spawn(create_actors_fut);
         self.actor_manager_state
@@ -531,6 +542,7 @@ impl StreamActorManager {
         self: Arc<Self>,
         actors: Vec<StreamActor>,
         shared_context: Arc<SharedContext>,
+        related_subscriptions: HashMap<TableId, HashSet<u32>>,
     ) -> StreamResult<CreateActorOutput> {
         let mut ret = Vec::with_capacity(actors.len());
         let create_actor_context = CreateActorContext::default();
@@ -541,6 +553,7 @@ impl StreamActorManager {
                 self.env.total_mem_usage(),
                 self.streaming_metrics.clone(),
                 actor.dispatcher.len(),
+                related_subscriptions.clone(),
             );
             let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
             let expr_context = actor.expr_context.clone().unwrap();
