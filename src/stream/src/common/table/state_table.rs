@@ -295,7 +295,7 @@ where
             table_catalog,
             store,
             vnodes,
-            StateTableOpConsistencyLevel::ConsistentOldValue,
+            StateTableOpConsistencyLevel::Inconsistent,
         )
         .await
     }
