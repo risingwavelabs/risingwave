@@ -357,28 +357,32 @@ impl NonOverlapSubLevelPicker {
 
         ret.sstable_infos.retain(|ssts| !ssts.is_empty());
 
-        // To check whether the level count is expected
-        if ret.sstable_infos.len() > self.max_expected_level_count {
-            // rotate the sstables to meet the max_size and count
+        // To check whether the task is expected
+        if ret.total_file_size > self.max_compaction_bytes
+            || ret.total_file_count as u64 > self.max_file_count
+            || ret.sstable_infos.len() > self.max_expected_level_count
+        {
+            // rotate the sstables to meet the `max_file_count` and `max_compaction_bytes` and `max_expected_level_count`
             let mut total_file_count = 0;
             let mut total_file_size = 0;
-
-            let mut level_index = 0;
+            let mut total_level_count = 0;
 
             for (index, sstables) in ret.sstable_infos.iter().enumerate() {
                 total_file_count += sstables.len();
                 total_file_size += sstables.iter().map(|sst| sst.file_size).sum::<u64>();
+                total_level_count += 1;
 
                 if index > 0
                     && (total_file_count as u64 > self.max_file_count
-                        || total_file_size > self.max_compaction_bytes)
+                        || total_file_size > self.max_compaction_bytes
+                        || total_level_count > self.max_expected_level_count)
                 {
-                    level_index = index;
+                    ret.total_file_count = total_file_count;
+                    ret.total_file_size = total_file_size;
+                    ret.sstable_infos.truncate(index);
                     break;
                 }
             }
-
-            ret.sstable_infos.truncate(level_index);
         }
 
         ret
@@ -1032,7 +1036,7 @@ pub mod tests {
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
             {
                 let plan = &ret[0];
-                assert_eq!(4, plan.sstable_infos.len());
+                assert_eq!(3, plan.sstable_infos.len());
             }
         }
 
@@ -1049,7 +1053,7 @@ pub mod tests {
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
             {
                 let plan = &ret[0];
-                assert_eq!(4, plan.sstable_infos.len());
+                assert_eq!(3, plan.sstable_infos.len());
             }
         }
 
