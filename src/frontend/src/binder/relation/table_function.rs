@@ -73,7 +73,6 @@ impl Binder {
                     PG_KEYWORDS_TABLE_NAME,
                     alias,
                     None,
-                    false,
                 );
             }
         }

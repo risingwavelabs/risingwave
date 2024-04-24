@@ -16,7 +16,7 @@ use std::rc::Rc;
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::{CdcTableDesc, ColumnDesc, TableDesc};
+use risingwave_common::catalog::{ColumnDesc, TableDesc};
 
 use super::batch_log_seq_scan::BatchLogSeqScan;
 use super::generic::GenericPlanRef;
@@ -31,13 +31,14 @@ use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamCdcTableScan,
-    ToStreamContext,
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::Order;
 use crate::utils::{ColIndexMapping, Condition};
 
-/// `LogicalCdcScan` reads rows of a table from an external upstream database
+/// `LogicalLogScan` reads logs of a table from table or mv,
+/// Note!: Although it currently parses queries, it only supports simple full table queries
+/// and does not support orders or specifying pk ranges
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalLogScan {
     pub base: PlanBase<Logical>,
@@ -62,12 +63,16 @@ impl LogicalLogScan {
         table_name: String, // explain-only
         table_desc: Rc<TableDesc>,
         ctx: OptimizerContextRef,
+        old_epoch: u64,
+        new_epoch: u64,
     ) -> Self {
         generic::LogScan::new(
             table_name,
             (0..table_desc.columns.len()).collect(),
             table_desc,
             ctx,
+            old_epoch,
+            new_epoch,
         )
         .into()
     }
@@ -76,16 +81,14 @@ impl LogicalLogScan {
         &self.core.table_name
     }
 
-    pub fn cdc_table_desc(&self) -> &TableDesc {
+    pub fn log_table_desc(&self) -> &TableDesc {
         self.core.table_desc.as_ref()
     }
 
-    /// Get the descs of the output columns.
     pub fn column_descs(&self) -> Vec<ColumnDesc> {
         self.core.column_descs()
     }
 
-    /// Get the ids of the output columns.
     pub fn output_column_ids(&self) -> Vec<ColumnId> {
         self.core.output_column_ids()
     }
@@ -96,6 +99,8 @@ impl LogicalLogScan {
             output_col_idx,
             self.core.table_desc.clone(),
             self.base.ctx().clone(),
+            self.core.old_epoch,
+            self.core.new_epoch,
         )
         .into()
     }
@@ -126,7 +131,7 @@ impl Distill for LogicalLogScan {
                     self.output_col_idx()
                         .iter()
                         .map(|i| {
-                            let col_name = &self.cdc_table_desc().columns[*i].name;
+                            let col_name = &self.log_table_desc().columns[*i].name;
                             Pretty::from(if verbose {
                                 format!("{}.{}", self.table_name(), col_name)
                             } else {
@@ -138,7 +143,7 @@ impl Distill for LogicalLogScan {
             ));
         }
 
-        childless_record("LogicalCdcScan", vec)
+        childless_record("LogicalLogScan", vec)
     }
 }
 
@@ -151,7 +156,6 @@ impl ColPrunable for LogicalLogScan {
         assert!(output_col_idx
             .iter()
             .all(|i| self.output_col_idx().contains(i)));
-
         self.clone_with_output_indices(output_col_idx).into()
     }
 }
@@ -194,8 +198,7 @@ impl ToBatch for LogicalLogScan {
     }
 
     fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
-        required_order
-            .enforce_if_not_satisfies(BatchLogSeqScan::new(self.core.clone(), vec![]).into())
+        required_order.enforce_if_not_satisfies(BatchLogSeqScan::new(self.core.clone()).into())
     }
 }
 

@@ -41,6 +41,9 @@ pub struct LogScan {
     #[educe(PartialEq(ignore))]
     #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,
+
+    pub old_epoch: u64,
+    pub new_epoch: u64,
 }
 
 impl LogScan {
@@ -74,6 +77,20 @@ impl LogScan {
             .collect()
     }
 
+    pub fn distribution_key(&self) -> Option<Vec<usize>> {
+        let tb_idx_to_op_idx = self
+            .output_col_idx
+            .iter()
+            .enumerate()
+            .map(|(op_idx, tb_idx)| (*tb_idx, op_idx))
+            .collect::<HashMap<_, _>>();
+        self.table_desc
+            .distribution_key
+            .iter()
+            .map(|&tb_idx| tb_idx_to_op_idx.get(&tb_idx).cloned())
+            .collect()
+    }
+
     /// get the Mapping of columnIndex from internal column index to output column index
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
         ColIndexMapping::with_remaining_columns(
@@ -94,12 +111,14 @@ impl LogScan {
         ids
     }
 
-    /// Create a logical scan node for CDC backfill
+    /// Create a logical scan node for log table scan
     pub(crate) fn new(
         table_name: String,
         output_col_idx: Vec<usize>,
         table_desc: Rc<TableDesc>,
         ctx: OptimizerContextRef,
+        old_epoch: u64,
+        new_epoch: u64,
     ) -> Self {
         Self {
             table_name,
@@ -107,6 +126,8 @@ impl LogScan {
             table_desc,
             chunk_size: None,
             ctx,
+            old_epoch,
+            new_epoch,
         }
     }
 
@@ -120,22 +141,6 @@ impl LogScan {
             .map(Pretty::from)
             .collect(),
         )
-    }
-
-    pub(crate) fn order_names(&self) -> Vec<String> {
-        self.table_desc
-            .order_column_indices()
-            .iter()
-            .map(|&i| self.get_table_columns()[i].name.clone())
-            .collect()
-    }
-
-    pub(crate) fn order_names_with_table_prefix(&self) -> Vec<String> {
-        self.table_desc
-            .order_column_indices()
-            .iter()
-            .map(|&i| format!("{}.{}", self.table_name, self.get_table_columns()[i].name))
-            .collect()
     }
 
     pub(crate) fn get_id_to_op_idx_mapping(
@@ -154,11 +159,8 @@ impl LogScan {
     }
 }
 
-// TODO: extend for cdc table
 impl GenericPlanNode for LogScan {
     fn schema(&self) -> Schema {
-        println!("{:?}",self
-        .output_col_idx);
         let fields = self
             .output_col_idx
             .iter()
@@ -167,7 +169,6 @@ impl GenericPlanNode for LogScan {
                 Field::from_with_table_name_prefix(col, &self.table_name)
             })
             .collect();
-        println!("{:?}",fields);
         Schema { fields }
     }
 
@@ -190,7 +191,6 @@ impl GenericPlanNode for LogScan {
 
     fn functional_dependency(&self) -> FunctionalDependencySet {
         let pk_indices = self.stream_key();
-        println!("pk_indices {:?}",pk_indices);
         let col_num = self.output_col_idx.len();
         match &pk_indices {
             Some(pk_indices) => FunctionalDependencySet::with_key(col_num, pk_indices),

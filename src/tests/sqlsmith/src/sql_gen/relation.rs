@@ -68,7 +68,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 columns: vec![],
             }),
             as_of: None,
-            query_log: false,
         };
         table.name = alias; // Rename the table.
         (table_factor, table)

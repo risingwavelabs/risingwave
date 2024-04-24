@@ -203,7 +203,6 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
     #[async_recursion]
     async fn try_build(&self) -> Result<BoxedExecutor> {
         let mut inputs = Vec::with_capacity(self.plan_node.children.len());
-        println!("input_node: {:?}", self.plan_node);
         for input_node in &self.plan_node.children {
             let input = self.clone_for_plan(input_node).build().await?;
             inputs.push(input);

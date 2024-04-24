@@ -151,7 +151,6 @@ impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
         source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        println!("333");
         ensure!(
             inputs.is_empty(),
             "Exchange executor should not have children!"

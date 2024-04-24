@@ -18,7 +18,8 @@ use std::ops::Deref;
 use either::Either;
 use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::bail;
-use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME};
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field, TableId, DEFAULT_SCHEMA_NAME};
+use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_sqlparser::ast::{
     AsOf, Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias,
     TableFactor,
@@ -31,8 +32,11 @@ use super::bind_context::ColumnBinding;
 use super::statement::RewriteExprsRecursive;
 use crate::binder::bind_context::{BindingCte, BindingCteState};
 use crate::binder::Binder;
+use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::CatalogError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef};
+use crate::TableCatalog;
 
 mod cte_ref;
 mod join;
@@ -343,7 +347,6 @@ impl Binder {
         name: ObjectName,
         alias: Option<TableAlias>,
         as_of: Option<AsOf>,
-        query_log: bool,
     ) -> Result<Relation> {
         let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
 
@@ -401,14 +404,93 @@ impl Binder {
                 }
             }
         } else {
-            self.bind_relation_by_name_inner(
-                schema_name.as_deref(),
-                &table_name,
-                alias,
-                as_of,
-                query_log,
-            )
+            self.bind_relation_by_name_inner(schema_name.as_deref(), &table_name, alias, as_of)
         }
+    }
+
+    pub fn bind_log_table_relation_by_name(
+        &mut self,
+        name: ObjectName,
+        old_epoch: u64,
+        new_epoch: u64,
+    ) -> Result<Relation> {
+        let resolve_log_table_relation = |log_table_catalog: &std::sync::Arc<TableCatalog>| {
+            let log_table_catalog = &*log_table_catalog.clone();
+            let mut log_table_catalog = log_table_catalog.clone();
+            let next_column_id = log_table_catalog
+                .columns
+                .iter()
+                .max_by(|a, b| {
+                    a.column_desc
+                        .column_id
+                        .get_id()
+                        .cmp(&b.column_desc.column_id.get_id())
+                })
+                .map(|c| c.column_desc.column_id)
+                .unwrap_or_default()
+                .next();
+
+            log_table_catalog.columns.push(ColumnCatalog {
+                column_desc: ColumnDesc::named(
+                    "op",
+                    next_column_id,
+                    risingwave_common::types::DataType::Int16,
+                ),
+                is_hidden: false,
+            });
+            let log_table_catalog = std::sync::Arc::new(log_table_catalog);
+            let table = BoundLogTable {
+                table_id: log_table_catalog.id(),
+                table_catalog: log_table_catalog.clone(),
+                old_epoch,
+                new_epoch,
+            };
+            (
+                Relation::LogTable(Box::new(table)),
+                log_table_catalog
+                    .columns
+                    .iter()
+                    .map(|c| (c.is_hidden, Field::from(&c.column_desc)))
+                    .collect_vec(),
+            )
+        };
+
+        let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
+        let (ret, columns) = match schema_name {
+            Some(name) => {
+                let schema_path = SchemaPath::Name(&name);
+                if let Ok((table_catalog, _)) =
+                    self.catalog
+                        .get_table_by_name(&self.db_name, schema_path, &table_name)
+                {
+                    resolve_log_table_relation(table_catalog)
+                } else {
+                    return Err(CatalogError::NotFound("table", table_name.to_string()).into());
+                }
+            }
+            None => (|| {
+                let user_name = &self.auth_context.user_name;
+                for path in self.search_path.path() {
+                    let schema_name = if path == USER_NAME_WILD_CARD {
+                        user_name
+                    } else {
+                        path
+                    };
+                    if let Ok(schema) = self.catalog.get_schema_by_name(&self.db_name, schema_name)
+                    {
+                        if let Some(table_catalog) = schema.get_table_by_name(&table_name) {
+                            return Ok(resolve_log_table_relation(table_catalog));
+                        }
+                    }
+                }
+                Err(Into::<RwError>::into(CatalogError::NotFound(
+                    "table",
+                    table_name.to_string(),
+                )))
+            })()?,
+        };
+        self.bind_table_to_context(columns, table_name.to_string(), None)?;
+        Ok(ret)
     }
 
     // Bind a relation provided a function arg.
@@ -427,7 +509,7 @@ impl Binder {
         }?;
 
         Ok((
-            self.bind_relation_by_name(table_name.clone(), None, None, false)?,
+            self.bind_relation_by_name(table_name.clone(), None, None)?,
             table_name,
         ))
     }
@@ -477,17 +559,14 @@ impl Binder {
             .map_or(DEFAULT_SCHEMA_NAME.to_string(), |arg| arg.to_string());
 
         let table_name = self.catalog.get_table_name_by_id(table_id)?;
-        self.bind_relation_by_name_inner(Some(&schema), &table_name, alias, None, false)
+        self.bind_relation_by_name_inner(Some(&schema), &table_name, alias, None)
     }
 
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
         match table_factor {
-            TableFactor::Table {
-                name,
-                alias,
-                as_of,
-                query_log,
-            } => self.bind_relation_by_name(name, alias, as_of, query_log),
+            TableFactor::Table { name, alias, as_of } => {
+                self.bind_relation_by_name(name, alias, as_of)
+            }
             TableFactor::TableFunction {
                 name,
                 alias,
@@ -528,6 +607,11 @@ impl Binder {
                 self.pop_and_merge_lateral_context()?;
                 Ok(bound_join)
             }
+            TableFactor::LogTable {
+                name,
+                old_epoch,
+                new_epoch,
+            } => self.bind_log_table_relation_by_name(name, old_epoch, new_epoch),
         }
     }
 }

@@ -201,7 +201,6 @@ pub fn gen_query_from_table_name(from_name: ObjectName) -> Query {
         name: from_name,
         alias: None,
         as_of: None,
-        query_log: false,
     };
     let from = vec![TableWithJoins {
         relation: table_factor,
@@ -228,7 +227,6 @@ pub fn gen_query_from_logstore_ge_rw_timestamp(logstore_name: &str, rw_timestamp
         name: ObjectName(vec![logstore_name.into()]),
         alias: None,
         as_of: None,
-        query_log: true,
     };
     let from = vec![TableWithJoins {
         relation: table_factor,
@@ -245,9 +243,8 @@ pub fn gen_query_from_logstore_ge_rw_timestamp(logstore_name: &str, rw_timestamp
     ];
     let select = Select {
         from,
-        // projection: vec![SelectItem::Wildcard(Some(except_columns))],
-        projection: vec![SelectItem::Wildcard(None)],
-        // selection,
+        projection: vec![SelectItem::Wildcard(Some(except_columns))],
+        selection,
         ..Default::default()
     };
     let order_by = vec![OrderByExpr {
@@ -259,7 +256,7 @@ pub fn gen_query_from_logstore_ge_rw_timestamp(logstore_name: &str, rw_timestamp
     Query {
         with: None,
         body,
-        order_by: vec![],
+        order_by,
         limit: None,
         offset: None,
         fetch: None,

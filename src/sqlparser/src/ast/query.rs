@@ -381,7 +381,11 @@ pub enum TableFactor {
         name: ObjectName,
         alias: Option<TableAlias>,
         as_of: Option<AsOf>,
-        query_log: bool,
+    },
+    LogTable {
+        name: ObjectName,
+        old_epoch: u64,
+        new_epoch: u64,
     },
     Derived {
         lateral: bool,
@@ -452,6 +456,15 @@ impl fmt::Display for TableFactor {
                 Ok(())
             }
             TableFactor::NestedJoin(table_reference) => write!(f, "({})", table_reference),
+            TableFactor::LogTable {
+                name,
+                old_epoch,
+                new_epoch,
+            } => {
+                write!(f, "{}", name)?;
+                write!(f, "Epoch FROM {} TO {}", old_epoch, new_epoch)?;
+                Ok(())
+            }
         }
     }
 }

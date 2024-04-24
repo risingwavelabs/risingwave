@@ -110,6 +110,15 @@ impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for StorageTableInner<S, 
 
 // init
 impl<S: StateStore> StorageTableInner<S, EitherSerde> {
+    pub fn new_partial(
+        store: S,
+        output_column_ids: Vec<ColumnId>,
+        vnodes: Option<Arc<Bitmap>>,
+        table_desc: &StorageTableDesc,
+    ) -> Self {
+        Self::new_partial_inner(store, output_column_ids, vnodes, table_desc, vec![])
+    }
+
     /// Create a  [`StorageTableInner`] given a complete set of `columns` and a partial
     /// set of `output_column_ids`.
     /// When reading from the storage table,
@@ -120,11 +129,13 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
     /// from those supplied to associated executors.
     /// These `output_column_ids` may have `pk` appended, since they will be needed to scan from
     /// storage. The associated executors may not have these `pk` fields.
-    pub fn new_partial(
+    pub fn new_partial_inner(
         store: S,
         output_column_ids: Vec<ColumnId>,
         vnodes: Option<Arc<Bitmap>>,
         table_desc: &StorageTableDesc,
+        // Use for log iter's op
+        excluded_indices: Vec<ColumnId>,
     ) -> Self {
         let table_id = TableId {
             table_id: table_desc.table_id,
@@ -168,6 +179,7 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
             distribution,
             table_option,
             value_indices,
+            excluded_indices,
             prefix_hint_len,
             versioned,
         )
@@ -192,6 +204,7 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
             TableDistribution::singleton(),
             Default::default(),
             value_indices,
+            vec![],
             0,
             false,
         )
@@ -228,6 +241,7 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
         distribution: TableDistribution,
         table_option: TableOption,
         value_indices: Vec<usize>,
+        excluded_column_ids: Vec<ColumnId>,
         read_prefix_len_hint: usize,
         versioned: bool,
     ) -> Self {
@@ -235,11 +249,19 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
 
         let (output_columns, output_indices) =
             find_columns_by_ids(&table_columns, &output_column_ids);
+        let (excluded_columns, excluded_indices) =
+            find_columns_by_ids(&table_columns, &excluded_column_ids);
+        if !excluded_columns.is_empty() {
+            // Now we only exclude the 'op'
+            assert_eq!(excluded_columns.first().unwrap().name, "op")
+        }
         let mut value_output_indices = vec![];
         let mut key_output_indices = vec![];
 
         for idx in &output_indices {
-            if value_indices.contains(idx) {
+            if excluded_indices.contains(idx) {
+                continue;
+            } else if value_indices.contains(idx) {
                 value_output_indices.push(*idx);
             } else {
                 key_output_indices.push(*idx);
@@ -416,8 +438,6 @@ pub trait PkAndRowStream = Stream<Item = StorageResult<KeyedRow<Bytes>>> + Send;
 
 /// The row iterator of the storage table.
 /// The wrapper of [`StorageTableInnerIter`] if pk is not persisted.
-// pub type StorageTableInnerIter<S: StateStore, SD: ValueRowSerde> = impl PkAndRowStream;
-// pub type StorageTableInnerIter2<S: StateStore, SD: ValueRowSerde> = impl PkAndRowStream;
 
 #[async_trait::async_trait]
 impl<S: PkAndRowStream + Unpin> TableIter for S {
@@ -659,7 +679,6 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         end_epoch: HummockReadEpoch,
         pk_prefix: impl Row,
         range_bounds: impl RangeBounds<OwnedRow>,
-        // ordered: bool,
     ) -> StorageResult<impl Stream<Item = StorageResult<KeyedRow<Bytes>>> + Send> {
         self.iter_log_with_pk_bounds(satrt_epoch, end_epoch, pk_prefix, range_bounds)
             .await
@@ -671,7 +690,6 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         end_epoch: HummockReadEpoch,
         pk_prefix: impl Row,
         range_bounds: impl RangeBounds<OwnedRow>,
-        // ordered: bool,
     ) -> StorageResult<impl Stream<Item = StorageResult<KeyedRow<Bytes>>> + Send> {
         let start_key = self.serialize_pk_bound(&pk_prefix, range_bounds.start_bound(), true);
         let end_key = self.serialize_pk_bound(&pk_prefix, range_bounds.end_bound(), false);
@@ -693,14 +711,9 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             let read_options = ReadLogOptions {
                 table_id: self.table_id,
             };
-            let pk_serializer = match self.output_row_in_key_indices.is_empty() {
-                true => None,
-                false => Some(Arc::new(self.pk_serializer.clone())),
-            };
             let iter = StorageTableInnerIterLogInner::<S, SD>::new(
                 &self.store,
                 self.mapping.clone(),
-                pk_serializer,
                 self.row_serde.clone(),
                 table_key_range,
                 read_options,
@@ -713,18 +726,13 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         }))
         .await?;
 
-        println!("test444");
         #[auto_enum(futures03::Stream)]
         let iter = match iterators.len() {
             0 => unreachable!(),
             1 => iterators.into_iter().next().unwrap(),
             // Concat all iterators if not to preserve order.
-            // _ if !ordered => {
-            //     futures::stream::iter(iterators.into_iter().map(Box::pin).collect_vec())
-            //         .flatten_unordered(1024)
-            // }
-            // Merge all iterators if to preserve order.
-            _ => merge_sort(iterators.into_iter().map(Box::pin).collect()),
+            _ => futures::stream::iter(iterators.into_iter().map(Box::pin).collect_vec())
+                .flatten_unordered(1024),
         };
 
         Ok(iter)
@@ -857,7 +865,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
     }
 }
 
-/// [`StorageTableInnerIterInner`] iterates on the storage table.
+/// [`StorageTableInnerIterLogInner`] iterates on the storage table.
 struct StorageTableInnerIterLogInner<S: StateStore, SD: ValueRowSerde> {
     /// An iterator that returns raw bytes from storage.
     iter: S::ChangeLogIter,
@@ -865,9 +873,6 @@ struct StorageTableInnerIterLogInner<S: StateStore, SD: ValueRowSerde> {
     mapping: Arc<ColumnMapping>,
 
     row_deserializer: Arc<SD>,
-
-    /// Used for serializing and deserializing the primary key.
-    pk_serializer: Option<Arc<OrderedRowSerde>>,
 }
 
 impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterLogInner<S, SD> {
@@ -876,7 +881,6 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterLogInner<S, SD> {
     async fn new(
         store: &S,
         mapping: Arc<ColumnMapping>,
-        pk_serializer: Option<Arc<OrderedRowSerde>>,
         row_deserializer: Arc<SD>,
         table_key_range: TableKeyRange,
         read_options: ReadLogOptions,
@@ -885,7 +889,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterLogInner<S, SD> {
     ) -> StorageResult<Self> {
         let raw_satrt_epoch = satrt_epoch.get_epoch();
         let raw_end_epoch = end_epoch.get_epoch();
-        // store.try_wait_epoch(end_epoch).await?;
+        store.try_wait_epoch(end_epoch).await?;
         let iter = store
             .iter_log(
                 (raw_satrt_epoch, raw_end_epoch),
@@ -893,16 +897,16 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterLogInner<S, SD> {
                 read_options,
             )
             .await?;
-        // // For `HummockStorage`, a cluster recovery will clear storage data and make subsequent
-        // // `HummockReadEpoch::Current` read incomplete.
-        // // `validate_read_epoch` is a safeguard against that incorrect read. It rejects the read
-        // // result if any recovery has happened after `try_wait_epoch`.
-        // store.validate_read_epoch(epoch)?;
+        // For `HummockStorage`, a cluster recovery will clear storage data and make subsequent
+        // `HummockReadEpoch::Current` read incomplete.
+        // `validate_read_epoch` is a safeguard against that incorrect read. It rejects the read
+        // result if any recovery has happened after `try_wait_epoch`.
+        store.validate_read_epoch(end_epoch)?;
+        store.validate_read_epoch(satrt_epoch)?;
         let iter = Self {
             iter,
             mapping,
             row_deserializer,
-            pk_serializer,
         };
         Ok(iter)
     }
@@ -911,14 +915,15 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterLogInner<S, SD> {
     #[try_stream(ok = KeyedRow<Bytes>, error = StorageError)]
     async fn into_stream(mut self) {
         let build_value_with_op = |value: &[u8], op: i16| -> Result<Vec<Datum>, StorageError> {
-            let mut result_row_vec = vec![];
             let full_row = self.row_deserializer.deserialize(value)?;
             let result_row_in_value = self
                 .mapping
                 .project(OwnedRow::new(full_row))
                 .into_owned_row();
-            result_row_vec.push(Some(ScalarImpl::Int16(4)));
-            result_row_vec.extend(result_row_in_value.into_iter());
+            let result_row_vec = result_row_in_value
+                .into_iter()
+                .chain(vec![Some(ScalarImpl::Int16(op))])
+                .collect_vec();
             Ok(result_row_vec)
         };
 

@@ -74,14 +74,12 @@ message FilterNode {
 message LogRowSeqScanNode{
   plan_common.StorageTableDesc table_desc = 1;
   repeated int32 column_ids = 2;
-  // All the ranges need to be read. i.e., they are OR'ed.
-  //
-  // Empty `scan_ranges` means full table scan.
-  repeated ScanRange scan_ranges = 3;
   // The partition to read for scan tasks.
   //
   // Will be filled by the scheduler.
-  common.Buffer vnode_bitmap = 4;
+  common.Buffer vnode_bitmap = 3;
+  common.BatchQueryEpoch old_epoch = 4;
+  common.BatchQueryEpoch new_epoch = 5;
 }
 
 message InsertNode {

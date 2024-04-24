@@ -79,6 +79,8 @@ impl Planner {
             log_table.table_catalog.name().to_string(),
             Rc::new(log_table.table_catalog.table_desc()),
             self.ctx(),
+            log_table.old_epoch,
+            log_table.new_epoch,
         )
         .into())
     }

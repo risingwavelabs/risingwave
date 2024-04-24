@@ -469,7 +469,6 @@ impl LocalQueryExecution {
                                 .into_table()
                                 .expect("PartitionInfo should be TablePartitionInfo here");
                             scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
-                            scan_node.scan_ranges = partition.scan_ranges;
                         }
                     }
                     _ => unreachable!(),

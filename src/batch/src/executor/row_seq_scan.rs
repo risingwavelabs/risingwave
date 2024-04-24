@@ -161,7 +161,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        println!("222");
         ensure!(
             inputs.is_empty(),
             "Row sequential scan should not have input executor!"
@@ -178,7 +177,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .copied()
             .map(ColumnId::from)
             .collect();
-
         let vnodes = match &seq_scan_node.vnode_bitmap {
             Some(vnodes) => Some(Bitmap::from(vnodes).into()),
             // This is possible for dml. vnode_bitmap is not filled by scheduler.
