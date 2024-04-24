@@ -113,3 +113,10 @@ select * from numeric_to_rw_int256 order by id;
 105 NULL
 106 NULL
 107 NULL
+
+query II
+select * from enum_to_varchar order by id;
+----
+1 happy
+2 ok
+3 sad
