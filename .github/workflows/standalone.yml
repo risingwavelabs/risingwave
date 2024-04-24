@@ -13,7 +13,7 @@ jobs:
         - 4566:4566
       options: >-
         --entrypoint "/risingwave/bin/risingwave"
-        --single_node
+        single_node
     steps:
       - name: Check out code
         uses: actions/checkout@v2
