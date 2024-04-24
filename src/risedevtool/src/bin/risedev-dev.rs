@@ -18,16 +18,16 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use console::style;
 use fs_err::OpenOptions;
 use indicatif::ProgressBar;
 use risedev::util::{complete_spin, fail_spin};
 use risedev::{
     generate_risedev_env, preflight_check, CompactorService, ComputeNodeService, ConfigExpander,
-    ConfigureTmuxTask, EnsureStopService, ExecuteContext, FrontendService, GrafanaService,
-    KafkaService, MetaNodeService, MinioService, PrometheusService, PubsubService, RedisService,
-    ServiceConfig, SqliteConfig, Task, TempoService, ZooKeeperService, RISEDEV_NAME,
+    ConfigureTmuxTask, DummyService, EnsureStopService, ExecuteContext, FrontendService,
+    GrafanaService, KafkaService, MetaNodeService, MinioService, PrometheusService, PubsubService,
+    RedisService, ServiceConfig, SqliteConfig, Task, TempoService, ZooKeeperService, RISEDEV_NAME,
 };
 use tempfile::tempdir;
 use thiserror_ext::AsReport;
@@ -59,33 +59,6 @@ impl ProgressManager {
         if let Some(ref pa) = self.pa {
             pa.finish();
         }
-    }
-}
-
-struct DummyService {
-    id: String,
-}
-
-impl DummyService {
-    pub fn new(id: &str) -> Self {
-        Self { id: id.to_string() }
-    }
-}
-
-impl Task for DummyService {
-    fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
-        ctx.service(self);
-        writeln!(
-            &mut ctx.log,
-            "{} is a dummy service. Please ensure it's correctly configured on your own! 🙏",
-            self.id
-        )?;
-        ctx.complete_spin();
-        Ok(())
-    }
-
-    fn id(&self) -> String {
-        self.id.clone()
     }
 }
 
@@ -346,6 +319,9 @@ fn task_main(
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 // TODO: support starting mysql in RiseDev. Currently it's user-managed only
+                if !c.user_managed {
+                    bail!("Non user-managed MySQL is not supported yet. Please use user-managed MySQL.");
+                }
                 DummyService::new(&c.id).execute(&mut ctx)?;
                 let mut task =
                     risedev::ConfigureTcpNodeTask::new(c.address.clone(), c.port, c.user_managed)?;
