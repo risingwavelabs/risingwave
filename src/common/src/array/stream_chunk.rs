@@ -133,11 +133,7 @@ impl StreamChunk {
     /// Should prefer using [`StreamChunkBuilder`] instead to avoid unnecessary
     /// allocation of rows.
     pub fn from_rows(rows: &[(Op, impl Row)], data_types: &[DataType]) -> Self {
-        // `append_row` will cause the builder to finish immediately once capacity is met.
-        // Hence, we allocate an extra row here, to avoid the builder finishing prematurely.
-        // This just makes the code cleaner, since we can loop through all rows, and consume it finally.
-        // TODO: introduce `new_unlimited` to decouple memory reservation from builder capacity.
-        let mut builder = StreamChunkBuilder::new(rows.len() + 1, data_types.to_vec());
+        let mut builder = StreamChunkBuilder::unlimited(data_types.to_vec(), Some(rows.len()));
 
         for (op, row) in rows {
             let none = builder.append_row(*op, row);
@@ -659,11 +655,7 @@ impl StreamChunk {
         let data_types = chunks[0].data_types();
         let size = chunks.iter().map(|c| c.cardinality()).sum::<usize>();
 
-        // `append_row` will cause the builder to finish immediately once capacity is met.
-        // Hence, we allocate an extra row here, to avoid the builder finishing prematurely.
-        // This just makes the code cleaner, since we can loop through all rows, and consume it finally.
-        // TODO: introduce `new_unlimited` to decouple memory reservation from builder capacity.
-        let mut builder = StreamChunkBuilder::new(size + 1, data_types);
+        let mut builder = StreamChunkBuilder::unlimited(data_types, Some(size));
 
         for chunk in chunks {
             // TODO: directly append chunks.
