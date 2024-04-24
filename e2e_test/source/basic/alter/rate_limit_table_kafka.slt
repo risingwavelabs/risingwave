@@ -68,10 +68,6 @@ query I
 alter table kafka_source set streaming_rate_limit to default;
 
 skipif in-memory
-statement ok
-flush;
-
-skipif in-memory
 sleep 3s
 
 skipif in-memory
