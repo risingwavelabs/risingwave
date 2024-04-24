@@ -317,7 +317,7 @@ impl Binder {
                     .get()
                     .clone();
 
-                self.bind_rcte(with, entry, left, right, all)?;
+                self.bind_rcte(with, entry, *left, *right, all)?;
             } else {
                 let bound_query = self.bind_query(query)?;
                 self.context.cte_to_relation.insert(
@@ -396,8 +396,8 @@ impl Binder {
         &mut self,
         with: Option<With>,
         entry: Rc<RefCell<BindingCte>>,
-        left: Box<SetExpr>,
-        right: Box<SetExpr>,
+        left: SetExpr,
+        right: SetExpr,
         all: bool,
     ) -> Result<()> {
         self.push_context();
@@ -410,8 +410,8 @@ impl Binder {
         &mut self,
         with: Option<With>,
         entry: Rc<RefCell<BindingCte>>,
-        left: Box<SetExpr>,
-        right: Box<SetExpr>,
+        left: SetExpr,
+        right: SetExpr,
         all: bool,
     ) -> Result<()> {
         if let Some(with) = with {
@@ -421,7 +421,7 @@ impl Binder {
         // We assume `left` is the base term, otherwise the implementation may be very hard.
         // The behavior is the same as PostgreSQL's.
         // reference: <https://www.postgresql.org/docs/16/sql-select.html#:~:text=the%20recursive%20self%2Dreference%20must%20appear%20on%20the%20right%2Dhand%20side%20of%20the%20UNION>
-        let mut base = self.bind_set_expr(*left)?;
+        let mut base = self.bind_set_expr(left)?;
 
         entry.borrow_mut().state = BindingCteState::BaseResolved {
             schema: base.schema().clone(),
@@ -433,7 +433,7 @@ impl Binder {
             .cte_to_relation
             .clone_from(&new_context.cte_to_relation);
         // bind the rest of the recursive cte
-        let mut recursive = self.bind_set_expr(*right)?;
+        let mut recursive = self.bind_set_expr(right)?;
         // Reset context for the set operation.
         self.context = Default::default();
         self.context.cte_to_relation = new_context.cte_to_relation;
