@@ -67,7 +67,7 @@ if [[ -n "${ORIGINAL_IMAGE_TAG+x}" ]] && [[ -n "${NEW_IMAGE_TAG+x}" ]]; then
   done
   docker manifest create --insecure "${ghcraddr}:${NEW_IMAGE_TAG}" "${args[@]}"
   docker manifest push --insecure "${ghcraddr}:${NEW_IMAGE_TAG}"
-  return 0
+  exit 0
 fi
 
 echo "--- multi arch image create"

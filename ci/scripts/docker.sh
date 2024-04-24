@@ -18,7 +18,7 @@ if [[ -n "${ORIGINAL_IMAGE_TAG+x}" ]] && [[ -n "${NEW_IMAGE_TAG+x}" ]]; then
   docker pull ${ghcraddr}:${ORIGINAL_IMAGE_TAG}
   docker tag ${ghcraddr}:${ORIGINAL_IMAGE_TAG} ${ghcraddr}:${NEW_IMAGE_TAG}-${arch}
   docker push ${ghcraddr}:${NEW_IMAGE_TAG}-${arch}
-  return 0
+  exit 0
 fi
 
 # Build RisingWave docker image ${BUILDKITE_COMMIT}-${arch}
