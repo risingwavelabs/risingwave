@@ -41,6 +41,7 @@ pub struct Model {
     pub version: i64,
     // `secret_ref` stores the mapping info mapping from property name to secret id and type.
     pub secret_ref: Option<SecretRef>,
+    pub rate_limit: Option<u32>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -103,7 +104,11 @@ impl From<PbSource> for ActiveModel {
             optional_associated_table_id: Set(optional_associated_table_id),
             connection_id: Set(source.connection_id.map(|id| id as _)),
             version: Set(source.version as _),
+<<<<<<< HEAD
             secret_ref: Set(Some(SecretRef::from(source.secret_refs))),
+=======
+            rate_limit: Set(source.rate_limit),
+>>>>>>> e3c0f3f7e2 (add rate_limit to source catalog proto)
         }
     }
 }

@@ -68,6 +68,7 @@ use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot}
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::{Binder, TableCatalog, WithOptions};
+use crate::utils::OverwriteOptions;
 
 /// Column ID generator for a new table or a new version of an existing table to alter.
 #[derive(Debug)]
@@ -459,7 +460,7 @@ pub fn bind_pk_and_row_id_on_relation(
 /// stream source.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn gen_create_table_plan_with_source(
-    handler_args: HandlerArgs,
+    mut handler_args: HandlerArgs,
     explain_options: ExplainOptions,
     table_name: ObjectName,
     column_defs: Vec<ColumnDef>,
@@ -490,6 +491,8 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let (columns_from_resolve_source, source_info) =
         bind_columns_from_source(session, &source_schema, Either::Left(&with_properties)).await?;
 
+    let overwrite_options = OverwriteOptions::new(&mut handler_args);
+    let rate_limit = overwrite_options.source_rate_limit;
     let (source_catalog, database_id, schema_id) = bind_create_source_or_table_with_connector(
         handler_args.clone(),
         table_name,
@@ -504,6 +507,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         include_column_options,
         &mut col_id_gen,
         false,
+        rate_limit,
     )
     .await?;
 
@@ -673,6 +677,7 @@ fn gen_table_plan_inner(
     let session = context.session_ctx().clone();
     let retention_seconds = context.with_options().retention_seconds();
     let is_external_source = source_catalog.is_some();
+
     let source_node: PlanRef = LogicalSource::new(
         source_catalog.map(|source| Rc::new(source.clone())),
         columns.clone(),
