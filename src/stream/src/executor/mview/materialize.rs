@@ -36,7 +36,7 @@ use risingwave_storage::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew
 
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
-use crate::common::table::state_table::StateTableInner;
+use crate::common::table::state_table::{StateTableInner, StateTableOpConsistencyLevel};
 use crate::executor::prelude::*;
 use crate::executor::{AddMutation, UpdateMutation};
 
@@ -58,6 +58,21 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
     conflict_behavior: ConflictBehavior,
 
     version_column_index: Option<u32>,
+
+    may_have_downstream: bool,
+}
+
+fn get_op_consistency_level(
+    conflict_behavior: ConflictBehavior,
+    may_have_downstream: bool,
+) -> StateTableOpConsistencyLevel {
+    if !may_have_downstream && matches!(conflict_behavior, ConflictBehavior::Overwrite) {
+        // Table with overwrite conflict behavior could disable conflict check
+        // if no downstream mv depends on it, so we use a inconsistent_op to skip sanity check as well.
+        StateTableOpConsistencyLevel::Inconsistent
+    } else {
+        StateTableOpConsistencyLevel::ConsistentOldValue
+    }
 }
 
 impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
@@ -90,16 +105,16 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         );
 
         let arrange_key_indices: Vec<usize> = arrange_key.iter().map(|k| k.column_index).collect();
-
+        let may_have_downstream = actor_context.initial_dispatch_num != 0;
+        let op_consistency_level = get_op_consistency_level(conflict_behavior, may_have_downstream);
         // Note: The current implementation could potentially trigger a switch on the inconsistent_op flag. If the storage relies on this flag to perform optimizations, it would be advisable to maintain consistency with it throughout the lifecycle.
-        let state_table = if matches!(conflict_behavior, ConflictBehavior::Overwrite)
-            && actor_context.dispatch_num == 0
-        {
-            // Table with overwrite conflict behavior could disable conflict check if no downstream mv depends on it, so we use a inconsistent_op to skip sanity check as well.
-            StateTableInner::from_table_catalog_inconsistent_op(table_catalog, store, vnodes).await
-        } else {
-            StateTableInner::from_table_catalog(table_catalog, store, vnodes).await
-        };
+        let state_table = StateTableInner::from_table_catalog_with_consistency_level(
+            table_catalog,
+            store,
+            vnodes,
+            op_consistency_level,
+        )
+        .await;
 
         let metrics_info =
             MetricsInfo::new(metrics, table_catalog.id, actor_context.id, "Materialize");
@@ -117,6 +132,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             ),
             conflict_behavior,
             version_column_index,
+            may_have_downstream,
         }
     }
 
@@ -223,17 +239,20 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     }
                 }
                 Message::Barrier(b) => {
-                    let mutation = b.mutation.clone();
+                    let mutation = b.mutation.as_deref();
                     // If a downstream mv depends on the current table, we need to do conflict check again.
-                    if !self.state_table.is_consistent_op()
+                    if !self.may_have_downstream
                         && Self::new_downstream_created(mutation, self.actor_context.id)
                     {
+                        self.may_have_downstream = true;
+                    }
+                    let op_consistency_level =
+                        get_op_consistency_level(self.conflict_behavior, self.may_have_downstream);
+                    self.state_table
+                        .commit_may_switch_consistent_op(b.epoch, op_consistency_level)
+                        .await?;
+                    if !self.state_table.is_consistent_op() {
                         assert_eq!(self.conflict_behavior, ConflictBehavior::Overwrite);
-                        self.state_table
-                            .commit_with_switch_consistent_op(b.epoch, Some(true))
-                            .await?;
-                    } else {
-                        self.state_table.commit(b.epoch).await?;
                     }
 
                     // Update the vnode bitmap for the state table if asked.
@@ -252,8 +271,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         }
     }
 
-    fn new_downstream_created(mutation: Option<Arc<Mutation>>, actor_id: ActorId) -> bool {
-        let Some(mutation) = mutation.as_deref() else {
+    fn new_downstream_created(mutation: Option<&Mutation>, actor_id: ActorId) -> bool {
+        let Some(mutation) = mutation else {
             return false;
         };
         match mutation {
@@ -330,6 +349,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             ),
             conflict_behavior,
             version_column_index: None,
+            may_have_downstream: true,
         }
     }
 }
