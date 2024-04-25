@@ -19,6 +19,8 @@ use risingwave_common::config::{
 };
 use risingwave_common::util::pretty_bytes::convert;
 
+use crate::ComputeNodeOpts;
+
 /// The minimal memory requirement of computing tasks in megabytes.
 pub const MIN_COMPUTE_MEMORY_MB: usize = 512;
 /// The memory reserved for system usage (stack and code segment of processes, allocation
@@ -41,20 +43,24 @@ const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.3;
 /// Each compute node reserves some memory for stack and code segment of processes, allocation
 /// overhead, network buffer, etc. based on `SYSTEM_RESERVED_MEMORY_PROPORTION`. The reserve memory
 /// size must be larger than `MIN_SYSTEM_RESERVED_MEMORY_MB`
-pub fn reserve_memory_bytes(total_memory_bytes: usize) -> (usize, usize) {
-    if total_memory_bytes < MIN_COMPUTE_MEMORY_MB << 20 {
+pub fn reserve_memory_bytes(opts: &ComputeNodeOpts) -> (usize, usize) {
+    if opts.total_memory_bytes < MIN_COMPUTE_MEMORY_MB << 20 {
         panic!(
             "The total memory size ({}) is too small. It must be at least {} MB.",
-            convert(total_memory_bytes as _),
+            convert(opts.total_memory_bytes as _),
             MIN_COMPUTE_MEMORY_MB
         );
     }
 
-    let reserved = std::cmp::max(
-        (total_memory_bytes as f64 * SYSTEM_RESERVED_MEMORY_PROPORTION).ceil() as usize,
-        MIN_SYSTEM_RESERVED_MEMORY_MB << 20,
-    );
-    (reserved, total_memory_bytes - reserved)
+    // If `reserved_memory_bytes` is not set, use `SYSTEM_RESERVED_MEMORY_PROPORTION` * `total_memory_bytes`.
+    let reserved = opts.reserved_memory_bytes.unwrap_or_else(|| {
+        (opts.total_memory_bytes as f64 * SYSTEM_RESERVED_MEMORY_PROPORTION).ceil() as usize
+    });
+
+    // Should have at least `MIN_SYSTEM_RESERVED_MEMORY_MB` for reserved memory.
+    let reserved = std::cmp::max(reserved, MIN_SYSTEM_RESERVED_MEMORY_MB << 20);
+
+    (reserved, opts.total_memory_bytes - reserved)
 }
 
 /// Decide the memory limit for each storage cache. If not specified in `StorageConfig`, memory
@@ -230,21 +236,41 @@ pub fn storage_memory_config(
 
 #[cfg(test)]
 mod tests {
+    use clap::Parser;
     use risingwave_common::config::StorageConfig;
 
     use super::{reserve_memory_bytes, storage_memory_config};
+    use crate::ComputeNodeOpts;
 
     #[test]
     fn test_reserve_memory_bytes() {
         // at least 512 MB
-        let (reserved, non_reserved) = reserve_memory_bytes(1536 << 20);
-        assert_eq!(reserved, 512 << 20);
-        assert_eq!(non_reserved, 1024 << 20);
+        {
+            let mut opts = ComputeNodeOpts::parse_from(vec![] as Vec<String>);
+            opts.total_memory_bytes = 1536 << 20;
+            let (reserved, non_reserved) = reserve_memory_bytes(&opts);
+            assert_eq!(reserved, 512 << 20);
+            assert_eq!(non_reserved, 1024 << 20);
+        }
 
         // reserve based on proportion
-        let (reserved, non_reserved) = reserve_memory_bytes(10 << 30);
-        assert_eq!(reserved, 3 << 30);
-        assert_eq!(non_reserved, 7 << 30);
+        {
+            let mut opts = ComputeNodeOpts::parse_from(vec![] as Vec<String>);
+            opts.total_memory_bytes = 10 << 30;
+            let (reserved, non_reserved) = reserve_memory_bytes(&opts);
+            assert_eq!(reserved, 3 << 30);
+            assert_eq!(non_reserved, 7 << 30);
+        }
+
+        // reserve based on opts
+        {
+            let mut opts = ComputeNodeOpts::parse_from(vec![] as Vec<String>);
+            opts.total_memory_bytes = 10 << 30;
+            opts.reserved_memory_bytes = Some(2 << 30);
+            let (reserved, non_reserved) = reserve_memory_bytes(&opts);
+            assert_eq!(reserved, 2 << 30);
+            assert_eq!(non_reserved, 8 << 30);
+        }
     }
 
     #[test]

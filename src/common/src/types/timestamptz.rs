@@ -130,6 +130,7 @@ impl Timestamptz {
 
     pub fn lookup_time_zone(time_zone: &str) -> std::result::Result<Tz, String> {
         Tz::from_str_insensitive(time_zone)
+            .map_err(|_| format!("'{time_zone}' is not a valid timezone"))
     }
 
     pub fn from_protobuf(timestamp_micros: i64) -> ArrayResult<Self> {

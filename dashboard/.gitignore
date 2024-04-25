@@ -26,3 +26,6 @@ yarn-error.log*
 
 # generated proto
 proto/gen
+
+# vendored monaco
+public/monaco
