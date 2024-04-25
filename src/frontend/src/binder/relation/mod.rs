@@ -414,10 +414,8 @@ impl Binder {
         old_epoch: u64,
         new_epoch: u64,
     ) -> Result<Relation> {
-        let resolve_log_table_relation = |log_table_catalog: &std::sync::Arc<TableCatalog>| {
-            let log_table_catalog = &*log_table_catalog.clone();
-            let mut log_table_catalog = log_table_catalog.clone();
-            let next_column_id = log_table_catalog
+        let resolve_log_table_relation = |table_catalog: &std::sync::Arc<TableCatalog>| {
+            let next_column_id = table_catalog
                 .columns
                 .iter()
                 .max_by(|a, b| {
@@ -429,21 +427,26 @@ impl Binder {
                 .map(|c| c.column_desc.column_id)
                 .unwrap_or_default()
                 .next();
-
-            log_table_catalog.columns.push(ColumnCatalog {
+            let op_column = ColumnCatalog {
                 column_desc: ColumnDesc::named(
                     "op",
                     next_column_id,
                     risingwave_common::types::DataType::Int16,
                 ),
                 is_hidden: false,
-            });
+            };
+
+            let log_table_catalog = &*table_catalog.clone();
+            let mut log_table_catalog = log_table_catalog.clone();
+            log_table_catalog.columns.push(op_column.clone());
+
             let log_table_catalog = std::sync::Arc::new(log_table_catalog);
             let table = BoundLogTable {
-                table_id: log_table_catalog.id(),
-                table_catalog: log_table_catalog.clone(),
+                table_id: table_catalog.id(),
+                table_catalog: table_catalog.clone(), // We save the original TableCatalog
                 old_epoch,
                 new_epoch,
+                op_column,
             };
             (
                 Relation::LogTable(Box::new(table)),

@@ -107,7 +107,7 @@ impl TryToBatchPb for BatchLogSeqScan {
             table_desc: Some(self.core.table_desc.try_to_protobuf()?),
             column_ids: self
                 .core
-                .output_column_ids()
+                .output_column_ids_to_batch()
                 .iter()
                 .map(ColumnId::get_id)
                 .collect(),

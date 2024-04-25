@@ -110,15 +110,6 @@ impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for StorageTableInner<S, 
 
 // init
 impl<S: StateStore> StorageTableInner<S, EitherSerde> {
-    pub fn new_partial(
-        store: S,
-        output_column_ids: Vec<ColumnId>,
-        vnodes: Option<Arc<Bitmap>>,
-        table_desc: &StorageTableDesc,
-    ) -> Self {
-        Self::new_partial_inner(store, output_column_ids, vnodes, table_desc, vec![])
-    }
-
     /// Create a  [`StorageTableInner`] given a complete set of `columns` and a partial
     /// set of `output_column_ids`.
     /// When reading from the storage table,
@@ -129,13 +120,11 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
     /// from those supplied to associated executors.
     /// These `output_column_ids` may have `pk` appended, since they will be needed to scan from
     /// storage. The associated executors may not have these `pk` fields.
-    pub fn new_partial_inner(
+    pub fn new_partial(
         store: S,
         output_column_ids: Vec<ColumnId>,
         vnodes: Option<Arc<Bitmap>>,
         table_desc: &StorageTableDesc,
-        // Use for log iter's op
-        excluded_indices: Vec<ColumnId>,
     ) -> Self {
         let table_id = TableId {
             table_id: table_desc.table_id,
@@ -179,7 +168,6 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
             distribution,
             table_option,
             value_indices,
-            excluded_indices,
             prefix_hint_len,
             versioned,
         )
@@ -204,7 +192,6 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
             TableDistribution::singleton(),
             Default::default(),
             value_indices,
-            vec![],
             0,
             false,
         )
@@ -241,7 +228,6 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
         distribution: TableDistribution,
         table_option: TableOption,
         value_indices: Vec<usize>,
-        excluded_column_ids: Vec<ColumnId>,
         read_prefix_len_hint: usize,
         versioned: bool,
     ) -> Self {
@@ -249,19 +235,12 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
 
         let (output_columns, output_indices) =
             find_columns_by_ids(&table_columns, &output_column_ids);
-        let (excluded_columns, excluded_indices) =
-            find_columns_by_ids(&table_columns, &excluded_column_ids);
-        if !excluded_columns.is_empty() {
-            // Now we only exclude the 'op'
-            assert_eq!(excluded_columns.first().unwrap().name, "op")
-        }
+
         let mut value_output_indices = vec![];
         let mut key_output_indices = vec![];
 
         for idx in &output_indices {
-            if excluded_indices.contains(idx) {
-                continue;
-            } else if value_indices.contains(idx) {
+            if value_indices.contains(idx) {
                 value_output_indices.push(*idx);
             } else {
                 key_output_indices.push(*idx);

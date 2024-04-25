@@ -17,7 +17,7 @@ use std::sync::Arc;
 use either::Either;
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::{is_system_schema, Field};
+use risingwave_common::catalog::{is_system_schema, ColumnCatalog, Field};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_sqlparser::ast::{AsOf, Statement, TableAlias};
@@ -48,6 +48,7 @@ pub struct BoundLogTable {
     pub table_catalog: Arc<TableCatalog>,
     pub new_epoch: u64,
     pub old_epoch: u64,
+    pub op_column: ColumnCatalog,
 }
 
 #[derive(Debug, Clone)]

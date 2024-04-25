@@ -21,7 +21,7 @@ use futures_util::pin_mut;
 use prometheus::Histogram;
 use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnId, Schema};
+use risingwave_common::catalog::{ColumnId, Field, Schema};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::BatchQueryEpoch;
@@ -91,12 +91,6 @@ impl BoxedExecutorBuilder for LogStoreRowSeqScanExecutorBuilder {
         )?;
 
         let table_desc: &StorageTableDesc = log_store_seq_scan_node.get_table_desc()?;
-        let op_id = log_store_seq_scan_node
-            .column_ids
-            .iter()
-            .max()
-            .map(ColumnId::from)
-            .unwrap();
         let column_ids = log_store_seq_scan_node
             .column_ids
             .iter()
@@ -116,13 +110,7 @@ impl BoxedExecutorBuilder for LogStoreRowSeqScanExecutorBuilder {
         let metrics = source.context().batch_metrics();
 
         dispatch_state_store!(source.context().state_store(), state_store, {
-            let table = StorageTable::new_partial_inner(
-                state_store,
-                column_ids,
-                vnodes,
-                table_desc,
-                vec![op_id],
-            );
+            let table = StorageTable::new_partial(state_store, column_ids, vnodes, table_desc);
             Ok(Box::new(LogRowSeqScanExecutor::new(
                 table,
                 scan_ranges,
@@ -162,6 +150,13 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
             new_epoch,
         } = *self;
         let table = std::sync::Arc::new(table);
+        let mut schema = table.schema().clone();
+        // Add op column
+        schema.fields.push(Field::with_name(
+            risingwave_common::types::DataType::Int16,
+            "op",
+        ));
+        let schema = Arc::new(schema);
 
         // Create collector.
         let histogram = metrics.as_ref().map(|metrics| {
@@ -181,6 +176,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
                 new_epoch.clone(),
                 chunk_size,
                 histogram.clone(),
+                schema.clone(),
             );
             #[for_await]
             for chunk in stream {
@@ -198,6 +194,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
         new_epoch: BatchQueryEpoch,
         chunk_size: usize,
         histogram: Option<impl Deref<Target = Histogram>>,
+        schema: Arc<Schema>,
     ) {
         let ScanRange {
             pk_prefix,
@@ -246,7 +243,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
         loop {
             let timer = histogram.as_ref().map(|histogram| histogram.start_timer());
 
-            let chunk = collect_data_chunk(&mut iter, table.schema(), Some(chunk_size))
+            let chunk = collect_data_chunk(&mut iter, &schema, Some(chunk_size))
                 .await
                 .map_err(BatchError::from)?;
             if let Some(timer) = timer {

@@ -17,7 +17,7 @@ use std::rc::Rc;
 
 use educe::Educe;
 use pretty_xmlish::Pretty;
-use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::ColumnOrder;
 
@@ -35,6 +35,8 @@ pub struct LogScan {
     pub output_col_idx: Vec<usize>,
     /// Descriptor of the table
     pub table_desc: Rc<TableDesc>,
+    /// Catalog of the op column
+    pub op_column: Rc<ColumnCatalog>,
     /// Help `RowSeqLogScan` executor use a better chunk size
     pub chunk_size: Option<u32>,
 
@@ -56,6 +58,14 @@ impl LogScan {
         self.output_col_idx
             .iter()
             .map(|i| self.get_table_columns()[*i].column_id)
+            .collect()
+    }
+
+    pub fn output_column_ids_to_batch(&self) -> Vec<ColumnId> {
+        self.output_col_idx
+            .iter()
+            .map(|i| self.get_table_columns()[*i].column_id)
+            .filter(|i| i != &self.op_column.column_desc.column_id)
             .collect()
     }
 
@@ -116,6 +126,7 @@ impl LogScan {
         table_name: String,
         output_col_idx: Vec<usize>,
         table_desc: Rc<TableDesc>,
+        op_column: Rc<ColumnCatalog>,
         ctx: OptimizerContextRef,
         old_epoch: u64,
         new_epoch: u64,
@@ -124,6 +135,7 @@ impl LogScan {
             table_name,
             output_col_idx,
             table_desc,
+            op_column,
             chunk_size: None,
             ctx,
             old_epoch,
@@ -145,14 +157,14 @@ impl LogScan {
 
     pub(crate) fn get_id_to_op_idx_mapping(
         output_col_idx: &[usize],
-        table_desc: &Rc<TableDesc>,
+        columns: Vec<ColumnDesc>,
     ) -> HashMap<ColumnId, usize> {
         let mut id_to_op_idx = HashMap::new();
         output_col_idx
             .iter()
             .enumerate()
             .for_each(|(op_idx, tb_idx)| {
-                let col = &table_desc.columns[*tb_idx];
+                let col = &columns[*tb_idx];
                 id_to_op_idx.insert(col.column_id, op_idx);
             });
         id_to_op_idx
@@ -173,13 +185,14 @@ impl GenericPlanNode for LogScan {
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        let id_to_op_idx = Self::get_id_to_op_idx_mapping(&self.output_col_idx, &self.table_desc);
+        let id_to_op_idx =
+            Self::get_id_to_op_idx_mapping(&self.output_col_idx, self.get_table_columns());
         self.table_desc
             .stream_key
             .iter()
             .map(|&c| {
                 id_to_op_idx
-                    .get(&self.table_desc.columns[c].column_id)
+                    .get(&self.get_table_columns()[c].column_id)
                     .copied()
             })
             .collect::<Option<Vec<_>>>()
@@ -200,8 +213,10 @@ impl GenericPlanNode for LogScan {
 }
 
 impl LogScan {
-    pub fn get_table_columns(&self) -> &[ColumnDesc] {
-        &self.table_desc.columns
+    pub fn get_table_columns(&self) -> Vec<ColumnDesc> {
+        let mut columns = self.table_desc.columns.clone();
+        columns.push(self.op_column.column_desc.clone());
+        columns
     }
 
     /// Get the descs of the output columns.

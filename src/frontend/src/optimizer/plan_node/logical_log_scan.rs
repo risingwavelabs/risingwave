@@ -16,7 +16,7 @@ use std::rc::Rc;
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::{ColumnDesc, TableDesc};
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, TableDesc};
 
 use super::batch_log_seq_scan::BatchLogSeqScan;
 use super::generic::GenericPlanRef;
@@ -62,14 +62,16 @@ impl LogicalLogScan {
     pub fn create(
         table_name: String, // explain-only
         table_desc: Rc<TableDesc>,
+        op_column: Rc<ColumnCatalog>,
         ctx: OptimizerContextRef,
         old_epoch: u64,
         new_epoch: u64,
     ) -> Self {
         generic::LogScan::new(
             table_name,
-            (0..table_desc.columns.len()).collect(),
+            (0..(table_desc.columns.len() + 1)).collect(),
             table_desc,
+            op_column,
             ctx,
             old_epoch,
             new_epoch,
@@ -98,6 +100,7 @@ impl LogicalLogScan {
             self.table_name().to_string(),
             output_col_idx,
             self.core.table_desc.clone(),
+            self.core.op_column.clone(),
             self.base.ctx().clone(),
             self.core.old_epoch,
             self.core.new_epoch,
@@ -131,7 +134,7 @@ impl Distill for LogicalLogScan {
                     self.output_col_idx()
                         .iter()
                         .map(|i| {
-                            let col_name = &self.log_table_desc().columns[*i].name;
+                            let col_name = &self.column_descs()[*i].name;
                             Pretty::from(if verbose {
                                 format!("{}.{}", self.table_name(), col_name)
                             } else {
