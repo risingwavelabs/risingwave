@@ -20,3 +20,5 @@ insert into numeric_table values(104, 115792089237316195423570985008687907853269
 insert into numeric_table values(105, 115792089237316195423570985008687907853269984665640564039457584007913129639936.555555);
 insert into numeric_table values(106, 'NaN'::numeric);
 insert into numeric_table values(107, 'Infinity'::numeric);
+
+INSERT INTO enum_table VALUES (3, 'sad');
