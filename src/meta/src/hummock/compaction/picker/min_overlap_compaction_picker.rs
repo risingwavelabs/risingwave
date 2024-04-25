@@ -182,7 +182,7 @@ pub struct SubLevelSstables {
 pub struct NonOverlapSubLevelPicker {
     min_compaction_bytes: u64,
     max_compaction_bytes: u64,
-    min_depth: usize,
+    min_expected_level_count: usize,
     max_file_count: u64,
     overlap_strategy: Arc<dyn OverlapStrategy>,
     enable_check_task_level_overlap: bool,
@@ -193,7 +193,7 @@ impl NonOverlapSubLevelPicker {
     pub fn new(
         min_compaction_bytes: u64,
         max_compaction_bytes: u64,
-        min_depth: usize,
+        min_expected_level_count: usize,
         max_file_count: u64,
         overlap_strategy: Arc<dyn OverlapStrategy>,
         enable_check_task_level_overlap: bool,
@@ -201,7 +201,7 @@ impl NonOverlapSubLevelPicker {
         Self {
             min_compaction_bytes,
             max_compaction_bytes,
-            min_depth,
+            min_expected_level_count,
             max_file_count,
             overlap_strategy,
             enable_check_task_level_overlap,
@@ -213,7 +213,7 @@ impl NonOverlapSubLevelPicker {
     pub fn for_test(
         min_compaction_bytes: u64,
         max_compaction_bytes: u64,
-        min_depth: usize,
+        min_expected_level_count: usize,
         max_file_count: u64,
         overlap_strategy: Arc<dyn OverlapStrategy>,
         enable_check_task_level_overlap: bool,
@@ -222,7 +222,7 @@ impl NonOverlapSubLevelPicker {
         Self {
             min_compaction_bytes,
             max_compaction_bytes,
-            min_depth,
+            min_expected_level_count,
             max_file_count,
             overlap_strategy,
             enable_check_task_level_overlap,
@@ -323,7 +323,7 @@ impl NonOverlapSubLevelPicker {
             }
 
             // When size / file count has exceeded the limit, we need to abandon this plan, it cannot be expanded to the last sub_level
-            if max_select_level_count > 1
+            if max_select_level_count >= self.min_expected_level_count
                 && (add_files_size >= self.max_compaction_bytes
                     || add_files_count >= self.max_file_count as usize)
             {
@@ -367,13 +367,13 @@ impl NonOverlapSubLevelPicker {
             let mut total_file_count = 0;
             let mut total_file_size = 0;
             let mut total_level_count = 0;
-
             for (index, sstables) in ret.sstable_infos.iter().enumerate() {
                 total_file_count += sstables.len();
                 total_file_size += sstables.iter().map(|sst| sst.file_size).sum::<u64>();
                 total_level_count += 1;
 
-                if index > 0
+                // Atleast `min_expected_level_count`` level should be selected
+                if total_level_count >= self.min_expected_level_count
                     && (total_file_count as u64 >= self.max_file_count
                         || total_file_size >= self.max_compaction_bytes
                         || total_level_count >= self.max_expected_level_count)
@@ -398,7 +398,7 @@ impl NonOverlapSubLevelPicker {
         l0: &[Level],
         level_handler: &LevelHandler,
     ) -> Vec<SubLevelSstables> {
-        if l0.len() < self.min_depth {
+        if l0.len() < self.min_expected_level_count {
             return vec![];
         }
 
@@ -409,7 +409,7 @@ impl NonOverlapSubLevelPicker {
             }
 
             let ret = self.pick_sub_level(l0, level_handler, sst);
-            if ret.sstable_infos.len() < self.min_depth
+            if ret.sstable_infos.len() < self.min_expected_level_count
                 && ret.total_file_size < self.min_compaction_bytes
             {
                 continue;
