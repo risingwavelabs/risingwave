@@ -873,6 +873,8 @@ mod logical_topn;
 mod logical_union;
 mod logical_update;
 mod logical_values;
+mod logical_recursive_union;
+mod logical_cte_ref;
 mod stream_dedup;
 mod stream_delta_join;
 mod stream_dml;
@@ -973,6 +975,8 @@ pub use logical_topn::LogicalTopN;
 pub use logical_union::LogicalUnion;
 pub use logical_update::LogicalUpdate;
 pub use logical_values::LogicalValues;
+pub use logical_recursive_union::LogicalRecursiveUnion;
+pub use logical_cte_ref::LogicalCteRef;
 pub use stream_cdc_table_scan::StreamCdcTableScan;
 pub use stream_dedup::StreamDedup;
 pub use stream_delta_join::StreamDeltaJoin;
@@ -1063,6 +1067,8 @@ macro_rules! for_all_plan_nodes {
             , { Logical, MaxOneRow }
             , { Logical, KafkaScan }
             , { Logical, IcebergScan }
+            , { Logical, RecursiveUnion }
+            , { Logical, CteRef }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -1165,6 +1171,8 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, MaxOneRow }
             , { Logical, KafkaScan }
             , { Logical, IcebergScan }
+            , { Logical, RecursiveUnion }
+            , { Logical, CteRef }
         }
     };
 }
