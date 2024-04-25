@@ -363,6 +363,10 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .enable_check_task_level_overlap,
                 enable_dropped_column_reclaim: config.meta.enable_dropped_column_reclaim,
                 object_store_config: config.storage.object_store,
+                max_trivial_move_task_count_per_loop: config
+                    .meta
+                    .developer
+                    .max_trivial_move_task_count_per_loop,
             },
             config.system.into_init_system_params(),
             Default::default(),
