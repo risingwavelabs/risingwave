@@ -23,7 +23,7 @@ from
 
 # Wait for the topic to create
 skipif in-memory
-sleep 3s
+sleep 5s
 
 statement ok
 create source kafka_source (v1 int) with (
