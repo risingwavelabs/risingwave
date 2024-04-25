@@ -10,10 +10,15 @@ mysql -e "
     DROP DATABASE IF EXISTS testdb1; CREATE DATABASE testdb1;
     USE testdb1;
     CREATE TABLE tt1 (v1 int primary key, v2 timestamp);
+    INSERT INTO tt1 VALUES (1, '2023-10-23 10:00:00');
     CREATE TABLE tt2 (v1 int primary key, v2 timestamp);
+    INSERT INTO tt2 VALUES (2, '2023-10-23 11:00:00');
     CREATE TABLE tt3 (v1 int primary key, v2 timestamp);
+    INSERT INTO tt3 VALUES (3, '2023-10-23 12:00:00');
     CREATE TABLE tt4 (v1 int primary key, v2 timestamp);
+    INSERT INTO tt4 VALUES (4, '2023-10-23 13:00:00');
     CREATE TABLE tt5 (v1 int primary key, v2 timestamp);
+    INSERT INTO tt5 VALUES (5, '2023-10-23 14:00:00');
 "
 
 system ok
@@ -46,15 +51,6 @@ internal_table.mjs --name s --type '' --count
 ----
 count: 1
 
-
-system ok
-mysql -e "
-    INSERT INTO tt1 VALUES (1, '2023-10-23 10:00:00');
-    INSERT INTO tt2 VALUES (2, '2023-10-23 11:00:00');
-    INSERT INTO tt3 VALUES (3, '2023-10-23 12:00:00');
-    INSERT INTO tt4 VALUES (4, '2023-10-23 13:00:00');
-    INSERT INTO tt5 VALUES (5, '2023-10-23 14:00:00');
-" testdb1
 
 statement ok
 create table tt1 (v1 int,
