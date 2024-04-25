@@ -18,6 +18,7 @@ mod m20240630_131430_remove_parallel_unit;
 mod m20240701_060504_hummock_time_travel;
 mod m20240702_080451_system_param_value;
 mod m20240702_084927_unnecessary_fk;
+mod m20240425_053608_add_rate_limit_to_source_catalog;
 
 pub struct Migrator;
 
@@ -41,26 +42,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20240702_080451_system_param_value::Migration),
             Box::new(m20240702_084927_unnecessary_fk::Migration),
             Box::new(m20240701_060504_hummock_time_travel::Migration),
+            Box::new(m20240425_053608_add_rate_limit_to_source_catalog::Migration),
         ]
-    }
-}
-
-#[macro_export]
-macro_rules! assert_not_has_tables {
-    ($manager:expr, $( $table:ident ),+) => {
-        $(
-            assert!(
-                !$manager
-                    .has_table($table::Table.to_string())
-                    .await?,
-                "Table `{}` already exists",
-                $table::Table.to_string()
-            );
-        )+
-    };
-}
-
-#[macro_export]
 macro_rules! drop_tables {
     ($manager:expr, $( $table:ident ),+) => {
         $(
