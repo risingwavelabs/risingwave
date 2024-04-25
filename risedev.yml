@@ -823,6 +823,30 @@ profile:
         address: message_queue
         port: 29092
 
+  ci-inline-source-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+      - use: etcd
+        unsafe-no-fsync: true
+      - use: meta-node
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: pubsub
+        persist-data: true
+      - use: kafka
+        user-managed: true
+        address: message_queue
+        port: 29092
+      - use: mysql
+        port: 3306
+        address: mysql
+        user: root
+        password: 123456
+        user-managed: true
+
   ci-redis:
     config-path: src/config/ci.toml
     steps:
@@ -1406,3 +1430,21 @@ template:
 
     # address of redis
     address: "127.0.0.1"
+
+  # MySQL service. Currently user-managed only
+  mysql:
+    # Id to be picked-up by services
+    id: mysql
+
+    # listen port of mysql
+    port: 8306
+    # address of mysql
+    address: "127.0.0.1"
+
+    # Note: these configs are not validated by risedev. They are passed as-is to risedev-env
+    # default user for mysql operations.
+    # This is not used in RISEDEV_MYSQL_WITH_OPTIONS_COMMON.
+    user: root
+    password: ""
+
+    user-managed: true

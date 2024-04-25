@@ -195,22 +195,29 @@ impl Planner {
                 Ok(LogicalTableFunction::new(*tf, with_ordinality, self.ctx()).into())
             }
             expr => {
-                let mut schema = Schema {
+                let schema = Schema {
                     // TODO: should be named
                     fields: vec![Field::unnamed(expr.return_type())],
                 };
-                if with_ordinality {
-                    schema
-                        .fields
-                        .push(Field::with_name(DataType::Int64, "ordinality"));
-                    Ok(LogicalValues::create(
-                        vec![vec![expr, ExprImpl::literal_bigint(1)]],
-                        schema,
-                        self.ctx(),
-                    ))
+                let expr_return_type = expr.return_type();
+                let root = LogicalValues::create(vec![vec![expr]], schema, self.ctx());
+                let input_ref = ExprImpl::from(InputRef::new(0, expr_return_type.clone()));
+                let mut exprs = if let DataType::Struct(st) = expr_return_type {
+                    st.iter()
+                        .enumerate()
+                        .map(|(i, (_, ty))| {
+                            let idx = ExprImpl::literal_int(i.try_into().unwrap());
+                            let args = vec![input_ref.clone(), idx];
+                            FunctionCall::new_unchecked(ExprType::Field, args, ty.clone()).into()
+                        })
+                        .collect()
                 } else {
-                    Ok(LogicalValues::create(vec![vec![expr]], schema, self.ctx()))
+                    vec![input_ref]
+                };
+                if with_ordinality {
+                    exprs.push(ExprImpl::literal_bigint(1));
                 }
+                Ok(LogicalProject::create(root, exprs))
             }
         }
     }
