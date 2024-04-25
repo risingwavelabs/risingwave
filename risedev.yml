@@ -92,6 +92,17 @@ profile:
       - use: compute-node
       - use: frontend
 
+  # You can use this in combination with the virtual compactor
+  # provided in https://github.com/risingwavelabs/risingwave-extensions
+  dev-compactor:
+    steps:
+      - use: minio
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      - use: compactor
+        user-managed: true
+
   full:
     steps:
       - use: minio
@@ -794,7 +805,7 @@ profile:
         health-check-port: 6788
       - use: compactor
 
-  ci-pubsub:
+  ci-pubsub-kafka:
     config-path: src/config/ci.toml
     steps:
       - use: minio
@@ -807,6 +818,10 @@ profile:
       - use: compactor
       - use: pubsub
         persist-data: true
+      - use: kafka
+        user-managed: true
+        address: message_queue
+        port: 29092
 
   ci-redis:
     config-path: src/config/ci.toml
@@ -958,14 +973,14 @@ profile:
   full-with-batch-query-limit:
     config-path: src/config/full-with-batch-query-limit.toml
     steps:
-        - use: minio
-        - use: etcd
-        - use: meta-node
-        - use: compute-node
-        - use: frontend
-        - use: compactor
-        - use: prometheus
-        - use: grafana
+      - use: minio
+      - use: etcd
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      - use: compactor
+      - use: prometheus
+      - use: grafana
 
 compose:
   risingwave: "ghcr.io/risingwavelabs/risingwave:latest"
@@ -1332,6 +1347,8 @@ template:
     # Kafka broker id. If there are multiple instances of Kafka, we will need to set.
     broker-id: 0
 
+    user-managed: false
+
   # Google pubsub emulator service
   pubsub:
     id: pubsub-${port}
@@ -1389,4 +1406,3 @@ template:
 
     # address of redis
     address: "127.0.0.1"
-

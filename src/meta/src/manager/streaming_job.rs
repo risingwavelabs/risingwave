@@ -290,6 +290,7 @@ impl StreamingJob {
             Self::MaterializedView(table) => {
                 table.get_create_type().unwrap_or(CreateType::Foreground)
             }
+            Self::Sink(s, _) => s.get_create_type().unwrap_or(CreateType::Foreground),
             _ => CreateType::Foreground,
         }
     }

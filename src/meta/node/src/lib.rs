@@ -32,6 +32,7 @@ use risingwave_meta::*;
 use risingwave_meta_service::*;
 pub use rpc::{ElectionClient, ElectionMember, EtcdElectionClient};
 use server::rpc_serve;
+pub use server::started::get as is_server_started;
 
 use crate::manager::MetaOpts;
 
@@ -364,6 +365,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 object_store_config: config.storage.object_store,
             },
             config.system.into_init_system_params(),
+            Default::default(),
         )
         .await
         .unwrap();

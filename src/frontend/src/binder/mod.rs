@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use parking_lot::RwLock;
-use risingwave_common::session_config::{ConfigMap, SearchPath};
+use risingwave_common::session_config::{SearchPath, SessionConfig};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_sqlparser::ast::{
@@ -107,7 +107,7 @@ pub struct Binder {
     /// and so on.
     next_share_id: ShareId,
 
-    session_config: Arc<RwLock<ConfigMap>>,
+    session_config: Arc<RwLock<SessionConfig>>,
 
     search_path: SearchPath,
     /// The type of binding statement.
@@ -563,17 +563,8 @@ mod tests {
                                         data_type: Int32,
                                     },
                                 ),
-                                InputRef(
-                                    InputRef {
-                                        index: 1,
-                                        data_type: Int32,
-                                    },
-                                ),
                             ],
                             aliases: [
-                                Some(
-                                    "a",
-                                ),
                                 Some(
                                     "a",
                                 ),
@@ -717,7 +708,6 @@ mod tests {
                             having: None,
                             schema: Schema {
                                 fields: [
-                                    a:Int32,
                                     a:Int32,
                                 ],
                             },

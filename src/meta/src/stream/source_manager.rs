@@ -680,7 +680,7 @@ impl SourceManager {
                         (
                             actor_id as ActorId,
                             splits
-                                .into_inner()
+                                .to_protobuf()
                                 .splits
                                 .iter()
                                 .map(|split| SplitImpl::try_from(split).unwrap())

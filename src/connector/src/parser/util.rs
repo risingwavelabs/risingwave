@@ -25,6 +25,20 @@ use crate::connector_common::AwsAuthProps;
 use crate::error::ConnectorResult;
 use crate::source::SourceMeta;
 
+macro_rules! log_error {
+    ($name:expr, $err:expr, $message:expr) => {
+        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+            tracing::error!(
+                column = $name,
+                error = %$err.as_report(),
+                suppressed_count,
+                $message,
+            );
+        }
+    };
+}
+pub(crate) use log_error;
+
 /// get kafka topic name
 pub(super) fn get_kafka_topic(props: &HashMap<String, String>) -> ConnectorResult<&String> {
     const KAFKA_TOPIC_KEY1: &str = "kafka.topic";

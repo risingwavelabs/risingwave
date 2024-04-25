@@ -13,9 +13,12 @@
 // limitations under the License.
 
 use std::future::Future;
+use std::num::NonZeroU32;
 
 use futures::{pin_mut, Stream};
 use futures_async_stream::try_stream;
+use governor::clock::MonotonicClock;
+use governor::{Quota, RateLimiter};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::row::OwnedRow;
@@ -23,6 +26,7 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReader};
 
 use super::external::ExternalStorageTable;
+use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::backfill::utils::iter_chunks;
 use crate::executor::{StreamExecutorError, StreamExecutorResult, INVALID_EPOCH};
 
@@ -43,16 +47,16 @@ pub struct SnapshotReadArgs {
     pub epoch: u64,
     pub current_pos: Option<OwnedRow>,
     pub ordered: bool,
-    pub chunk_size: usize,
+    pub rate_limit_rps: Option<u32>,
 }
 
 impl SnapshotReadArgs {
-    pub fn new_for_cdc(current_pos: Option<OwnedRow>, chunk_size: usize) -> Self {
+    pub fn new_for_cdc(current_pos: Option<OwnedRow>, rate_limit_rps: Option<u32>) -> Self {
         Self {
             epoch: INVALID_EPOCH,
             current_pos,
             ordered: false,
-            chunk_size,
+            rate_limit_rps,
         }
     }
 }
@@ -76,7 +80,7 @@ impl<T> UpstreamTableReader<T> {
 
 impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
-    async fn snapshot_read(&self, args: SnapshotReadArgs, limit: u32) {
+    async fn snapshot_read(&self, args: SnapshotReadArgs, read_limit: u32) {
         let primary_keys = self
             .inner
             .pk_indices()
@@ -97,17 +101,61 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
             self.inner.schema_table_name(),
             args.current_pos,
             primary_keys,
-            limit,
+            read_limit,
         );
 
         pin_mut!(row_stream);
 
-        let mut builder = DataChunkBuilder::new(self.inner.schema().data_types(), args.chunk_size);
+        let mut builder = DataChunkBuilder::new(
+            self.inner.schema().data_types(),
+            limited_chunk_size(args.rate_limit_rps),
+        );
         let chunk_stream = iter_chunks(row_stream, &mut builder);
+
+        if args.rate_limit_rps == Some(0) {
+            // If limit is 0, we should not read any data from the upstream table.
+            // Keep waiting util the stream is rebuilt.
+            let future = futures::future::pending::<()>();
+            future.await;
+            unreachable!();
+        }
+
+        let limiter = args.rate_limit_rps.map(|limit| {
+            tracing::info!(rate_limit = limit, "rate limit applied");
+            RateLimiter::direct_with_clock(
+                Quota::per_second(NonZeroU32::new(limit).unwrap()),
+                &MonotonicClock,
+            )
+        });
+
         #[for_await]
         for chunk in chunk_stream {
-            yield Some(chunk?);
+            let chunk = chunk?;
+            let chunk_size = chunk.capacity();
+
+            if args.rate_limit_rps.is_none() || chunk_size == 0 {
+                // no limit, or empty chunk
+                yield Some(chunk);
+                continue;
+            }
+
+            // Apply rate limit, see `risingwave_stream::executor::source::apply_rate_limit` for more.
+            // May be should be refactored to a common function later.
+            let limiter = limiter.as_ref().unwrap();
+            let limit = args.rate_limit_rps.unwrap() as usize;
+
+            // Because we produce chunks with limited-sized data chunk builder and all rows
+            // are `Insert`s, the chunk size should never exceed the limit.
+            assert!(chunk_size <= limit);
+
+            // `InsufficientCapacity` should never happen because we have check the cardinality
+            limiter
+                .until_n_ready(NonZeroU32::new(chunk_size as u32).unwrap())
+                .await
+                .unwrap();
+            yield Some(chunk);
         }
+
         yield None;
     }
 

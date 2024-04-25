@@ -17,13 +17,14 @@ normal = ["workspace-hack"]
 anyhow = "1"
 async-trait = "0.1"
 easy-ext = "1"
-either = "1.10.0"
+either = "1.11.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 http = "0.2"
 hyper = "0.14" # required by tonic
 itertools = { workspace = true }
 lru = { workspace = true }
 moka = { version = "0.12", features = ["future"] }
+paste = "1"
 rand = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_error = { workspace = true }

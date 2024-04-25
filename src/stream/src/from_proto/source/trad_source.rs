@@ -18,9 +18,7 @@ use risingwave_common::catalog::{
     default_key_column_name_version_mapping, TableId, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
-use risingwave_connector::source::{
-    should_copy_to_format_encode_options, SourceCtrlOpts, UPSTREAM_SOURCE_KEY,
-};
+use risingwave_connector::source::{should_copy_to_format_encode_options, UPSTREAM_SOURCE_KEY};
 use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::PbStreamSourceInfo;
 use risingwave_pb::data::data_type::TypeName as PbTypeName;
@@ -35,10 +33,10 @@ use risingwave_storage::panic_store::PanicStateStore;
 use tokio::sync::mpsc::unbounded_channel;
 
 use super::*;
-use crate::executor::source::{FsListExecutor, StreamSourceCore};
-use crate::executor::source_executor::SourceExecutor;
-use crate::executor::state_table_handler::SourceStateTableHandler;
-use crate::executor::{FlowControlExecutor, TroublemakerExecutor};
+use crate::executor::source::{
+    FsListExecutor, SourceExecutor, SourceStateTableHandler, StreamSourceCore,
+};
+use crate::executor::TroublemakerExecutor;
 
 const FS_CONNECTORS: &[&str] = &["s3"];
 pub struct SourceExecutorBuilder;
@@ -179,11 +177,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     source.with_properties.clone(),
                 );
 
-                let source_ctrl_opts = SourceCtrlOpts {
-                    chunk_size: params.env.config().developer.chunk_size,
-                    rate_limit: source.rate_limit.map(|x| x as _),
-                };
-
                 let source_column_ids: Vec<_> = source_desc_builder
                     .column_catalogs_to_source_column_descs()
                     .iter()
@@ -213,13 +206,13 @@ impl ExecutorBuilder for SourceExecutorBuilder {
 
                 if is_fs_connector {
                     #[expect(deprecated)]
-                    crate::executor::FsSourceExecutor::new(
+                    crate::executor::source::FsSourceExecutor::new(
                         params.actor_context.clone(),
                         stream_source_core,
                         params.executor_stats,
                         barrier_receiver,
                         system_params,
-                        source_ctrl_opts,
+                        source.rate_limit,
                     )?
                     .boxed()
                 } else if is_fs_v2_connector {
@@ -229,7 +222,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         params.executor_stats.clone(),
                         barrier_receiver,
                         system_params,
-                        source_ctrl_opts.clone(),
+                        source.rate_limit,
                     )
                     .boxed()
                 } else {
@@ -239,17 +232,11 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         params.executor_stats.clone(),
                         barrier_receiver,
                         system_params,
-                        source_ctrl_opts.clone(),
+                        source.rate_limit,
                     )
                     .boxed()
                 }
             };
-            let mut info = params.info.clone();
-            info.identity = format!("{} (flow controlled)", info.identity);
-
-            let rate_limit = source.rate_limit.map(|x| x as _);
-            let exec =
-                FlowControlExecutor::new((info, exec).into(), params.actor_context, rate_limit);
 
             if crate::consistency::insane() {
                 let mut info = params.info.clone();
@@ -274,8 +261,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 params.executor_stats,
                 barrier_receiver,
                 system_params,
-                // we don't expect any data in, so no need to set chunk_sizes
-                SourceCtrlOpts::default(),
+                None,
             );
             Ok((params.info, exec).into())
         }

@@ -25,7 +25,7 @@ use futures::stream::BoxStream;
 use lru::LruCache;
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
 use risingwave_common::config::{MetaConfig, MAX_CONNECTION_WINDOW_SIZE};
-use risingwave_common::hash::ParallelUnitMapping;
+use risingwave_common::hash::WorkerMapping;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
@@ -37,8 +37,8 @@ use risingwave_common::RW_VERSION;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
-    SstObjectIdRange,
+    CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, SstObjectIdRange,
+    SyncResult,
 };
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
@@ -77,6 +77,7 @@ use risingwave_pb::meta::meta_member_service_client::MetaMemberServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
 use risingwave_pb::meta::scale_service_client::ScaleServiceClient;
 use risingwave_pb::meta::serving_service_client::ServingServiceClient;
+use risingwave_pb::meta::session_param_service_client::SessionParamServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
 use risingwave_pb::meta::telemetry_info_service_client::TelemetryInfoServiceClient;
@@ -797,6 +798,12 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn recover(&self) -> Result<()> {
+        let request = RecoverRequest {};
+        self.inner.recover(request).await?;
+        Ok(())
+    }
+
     pub async fn cancel_creating_jobs(&self, jobs: PbJobs) -> Result<Vec<u32>> {
         let request = CancelCreatingJobsRequest { jobs: Some(jobs) };
         let resp = self.inner.cancel_creating_jobs(request).await?;
@@ -1110,6 +1117,18 @@ impl MetaClient {
         Ok(resp.params.map(SystemParamsReader::from))
     }
 
+    pub async fn get_session_params(&self) -> Result<String> {
+        let req = GetSessionParamsRequest {};
+        let resp = self.inner.get_session_params(req).await?;
+        Ok(resp.params)
+    }
+
+    pub async fn set_session_param(&self, param: String, value: Option<String>) -> Result<String> {
+        let req = SetSessionParamRequest { param, value };
+        let resp = self.inner.set_session_param(req).await?;
+        Ok(resp.param)
+    }
+
     pub async fn get_ddl_progress(&self) -> Result<Vec<DdlProgress>> {
         let req = GetDdlProgressRequest {};
         let resp = self.inner.get_ddl_progress(req).await?;
@@ -1137,13 +1156,11 @@ impl MetaClient {
         Ok(resp.tables)
     }
 
-    pub async fn list_serving_vnode_mappings(
-        &self,
-    ) -> Result<HashMap<u32, (u32, ParallelUnitMapping)>> {
+    pub async fn list_serving_vnode_mappings(&self) -> Result<HashMap<u32, (u32, WorkerMapping)>> {
         let req = GetServingVnodeMappingsRequest {};
         let resp = self.inner.get_serving_vnode_mappings(req).await?;
         let mappings = resp
-            .mappings
+            .worker_mappings
             .into_iter()
             .map(|p| {
                 (
@@ -1153,7 +1170,7 @@ impl MetaClient {
                             .get(&p.fragment_id)
                             .cloned()
                             .unwrap_or(0),
-                        ParallelUnitMapping::from_protobuf(p.mapping.as_ref().unwrap()),
+                        WorkerMapping::from_protobuf(p.mapping.as_ref().unwrap()),
                     ),
                 )
             })
@@ -1373,11 +1390,7 @@ impl HummockMetaClient for MetaClient {
         Ok(SstObjectIdRange::new(resp.start_id, resp.end_id))
     }
 
-    async fn commit_epoch(
-        &self,
-        _epoch: HummockEpoch,
-        _sstables: Vec<LocalSstableInfo>,
-    ) -> Result<()> {
+    async fn commit_epoch(&self, _epoch: HummockEpoch, _sync_result: SyncResult) -> Result<()> {
         panic!("Only meta service can commit_epoch in production.")
     }
 
@@ -1500,6 +1513,7 @@ struct GrpcMetaClientCore {
     backup_client: BackupServiceClient<Channel>,
     telemetry_client: TelemetryInfoServiceClient<Channel>,
     system_params_client: SystemParamsServiceClient<Channel>,
+    session_params_client: SessionParamServiceClient<Channel>,
     serving_client: ServingServiceClient<Channel>,
     cloud_client: CloudServiceClient<Channel>,
     sink_coordinate_client: SinkCoordinationRpcClient,
@@ -1526,6 +1540,7 @@ impl GrpcMetaClientCore {
         let telemetry_client =
             TelemetryInfoServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let system_params_client = SystemParamsServiceClient::new(channel.clone());
+        let session_params_client = SessionParamServiceClient::new(channel.clone());
         let serving_client = ServingServiceClient::new(channel.clone());
         let cloud_client = CloudServiceClient::new(channel.clone());
         let sink_coordinate_client = SinkCoordinationServiceClient::new(channel.clone());
@@ -1544,6 +1559,7 @@ impl GrpcMetaClientCore {
             backup_client,
             telemetry_client,
             system_params_client,
+            session_params_client,
             serving_client,
             cloud_client,
             sink_coordinate_client,
@@ -1554,7 +1570,7 @@ impl GrpcMetaClientCore {
 
 /// Client to meta server. Cloning the instance is lightweight.
 ///
-/// It is a wrapper of tonic client. See [`crate::rpc_client_method_impl`].
+/// It is a wrapper of tonic client. See [`crate::meta_rpc_client_method_impl`].
 #[derive(Debug, Clone)]
 struct GrpcMetaClient {
     member_monitor_event_sender: mpsc::Sender<Sender<Result<()>>>,
@@ -1591,7 +1607,11 @@ impl MetaMemberManagement {
     async fn refresh_members(&mut self) -> Result<()> {
         let leader_addr = match self.members.as_mut() {
             Either::Left(client) => {
-                let resp = client.to_owned().members(MembersRequest {}).await?;
+                let resp = client
+                    .to_owned()
+                    .members(MembersRequest {})
+                    .await
+                    .map_err(RpcError::from_meta_status)?;
                 let resp = resp.into_inner();
                 resp.members.into_iter().find(|member| member.is_leader)
             }
@@ -1883,6 +1903,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_fragment_distribution, ListFragmentDistributionRequest, ListFragmentDistributionResponse }
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }
+            ,{ stream_client, recover, RecoverRequest, RecoverResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
@@ -1969,6 +1990,8 @@ macro_rules! for_all_meta_rpc {
             ,{ telemetry_client, get_telemetry_info, GetTelemetryInfoRequest, TelemetryInfoResponse}
             ,{ system_params_client, get_system_params, GetSystemParamsRequest, GetSystemParamsResponse }
             ,{ system_params_client, set_system_param, SetSystemParamRequest, SetSystemParamResponse }
+            ,{ session_params_client, get_session_params, GetSessionParamsRequest, GetSessionParamsResponse }
+            ,{ session_params_client, set_session_param, SetSessionParamRequest, SetSessionParamResponse }
             ,{ serving_client, get_serving_vnode_mappings, GetServingVnodeMappingsRequest, GetServingVnodeMappingsResponse }
             ,{ cloud_client, rw_cloud_validate_source, RwCloudValidateSourceRequest, RwCloudValidateSourceResponse }
             ,{ event_log_client, list_event_log, ListEventLogRequest, ListEventLogResponse }

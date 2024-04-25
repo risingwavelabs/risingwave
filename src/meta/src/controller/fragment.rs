@@ -18,14 +18,14 @@ use std::mem::swap;
 use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::bail;
+use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::actor::ActorStatus;
-use risingwave_meta_model_v2::fragment::StreamNode;
 use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, fragment, object, sink, streaming_job, ActorId, ActorUpstreamActors,
     ConnectorSplits, ExprContext, FragmentId, FragmentVnodeMapping, I32Array, JobStatus, ObjectId,
-    SinkId, SourceId, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
+    SinkId, SourceId, StreamNode, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
 };
 use risingwave_pb::common::PbParallelUnit;
 use risingwave_pb::meta::subscribe_response::{
@@ -34,9 +34,7 @@ use risingwave_pb::meta::subscribe_response::{
 use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{PbActorStatus, PbFragment, PbState};
-use risingwave_pb::meta::{
-    FragmentParallelUnitMapping, PbFragmentParallelUnitMapping, PbTableFragments,
-};
+use risingwave_pb::meta::{FragmentWorkerMapping, PbFragmentWorkerMapping, PbTableFragments};
 use risingwave_pb::source::PbConnectorSplits;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
@@ -51,7 +49,8 @@ use sea_orm::{
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::utils::{
-    get_actor_dispatchers, FragmentDesc, PartialActorLocation, PartialFragmentStateTables,
+    get_actor_dispatchers, get_parallel_unit_to_worker_map, FragmentDesc, PartialActorLocation,
+    PartialFragmentStateTables,
 };
 use crate::manager::{ActorInfos, LocalNotification};
 use crate::model::TableParallelism;
@@ -62,7 +61,9 @@ impl CatalogControllerInner {
     /// List all fragment vnode mapping info for all CREATED streaming jobs.
     pub async fn all_running_fragment_mappings(
         &self,
-    ) -> MetaResult<impl Iterator<Item = FragmentParallelUnitMapping> + '_> {
+    ) -> MetaResult<impl Iterator<Item = FragmentWorkerMapping> + '_> {
+        let txn = self.db.begin().await?;
+
         let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
             .join(JoinType::InnerJoin, fragment::Relation::Object.def())
             .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
@@ -70,14 +71,23 @@ impl CatalogControllerInner {
             .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
             .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
             .into_tuple()
-            .all(&self.db)
+            .all(&txn)
             .await?;
-        Ok(fragment_mappings.into_iter().map(|(fragment_id, mapping)| {
-            FragmentParallelUnitMapping {
-                fragment_id: fragment_id as _,
-                mapping: Some(mapping.into_inner()),
-            }
-        }))
+
+        let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
+
+        Ok(fragment_mappings
+            .into_iter()
+            .map(move |(fragment_id, mapping)| {
+                let worker_mapping = ParallelUnitMapping::from_protobuf(&mapping.to_protobuf())
+                    .to_worker(&parallel_unit_to_worker)
+                    .to_protobuf();
+
+                FragmentWorkerMapping {
+                    fragment_id: fragment_id as _,
+                    mapping: Some(worker_mapping),
+                }
+            }))
     }
 }
 
@@ -85,7 +95,7 @@ impl CatalogController {
     pub(crate) async fn notify_fragment_mapping(
         &self,
         operation: NotificationOperation,
-        fragment_mappings: Vec<PbFragmentParallelUnitMapping>,
+        fragment_mappings: Vec<PbFragmentWorkerMapping>,
     ) {
         let fragment_ids = fragment_mappings
             .iter()
@@ -97,7 +107,7 @@ impl CatalogController {
                 .notification_manager()
                 .notify_frontend(
                     operation,
-                    NotificationInfo::ParallelUnitMapping(fragment_mapping),
+                    NotificationInfo::StreamingWorkerMapping(fragment_mapping),
                 )
                 .await;
         }
@@ -229,7 +239,7 @@ impl CatalogController {
                 expr_context: pb_expr_context,
             } = actor;
 
-            let splits = pb_actor_splits.get(&actor_id).cloned().map(ConnectorSplits);
+            let splits = pb_actor_splits.get(&actor_id).map(ConnectorSplits::from);
             let status = pb_actor_status.get(&actor_id).cloned().ok_or_else(|| {
                 anyhow::anyhow!(
                     "actor {} in fragment {} has no actor_status",
@@ -265,8 +275,8 @@ impl CatalogController {
                 parallel_unit_id,
                 worker_id,
                 upstream_actor_ids: upstream_actors.into(),
-                vnode_bitmap: pb_vnode_bitmap.map(VnodeBitmap),
-                expr_context: ExprContext(pb_expr_context),
+                vnode_bitmap: pb_vnode_bitmap.as_ref().map(VnodeBitmap::from),
+                expr_context: ExprContext::from(&pb_expr_context),
             });
             actor_dispatchers.insert(
                 actor_id as ActorId,
@@ -279,9 +289,12 @@ impl CatalogController {
 
         let upstream_fragment_id = pb_upstream_fragment_ids.into();
 
-        let vnode_mapping = pb_vnode_mapping.map(FragmentVnodeMapping).unwrap();
+        let vnode_mapping = pb_vnode_mapping
+            .as_ref()
+            .map(FragmentVnodeMapping::from)
+            .unwrap();
 
-        let stream_node = StreamNode::from_protobuf(&stream_node);
+        let stream_node = StreamNode::from(&stream_node);
 
         let distribution_type = PbFragmentDistributionType::try_from(pb_distribution_type)
             .unwrap()
@@ -415,8 +428,8 @@ impl CatalogController {
                 Some(nodes)
             };
 
-            let pb_vnode_bitmap = vnode_bitmap.map(|vnode_bitmap| vnode_bitmap.into_inner());
-            let pb_expr_context = Some(expr_context.into_inner());
+            let pb_vnode_bitmap = vnode_bitmap.map(|vnode_bitmap| vnode_bitmap.to_protobuf());
+            let pb_expr_context = Some(expr_context.to_protobuf());
 
             let pb_upstream_actor_id = upstream_fragment_actors
                 .values()
@@ -443,7 +456,7 @@ impl CatalogController {
             );
 
             if let Some(splits) = splits {
-                pb_actor_splits.insert(actor_id as _, splits.into_inner());
+                pb_actor_splits.insert(actor_id as _, splits.to_protobuf());
             }
 
             pb_actors.push(PbStreamActor {
@@ -459,7 +472,7 @@ impl CatalogController {
         }
 
         let pb_upstream_fragment_ids = upstream_fragment_id.into_u32_array();
-        let pb_vnode_mapping = vnode_mapping.into_inner();
+        let pb_vnode_mapping = vnode_mapping.to_protobuf();
         let pb_state_table_ids = state_table_ids.into_u32_array();
         let pb_distribution_type = PbFragmentDistributionType::from(distribution_type) as _;
         let pb_fragment = PbFragment {
@@ -908,7 +921,7 @@ impl CatalogController {
                 .await?;
         }
 
-        let mut fragment_mapping: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
+        let fragment_mapping: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
             .select_only()
             .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
             .join(JoinType::InnerJoin, fragment::Relation::Actor.def())
@@ -917,20 +930,24 @@ impl CatalogController {
             .all(&txn)
             .await?;
         // TODO: we'd better not store vnode mapping in fragment table and derive it from actors.
-        for (fragment_id, vnode_mapping) in &mut fragment_mapping {
-            vnode_mapping.0.data.iter_mut().for_each(|id| {
+
+        for (fragment_id, vnode_mapping) in &fragment_mapping {
+            let mut pb_vnode_mapping = vnode_mapping.to_protobuf();
+            pb_vnode_mapping.data.iter_mut().for_each(|id| {
                 if let Some(new_id) = plan.get(&(*id as i32)) {
                     *id = new_id.id;
                 }
             });
             fragment::ActiveModel {
                 fragment_id: Set(*fragment_id),
-                vnode_mapping: Set(vnode_mapping.clone()),
+                vnode_mapping: Set(FragmentVnodeMapping::from(&pb_vnode_mapping)),
                 ..Default::default()
             }
             .update(&txn)
             .await?;
         }
+
+        let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
 
         txn.commit().await?;
 
@@ -938,9 +955,13 @@ impl CatalogController {
             NotificationOperation::Update,
             fragment_mapping
                 .into_iter()
-                .map(|(fragment_id, mapping)| PbFragmentParallelUnitMapping {
+                .map(|(fragment_id, mapping)| PbFragmentWorkerMapping {
                     fragment_id: fragment_id as _,
-                    mapping: Some(mapping.into_inner()),
+                    mapping: Some(
+                        ParallelUnitMapping::from_protobuf(&mapping.to_protobuf())
+                            .to_worker(&parallel_unit_to_worker)
+                            .to_protobuf(),
+                    ),
                 })
                 .collect(),
         )
@@ -1053,13 +1074,13 @@ impl CatalogController {
                     .ok_or_else(|| MetaError::catalog_id_not_found("actor_id", actor_id))?;
 
                 let mut actor_splits = actor_splits
-                    .map(|splits| splits.0.splits)
+                    .map(|splits| splits.to_protobuf().splits)
                     .unwrap_or_default();
                 actor_splits.extend(splits.iter().map(Into::into));
 
                 Actor::update(actor::ActiveModel {
                     actor_id: Set(*actor_id as _),
-                    splits: Set(Some(ConnectorSplits(PbConnectorSplits {
+                    splits: Set(Some(ConnectorSplits::from(&PbConnectorSplits {
                         splits: actor_splits,
                     }))),
                     ..Default::default()
@@ -1349,10 +1370,11 @@ mod tests {
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_common::util::stream_graph_visitor::visit_stream_node;
     use risingwave_meta_model_v2::actor::ActorStatus;
-    use risingwave_meta_model_v2::fragment::{DistributionType, StreamNode};
+    use risingwave_meta_model_v2::fragment::DistributionType;
     use risingwave_meta_model_v2::{
         actor, actor_dispatcher, fragment, ActorId, ActorUpstreamActors, ConnectorSplits,
-        ExprContext, FragmentId, FragmentVnodeMapping, I32Array, ObjectId, TableId, VnodeBitmap,
+        ExprContext, FragmentId, FragmentVnodeMapping, I32Array, ObjectId, StreamNode, TableId,
+        VnodeBitmap,
     };
     use risingwave_pb::common::ParallelUnit;
     use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
@@ -1564,9 +1586,9 @@ mod tests {
 
                 let vnode_bitmap = actor_vnode_bitmaps
                     .remove(&parallel_unit_id)
-                    .map(|m| VnodeBitmap(m.to_protobuf()));
+                    .map(|m| VnodeBitmap::from(&m.to_protobuf()));
 
-                let actor_splits = Some(ConnectorSplits(PbConnectorSplits {
+                let actor_splits = Some(ConnectorSplits::from(&PbConnectorSplits {
                     splits: vec![PbConnectorSplit {
                         split_type: "dummy".to_string(),
                         ..Default::default()
@@ -1585,7 +1607,7 @@ mod tests {
                     worker_id: 0,
                     upstream_actor_ids: ActorUpstreamActors(actor_upstream_actor_ids),
                     vnode_bitmap,
-                    expr_context: ExprContext(PbExprContext {
+                    expr_context: ExprContext::from(&PbExprContext {
                         time_zone: String::from("America/New_York"),
                     }),
                 }
@@ -1623,8 +1645,8 @@ mod tests {
             job_id: TEST_JOB_ID,
             fragment_type_mask: 0,
             distribution_type: DistributionType::Hash,
-            stream_node: StreamNode::from_protobuf(&stream_node),
-            vnode_mapping: FragmentVnodeMapping(parallel_unit_mapping.to_protobuf()),
+            stream_node: StreamNode::from(&stream_node),
+            vnode_mapping: FragmentVnodeMapping::from(&parallel_unit_mapping.to_protobuf()),
             state_table_ids: I32Array(vec![TEST_STATE_TABLE_ID]),
             upstream_fragment_id: I32Array::default(),
         };
@@ -1709,10 +1731,8 @@ mod tests {
 
             assert_eq!(actor_dispatcher, pb_dispatcher);
             assert_eq!(
-                vnode_bitmap,
-                pb_vnode_bitmap
-                    .as_ref()
-                    .map(|bitmap| VnodeBitmap(bitmap.clone()))
+                vnode_bitmap.map(|bitmap| bitmap.to_protobuf()),
+                pb_vnode_bitmap,
             );
 
             assert_eq!(mview_definition, "");
@@ -1733,13 +1753,10 @@ mod tests {
 
             assert_eq!(
                 splits,
-                pb_actor_splits
-                    .get(&pb_actor_id)
-                    .cloned()
-                    .map(ConnectorSplits)
+                pb_actor_splits.get(&pb_actor_id).map(ConnectorSplits::from)
             );
 
-            assert_eq!(Some(expr_context.into_inner()), pb_expr_context);
+            assert_eq!(Some(expr_context.to_protobuf()), pb_expr_context);
         }
     }
 
@@ -1761,8 +1778,8 @@ mod tests {
             PbFragmentDistributionType::from(fragment.distribution_type) as i32
         );
         assert_eq!(
-            pb_vnode_mapping.map(FragmentVnodeMapping).unwrap(),
-            fragment.vnode_mapping
+            pb_vnode_mapping.unwrap(),
+            fragment.vnode_mapping.to_protobuf()
         );
 
         assert_eq!(

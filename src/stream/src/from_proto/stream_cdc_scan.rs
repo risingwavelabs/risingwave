@@ -23,7 +23,7 @@ use risingwave_pb::stream_plan::StreamCdcScanNode;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::{CdcBackfillExecutor, Executor, ExternalStorageTable, FlowControlExecutor};
+use crate::executor::{CdcBackfillExecutor, Executor, ExternalStorageTable};
 
 pub struct StreamCdcScanExecutorBuilder;
 
@@ -88,13 +88,6 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
         let state_table =
             StateTable::from_table_catalog(node.get_state_table()?, state_store, vnodes).await;
 
-        // adjust backfill chunk size if rate limit is set.
-        let chunk_size = params.env.config().developer.chunk_size;
-        let backfill_chunk_size = node
-            .rate_limit
-            .map(|x| std::cmp::min(x as usize, chunk_size))
-            .unwrap_or(chunk_size);
-
         let exec = CdcBackfillExecutor::new(
             params.actor_context.clone(),
             external_table,
@@ -103,16 +96,8 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             None,
             params.executor_stats,
             state_table,
-            backfill_chunk_size,
+            node.rate_limit,
             disable_backfill,
-        );
-        let mut info = params.info.clone();
-        info.identity = format!("{} (flow controlled)", info.identity);
-
-        let exec = FlowControlExecutor::new(
-            (info, exec).into(),
-            params.actor_context,
-            node.rate_limit.map(|x| x as _),
         );
         Ok((params.info, exec).into())
     }

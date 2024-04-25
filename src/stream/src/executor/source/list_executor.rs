@@ -12,25 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Formatter;
-use std::sync::Arc;
-
 use anyhow::anyhow;
 use either::Either;
-use futures::{StreamExt, TryStreamExt};
+use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::Op;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
-use risingwave_connector::source::SourceCtrlOpts;
-use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use crate::executor::error::StreamExecutorError;
-use crate::executor::monitor::StreamingMetrics;
+use super::{barrier_to_message_stream, StreamSourceCore};
+use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::executor::*;
 
 const CHUNK_SIZE: usize = 1024;
 
@@ -50,19 +44,18 @@ pub struct FsListExecutor<S: StateStore> {
     /// System parameter reader to read barrier interval
     system_params: SystemParamsReaderRef,
 
-    // control options for connector level
-    source_ctrl_opts: SourceCtrlOpts,
+    /// Rate limit in rows/s.
+    rate_limit_rps: Option<u32>,
 }
 
 impl<S: StateStore> FsListExecutor<S> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
         stream_source_core: Option<StreamSourceCore<S>>,
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
         system_params: SystemParamsReaderRef,
-        source_ctrl_opts: SourceCtrlOpts,
+        rate_limit_rps: Option<u32>,
     ) -> Self {
         Self {
             actor_ctx,
@@ -70,7 +63,7 @@ impl<S: StateStore> FsListExecutor<S> {
             metrics,
             barrier_receiver: Some(barrier_receiver),
             system_params,
-            source_ctrl_opts,
+            rate_limit_rps,
         }
     }
 
@@ -89,21 +82,25 @@ impl<S: StateStore> FsListExecutor<S> {
         let chunked_stream = stream.chunks(CHUNK_SIZE).map(|chunk| {
             let rows = chunk
                 .into_iter()
-                .map(|item| {
-                    let page_item = item.unwrap();
-                    (
+                .map(|item| match item {
+                    Ok(page_item) => Ok((
                         Op::Insert,
                         OwnedRow::new(vec![
                             Some(ScalarImpl::Utf8(page_item.name.into_boxed_str())),
                             Some(ScalarImpl::Timestamptz(page_item.timestamp)),
                             Some(ScalarImpl::Int64(page_item.size)),
                         ]),
-                    )
+                    )),
+                    Err(e) => {
+                        tracing::error!("Connector fail to list item: {e}");
+                        Err(e)
+                    }
                 })
                 .collect::<Vec<_>>();
 
+            let res: Vec<(Op, OwnedRow)> = rows.into_iter().flatten().collect();
             Ok(StreamChunk::from_rows(
-                &rows,
+                &res,
                 &[DataType::Varchar, DataType::Timestamptz, DataType::Int64],
             ))
         });

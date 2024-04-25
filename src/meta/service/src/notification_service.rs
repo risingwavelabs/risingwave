@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use itertools::Itertools;
-use risingwave_meta::manager::MetadataManager;
+use risingwave_meta::manager::{MetadataManager, SessionParamsManagerImpl};
 use risingwave_meta::MetaResult;
 use risingwave_pb::backup_service::MetaBackupManifestId;
 use risingwave_pb::catalog::Table;
@@ -23,7 +24,7 @@ use risingwave_pb::hummock::WriteLimits;
 use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::{
-    FragmentParallelUnitMapping, MetaSnapshot, SubscribeRequest, SubscribeType,
+    FragmentWorkerMapping, GetSessionParamsResponse, MetaSnapshot, SubscribeRequest, SubscribeType,
 };
 use risingwave_pb::user::UserInfo;
 use tokio::sync::mpsc;
@@ -136,9 +137,9 @@ impl NotificationServiceImpl {
         }
     }
 
-    async fn get_parallel_unit_mapping_snapshot(
+    async fn get_worker_mapping_snapshot(
         &self,
-    ) -> MetaResult<(Vec<FragmentParallelUnitMapping>, NotificationVersion)> {
+    ) -> MetaResult<(Vec<FragmentWorkerMapping>, NotificationVersion)> {
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
                 let fragment_guard = mgr.fragment_manager.get_fragment_read_guard().await;
@@ -159,11 +160,11 @@ impl NotificationServiceImpl {
         }
     }
 
-    fn get_serving_vnode_mappings(&self) -> Vec<FragmentParallelUnitMapping> {
+    fn get_serving_vnode_mappings(&self) -> Vec<FragmentWorkerMapping> {
         self.serving_vnode_mapping
             .all()
             .iter()
-            .map(|(fragment_id, mapping)| FragmentParallelUnitMapping {
+            .map(|(fragment_id, mapping)| FragmentWorkerMapping {
                 fragment_id: *fragment_id,
                 mapping: Some(mapping.to_protobuf()),
             })
@@ -239,12 +240,24 @@ impl NotificationServiceImpl {
             users,
             catalog_version,
         ) = self.get_catalog_snapshot().await?;
-        let (parallel_unit_mappings, parallel_unit_mapping_version) =
-            self.get_parallel_unit_mapping_snapshot().await?;
-        let serving_parallel_unit_mappings = self.get_serving_vnode_mappings();
+
+        let (streaming_worker_mappings, streaming_worker_mapping_version) =
+            self.get_worker_mapping_snapshot().await?;
+        let serving_worker_mappings = self.get_serving_vnode_mappings();
+
         let (nodes, worker_node_version) = self.get_worker_node_snapshot().await?;
 
         let hummock_snapshot = Some(self.hummock_manager.latest_snapshot());
+
+        let session_params = match self.env.session_params_manager_impl_ref() {
+            SessionParamsManagerImpl::Kv(manager) => manager.get_params().await,
+            SessionParamsManagerImpl::Sql(controller) => controller.get_params().await,
+        };
+
+        let session_params = Some(GetSessionParamsResponse {
+            params: serde_json::to_string(&session_params)
+                .context("failed to encode session params")?,
+        });
 
         Ok(MetaSnapshot {
             databases,
@@ -258,15 +271,16 @@ impl NotificationServiceImpl {
             functions,
             connections,
             users,
-            parallel_unit_mappings,
             nodes,
             hummock_snapshot,
-            serving_parallel_unit_mappings,
             version: Some(SnapshotVersion {
                 catalog_version,
-                parallel_unit_mapping_version,
                 worker_node_version,
+                streaming_worker_mapping_version,
             }),
+            serving_worker_mappings,
+            streaming_worker_mappings,
+            session_params,
             ..Default::default()
         })
     }

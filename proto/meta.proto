@@ -111,6 +111,16 @@ message FragmentParallelUnitMappings {
   repeated FragmentParallelUnitMapping mappings = 1;
 }
 
+/// Worker mapping with fragment id, used for notification.
+message FragmentWorkerMapping {
+  uint32 fragment_id = 1;
+  common.WorkerMapping mapping = 2;
+}
+
+message FragmentWorkerMappings {
+  repeated FragmentWorkerMapping mappings = 1;
+}
+
 // TODO: remove this when dashboard refactored.
 message ActorLocation {
   common.WorkerNode node = 1;
@@ -266,6 +276,10 @@ message ApplyThrottleResponse {
   common.Status status = 1;
 }
 
+message RecoverRequest {}
+
+message RecoverResponse {}
+
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
   rpc Pause(PauseRequest) returns (PauseResponse);
@@ -277,6 +291,7 @@ service StreamManagerService {
   rpc ListActorStates(ListActorStatesRequest) returns (ListActorStatesResponse);
   rpc ListObjectDependencies(ListObjectDependenciesRequest) returns (ListObjectDependenciesResponse);
   rpc ApplyThrottle(ApplyThrottleRequest) returns (ApplyThrottleResponse);
+  rpc Recover(RecoverRequest) returns (RecoverResponse);
 }
 
 // Below for cluster service.
@@ -372,8 +387,10 @@ message SubscribeRequest {
 message MetaSnapshot {
   message SnapshotVersion {
     uint64 catalog_version = 1;
-    uint64 parallel_unit_mapping_version = 2;
+    reserved 2;
+    reserved "parallel_unit_mapping_version";
     uint64 worker_node_version = 3;
+    uint64 streaming_worker_mapping_version = 4;
   }
   repeated catalog.Database databases = 1;
   repeated catalog.Schema schemas = 2;
@@ -386,15 +403,20 @@ message MetaSnapshot {
   repeated catalog.Connection connections = 17;
   repeated catalog.Subscription subscriptions = 19;
   repeated user.UserInfo users = 8;
-  // for streaming
-  repeated FragmentParallelUnitMapping parallel_unit_mappings = 9;
+  reserved 9;
+  reserved "parallel_unit_mappings";
+  GetSessionParamsResponse session_params = 20;
   repeated common.WorkerNode nodes = 10;
   hummock.HummockSnapshot hummock_snapshot = 11;
   hummock.HummockVersion hummock_version = 12;
   backup_service.MetaBackupManifestId meta_backup_manifest_id = 14;
   hummock.WriteLimits hummock_write_limits = 16;
-  // for serving
-  repeated FragmentParallelUnitMapping serving_parallel_unit_mappings = 18;
+  reserved 18;
+  reserved "serving_parallel_unit_mappings";
+
+  // for streaming
+  repeated FragmentWorkerMapping streaming_worker_mappings = 21;
+  repeated FragmentWorkerMapping serving_worker_mappings = 22;
 
   SnapshotVersion version = 13;
 }
@@ -432,8 +454,7 @@ message SubscribeResponse {
     catalog.Schema schema = 5;
     catalog.Function function = 6;
     user.UserInfo user = 11;
-    // for streaming
-    FragmentParallelUnitMapping parallel_unit_mapping = 12;
+    SetSessionParamRequest session_param = 26;
     common.WorkerNode node = 13;
     hummock.HummockSnapshot hummock_snapshot = 14;
     hummock.HummockVersionDeltas hummock_version_deltas = 15;
@@ -443,10 +464,15 @@ message SubscribeResponse {
     hummock.WriteLimits hummock_write_limits = 20;
     RelationGroup relation_group = 21;
     catalog.Connection connection = 22;
-    FragmentParallelUnitMappings serving_parallel_unit_mappings = 23;
     hummock.HummockVersionStats hummock_stats = 24;
     Recovery recovery = 25;
+    FragmentWorkerMapping streaming_worker_mapping = 27;
+    FragmentWorkerMappings serving_worker_mappings = 28;
   }
+  reserved 12;
+  reserved "parallel_unit_mapping";
+  reserved 23;
+  reserved "serving_parallel_unit_mappings";
 }
 
 service NotificationService {
@@ -596,11 +622,35 @@ service SystemParamsService {
   rpc SetSystemParam(SetSystemParamRequest) returns (SetSystemParamResponse);
 }
 
+message GetSessionParamsRequest {}
+
+message GetSessionParamsResponse {
+  string params = 1;
+}
+
+message SetSessionParamRequest {
+  string param = 1;
+  // None means set to default value.
+  optional string value = 2;
+}
+
+message SetSessionParamResponse {
+  string param = 1;
+}
+
+// Used for alter system wide default parameters
+service SessionParamService {
+  rpc GetSessionParams(GetSessionParamsRequest) returns (GetSessionParamsResponse);
+  rpc SetSessionParam(SetSessionParamRequest) returns (SetSessionParamResponse);
+}
+
 message GetServingVnodeMappingsRequest {}
 
 message GetServingVnodeMappingsResponse {
-  repeated FragmentParallelUnitMapping mappings = 1;
+  reserved 1;
+  reserved "mappings";
   map<uint32, uint32> fragment_to_table = 2;
+  repeated FragmentWorkerMapping worker_mappings = 3;
 }
 
 service ServingService {

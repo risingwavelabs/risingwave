@@ -45,6 +45,7 @@ use crate::parser::ParserConfig;
 pub(crate) use crate::source::common::CommonSplitReader;
 use crate::source::filesystem::FsPageItem;
 use crate::source::monitor::EnumeratorMetrics;
+use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc};
 use crate::with_options::WithOptions;
 use crate::{
     dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
@@ -130,38 +131,42 @@ pub const MAX_CHUNK_SIZE: usize = 1024;
 
 #[derive(Debug, Clone)]
 pub struct SourceCtrlOpts {
-    // comes from developer::stream_chunk_size in stream scenario and developer::batch_chunk_size
-    // in batch scenario
+    /// The max size of a chunk yielded by source stream.
     pub chunk_size: usize,
     /// Rate limit of source
     pub rate_limit: Option<u32>,
 }
 
-impl Default for SourceCtrlOpts {
-    fn default() -> Self {
-        Self {
-            chunk_size: MAX_CHUNK_SIZE,
-            rate_limit: None,
-        }
-    }
-}
+// The options in `SourceCtrlOpts` are so important that we don't want to impl `Default` for it,
+// so that we can prevent any unintentional use of the default value.
+impl !Default for SourceCtrlOpts {}
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SourceEnumeratorContext {
     pub info: SourceEnumeratorInfo,
     pub metrics: Arc<EnumeratorMetrics>,
 }
 
-#[derive(Clone, Debug, Default)]
+impl SourceEnumeratorContext {
+    /// Create a dummy `SourceEnumeratorContext` for testing purpose, or for the situation
+    /// where the real context doesn't matter.
+    pub fn dummy() -> SourceEnumeratorContext {
+        SourceEnumeratorContext {
+            info: SourceEnumeratorInfo { source_id: 0 },
+            metrics: Arc::new(EnumeratorMetrics::default()),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct SourceEnumeratorInfo {
     pub source_id: u32,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SourceContext {
     pub actor_id: u32,
     pub source_id: TableId,
-    // There should be a 1-1 mapping between `source_id` & `fragment_id`
     pub fragment_id: u32,
     pub source_name: String,
     pub metrics: Arc<SourceMetrics>,
@@ -174,10 +179,10 @@ impl SourceContext {
         actor_id: u32,
         source_id: TableId,
         fragment_id: u32,
+        source_name: String,
         metrics: Arc<SourceMetrics>,
         source_ctrl_opts: SourceCtrlOpts,
         connector_props: ConnectorProperties,
-        source_name: String,
     ) -> Self {
         Self {
             actor_id,
@@ -188,6 +193,23 @@ impl SourceContext {
             source_ctrl_opts,
             connector_props,
         }
+    }
+
+    /// Create a dummy `SourceContext` for testing purpose, or for the situation
+    /// where the real context doesn't matter.
+    pub fn dummy() -> Self {
+        Self::new(
+            0,
+            TableId::new(0),
+            0,
+            "dummy".to_string(),
+            Arc::new(SourceMetrics::default()),
+            SourceCtrlOpts {
+                chunk_size: MAX_CHUNK_SIZE,
+                rate_limit: None,
+            },
+            ConnectorProperties::default(),
+        )
     }
 }
 
@@ -424,6 +446,24 @@ impl SplitImpl {
             |other| bail!("connector '{}' is not supported", other)
         )
     }
+
+    pub fn is_cdc_split(&self) -> bool {
+        matches!(
+            self,
+            MysqlCdc(_) | PostgresCdc(_) | MongodbCdc(_) | CitusCdc(_)
+        )
+    }
+
+    /// Get the current split offset.
+    pub fn get_cdc_split_offset(&self) -> String {
+        match self {
+            MysqlCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            PostgresCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            MongodbCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            CitusCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            _ => unreachable!("get_cdc_split_offset() is only for cdc split"),
+        }
+    }
 }
 
 impl SplitMetaData for SplitImpl {
@@ -538,6 +578,7 @@ pub trait SplitMetaData: Sized {
         Self::restore_from_json(JsonbVal::value_deserialize(bytes).unwrap())
     }
 
+    /// Encode the whole split metadata to a JSON object
     fn encode_to_json(&self) -> JsonbVal;
     fn restore_from_json(value: JsonbVal) -> Result<Self>;
     fn update_offset(&mut self, last_seen_offset: String) -> crate::error::ConnectorResult<()>;

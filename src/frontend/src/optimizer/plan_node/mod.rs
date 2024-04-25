@@ -39,6 +39,7 @@ use itertools::Itertools;
 use paste::paste;
 use pretty_xmlish::{Pretty, PrettyConfig};
 use risingwave_common::catalog::Schema;
+use risingwave_common::util::recursive::{self, Recurse};
 use risingwave_pb::batch_plan::PlanNode as BatchPlanPb;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanPb;
 use serde::Serialize;
@@ -51,6 +52,7 @@ use self::utils::Distill;
 use super::property::{Distribution, FunctionalDependencySet, Order};
 use crate::error::{ErrorCode, Result};
 use crate::optimizer::ExpressionSimplifyRewriter;
+use crate::session::current::notice_to_user;
 
 /// A marker trait for different conventions, used for enforcing type safety.
 ///
@@ -694,6 +696,10 @@ impl dyn PlanNode {
     }
 }
 
+const PLAN_DEPTH_THRESHOLD: usize = 30;
+const PLAN_TOO_DEEP_NOTICE: &str = "The plan is too deep. \
+Consider simplifying or splitting the query if you encounter any issues.";
+
 impl dyn PlanNode {
     /// Serialize the plan node and its children to a stream plan proto.
     ///
@@ -703,41 +709,47 @@ impl dyn PlanNode {
         &self,
         state: &mut BuildFragmentGraphState,
     ) -> SchedulerResult<StreamPlanPb> {
-        use stream::prelude::*;
+        recursive::tracker!().recurse(|t| {
+            if t.depth_reaches(PLAN_DEPTH_THRESHOLD) {
+                notice_to_user(PLAN_TOO_DEEP_NOTICE);
+            }
 
-        if let Some(stream_table_scan) = self.as_stream_table_scan() {
-            return stream_table_scan.adhoc_to_stream_prost(state);
-        }
-        if let Some(stream_cdc_table_scan) = self.as_stream_cdc_table_scan() {
-            return stream_cdc_table_scan.adhoc_to_stream_prost(state);
-        }
-        if let Some(stream_source_scan) = self.as_stream_source_scan() {
-            return stream_source_scan.adhoc_to_stream_prost(state);
-        }
-        if let Some(stream_share) = self.as_stream_share() {
-            return stream_share.adhoc_to_stream_prost(state);
-        }
+            use stream::prelude::*;
 
-        let node = Some(self.try_to_stream_prost_body(state)?);
-        let input = self
-            .inputs()
-            .into_iter()
-            .map(|plan| plan.to_stream_prost(state))
-            .try_collect()?;
-        // TODO: support pk_indices and operator_id
-        Ok(StreamPlanPb {
-            input,
-            identity: self.explain_myself_to_string(),
-            node_body: node,
-            operator_id: self.id().0 as _,
-            stream_key: self
-                .stream_key()
-                .unwrap_or_default()
-                .iter()
-                .map(|x| *x as u32)
-                .collect(),
-            fields: self.schema().to_prost(),
-            append_only: self.plan_base().append_only(),
+            if let Some(stream_table_scan) = self.as_stream_table_scan() {
+                return stream_table_scan.adhoc_to_stream_prost(state);
+            }
+            if let Some(stream_cdc_table_scan) = self.as_stream_cdc_table_scan() {
+                return stream_cdc_table_scan.adhoc_to_stream_prost(state);
+            }
+            if let Some(stream_source_scan) = self.as_stream_source_scan() {
+                return stream_source_scan.adhoc_to_stream_prost(state);
+            }
+            if let Some(stream_share) = self.as_stream_share() {
+                return stream_share.adhoc_to_stream_prost(state);
+            }
+
+            let node = Some(self.try_to_stream_prost_body(state)?);
+            let input = self
+                .inputs()
+                .into_iter()
+                .map(|plan| plan.to_stream_prost(state))
+                .try_collect()?;
+            // TODO: support pk_indices and operator_id
+            Ok(StreamPlanPb {
+                input,
+                identity: self.explain_myself_to_string(),
+                node_body: node,
+                operator_id: self.id().0 as _,
+                stream_key: self
+                    .stream_key()
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|x| *x as u32)
+                    .collect(),
+                fields: self.schema().to_prost(),
+                append_only: self.plan_base().append_only(),
+            })
         })
     }
 
@@ -749,20 +761,26 @@ impl dyn PlanNode {
     /// Serialize the plan node and its children to a batch plan proto without the identity field
     /// (for testing).
     pub fn to_batch_prost_identity(&self, identity: bool) -> SchedulerResult<BatchPlanPb> {
-        let node_body = Some(self.try_to_batch_prost_body()?);
-        let children = self
-            .inputs()
-            .into_iter()
-            .map(|plan| plan.to_batch_prost_identity(identity))
-            .try_collect()?;
-        Ok(BatchPlanPb {
-            children,
-            identity: if identity {
-                self.explain_myself_to_string()
-            } else {
-                "".into()
-            },
-            node_body,
+        recursive::tracker!().recurse(|t| {
+            if t.depth_reaches(PLAN_DEPTH_THRESHOLD) {
+                notice_to_user(PLAN_TOO_DEEP_NOTICE);
+            }
+
+            let node_body = Some(self.try_to_batch_prost_body()?);
+            let children = self
+                .inputs()
+                .into_iter()
+                .map(|plan| plan.to_batch_prost_identity(identity))
+                .try_collect()?;
+            Ok(BatchPlanPb {
+                children,
+                identity: if identity {
+                    self.explain_myself_to_string()
+                } else {
+                    "".into()
+                },
+                node_body,
+            })
         })
     }
 
@@ -838,6 +856,7 @@ mod logical_hop_window;
 mod logical_insert;
 mod logical_intersect;
 mod logical_join;
+mod logical_kafka_scan;
 mod logical_limit;
 mod logical_max_one_row;
 mod logical_multi_join;
@@ -885,7 +904,10 @@ mod stream_topn;
 mod stream_values;
 mod stream_watermark_filter;
 
+mod batch_iceberg_scan;
+mod batch_kafka_scan;
 mod derive;
+mod logical_iceberg_scan;
 mod stream_cdc_table_scan;
 mod stream_share;
 mod stream_temporal_join;
@@ -900,7 +922,9 @@ pub use batch_group_topn::BatchGroupTopN;
 pub use batch_hash_agg::BatchHashAgg;
 pub use batch_hash_join::BatchHashJoin;
 pub use batch_hop_window::BatchHopWindow;
+pub use batch_iceberg_scan::BatchIcebergScan;
 pub use batch_insert::BatchInsert;
+pub use batch_kafka_scan::BatchKafkaScan;
 pub use batch_limit::BatchLimit;
 pub use batch_lookup_join::BatchLookupJoin;
 pub use batch_max_one_row::BatchMaxOneRow;
@@ -928,9 +952,11 @@ pub use logical_except::LogicalExcept;
 pub use logical_expand::LogicalExpand;
 pub use logical_filter::LogicalFilter;
 pub use logical_hop_window::LogicalHopWindow;
+pub use logical_iceberg_scan::LogicalIcebergScan;
 pub use logical_insert::LogicalInsert;
 pub use logical_intersect::LogicalIntersect;
 pub use logical_join::LogicalJoin;
+pub use logical_kafka_scan::LogicalKafkaScan;
 pub use logical_limit::LogicalLimit;
 pub use logical_max_one_row::LogicalMaxOneRow;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
@@ -1035,6 +1061,8 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Intersect }
             , { Logical, Except }
             , { Logical, MaxOneRow }
+            , { Logical, KafkaScan }
+            , { Logical, IcebergScan }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -1062,6 +1090,8 @@ macro_rules! for_all_plan_nodes {
             , { Batch, Source }
             , { Batch, OverWindow }
             , { Batch, MaxOneRow }
+            , { Batch, KafkaScan }
+            , { Batch, IcebergScan }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -1133,6 +1163,8 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Intersect }
             , { Logical, Except }
             , { Logical, MaxOneRow }
+            , { Logical, KafkaScan }
+            , { Logical, IcebergScan }
         }
     };
 }
@@ -1169,6 +1201,8 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, Source }
             , { Batch, OverWindow }
             , { Batch, MaxOneRow }
+            , { Batch, KafkaScan }
+            , { Batch, IcebergScan }
         }
     };
 }

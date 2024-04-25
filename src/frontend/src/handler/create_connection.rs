@@ -124,12 +124,7 @@ pub async fn handle_create_connection(
         };
     }
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
-    let with_properties = handler_args
-        .with_options
-        .inner()
-        .clone()
-        .into_iter()
-        .collect();
+    let with_properties = handler_args.with_options.clone().into_connector_props();
 
     let create_connection_payload = resolve_create_connection_payload(&with_properties)?;
 
