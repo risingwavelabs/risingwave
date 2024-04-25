@@ -39,7 +39,7 @@ statement ok
 create materialized view mv_1 as select * from s0;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
-sleep 1s
+sleep 2s
 
 # Ingestion started
 system ok
@@ -72,7 +72,7 @@ SET rw_enable_shared_source TO false;
 statement ok
 create materialized view mv_2 as select * from s0;
 
-sleep 1s
+sleep 2s
 
 query IT rowsort
 select v1, v2 from s0;
