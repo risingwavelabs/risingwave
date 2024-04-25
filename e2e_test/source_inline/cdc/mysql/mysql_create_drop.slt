@@ -43,9 +43,9 @@ create source s with (
   server.id = '114514'
 );
 
-sleep 1s
-
-# There's no data in upstream yet, but the offset is updated in the source executor via the heartbeat message.
+# SourceExecutor only receives new data after it's created.
+# But it can receive offset update at the beginning and periodically
+# via the heartbeat message.
 system ok
 internal_table.mjs --name s --type '' --count
 ----
