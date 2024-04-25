@@ -257,18 +257,22 @@ impl LevelCompactionPicker {
                 ValidationRuleType::ToBase,
                 stats,
             ) {
-                let log_counter = LOG_COUNTER.with_borrow_mut(|counter| {
-                    *counter += 1;
-                    *counter
-                });
-                if l0.total_file_size > target_level.total_file_size * 8 && log_counter % 100 == 0 {
-                    tracing::warn!("skip task with level count: {}, file count: {}, select size: {}, target size: {}, target level size: {}",
-                        result.input_levels.len(),
-                        result.total_file_count,
-                        result.select_input_size,
-                        result.target_input_size,
-                        target_level.total_file_size,
-                    );
+                if l0.total_file_size > target_level.total_file_size * 8 {
+                    let log_counter = LOG_COUNTER.with_borrow_mut(|counter| {
+                        *counter += 1;
+                        *counter
+                    });
+
+                    // reduce log
+                    if log_counter % 100 == 0 {
+                        tracing::warn!("skip task with level count: {}, file count: {}, select size: {}, target size: {}, target level size: {}",
+                            result.input_levels.len(),
+                            result.total_file_count,
+                            result.select_input_size,
+                            result.target_input_size,
+                            target_level.total_file_size,
+                        );
+                    }
                 }
                 continue;
             }
