@@ -1239,7 +1239,9 @@ mod tests {
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
                 state_table_ids: vec![0],
-                vnode_mapping: Some(ParallelUnitMapping::new_single(0).to_protobuf()),
+                vnode_mapping: Some(
+                    risingwave_common::hash::ParallelUnitMapping::new_single(0).to_protobuf(),
+                ),
                 ..Default::default()
             },
         );
