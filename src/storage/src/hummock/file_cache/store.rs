@@ -32,6 +32,7 @@ use foyer::storage::runtime::{
 use foyer::storage::storage::{Storage, StorageWriter};
 use foyer::storage::store::{LfuFsStoreConfig, NoneStore, NoneStoreWriter};
 use risingwave_hummock_sdk::HummockSstableObjectId;
+use serde::{Deserialize, Serialize};
 
 use crate::hummock::{Block, HummockResult, Sstable, SstableMeta};
 
@@ -343,7 +344,7 @@ where
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
 pub struct SstableBlockIndex {
     pub sst_id: HummockSstableObjectId,
     pub block_idx: u64,
@@ -410,7 +411,7 @@ impl Cursor for SstableBlockIndexCursor {
 /// [`CachedBlock`] uses different coding for writing to use/bypass compression.
 ///
 /// But when reading, it will always be `Loaded`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CachedBlock {
     Loaded {
         block: Box<Block>,
@@ -582,7 +583,7 @@ impl Cursor for BoxBlockCursor {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CachedSstable(Arc<Sstable>);
 
 impl Clone for CachedSstable {
@@ -799,5 +800,15 @@ mod tests {
             let index = SstableBlockIndex::read(&buf[..]).unwrap();
             assert_eq!(target, index);
         }
+    }
+
+    #[test]
+    fn test_sstable_block_index_serde() {
+        let sbi = SstableBlockIndex {
+            sst_id: 114,
+            block_idx: 514,
+        };
+        let buf = bincode::serialize(&sbi).unwrap();
+        assert_eq!(buf.len(), 16)
     }
 }

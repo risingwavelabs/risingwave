@@ -1027,6 +1027,11 @@ mod tests {
 
     #[test]
     fn test_block_serde() {
+        fn assmut_serde<'de, T: Serialize + Deserialize<'de>>() {}
+
+        assmut_serde::<Block>();
+        assmut_serde::<Box<Block>>();
+
         let options = BlockBuilderOptions::default();
         let mut builder = BlockBuilder::new(options);
         for i in 0..100 {

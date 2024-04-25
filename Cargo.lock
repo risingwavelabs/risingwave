@@ -10789,6 +10789,8 @@ dependencies = [
  "risingwave_common",
  "risingwave_common_estimate_size",
  "risingwave_pb",
+ "serde",
+ "serde_bytes",
  "tracing",
  "workspace-hack",
 ]
