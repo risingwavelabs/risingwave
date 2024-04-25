@@ -20,7 +20,7 @@ use risingwave_pb::hummock::report_compaction_task_request::{
     Event as ReportCompactionTaskEvent, HeartBeat as SharedHeartBeat,
     ReportTask as ReportSharedTask,
 };
-use risingwave_pb::hummock::{ReportFullScanTaskRequest, ReportVacuumTaskRequest};
+use risingwave_pb::hummock::{CompactTask, ReportFullScanTaskRequest, ReportVacuumTaskRequest};
 use risingwave_rpc_client::GrpcCompactorProxyClient;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
@@ -51,7 +51,7 @@ pub use context::{
 use futures::{pin_mut, StreamExt};
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
 use more_asserts::assert_ge;
-use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
+use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStatsMap};
 use risingwave_hummock_sdk::{compact_task_to_string, HummockCompactionTaskId, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compaction_event_request::{
@@ -434,6 +434,28 @@ pub fn start_compactor(
                     }
                 };
 
+                fn send_report_task_event(
+                    compact_task: &CompactTask,
+                    table_stats: TableStatsMap,
+                    request_sender: &mpsc::UnboundedSender<SubscribeCompactionEventRequest>,
+                ) {
+                    if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
+                        event: Some(RequestEvent::ReportTask(ReportTask {
+                            task_id: compact_task.task_id,
+                            task_status: compact_task.task_status,
+                            sorted_output_ssts: compact_task.sorted_output_ssts.clone(),
+                            table_stats_change: to_prost_table_stats_map(table_stats),
+                        })),
+                        create_at: SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .expect("Clock may have gone backwards")
+                            .as_millis() as u64,
+                    }) {
+                        let task_id = compact_task.task_id;
+                        tracing::warn!(error = %e.as_report(), "Failed to report task {task_id:?}");
+                    }
+                }
+
                 match event {
                     Some(Ok(SubscribeCompactionEventResponse { event, create_at })) => {
                         let event = match event {
@@ -481,28 +503,11 @@ pub fn start_compactor(
                                             TaskStatus::NoAvailCpuResourceCanceled,
                                         );
 
-                                        if let Err(e) =
-                                            request_sender.send(SubscribeCompactionEventRequest {
-                                                event: Some(RequestEvent::ReportTask(ReportTask {
-                                                    task_id: compact_task.task_id,
-                                                    task_status: compact_task.task_status,
-                                                    sorted_output_ssts: compact_task
-                                                        .sorted_output_ssts
-                                                        .clone(),
-                                                    table_stats_change: to_prost_table_stats_map(
-                                                        table_stats,
-                                                    ),
-                                                })),
-                                                create_at: SystemTime::now()
-                                                    .duration_since(std::time::UNIX_EPOCH)
-                                                    .expect("Clock may have gone backwards")
-                                                    .as_millis()
-                                                    as u64,
-                                            })
-                                        {
-                                            let task_id = compact_task.task_id;
-                                            tracing::warn!(error = %e.as_report(), "Failed to report task {task_id:?}");
-                                        }
+                                        send_report_task_event(
+                                            &compact_task,
+                                            table_stats,
+                                            &request_sender,
+                                        );
 
                                         continue 'start_stream;
                                     }
@@ -548,27 +553,11 @@ pub fn start_compactor(
                                         };
                                     shutdown.lock().unwrap().remove(&task_id);
 
-                                    if let Err(e) =
-                                        request_sender.send(SubscribeCompactionEventRequest {
-                                            event: Some(RequestEvent::ReportTask(ReportTask {
-                                                task_id: compact_task.task_id,
-                                                task_status: compact_task.task_status,
-                                                sorted_output_ssts: compact_task
-                                                    .sorted_output_ssts
-                                                    .clone(),
-                                                table_stats_change: to_prost_table_stats_map(
-                                                    table_stats,
-                                                ),
-                                            })),
-                                            create_at: SystemTime::now()
-                                                .duration_since(std::time::UNIX_EPOCH)
-                                                .expect("Clock may have gone backwards")
-                                                .as_millis()
-                                                as u64,
-                                        })
-                                    {
-                                        tracing::warn!(error = %e.as_report(), "Failed to report task {task_id:?}");
-                                    }
+                                    send_report_task_event(
+                                        &compact_task,
+                                        table_stats,
+                                        &request_sender,
+                                    );
 
                                     let enable_check_compaction_result =
                                     context.storage_opts.check_compaction_result;
