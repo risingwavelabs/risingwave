@@ -2,7 +2,9 @@ import json
 import subprocess
 import sys
 
-relations = ['rwctest.bqtest.bq_sink']
+relations = ['rwctest.bqtest.bq_sink', 'rwctest.bqtest.bq_sink_data_types']
+
+subprocess.run(["docker", "compose", "exec", "gcloud-cli", "bq", "query", "--use_legacy_sql=false", "--format=json", 'SELECT * FROM rwctest.bqtest.bq_sink_data_types'])
 
 failed_cases = []
 for rel in relations:
