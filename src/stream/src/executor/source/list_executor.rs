@@ -82,21 +82,25 @@ impl<S: StateStore> FsListExecutor<S> {
         let chunked_stream = stream.chunks(CHUNK_SIZE).map(|chunk| {
             let rows = chunk
                 .into_iter()
-                .map(|item| {
-                    let page_item = item.expect("list file failed, please check whether the source connector is configured correctly.");
-                    (
+                .map(|item| match item {
+                    Ok(page_item) => Ok((
                         Op::Insert,
                         OwnedRow::new(vec![
                             Some(ScalarImpl::Utf8(page_item.name.into_boxed_str())),
                             Some(ScalarImpl::Timestamptz(page_item.timestamp)),
                             Some(ScalarImpl::Int64(page_item.size)),
                         ]),
-                    )
+                    )),
+                    Err(e) => {
+                        tracing::error!("Connector fail to list item: {e}");
+                        Err(e)
+                    }
                 })
                 .collect::<Vec<_>>();
 
+            let res: Vec<(Op, OwnedRow)> = rows.into_iter().flatten().collect();
             Ok(StreamChunk::from_rows(
-                &rows,
+                &res,
                 &[DataType::Varchar, DataType::Timestamptz, DataType::Int64],
             ))
         });
