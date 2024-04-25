@@ -58,6 +58,8 @@ create table tt1_shared (v1 int,
   PRIMARY KEY (v1)
 ) from s table 'testdb1.tt1';
 
+sleep 2s
+
 # The source is resumed.
 # SourceExecutor does not handle historical data, and only receives new data after it's created.
 # But it can receive offset update at the beginning and periodically

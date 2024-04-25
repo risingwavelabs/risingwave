@@ -65,7 +65,7 @@ internal_table.mjs --name s0 --type source
 # 3,"{""Backfilling"": ""0""}"
 
 
-# This does not the behavior for CREATE MATERIALIZED VIEW below. It also uses the shared source, and creates SourceBackfillExecutor.
+# This does not affect the behavior for CREATE MATERIALIZED VIEW below. It also uses the shared source, and creates SourceBackfillExecutor.
 statement ok
 SET rw_enable_shared_source TO false;
 
@@ -165,7 +165,7 @@ cat <<EOF | rpk topic produce shared_source -f "%p %v\\n" -p 0
 EOF
 done
 
-sleep 2s
+sleep 5s
 
 query IT rowsort
 select v1, count(*) from s0 group by v1;
