@@ -156,24 +156,54 @@ internal_table.mjs --name s0 --type source
 
 
 system ok
-for i in {0..9}; do
 cat <<EOF | rpk topic produce shared_source -f "%p %v\\n" -p 0
 0 {"v1": 1, "v2": "a"}
 1 {"v1": 2, "v2": "b"}
 2 {"v1": 3, "v2": "c"}
 3 {"v1": 4, "v2": "d"}
+0 {"v1": 1, "v2": "a"}
+1 {"v1": 2, "v2": "b"}
+2 {"v1": 3, "v2": "c"}
+3 {"v1": 4, "v2": "d"}
+0 {"v1": 1, "v2": "a"}
+1 {"v1": 2, "v2": "b"}
+2 {"v1": 3, "v2": "c"}
+3 {"v1": 4, "v2": "d"}
+0 {"v1": 1, "v2": "a"}
+1 {"v1": 2, "v2": "b"}
+2 {"v1": 3, "v2": "c"}
+3 {"v1": 4, "v2": "d"}
+0 {"v1": 1, "v2": "a"}
+1 {"v1": 2, "v2": "b"}
+2 {"v1": 3, "v2": "c"}
+3 {"v1": 4, "v2": "d"}
+0 {"v1": 1, "v2": "a"}
+1 {"v1": 2, "v2": "b"}
+2 {"v1": 3, "v2": "c"}
+3 {"v1": 4, "v2": "d"}
+0 {"v1": 1, "v2": "a"}
+1 {"v1": 2, "v2": "b"}
+2 {"v1": 3, "v2": "c"}
+3 {"v1": 4, "v2": "d"}
+0 {"v1": 1, "v2": "a"}
+1 {"v1": 2, "v2": "b"}
+2 {"v1": 3, "v2": "c"}
+3 {"v1": 4, "v2": "d"}
+0 {"v1": 1, "v2": "a"}
+1 {"v1": 2, "v2": "b"}
+2 {"v1": 3, "v2": "c"}
+3 {"v1": 4, "v2": "d"}
 EOF
-done
 
-sleep 5s
+sleep 2s
 
-# query IT rowsort
-# select v1, count(*) from s0 group by v1;
-# ----
-# 1 12
-# 2 12
-# 3 12
-# 4 12
+query IT rowsort
+select v1, count(*) from s0 group by v1;
+----
+1 12
+2 12
+3 12
+4 12
 
 query IT rowsort
 select v1, count(*) from mv_1 group by v1;
