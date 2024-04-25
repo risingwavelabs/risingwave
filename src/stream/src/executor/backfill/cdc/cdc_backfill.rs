@@ -479,7 +479,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                             // mark backfill has finished
                             state_impl
                                 .mutate_state(
-                                    current_pk_pos,
+                                    current_pk_pos.clone(),
                                     last_binlog_offset.clone(),
                                     total_snapshot_row_count,
                                     true,
@@ -576,7 +576,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             );
             state_impl
                 .mutate_state(
-                    current_pk_pos,
+                    current_pk_pos.clone(),
                     last_binlog_offset.clone(),
                     total_snapshot_row_count,
                     true,
