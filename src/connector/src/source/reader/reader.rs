@@ -110,9 +110,6 @@ impl SourceReader {
         matches!(
             &self.config,
             ConnectorProperties::PostgresCdc(_)
-                | ConnectorProperties::MysqlCdc(_)
-                | ConnectorProperties::MongodbCdc(_)
-                | ConnectorProperties::CitusCdc(_)
         )
     }
 
