@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
-use foyer::memory::CacheContext;
+use foyer::CacheContext;
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 use risingwave_common::catalog::TableId;
@@ -54,7 +54,7 @@ use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::test_utils::hybrid_cache_for_test;
 use risingwave_storage::hummock::utils::cmp_delete_range_left_bounds;
 use risingwave_storage::hummock::{
-    CachePolicy, FileCache, HummockStorage, MemoryLimiter, SstableObjectIdManager, SstableStore,
+    CachePolicy, HummockStorage, MemoryLimiter, SstableObjectIdManager, SstableStore,
     SstableStoreConfig,
 };
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
@@ -222,8 +222,6 @@ async fn compaction_test(
         meta_cache_eviction: EvictionConfig::for_test(),
         prefetch_buffer_capacity: storage_memory_config.prefetch_buffer_capacity_mb * (1 << 20),
         max_prefetch_block_number: storage_opts.max_prefetch_block_number,
-        data_file_cache: FileCache::none(),
-        meta_file_cache: FileCache::none(),
         recent_filter: None,
         state_store_metrics: state_store_metrics.clone(),
         meta_cache_v2: hybrid_cache_for_test().await,

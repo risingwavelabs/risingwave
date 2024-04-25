@@ -78,8 +78,10 @@ license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
-foyer = "0.6"
-foyer_08 = { package = "foyer", version = "0.8.3", features = ["nightly"] }
+# foyer_08 = { package = "foyer", version = "0.8.4", features = ["nightly"] }
+foyer = { package = "foyer", git = "https://github.com/mrcroxx/foyer", branch = "main", features = [
+    "nightly",
+] }
 auto_enums = { version = "0.8", features = ["futures03", "tokio1"] }
 await-tree = "0.2.1"
 aws-config = { version = "1", default-features = false, features = [

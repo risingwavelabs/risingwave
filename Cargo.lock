@@ -1776,7 +1776,7 @@ dependencies = [
  "bitflags 2.5.0",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "lazy_static",
  "lazycell",
  "log",
@@ -4913,60 +4913,29 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15240094bab62dfeb59bb974e2fb7bff18727c6dc7bd1f5f6fc82a9e6fda5a38"
-dependencies = [
- "foyer-common 0.4.0",
- "foyer-intrusive 0.3.1",
- "foyer-memory 0.1.4",
- "foyer-storage 0.5.1",
- "foyer-workspace-hack 0.3.0",
-]
-
-[[package]]
-name = "foyer"
-version = "0.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91ea40fa43ddbbb37e08c54123fa235cbf38d915fd39d5a94a061dff6a15ebda"
+version = "0.8.4"
+source = "git+https://github.com/mrcroxx/foyer?branch=main#900e41a01187e21db284731b1891b5fd79cb76fb"
 dependencies = [
  "ahash 0.8.6",
  "anyhow",
- "foyer-common 0.6.2",
- "foyer-intrusive 0.5.2",
- "foyer-memory 0.3.2",
- "foyer-storage 0.7.2",
- "foyer-workspace-hack 0.5.2",
-]
-
-[[package]]
-name = "foyer-common"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad95f985cfbd5a8bf9f115d963918e742dfbb75350febff509b09cf194842b0c"
-dependencies = [
- "anyhow",
- "bytes",
- "foyer-workspace-hack 0.3.0",
- "itertools 0.12.1",
- "madsim-tokio",
- "parking_lot 0.12.1",
- "paste",
- "tracing",
+ "foyer-common",
+ "foyer-intrusive",
+ "foyer-memory",
+ "foyer-storage",
+ "foyer-workspace-hack",
 ]
 
 [[package]]
 name = "foyer-common"
 version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12b4346672694d2e11c429984d11ba124ed7abb8ba063e24d157b2013f59239d"
+source = "git+https://github.com/mrcroxx/foyer?branch=main#900e41a01187e21db284731b1891b5fd79cb76fb"
 dependencies = [
  "ahash 0.8.6",
  "anyhow",
  "bytes",
  "cfg-if",
  "crossbeam",
- "foyer-workspace-hack 0.5.2",
+ "foyer-workspace-hack",
  "hashbrown 0.14.3",
  "itertools 0.12.1",
  "madsim-tokio",
@@ -4979,73 +4948,33 @@ dependencies = [
 
 [[package]]
 name = "foyer-intrusive"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c38107e68d0c321995c0ca49d4a3207455c2cbeb4df5878f9071b4c638c2096"
-dependencies = [
- "bytes",
- "cmsketch 0.1.5",
- "foyer-common 0.4.0",
- "foyer-workspace-hack 0.3.0",
- "itertools 0.12.1",
- "memoffset",
- "parking_lot 0.12.1",
- "paste",
- "tracing",
- "twox-hash",
-]
-
-[[package]]
-name = "foyer-intrusive"
 version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fee0caaa581c01662072f5802994d2338ea52612f6000167a1a55361ec0b98a"
+source = "git+https://github.com/mrcroxx/foyer?branch=main#900e41a01187e21db284731b1891b5fd79cb76fb"
 dependencies = [
  "bytes",
  "cmsketch 0.1.5",
- "foyer-common 0.6.2",
- "foyer-workspace-hack 0.5.2",
+ "foyer-common",
+ "foyer-workspace-hack",
  "itertools 0.12.1",
  "memoffset",
  "parking_lot 0.12.1",
  "paste",
  "tracing",
  "twox-hash",
-]
-
-[[package]]
-name = "foyer-memory"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d1c86096f23d567783f7fd3ad34e9d7e94a56854b405305c6b0fe24850a2731"
-dependencies = [
- "ahash 0.8.6",
- "bitflags 2.5.0",
- "cmsketch 0.2.0",
- "crossbeam",
- "foyer-intrusive 0.3.1",
- "foyer-workspace-hack 0.3.0",
- "futures",
- "hashbrown 0.14.3",
- "itertools 0.12.1",
- "libc",
- "madsim-tokio",
- "parking_lot 0.12.1",
 ]
 
 [[package]]
 name = "foyer-memory"
 version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f419ca05a413d4ec767221e65bbe97e117296b2270aaa81a2072137571f57e42"
+source = "git+https://github.com/mrcroxx/foyer?branch=main#900e41a01187e21db284731b1891b5fd79cb76fb"
 dependencies = [
  "ahash 0.8.6",
  "anyhow",
  "bitflags 2.5.0",
  "cmsketch 0.2.0",
- "foyer-common 0.6.2",
- "foyer-intrusive 0.5.2",
- "foyer-workspace-hack 0.5.2",
+ "foyer-common",
+ "foyer-intrusive",
+ "foyer-workspace-hack",
  "futures",
  "hashbrown 0.14.3",
  "itertools 0.12.1",
@@ -5056,39 +4985,8 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5e0749c569ef5f8d9f877a6a81da24e7d1b6f8ea87ec6c3933e12dac0c7632f"
-dependencies = [
- "anyhow",
- "bitflags 2.5.0",
- "bitmaps",
- "bytes",
- "foyer-common 0.4.0",
- "foyer-intrusive 0.3.1",
- "foyer-workspace-hack 0.3.0",
- "futures",
- "itertools 0.12.1",
- "libc",
- "lz4",
- "madsim-tokio",
- "memoffset",
- "nix 0.28.0",
- "parking_lot 0.12.1",
- "paste",
- "prometheus",
- "rand",
- "thiserror",
- "tracing",
- "twox-hash",
- "zstd 0.13.0",
-]
-
-[[package]]
-name = "foyer-storage"
 version = "0.7.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a52c8ed0e0fa0586bd905c4f99b207579d9b5d8bbf6fd7aa9d0d3cdc6559f0f7"
+source = "git+https://github.com/mrcroxx/foyer?branch=main#900e41a01187e21db284731b1891b5fd79cb76fb"
 dependencies = [
  "ahash 0.8.6",
  "allocator-api2",
@@ -5098,9 +4996,9 @@ dependencies = [
  "bitmaps",
  "bytes",
  "either",
- "foyer-common 0.6.2",
- "foyer-memory 0.3.2",
- "foyer-workspace-hack 0.5.2",
+ "foyer-common",
+ "foyer-memory",
+ "foyer-workspace-hack",
  "futures",
  "itertools 0.12.1",
  "lazy_static",
@@ -5121,38 +5019,8 @@ dependencies = [
 
 [[package]]
 name = "foyer-workspace-hack"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77a5ee5ab890d1893232fd44af33197c7499813816b8880649a15ee9438d5e07"
-dependencies = [
- "ahash 0.8.6",
- "cc",
- "crossbeam-channel",
- "crossbeam-utils",
- "either",
- "futures-channel",
- "futures-core",
- "futures-executor",
- "futures-sink",
- "futures-util",
- "hashbrown 0.14.3",
- "libc",
- "parking_lot 0.12.1",
- "parking_lot_core 0.9.8",
- "proc-macro2",
- "quote",
- "rand",
- "smallvec",
- "syn 2.0.57",
- "tokio",
- "tracing-core",
-]
-
-[[package]]
-name = "foyer-workspace-hack"
 version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "784af375513f8cbd60dfc4f1d5ccdc0f358986c6d69ad7597f8758b50b626d8b"
+source = "git+https://github.com/mrcroxx/foyer?branch=main#900e41a01187e21db284731b1891b5fd79cb76fb"
 dependencies = [
  "ahash 0.8.6",
  "cc",
@@ -9412,7 +9280,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.12.1",
+ "parking_lot 0.11.2",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
@@ -10075,7 +9943,7 @@ dependencies = [
  "async-trait",
  "criterion",
  "either",
- "foyer 0.6.0",
+ "foyer",
  "futures",
  "futures-async-stream",
  "futures-util",
@@ -10244,7 +10112,7 @@ dependencies = [
  "ethnum",
  "expect-test",
  "fixedbitset 0.5.0",
- "foyer 0.6.0",
+ "foyer",
  "futures",
  "governor",
  "hex",
@@ -10423,7 +10291,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "clap",
- "foyer 0.6.0",
+ "foyer",
  "futures",
  "madsim-tokio",
  "prometheus",
@@ -10476,7 +10344,7 @@ dependencies = [
  "chrono",
  "clap",
  "either",
- "foyer 0.6.0",
+ "foyer",
  "futures",
  "futures-async-stream",
  "hyper 0.14.27",
@@ -10949,7 +10817,7 @@ dependencies = [
  "criterion",
  "expect-test",
  "fail",
- "foyer 0.6.0",
+ "foyer",
  "futures",
  "futures-async-stream",
  "itertools 0.12.1",
@@ -10980,7 +10848,7 @@ dependencies = [
  "bincode 2.0.0-rc.3",
  "byteorder",
  "bytes",
- "foyer 0.6.0",
+ "foyer",
  "futures",
  "futures-async-stream",
  "itertools 0.12.1",
@@ -11536,8 +11404,7 @@ dependencies = [
  "expect-test",
  "fail",
  "fiemap",
- "foyer 0.6.0",
- "foyer 0.8.3",
+ "foyer",
  "futures",
  "futures-async-stream",
  "hex",
@@ -11606,7 +11473,7 @@ dependencies = [
  "enum-as-inner 0.6.0",
  "expect-test",
  "fail",
- "foyer 0.6.0",
+ "foyer",
  "futures",
  "futures-async-stream",
  "governor",

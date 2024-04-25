@@ -34,7 +34,7 @@ use risingwave_storage::hummock::store::version::HummockVersionReader;
 use risingwave_storage::hummock::store::HummockStorageIterator;
 use risingwave_storage::hummock::test_utils::hybrid_cache_for_test;
 use risingwave_storage::hummock::{
-    get_committed_read_version_tuple, CachePolicy, FileCache, SstableStore, SstableStoreConfig,
+    get_committed_read_version_tuple, CachePolicy, SstableStore, SstableStoreConfig,
 };
 use risingwave_storage::monitor::{global_hummock_state_store_metrics, HummockStateStoreMetrics};
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
@@ -89,8 +89,6 @@ impl HummockJavaBindingIterator {
             meta_cache_eviction: EvictionConfig::for_test(),
             prefetch_buffer_capacity: 1 << 10,
             max_prefetch_block_number: 16,
-            data_file_cache: FileCache::none(),
-            meta_file_cache: FileCache::none(),
             recent_filter: None,
             state_store_metrics: Arc::new(global_hummock_state_store_metrics(
                 MetricLevel::Disabled,

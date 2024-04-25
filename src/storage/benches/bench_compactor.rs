@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
-use foyer::memory::CacheContext;
+use foyer::CacheContext;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::config::{EvictionConfig, MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
@@ -45,7 +45,7 @@ use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::test_utils::hybrid_cache_for_test;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    CachePolicy, FileCache, SstableBuilder, SstableBuilderOptions, SstableIterator, SstableStore,
+    CachePolicy, SstableBuilder, SstableBuilderOptions, SstableIterator, SstableStore,
     SstableStoreConfig, SstableWriterOptions, Xor16FilterBuilder,
 };
 use risingwave_storage::monitor::{
@@ -70,8 +70,6 @@ pub async fn mock_sstable_store() -> SstableStoreRef {
         meta_cache_eviction: EvictionConfig::for_test(),
         prefetch_buffer_capacity: 64 << 20,
         max_prefetch_block_number: 16,
-        data_file_cache: FileCache::none(),
-        meta_file_cache: FileCache::none(),
         recent_filter: None,
         state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
 

@@ -21,7 +21,6 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
 use criterion::{criterion_group, criterion_main, Criterion};
-use foyer::memory as foyer;
 use moka::future::Cache;
 use rand::rngs::SmallRng;
 use rand::{RngCore, SeedableRng};
@@ -123,16 +122,13 @@ pub struct FoyerCache {
 
 impl FoyerCache {
     pub fn lru(capacity: usize, fake_io_latency: Duration) -> Self {
-        let inner = foyer::Cache::lru(foyer::LruCacheConfig {
-            capacity,
-            shards: 8,
-            eviction_config: foyer::LruConfig {
-                high_priority_pool_ratio: 0.0,
-            },
-            object_pool_capacity: 8 * 1024,
-            hash_builder: ahash::RandomState::default(),
-            event_listener: foyer::DefaultCacheEventListener::default(),
-        });
+        let inner = foyer::CacheBuilder::new(capacity)
+            .with_shards(8)
+            .with_eviction_config(foyer::LruConfig {
+                high_priority_pool_ratio: 0.8,
+            })
+            .with_object_pool_capacity(8 * 1024)
+            .build();
         Self {
             inner,
             fake_io_latency,
@@ -140,19 +136,16 @@ impl FoyerCache {
     }
 
     pub fn lfu(capacity: usize, fake_io_latency: Duration) -> Self {
-        let inner = foyer::Cache::lfu(foyer::LfuCacheConfig {
-            capacity,
-            shards: 8,
-            eviction_config: foyer::LfuConfig {
+        let inner = foyer::CacheBuilder::new(capacity)
+            .with_shards(8)
+            .with_eviction_config(foyer::LfuConfig {
                 window_capacity_ratio: 0.1,
                 protected_capacity_ratio: 0.8,
                 cmsketch_eps: 0.001,
                 cmsketch_confidence: 0.9,
-            },
-            object_pool_capacity: 8 * 1024,
-            hash_builder: ahash::RandomState::default(),
-            event_listener: foyer::DefaultCacheEventListener::default(),
-        });
+            })
+            .with_object_pool_capacity(8 * 1024)
+            .build();
         Self {
             inner,
             fake_io_latency,
@@ -170,7 +163,7 @@ impl CacheBase for FoyerCache {
                 async move {
                     get_fake_block(sst_object_id, block_idx, latency)
                         .await
-                        .map(|block| (Arc::new(block), 1, foyer::CacheContext::Default))
+                        .map(|block| (Arc::new(block), foyer::CacheContext::Default))
                 }
             })
             .await?;

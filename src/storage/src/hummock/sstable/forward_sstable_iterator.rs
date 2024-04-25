@@ -316,7 +316,7 @@ mod tests {
     use std::collections::Bound;
 
     use bytes::Bytes;
-    use foyer::memory::CacheContext;
+    use foyer::CacheContext;
     use itertools::Itertools;
     use rand::prelude::*;
     use risingwave_common::catalog::TableId;

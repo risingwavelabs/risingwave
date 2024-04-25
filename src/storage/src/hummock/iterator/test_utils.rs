@@ -37,8 +37,8 @@ use crate::hummock::test_utils::{
     hybrid_cache_for_test,
 };
 use crate::hummock::{
-    FileCache, HummockValue, SstableBuilderOptions, SstableIterator, SstableIteratorType,
-    SstableStoreConfig, SstableStoreRef, TableHolder,
+    HummockValue, SstableBuilderOptions, SstableIterator, SstableIteratorType, SstableStoreConfig,
+    SstableStoreRef, TableHolder,
 };
 use crate::monitor::{global_hummock_state_store_metrics, ObjectStoreMetrics};
 
@@ -80,8 +80,6 @@ pub async fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> Ssta
         prefetch_buffer_capacity: 64 << 20,
         max_prefetch_block_number: 16,
 
-        data_file_cache: FileCache::none(),
-        meta_file_cache: FileCache::none(),
         recent_filter: None,
         state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
 

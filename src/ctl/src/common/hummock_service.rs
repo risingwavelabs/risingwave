@@ -22,7 +22,7 @@ use risingwave_object_store::object::build_remote_object_store;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::test_utils::hybrid_cache_for_test;
-use risingwave_storage::hummock::{FileCache, HummockStorage, SstableStore, SstableStoreConfig};
+use risingwave_storage::hummock::{HummockStorage, SstableStore, SstableStoreConfig};
 use risingwave_storage::monitor::{
     global_hummock_state_store_metrics, CompactorMetrics, HummockMetrics, HummockStateStoreMetrics,
     MonitoredStateStore, MonitoredStorageMetrics, ObjectStoreMetrics,
@@ -179,8 +179,6 @@ impl HummockServiceOpts {
             meta_cache_eviction: EvictionConfig::for_test(),
             prefetch_buffer_capacity: opts.block_cache_capacity_mb * (1 << 20),
             max_prefetch_block_number: opts.max_prefetch_block_number,
-            data_file_cache: FileCache::none(),
-            meta_file_cache: FileCache::none(),
             recent_filter: None,
             state_store_metrics: Arc::new(global_hummock_state_store_metrics(
                 MetricLevel::Disabled,

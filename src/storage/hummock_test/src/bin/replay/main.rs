@@ -45,7 +45,7 @@ use risingwave_storage::filter_key_extractor::{
     FakeRemoteTableAccessor, RpcFilterKeyExtractorManager,
 };
 use risingwave_storage::hummock::test_utils::hybrid_cache_for_test;
-use risingwave_storage::hummock::{FileCache, HummockStorage, SstableStore, SstableStoreConfig};
+use risingwave_storage::hummock::{HummockStorage, SstableStore, SstableStoreConfig};
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics, ObjectStoreMetrics};
 use risingwave_storage::opts::StorageOpts;
 use serde::{Deserialize, Serialize};
@@ -123,8 +123,6 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         meta_cache_eviction: EvictionConfig::for_test(),
         prefetch_buffer_capacity: storage_opts.prefetch_buffer_capacity_mb * (1 << 20),
         max_prefetch_block_number: storage_opts.max_prefetch_block_number,
-        data_file_cache: FileCache::none(),
-        meta_file_cache: FileCache::none(),
         recent_filter: None,
         state_store_metrics: state_store_metrics.clone(),
         meta_cache_v2: hybrid_cache_for_test().await,

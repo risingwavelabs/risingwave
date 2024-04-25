@@ -17,9 +17,9 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use foyer::memory::CacheContext;
-use foyer_08::{
-    HybridCache, HybridCacheBuilder, StorageKey as HybridKey, StorageValue as HybridValue,
+use foyer::{
+    CacheContext, HybridCache, HybridCacheBuilder, StorageKey as HybridKey,
+    StorageValue as HybridValue,
 };
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;

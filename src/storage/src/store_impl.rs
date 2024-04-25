@@ -13,14 +13,13 @@
 // limitations under the License.
 
 use std::fmt::Debug;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
-use foyer_08::{
-    FsDeviceConfigBuilder, HybridCacheBuilder, LruConfig, RatedTicketAdmissionPolicy,
-    RuntimeConfigBuilder,
+use foyer::{
+    set_metrics_registry, FsDeviceConfigBuilder, HybridCacheBuilder, LruConfig,
+    RatedTicketAdmissionPolicy, RuntimeConfigBuilder,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
@@ -29,11 +28,10 @@ use risingwave_object_store::object::build_remote_object_store;
 
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{RemoteTableAccessor, RpcFilterKeyExtractorManager};
-use crate::hummock::file_cache::preclude::*;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::{
-    set_foyer_metrics_registry, CachedBlock, FileCache, FileCacheConfig, HummockError,
-    HummockStorage, RecentFilter, Sstable, SstableBlockIndex, SstableStore, SstableStoreConfig,
+    Block, HummockError, HummockStorage, RecentFilter, Sstable, SstableBlockIndex, SstableStore,
+    SstableStoreConfig,
 };
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
@@ -574,7 +572,7 @@ impl StateStoreImpl {
     ) -> StorageResult<Self> {
         const MB: usize = 1024 * 1024;
 
-        set_foyer_metrics_registry(GLOBAL_METRICS_REGISTRY.clone());
+        set_metrics_registry(GLOBAL_METRICS_REGISTRY.clone());
 
         let meta_cache_v2 = {
             let mut builder = HybridCacheBuilder::new()
@@ -640,8 +638,9 @@ impl StateStoreImpl {
                     },
                 )
                 .with_object_pool_capacity(1024 * opts.block_cache_shard_num)
-                .with_weighter(|_: &SstableBlockIndex, value: &CachedBlock| {
-                    u64::BITS as usize * 2 / 8 + value.weight()
+                .with_weighter(|_: &SstableBlockIndex, value: &Box<Block>| {
+                    // FIXME(MrCroxx): Calculate block weight more accurately.
+                    u64::BITS as usize * 2 / 8 + value.raw().len()
                 })
                 .storage();
 
@@ -682,71 +681,13 @@ impl StateStoreImpl {
             builder.build().await.map_err(HummockError::foyer_error)?
         };
 
-        let (data_file_cache, recent_filter) = if opts.data_file_cache_dir.is_empty() {
-            (FileCache::none(), None)
+        let recent_filter = if opts.data_file_cache_dir.is_empty() {
+            None
         } else {
-            let config = FileCacheConfig {
-                name: "data".to_string(),
-                dir: PathBuf::from(opts.data_file_cache_dir.clone()),
-                capacity: opts.data_file_cache_capacity_mb * MB,
-                file_capacity: opts.data_file_cache_file_capacity_mb * MB,
-                device_align: opts.data_file_cache_device_align,
-                device_io_size: opts.data_file_cache_device_io_size,
-                lfu_window_to_cache_size_ratio: opts.data_file_cache_lfu_window_to_cache_size_ratio,
-                lfu_tiny_lru_capacity_ratio: opts.data_file_cache_lfu_tiny_lru_capacity_ratio,
-                insert_rate_limit: opts.data_file_cache_insert_rate_limit_mb * MB,
-                flushers: opts.data_file_cache_flushers,
-                reclaimers: opts.data_file_cache_reclaimers,
-                recover_concurrency: opts.data_file_cache_recover_concurrency,
-                catalog_bits: opts.data_file_cache_catalog_bits,
-                admissions: vec![],
-                reinsertions: vec![],
-                compression: opts
-                    .data_file_cache_compression
-                    .as_str()
-                    .try_into()
-                    .map_err(HummockError::file_cache)?,
-            };
-            let cache = FileCache::open(config)
-                .await
-                .map_err(HummockError::file_cache)?;
-            let filter = Some(Arc::new(RecentFilter::new(
+            Some(Arc::new(RecentFilter::new(
                 opts.cache_refill_recent_filter_layers,
                 Duration::from_millis(opts.cache_refill_recent_filter_rotate_interval_ms as u64),
-            )));
-            (cache, filter)
-        };
-
-        let meta_file_cache = if opts.meta_file_cache_dir.is_empty() {
-            FileCache::none()
-        } else {
-            const MB: usize = 1024 * 1024;
-
-            let config = FileCacheConfig {
-                name: "meta".to_string(),
-                dir: PathBuf::from(opts.meta_file_cache_dir.clone()),
-                capacity: opts.meta_file_cache_capacity_mb * MB,
-                file_capacity: opts.meta_file_cache_file_capacity_mb * MB,
-                device_align: opts.meta_file_cache_device_align,
-                device_io_size: opts.meta_file_cache_device_io_size,
-                lfu_window_to_cache_size_ratio: opts.meta_file_cache_lfu_window_to_cache_size_ratio,
-                lfu_tiny_lru_capacity_ratio: opts.meta_file_cache_lfu_tiny_lru_capacity_ratio,
-                insert_rate_limit: opts.meta_file_cache_insert_rate_limit_mb * MB,
-                flushers: opts.meta_file_cache_flushers,
-                reclaimers: opts.meta_file_cache_reclaimers,
-                recover_concurrency: opts.meta_file_cache_recover_concurrency,
-                catalog_bits: opts.meta_file_cache_catalog_bits,
-                admissions: vec![],
-                reinsertions: vec![],
-                compression: opts
-                    .meta_file_cache_compression
-                    .as_str()
-                    .try_into()
-                    .map_err(HummockError::file_cache)?,
-            };
-            FileCache::open(config)
-                .await
-                .map_err(HummockError::file_cache)?
+            )))
         };
 
         let store = match s {
@@ -770,8 +711,6 @@ impl StateStoreImpl {
                     meta_cache_eviction: opts.meta_cache_eviction_config.clone(),
                     prefetch_buffer_capacity: opts.prefetch_buffer_capacity_mb * (1 << 20),
                     max_prefetch_block_number: opts.max_prefetch_block_number,
-                    data_file_cache,
-                    meta_file_cache,
                     recent_filter,
                     state_store_metrics: state_store_metrics.clone(),
 

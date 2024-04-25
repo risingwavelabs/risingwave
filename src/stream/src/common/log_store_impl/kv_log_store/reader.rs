@@ -18,7 +18,7 @@ use std::pin::Pin;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use foyer::memory::CacheContext;
+use foyer::CacheContext;
 use futures::future::{try_join_all, BoxFuture};
 use futures::{FutureExt, TryFutureExt};
 use risingwave_common::array::StreamChunk;
