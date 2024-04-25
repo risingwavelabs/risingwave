@@ -191,7 +191,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
 mod tests {
 
     use futures::pin_mut;
-    use futures_async_stream::{for_await, try_stream};
+    use futures_async_stream::for_await;
     use maplit::{convert_args, hashmap};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
     use risingwave_common::row::OwnedRow;

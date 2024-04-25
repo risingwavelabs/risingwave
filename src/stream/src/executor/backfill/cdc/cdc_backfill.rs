@@ -333,20 +333,10 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         cur_barrier_upstream_processed_rows,
                                     );
 
-                                    // update and persist current backfill progress
-                                    state_impl
-                                        .mutate_state(
-                                            current_pk_pos.clone(),
-                                            last_binlog_offset.clone(),
-                                            total_snapshot_row_count,
-                                            false,
-                                        )
-                                        .await?;
-                                    state_impl.commit_state(barrier.epoch).await?;
-
                                     // when processing a barrier, check whether can start a new snapshot
                                     // if the number of barriers reaches the snapshot interval
                                     if can_start_new_snapshot {
+                                        // staging the barrier
                                         pending_barrier = Some(barrier);
                                         tracing::debug!(
                                             upstream_table_id,
@@ -357,6 +347,18 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         // Break the loop for consuming snapshot and prepare to start a new snapshot
                                         break;
                                     } else {
+                                        // update and persist current backfill progress
+                                        state_impl
+                                            .mutate_state(
+                                                current_pk_pos.clone(),
+                                                last_binlog_offset.clone(),
+                                                total_snapshot_row_count,
+                                                false,
+                                            )
+                                            .await?;
+
+                                        state_impl.commit_state(barrier.epoch).await?;
+
                                         // emit barrier and continue consume the backfill stream
                                         yield Message::Barrier(barrier);
                                     }
@@ -420,16 +422,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         ));
                                     }
 
-                                    state_impl
-                                        .mutate_state(
-                                            current_pk_pos.clone(),
-                                            last_binlog_offset.clone(),
-                                            total_snapshot_row_count,
-                                            true,
-                                        )
-                                        .await?;
-
-                                    // backfill has finished
+                                    // backfill has finished, exit the backfill loop and persist the state when we recv a barrier
                                     break 'backfill_loop;
                                 }
                                 Some(chunk) => {
@@ -458,6 +451,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 }
 
                 assert!(pending_barrier.is_some(), "pending_barrier must exist");
+                let pending_barrier = pending_barrier.unwrap();
+
                 // Here we have to ensure the snapshot stream is consumed at least once,
                 // since the barrier event can kick in anytime.
                 // Otherwise, the result set of the new snapshot stream may become empty.
@@ -492,9 +487,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                 .await?;
 
                             // commit state because we have received a barrier message
-                            let barrier = pending_barrier.unwrap();
-                            state_impl.commit_state(barrier.epoch).await?;
-                            yield Message::Barrier(barrier);
+                            state_impl.commit_state(pending_barrier.epoch).await?;
+                            yield Message::Barrier(pending_barrier);
                             // end of backfill loop, since backfill has finished
                             break 'backfill_loop;
                         }
@@ -560,8 +554,18 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     cur_barrier_upstream_processed_rows,
                 );
 
-                let barrier = pending_barrier.unwrap();
-                yield Message::Barrier(barrier);
+                // update and persist current backfill progress
+                state_impl
+                    .mutate_state(
+                        current_pk_pos.clone(),
+                        last_binlog_offset.clone(),
+                        total_snapshot_row_count,
+                        false,
+                    )
+                    .await?;
+
+                state_impl.commit_state(pending_barrier.epoch).await?;
+                yield Message::Barrier(pending_barrier);
             }
         } else if self.disable_backfill {
             // If backfill is disabled, we just mark the backfill as finished
@@ -595,7 +599,16 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             if let Some(msg) = mapping_message(msg, &self.output_indices) {
                 // If not finished then we need to update state, otherwise no need.
                 if let Message::Barrier(barrier) = &msg {
-                    // persist the backfill state
+                    // finalized the backfill state
+                    // TODO: unify `mutate_state` and `commit_state` into one method
+                    state_impl
+                        .mutate_state(
+                            current_pk_pos.clone(),
+                            last_binlog_offset.clone(),
+                            total_snapshot_row_count,
+                            true,
+                        )
+                        .await?;
                     state_impl.commit_state(barrier.epoch).await?;
 
                     // mark progress as finished
