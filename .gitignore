@@ -81,3 +81,5 @@ e2e_test/iceberg/spark-*-bin*
 **/poetry.lock
 
 *.slt.temp
+
+.direnv/
