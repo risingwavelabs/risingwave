@@ -443,10 +443,11 @@ impl NonOverlapSubLevelPicker {
                 .then_with(|| a.total_file_size.cmp(&b.total_file_size))
         });
 
+        // For unexpected task the number of levels is as small as possible
         unexpected.sort_by(|a, b| {
-            b.sstable_infos
+            a.sstable_infos
                 .len()
-                .cmp(&a.sstable_infos.len())
+                .cmp(&b.sstable_infos.len())
                 .then_with(|| a.total_file_count.cmp(&b.total_file_count))
                 .then_with(|| a.total_file_size.cmp(&b.total_file_size))
         });
