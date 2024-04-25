@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/// It duplicates the on found crate sea-orm-migration, but derives serde.
+/// It duplicates the one found in crate sea-orm-migration, but derives serde.
 /// It's only used by metadata backup/restore.
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
