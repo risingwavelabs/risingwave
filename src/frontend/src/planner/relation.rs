@@ -232,7 +232,7 @@ impl Planner {
             }
             // for the recursive union in rcte
             Either::Right(recursive_union) => {
-                self.plan_recursive_union(*recursive_union.base, *recursive_union.recursive)
+                self.plan_recursive_union(*recursive_union.base, *recursive_union.recursive, share.share_id)
             }
         }
     }
@@ -242,7 +242,9 @@ impl Planner {
     }
 
     pub(super) fn plan_cte_ref(&mut self, cte_ref: BoundBackCteRef) -> Result<PlanRef> {
-        todo!()
+        // TODO: this is actually duplicated from `plan_recursive_union`, refactor?
+        let base = self.plan_set_expr(cte_ref.base, vec![], &[])?;
+        Ok(LogicalCteRef::create(cte_ref.share_id, base))
     }
 
     fn collect_col_data_types_for_tumble_window(relation: &Relation) -> Result<Vec<DataType>> {

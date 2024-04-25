@@ -15,6 +15,7 @@
 use core::convert::Into;
 use core::fmt::Formatter;
 use std::cell::{RefCell, RefMut};
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -62,7 +63,7 @@ pub struct OptimizerContext {
     overwrite_options: OverwriteOptions,
     /// Store the mapping between `share_id` and the corresponding
     /// `PlanRef`, used by rcte's planning. (e.g., in `LogicalCteRef`)
-    // rcte_cache: HashMap<ShareId, PlanRef>,
+    rcte_cache: RefCell<HashMap<ShareId, PlanRef>>,
 
     _phantom: PhantomUnsend,
 }
@@ -96,7 +97,7 @@ impl OptimizerContext {
             next_expr_display_id: RefCell::new(RESERVED_ID_NUM.into()),
             total_rule_applied: RefCell::new(0),
             overwrite_options,
-            // rcte_cache: HashMap::new(),
+            rcte_cache: RefCell::new(HashMap::new()),
             _phantom: Default::default(),
         }
     }
@@ -119,7 +120,7 @@ impl OptimizerContext {
             next_expr_display_id: RefCell::new(0),
             total_rule_applied: RefCell::new(0),
             overwrite_options: OverwriteOptions::default(),
-            // rcte_cache: HashMap::new(),
+            rcte_cache: RefCell::new(HashMap::new()),
             _phantom: Default::default(),
         }
         .into()
@@ -236,6 +237,14 @@ impl OptimizerContext {
 
     pub fn get_session_timezone(&self) -> String {
         self.session_timezone.borrow().timezone()
+    }
+
+    pub fn get_rcte_cache_plan(&self, id: &ShareId) -> Option<PlanRef> {
+        self.rcte_cache.borrow().get(id).cloned()
+    }
+
+    pub fn insert_rcte_cache_plan(&self, id: ShareId, plan: PlanRef) {
+        self.rcte_cache.borrow_mut().insert(id, plan);
     }
 }
 

@@ -30,7 +30,7 @@ pub struct RecursiveUnion<PlanRef> {
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for RecursiveUnion<PlanRef> {
     fn functional_dependency(&self) -> FunctionalDependencySet {
-        todo!()
+        self.recursive.functional_dependency().clone()
     }
 
     fn schema(&self) -> Schema {
@@ -53,7 +53,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for RecursiveUnion<PlanRef> {
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        self.base.ctx()
+        self.recursive.ctx()
     }
 }
 

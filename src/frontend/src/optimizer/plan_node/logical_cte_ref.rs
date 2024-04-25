@@ -36,14 +36,14 @@ pub struct LogicalCteRef {
 }
 
 impl LogicalCteRef {
-    pub fn new(share_id: ShareId, base_plan: PlanRef, r#ref: Weak<PlanRef>) -> Self {
-        let core = generic::CteRef::new(share_id, r#ref, base_plan);
+    pub fn new(share_id: ShareId, base_plan: PlanRef) -> Self {
+        let core = generic::CteRef::new(share_id, base_plan);
         let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
     }
 
-    pub fn create(share_id: ShareId, base_plan: PlanRef, r#ref: Weak<PlanRef>) -> PlanRef {
-        Self::new(share_id, base_plan, r#ref).into()
+    pub fn create(share_id: ShareId, base_plan: PlanRef) -> PlanRef {
+        Self::new(share_id, base_plan).into()
     }
 }
 

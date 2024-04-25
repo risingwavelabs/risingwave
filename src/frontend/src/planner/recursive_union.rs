@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::binder::BoundSetExpr;
+use crate::binder::{BoundSetExpr, ShareId};
 use crate::error::Result;
 use crate::optimizer::plan_node::LogicalRecursiveUnion;
 use crate::{PlanRef, Planner};
@@ -22,9 +22,12 @@ impl Planner {
         &mut self,
         base: BoundSetExpr,
         recursive: BoundSetExpr,
+        id: ShareId,
     ) -> Result<PlanRef> {
         let base = self.plan_set_expr(base, vec![], &[])?;
         let recursive = self.plan_set_expr(recursive, vec![], &[])?;
-        Ok(LogicalRecursiveUnion::create(base, recursive))
+        let plan = LogicalRecursiveUnion::create(base, recursive);
+        self.ctx.insert_rcte_cache_plan(id, plan.clone());
+        Ok(plan)
     }
 }

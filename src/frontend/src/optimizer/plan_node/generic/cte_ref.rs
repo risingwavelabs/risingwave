@@ -16,18 +16,19 @@ use std::cell::RefCell;
 use std::hash::Hash;
 use std::rc::Weak;
 
+use itertools::Itertools;
 use pretty_xmlish::StrAssocArr;
+use risingwave_common::array::Op;
 use risingwave_common::catalog::Schema;
 
 use super::{impl_distill_unit_from_fields, GenericPlanNode, GenericPlanRef};
 use crate::binder::ShareId;
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::OptimizerContextRef;
+use crate::{optimizer, OptimizerContextRef};
 
 #[derive(Clone, Debug)]
 pub struct CteRef<PlanRef> {
     share_id: ShareId,
-    pub r#ref: Weak<PlanRef>,
     base: PlanRef,
     derived_stream_key: RefCell<Option<Option<Vec<usize>>>>,
     deriving: RefCell<bool>,
@@ -48,14 +49,19 @@ impl<PlanRef> Hash for CteRef<PlanRef> {
 }
 
 impl<PlanRef> CteRef<PlanRef> {
-    pub fn new(share_id: ShareId, r#ref: Weak<PlanRef>, base: PlanRef) -> Self {
+    pub fn new(share_id: ShareId, base: PlanRef) -> Self {
         Self {
             share_id,
-            r#ref,
             base,
             derived_stream_key: RefCell::new(None),
             deriving: RefCell::new(false),
         }
+    }
+}
+
+impl<PlanRef: GenericPlanRef> CteRef<PlanRef> {
+    pub fn get_cte_ref(&self) -> Option<optimizer::plan_node::PlanRef> {
+        self.base.ctx().get_rcte_cache_plan(&self.share_id)
     }
 }
 
@@ -65,25 +71,19 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for CteRef<PlanRef> {
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        if let Some(derived_stream_key) = self.derived_stream_key.borrow().as_ref() {
-            return derived_stream_key.clone();
+        if let Some(plan_ref) = self.get_cte_ref() {
+            plan_ref.stream_key().map(|s| s.iter().map(|i| i.to_owned()).collect_vec())
+        } else {
+            self.base.stream_key().map(|s| s.iter().map(|i| i.to_owned()).collect_vec())
         }
-        if *self.deriving.borrow() {
-            return self.base.stream_key().map(Into::into);
-        }
-        *self.deriving.borrow_mut() = true;
-        let derived_stream_key = self.r#ref.upgrade().unwrap().stream_key().map(Into::into);
-        *self.deriving.borrow_mut() = false;
-        *self.derived_stream_key.borrow_mut() = Some(derived_stream_key.clone());
-        derived_stream_key
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        self.r#ref.upgrade().unwrap().ctx()
+        self.base.ctx()
     }
 
     fn functional_dependency(&self) -> FunctionalDependencySet {
-        todo!()
+        self.base.functional_dependency().clone()
     }
 }
 

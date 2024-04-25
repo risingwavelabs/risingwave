@@ -85,7 +85,7 @@ impl PredicatePushdown for LogicalRecursiveUnion {
         _predicate: Condition,
         _ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        todo!()
+        self.clone().into()
     }
 }
 
