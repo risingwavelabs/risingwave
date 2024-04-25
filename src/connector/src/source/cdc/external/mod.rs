@@ -579,7 +579,7 @@ mod tests {
     use futures_async_stream::for_await;
     use maplit::{convert_args, hashmap};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
-    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::types::DataType;
 
     use crate::source::cdc::external::{
         CdcOffset, ExternalTableReader, MySqlExternalTableReader, MySqlOffset, SchemaTableName,
