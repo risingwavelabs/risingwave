@@ -359,6 +359,7 @@ mod test {
                             connector_rpc_sink_payload_format: None,
                             config_path: "src/config/test.toml",
                             total_memory_bytes: 34359738368,
+                            reserved_memory_bytes: None,
                             parallelism: 10,
                             role: Both,
                             metrics_level: None,

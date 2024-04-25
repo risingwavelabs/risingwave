@@ -41,6 +41,14 @@ use risingwave_expr::{function, ExprError, Result};
 /// )).*;
 /// ----
 /// 1 {2,"a b"} (4,"a b c")
+///
+/// query II
+/// select * from jsonb_populate_record(
+///    null::struct<a int, b int>,
+///    '{"a": 1, "b": 2}'
+/// );
+/// ----
+/// 1 2
 /// ```
 #[function("jsonb_populate_record(struct, jsonb) -> struct")]
 fn jsonb_populate_record(
