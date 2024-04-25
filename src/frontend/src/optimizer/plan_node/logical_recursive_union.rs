@@ -28,8 +28,8 @@ use crate::error::Result;
 use crate::utils::Condition;
 use crate::PlanRef;
 
-/// `LogicalUnion` returns the union of the rows of its inputs.
-/// If `all` is false, it needs to eliminate duplicates.
+/// `LogicalRecursiveUnion` returns the union of the rows of its inputs.
+/// note: if `all` is false, it needs to eliminate duplicates.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalRecursiveUnion {
     pub base: PlanBase<Logical>,

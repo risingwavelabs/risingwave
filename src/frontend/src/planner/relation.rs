@@ -29,8 +29,7 @@ use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{
-    LogicalApply, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalShare,
-    LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalValues, PlanRef,
+    LogicalApply, LogicalCteRef, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalShare, LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalValues, PlanRef
 };
 use crate::optimizer::property::Cardinality;
 use crate::planner::Planner;
@@ -242,8 +241,8 @@ impl Planner {
         todo!("plan watermark");
     }
 
-    pub(super) fn plan_cte_ref(&mut self, _cte_ref: BoundBackCteRef) -> Result<PlanRef> {
-        bail_not_implemented!(issue = 15135, "recursive CTE not supported")
+    pub(super) fn plan_cte_ref(&mut self, cte_ref: BoundBackCteRef) -> Result<PlanRef> {
+        todo!()
     }
 
     fn collect_col_data_types_for_tumble_window(relation: &Relation) -> Result<Vec<DataType>> {

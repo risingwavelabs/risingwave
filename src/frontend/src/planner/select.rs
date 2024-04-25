@@ -95,6 +95,7 @@ impl Planner {
             None => self.create_dummy_values(),
             Some(t) => self.plan_relation(t)?,
         };
+        println!("after plan relation: {:#?}", root);
         // Plan the WHERE clause.
         if let Some(where_clause) = where_clause {
             root = self.plan_where(root, where_clause)?;

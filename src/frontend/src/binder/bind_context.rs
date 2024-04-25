@@ -94,7 +94,7 @@ pub enum BindingCteState {
     #[default]
     Init,
     /// We know the schema form after the base term resolved.
-    BaseResolved { schema: Schema },
+    BaseResolved { base: BoundSetExpr },
     /// We get the whole bound result of the (recursive) CTE.
     Bound {
         query: Either<BoundQuery, RecursiveUnion>,

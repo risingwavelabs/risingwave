@@ -374,13 +374,13 @@ impl Binder {
                 BindingCteState::Init => {
                     Err(ErrorCode::BindError("Base term of recursive CTE not found, consider writing it to left side of the `UNION ALL` operator".to_string()).into())
                 }
-                BindingCteState::BaseResolved { schema } => {
+                BindingCteState::BaseResolved { base } => {
                     self.bind_table_to_context(
-                        schema.fields.iter().map(|f| (false, f.clone())),
+                        base.schema().fields.iter().map(|f| (false, f.clone())),
                         table_name.clone(),
                         Some(original_alias),
                     )?;
-                    Ok(Relation::BackCteRef(Box::new(BoundBackCteRef { share_id })))
+                    Ok(Relation::BackCteRef(Box::new(BoundBackCteRef { share_id, base })))
                 }
                 BindingCteState::Bound { query } => {
                     let schema = match &query {

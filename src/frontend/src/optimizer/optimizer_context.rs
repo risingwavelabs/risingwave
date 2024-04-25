@@ -62,7 +62,7 @@ pub struct OptimizerContext {
     overwrite_options: OverwriteOptions,
     /// Store the mapping between `share_id` and the corresponding
     /// `PlanRef`, used by rcte's planning. (e.g., in `LogicalCteRef`)
-    rcte_cache: HashMap<ShareId, PlanRef>,
+    // rcte_cache: HashMap<ShareId, PlanRef>,
 
     _phantom: PhantomUnsend,
 }
@@ -96,7 +96,7 @@ impl OptimizerContext {
             next_expr_display_id: RefCell::new(RESERVED_ID_NUM.into()),
             total_rule_applied: RefCell::new(0),
             overwrite_options,
-            rcte_cache: HashMap::new(),
+            // rcte_cache: HashMap::new(),
             _phantom: Default::default(),
         }
     }
@@ -119,7 +119,7 @@ impl OptimizerContext {
             next_expr_display_id: RefCell::new(0),
             total_rule_applied: RefCell::new(0),
             overwrite_options: OverwriteOptions::default(),
-            rcte_cache: HashMap::new(),
+            // rcte_cache: HashMap::new(),
             _phantom: Default::default(),
         }
         .into()

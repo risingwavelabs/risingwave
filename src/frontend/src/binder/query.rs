@@ -357,7 +357,7 @@ impl Binder {
                 let mut base = self.bind_set_expr(*left)?;
 
                 entry.borrow_mut().state = BindingCteState::BaseResolved {
-                    schema: base.schema().clone(),
+                    base: base.clone(),
                 };
 
                 // Reset context for right side, but keep `cte_to_relation`.
