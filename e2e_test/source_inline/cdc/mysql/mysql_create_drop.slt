@@ -45,7 +45,23 @@ create source s with (
 
 sleep 2s
 
-# SourceExecutor only receives new data after it's created.
+# At the beginning, the source is paused. It will resume after a downstream is created.
+system ok
+internal_table.mjs --name s --type '' --count
+----
+count: 0
+
+
+statement ok
+create table tt1_shared (v1 int,
+  v2 timestamptz,
+  PRIMARY KEY (v1)
+) from s table 'testdb1.tt1';
+
+sleep 2s
+
+# The source is resumed.
+# SourceExecutor does not handle historical data, and only receives new data after it's created.
 # But it can receive offset update at the beginning and periodically
 # via the heartbeat message.
 system ok
@@ -113,12 +129,6 @@ create table tt5 (v1 int,
   database.name = 'testdb1',
   table.name = 'tt5',
 );
-
-statement ok
-create table tt1_shared (v1 int,
-  v2 timestamptz,
-  PRIMARY KEY (v1)
-) from s table 'testdb1.tt1';
 
 statement ok
 create table tt2_shared (v1 int,
