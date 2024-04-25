@@ -21,11 +21,13 @@ use std::sync::Arc;
 
 use risingwave_sqlparser::ast::{ExplainOptions, ExplainType};
 
+use crate::binder::ShareId;
 use crate::expr::{CorrelatedId, SessionTimezone};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::session::SessionImpl;
 use crate::utils::{OverwriteOptions, WithOptions};
+use crate::PlanRef;
 
 const RESERVED_ID_NUM: u16 = 10000;
 
@@ -58,6 +60,9 @@ pub struct OptimizerContext {
     /// Store the configs can be overwritten in with clause
     /// if not specified, use the value from session variable.
     overwrite_options: OverwriteOptions,
+    /// Store the mapping between `share_id` and the corresponding
+    /// `PlanRef`, used by rcte's planning. (e.g., in `LogicalCteRef`)
+    rcte_cache: HashMap<ShareId, PlanRef>,
 
     _phantom: PhantomUnsend,
 }
@@ -91,6 +96,7 @@ impl OptimizerContext {
             next_expr_display_id: RefCell::new(RESERVED_ID_NUM.into()),
             total_rule_applied: RefCell::new(0),
             overwrite_options,
+            rcte_cache: HashMap::new(),
             _phantom: Default::default(),
         }
     }
@@ -113,6 +119,7 @@ impl OptimizerContext {
             next_expr_display_id: RefCell::new(0),
             total_rule_applied: RefCell::new(0),
             overwrite_options: OverwriteOptions::default(),
+            rcte_cache: HashMap::new(),
             _phantom: Default::default(),
         }
         .into()
