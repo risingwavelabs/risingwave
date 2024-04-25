@@ -254,8 +254,14 @@ fn consistent_old_value_op(
 
 #[derive(Eq, PartialEq, Copy, Clone, Debug)]
 pub enum StateTableOpConsistencyLevel {
+    /// Op is inconsistent
     Inconsistent,
+    /// Op is consistent.
+    /// - Insert op should ensure that the key does not exist previously
+    /// - Delete and Update op should ensure that the key exists and the previous value matches the passed old value
     ConsistentOldValue,
+    /// The requirement on operation consistency is the same as `ConsistentOldValue`.
+    /// The difference is that in the `LogStoreEnabled`, the state table should also flush and store and old value.
     LogStoreEnabled,
 }
 
