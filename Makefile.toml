@@ -1308,7 +1308,6 @@ echo "All processes has exited."
 """
 
 [tasks.slt]
-env = { SLT_HOST = "${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS}", SLT_PORT = "${RISEDEV_RW_FRONTEND_PORT}", SLT_DB = "dev" }
 category = "RiseDev - Test - SQLLogicTest"
 install_crate = { version = "0.20.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
   "--help",
@@ -1318,6 +1317,19 @@ env_files = ["${PREFIX_CONFIG}/risedev-env"]
 command = "sqllogictest"
 args = ["${@}"]
 description = "🌟 Run SQLLogicTest"
+
+[tasks.slt.env]
+SLT_HOST = "${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS}"
+SLT_PORT = "${RISEDEV_RW_FRONTEND_PORT}"
+SLT_DB = "dev"
+PATH = "${PWD}/e2e_test/commands:${PATH}"
+
+[tasks.slt-clean]
+category = "RiseDev - Test - SQLLogicTest"
+dependencies = ["clean-kafka", "reset-rw"]
+description = "Run SQLLogicTest with a clean environment"
+run_task = "slt"
+args = ["${@}"]
 
 [tasks.slt-streaming]
 category = "RiseDev - Test - SQLLogicTest"
@@ -1433,3 +1445,14 @@ script = """
 vars = dump_variables
 echo ${vars}
 """
+
+[tasks.show-risedev-env]
+description = "Show risedev-env environment variables"
+dependencies = ["check-risedev-env-file"]
+script = '''
+#!/usr/bin/env bash
+set -euo pipefail
+cat ${PREFIX_CONFIG}/risedev-env
+echo "Hint: To load the environment variables into the shell, you may run:"
+echo "$(tput setaf 4)\set -a; source ${PREFIX_CONFIG}/risedev-env; set +a$(tput sgr0)"
+'''
