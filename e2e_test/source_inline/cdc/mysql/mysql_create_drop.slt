@@ -43,7 +43,7 @@ create source s with (
   server.id = '114514'
 );
 
-sleep 1s
+sleep 2s
 
 # SourceExecutor only receives new data after it's created.
 # But it can receive offset update at the beginning and periodically
