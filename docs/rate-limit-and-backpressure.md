@@ -15,7 +15,7 @@ Here we compare 2 concepts in RisingWave used to keep barrier latency low.
 The data between barriers takes a long time to process.
 This can be due to high amplification, UDF latency, or other reasons.
 
-By default, Barriers have an interval of 256ms.
+By default, Barriers have an interval of 1s.
 If records between those barrier take longer than 256ms to process, the barrier latency will increase by that difference.
 
 ## How does Backpressure affect Barrier Latency?
@@ -77,6 +77,9 @@ It will only do so once it is full.
 This means that the stream chunks between barriers are equivalent to channel capacity.
 And then the barrier latency is the duration taken to process these barriers.
 
+Besides channels, some executors may also buffer chunks, for instance within the ChunkBuilder.
+Barrier latency also has to consider these.
+
 _example.toml_
 ```toml
 [streaming.developer]
@@ -104,6 +107,9 @@ This means that barriers are not rate limited.
 
 In a newly created MV, it will undergo Backfilling, to fill the MV with historical data and fresh data concurrently.
 When the MV has joins or UDF calls with high latency, the barrier latency can spike.
+
+After creating new jobs we'll naturally have more channels to fill in order to make back-pressure take effects.
+This might also be a reason why we get temporary increase in barrier latency.
 
 In such a case, we can rate limit the Backfill actor's snapshot read side to keep barrier latency low.
 
