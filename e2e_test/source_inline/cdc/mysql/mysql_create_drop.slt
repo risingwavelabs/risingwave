@@ -51,6 +51,7 @@ internal_table.mjs --name s --type '' --count
 ----
 count: 0
 
+
 statement ok
 create table tt1_shared (v1 int,
   v2 timestamptz,
