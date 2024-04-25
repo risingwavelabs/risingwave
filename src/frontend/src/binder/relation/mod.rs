@@ -26,7 +26,6 @@ use risingwave_sqlparser::ast::{
 use thiserror::Error;
 use thiserror_ext::AsReport;
 
-use self::cte_ref::BoundBackCteRef;
 use super::bind_context::ColumnBinding;
 use super::statement::RewriteExprsRecursive;
 use crate::binder::bind_context::{BindingCte, BindingCteState};
@@ -43,6 +42,7 @@ mod table_or_source;
 mod watermark;
 mod window_table_function;
 
+pub use cte_ref::BoundBackCteRef;
 pub use join::BoundJoin;
 pub use share::BoundShare;
 pub use subquery::BoundSubquery;

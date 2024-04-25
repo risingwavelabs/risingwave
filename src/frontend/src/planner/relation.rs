@@ -22,8 +22,8 @@ use risingwave_common::types::{DataType, Interval, ScalarImpl};
 use risingwave_sqlparser::ast::AsOf;
 
 use crate::binder::{
-    BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
-    BoundWindowTableFunction, Relation, WindowTableFunctionKind,
+    BoundBackCteRef, BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable,
+    BoundWatermark, BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
@@ -218,25 +218,34 @@ impl Planner {
     }
 
     pub(super) fn plan_share(&mut self, share: BoundShare) -> Result<PlanRef> {
-        let Either::Left(nonrecursive_query) = share.input else {
-            bail_not_implemented!(issue = 15135, "recursive CTE is not supported");
-        };
-        let id = share.share_id;
-        match self.share_cache.get(&id) {
-            None => {
-                let result = self
-                    .plan_query(nonrecursive_query)?
-                    .into_unordered_subplan();
-                let logical_share = LogicalShare::create(result);
-                self.share_cache.insert(id, logical_share.clone());
-                Ok(logical_share)
+        match share.input {
+            Either::Left(nonrecursive_query) => {
+                let id = share.share_id;
+                match self.share_cache.get(&id) {
+                    None => {
+                        let result = self
+                            .plan_query(nonrecursive_query)?
+                            .into_unordered_subplan();
+                        let logical_share = LogicalShare::create(result);
+                        self.share_cache.insert(id, logical_share.clone());
+                        Ok(logical_share)
+                    }
+                    Some(result) => Ok(result.clone()),
+                }
             }
-            Some(result) => Ok(result.clone()),
+            Either::Right(recursive_union) => {
+                self.plan_recursive_union(*recursive_union.base, *recursive_union.recursive)
+            }
         }
     }
 
     pub(super) fn plan_watermark(&mut self, _watermark: BoundWatermark) -> Result<PlanRef> {
         todo!("plan watermark");
+    }
+
+    #[allow(dead_code)]
+    pub(super) fn plan_cte_ref(&mut self, _cte_ref: BoundBackCteRef) -> Result<PlanRef> {
+        todo!("plan cte ref");
     }
 
     fn collect_col_data_types_for_tumble_window(relation: &Relation) -> Result<Vec<DataType>> {

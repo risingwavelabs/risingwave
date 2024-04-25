@@ -17,7 +17,6 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 
 use super::{impl_distill_unit_from_fields, GenericPlanNode, GenericPlanRef};
-use crate::optimizer::plan_node::ColPrunable;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::OptimizerContextRef;
 

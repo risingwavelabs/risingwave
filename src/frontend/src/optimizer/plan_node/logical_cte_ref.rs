@@ -20,7 +20,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use super::expr_visitable::ExprVisitable;
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
+    generic, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
     LogicalProject, PlanBase, PredicatePushdown, PredicatePushdownContext, RewriteStreamContext,
     ToBatch, ToStream, ToStreamContext,
 };
@@ -56,7 +56,7 @@ impl ExprRewritable for LogicalCteRef {}
 impl ExprVisitable for LogicalCteRef {}
 
 impl ColPrunable for LogicalCteRef {
-    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         LogicalProject::with_out_col_idx(self.clone().into(), required_cols.iter().copied()).into()
     }
 }
@@ -64,8 +64,8 @@ impl ColPrunable for LogicalCteRef {
 impl PredicatePushdown for LogicalCteRef {
     fn predicate_pushdown(
         &self,
-        predicate: Condition,
-        ctx: &mut PredicatePushdownContext,
+        _predicate: Condition,
+        _ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
         todo!()
     }
@@ -78,13 +78,13 @@ impl ToBatch for LogicalCteRef {
 }
 
 impl ToStream for LogicalCteRef {
-    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         bail_not_implemented!(issue = 15135, "recursive CTE not supported")
     }
 
     fn logical_rewrite_for_stream(
         &self,
-        ctx: &mut RewriteStreamContext,
+        _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
         bail_not_implemented!(issue = 15135, "recursive CTE not supported")
     }
