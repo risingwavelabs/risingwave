@@ -576,10 +576,12 @@ impl ExternalTableReaderImpl {
 mod tests {
 
     use futures::pin_mut;
-    use futures_async_stream::for_await;
+    use futures_async_stream::{for_await, try_stream};
     use maplit::{convert_args, hashmap};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
-    use risingwave_common::types::DataType;
+    use risingwave_common::row::OwnedRow;
+    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 
     use crate::source::cdc::external::{
         CdcOffset, ExternalTableReader, MySqlExternalTableReader, MySqlOffset, SchemaTableName,
