@@ -9265,6 +9265,7 @@ dependencies = [
  "async-trait",
  "auto_enums",
  "auto_impl",
+ "await-tree",
  "aws-config",
  "aws-credential-types",
  "aws-sdk-kinesis",

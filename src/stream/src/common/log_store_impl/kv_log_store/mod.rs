@@ -16,9 +16,11 @@ use std::sync::Arc;
 
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
+use risingwave_common::metrics::{
+    LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
+};
 use risingwave_connector::sink::log_store::LogStoreFactory;
-use risingwave_connector::sink::{SinkParam, SinkWriterParam};
+use risingwave_connector::sink::SinkParam;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::store::{NewLocalOptions, OpConsistencyLevel};
 use risingwave_storage::StateStore;
@@ -74,6 +76,10 @@ pub(crate) struct KvLogStoreMetrics {
     pub storage_write_size: LabelGuardedIntCounter<3>,
     pub rewind_count: LabelGuardedIntCounter<3>,
     pub rewind_delay: LabelGuardedHistogram<3>,
+    pub buffer_unconsumed_item_count: LabelGuardedIntGauge<3>,
+    pub buffer_unconsumed_row_count: LabelGuardedIntGauge<3>,
+    pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge<3>,
+    pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge<3>,
     pub persistent_log_read_metrics: KvLogStoreReadMetrics,
     pub flushed_buffer_read_metrics: KvLogStoreReadMetrics,
 }
@@ -81,11 +87,11 @@ pub(crate) struct KvLogStoreMetrics {
 impl KvLogStoreMetrics {
     pub(crate) fn new(
         metrics: &StreamingMetrics,
-        writer_param: &SinkWriterParam,
+        identity: &String,
         sink_param: &SinkParam,
         connector: &'static str,
     ) -> Self {
-        let executor_id = format!("{}", writer_param.executor_id);
+        let executor_id = identity;
         let sink_id = format!("{}", sink_param.sink_id.sink_id);
         let labels = &[executor_id.as_str(), connector, sink_id.as_str()];
         let storage_write_size = metrics
@@ -140,10 +146,27 @@ impl KvLogStoreMetrics {
             .kv_log_store_rewind_delay
             .with_guarded_label_values(labels);
 
+        let buffer_unconsumed_item_count = metrics
+            .kv_log_store_buffer_unconsumed_item_count
+            .with_guarded_label_values(labels);
+        let buffer_unconsumed_row_count = metrics
+            .kv_log_store_buffer_unconsumed_row_count
+            .with_guarded_label_values(labels);
+        let buffer_unconsumed_epoch_count = metrics
+            .kv_log_store_buffer_unconsumed_epoch_count
+            .with_guarded_label_values(labels);
+        let buffer_unconsumed_min_epoch = metrics
+            .kv_log_store_buffer_unconsumed_min_epoch
+            .with_guarded_label_values(labels);
+
         Self {
             storage_write_size,
             rewind_count,
             storage_write_count,
+            buffer_unconsumed_item_count,
+            buffer_unconsumed_row_count,
+            buffer_unconsumed_epoch_count,
+            buffer_unconsumed_min_epoch,
             persistent_log_read_metrics: KvLogStoreReadMetrics {
                 storage_read_size: persistent_log_read_size,
                 storage_read_count: persistent_log_read_count,
@@ -161,6 +184,10 @@ impl KvLogStoreMetrics {
         KvLogStoreMetrics {
             storage_write_count: LabelGuardedIntCounter::test_int_counter(),
             storage_write_size: LabelGuardedIntCounter::test_int_counter(),
+            buffer_unconsumed_item_count: LabelGuardedIntGauge::test_int_gauge(),
+            buffer_unconsumed_row_count: LabelGuardedIntGauge::test_int_gauge(),
+            buffer_unconsumed_epoch_count: LabelGuardedIntGauge::test_int_gauge(),
+            buffer_unconsumed_min_epoch: LabelGuardedIntGauge::test_int_gauge(),
             rewind_count: LabelGuardedIntCounter::test_int_counter(),
             rewind_delay: LabelGuardedHistogram::test_histogram(),
             persistent_log_read_metrics: KvLogStoreReadMetrics::for_test(),
@@ -369,7 +396,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
             })
             .await;
 
-        let (tx, rx) = new_log_store_buffer(self.max_row_count);
+        let (tx, rx) = new_log_store_buffer(self.max_row_count, self.metrics.clone());
 
         let reader = KvLogStoreReader::new(
             table_id,
