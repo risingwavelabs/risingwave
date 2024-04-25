@@ -90,6 +90,13 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "RW_TOTAL_MEMORY_BYTES", default_value_t = default_total_memory_bytes())]
     pub total_memory_bytes: usize,
 
+    /// Reserved memory for the compute node in bytes.
+    /// If not set, a portion (default to 30%) for the total_memory_bytes will be used as the reserved memory.
+    ///
+    /// The total memory compute and storage can use is `total_memory_bytes` - `reserved_memory_bytes`.
+    #[clap(long, env = "RW_RESERVED_MEMORY_BYTES")]
+    pub reserved_memory_bytes: Option<usize>,
+
     /// The parallelism that the compute node will register to the scheduler of the meta service.
     #[clap(long, env = "RW_PARALLELISM", default_value_t = default_parallelism())]
     #[override_opts(if_absent, path = streaming.actor_runtime_worker_threads_num)]

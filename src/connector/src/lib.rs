@@ -32,6 +32,7 @@
 #![feature(iterator_try_collect)]
 #![feature(try_blocks)]
 #![feature(error_generic_member_access)]
+#![feature(negative_impls)]
 #![feature(register_tool)]
 #![register_tool(rw)]
 #![recursion_limit = "256"]

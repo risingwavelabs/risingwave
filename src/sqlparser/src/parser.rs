@@ -246,6 +246,7 @@ impl Parser {
                 Keyword::CLOSE => Ok(self.parse_close_cursor()?),
                 Keyword::TRUNCATE => Ok(self.parse_truncate()?),
                 Keyword::CREATE => Ok(self.parse_create()?),
+                Keyword::DISCARD => Ok(self.parse_discard()?),
                 Keyword::DROP => Ok(self.parse_drop()?),
                 Keyword::DELETE => Ok(self.parse_delete()?),
                 Keyword::INSERT => Ok(self.parse_insert()?),
@@ -2440,6 +2441,9 @@ impl Parser {
             } else if self.parse_keyword(Keyword::LANGUAGE) {
                 ensure_not_set(&body.language, "LANGUAGE")?;
                 body.language = Some(self.parse_identifier()?);
+            } else if self.parse_keyword(Keyword::RUNTIME) {
+                ensure_not_set(&body.runtime, "RUNTIME")?;
+                body.runtime = Some(self.parse_function_runtime()?);
             } else if self.parse_keyword(Keyword::IMMUTABLE) {
                 ensure_not_set(&body.behavior, "IMMUTABLE | STABLE | VOLATILE")?;
                 body.behavior = Some(FunctionBehavior::Immutable);
@@ -2455,6 +2459,15 @@ impl Parser {
             } else if self.parse_keyword(Keyword::USING) {
                 ensure_not_set(&body.using, "USING")?;
                 body.using = Some(self.parse_create_function_using()?);
+            } else if self.parse_keyword(Keyword::SYNC) {
+                ensure_not_set(&body.function_type, "SYNC | ASYNC")?;
+                body.function_type = Some(self.parse_function_type(false, false)?);
+            } else if self.parse_keyword(Keyword::ASYNC) {
+                ensure_not_set(&body.function_type, "SYNC | ASYNC")?;
+                body.function_type = Some(self.parse_function_type(true, false)?);
+            } else if self.parse_keyword(Keyword::GENERATOR) {
+                ensure_not_set(&body.function_type, "SYNC | ASYNC")?;
+                body.function_type = Some(self.parse_function_type(false, true)?);
             } else {
                 return Ok(body);
             }
@@ -2477,6 +2490,36 @@ impl Parser {
         }
     }
 
+    fn parse_function_runtime(&mut self) -> Result<FunctionRuntime, ParserError> {
+        let ident = self.parse_identifier()?;
+        match ident.value.to_lowercase().as_str() {
+            "deno" => Ok(FunctionRuntime::Deno),
+            "quickjs" => Ok(FunctionRuntime::QuickJs),
+            r => Err(ParserError::ParserError(format!(
+                "Unsupported runtime: {r}"
+            ))),
+        }
+    }
+
+    fn parse_function_type(
+        &mut self,
+        is_async: bool,
+        is_generator: bool,
+    ) -> Result<CreateFunctionType, ParserError> {
+        let is_generator = if is_generator {
+            true
+        } else {
+            self.parse_keyword(Keyword::GENERATOR)
+        };
+
+        match (is_async, is_generator) {
+            (false, false) => Ok(CreateFunctionType::Sync),
+            (true, false) => Ok(CreateFunctionType::Async),
+            (false, true) => Ok(CreateFunctionType::Generator),
+            (true, true) => Ok(CreateFunctionType::AsyncGenerator),
+        }
+    }
+
     // CREATE USER name [ [ WITH ] option [ ... ] ]
     // where option can be:
     //       SUPERUSER | NOSUPERUSER
@@ -2492,6 +2535,12 @@ impl Parser {
         Ok(self
             .parse_options_with_preceding_keyword(Keyword::WITH)?
             .to_vec())
+    }
+
+    pub fn parse_discard(&mut self) -> Result<Statement, ParserError> {
+        self.expect_keyword(Keyword::ALL)
+            .map_err(|_| ParserError::ParserError("only DISCARD ALL is supported".to_string()))?;
+        Ok(Statement::Discard(DiscardType::All))
     }
 
     pub fn parse_drop(&mut self) -> Result<Statement, ParserError> {

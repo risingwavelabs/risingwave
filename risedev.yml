@@ -92,6 +92,17 @@ profile:
       - use: compute-node
       - use: frontend
 
+  # You can use this in combination with the virtual compactor
+  # provided in https://github.com/risingwavelabs/risingwave-extensions
+  dev-compactor:
+    steps:
+      - use: minio
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      - use: compactor
+        user-managed: true
+
   full:
     steps:
       - use: minio
@@ -978,14 +989,14 @@ profile:
   full-with-batch-query-limit:
     config-path: src/config/full-with-batch-query-limit.toml
     steps:
-        - use: minio
-        - use: etcd
-        - use: meta-node
-        - use: compute-node
-        - use: frontend
-        - use: compactor
-        - use: prometheus
-        - use: grafana
+      - use: minio
+      - use: etcd
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      - use: compactor
+      - use: prometheus
+      - use: grafana
 
 compose:
   risingwave: "ghcr.io/risingwavelabs/risingwave:latest"
@@ -1411,4 +1422,3 @@ template:
 
     # address of redis
     address: "127.0.0.1"
-
