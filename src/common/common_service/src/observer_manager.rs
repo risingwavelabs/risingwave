@@ -145,9 +145,6 @@ where
             | Info::Function(_) => {
                 notification.version > info.version.as_ref().unwrap().catalog_version
             }
-            Info::ParallelUnitMapping(_) => {
-                notification.version > info.version.as_ref().unwrap().parallel_unit_mapping_version
-            }
             Info::Node(_) => {
                 notification.version > info.version.as_ref().unwrap().worker_node_version
             }
@@ -157,10 +154,18 @@ where
             Info::HummockSnapshot(_) => true,
             Info::MetaBackupManifestId(_) => true,
             Info::SystemParams(_) | Info::SessionParam(_) => true,
-            Info::ServingParallelUnitMappings(_) => true,
             Info::Snapshot(_) | Info::HummockWriteLimits(_) => unreachable!(),
             Info::HummockStats(_) => true,
             Info::Recovery(_) => true,
+            Info::StreamingWorkerMapping(_) => {
+                notification.version
+                    > info
+                        .version
+                        .as_ref()
+                        .unwrap()
+                        .streaming_worker_mapping_version
+            }
+            Info::ServingWorkerMappings(_) => true,
         });
 
         self.observer_states
