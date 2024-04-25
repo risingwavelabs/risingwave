@@ -1493,6 +1493,7 @@ fn row_encode_to_prost(row_encode: &Encode) -> EncodeType {
         Encode::Csv => EncodeType::Csv,
         Encode::Bytes => EncodeType::Bytes,
         Encode::Template => EncodeType::Template,
+        Encode::Parquet => EncodeType::Parquet,
         Encode::None => EncodeType::None,
     }
 }

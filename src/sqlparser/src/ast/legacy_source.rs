@@ -131,6 +131,7 @@ pub enum SourceSchema {
     Maxwell,                // Keyword::MAXWELL
     CanalJson,              // Keyword::CANAL_JSON
     Csv(CsvInfo),           // Keyword::CSV
+    Parquet,                // Keyword::PARQUET
     Native,
     DebeziumAvro(DebeziumAvroSchema), // Keyword::DEBEZIUM_AVRO
     Bytes,
@@ -149,6 +150,7 @@ impl SourceSchema {
             SourceSchema::Maxwell => (Format::Maxwell, Encode::Json),
             SourceSchema::CanalJson => (Format::Canal, Encode::Json),
             SourceSchema::Csv(_) => (Format::Plain, Encode::Csv),
+            SourceSchema::Parquet => (Format::Plain, Encode::Parquet),
             SourceSchema::DebeziumAvro(_) => (Format::Debezium, Encode::Avro),
             SourceSchema::Bytes => (Format::Plain, Encode::Bytes),
             SourceSchema::Native => (Format::Native, Encode::Native),
@@ -259,6 +261,7 @@ impl fmt::Display for SourceSchema {
             SourceSchema::UpsertAvro(avro_schema) => write!(f, "UPSERT_AVRO {}", avro_schema),
             SourceSchema::CanalJson => write!(f, "CANAL_JSON"),
             SourceSchema::Csv(csv_info) => write!(f, "CSV {}", csv_info),
+            SourceSchema::Parquet => write!(f, "PARQUET"),
             SourceSchema::Native => write!(f, "NATIVE"),
             SourceSchema::DebeziumAvro(avro_schema) => write!(f, "DEBEZIUM_AVRO {}", avro_schema),
             SourceSchema::Bytes => write!(f, "BYTES"),

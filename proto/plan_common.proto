@@ -147,6 +147,7 @@ enum EncodeType {
   ENCODE_TYPE_BYTES = 6;
   ENCODE_TYPE_TEMPLATE = 7;
   ENCODE_TYPE_NONE = 8;
+  ENCODE_TYPE_PARQUET = 9;
 }
 
 enum RowFormatType {
@@ -164,6 +165,7 @@ enum RowFormatType {
   UPSERT_AVRO = 11;
   DEBEZIUM_MONGO_JSON = 12;
   BYTES = 13;
+  PARQUET = 14;
 }
 
 message IndexAndExpr {

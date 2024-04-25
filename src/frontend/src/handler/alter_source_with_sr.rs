@@ -63,6 +63,7 @@ fn encode_type_to_encode(from: EncodeType) -> Option<Encode> {
         EncodeType::Json => Encode::Json,
         EncodeType::Bytes => Encode::Bytes,
         EncodeType::Template => Encode::Template,
+        EncodeType::Parquet => Encode::Parquet,
         EncodeType::None => Encode::None,
     })
 }
