@@ -25,7 +25,7 @@ use futures::stream::BoxStream;
 use lru::LruCache;
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
 use risingwave_common::config::{MetaConfig, MAX_CONNECTION_WINDOW_SIZE};
-use risingwave_common::hash::ParallelUnitMapping;
+use risingwave_common::hash::WorkerMapping;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
@@ -37,8 +37,8 @@ use risingwave_common::RW_VERSION;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
-    SstObjectIdRange,
+    CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, SstObjectIdRange,
+    SyncResult,
 };
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
@@ -1156,13 +1156,11 @@ impl MetaClient {
         Ok(resp.tables)
     }
 
-    pub async fn list_serving_vnode_mappings(
-        &self,
-    ) -> Result<HashMap<u32, (u32, ParallelUnitMapping)>> {
+    pub async fn list_serving_vnode_mappings(&self) -> Result<HashMap<u32, (u32, WorkerMapping)>> {
         let req = GetServingVnodeMappingsRequest {};
         let resp = self.inner.get_serving_vnode_mappings(req).await?;
         let mappings = resp
-            .mappings
+            .worker_mappings
             .into_iter()
             .map(|p| {
                 (
@@ -1172,7 +1170,7 @@ impl MetaClient {
                             .get(&p.fragment_id)
                             .cloned()
                             .unwrap_or(0),
-                        ParallelUnitMapping::from_protobuf(p.mapping.as_ref().unwrap()),
+                        WorkerMapping::from_protobuf(p.mapping.as_ref().unwrap()),
                     ),
                 )
             })
@@ -1392,11 +1390,7 @@ impl HummockMetaClient for MetaClient {
         Ok(SstObjectIdRange::new(resp.start_id, resp.end_id))
     }
 
-    async fn commit_epoch(
-        &self,
-        _epoch: HummockEpoch,
-        _sstables: Vec<LocalSstableInfo>,
-    ) -> Result<()> {
+    async fn commit_epoch(&self, _epoch: HummockEpoch, _sync_result: SyncResult) -> Result<()> {
         panic!("Only meta service can commit_epoch in production.")
     }
 

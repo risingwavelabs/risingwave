@@ -28,7 +28,7 @@ use risingwave_hummock_sdk::key::{
     is_empty_key_range, vnode, vnode_range, TableKey, TableKeyRange,
 };
 use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
-use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
@@ -47,7 +47,7 @@ use crate::hummock::event_handler::hummock_event_handler::{BufferTracker, Hummoc
 use crate::hummock::event_handler::{
     HummockEvent, HummockEventHandler, HummockVersionUpdate, ReadOnlyReadVersionMapping,
 };
-use crate::hummock::iterator::ChangeLogIterator;
+use crate::hummock::iterator::change_log::ChangeLogIterator;
 use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
 use crate::hummock::observer_manager::HummockObserverNode;
 use crate::hummock::utils::{validate_safe_epoch, wait_for_epoch};

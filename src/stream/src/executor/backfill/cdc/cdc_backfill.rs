@@ -12,19 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::pin::{pin, Pin};
-use std::sync::Arc;
+use std::pin::Pin;
 
 use either::Either;
+use futures::stream;
 use futures::stream::select_with_strategy;
-use futures::{pin_mut, stream, StreamExt};
-use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{DataChunk, StreamChunk};
+use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
-use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{DataType, ScalarRefImpl};
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::parser::{
     DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties, ProtocolProperties,
@@ -32,10 +29,8 @@ use risingwave_connector::parser::{
 };
 use risingwave_connector::source::cdc::external::CdcOffset;
 use risingwave_connector::source::{SourceColumnDesc, SourceContext};
-use risingwave_storage::StateStore;
 use rw_futures_util::pausable;
 
-use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::cdc::state::CdcBackfillState;
 use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::cdc::upstream_table::snapshot::{
@@ -44,11 +39,7 @@ use crate::executor::backfill::cdc::upstream_table::snapshot::{
 use crate::executor::backfill::utils::{
     get_cdc_chunk_last_offset, get_new_pos, mapping_chunk, mapping_message, mark_cdc_chunk,
 };
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, Message,
-    StreamExecutorError, StreamExecutorResult,
-};
+use crate::executor::prelude::*;
 use crate::task::CreateMviewProgress;
 
 /// `split_id`, `is_finished`, `row_count`, `cdc_offset` all occupy 1 column each.
@@ -76,7 +67,8 @@ pub struct CdcBackfillExecutor<S: StateStore> {
 
     metrics: Arc<StreamingMetrics>,
 
-    chunk_size: usize,
+    /// Rate limit in rows/s.
+    rate_limit_rps: Option<u32>,
 
     disable_backfill: bool,
 
@@ -96,7 +88,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         progress: Option<CreateMviewProgress>,
         metrics: Arc<StreamingMetrics>,
         state_table: StateTable<S>,
-        chunk_size: usize,
+        rate_limit_rps: Option<u32>,
         disable_backfill: bool,
         snapshot_interval: u32,
         snapshot_read_limit: u32,
@@ -117,7 +109,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             state_impl,
             progress,
             metrics,
-            chunk_size,
+            rate_limit_rps,
             disable_backfill,
             snapshot_interval,
             snapshot_read_limit,
@@ -210,7 +202,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             is_finished = state.is_finished,
             disable_backfill = self.disable_backfill,
             snapshot_row_count = total_snapshot_row_count,
-            chunk_size = self.chunk_size,
+            rate_limit = self.rate_limit_rps,
             "start cdc backfill"
         );
 
@@ -265,13 +257,14 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
             // the buffer will be drained when a barrier comes
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
+
             'backfill_loop: loop {
                 let left_upstream = upstream.by_ref().map(Either::Left);
 
                 let mut snapshot_read_row_cnt: usize = 0;
                 let read_args = SnapshotReadArgs::new(
                     current_pk_pos.clone(),
-                    self.chunk_size,
+                    self.rate_limit_rps,
                     pk_in_output_indices.clone(),
                 );
 
@@ -319,13 +312,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                                 valve.resume();
                                             }
                                             Mutation::Throttle(some) => {
-                                                if let Some(rate_limit) =
+                                                if let Some(new_rate_limit) =
                                                     some.get(&self.actor_ctx.id)
+                                                    && *new_rate_limit != self.rate_limit_rps
                                                 {
-                                                    self.chunk_size = rate_limit
-                                                        .map(|x| x as usize)
-                                                        .unwrap_or(self.chunk_size);
-                                                    // rebuild the new reader stream with new chunk size
+                                                    self.rate_limit_rps = *new_rate_limit;
+                                                    // rebuild the new reader stream with new rate limit
                                                     continue 'backfill_loop;
                                                 }
                                             }

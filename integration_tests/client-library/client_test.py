@@ -35,12 +35,16 @@ def check_ruby():
                    check=True)
 
 
+def check_spring_boot():
+    subprocess.run(["docker", "compose", "exec", "spring-boot", "bash", "-c",
+                    "cd /spring-boot-client && mvn spring-boot:run"], check=True)
+
 subprocess.run(["docker", "compose", "up", "-d"], check=True)
 sleep(10)
 
 failed_cases = []
 
-for client in ['go', 'python', 'java', 'nodejs', 'php', 'ruby']:
+for client in ['go', 'python', 'java', 'nodejs', 'php', 'ruby', 'spring-boot']:
     print(f"--- {client} client test")
     try:
         if client == 'go':
@@ -55,6 +59,8 @@ for client in ['go', 'python', 'java', 'nodejs', 'php', 'ruby']:
             check_php()
         elif client == 'ruby':
             check_ruby()
+        elif client == 'spring-boot':
+            check_spring_boot()
     except Exception as e:
         print(e)
         failed_cases.append(f"{client} client failed")

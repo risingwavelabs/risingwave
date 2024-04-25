@@ -131,8 +131,7 @@ pub const MAX_CHUNK_SIZE: usize = 1024;
 
 #[derive(Debug, Clone)]
 pub struct SourceCtrlOpts {
-    // comes from developer::stream_chunk_size in stream scenario and developer::batch_chunk_size
-    // in batch scenario
+    /// The max size of a chunk yielded by source stream.
     pub chunk_size: usize,
     /// Rate limit of source
     pub rate_limit: Option<u32>,
@@ -168,7 +167,6 @@ pub struct SourceEnumeratorInfo {
 pub struct SourceContext {
     pub actor_id: u32,
     pub source_id: TableId,
-    // There should be a 1-1 mapping between `source_id` & `fragment_id`
     pub fragment_id: u32,
     pub source_name: String,
     pub metrics: Arc<SourceMetrics>,

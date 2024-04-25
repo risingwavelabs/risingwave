@@ -88,13 +88,6 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
         let state_table =
             StateTable::from_table_catalog(node.get_state_table()?, state_store, vnodes).await;
 
-        // adjust backfill chunk size if rate limit is set.
-        let chunk_size = params.env.config().developer.chunk_size;
-        let backfill_chunk_size = node
-            .rate_limit
-            .map(|x| std::cmp::min(x as usize, chunk_size))
-            .unwrap_or(chunk_size);
-
         let exec = CdcBackfillExecutor::new(
             params.actor_context.clone(),
             external_table,
@@ -103,7 +96,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             None,
             params.executor_stats,
             state_table,
-            backfill_chunk_size,
+            node.rate_limit,
             disable_backfill,
             1,
             1000,

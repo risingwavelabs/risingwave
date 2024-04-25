@@ -15,7 +15,7 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = "1"
-apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "f33bf6a9d1734d1e23edeb374dc48d26db4b18a5", features = [
+apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "5349b0c7b35940d117397edbd314ca9087cdb892", features = [
     "snappy",
     "zstandard",
     "bzip",
@@ -109,6 +109,7 @@ reqwest = { version = "0.12.2", features = ["json", "stream"] }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_jni_core = { workspace = true }
+risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 rumqttc = { version = "0.24.0", features = ["url"] }
