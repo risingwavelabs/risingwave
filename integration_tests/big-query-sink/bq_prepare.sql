@@ -20,7 +20,7 @@ CREATE TABLE `rwctest.bqtest.bq_sink_data_types` (
     c_timestamp DATETIME,
     c_timestamptz TIMESTAMP,
     c_interval INTERVAL,
-    c_jsonb STRING,
+    c_jsonb JSON,
     c_boolean_array ARRAY<BOOL>,
     c_smallint_array ARRAY<INT64>,
     c_integer_array ARRAY<INT64>,
@@ -33,6 +33,6 @@ CREATE TABLE `rwctest.bqtest.bq_sink_data_types` (
     c_timestamp_array ARRAY<DATETIME>,
     c_timestamptz_array ARRAY<TIMESTAMP>,
     c_interval_array ARRAY<INTERVAL>,
-    c_jsonb_array ARRAY<STRING>,
+    c_jsonb_array ARRAY<JSON>,
     c_struct STRUCT<s_int INT64, s_bool BOOL>
 );
