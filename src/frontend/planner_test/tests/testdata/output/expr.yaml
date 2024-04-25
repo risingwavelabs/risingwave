@@ -615,6 +615,23 @@
 - sql: |
     select * from max();
   binder_error: 'Invalid input syntax: aggregate functions are not allowed in FROM'
+- sql: |
+    create table t (k int, j jsonb);
+    select a * k + b from t, jsonb_populate_record(null::struct<a int, b int>, j);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [((Field($expr1, 0:Int32) * t.k) + Field($expr1, 1:Int32)) as $expr2] }
+      └─BatchHashJoin { type: Inner, predicate: t.j IS NOT DISTINCT FROM t.j, output: all }
+        ├─BatchExchange { order: [], dist: HashShard(t.j) }
+        │ └─BatchScan { table: t, columns: [t.k, t.j], distribution: SomeShard }
+        └─BatchExchange { order: [], dist: HashShard(t.j) }
+          └─BatchProject { exprs: [t.j, JsonbPopulateRecord(null:Struct(StructType { field_names: ["a", "b"], field_types: [Int32, Int32] }), t.j) as $expr1] }
+            └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+              ├─BatchExchange { order: [], dist: Single }
+              │ └─BatchHashAgg { group_key: [t.j], aggs: [] }
+              │   └─BatchExchange { order: [], dist: HashShard(t.j) }
+              │     └─BatchScan { table: t, columns: [t.j], distribution: SomeShard }
+              └─BatchValues { rows: [[]] }
 - name: Grafana issue-10134
   sql: |
     SELECT * FROM
