@@ -72,9 +72,13 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for CteRef<PlanRef> {
 
     fn stream_key(&self) -> Option<Vec<usize>> {
         if let Some(plan_ref) = self.get_cte_ref() {
-            plan_ref.stream_key().map(|s| s.iter().map(|i| i.to_owned()).collect_vec())
+            plan_ref
+                .stream_key()
+                .map(|s| s.iter().map(|i| i.to_owned()).collect_vec())
         } else {
-            self.base.stream_key().map(|s| s.iter().map(|i| i.to_owned()).collect_vec())
+            self.base
+                .stream_key()
+                .map(|s| s.iter().map(|i| i.to_owned()).collect_vec())
         }
     }
 

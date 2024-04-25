@@ -356,9 +356,7 @@ impl Binder {
                 // reference: <https://www.postgresql.org/docs/16/sql-select.html#:~:text=the%20recursive%20self%2Dreference%20must%20appear%20on%20the%20right%2Dhand%20side%20of%20the%20UNION>
                 let mut base = self.bind_set_expr(*left)?;
 
-                entry.borrow_mut().state = BindingCteState::BaseResolved {
-                    base: base.clone(),
-                };
+                entry.borrow_mut().state = BindingCteState::BaseResolved { base: base.clone() };
 
                 // Reset context for right side, but keep `cte_to_relation`.
                 let new_context = std::mem::take(&mut self.context);

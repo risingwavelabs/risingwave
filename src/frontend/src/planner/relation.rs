@@ -29,7 +29,8 @@ use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{
-    LogicalApply, LogicalCteRef, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalShare, LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalValues, PlanRef
+    LogicalApply, LogicalCteRef, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan,
+    LogicalShare, LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalValues, PlanRef,
 };
 use crate::optimizer::property::Cardinality;
 use crate::planner::Planner;
@@ -56,7 +57,7 @@ impl Planner {
             Relation::Watermark(tf) => self.plan_watermark(*tf),
             // note that rcte (i.e., RecursiveUnion) is included *implicitly* in share.
             Relation::Share(share) => self.plan_share(*share),
-            Relation::BackCteRef(cte_ref) => self.plan_cte_ref(*cte_ref)
+            Relation::BackCteRef(cte_ref) => self.plan_cte_ref(*cte_ref),
         }
     }
 
@@ -231,9 +232,11 @@ impl Planner {
                 }
             }
             // for the recursive union in rcte
-            Either::Right(recursive_union) => {
-                self.plan_recursive_union(*recursive_union.base, *recursive_union.recursive, share.share_id)
-            }
+            Either::Right(recursive_union) => self.plan_recursive_union(
+                *recursive_union.base,
+                *recursive_union.recursive,
+                share.share_id,
+            ),
         }
     }
 

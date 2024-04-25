@@ -20,9 +20,9 @@ use smallvec::{smallvec, SmallVec};
 use super::expr_visitable::ExprVisitable;
 use super::utils::impl_distill_by_unit;
 use super::{
-    generic, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
-    PlanBase, PlanTreeNode, PredicatePushdown, PredicatePushdownContext, RewriteStreamContext,
-    ToBatch, ToStream, ToStreamContext,
+    generic, ColPrunable, ColumnPruningContext, ExprRewritable, Logical, PlanBase, PlanTreeNode,
+    PredicatePushdown, PredicatePushdownContext, RewriteStreamContext, ToBatch, ToStream,
+    ToStreamContext,
 };
 use crate::error::Result;
 use crate::utils::Condition;
