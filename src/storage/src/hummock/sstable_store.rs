@@ -24,8 +24,9 @@ use bytes::Bytes;
 use fail::fail_point;
 use foyer::memory::{
     Cache, CacheContext, CacheEntry, CacheEventListener, EntryState, Key, LfuCacheConfig,
-    LruCacheConfig, LruConfig, S3FifoCacheConfig, Value,
+    LruCacheConfig, LruConfig as OldLruConfig, S3FifoCacheConfig, Value,
 };
+use foyer_08::{HybridCache, HybridCacheBuilder};
 use futures::{future, StreamExt};
 use itertools::Itertools;
 use risingwave_common::config::{EvictionConfig, StorageMemoryConfig};
@@ -202,6 +203,9 @@ pub struct SstableStoreConfig {
     pub meta_file_cache: FileCache<HummockSstableObjectId, CachedSstable>,
     pub recent_filter: Option<Arc<RecentFilter<(HummockSstableObjectId, usize)>>>,
     pub state_store_metrics: Arc<HummockStateStoreMetrics>,
+
+    pub meta_cache_v2: HybridCache<HummockSstableObjectId, Box<Sstable>>,
+    pub block_cache_v2: HybridCache<SstableBlockIndex, CachedBlock>,
 }
 
 pub struct SstableStore {
@@ -210,6 +214,11 @@ pub struct SstableStore {
     block_cache: BlockCache,
     // TODO(MrCroxx): use no hash random state
     meta_cache: Arc<Cache<HummockSstableObjectId, Box<Sstable>, MetaCacheEventListener>>,
+
+    #[expect(dead_code)]
+    meta_cache_v2: HybridCache<HummockSstableObjectId, Box<Sstable>>,
+    #[expect(dead_code)]
+    block_cache_v2: HybridCache<SstableBlockIndex, CachedBlock>,
 
     data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
     meta_file_cache: FileCache<HummockSstableObjectId, CachedSstable>,
@@ -279,6 +288,9 @@ impl SstableStore {
             block_cache,
             meta_cache,
 
+            meta_cache_v2: config.meta_cache_v2,
+            block_cache_v2: config.block_cache_v2,
+
             data_file_cache: config.data_file_cache,
             meta_file_cache: config.meta_file_cache,
 
@@ -291,29 +303,46 @@ impl SstableStore {
 
     /// For compactor, we do not need a high concurrency load for cache. Instead, we need the cache
     ///  can be evict more effective.
-    pub fn for_compactor(
+    pub async fn for_compactor(
         store: ObjectStoreRef,
         path: String,
         block_cache_capacity: usize,
         meta_cache_capacity: usize,
-    ) -> Self {
+    ) -> HummockResult<Self> {
         let meta_cache = Arc::new(Cache::lru(LruCacheConfig {
             capacity: meta_cache_capacity,
             shards: 1,
-            eviction_config: LruConfig {
+            eviction_config: OldLruConfig {
                 high_priority_pool_ratio: 0.0,
             },
             object_pool_capacity: 1024,
             hash_builder: RandomState::default(),
             event_listener: FileCache::none().into(),
         }));
-        Self {
+
+        let meta_cache_v2 = HybridCacheBuilder::new()
+            .memory(meta_cache_capacity)
+            .with_shards(1)
+            .storage()
+            .build()
+            .await
+            .map_err(HummockError::foyer_error)?;
+
+        let block_cache_v2 = HybridCacheBuilder::new()
+            .memory(block_cache_capacity)
+            .with_shards(1)
+            .storage()
+            .build()
+            .await
+            .map_err(HummockError::foyer_error)?;
+
+        Ok(Self {
             path,
             store,
             block_cache: BlockCache::new(BlockCacheConfig {
                 capacity: block_cache_capacity,
                 shard_num: 1,
-                eviction: EvictionConfig::Lru(LruConfig {
+                eviction: EvictionConfig::Lru(OldLruConfig {
                     high_priority_pool_ratio: 0.0,
                 }),
                 listener: BlockCacheEventListener::new(
@@ -328,7 +357,10 @@ impl SstableStore {
             prefetch_buffer_capacity: block_cache_capacity,
             max_prefetch_block_number: 16, /* compactor won't use this parameter, so just assign a default value. */
             recent_filter: None,
-        }
+
+            meta_cache_v2,
+            block_cache_v2,
+        })
     }
 
     pub async fn delete(&self, object_id: HummockSstableObjectId) -> HummockResult<()> {
@@ -1295,7 +1327,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_batch_upload() {
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
         let x_range = 0..100;
         let (data, meta) = gen_test_sstable_data(
             default_builder_opt_for_test(),
@@ -1325,7 +1357,7 @@ mod tests {
     #[tokio::test]
     async fn test_streaming_upload() {
         // Generate test data.
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
         let x_range = 0..100;
         let (data, meta) = gen_test_sstable_data(
             default_builder_opt_for_test(),
@@ -1352,9 +1384,9 @@ mod tests {
         validate_sst(sstable_store, &info, meta, x_range).await;
     }
 
-    #[test]
-    fn test_basic() {
-        let sstable_store = mock_sstable_store();
+    #[tokio::test]
+    async fn test_basic() {
+        let sstable_store = mock_sstable_store().await;
         let object_id = 123;
         let data_path = sstable_store.get_sst_data_path(object_id);
         assert_eq!(data_path, "test/123.data");

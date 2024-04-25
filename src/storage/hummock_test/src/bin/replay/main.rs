@@ -44,6 +44,7 @@ use risingwave_object_store::object::build_remote_object_store;
 use risingwave_storage::filter_key_extractor::{
     FakeRemoteTableAccessor, RpcFilterKeyExtractorManager,
 };
+use risingwave_storage::hummock::test_utils::hybrid_cache_for_test;
 use risingwave_storage::hummock::{FileCache, HummockStorage, SstableStore, SstableStoreConfig};
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics, ObjectStoreMetrics};
 use risingwave_storage::opts::StorageOpts;
@@ -126,6 +127,8 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         meta_file_cache: FileCache::none(),
         recent_filter: None,
         state_store_metrics: state_store_metrics.clone(),
+        meta_cache_v2: hybrid_cache_for_test().await,
+        block_cache_v2: hybrid_cache_for_test().await,
     }));
 
     let (hummock_meta_client, notification_client, notifier) = {

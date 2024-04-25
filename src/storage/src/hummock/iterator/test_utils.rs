@@ -34,6 +34,7 @@ use crate::hummock::sstable_store::SstableStore;
 pub use crate::hummock::test_utils::default_builder_opt_for_test;
 use crate::hummock::test_utils::{
     gen_test_sstable, gen_test_sstable_info, gen_test_sstable_with_range_tombstone,
+    hybrid_cache_for_test,
 };
 use crate::hummock::{
     FileCache, HummockValue, SstableBuilderOptions, SstableIterator, SstableIteratorType,
@@ -55,16 +56,17 @@ macro_rules! assert_bytes_eq {
 
 pub const TEST_KEYS_COUNT: usize = 10;
 
-pub fn mock_sstable_store() -> SstableStoreRef {
+pub async fn mock_sstable_store() -> SstableStoreRef {
     mock_sstable_store_with_object_store(Arc::new(ObjectStoreImpl::InMem(
         InMemObjectStore::new().monitored(
             Arc::new(ObjectStoreMetrics::unused()),
             ObjectStoreConfig::default(),
         ),
     )))
+    .await
 }
 
-pub fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableStoreRef {
+pub async fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableStoreRef {
     let path = "test".to_string();
     Arc::new(SstableStore::new(SstableStoreConfig {
         store,
@@ -82,6 +84,9 @@ pub fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableSto
         meta_file_cache: FileCache::none(),
         recent_filter: None,
         state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
+
+        meta_cache_v2: hybrid_cache_for_test().await,
+        block_cache_v2: hybrid_cache_for_test().await,
     }))
 }
 
@@ -227,7 +232,7 @@ pub async fn gen_merge_iterator_interleave_test_sstable_iters(
     key_count: usize,
     count: usize,
 ) -> Vec<SstableIterator> {
-    let sstable_store = mock_sstable_store();
+    let sstable_store = mock_sstable_store().await;
     let mut result = vec![];
     for i in 0..count {
         let table = gen_iterator_test_sstable_base(

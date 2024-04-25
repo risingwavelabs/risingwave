@@ -27,6 +27,7 @@ use risingwave_common::config::{EvictionConfig, MetricLevel, ObjectStoreConfig};
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_object_store::object::{ObjectStore, ObjectStoreImpl, S3ObjectStore};
 use risingwave_storage::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
+use risingwave_storage::hummock::test_utils::hybrid_cache_for_test;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
     BatchSstableWriterFactory, CachePolicy, FileCache, HummockResult, MemoryLimiter,
@@ -131,32 +132,36 @@ fn bench_builder(
         .unwrap();
 
     let metrics = Arc::new(ObjectStoreMetrics::unused());
-    let object_store = runtime.block_on(async {
-        S3ObjectStore::new_with_config(
+    let sstable_store = runtime.block_on(async {
+        let object_store = S3ObjectStore::new_with_config(
             bucket.to_string(),
             metrics.clone(),
             ObjectStoreConfig::default(),
         )
         .await
-        .monitored(metrics, ObjectStoreConfig::default())
+        .monitored(metrics, ObjectStoreConfig::default());
+        let object_store = Arc::new(ObjectStoreImpl::S3(object_store));
+        Arc::new(SstableStore::new(SstableStoreConfig {
+            store: object_store,
+            path: "test".to_string(),
+            block_cache_capacity: 64 << 20,
+            meta_cache_capacity: 128 << 20,
+            meta_cache_shard_num: 2,
+            block_cache_shard_num: 2,
+            block_cache_eviction: EvictionConfig::for_test(),
+            meta_cache_eviction: EvictionConfig::for_test(),
+            prefetch_buffer_capacity: 64 << 20,
+            max_prefetch_block_number: 16,
+            data_file_cache: FileCache::none(),
+            meta_file_cache: FileCache::none(),
+            recent_filter: None,
+            state_store_metrics: Arc::new(global_hummock_state_store_metrics(
+                MetricLevel::Disabled,
+            )),
+            meta_cache_v2: hybrid_cache_for_test().await,
+            block_cache_v2: hybrid_cache_for_test().await,
+        }))
     });
-    let object_store = Arc::new(ObjectStoreImpl::S3(object_store));
-    let sstable_store = Arc::new(SstableStore::new(SstableStoreConfig {
-        store: object_store,
-        path: "test".to_string(),
-        block_cache_capacity: 64 << 20,
-        meta_cache_capacity: 128 << 20,
-        meta_cache_shard_num: 2,
-        block_cache_shard_num: 2,
-        block_cache_eviction: EvictionConfig::for_test(),
-        meta_cache_eviction: EvictionConfig::for_test(),
-        prefetch_buffer_capacity: 64 << 20,
-        max_prefetch_block_number: 16,
-        data_file_cache: FileCache::none(),
-        meta_file_cache: FileCache::none(),
-        recent_filter: None,
-        state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
-    }));
 
     let mut group = c.benchmark_group("bench_multi_builder");
     group

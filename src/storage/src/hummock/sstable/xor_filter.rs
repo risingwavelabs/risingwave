@@ -458,7 +458,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_blocked_bloom_filter() {
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
         let writer_opts = SstableWriterOptions {
             capacity_hint: None,
             tracker: None,

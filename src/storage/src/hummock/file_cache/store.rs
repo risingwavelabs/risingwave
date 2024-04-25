@@ -423,6 +423,17 @@ pub enum CachedBlock {
 }
 
 impl CachedBlock {
+    pub fn weight(&self) -> usize {
+        match self {
+            // FIXME(MrCroxx): Make the calculation more accurately.
+            CachedBlock::Loaded { block } => block.data().len(),
+            CachedBlock::Fetched {
+                bytes,
+                uncompressed_capacity: _,
+            } => bytes.len() + usize::BITS as usize / 8,
+        }
+    }
+
     pub fn should_compress(&self) -> bool {
         match self {
             CachedBlock::Loaded { .. } => true,

@@ -32,6 +32,7 @@ use risingwave_storage::error::StorageResult;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::store::version::HummockVersionReader;
 use risingwave_storage::hummock::store::HummockStorageIterator;
+use risingwave_storage::hummock::test_utils::hybrid_cache_for_test;
 use risingwave_storage::hummock::{
     get_committed_read_version_tuple, CachePolicy, FileCache, SstableStore, SstableStoreConfig,
 };
@@ -94,6 +95,8 @@ impl HummockJavaBindingIterator {
             state_store_metrics: Arc::new(global_hummock_state_store_metrics(
                 MetricLevel::Disabled,
             )),
+            meta_cache_v2: hybrid_cache_for_test().await,
+            block_cache_v2: hybrid_cache_for_test().await,
         }));
         let reader = HummockVersionReader::new(
             sstable_store,

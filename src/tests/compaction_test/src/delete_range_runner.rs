@@ -51,6 +51,7 @@ use risingwave_storage::hummock::compactor::{
     start_compactor, CompactionExecutor, CompactorContext,
 };
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
+use risingwave_storage::hummock::test_utils::hybrid_cache_for_test;
 use risingwave_storage::hummock::utils::cmp_delete_range_left_bounds;
 use risingwave_storage::hummock::{
     CachePolicy, FileCache, HummockStorage, MemoryLimiter, SstableObjectIdManager, SstableStore,
@@ -225,6 +226,8 @@ async fn compaction_test(
         meta_file_cache: FileCache::none(),
         recent_filter: None,
         state_store_metrics: state_store_metrics.clone(),
+        meta_cache_v2: hybrid_cache_for_test().await,
+        block_cache_v2: hybrid_cache_for_test().await,
     }));
 
     let store = HummockStorage::new(

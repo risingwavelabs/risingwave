@@ -57,7 +57,6 @@ fn gen_interleave_shared_buffer_batch_iter(
 fn criterion_benchmark(c: &mut Criterion) {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let batches = gen_interleave_shared_buffer_batch_iter(10000, 100);
-    let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         runtime.block_on(setup_compute_env(8080));
@@ -67,6 +66,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     ));
 
     let global_hummock_storage = runtime.block_on(async {
+        let sstable_store = mock_sstable_store().await;
         HummockStorage::for_test(
             hummock_options,
             sstable_store,

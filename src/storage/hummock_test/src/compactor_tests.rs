@@ -104,7 +104,7 @@ pub(crate) mod tests {
             write_conflict_detection_enabled: true,
             ..Default::default()
         });
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
 
         let hummock = GlobalHummockStorage::for_test(
             options,
@@ -138,7 +138,7 @@ pub(crate) mod tests {
             write_conflict_detection_enabled: true,
             ..Default::default()
         });
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
 
         GlobalHummockStorage::for_test(
             options,
