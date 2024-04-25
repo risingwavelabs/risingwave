@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound;
-use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::rc::Rc;
 
 use educe::Educe;
@@ -65,9 +63,6 @@ pub struct Source {
     #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,
 
-    /// Kafka timestamp range, currently we only support kafka, so we just leave it like this.
-    pub(crate) kafka_timestamp_range: (Bound<i64>, Bound<i64>),
-
     pub as_of: Option<AsOf>,
 }
 
@@ -113,6 +108,12 @@ impl Source {
             .is_some_and(|catalog| catalog.with_properties.is_iceberg_connector())
     }
 
+    pub fn is_kafka_connector(&self) -> bool {
+        self.catalog
+            .as_ref()
+            .is_some_and(|catalog| catalog.with_properties.is_kafka_connector())
+    }
+
     /// Currently, only iceberg source supports time travel.
     pub fn support_time_travel(&self) -> bool {
         self.is_iceberg_connector()
@@ -134,22 +135,6 @@ impl Source {
         });
         self.column_catalog.retain(|c| !c.is_generated());
         (self, original_row_id_index)
-    }
-
-    pub fn kafka_timestamp_range_value(&self) -> (Option<i64>, Option<i64>) {
-        let (lower_bound, upper_bound) = &self.kafka_timestamp_range;
-        let lower_bound = match lower_bound {
-            Included(t) => Some(*t),
-            Excluded(t) => Some(*t - 1),
-            Unbounded => None,
-        };
-
-        let upper_bound = match upper_bound {
-            Included(t) => Some(*t),
-            Excluded(t) => Some(*t + 1),
-            Unbounded => None,
-        };
-        (lower_bound, upper_bound)
     }
 
     pub fn infer_internal_table_catalog(require_dist_key: bool) -> TableCatalog {

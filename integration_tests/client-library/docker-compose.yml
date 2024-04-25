@@ -54,6 +54,11 @@ services:
     command: tail -f /dev/null
     volumes:
       - ./ruby:/ruby-client
+  spring-boot:
+    image: maven:3.9.6-sapmachine-17
+    command: tail -f /dev/null
+    volumes:
+      - ./spring-boot:/spring-boot-client
 
 volumes:
   risingwave-standalone:

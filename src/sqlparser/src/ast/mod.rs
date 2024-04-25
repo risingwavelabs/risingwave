@@ -1192,6 +1192,8 @@ pub enum Statement {
         /// RETURNING
         returning: Vec<SelectItem>,
     },
+    /// DISCARD
+    Discard(DiscardType),
     /// CREATE VIEW
     CreateView {
         or_replace: bool,
@@ -1286,6 +1288,22 @@ pub enum Statement {
         append_only: bool,
         params: CreateFunctionBody,
     },
+
+    /// DECLARE CURSOR
+    DeclareCursor {
+        stmt: DeclareCursorStatement,
+    },
+
+    // FETCH CURSOR
+    FetchCursor {
+        stmt: FetchCursorStatement,
+    },
+
+    // CLOSE CURSOR
+    CloseCursor {
+        stmt: CloseCursorStatement,
+    },
+
     /// ALTER DATABASE
     AlterDatabase {
         name: ObjectName,
@@ -1496,21 +1514,6 @@ pub enum Statement {
     AlterSystem {
         param: Ident,
         value: SetVariableValue,
-    },
-    /// DECLARE CURSOR
-    DeclareCursor {
-        cursor_name: ObjectName,
-        query: Box<Query>,
-    },
-    /// FETCH FROM CURSOR
-    FetchCursor {
-        cursor_name: ObjectName,
-        /// Number of rows to fetch. `None` means `FETCH ALL`.
-        count: Option<i32>,
-    },
-    /// CLOSE CURSOR
-    CloseCursor {
-        cursor_name: Option<ObjectName>,
     },
     /// FLUSH the current barrier.
     ///
@@ -1854,6 +1857,9 @@ impl fmt::Display for Statement {
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
             Statement::CreateSubscription { stmt } => write!(f, "CREATE SUBSCRIPTION {}", stmt,),
             Statement::CreateConnection { stmt } => write!(f, "CREATE CONNECTION {}", stmt,),
+            Statement::DeclareCursor { stmt } => write!(f, "DECLARE {}", stmt,),
+            Statement::FetchCursor { stmt } => write!(f, "FETCH {}", stmt),
+            Statement::CloseCursor { stmt } => write!(f, "CLOSE {}", stmt),
             Statement::AlterDatabase { name, operation } => {
                 write!(f, "ALTER DATABASE {} {}", name, operation)
             }
@@ -1888,6 +1894,7 @@ impl fmt::Display for Statement {
             Statement::AlterConnection { name, operation } => {
                 write!(f, "ALTER CONNECTION {} {}", name, operation)
             }
+            Statement::Discard(t) => write!(f, "DISCARD {}", t),
             Statement::Drop(stmt) => write!(f, "DROP {}", stmt),
             Statement::DropFunction {
                 if_exists,
@@ -2071,23 +2078,6 @@ impl fmt::Display for Statement {
                     f,
                     "{param} = {value}",
                 )
-            }
-            Statement::DeclareCursor { cursor_name, query } => {
-                write!(f, "DECLARE {} CURSOR FOR {}", cursor_name, query)
-            },
-            Statement::FetchCursor { cursor_name , count} => {
-                if let Some(count) = count {
-                    write!(f, "FETCH {} FROM {}", count, cursor_name)
-                } else {
-                    write!(f, "FETCH NEXT FROM {}", cursor_name)
-                }
-            },
-            Statement::CloseCursor { cursor_name } => {
-                if let Some(name) = cursor_name {
-                    write!(f, "CLOSE {}", name)
-                } else {
-                    write!(f, "CLOSE ALL")
-                }
             }
             Statement::Flush => {
                 write!(f, "FLUSH")
@@ -2897,6 +2887,9 @@ impl fmt::Display for TableColumnDef {
 pub struct CreateFunctionBody {
     /// LANGUAGE lang_name
     pub language: Option<Ident>,
+
+    pub runtime: Option<FunctionRuntime>,
+
     /// IMMUTABLE | STABLE | VOLATILE
     pub behavior: Option<FunctionBehavior>,
     /// AS 'definition'
@@ -2907,6 +2900,8 @@ pub struct CreateFunctionBody {
     pub return_: Option<Expr>,
     /// USING ...
     pub using: Option<CreateFunctionUsing>,
+
+    pub function_type: Option<CreateFunctionType>,
 }
 
 impl fmt::Display for CreateFunctionBody {
@@ -2914,6 +2909,11 @@ impl fmt::Display for CreateFunctionBody {
         if let Some(language) = &self.language {
             write!(f, " LANGUAGE {language}")?;
         }
+
+        if let Some(runtime) = &self.runtime {
+            write!(f, " RUNTIME {runtime}")?;
+        }
+
         if let Some(behavior) = &self.behavior {
             write!(f, " {behavior}")?;
         }
@@ -2925,6 +2925,9 @@ impl fmt::Display for CreateFunctionBody {
         }
         if let Some(using) = &self.using {
             write!(f, " {using}")?;
+        }
+        if let Some(function_type) = &self.function_type {
+            write!(f, " {function_type}")?;
         }
         Ok(())
     }
@@ -2996,6 +2999,42 @@ impl fmt::Display for CreateFunctionUsing {
             CreateFunctionUsing::Base64(s) => {
                 write!(f, "BASE64 '{s}'")
             }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum FunctionRuntime {
+    QuickJs,
+    Deno,
+}
+
+impl fmt::Display for FunctionRuntime {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FunctionRuntime::QuickJs => write!(f, "quickjs"),
+            FunctionRuntime::Deno => write!(f, "deno"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum CreateFunctionType {
+    Sync,
+    Async,
+    Generator,
+    AsyncGenerator,
+}
+
+impl fmt::Display for CreateFunctionType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CreateFunctionType::Sync => write!(f, "SYNC"),
+            CreateFunctionType::Async => write!(f, "ASYNC"),
+            CreateFunctionType::Generator => write!(f, "SYNC GENERATOR"),
+            CreateFunctionType::AsyncGenerator => write!(f, "ASYNC GENERATOR"),
         }
     }
 }
@@ -3072,6 +3111,21 @@ impl fmt::Display for AsOf {
             TimestampString(ts) => write!(f, " FOR SYSTEM_TIME AS OF '{}'", ts),
             VersionNum(v) => write!(f, " FOR SYSTEM_VERSION AS OF {}", v),
             VersionString(v) => write!(f, " FOR SYSTEM_VERSION AS OF '{}'", v),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum DiscardType {
+    All,
+}
+
+impl fmt::Display for DiscardType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use DiscardType::*;
+        match self {
+            All => write!(f, "ALL"),
         }
     }
 }
@@ -3219,6 +3273,8 @@ mod tests {
                 as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
                 return_: None,
                 using: None,
+                runtime: None,
+                function_type: None,
             },
             with_options: CreateFunctionWithOptions {
                 always_retry_on_network_error: None,
@@ -3240,6 +3296,8 @@ mod tests {
                 as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
                 return_: None,
                 using: None,
+                runtime: None,
+                function_type: None,
             },
             with_options: CreateFunctionWithOptions {
                 always_retry_on_network_error: Some(true),
@@ -3247,6 +3305,30 @@ mod tests {
         };
         assert_eq!(
             "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1' WITH ( ALWAYS_RETRY_NETWORK_ERRORS = true )",
+            format!("{}", create_function)
+        );
+
+        let create_function = Statement::CreateFunction {
+            temporary: false,
+            or_replace: false,
+            name: ObjectName(vec![Ident::new_unchecked("foo")]),
+            args: Some(vec![OperateFunctionArg::unnamed(DataType::Int)]),
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
+            params: CreateFunctionBody {
+                language: Some(Ident::new_unchecked("javascript")),
+                behavior: None,
+                as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
+                return_: None,
+                using: None,
+                runtime: Some(FunctionRuntime::Deno),
+                function_type: Some(CreateFunctionType::AsyncGenerator),
+            },
+            with_options: CreateFunctionWithOptions {
+                always_retry_on_network_error: None,
+            },
+        };
+        assert_eq!(
+            "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE javascript RUNTIME deno AS 'SELECT 1' ASYNC GENERATOR",
             format!("{}", create_function)
         );
     }

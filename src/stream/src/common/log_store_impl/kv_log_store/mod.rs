@@ -411,10 +411,9 @@ mod tests {
     use risingwave_connector::sink::log_store::{
         ChunkId, LogReader, LogStoreFactory, LogStoreReadItem, LogWriter, TruncateOffset,
     };
-    use risingwave_hummock_sdk::HummockReadEpoch;
+    use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
     use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
     use risingwave_storage::hummock::HummockStorage;
-    use risingwave_storage::store::SyncResult;
     use risingwave_storage::StateStore;
 
     use crate::common::log_store_impl::kv_log_store::reader::KvLogStoreReader;

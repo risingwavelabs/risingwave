@@ -187,10 +187,13 @@
                             └─StreamTableScan { table: t, columns: [t.arr, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     select * from abs(1) WITH ORDINALITY;
-  batch_plan: 'BatchValues { rows: [[1:Int32, 1:Int64]] }'
+  batch_plan: |-
+    BatchProject { exprs: [, 1:Int64] }
+    └─BatchValues { rows: [[1:Int32]] }
   stream_plan: |-
     StreamMaterialize { columns: [abs, ordinality, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
-    └─StreamValues { rows: [[1:Int32, 1:Int64, 0:Int64]] }
+    └─StreamProject { exprs: [, 1:Int64, _row_id] }
+      └─StreamValues { rows: [[1:Int32, 0:Int64]] }
 - sql: |
     create table t(x int , arr int[]);
     select * from t, abs(x) WITH ORDINALITY;

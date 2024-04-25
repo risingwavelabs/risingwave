@@ -1,3 +1,7 @@
+> [!NOTE]
+>
+> Please write new tests according to the style in `e2e_test/source_inline`.
+
 Test in this directory needs some prior setup.
 
 See also `ci/scripts/e2e-source-test.sh`, and `scripts/source`

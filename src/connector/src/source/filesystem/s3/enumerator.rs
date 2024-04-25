@@ -140,7 +140,7 @@ mod tests {
             endpoint_url: None,
         };
         let mut enumerator =
-            S3SplitEnumerator::new(props.into(), SourceEnumeratorContext::default().into())
+            S3SplitEnumerator::new(props.into(), SourceEnumeratorContext::dummy().into())
                 .await
                 .unwrap();
         let splits = enumerator.list_splits().await.unwrap();
