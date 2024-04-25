@@ -4,7 +4,11 @@ import sys
 
 relations = ['rwctest.bqtest.bq_sink', 'rwctest.bqtest.bq_sink_data_types']
 
-subprocess.run(["docker", "compose", "exec", "gcloud-cli", "bq", "query", "--use_legacy_sql=false", "--format=json", 'SELECT * FROM rwctest.bqtest.bq_sink_data_types'])
+subprocess.run(["docker", "compose", "exec", "gcloud-cli", "bq", "query", "--use_legacy_sql=false", "--format=json", 'SELECT * FROM rwctest.bqtest.bq_sink_data_types WHERE types_id = 1'])
+
+subprocess.run(["docker", "compose", "exec", "gcloud-cli", "bq", "query", "--use_legacy_sql=false", "--format=json", 'SELECT * FROM rwctest.bqtest.bq_sink_data_types WHERE types_id = 2'])
+
+subprocess.run(["docker", "compose", "exec", "gcloud-cli", "bq", "query", "--use_legacy_sql=false", "--format=json", 'SELECT * FROM rwctest.bqtest.bq_sink_data_types WHERE types_id = 3'])
 
 failed_cases = []
 for rel in relations:
