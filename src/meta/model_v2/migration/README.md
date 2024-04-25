@@ -11,7 +11,7 @@
 ## How to run the migrator CLI
 - Generate a new migration file
     ```sh
-    cargo run -- generate MIGRATION_NAME
+    DATABASE_URL=sqlite::memory: cargo run -- generate MIGRATION_NAME
     ```
 - Apply all pending migrations for test purposes, `DATABASE_URL` required.
     ```sh
