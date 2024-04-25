@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::rc::Weak;
-
 use risingwave_common::bail_not_implemented;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
@@ -67,7 +65,7 @@ impl PredicatePushdown for LogicalCteRef {
         _predicate: Condition,
         _ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        todo!()
+        self.clone().into()
     }
 }
 

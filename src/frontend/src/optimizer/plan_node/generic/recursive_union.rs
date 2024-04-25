@@ -13,8 +13,7 @@
 // limitations under the License.
 
 use pretty_xmlish::StrAssocArr;
-use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::types::DataType;
+use risingwave_common::catalog::Schema;
 
 use super::{impl_distill_unit_from_fields, GenericPlanNode, GenericPlanRef};
 use crate::optimizer::property::FunctionalDependencySet;
@@ -34,10 +33,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for RecursiveUnion<PlanRef> {
     }
 
     fn schema(&self) -> Schema {
-        let mut base = self.base.schema().clone();
-        let iter_field = Field::with_name(DataType::Int16, "$iter");
-        base.fields.push(iter_field);
-        base
+        self.recursive.schema().clone()
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {

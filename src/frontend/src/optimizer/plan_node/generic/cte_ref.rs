@@ -12,13 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
 use std::hash::Hash;
-use std::rc::Weak;
 
 use itertools::Itertools;
 use pretty_xmlish::StrAssocArr;
-use risingwave_common::array::Op;
 use risingwave_common::catalog::Schema;
 
 use super::{impl_distill_unit_from_fields, GenericPlanNode, GenericPlanRef};
@@ -30,8 +27,6 @@ use crate::{optimizer, OptimizerContextRef};
 pub struct CteRef<PlanRef> {
     share_id: ShareId,
     base: PlanRef,
-    derived_stream_key: RefCell<Option<Option<Vec<usize>>>>,
-    deriving: RefCell<bool>,
 }
 
 impl<PlanRef> PartialEq for CteRef<PlanRef> {
@@ -50,12 +45,7 @@ impl<PlanRef> Hash for CteRef<PlanRef> {
 
 impl<PlanRef> CteRef<PlanRef> {
     pub fn new(share_id: ShareId, base: PlanRef) -> Self {
-        Self {
-            share_id,
-            base,
-            derived_stream_key: RefCell::new(None),
-            deriving: RefCell::new(false),
-        }
+        Self { share_id, base }
     }
 }
 
