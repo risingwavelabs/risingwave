@@ -585,7 +585,7 @@ impl SealedData {
     }
 
     // Flush can be triggered by either a sync_epoch or a spill (`may_flush`) request.
-    fn flush(&mut self, context: &UploaderContext, is_spilled: bool) {
+    fn flush(&mut self, context: &UploaderContext, is_spilled: bool) -> bool {
         // drop unfinished merging tasks
         self.drop_merging_tasks();
 
@@ -624,6 +624,9 @@ impl SealedData {
                 info!("Spill sealed data. Task: {}", task.get_task_info());
             }
             self.spilled_data.add_task(task);
+            true
+        } else {
+            false
         }
     }
 
@@ -1052,7 +1055,7 @@ impl HummockUploader {
         if !self.context.buffer_tracker.need_more_flush() {
             return false;
         }
-        self.sealed_data.flush(&self.context, true);
+        let mut flush_unseal = self.sealed_data.flush(&self.context, true);
 
         if self.context.buffer_tracker.need_more_flush() {
             let mut unseal_epochs = vec![];
@@ -1064,12 +1067,13 @@ impl HummockUploader {
             for (_, epoch) in unseal_epochs.iter().rev() {
                 let unsealed_data = self.unsealed_data.get_mut(epoch).unwrap();
                 unsealed_data.flush(&self.context);
+                flush_unseal = true;
                 if !self.context.buffer_tracker.need_more_flush() {
                     break;
                 }
             }
         }
-        true
+        flush_unseal
     }
 
     pub(crate) fn clear(&mut self) {
@@ -2028,7 +2032,7 @@ mod tests {
     async fn test_uploader_frequently_flush() {
         let config = StorageOpts {
             shared_buffer_capacity_mb: 1,
-            shared_buffer_flush_ratio: 0.0002,
+            shared_buffer_flush_ratio: 0.001,
             ..Default::default()
         };
         let (buffer_tracker, mut uploader, _new_task_notifier) =
