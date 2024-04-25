@@ -3584,11 +3584,11 @@ impl Parser {
                 AlterSourceOperation::SetSchema {
                     new_schema_name: schema_name,
                 }
+            } else if let Some(rate_limit) = self.parse_alter_streaming_rate_limit()? {
+                AlterSourceOperation::SetStreamingRateLimit { rate_limit }
             } else {
                 return self.expected("SCHEMA after SET", self.peek_token());
             }
-        } else if let Some(rate_limit) = self.parse_alter_streaming_rate_limit()? {
-            AlterSourceOperation::SetStreamingRateLimit { rate_limit }
         } else if self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
             let connector_schema = self.parse_schema()?.unwrap();
             AlterSourceOperation::FormatEncode { connector_schema }

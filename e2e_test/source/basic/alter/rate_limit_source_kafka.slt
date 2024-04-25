@@ -21,13 +21,16 @@ from
 
 ############## Source from kafka (rate_limit = 0)
 
+# Wait for the topic to create
+skipif in-memory
+sleep 3s
+
 statement ok
 create source kafka_source (v1 int) with (
   connector = 'kafka',
   topic = 'kafka_source',
   properties.bootstrap.server = 'localhost:29092',
   scan.startup.mode = 'earliest',
-  streaming_rate_limit = 0
 ) FORMAT PLAIN ENCODE JSON
 
 statement ok
@@ -41,6 +44,9 @@ sleep 3s
 ############## Create MV on source
 
 statement ok
+SET STREAMING_RATE_LIMIT=0;
+
+statement ok
 create materialized view mv1 as select count(*) from kafka_source;
 
 statement ok
@@ -49,7 +55,13 @@ create materialized view mv2 as select count(*) from kafka_source;
 statement ok
 create materialized view mv3 as select count(*) from kafka_source;
 
+statement ok
+SET STREAMING_RATE_LIMIT=default;
+
 ############## MVs should have 0 records, since source has (rate_limit = 0)
+
+statement ok
+flush;
 
 query I
 select * from mv1;
