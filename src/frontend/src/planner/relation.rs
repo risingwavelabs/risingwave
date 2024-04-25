@@ -57,9 +57,7 @@ impl Planner {
             Relation::Watermark(tf) => self.plan_watermark(*tf),
             // note that rcte (i.e., RecursiveUnion) is included *implicitly* in share.
             Relation::Share(share) => self.plan_share(*share),
-            Relation::BackCteRef(..) => {
-                bail_not_implemented!(issue = 15135, "recursive CTE is not supported")
-            }
+            Relation::BackCteRef(cte_ref) => self.plan_cte_ref(*cte_ref)
         }
     }
 
@@ -233,6 +231,7 @@ impl Planner {
                     Some(result) => Ok(result.clone()),
                 }
             }
+            // for the recursive union in rcte
             Either::Right(recursive_union) => {
                 self.plan_recursive_union(*recursive_union.base, *recursive_union.recursive)
             }
@@ -243,9 +242,8 @@ impl Planner {
         todo!("plan watermark");
     }
 
-    #[allow(dead_code)]
     pub(super) fn plan_cte_ref(&mut self, _cte_ref: BoundBackCteRef) -> Result<PlanRef> {
-        todo!("plan cte ref");
+        bail_not_implemented!(issue = 15135, "recursive CTE not supported")
     }
 
     fn collect_col_data_types_for_tumble_window(relation: &Relation) -> Result<Vec<DataType>> {
