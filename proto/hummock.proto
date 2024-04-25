@@ -185,6 +185,12 @@ message HummockVersionDelta {
   reserved "gc_object_ids";
   map<uint32, TableWatermarks> new_table_watermarks = 8;
   repeated uint32 removed_table_ids = 9;
+  message ChangeLogDelta {
+    EpochNewChangeLog new_log = 1;
+    // only logs in epoch later than truncate_epoch will be preserved
+    uint64 truncate_epoch = 2;
+  }
+  map<uint32, ChangeLogDelta> change_log_delta = 10;
 }
 
 message HummockVersionDeltas {

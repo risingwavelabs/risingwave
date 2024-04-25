@@ -140,11 +140,13 @@ impl DataChunk {
         self.columns.len()
     }
 
+    // TODO(rc): shall we rename this to `visible_size`? I sometimes find this confused with `capacity`.
     /// `cardinality` returns the number of visible tuples
     pub fn cardinality(&self) -> usize {
         self.visibility.count_ones()
     }
 
+    // TODO(rc): shall we rename this to `size`?
     /// `capacity` returns physical length of any chunk column
     pub fn capacity(&self) -> usize {
         self.visibility.len()
