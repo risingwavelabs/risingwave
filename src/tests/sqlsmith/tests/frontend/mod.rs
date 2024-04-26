@@ -198,14 +198,12 @@ fn run_batch_query(
             e.as_report()
         ))
     })?;
-    logical_plan
-        .gen_batch_distributed_plan(batch_plan)
-        .map_err(|e| {
-            Failed::from(format!(
-                "Failed to generate batch distributed plan:\nReason:\n{}",
-                e.as_report()
-            ))
-        })?;
+    logical_plan.gen_batch_distributed_plan().map_err(|e| {
+        Failed::from(format!(
+            "Failed to generate batch distributed plan:\nReason:\n{}",
+            e.as_report()
+        ))
+    })?;
     Ok(())
 }
 

@@ -599,7 +599,7 @@ impl TestCase {
 
         let mut planner = Planner::new(context.clone());
 
-        let mut plan_root = match planner.plan(bound) {
+        let plan_root = match planner.plan(bound) {
             Ok(plan_root) => {
                 if self.expected_outputs.contains(&TestType::LogicalPlan) {
                     ret.logical_plan =
@@ -618,6 +618,7 @@ impl TestCase {
             .contains(&TestType::OptimizedLogicalPlanForBatch)
             || self.expected_outputs.contains(&TestType::OptimizerError)
         {
+            let mut plan_root = plan_root.clone();
             let optimized_logical_plan_for_batch =
                 match plan_root.gen_optimized_logical_plan_for_batch() {
                     Ok(optimized_logical_plan_for_batch) => optimized_logical_plan_for_batch,
@@ -642,6 +643,7 @@ impl TestCase {
             .contains(&TestType::OptimizedLogicalPlanForStream)
             || self.expected_outputs.contains(&TestType::OptimizerError)
         {
+            let mut plan_root = plan_root.clone();
             let optimized_logical_plan_for_stream =
                 match plan_root.gen_optimized_logical_plan_for_stream() {
                     Ok(optimized_logical_plan_for_stream) => optimized_logical_plan_for_stream,
@@ -662,15 +664,13 @@ impl TestCase {
         }
 
         'batch: {
-            // if self.batch_plan.is_some()
-            //     || self.batch_plan_proto.is_some()
-            //     || self.batch_error.is_some()
             if self.expected_outputs.contains(&TestType::BatchPlan)
                 || self.expected_outputs.contains(&TestType::BatchPlanProto)
                 || self.expected_outputs.contains(&TestType::BatchError)
             {
+                let mut plan_root = plan_root.clone();
                 let batch_plan = match plan_root.gen_batch_plan() {
-                    Ok(batch_plan) => match plan_root.gen_batch_distributed_plan(batch_plan) {
+                    Ok(_batch_plan) => match plan_root.gen_batch_distributed_plan() {
                         Ok(batch_plan) => batch_plan,
                         Err(err) => {
                             ret.batch_error = Some(err.to_report_string_pretty());
@@ -701,8 +701,9 @@ impl TestCase {
             if self.expected_outputs.contains(&TestType::BatchLocalPlan)
                 || self.expected_outputs.contains(&TestType::BatchError)
             {
+                let mut plan_root = plan_root.clone();
                 let batch_plan = match plan_root.gen_batch_plan() {
-                    Ok(batch_plan) => match plan_root.gen_batch_local_plan(batch_plan) {
+                    Ok(_batch_plan) => match plan_root.gen_batch_local_plan() {
                         Ok(batch_plan) => batch_plan,
                         Err(err) => {
                             ret.batch_error = Some(err.to_report_string_pretty());
@@ -728,8 +729,9 @@ impl TestCase {
                 .contains(&TestType::BatchDistributedPlan)
                 || self.expected_outputs.contains(&TestType::BatchError)
             {
+                let mut plan_root = plan_root.clone();
                 let batch_plan = match plan_root.gen_batch_plan() {
-                    Ok(batch_plan) => match plan_root.gen_batch_distributed_plan(batch_plan) {
+                    Ok(_batch_plan) => match plan_root.gen_batch_distributed_plan() {
                         Ok(batch_plan) => batch_plan,
                         Err(err) => {
                             ret.batch_error = Some(err.to_report_string_pretty());
@@ -823,6 +825,7 @@ impl TestCase {
 
         'sink: {
             if self.expected_outputs.contains(&TestType::SinkPlan) {
+                let mut plan_root = plan_root.clone();
                 let sink_name = "sink_test";
                 let mut options = HashMap::new();
                 options.insert("connector".to_string(), "blackhole".to_string());

@@ -252,9 +252,11 @@ impl PlanRoot {
             PlanPhase::Logical => {
                 // Logical optimization
                 self.gen_optimized_logical_plan_for_batch()?
-            },
+            }
             PlanPhase::OptimizedLogicalForBatch => self.plan.clone(),
-            PlanPhase::Batch | PlanPhase::OptimizedLogicalForStream | PlanPhase::Stream => panic!("unexpected phase"),
+            PlanPhase::Batch | PlanPhase::OptimizedLogicalForStream | PlanPhase::Stream => {
+                panic!("unexpected phase")
+            }
         };
 
         if TemporalJoinValidator::exist_dangling_temporal_scan(plan.clone()) {
