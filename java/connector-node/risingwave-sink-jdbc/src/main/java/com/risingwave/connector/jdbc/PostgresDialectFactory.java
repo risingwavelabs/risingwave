@@ -14,10 +14,12 @@
 
 package com.risingwave.connector.jdbc;
 
+import java.util.List;
+
 public class PostgresDialectFactory implements JdbcDialectFactory {
 
     @Override
-    public JdbcDialect create(int[] columnSqlTypes) {
-        return new PostgresDialect(columnSqlTypes);
+    public JdbcDialect create(List<Integer> columnSqlTypes, List<Integer> pkIndices) {
+        return new PostgresDialect(columnSqlTypes, pkIndices);
     }
 }
