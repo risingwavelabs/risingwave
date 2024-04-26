@@ -1448,9 +1448,11 @@ template:
     # listen port of mysql
     port: 8306
 
-    # Note: these configs are not validated by risedev. They are passed as-is to risedev-env
-    # default user for mysql operations.
-    # This is not used in RISEDEV_MYSQL_WITH_OPTIONS_COMMON.
+    # Note:
+    # - This will be used to intialize the MySQL instance if it's fresh.
+    # - In user-managed mode, these configs are not validated by risedev.
+    #   They are passed as-is to risedev-env default user for MySQL operations.
+    # - This is not used in RISEDEV_MYSQL_WITH_OPTIONS_COMMON.
     user: root
     password: ""
     database: "risedev"

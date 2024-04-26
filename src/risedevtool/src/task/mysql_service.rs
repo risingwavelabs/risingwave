@@ -21,6 +21,7 @@ use anyhow::Result;
 use super::{ExecuteContext, Task};
 use crate::{DummyService, MySqlConfig};
 
+// TODO: extract to a common docker-backed service
 pub struct MysqlService {
     config: MySqlConfig,
 }
@@ -32,11 +33,11 @@ impl MysqlService {
 
     fn docker_pull(&self) -> Command {
         let mut cmd = Command::new("docker");
-        cmd.arg("pull").arg("mysql:8");
+        cmd.arg("pull").arg(&self.config.image);
         cmd
     }
 
-    fn docker_run(&self) -> Command {
+    fn docker_run_args(&self) -> Command {
         let mut cmd = Command::new("docker");
         cmd.arg("run")
             .arg("--rm")
@@ -69,7 +70,7 @@ impl Task for MysqlService {
 
         ctx.pb.set_message("starting...");
 
-        let mut run_cmd = self.docker_run();
+        let mut run_cmd = self.docker_run_args();
         if self.config.persist_data {
             let path = Path::new(&env::var("PREFIX_DATA")?).join(self.id());
             fs_err::create_dir_all(&path)?;
@@ -77,7 +78,7 @@ impl Task for MysqlService {
                 .arg("-v")
                 .arg(format!("{}:/var/lib/mysql", path.to_string_lossy()));
         }
-        run_cmd.arg("mysql:8");
+        run_cmd.arg(&self.config.image);
 
         ctx.run_command(ctx.tmux_run(run_cmd)?)?;
 
