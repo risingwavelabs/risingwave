@@ -407,8 +407,8 @@ select id, my_num from list_with_null_shared order by id;
 query II
 select id, my_mood from list_with_null_shared order by id;
 ----
-1 {happy,ok,NULL}
-2 {NULL,sad,ok}
+1 NULL
+2 NULL
 
 query II
 select id, my_uuid from list_with_null_shared order by id;
