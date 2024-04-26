@@ -218,38 +218,32 @@ where
     }
 }
 
-fn consistent_old_value_op(
-    row_serde: impl ValueRowSerde,
-    is_log_store: bool,
-) -> OpConsistencyLevel {
-    OpConsistencyLevel::ConsistentOldValue {
-        check_old_value: Arc::new(move |first: &Bytes, second: &Bytes| {
-            if first == second {
-                return true;
+fn consistent_old_value_op(row_serde: impl ValueRowSerde,  _is_log_store: bool) -> OpConsistencyLevel {
+    OpConsistencyLevel::ConsistentOldValue(Arc::new(move |first: &Bytes, second: &Bytes| {
+        if first == second {
+            return true;
+        }
+        let first = match row_serde.deserialize(first) {
+            Ok(rows) => rows,
+            Err(e) => {
+                error!(error = %e.as_report(), value = ?first, "fail to deserialize serialized value");
+                return false;
             }
-            let first = match row_serde.deserialize(first) {
-                Ok(rows) => rows,
-                Err(e) => {
-                    error!(error = %e.as_report(), value = ?first, "fail to deserialize serialized value");
-                    return false;
-                }
-            };
-            let second = match row_serde.deserialize(second) {
-                Ok(rows) => rows,
-                Err(e) => {
-                    error!(error = %e.as_report(), value = ?second, "fail to deserialize serialized value");
-                    return false;
-                }
-            };
-            if first != second {
-                error!(first = ?first, second = ?second, "sanity check fail");
-                false
-            } else {
-                true
+        };
+        let second = match row_serde.deserialize(second) {
+            Ok(rows) => rows,
+            Err(e) => {
+                error!(error = %e.as_report(), value = ?second, "fail to deserialize serialized value");
+                return false;
             }
-        }),
-        is_log_store,
-    }
+        };
+        if first != second {
+            error!(first = ?first, second = ?second, "sanity check fail");
+            false
+        } else {
+            true
+        }
+    }))
 }
 
 #[derive(Eq, PartialEq, Copy, Clone, Debug)]

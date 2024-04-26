@@ -523,14 +523,8 @@ impl LocalBarrierWorker {
             sync_result,
         } = result;
 
-        let (synced_sstables, table_watermarks, old_value_ssts) = sync_result
-            .map(|sync_result| {
-                (
-                    sync_result.uncommitted_ssts,
-                    sync_result.table_watermarks,
-                    sync_result.old_value_ssts,
-                )
-            })
+        let (synced_sstables, table_watermarks) = sync_result
+            .map(|sync_result| (sync_result.uncommitted_ssts, sync_result.table_watermarks))
             .unwrap_or_default();
 
         let result = StreamingControlStreamResponse {
@@ -558,10 +552,6 @@ impl LocalBarrierWorker {
                         table_watermarks: table_watermarks
                             .into_iter()
                             .map(|(key, value)| (key.table_id, value.to_protobuf()))
-                            .collect(),
-                        old_value_sstables: old_value_ssts
-                            .into_iter()
-                            .map(|sst| sst.sst_info)
                             .collect(),
                     },
                 ),

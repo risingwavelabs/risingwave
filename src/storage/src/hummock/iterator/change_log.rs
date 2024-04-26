@@ -387,123 +387,6 @@ impl StateStoreIter<StateStoreReadLogItem> for ChangeLogIterator {
     }
 }
 
-#[cfg(any(test, feature = "test"))]
-pub mod test_utils {
-    use std::collections::HashMap;
-
-    use bytes::Bytes;
-    use rand::{thread_rng, Rng, RngCore};
-    use risingwave_common::util::epoch::{test_epoch, EpochPair, MAX_EPOCH};
-    use risingwave_hummock_sdk::key::TableKey;
-
-    use crate::hummock::iterator::test_utils::iterator_test_table_key_of;
-    use crate::mem_table::KeyOp;
-    use crate::store::{InitOptions, LocalStateStore, SealCurrentEpochOptions};
-
-    pub type TestLogDataType = Vec<(u64, Vec<(TableKey<Bytes>, KeyOp)>)>;
-
-    pub fn gen_test_data(
-        epoch_count: usize,
-        key_count: usize,
-        skip_ratio: f64,
-        delete_ratio: f64,
-    ) -> TestLogDataType {
-        let mut store: HashMap<TableKey<Bytes>, Bytes> = HashMap::new();
-        let mut rng = thread_rng();
-        let mut logs = Vec::new();
-        for epoch_idx in 1..=(epoch_count - 1) {
-            let mut epoch_logs = Vec::new();
-            let epoch = test_epoch(epoch_idx as _);
-            for key_idx in 0..key_count {
-                if rng.gen_bool(skip_ratio) {
-                    continue;
-                }
-                let key = TableKey(Bytes::from(iterator_test_table_key_of(key_idx)));
-                if rng.gen_bool(delete_ratio) {
-                    if let Some(prev_value) = store.remove(&key) {
-                        epoch_logs.push((key, KeyOp::Delete(prev_value)));
-                    }
-                } else {
-                    let value = Bytes::copy_from_slice(rng.next_u64().to_string().as_bytes());
-                    let prev_value = store.get(&key);
-                    if let Some(prev_value) = prev_value {
-                        epoch_logs.push((
-                            key.clone(),
-                            KeyOp::Update((prev_value.clone(), value.clone())),
-                        ));
-                    } else {
-                        epoch_logs.push((key.clone(), KeyOp::Insert(value.clone())));
-                    }
-                    store.insert(key, value);
-                }
-            }
-            logs.push((epoch, epoch_logs));
-        }
-        // at the end add an epoch with only delete
-        {
-            let mut epoch_logs = Vec::new();
-            let epoch = test_epoch(epoch_count as _);
-            for (key, value) in store {
-                epoch_logs.push((key, KeyOp::Delete(value)));
-            }
-            logs.push((epoch, epoch_logs));
-        }
-        logs
-    }
-
-    pub async fn apply_test_log_data(
-        log_data: TestLogDataType,
-        state_store: &mut impl LocalStateStore,
-        try_flush_ratio: f64,
-    ) {
-        let mut rng = thread_rng();
-        let first_epoch = log_data[0].0;
-        for (epoch, epoch_logs) in log_data {
-            if epoch == first_epoch {
-                state_store
-                    .init(InitOptions {
-                        epoch: EpochPair::new_test_epoch(epoch),
-                    })
-                    .await
-                    .unwrap();
-            } else {
-                state_store.flush().await.unwrap();
-                state_store.seal_current_epoch(
-                    epoch,
-                    SealCurrentEpochOptions {
-                        table_watermarks: None,
-                        switch_op_consistency_level: None,
-                    },
-                );
-            }
-            for (key, op) in epoch_logs {
-                match op {
-                    KeyOp::Insert(value) => {
-                        state_store.insert(key, value, None).unwrap();
-                    }
-                    KeyOp::Delete(old_value) => {
-                        state_store.delete(key, old_value).unwrap();
-                    }
-                    KeyOp::Update((old_value, value)) => {
-                        state_store.insert(key, value, Some(old_value)).unwrap();
-                    }
-                }
-                if rng.gen_bool(try_flush_ratio) {
-                    state_store.try_flush().await.unwrap();
-                }
-            }
-        }
-        state_store.flush().await.unwrap();
-        state_store.seal_current_epoch(
-            MAX_EPOCH,
-            SealCurrentEpochOptions {
-                table_watermarks: None,
-                switch_op_consistency_level: None,
-            },
-        );
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -511,15 +394,13 @@ mod tests {
 
     use bytes::Bytes;
     use itertools::Itertools;
+    use rand::{thread_rng, Rng, RngCore};
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::table_distribution::TableDistribution;
-    use risingwave_common::util::epoch::test_epoch;
+    use risingwave_common::util::epoch::{test_epoch, EpochPair};
     use risingwave_hummock_sdk::key::{TableKey, UserKey};
     use risingwave_hummock_sdk::EpochWithGap;
 
-    use crate::hummock::iterator::change_log::test_utils::{
-        apply_test_log_data, gen_test_data, TestLogDataType,
-    };
     use crate::hummock::iterator::change_log::ChangeLogIteratorInner;
     use crate::hummock::iterator::test_utils::{
         iterator_test_table_key_of, iterator_test_value_of,
@@ -528,8 +409,9 @@ mod tests {
     use crate::mem_table::{KeyOp, MemTable, MemTableHummockIterator, MemTableStore};
     use crate::memory::MemoryStateStore;
     use crate::store::{
-        ChangeLogValue, NewLocalOptions, OpConsistencyLevel, ReadLogOptions, StateStoreIter,
-        StateStoreRead, CHECK_BYTES_EQUAL,
+        ChangeLogValue, InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel,
+        ReadLogOptions, ReadOptions, SealCurrentEpochOptions, StateStoreIter, StateStoreRead,
+        CHECK_BYTES_EQUAL,
     };
     use crate::StateStore;
 
@@ -651,66 +533,131 @@ mod tests {
         assert!(!iter.is_valid());
     }
 
-    fn gen_test_mem_table_store(
-        test_log_data: TestLogDataType,
-    ) -> Vec<(u64, MemTableStore, MemTableStore)> {
+    async fn gen_test_data(
+        table_id: TableId,
+        epoch_count: usize,
+        key_count: usize,
+        delete_ratio: f64,
+    ) -> (Vec<(u64, MemTableStore, MemTableStore)>, MemoryStateStore) {
+        let state_store = MemoryStateStore::new();
+        let mut rng = thread_rng();
+        let mut local = state_store
+            .new_local(NewLocalOptions {
+                table_id,
+                op_consistency_level: OpConsistencyLevel::ConsistentOldValue(
+                    CHECK_BYTES_EQUAL.clone(),
+                ),
+                table_option: Default::default(),
+                is_replicated: false,
+                vnodes: TableDistribution::all_vnodes(),
+            })
+            .await;
         let mut logs = Vec::new();
-        for (epoch, epoch_logs) in test_log_data {
+        for epoch_idx in 1..=epoch_count {
+            let epoch = test_epoch(epoch_idx as _);
             let mut new_values = MemTableStore::new();
             let mut old_values = MemTableStore::new();
-            for (key, op) in epoch_logs {
-                new_values.insert(key.clone(), op.clone());
-                if let KeyOp::Delete(old_value) | KeyOp::Update((old_value, _)) = op {
-                    old_values.insert(key, KeyOp::Insert(old_value));
+            if epoch_idx == 1 {
+                local
+                    .init(InitOptions {
+                        epoch: EpochPair::new_test_epoch(epoch),
+                    })
+                    .await
+                    .unwrap();
+            } else {
+                local.flush().await.unwrap();
+                local.seal_current_epoch(
+                    epoch,
+                    SealCurrentEpochOptions {
+                        table_watermarks: None,
+                        switch_op_consistency_level: None,
+                    },
+                );
+            }
+            for key_idx in 0..key_count {
+                let key = TableKey(Bytes::from(iterator_test_table_key_of(key_idx)));
+                if rng.gen_bool(delete_ratio) {
+                    if let Some(prev_value) = local
+                        .get(
+                            key.clone(),
+                            ReadOptions {
+                                prefix_hint: None,
+                                ignore_range_tombstone: false,
+                                prefetch_options: Default::default(),
+                                cache_policy: Default::default(),
+                                retention_seconds: None,
+                                table_id,
+                                read_version_from_backup: false,
+                            },
+                        )
+                        .await
+                        .unwrap()
+                    {
+                        new_values.insert(key.clone(), KeyOp::Delete(Bytes::new()));
+                        old_values.insert(key.clone(), KeyOp::Insert(prev_value.clone()));
+                        local.delete(key, prev_value).unwrap();
+                    }
+                } else {
+                    let value = Bytes::copy_from_slice(rng.next_u64().to_string().as_bytes());
+                    new_values.insert(key.clone(), KeyOp::Insert(value.clone()));
+                    let prev_value = local
+                        .get(
+                            key.clone(),
+                            ReadOptions {
+                                prefix_hint: None,
+                                ignore_range_tombstone: false,
+                                prefetch_options: Default::default(),
+                                cache_policy: Default::default(),
+                                retention_seconds: None,
+                                table_id,
+                                read_version_from_backup: false,
+                            },
+                        )
+                        .await
+                        .unwrap();
+                    if let Some(prev_value) = prev_value.clone() {
+                        old_values.insert(key.clone(), KeyOp::Insert(prev_value));
+                    }
+                    local.insert(key, value, prev_value).unwrap();
                 }
             }
             logs.push((epoch, new_values, old_values));
         }
-        logs
+        local.flush().await.unwrap();
+        local.seal_current_epoch(
+            test_epoch((epoch_count + 1) as _),
+            SealCurrentEpochOptions {
+                table_watermarks: None,
+                switch_op_consistency_level: None,
+            },
+        );
+        (logs, state_store)
     }
 
     #[tokio::test]
     async fn test_random_data() {
         let table_id = TableId::new(233);
         let epoch_count = 10;
-        let state_store = MemoryStateStore::new();
-        let mut local = state_store
-            .new_local(NewLocalOptions {
-                table_id,
-                op_consistency_level: OpConsistencyLevel::ConsistentOldValue {
-                    check_old_value: CHECK_BYTES_EQUAL.clone(),
-                    is_log_store: true,
-                },
-                table_option: Default::default(),
-                is_replicated: false,
-                vnodes: TableDistribution::all_vnodes(),
-            })
-            .await;
-        let logs = gen_test_data(epoch_count, 10000, 0.05, 0.2);
+        let (logs, state_store) = gen_test_data(table_id, epoch_count, 10000, 0.2).await;
         assert_eq!(logs.len(), epoch_count);
-        apply_test_log_data(logs.clone(), &mut local, 0.0).await;
-        let mem_table_logs = gen_test_mem_table_store(logs.clone());
-        assert_eq!(mem_table_logs.len(), epoch_count);
         for start_epoch_idx in 0..epoch_count {
-            for end_epoch_idx in start_epoch_idx..epoch_count {
-                let new_value_iter = MergeIterator::new(mem_table_logs.iter().map(
-                    |(epoch, new_value_memtable, _)| {
+            for end_epoch_idx in start_epoch_idx + 1..epoch_count {
+                let new_value_iter =
+                    MergeIterator::new(logs.iter().map(|(epoch, new_value_memtable, _)| {
                         MemTableHummockIterator::new(
                             new_value_memtable,
                             EpochWithGap::new_from_epoch(*epoch),
                             table_id,
                         )
-                    },
-                ));
-                let old_value_iter = MergeIterator::new(mem_table_logs.iter().map(
-                    |(epoch, _, old_value_memtable)| {
+                    }));
+                let old_value_iter =
+                    MergeIterator::new(logs.iter().map(|(epoch, _, old_value_memtable)| {
                         MemTableHummockIterator::new(
                             old_value_memtable,
                             EpochWithGap::new_from_epoch(*epoch),
                             table_id,
                         )
-                    },
-                ));
+                    }));
                 let epoch_range = (logs[start_epoch_idx].0, logs[end_epoch_idx].0);
                 let mut change_log_iter = ChangeLogIteratorInner::new(
                     epoch_range,

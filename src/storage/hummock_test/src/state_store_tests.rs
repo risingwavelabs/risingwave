@@ -13,39 +13,34 @@
 // limitations under the License.
 
 use std::ops::Bound;
-use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::sync::Arc;
 
 use bytes::Bytes;
 use expect_test::expect;
 use foyer::memory::CacheContext;
 use futures::{pin_mut, StreamExt};
-use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::hash::table_distribution::TableDistribution;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
-use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, TableKeyRange};
+use risingwave_hummock_sdk::key::prefixed_range_with_vnode;
 use risingwave_hummock_sdk::{
     HummockReadEpoch, HummockSstableObjectId, LocalSstableInfo, SyncResult,
 };
 use risingwave_meta::hummock::test_utils::setup_compute_env;
+use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
-use risingwave_storage::hummock::iterator::change_log::test_utils::{
-    apply_test_log_data, gen_test_data,
-};
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::test_utils::{count_stream, default_opts_for_test};
 use risingwave_storage::hummock::{CachePolicy, HummockStorage};
-use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
-use risingwave_storage::store_impl::verify::VerifyStateStore;
 
 use crate::get_notification_client_for_test;
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
-use crate::test_utils::{gen_key_from_str, with_hummock_storage_v2, TestIngestBatch};
+use crate::test_utils::{
+    gen_key_from_str, with_hummock_storage_v2, HummockStateStoreTestTrait, TestIngestBatch,
+};
 
 #[tokio::test]
 async fn test_empty_read_v2() {
@@ -85,6 +80,13 @@ async fn test_empty_read_v2() {
 #[tokio::test]
 async fn test_basic_v2() {
     let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
+    test_basic_inner(hummock_storage, meta_client).await;
+}
+
+async fn test_basic_inner(
+    hummock_storage: impl HummockStateStoreTestTrait,
+    meta_client: Arc<MockHummockMetaClient>,
+) {
     let anchor = gen_key_from_str(VirtualNode::ZERO, "aa");
 
     // First batch inserts the anchor and others.
@@ -407,8 +409,14 @@ async fn test_basic_v2() {
 
 #[tokio::test]
 async fn test_state_store_sync_v2() {
-    let (hummock_storage, _meta_client) = with_hummock_storage_v2(Default::default()).await;
+    let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
+    test_state_store_sync_inner(hummock_storage, meta_client).await;
+}
 
+async fn test_state_store_sync_inner(
+    hummock_storage: impl HummockStateStoreTestTrait,
+    _meta_client: Arc<MockHummockMetaClient>,
+) {
     let mut epoch = hummock_storage
         .get_pinned_version()
         .max_committed_epoch()
@@ -1019,7 +1027,13 @@ async fn test_reload_storage() {
 #[tokio::test]
 async fn test_delete_get_v2() {
     let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
+    test_delete_get_inner(hummock_storage, meta_client).await;
+}
 
+async fn test_delete_get_inner(
+    hummock_storage: impl HummockStateStoreTestTrait,
+    meta_client: Arc<MockHummockMetaClient>,
+) {
     let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
     let epoch1 = initial_epoch.next_epoch();
     let batch1 = vec![
@@ -1089,7 +1103,13 @@ async fn test_delete_get_v2() {
 #[tokio::test]
 async fn test_multiple_epoch_sync_v2() {
     let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
+    test_multiple_epoch_sync_inner(hummock_storage, meta_client).await;
+}
 
+async fn test_multiple_epoch_sync_inner(
+    hummock_storage: impl HummockStateStoreTestTrait,
+    meta_client: Arc<MockHummockMetaClient>,
+) {
     let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
     let epoch1 = initial_epoch.next_epoch();
     let batch1 = vec![
@@ -1524,114 +1544,5 @@ async fn test_replicated_local_hummock_storage() {
             []
         "#]];
         expected.assert_debug_eq(&actual);
-    }
-}
-
-#[tokio::test]
-async fn test_iter_log() {
-    let table_id = TableId::new(233);
-    let (hummock_storage, meta_client) = with_hummock_storage_v2(table_id).await;
-    let epoch_count = 10;
-    let key_count = 10000;
-
-    let test_log_data = gen_test_data(epoch_count, key_count, 0.05, 0.2);
-    let in_memory_state_store = MemoryStateStore::new();
-
-    let mut in_memory_local = in_memory_state_store
-        .new_local(NewLocalOptions {
-            table_id,
-            op_consistency_level: OpConsistencyLevel::ConsistentOldValue {
-                check_old_value: CHECK_BYTES_EQUAL.clone(),
-                is_log_store: true,
-            },
-            table_option: Default::default(),
-            is_replicated: false,
-            vnodes: TableDistribution::all_vnodes(),
-        })
-        .await;
-
-    apply_test_log_data(test_log_data.clone(), &mut in_memory_local, 0.0).await;
-
-    let mut hummock_local = hummock_storage
-        .new_local(NewLocalOptions {
-            table_id,
-            op_consistency_level: OpConsistencyLevel::ConsistentOldValue {
-                check_old_value: CHECK_BYTES_EQUAL.clone(),
-                is_log_store: true,
-            },
-            table_option: Default::default(),
-            is_replicated: false,
-            vnodes: TableDistribution::all_vnodes(),
-        })
-        .await;
-    // flush for about 10 times per epoch
-    apply_test_log_data(test_log_data.clone(), &mut hummock_local, 0.001).await;
-
-    for (epoch, _) in &test_log_data {
-        let res = hummock_storage.seal_and_sync_epoch(*epoch).await.unwrap();
-        if *epoch != test_log_data[0].0 {
-            assert!(!res.old_value_ssts.is_empty());
-        }
-        assert!(!res.uncommitted_ssts.is_empty());
-        meta_client.commit_epoch(*epoch, res).await.unwrap();
-    }
-
-    hummock_storage
-        .try_wait_epoch_for_test(test_log_data.last().unwrap().0)
-        .await;
-
-    let verify_state_store = VerifyStateStore {
-        actual: hummock_storage,
-        expected: Some(in_memory_state_store),
-        _phantom: Default::default(),
-    };
-
-    let verify_iter_log = |key_range: TableKeyRange| {
-        let state_store = &verify_state_store;
-        let test_log_data = &test_log_data;
-        async move {
-            for start_epoch_idx in 0..epoch_count {
-                for end_epoch_idx in start_epoch_idx..epoch_count {
-                    let min_epoch = test_log_data[start_epoch_idx].0;
-                    let max_epoch = test_log_data[end_epoch_idx].0;
-                    let mut iter = state_store
-                        .iter_log(
-                            (min_epoch, max_epoch),
-                            key_range.clone(),
-                            ReadLogOptions { table_id },
-                        )
-                        .await
-                        .unwrap();
-                    while iter.try_next().await.unwrap().is_some() {}
-                }
-            }
-        }
-    };
-
-    verify_iter_log((Unbounded, Unbounded)).await;
-
-    let keys = test_log_data
-        .iter()
-        .flat_map(|(_, logs)| logs.iter().map(|(key, _)| key.clone()))
-        .sorted()
-        .dedup()
-        .collect_vec();
-    assert_eq!(keys.len(), key_count);
-    let test_key_count = 5;
-    let step = key_count / test_key_count;
-
-    for start_key_idx in (0..test_key_count).step_by(step) {
-        let start_key = keys[start_key_idx].clone();
-        let start_bound = Included(start_key);
-        for end_key_idx in (start_key_idx..test_key_count).step_by(step) {
-            let end_key = keys[end_key_idx].clone();
-            let end_bound = if end_key_idx % 2 == 0 {
-                Included(end_key)
-            } else {
-                Excluded(end_key)
-            };
-            verify_iter_log((start_bound.clone(), end_bound)).await;
-        }
-        verify_iter_log((start_bound, Unbounded)).await;
     }
 }

@@ -101,8 +101,6 @@ pub struct SyncResult {
     pub uncommitted_ssts: Vec<LocalSstableInfo>,
     /// The collected table watermarks written by state tables.
     pub table_watermarks: HashMap<TableId, TableWatermarks>,
-    /// Sstable that holds the uncommitted old value
-    pub old_value_ssts: Vec<LocalSstableInfo>,
 }
 
 #[derive(Debug, Clone)]

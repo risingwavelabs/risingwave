@@ -23,8 +23,9 @@ use risingwave_storage::hummock::iterator::{
     Forward, HummockIterator, HummockIteratorUnion, MergeIterator, SkipWatermarkIterator,
 };
 use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::{
-    SharedBufferBatch, SharedBufferBatchIterator, SharedBufferValue,
+    SharedBufferBatch, SharedBufferBatchIterator,
 };
+use risingwave_storage::hummock::value::HummockValue;
 
 fn gen_interleave_shared_buffer_batch_iter(
     batch_size: usize,
@@ -38,7 +39,7 @@ fn gen_interleave_shared_buffer_batch_iter(
                 TableKey(Bytes::copy_from_slice(
                     format!("test_key_{:08}", j * batch_count + i).as_bytes(),
                 )),
-                SharedBufferValue::Insert(Bytes::copy_from_slice("value".as_bytes())),
+                HummockValue::put(Bytes::copy_from_slice("value".as_bytes())),
             ));
         }
         let batch = SharedBufferBatch::for_test(batch_data, 2333, Default::default());
@@ -68,7 +69,7 @@ fn gen_interleave_shared_buffer_batch_enum_iter(
                 TableKey(Bytes::copy_from_slice(
                     format!("test_key_{:08}", j * batch_count + i).as_bytes(),
                 )),
-                SharedBufferValue::Insert(Bytes::copy_from_slice("value".as_bytes())),
+                HummockValue::put(Bytes::copy_from_slice("value".as_bytes())),
             ));
         }
         let batch = SharedBufferBatch::for_test(batch_data, 2333, Default::default());

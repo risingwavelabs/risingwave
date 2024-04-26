@@ -175,10 +175,7 @@ impl MemTable {
 
     pub fn delete(&mut self, pk: TableKey<Bytes>, old_value: Bytes) -> Result<()> {
         let key_len = std::mem::size_of::<Bytes>() + pk.len();
-        let OpConsistencyLevel::ConsistentOldValue {
-            check_old_value: value_checker,
-            ..
-        } = &self.op_consistency_level
+        let OpConsistencyLevel::ConsistentOldValue(value_checker) = &self.op_consistency_level
         else {
             let delete_value = KeyOp::Delete(old_value);
             self.kv_size.add(&pk, &delete_value);
@@ -243,10 +240,7 @@ impl MemTable {
         old_value: Bytes,
         new_value: Bytes,
     ) -> Result<()> {
-        let OpConsistencyLevel::ConsistentOldValue {
-            check_old_value: value_checker,
-            ..
-        } = &self.op_consistency_level
+        let OpConsistencyLevel::ConsistentOldValue(value_checker) = &self.op_consistency_level
         else {
             let key_len = std::mem::size_of::<Bytes>() + pk.len();
 
@@ -689,10 +683,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_mem_table_memory_size() {
-        let mut mem_table = MemTable::new(OpConsistencyLevel::ConsistentOldValue {
-            check_old_value: CHECK_BYTES_EQUAL.clone(),
-            is_log_store: false,
-        });
+        let mut mem_table = MemTable::new(OpConsistencyLevel::ConsistentOldValue(
+            CHECK_BYTES_EQUAL.clone(),
+        ));
         assert_eq!(mem_table.kv_size.size(), 0);
 
         mem_table
@@ -885,10 +878,9 @@ mod tests {
         let mut test_data = ordered_test_data.clone();
 
         test_data.shuffle(&mut rng);
-        let mut mem_table = MemTable::new(OpConsistencyLevel::ConsistentOldValue {
-            check_old_value: CHECK_BYTES_EQUAL.clone(),
-            is_log_store: false,
-        });
+        let mut mem_table = MemTable::new(OpConsistencyLevel::ConsistentOldValue(
+            CHECK_BYTES_EQUAL.clone(),
+        ));
         for (key, op) in test_data {
             match op {
                 KeyOp::Insert(value) => {

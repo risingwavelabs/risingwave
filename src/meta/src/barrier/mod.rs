@@ -16,7 +16,6 @@ use std::assert_matches::assert_matches;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::pending;
-use std::iter::empty;
 use std::mem::{replace, take};
 use std::sync::Arc;
 use std::time::Duration;
@@ -31,7 +30,6 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
-use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::table_watermark::{
     merge_multiple_new_table_watermarks, TableWatermarks,
 };
@@ -1146,12 +1144,11 @@ pub type BarrierManagerRef = GlobalBarrierManagerContext;
 fn collect_commit_epoch_info(
     resps: Vec<BarrierCompleteResponse>,
     command_ctx: &CommandContext,
-    epochs: &Vec<u64>,
+    _epochs: &Vec<u64>,
 ) -> CommitEpochInfo {
     let mut sst_to_worker: HashMap<HummockSstableObjectId, WorkerId> = HashMap::new();
     let mut synced_ssts: Vec<ExtendedSstableInfo> = vec![];
     let mut table_watermarks = Vec::with_capacity(resps.len());
-    let mut old_value_ssts = Vec::with_capacity(resps.len());
     for resp in resps {
         let ssts_iter = resp.synced_sstables.into_iter().map(|grouped| {
             let sst_info = grouped.sst.expect("field not None");
@@ -1164,7 +1161,6 @@ fn collect_commit_epoch_info(
         });
         synced_ssts.extend(ssts_iter);
         table_watermarks.push(resp.table_watermarks);
-        old_value_ssts.extend(resp.old_value_sstables);
     }
     let new_table_fragment_info = if let Command::CreateStreamingJob {
         table_fragments, ..
@@ -1182,14 +1178,6 @@ fn collect_commit_epoch_info(
     } else {
         None
     };
-
-    let table_new_change_log = build_table_change_log_delta(
-        old_value_ssts.into_iter(),
-        synced_ssts.iter().map(|sst| &sst.sst_info),
-        epochs,
-        // TODO: pass log store table id and the corresponding truncate_epoch
-        empty(),
-    );
 
     CommitEpochInfo::new(
         synced_ssts,
@@ -1211,6 +1199,5 @@ fn collect_commit_epoch_info(
         ),
         sst_to_worker,
         new_table_fragment_info,
-        table_new_change_log,
     )
 }

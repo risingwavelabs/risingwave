@@ -303,9 +303,8 @@ mod tests {
     use risingwave_hummock_sdk::EpochWithGap;
 
     use crate::hummock::iterator::{HummockIterator, SkipWatermarkIterator};
-    use crate::hummock::shared_buffer::shared_buffer_batch::{
-        SharedBufferBatch, SharedBufferValue,
-    };
+    use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
+    use crate::hummock::value::HummockValue;
 
     const EPOCH: u64 = test_epoch(1);
     const TABLE_ID: TableId = TableId::new(233);
@@ -350,7 +349,7 @@ mod tests {
     }
 
     fn build_batch(
-        pairs: impl Iterator<Item = (TableKey<Bytes>, SharedBufferValue<Bytes>)>,
+        pairs: impl Iterator<Item = (TableKey<Bytes>, HummockValue<Bytes>)>,
     ) -> Option<SharedBufferBatch> {
         let pairs: Vec<_> = pairs.collect();
         if pairs.is_empty() {
@@ -361,9 +360,9 @@ mod tests {
     }
 
     fn filter_with_watermarks(
-        iter: impl Iterator<Item = (TableKey<Bytes>, SharedBufferValue<Bytes>)>,
+        iter: impl Iterator<Item = (TableKey<Bytes>, HummockValue<Bytes>)>,
         table_watermarks: ReadTableWatermark,
-    ) -> impl Iterator<Item = (TableKey<Bytes>, SharedBufferValue<Bytes>)> {
+    ) -> impl Iterator<Item = (TableKey<Bytes>, HummockValue<Bytes>)> {
         iter.filter(move |(key, _)| {
             if let Some(watermark) = table_watermarks.vnode_watermarks.get(&key.vnode_part()) {
                 !table_watermarks
@@ -425,10 +424,10 @@ mod tests {
         assert_iter_eq(first, second, Some((*last_vnode, last_key_index + 1))).await;
     }
 
-    fn gen_key_value(vnode: usize, index: usize) -> (TableKey<Bytes>, SharedBufferValue<Bytes>) {
+    fn gen_key_value(vnode: usize, index: usize) -> (TableKey<Bytes>, HummockValue<Bytes>) {
         (
             gen_key_from_str(VirtualNode::from_index(vnode), &gen_inner_key(index)),
-            SharedBufferValue::Insert(Bytes::copy_from_slice(
+            HummockValue::Put(Bytes::copy_from_slice(
                 format!("{}-value-{}", vnode, index).as_bytes(),
             )),
         )

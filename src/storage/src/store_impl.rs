@@ -201,7 +201,7 @@ macro_rules! dispatch_state_store {
     }};
 }
 
-#[cfg(any(debug_assertions, test, feature = "test"))]
+#[cfg(debug_assertions)]
 pub mod verify {
     use std::fmt::Debug;
     use std::future::Future;

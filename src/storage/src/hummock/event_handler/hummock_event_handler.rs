@@ -28,7 +28,7 @@ use prometheus::core::{AtomicU64, GenericGauge};
 use prometheus::{Histogram, IntGauge};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
-use risingwave_hummock_sdk::{HummockEpoch, SyncResult};
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo, SyncResult};
 use thiserror_ext::AsReport;
 use tokio::spawn;
 use tokio::sync::mpsc::error::SendError;
@@ -199,7 +199,7 @@ async fn flush_imms(
     compactor_context: CompactorContext,
     filter_key_extractor_manager: FilterKeyExtractorManager,
     sstable_object_id_manager: Arc<SstableObjectIdManager>,
-) -> HummockResult<UploadTaskOutput> {
+) -> HummockResult<Vec<LocalSstableInfo>> {
     for epoch in &task_info.epochs {
         let _ = sstable_object_id_manager
             .add_watermark_object_id(Some(*epoch))
@@ -257,7 +257,7 @@ impl HummockEventHandler {
                 spawn({
                     let future = async move {
                         let _timer = upload_task_latency.start_timer();
-                        let mut output = flush_imms(
+                        let ssts = flush_imms(
                             payload,
                             task_info,
                             upload_compactor_context.clone(),
@@ -265,14 +265,10 @@ impl HummockEventHandler {
                             sstable_object_id_manager.clone(),
                         )
                         .await?;
-                        assert!(
-                            output
-                                .wait_poll_timer
-                                .replace(wait_poll_latency.start_timer())
-                                .is_none(),
-                            "should not set timer before"
-                        );
-                        Ok(output)
+                        Ok(UploadTaskOutput {
+                            ssts,
+                            wait_poll_timer: Some(wait_poll_latency.start_timer()),
+                        })
                     };
                     if let Some(tree_root) = tree_root {
                         tree_root.instrument(future).left_future()
@@ -992,13 +988,6 @@ fn to_sync_result(result: &HummockResult<SyncedData>) -> HummockResult<SyncResul
                     .flat_map(|staging_sstable_info| staging_sstable_info.sstable_infos().clone())
                     .collect(),
                 table_watermarks: sync_data.table_watermarks.clone(),
-                old_value_ssts: sync_data
-                    .staging_ssts
-                    .iter()
-                    .flat_map(|staging_sstable_info| {
-                        staging_sstable_info.old_value_sstable_infos().clone()
-                    })
-                    .collect(),
             })
         }
         Err(e) => Err(HummockError::other(format!(
@@ -1035,11 +1024,10 @@ mod tests {
     use crate::hummock::event_handler::{HummockEvent, HummockEventHandler, HummockVersionUpdate};
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::local_version::pinned_version::PinnedVersion;
-    use crate::hummock::shared_buffer::shared_buffer_batch::{
-        SharedBufferBatch, SharedBufferValue,
-    };
+    use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
     use crate::hummock::store::version::{StagingData, VersionUpdate};
     use crate::hummock::test_utils::default_opts_for_test;
+    use crate::hummock::value::HummockValue;
     use crate::hummock::HummockError;
     use crate::monitor::HummockStateStoreMetrics;
 
@@ -1112,8 +1100,7 @@ mod tests {
             SharedBufferBatch::build_shared_buffer_batch(
                 epoch,
                 spill_offset,
-                vec![(TableKey(Bytes::from("key")), SharedBufferValue::Delete)],
-                None,
+                vec![(TableKey(Bytes::from("key")), HummockValue::Delete)],
                 10,
                 table_id,
                 instance_id,

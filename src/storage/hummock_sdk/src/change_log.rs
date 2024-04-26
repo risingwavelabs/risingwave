@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use risingwave_pb::hummock::{PbEpochNewChangeLog, PbTableChangeLog, SstableInfo};
 
-use risingwave_common::catalog::TableId;
-use risingwave_pb::hummock::hummock_version_delta::ChangeLogDelta;
-use risingwave_pb::hummock::{EpochNewChangeLog, SstableInfo, TableChangeLog as PbTableChangeLog};
-use tracing::warn;
+#[derive(Debug, Clone, PartialEq)]
+pub struct EpochNewChangeLog {
+    pub new_value: Vec<SstableInfo>,
+    pub old_value: Vec<SstableInfo>,
+    pub epochs: Vec<u64>,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableChangeLog(pub Vec<EpochNewChangeLog>);
@@ -32,70 +34,35 @@ impl TableChangeLog {
         });
         &self.0[start..end]
     }
-
-    pub fn truncate(&mut self, truncate_epoch: u64) {
-        // TODO: may optimize by using VecDeque to maintain the log
-        self.0
-            .retain(|change_log| *change_log.epochs.last().expect("non-empty") > truncate_epoch);
-        if let Some(first_log) = self.0.first_mut() {
-            first_log.epochs.retain(|epoch| *epoch > truncate_epoch);
-        }
-    }
 }
 
 impl TableChangeLog {
     pub fn to_protobuf(&self) -> PbTableChangeLog {
         PbTableChangeLog {
-            change_logs: self.0.clone(),
+            change_logs: self
+                .0
+                .iter()
+                .map(|epoch_new_log| PbEpochNewChangeLog {
+                    epochs: epoch_new_log.epochs.clone(),
+                    new_value: epoch_new_log.new_value.clone(),
+                    old_value: epoch_new_log.old_value.clone(),
+                })
+                .collect(),
         }
     }
 
     pub fn from_protobuf(val: &PbTableChangeLog) -> Self {
-        Self(val.change_logs.clone())
+        Self(
+            val.change_logs
+                .iter()
+                .map(|epoch_new_log| EpochNewChangeLog {
+                    epochs: epoch_new_log.epochs.clone(),
+                    new_value: epoch_new_log.new_value.clone(),
+                    old_value: epoch_new_log.old_value.clone(),
+                })
+                .collect(),
+        )
     }
-}
-
-pub fn build_table_change_log_delta<'a>(
-    old_value_ssts: impl Iterator<Item = SstableInfo>,
-    new_value_ssts: impl Iterator<Item = &'a SstableInfo>,
-    epochs: &Vec<u64>,
-    log_store_table_ids: impl Iterator<Item = (u32, u64)>,
-) -> HashMap<TableId, ChangeLogDelta> {
-    let mut table_change_log: HashMap<_, _> = log_store_table_ids
-        .map(|(table_id, truncate_epoch)| {
-            (
-                TableId::new(table_id),
-                ChangeLogDelta {
-                    truncate_epoch,
-                    new_log: Some(EpochNewChangeLog {
-                        new_value: vec![],
-                        old_value: vec![],
-                        epochs: epochs.clone(),
-                    }),
-                },
-            )
-        })
-        .collect();
-    for sst in old_value_ssts {
-        for table_id in &sst.table_ids {
-            match table_change_log.get_mut(&TableId::new(*table_id)) {
-                Some(log) => {
-                    log.new_log.as_mut().unwrap().old_value.push(sst.clone());
-                }
-                None => {
-                    warn!(table_id, ?sst, "old value sst contains non-log-store table");
-                }
-            }
-        }
-    }
-    for sst in new_value_ssts {
-        for table_id in &sst.table_ids {
-            if let Some(log) = table_change_log.get_mut(&TableId::new(*table_id)) {
-                log.new_log.as_mut().unwrap().new_value.push(sst.clone());
-            }
-        }
-    }
-    table_change_log
 }
 
 #[cfg(test)]
@@ -142,70 +109,5 @@ mod tests {
                 assert_eq!(&expected, actual, "{:?}", (min_epoch, max_epoch));
             }
         }
-    }
-
-    #[test]
-    fn test_truncate() {
-        let mut table_change_log = TableChangeLog(vec![
-            EpochNewChangeLog {
-                new_value: vec![],
-                old_value: vec![],
-                epochs: vec![1],
-            },
-            EpochNewChangeLog {
-                new_value: vec![],
-                old_value: vec![],
-                epochs: vec![2],
-            },
-            EpochNewChangeLog {
-                new_value: vec![],
-                old_value: vec![],
-                epochs: vec![3, 4],
-            },
-            EpochNewChangeLog {
-                new_value: vec![],
-                old_value: vec![],
-                epochs: vec![5],
-            },
-        ]);
-
-        table_change_log.truncate(1);
-        assert_eq!(
-            table_change_log,
-            TableChangeLog(vec![
-                EpochNewChangeLog {
-                    new_value: vec![],
-                    old_value: vec![],
-                    epochs: vec![2],
-                },
-                EpochNewChangeLog {
-                    new_value: vec![],
-                    old_value: vec![],
-                    epochs: vec![3, 4],
-                },
-                EpochNewChangeLog {
-                    new_value: vec![],
-                    old_value: vec![],
-                    epochs: vec![5],
-                },
-            ])
-        );
-
-        table_change_log.truncate(3);
-        assert_eq!(
-            table_change_log,
-            TableChangeLog(vec![
-                EpochNewChangeLog {
-                    new_value: vec![],
-                    old_value: vec![],
-                    epochs: vec![4],
-                },
-                EpochNewChangeLog {
-                    new_value: vec![],
-                    old_value: vec![],
-                    epochs: vec![5],
-                },
-            ])
-        )
     }
 }
