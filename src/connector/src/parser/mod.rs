@@ -89,6 +89,7 @@ pub struct SourceStreamChunkBuilder {
     descs: Vec<SourceColumnDesc>,
     builders: Vec<ArrayBuilderImpl>,
     op_builder: Vec<Op>,
+    vis_builder: BitmapBuilder,
 }
 
 impl SourceStreamChunkBuilder {
@@ -102,6 +103,7 @@ impl SourceStreamChunkBuilder {
             descs,
             builders,
             op_builder: Vec::with_capacity(cap),
+            vis_builder: BitmapBuilder::with_capacity(cap),
         }
     }
 
@@ -110,18 +112,21 @@ impl SourceStreamChunkBuilder {
             descs: &self.descs,
             builders: &mut self.builders,
             op_builder: &mut self.op_builder,
+            vis_builder: &mut self.vis_builder,
+            visible: true, // write visible rows by default
             row_meta: None,
         }
     }
 
     /// Consumes the builder and returns a [`StreamChunk`].
     pub fn finish(self) -> StreamChunk {
-        StreamChunk::new(
+        StreamChunk::with_visibility(
             self.op_builder,
             self.builders
                 .into_iter()
                 .map(|builder| builder.finish().into())
                 .collect(),
+            self.vis_builder.finish(),
         )
     }
 
@@ -129,7 +134,7 @@ impl SourceStreamChunkBuilder {
     /// the builders of the next [`StreamChunk`].
     #[must_use]
     pub fn take(&mut self, next_cap: usize) -> StreamChunk {
-        let descs = std::mem::take(&mut self.descs);
+        let descs = std::mem::take(&mut self.descs); // we don't use `descs` in `finish`
         let builder = std::mem::replace(self, Self::with_capacity(descs, next_cap));
         builder.finish()
     }
@@ -140,63 +145,6 @@ impl SourceStreamChunkBuilder {
 
     pub fn is_empty(&self) -> bool {
         self.op_builder.is_empty()
-    }
-}
-
-/// A builder for building a [`StreamChunk`] that contains only heartbeat rows.
-/// Some connectors may emit heartbeat messages to the downstream, and the cdc source
-/// rely on the heartbeat messages to keep the source offset up-to-date with upstream.
-pub struct HeartbeatChunkBuilder {
-    builder: SourceStreamChunkBuilder,
-}
-
-impl HeartbeatChunkBuilder {
-    fn with_capacity(descs: Vec<SourceColumnDesc>, cap: usize) -> Self {
-        let builders = descs
-            .iter()
-            .map(|desc| desc.data_type.create_array_builder(cap))
-            .collect();
-
-        Self {
-            builder: SourceStreamChunkBuilder {
-                descs,
-                builders,
-                op_builder: Vec::with_capacity(cap),
-            },
-        }
-    }
-
-    fn row_writer(&mut self) -> SourceStreamChunkRowWriter<'_> {
-        self.builder.row_writer()
-    }
-
-    /// Consumes the builder and returns a [`StreamChunk`] with all rows marked as invisible
-    fn finish(self) -> StreamChunk {
-        // heartbeat chunk should be invisible
-        let builder = self.builder;
-        let visibility = BitmapBuilder::zeroed(builder.op_builder.len());
-        StreamChunk::with_visibility(
-            builder.op_builder,
-            builder
-                .builders
-                .into_iter()
-                .map(|builder| builder.finish().into())
-                .collect(),
-            visibility.finish(),
-        )
-    }
-
-    /// Resets the builder and returns a [`StreamChunk`], while reserving `next_cap` capacity for
-    /// the builders of the next [`StreamChunk`].
-    #[must_use]
-    fn take(&mut self, next_cap: usize) -> StreamChunk {
-        let descs = std::mem::take(&mut self.builder.descs);
-        let builder = std::mem::replace(self, Self::with_capacity(descs, next_cap));
-        builder.finish()
-    }
-
-    fn is_empty(&self) -> bool {
-        self.builder.is_empty()
     }
 }
 
@@ -213,11 +161,31 @@ pub struct SourceStreamChunkRowWriter<'a> {
     descs: &'a [SourceColumnDesc],
     builders: &'a mut [ArrayBuilderImpl],
     op_builder: &'a mut Vec<Op>,
+    vis_builder: &'a mut BitmapBuilder,
+
+    /// Whether the rows written by this writer should be visible in output `StreamChunk`.
+    visible: bool,
 
     /// An optional meta data of the original message.
     ///
     /// When this is set by `with_meta`, it'll be used to fill the columns of types other than [`SourceColumnType::Normal`].
     row_meta: Option<MessageMeta<'a>>,
+}
+
+impl<'a> SourceStreamChunkRowWriter<'a> {
+    /// Set the meta data of the original message for this row writer.
+    ///
+    /// This should always be called except for tests.
+    fn with_meta(mut self, row_meta: MessageMeta<'a>) -> Self {
+        self.row_meta = Some(row_meta);
+        self
+    }
+
+    /// Convert the row writer to invisible row writer.
+    fn invisible(mut self) -> Self {
+        self.visible = false;
+        self
+    }
 }
 
 /// The meta data of the original message for a row writer.
@@ -306,7 +274,7 @@ impl OpAction for OpActionInsert {
 
     #[inline(always)]
     fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
-        writer.op_builder.push(Op::Insert);
+        writer.append_op(Op::Insert);
     }
 }
 
@@ -332,7 +300,7 @@ impl OpAction for OpActionDelete {
 
     #[inline(always)]
     fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
-        writer.op_builder.push(Op::Delete);
+        writer.append_op(Op::Delete);
     }
 }
 
@@ -360,24 +328,17 @@ impl OpAction for OpActionUpdate {
 
     #[inline(always)]
     fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
-        writer.op_builder.push(Op::UpdateDelete);
-        writer.op_builder.push(Op::UpdateInsert);
-    }
-}
-
-impl<'a> SourceStreamChunkRowWriter<'a> {
-    /// Set the meta data of the original message for this row writer.
-    ///
-    /// This should always be called except for tests.
-    fn with_meta(self, row_meta: MessageMeta<'a>) -> Self {
-        Self {
-            row_meta: Some(row_meta),
-            ..self
-        }
+        writer.append_op(Op::UpdateDelete);
+        writer.append_op(Op::UpdateInsert);
     }
 }
 
 impl SourceStreamChunkRowWriter<'_> {
+    fn append_op(&mut self, op: Op) {
+        self.op_builder.push(op);
+        self.vis_builder.append(self.visible);
+    }
+
     fn do_action<A: OpAction>(
         &mut self,
         mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<A::Output>,
@@ -679,7 +640,6 @@ const MAX_ROWS_FOR_TRANSACTION: usize = 4096;
 async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream: BoxSourceStream) {
     let columns = parser.columns().to_vec();
 
-    let mut heartbeat_builder = HeartbeatChunkBuilder::with_capacity(columns.clone(), 0);
     let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
 
     struct Transaction {
@@ -721,7 +681,8 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     offset = msg.offset,
                     "got a empty message, could be a heartbeat"
                 );
-                parser.emit_empty_row(heartbeat_builder.row_writer().with_meta(MessageMeta {
+                // Emit an empty invisible row for the heartbeat message.
+                parser.emit_empty_row(builder.row_writer().invisible().with_meta(MessageMeta {
                     meta: &msg.meta,
                     split_id: &msg.split_id,
                     offset: &msg.offset,
@@ -810,13 +771,6 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     }
                 },
             }
-        }
-
-        // emit heartbeat for each message batch
-        // we must emit heartbeat chunk before the data chunk,
-        // otherwise the source offset could be backward due to the heartbeat
-        if !heartbeat_builder.is_empty() {
-            yield heartbeat_builder.take(0);
         }
 
         // If we are not in a transaction, we should yield the chunk now.
