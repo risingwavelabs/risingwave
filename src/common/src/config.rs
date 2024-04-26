@@ -1314,7 +1314,7 @@ pub mod default {
         }
 
         pub fn compactor_max_task_multiplier() -> f32 {
-            2.5000
+            3.5000
         }
 
         pub fn compactor_memory_available_proportion() -> f64 {
@@ -1363,7 +1363,7 @@ pub mod default {
         }
 
         pub fn enable_fast_compaction() -> bool {
-            false
+            true
         }
 
         pub fn check_compaction_result() -> bool {
@@ -1625,7 +1625,7 @@ pub mod default {
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 300;
         const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 100;
         const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
-        const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 12;
+        const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 6;
         const DEFAULT_TOMBSTONE_RATIO_PERCENT: u32 = 40;
         const DEFAULT_EMERGENCY_PICKER: bool = true;
 

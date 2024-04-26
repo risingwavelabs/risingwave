@@ -49,7 +49,8 @@ pub struct ActorContext {
 
     pub streaming_metrics: Arc<StreamingMetrics>,
 
-    pub dispatch_num: usize,
+    /// This is the number of dispatchers when the actor is created. It will not be updated during runtime when new downstreams are added.
+    pub initial_dispatch_num: usize,
 }
 
 pub type ActorContextRef = Arc<ActorContext>;
@@ -65,7 +66,7 @@ impl ActorContext {
             total_mem_val: Arc::new(TrAdder::new()),
             streaming_metrics: Arc::new(StreamingMetrics::unused()),
             // Set 1 for test to enable sanity check on table
-            dispatch_num: 1,
+            initial_dispatch_num: 1,
         })
     }
 
@@ -73,7 +74,7 @@ impl ActorContext {
         stream_actor: &PbStreamActor,
         total_mem_val: Arc<TrAdder<i64>>,
         streaming_metrics: Arc<StreamingMetrics>,
-        dispatch_num: usize,
+        initial_dispatch_num: usize,
     ) -> ActorContextRef {
         Arc::new(Self {
             id: stream_actor.actor_id,
@@ -83,7 +84,7 @@ impl ActorContext {
             last_mem_val: Arc::new(0.into()),
             total_mem_val,
             streaming_metrics,
-            dispatch_num,
+            initial_dispatch_num,
         })
     }
 
