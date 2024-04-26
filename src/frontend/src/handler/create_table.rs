@@ -719,7 +719,7 @@ fn gen_table_plan_inner(
     .into();
 
     let required_cols = FixedBitSet::with_capacity(columns.len());
-    let mut plan_root = PlanRoot::new(
+    let plan_root = PlanRoot::new(
         source_node,
         RequiredDist::Any,
         Order::any(),
@@ -868,7 +868,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
 
     let scan_node: PlanRef = logical_scan.into();
     let required_cols = FixedBitSet::with_capacity(columns.len());
-    let mut plan_root = PlanRoot::new(
+    let plan_root = PlanRoot::new(
         scan_node,
         RequiredDist::Any,
         Order::any(),
