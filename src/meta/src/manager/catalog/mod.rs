@@ -47,7 +47,8 @@ use tokio::sync::{Mutex, MutexGuard};
 use user::*;
 
 use crate::manager::{
-    IdCategory, MetaSrvEnv, NotificationVersion, StreamingJob, IGNORED_NOTIFICATION_VERSION,
+    IdCategory, LocalNotification, MetaSrvEnv, NotificationVersion, StreamingJob,
+    IGNORED_NOTIFICATION_VERSION,
 };
 use crate::model::{BTreeMapTransaction, MetadataModel, TableFragments, ValTransaction};
 use crate::storage::Transaction;
@@ -1679,6 +1680,19 @@ impl CatalogManager {
             users,
             subscriptions
         )?;
+
+        // After catalog changes have been saved, synchronize them with Hummock.
+        let tables_to_unregister_from_hummock = all_table_ids
+            .iter()
+            .chain(&all_internal_table_ids)
+            .cloned()
+            .collect_vec();
+        self.env
+            .notification_manager()
+            .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
+                tables_to_unregister_from_hummock,
+            ))
+            .await;
 
         for index in &indexes_removed {
             user_core.decrease_ref(index.owner);

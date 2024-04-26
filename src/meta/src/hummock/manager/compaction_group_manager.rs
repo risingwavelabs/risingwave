@@ -304,6 +304,10 @@ impl HummockManager {
                 .push(TableId::new(*table_id));
         }
 
+        if modified_groups.is_empty() {
+            return Ok(());
+        }
+
         // Remove empty group, GC SSTs and remove metric.
         let mut branched_ssts = create_trx_wrapper!(
             self.meta_store_ref(),

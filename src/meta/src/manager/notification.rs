@@ -48,6 +48,7 @@ pub enum LocalNotification {
     FragmentMappingsUpsert(Vec<FragmentId>),
     FragmentMappingsDelete(Vec<FragmentId>),
     AdhocRecovery,
+    UnregisterTablesFromHummock(Vec<u32>),
 }
 
 #[derive(Debug)]

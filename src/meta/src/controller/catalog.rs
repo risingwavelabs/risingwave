@@ -71,7 +71,9 @@ use crate::controller::utils::{
     list_user_info_by_ids, resolve_source_register_info_for_jobs, PartialObject,
 };
 use crate::controller::ObjectModel;
-use crate::manager::{Catalog, MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
+use crate::manager::{
+    Catalog, LocalNotification, MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION,
+};
 use crate::rpc::ddl_controller::DropMode;
 use crate::stream::SourceManagerRef;
 use crate::telemetry::MetaTelemetryJobDesc;
@@ -2119,6 +2121,17 @@ impl CatalogController {
         let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
 
         txn.commit().await?;
+        // After catalog changes have been saved, synchronize them with Hummock.
+        let tables_to_unregister_from_hummock = to_drop_state_table_ids
+            .iter()
+            .map(|id| u32::try_from(*id).unwrap())
+            .collect_vec();
+        self.env
+            .notification_manager()
+            .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
+                tables_to_unregister_from_hummock,
+            ))
+            .await;
 
         // notify about them.
         self.notify_users_update(user_infos).await;

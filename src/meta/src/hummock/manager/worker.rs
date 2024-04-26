@@ -92,21 +92,27 @@ impl HummockManager {
     }
 
     async fn handle_local_notification(&self, notification: LocalNotification) {
-        if let LocalNotification::WorkerNodeDeleted(worker_node) = notification {
-            if worker_node.get_type().unwrap() == WorkerType::Compactor {
-                self.compactor_manager.remove_compactor(worker_node.id);
+        match notification {
+            LocalNotification::WorkerNodeDeleted(worker_node) => {
+                if worker_node.get_type().unwrap() == WorkerType::Compactor {
+                    self.compactor_manager.remove_compactor(worker_node.id);
+                }
+                self.release_contexts(vec![worker_node.id])
+                    .await
+                    .unwrap_or_else(|err| {
+                        panic!(
+                            "Failed to release hummock context {}, error={}",
+                            worker_node.id,
+                            err.as_report()
+                        )
+                    });
+                tracing::info!("Released hummock context {}", worker_node.id);
+                sync_point!("AFTER_RELEASE_HUMMOCK_CONTEXTS_ASYNC");
             }
-            self.release_contexts(vec![worker_node.id])
-                .await
-                .unwrap_or_else(|err| {
-                    panic!(
-                        "Failed to release hummock context {}, error={}",
-                        worker_node.id,
-                        err.as_report()
-                    )
-                });
-            tracing::info!("Released hummock context {}", worker_node.id);
-            sync_point!("AFTER_RELEASE_HUMMOCK_CONTEXTS_ASYNC");
+            LocalNotification::UnregisterTablesFromHummock(table_ids) => {
+                self.unregister_table_ids_fail_fast(&table_ids).await;
+            }
+            _ => {}
         }
     }
 }
