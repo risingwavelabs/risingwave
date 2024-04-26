@@ -57,6 +57,7 @@ pub mod create_function;
 pub mod create_index;
 pub mod create_mv;
 pub mod create_schema;
+pub mod create_secret;
 pub mod create_sink;
 pub mod create_source;
 pub mod create_sql_function;
@@ -252,6 +253,9 @@ pub async fn handle(
         }
         Statement::CreateConnection { stmt } => {
             create_connection::handle_create_connection(handler_args, stmt).await
+        }
+        Statement::CreateSecret { .. } => {
+            create_secret::handle_create_secret(handler_args, stmt).await
         }
         Statement::CreateFunction {
             or_replace,

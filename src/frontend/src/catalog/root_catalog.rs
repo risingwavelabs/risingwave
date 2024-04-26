@@ -975,6 +975,21 @@ impl Catalog {
         }
     }
 
+    pub fn check_secret_name_duplicated(
+        &self,
+        db_name: &str,
+        schema_name: &str,
+        secret_name: &str,
+    ) -> CatalogResult<()> {
+        let schema = self.get_schema_by_name(db_name, schema_name)?;
+
+        if schema.get_secret_by_name(secret_name).is_some() {
+            Err(CatalogError::Duplicated("secret", secret_name.to_string()))
+        } else {
+            Ok(())
+        }
+    }
+
     /// Get the catalog cache's catalog version.
     pub fn version(&self) -> u64 {
         self.version

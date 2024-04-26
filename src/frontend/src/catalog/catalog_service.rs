@@ -43,6 +43,7 @@ pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;
 /// [`CatalogReader`] can read catalog from local catalog and force the holder can not modify it.
 #[derive(Clone)]
 pub struct CatalogReader(Arc<RwLock<Catalog>>);
+
 impl CatalogReader {
     pub fn new(inner: Arc<RwLock<Catalog>>) -> Self {
         CatalogReader(inner)
@@ -132,6 +133,15 @@ pub trait CatalogWriter: Send + Sync {
         schema_id: u32,
         owner_id: u32,
         connection: create_connection_request::Payload,
+    ) -> Result<()>;
+
+    async fn create_secret(
+        &self,
+        secret_name: String,
+        database_id: u32,
+        schema_id: u32,
+        owner_id: u32,
+        payload: Vec<u8>,
     ) -> Result<()>;
 
     async fn comment_on(&self, comment: PbComment) -> Result<()>;
@@ -373,6 +383,21 @@ impl CatalogWriter for CatalogWriterImpl {
                 owner_id,
                 connection,
             )
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn create_secret(
+        &self,
+        secret_name: String,
+        database_id: u32,
+        schema_id: u32,
+        owner_id: u32,
+        payload: Vec<u8>,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .create_secret(secret_name, database_id, schema_id, owner_id, payload)
             .await?;
         self.wait_version(version).await
     }

@@ -36,7 +36,7 @@ use risingwave_connector::source::{should_copy_to_format_encode_options, UPSTREA
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType};
 use risingwave_pb::catalog::{
     Comment, Connection, CreateType, Database, Function, Index, PbSource, PbStreamJobStatus,
-    Schema, Sink, Source, StreamJobStatus, Subscription, Table, View,
+    Schema, Secret, Sink, Source, StreamJobStatus, Subscription, Table, View,
 };
 use risingwave_pb::ddl_service::{alter_owner_request, alter_set_schema_request};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -478,6 +478,68 @@ impl CatalogManager {
             ))
         } else {
             Err(MetaError::catalog_id_not_found("database", database_id))
+        }
+    }
+
+    pub async fn create_secret(&self, secret: Secret) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        database_core.ensure_database_id(secret.database_id)?;
+        database_core.ensure_schema_id(secret.schema_id)?;
+        #[cfg(not(test))]
+        user_core.ensure_user_id(secret.owner)?;
+        let key = (
+            secret.database_id as DatabaseId,
+            secret.schema_id as SchemaId,
+            secret.name.clone(),
+        );
+        database_core.check_secret_name_duplicated(&key)?;
+
+        let secret_id = secret.id;
+        let mut secret_entry = BTreeMapTransaction::new(&mut database_core.secrets);
+        secret_entry.insert(secret_id, secret.to_owned());
+        commit_meta!(self, secret_entry)?;
+
+        user_core.increase_ref(secret.owner);
+
+        let version = self
+            .notify_frontend(Operation::Add, Info::Secret(secret))
+            .await;
+        Ok(version)
+    }
+
+    pub async fn drop_secret(&self, secret_id: SecretId) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        let mut secrets = BTreeMapTransaction::new(&mut database_core.secrets);
+
+        match database_core.relation_ref_count.get(&secret_id) {
+            Some(ref_count) => {
+                let connection_name = secrets
+                    .get(&secret_id)
+                    .ok_or_else(|| anyhow!("connection not found"))?
+                    .name
+                    .clone();
+                Err(MetaError::permission_denied(format!(
+                    "Fail to delete secret {} because {} other relation(s) depend on it",
+                    connection_name, ref_count
+                )))
+            }
+            None => {
+                let secret = secrets
+                    .remove(secret_id)
+                    .ok_or_else(|| anyhow!("secret not found"))?;
+
+                commit_meta!(self, secrets)?;
+                user_core.decrease_ref(secret.owner);
+
+                let version = self
+                    .notify_frontend(Operation::Delete, Info::Secret(secret))
+                    .await;
+                Ok(version)
+            }
         }
     }
 

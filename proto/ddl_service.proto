@@ -358,6 +358,26 @@ message GetDdlProgressResponse {
   repeated DdlProgress ddl_progress = 1;
 }
 
+message CreateSecretRequest {
+  string name = 1;
+  bytes value = 2;
+  uint32 database_id = 3;
+  uint32 schema_id = 4;
+  uint32 owner_id = 5;
+}
+
+message CreateSecretResponse {
+  uint64 version = 1;
+}
+
+message DropSecretRequest {
+  uint32 secret_id = 1;
+}
+
+message DropSecretResponse {
+  uint64 version = 1;
+}
+
 message CreateConnectionRequest {
   message PrivateLink {
     catalog.Connection.PrivateLinkService.PrivateLinkProvider provider = 1;
@@ -428,6 +448,8 @@ service DdlService {
   rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
   rpc CreateTable(CreateTableRequest) returns (CreateTableResponse);
+  rpc CreateSecret(CreateSecretRequest) returns (CreateSecretResponse);
+  rpc DropSecret(DropSecretRequest) returns (DropSecretResponse);
   rpc AlterName(AlterNameRequest) returns (AlterNameResponse);
   rpc AlterSource(AlterSourceRequest) returns (AlterSourceResponse);
   rpc AlterOwner(AlterOwnerRequest) returns (AlterOwnerResponse);

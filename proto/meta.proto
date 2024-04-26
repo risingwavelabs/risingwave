@@ -454,6 +454,7 @@ message SubscribeResponse {
     FragmentParallelUnitMappings serving_parallel_unit_mappings = 23;
     hummock.HummockVersionStats hummock_stats = 24;
     Recovery recovery = 25;
+    catalog.Secret secret = 27;
   }
 }
 

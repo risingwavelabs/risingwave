@@ -733,6 +733,10 @@ impl SchemaCatalog {
         self.connection_by_name.get(connection_name)
     }
 
+    pub fn get_secret_by_name(&self, secret_name: &str) -> Option<&Arc<SecretCatalog>> {
+        self.secret_by_name.get(secret_name)
+    }
+
     /// get all sources referencing the connection
     pub fn get_source_ids_by_connection(
         &self,

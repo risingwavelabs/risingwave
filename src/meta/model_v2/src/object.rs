@@ -39,6 +39,8 @@ pub enum ObjectType {
     Connection,
     #[sea_orm(string_value = "SUBSCRIPTION")]
     Subscription,
+    #[sea_orm(string_value = "SECRET")]
+    Secret,
 }
 
 impl ObjectType {
@@ -54,6 +56,7 @@ impl ObjectType {
             ObjectType::Function => "function",
             ObjectType::Connection => "connection",
             ObjectType::Subscription => "subscription",
+            ObjectType::Secret => "secret",
         }
     }
 }

@@ -172,6 +172,25 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    pub async fn create_secret(
+        &self,
+        secret_name: String,
+        database_id: u32,
+        schema_id: u32,
+        owner_id: u32,
+        value: Vec<u8>,
+    ) -> Result<CatalogVersion> {
+        let request = CreateSecretRequest {
+            name: secret_name,
+            database_id,
+            schema_id,
+            owner_id,
+            value,
+        };
+        let resp = self.inner.create_secret(request).await?;
+        Ok(resp.version)
+    }
+
     pub async fn list_connections(&self, _name: Option<&str>) -> Result<Vec<Connection>> {
         let request = ListConnectionsRequest {};
         let resp = self.inner.list_connections(request).await?;
@@ -1922,12 +1941,14 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_subscription, CreateSubscriptionRequest, CreateSubscriptionResponse }
             ,{ ddl_client, create_schema, CreateSchemaRequest, CreateSchemaResponse }
             ,{ ddl_client, create_database, CreateDatabaseRequest, CreateDatabaseResponse }
+             ,{ ddl_client, create_secret, CreateSecretRequest, CreateSecretResponse }
             ,{ ddl_client, create_index, CreateIndexRequest, CreateIndexResponse }
             ,{ ddl_client, create_function, CreateFunctionRequest, CreateFunctionResponse }
             ,{ ddl_client, drop_table, DropTableRequest, DropTableResponse }
             ,{ ddl_client, drop_materialized_view, DropMaterializedViewRequest, DropMaterializedViewResponse }
             ,{ ddl_client, drop_view, DropViewRequest, DropViewResponse }
             ,{ ddl_client, drop_source, DropSourceRequest, DropSourceResponse }
+             , {ddl_client, drop_secret, DropSecretRequest, DropSecretResponse}
             ,{ ddl_client, drop_sink, DropSinkRequest, DropSinkResponse }
             ,{ ddl_client, drop_subscription, DropSubscriptionRequest, DropSubscriptionResponse }
             ,{ ddl_client, drop_database, DropDatabaseRequest, DropDatabaseResponse }

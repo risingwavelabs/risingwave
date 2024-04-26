@@ -45,7 +45,7 @@ use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     connection, Comment, Connection, CreateType, Database, Function, PbSource, PbTable, Schema,
-    Sink, Source, Table, View,
+    Secret, Sink, Source, Table, View,
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
@@ -68,8 +68,9 @@ use crate::barrier::BarrierManagerRef;
 use crate::manager::{
     CatalogManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId, IdCategory,
     IdCategoryType, IndexId, LocalNotification, MetaSrvEnv, MetadataManager, MetadataManagerV1,
-    NotificationVersion, RelationIdEnum, SchemaId, SinkId, SourceId, StreamingClusterInfo,
-    StreamingJob, SubscriptionId, TableId, UserId, ViewId, IGNORED_NOTIFICATION_VERSION,
+    NotificationVersion, RelationIdEnum, SchemaId, SecretId, SinkId, SourceId,
+    StreamingClusterInfo, StreamingJob, SubscriptionId, TableId, UserId, ViewId,
+    IGNORED_NOTIFICATION_VERSION,
 };
 use crate::model::{FragmentId, StreamContext, TableFragments, TableParallelism};
 use crate::rpc::cloud_provider::AwsEc2Client;
@@ -149,6 +150,8 @@ pub enum DdlCommand {
     AlterSetSchema(alter_set_schema_request::Object, SchemaId),
     CreateConnection(Connection),
     DropConnection(ConnectionId),
+    CreateSecret(Secret),
+    DropSecret(SecretId),
     CommentOn(Comment),
 }
 
@@ -161,7 +164,9 @@ impl DdlCommand {
             | DdlCommand::DropFunction(_)
             | DdlCommand::DropView(_, _)
             | DdlCommand::DropStreamingJob(_, _, _)
-            | DdlCommand::DropConnection(_) => true,
+            | DdlCommand::DropConnection(_)
+            | DdlCommand::DropSecret(_) => true,
+
             // Simply ban all other commands in recovery.
             _ => false,
         }
@@ -330,6 +335,8 @@ impl DdlController {
                 DdlCommand::DropConnection(connection_id) => {
                     ctrl.drop_connection(connection_id).await
                 }
+                DdlCommand::CreateSecret(secret) => ctrl.create_secret(secret).await,
+                DdlCommand::DropSecret(secret_id) => ctrl.drop_secret(secret_id).await,
                 DdlCommand::AlterSourceColumn(source) => ctrl.alter_source_column(source).await,
                 DdlCommand::CommentOn(comment) => ctrl.comment_on(comment).await,
             }
@@ -595,6 +602,23 @@ impl DdlController {
         }
     }
 
+    async fn create_secret(&self, mut secret: Secret) -> MetaResult<NotificationVersion> {
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                secret.id = self.gen_unique_id::<{ IdCategory::Secret }>().await?;
+                mgr.catalog_manager.create_secret(secret).await
+            }
+            MetadataManager::V2(mgr) => mgr.catalog_controller.create_secret(secret).await,
+        }
+    }
+
+    async fn drop_secret(&self, secret_id: SecretId) -> MetaResult<NotificationVersion> {
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.drop_secret(secret_id).await,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.drop_secret(secret_id as _).await,
+        }
+    }
+
     pub(crate) async fn delete_vpc_endpoint(&self, connection: &Connection) -> MetaResult<()> {
         // delete AWS vpc endpoint
         if let Some(connection::Info::PrivateLinkService(svc)) = &connection.info
@@ -786,7 +810,7 @@ impl DdlController {
                     ctx,
                     internal_tables,
                 )
-                .await
+                    .await
             }
             (CreateType::Background, _) => {
                 let ctrl = self.clone();
@@ -1825,20 +1849,20 @@ impl DdlController {
 
         // Map the column indices in the dispatchers with the given mapping.
         let downstream_fragments = self.metadata_manager.get_downstream_chain_fragments(id).await?
-                .into_iter()
-                .map(|(d, f)|
-                    if let Some(mapping) = &table_col_index_mapping {
-                        Some((mapping.rewrite_dispatch_strategy(&d)?, f))
-                    } else {
-                        Some((d, f))
-                    })
-                .collect::<Option<_>>()
-                .ok_or_else(|| {
-                    // The `rewrite` only fails if some column is dropped.
-                    MetaError::invalid_parameter(
-                        "unable to drop the column due to being referenced by downstream materialized views or sinks",
-                    )
-                })?;
+            .into_iter()
+            .map(|(d, f)|
+                if let Some(mapping) = &table_col_index_mapping {
+                    Some((mapping.rewrite_dispatch_strategy(&d)?, f))
+                } else {
+                    Some((d, f))
+                })
+            .collect::<Option<_>>()
+            .ok_or_else(|| {
+                // The `rewrite` only fails if some column is dropped.
+                MetaError::invalid_parameter(
+                    "unable to drop the column due to being referenced by downstream materialized views or sinks",
+                )
+            })?;
 
         let complete_graph = CompleteStreamFragmentGraph::with_downstreams(
             fragment_graph,

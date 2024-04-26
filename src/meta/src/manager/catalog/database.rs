@@ -301,6 +301,16 @@ impl DatabaseManager {
         }
     }
 
+    pub fn check_secret_name_duplicated(&self, secret_key: &RelationKey) -> MetaResult<()> {
+        if self.secrets.values().any(|x| {
+            x.database_id == secret_key.0 && x.schema_id == secret_key.1 && x.name.eq(&secret_key.2)
+        }) {
+            Err(MetaError::catalog_duplicated("secret", &secret_key.2))
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn list_databases(&self) -> Vec<Database> {
         self.databases.values().cloned().collect_vec()
     }

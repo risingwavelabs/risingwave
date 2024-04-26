@@ -137,6 +137,8 @@ pub mod IdCategory {
     pub const CompactionGroup: IdCategoryType = 15;
     pub const Function: IdCategoryType = 16;
     pub const Connection: IdCategoryType = 17;
+
+    pub const Secret: IdCategoryType = 18;
 }
 
 pub type IdGeneratorManagerRef = Arc<IdGeneratorManager>;

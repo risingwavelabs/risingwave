@@ -61,8 +61,8 @@ use crate::controller::rename::{alter_relation_rename, alter_relation_rename_ref
 use crate::controller::utils::{
     check_connection_name_duplicate, check_database_name_duplicate,
     check_function_signature_duplicate, check_relation_name_duplicate, check_schema_name_duplicate,
-    ensure_object_id, ensure_object_not_refer, ensure_schema_empty, ensure_user_id,
-    get_fragment_mappings, get_fragment_mappings_by_jobs, get_referring_objects,
+    check_secret_name_duplicate, ensure_object_id, ensure_object_not_refer, ensure_schema_empty,
+    ensure_user_id, get_fragment_mappings, get_fragment_mappings_by_jobs, get_referring_objects,
     get_referring_objects_cascade, get_user_privilege, list_user_info_by_ids,
     resolve_source_register_info_for_jobs, PartialObject,
 };
@@ -1088,6 +1088,88 @@ impl CatalogController {
                     database_id: function_obj.database_id.unwrap() as _,
                     ..Default::default()
                 }),
+            )
+            .await;
+        Ok(version)
+    }
+
+    pub async fn create_secret(&self, mut pb_secret: PbSecret) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let owner_id = pb_secret.owner as _;
+        let txn = inner.db.begin().await?;
+        ensure_user_id(owner_id, &txn).await?;
+        ensure_object_id(ObjectType::Database, pb_secret.database_id as _, &txn).await?;
+        ensure_object_id(ObjectType::Schema, pb_secret.schema_id as _, &txn).await?;
+        check_secret_name_duplicate(&pb_secret, &txn).await?;
+
+        let secret_obj = Self::create_object(
+            &txn,
+            ObjectType::Secret,
+            owner_id,
+            Some(pb_secret.database_id as _),
+            Some(pb_secret.schema_id as _),
+        )
+        .await?;
+        pb_secret.id = secret_obj.oid as _;
+        let secret: secret::ActiveModel = pb_secret.clone().into();
+        Secret::insert(secret).exec(&txn).await?;
+
+        txn.commit().await?;
+
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Add,
+                NotificationInfo::Secret(pb_secret),
+            )
+            .await;
+        Ok(version)
+    }
+
+    pub async fn get_secret_by_id(&self, secret_id: SecretId) -> MetaResult<PbSecret> {
+        let inner = self.inner.read().await;
+        let (secret, obj) = Secret::find_by_id(secret_id)
+            .find_also_related(Object)
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("secret", secret_id))?;
+        Ok(ObjectModel(secret, obj.unwrap()).into())
+    }
+
+    pub async fn drop_secret(&self, secret_id: SecretId) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let (secret, secret_obj) = Secret::find_by_id(secret_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("secret", secret_id))?;
+        ensure_object_not_refer(ObjectType::Secret, secret_id, &txn).await?;
+
+        // Find affect users with privileges on the connection.
+        let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
+            .select_only()
+            .distinct()
+            .column(user_privilege::Column::UserId)
+            .filter(user_privilege::Column::Oid.eq(secret_id))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        let res = Object::delete_by_id(secret_id).exec(&txn).await?;
+        if res.rows_affected == 0 {
+            return Err(MetaError::catalog_id_not_found("secret", secret_id));
+        }
+        let user_infos = list_user_info_by_ids(to_update_user_ids, &txn).await?;
+
+        txn.commit().await?;
+
+        let pb_secret: PbSecret = ObjectModel(secret, secret_obj.unwrap()).into();
+
+        self.notify_users_update(user_infos).await;
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Delete,
+                NotificationInfo::Secret(pb_secret),
             )
             .await;
         Ok(version)

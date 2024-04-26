@@ -26,6 +26,7 @@ use crate::types::Row;
 
 pub type RowSet = Vec<Row>;
 pub type RowSetResult = Result<RowSet, BoxedError>;
+
 pub trait ValuesStream = Stream<Item = RowSetResult> + Unpin + Send;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -54,6 +55,7 @@ pub enum StatementType {
     CREATE_INDEX,
     CREATE_FUNCTION,
     CREATE_CONNECTION,
+    CREATE_SECRET,
     COMMENT,
     DESCRIBE,
     GRANT_PRIVILEGE,
@@ -69,6 +71,7 @@ pub enum StatementType {
     DROP_DATABASE,
     DROP_USER,
     DROP_CONNECTION,
+    DROP_SECRET,
     ALTER_DATABASE,
     ALTER_SCHEMA,
     ALTER_INDEX,
@@ -115,6 +118,7 @@ impl std::fmt::Display for StatementType {
 }
 
 pub trait Callback = Future<Output = Result<(), BoxedError>> + Send;
+
 pub type BoxedCallback = Pin<Box<dyn Callback>>;
 
 pub struct PgResponse<VS> {
