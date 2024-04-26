@@ -63,7 +63,7 @@ impl Default for CdcScanOptions {
     fn default() -> Self {
         Self {
             disable_backfill: false,
-            snapshot_barrier_interval: 5,
+            snapshot_barrier_interval: 1,
             snapshot_batch_size: 1000,
         }
     }
