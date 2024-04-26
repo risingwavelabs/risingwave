@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::catalog::Schema;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::LogRowSeqScanNode;
 use risingwave_pb::common::BatchQueryEpoch;
@@ -41,6 +42,10 @@ impl BatchLogSeqScan {
         let base = PlanBase::new_batch_with_core(&core, dist, order);
 
         Self { base, core }
+    }
+
+    pub fn schema(&self) -> &Schema {
+        self.base.schema()
     }
 
     pub fn new(core: generic::LogScan) -> Self {

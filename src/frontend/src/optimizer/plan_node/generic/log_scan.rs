@@ -17,7 +17,7 @@ use std::rc::Rc;
 
 use educe::Educe;
 use pretty_xmlish::Pretty;
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field, Schema, TableDesc};
+use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::ColumnOrder;
 
@@ -31,12 +31,12 @@ use crate::optimizer::property::FunctionalDependencySet;
 #[educe(PartialEq, Eq, Hash)]
 pub struct LogScan {
     pub table_name: String,
-    /// Include `output_col_idx` and columns required in `predicate`
+    /// Include `output_col_idx` and `op_column`
     pub output_col_idx: Vec<usize>,
     /// Descriptor of the table
     pub table_desc: Rc<TableDesc>,
     /// Catalog of the op column
-    pub op_column: Rc<ColumnCatalog>,
+    pub op_column: Rc<ColumnDesc>,
     /// Help `RowSeqLogScan` executor use a better chunk size
     pub chunk_size: Option<u32>,
 
@@ -65,7 +65,7 @@ impl LogScan {
         self.output_col_idx
             .iter()
             .map(|i| self.get_table_columns()[*i].column_id)
-            .filter(|i| i != &self.op_column.column_desc.column_id)
+            .filter(|i| i != &self.op_column.column_id)
             .collect()
     }
 
@@ -81,6 +81,7 @@ impl LogScan {
     }
 
     pub(crate) fn column_names(&self) -> Vec<String> {
+        println!("output_col_idx: {:?}", self.output_col_idx);
         self.output_col_idx
             .iter()
             .map(|&i| self.get_table_columns()[i].name.clone())
@@ -126,7 +127,7 @@ impl LogScan {
         table_name: String,
         output_col_idx: Vec<usize>,
         table_desc: Rc<TableDesc>,
-        op_column: Rc<ColumnCatalog>,
+        op_column: Rc<ColumnDesc>,
         ctx: OptimizerContextRef,
         old_epoch: u64,
         new_epoch: u64,
@@ -215,7 +216,7 @@ impl GenericPlanNode for LogScan {
 impl LogScan {
     pub fn get_table_columns(&self) -> Vec<ColumnDesc> {
         let mut columns = self.table_desc.columns.clone();
-        columns.push(self.op_column.column_desc.clone());
+        columns.push(self.op_column.as_ref().clone());
         columns
     }
 

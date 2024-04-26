@@ -859,7 +859,6 @@ mod logical_intersect;
 mod logical_join;
 mod logical_kafka_scan;
 mod logical_limit;
-mod logical_log_scan;
 mod logical_max_one_row;
 mod logical_multi_join;
 mod logical_now;
@@ -961,7 +960,6 @@ pub use logical_intersect::LogicalIntersect;
 pub use logical_join::LogicalJoin;
 pub use logical_kafka_scan::LogicalKafkaScan;
 pub use logical_limit::LogicalLimit;
-pub use logical_log_scan::LogicalLogScan;
 pub use logical_max_one_row::LogicalMaxOneRow;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
 pub use logical_now::LogicalNow;
@@ -1044,7 +1042,6 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Scan }
             , { Logical, CdcScan }
             , { Logical, SysScan }
-            , { Logical, LogScan }
             , { Logical, Source }
             , { Logical, Insert }
             , { Logical, Delete }
@@ -1148,7 +1145,6 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Scan }
             , { Logical, CdcScan }
             , { Logical, SysScan }
-            , { Logical, LogScan }
             , { Logical, Source }
             , { Logical, Insert }
             , { Logical, Delete }

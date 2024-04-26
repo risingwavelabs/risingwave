@@ -49,9 +49,8 @@ pub use insert::BoundInsert;
 use pgwire::pg_server::{Session, SessionId};
 pub use query::BoundQuery;
 pub use relation::{
-    BoundBaseTable, BoundJoin, BoundLogTable, BoundShare, BoundSource, BoundSystemTable,
-    BoundWatermark, BoundWindowTableFunction, Relation, ResolveQualifiedNameError,
-    WindowTableFunctionKind,
+    BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
+    BoundWindowTableFunction, Relation, ResolveQualifiedNameError, WindowTableFunctionKind,
 };
 pub use select::{BoundDistinct, BoundSelect};
 pub use set_expr::*;
