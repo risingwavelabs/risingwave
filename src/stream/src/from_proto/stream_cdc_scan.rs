@@ -98,6 +98,8 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             state_table,
             node.rate_limit,
             disable_backfill,
+            1,
+            1000,
         );
         Ok((params.info, exec).into())
     }

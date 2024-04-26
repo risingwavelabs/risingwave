@@ -15,10 +15,11 @@
 use risingwave_pb::catalog::PbDatabase;
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
+use serde::{Deserialize, Serialize};
 
 use crate::DatabaseId;
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "database")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
