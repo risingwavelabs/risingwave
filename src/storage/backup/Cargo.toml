@@ -16,6 +16,7 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
+bincode = "1.3"
 bytes = { version = "1", features = ["serde"] }
 itertools = { workspace = true }
 parking_lot = { workspace = true }
