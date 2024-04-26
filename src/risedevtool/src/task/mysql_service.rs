@@ -13,13 +13,13 @@
 // limitations under the License.
 
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 
 use super::{ExecuteContext, Task};
-use crate::MySqlConfig;
+use crate::{DummyService, MySqlConfig};
 
 pub struct MysqlService {
     config: MySqlConfig,
@@ -48,62 +48,40 @@ impl MysqlService {
             .arg(format!("MYSQL_USER={}", self.config.user))
             .arg("-e")
             .arg(format!("MYSQL_PASSWORD={}", self.config.password))
-            // ports
+            .arg("-e")
+            .arg(format!("MYSQL_DATABASE={}", self.config.database))
             .arg("-p")
-            .arg(format!("{}:{}:3306", self.config.address, self.config.port))
-            .arg("mysql:8");
+            .arg(format!("{}:{}:3306", self.config.address, self.config.port));
         cmd
     }
 }
 
 impl Task for MysqlService {
     fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
+        if self.config.user_managed {
+            return DummyService::new(&self.config.id).execute(ctx);
+        }
+
         ctx.service(self);
-
-        // let path = self.kafka_path()?;
-        // if !path.exists() {
-        //     return Err(anyhow!("Kafka binary not found in {:?}\nDid you enable kafka feature in `./risedev configure`?", path));
-        // }
-
-        // let prefix_config = env::var("PREFIX_CONFIG")?;
-
-        // let path = if self.config.persist_data {
-        //     Path::new(&env::var("PREFIX_DATA")?).join(self.id())
-        // } else {
-        //     let path = Path::new("/tmp/risedev").join(self.id());
-        //     fs_err::remove_dir_all(&path).ok();
-        //     path
-        // };
-        // fs_err::create_dir_all(&path)?;
-
-        // let config_path = Path::new(&prefix_config).join(format!("{}.properties", self.id()));
-        // fs_err::write(
-        //     &config_path,
-        //     KafkaGen.gen_server_properties(&self.config, &path.to_string_lossy()),
-        // )?;
-
-        // let mut cmd = self.kafka()?;
-
-        // cmd.arg(config_path);
 
         ctx.pb.set_message("pulling image...");
         ctx.run_command(self.docker_pull())?;
-        ctx.pb.set_message("starting...");
-        ctx.run_command(ctx.tmux_run(self.docker_run())?)?;
 
-        // if !self.config.user_managed {
-        //     ctx.run_command(ctx.tmux_run(cmd)?)?;
-        // } else {
-        //     ctx.pb.set_message("user managed");
-        //     writeln!(
-        //         &mut ctx.log,
-        //         "Please start your MySQL at {}:{}\n\n",
-        //         self.config.address, self.config.port
-        //     )?;
-        // }
+        ctx.pb.set_message("starting...");
+
+        let mut run_cmd = self.docker_run();
+        if self.config.persist_data {
+            let path = Path::new(&env::var("PREFIX_DATA")?).join(self.id());
+            fs_err::create_dir_all(&path)?;
+            run_cmd
+                .arg("-v")
+                .arg(format!("{}:/var/lib/mysql", path.to_string_lossy()));
+        }
+        run_cmd.arg("mysql:8");
+
+        ctx.run_command(ctx.tmux_run(run_cmd)?)?;
 
         ctx.pb.set_message("started");
-
         Ok(())
     }
 

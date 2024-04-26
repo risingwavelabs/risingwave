@@ -154,7 +154,7 @@ where
 
         writeln!(self.log, "---")?;
 
-        output.status.exit_ok()?;
+        output.status.exit_ok().context(full_output)?;
 
         Ok(output)
     }

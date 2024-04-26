@@ -1453,6 +1453,13 @@ template:
     # This is not used in RISEDEV_MYSQL_WITH_OPTIONS_COMMON.
     user: root
     password: ""
+    database: "risedev"
+
+    # The docker image. Can be overridden to use a different version.
+    image: "mysql:8"
+
+    # If set to true, data will be persisted at data/{id}.
+    persist-data: true
 
     # If `user-managed` is true, user is responsible for starting the service
     # to serve at the above address and port in any way they see fit.
