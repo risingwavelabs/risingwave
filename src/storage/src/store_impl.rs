@@ -590,6 +590,7 @@ impl StateStoreImpl {
                     .with_name("foyer.meta")
                     .with_device_config(
                         FsDeviceConfigBuilder::new(&opts.meta_file_cache_dir)
+                            .with_capacity(opts.meta_file_cache_capacity_mb * MB)
                             .with_file_size(opts.meta_file_cache_file_capacity_mb * MB)
                             .with_align(opts.meta_file_cache_device_align)
                             .with_io_size(opts.meta_file_cache_device_io_size)
@@ -639,6 +640,7 @@ impl StateStoreImpl {
                     .with_name("foyer.block")
                     .with_device_config(
                         FsDeviceConfigBuilder::new(&opts.data_file_cache_dir)
+                            .with_capacity(opts.data_file_cache_capacity_mb * MB)
                             .with_file_size(opts.data_file_cache_file_capacity_mb * MB)
                             .with_align(opts.data_file_cache_device_align)
                             .with_io_size(opts.data_file_cache_device_io_size)
