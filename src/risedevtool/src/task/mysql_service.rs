@@ -14,9 +14,9 @@
 
 use std::env;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use super::{ExecuteContext, Task};
 use crate::{DummyService, MySqlConfig};
@@ -29,6 +29,16 @@ pub struct MysqlService {
 impl MysqlService {
     pub fn new(config: MySqlConfig) -> Result<Self> {
         Ok(Self { config })
+    }
+
+    fn check_docker_installed() -> Result<()> {
+        Command::new("docker")
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .context("mysql service requires docker to be installed")
+            .map(|_| ())
     }
 
     fn docker_pull(&self) -> Command {
@@ -64,6 +74,8 @@ impl Task for MysqlService {
         }
 
         ctx.service(self);
+
+        Self::check_docker_installed()?;
 
         ctx.pb.set_message("pulling image...");
         ctx.run_command(self.docker_pull())?;
