@@ -47,13 +47,13 @@ statement ok
 SET STREAMING_RATE_LIMIT=0;
 
 statement ok
-create materialized view mv1 as select count(*) from kafka_source;
+create materialized view rl_mv1 as select count(*) from kafka_source;
 
 statement ok
-create materialized view mv2 as select count(*) from kafka_source;
+create materialized view rl_mv2 as select count(*) from kafka_source;
 
 statement ok
-create materialized view mv3 as select count(*) from kafka_source;
+create materialized view rl_mv3 as select count(*) from kafka_source;
 
 statement ok
 SET STREAMING_RATE_LIMIT=default;
@@ -64,17 +64,17 @@ statement ok
 flush;
 
 query I
-select * from mv1;
+select * from rl_mv1;
 ----
 0
 
 query I
-select * from mv2;
+select * from rl_mv2;
 ----
 0
 
 query I
-select * from mv3;
+select * from rl_mv3;
 ----
 0
 
@@ -93,32 +93,32 @@ sleep 3s
 
 skipif in-memory
 query I
-select count(*) > 0 from mv1;
+select count(*) > 0 from rl_mv1;
 ----
 t
 
 skipif in-memory
 query I
-select count(*) > 0 from mv2;
+select count(*) > 0 from rl_mv2;
 ----
 t
 
 skipif in-memory
 query I
-select count(*) > 0 from mv3;
+select count(*) > 0 from rl_mv3;
 ----
 t
 
 ############## Cleanup
 
 statement ok
-drop materialized view mv1;
+drop materialized view rl_mv1;
 
 statement ok
-drop materialized view mv2;
+drop materialized view rl_mv2;
 
 statement ok
-drop materialized view mv3;
+drop materialized view rl_mv3;
 
 statement ok
 drop source kafka_source;
