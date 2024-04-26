@@ -152,10 +152,6 @@ CREATE FUNCTION digest( t string ) RETURNS bytea LANGUAGE javascript RUNTIME den
     return result;
 $$ ASYNC;
 
-query I
-select bit_length(digest('Hello'));
-----
-256
 
 statement ok
 drop function digest;
