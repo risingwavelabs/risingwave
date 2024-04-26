@@ -23,7 +23,7 @@ use fail::fail_point;
 use foyer::{CacheContext, EntryState, HybridCache, HybridCacheBuilder, HybridCacheEntry};
 use futures::{future, StreamExt};
 use itertools::Itertools;
-use risingwave_common::config::{EvictionConfig, StorageMemoryConfig};
+use risingwave_common::config::StorageMemoryConfig;
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
@@ -93,12 +93,7 @@ impl From<CachePolicy> for TracedCachePolicy {
 pub struct SstableStoreConfig {
     pub store: ObjectStoreRef,
     pub path: String,
-    pub block_cache_capacity: usize,
-    pub block_cache_shard_num: usize,
-    pub block_cache_eviction: EvictionConfig,
-    pub meta_cache_capacity: usize,
-    pub meta_cache_shard_num: usize,
-    pub meta_cache_eviction: EvictionConfig,
+
     pub prefetch_buffer_capacity: usize,
     pub max_prefetch_block_number: usize,
     pub recent_filter: Option<Arc<RecentFilter<(HummockSstableObjectId, usize)>>>,

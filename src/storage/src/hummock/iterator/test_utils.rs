@@ -16,9 +16,10 @@ use std::iter::Iterator;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use foyer::HybridCacheBuilder;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{EvictionConfig, MetricLevel, ObjectStoreConfig};
+use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::key::{prefix_slice_with_vnode, FullKey, TableKey, UserKey};
@@ -34,7 +35,6 @@ use crate::hummock::sstable_store::SstableStore;
 pub use crate::hummock::test_utils::default_builder_opt_for_test;
 use crate::hummock::test_utils::{
     gen_test_sstable, gen_test_sstable_info, gen_test_sstable_with_range_tombstone,
-    hybrid_cache_for_test,
 };
 use crate::hummock::{
     HummockValue, SstableBuilderOptions, SstableIterator, SstableIteratorType, SstableStoreConfig,
@@ -68,23 +68,32 @@ pub async fn mock_sstable_store() -> SstableStoreRef {
 
 pub async fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableStoreRef {
     let path = "test".to_string();
+    let meta_cache_v2 = HybridCacheBuilder::new()
+        .memory(64 << 20)
+        .with_shards(2)
+        .storage()
+        .build()
+        .await
+        .unwrap();
+    let block_cache_v2 = HybridCacheBuilder::new()
+        .memory(64 << 20)
+        .with_shards(2)
+        .storage()
+        .build()
+        .await
+        .unwrap();
     Arc::new(SstableStore::new(SstableStoreConfig {
         store,
         path,
-        block_cache_capacity: 64 << 20,
-        block_cache_shard_num: 2,
-        block_cache_eviction: EvictionConfig::for_test(),
-        meta_cache_capacity: 64 << 20,
-        meta_cache_shard_num: 2,
-        meta_cache_eviction: EvictionConfig::for_test(),
+
         prefetch_buffer_capacity: 64 << 20,
         max_prefetch_block_number: 16,
 
         recent_filter: None,
         state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
 
-        meta_cache_v2: hybrid_cache_for_test().await,
-        block_cache_v2: hybrid_cache_for_test().await,
+        meta_cache_v2,
+        block_cache_v2,
     }))
 }
 
