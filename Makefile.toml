@@ -727,6 +727,10 @@ ${TMUX} list-windows -F "#{window_name} #{pane_id}" \
 | awk '{ print $2 }' \
 | xargs -I {} ${TMUX} send-keys -t {} C-c C-d
 
+# Kill docker components
+docker stop $(docker ps -a -q -f name=risedev-) || true
+
+# Kill kafka and zookeeper
 if [[ -n $(${TMUX} list-windows | grep kafka) ]];
 then
   echo "kill kafka"
