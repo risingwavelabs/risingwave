@@ -214,7 +214,7 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                     {
                         // FIXME(Kexiang): The null of enum list is not supported in Debezium.
                         // As `NULL` in enum list is not supported in Debezium, we use `EnumString`
-                        // instead of `Option<EnumString>` to handle enum to keep the behaivor aligned.
+                        // instead of `Option<EnumString>` to handle enum to keep the behaviors aligned.
                         // An enum list contains `NULL` will be converted to `NULL`.
                         let res = row.try_get::<_, Option<Vec<EnumString>>>(i);
                         match res {
