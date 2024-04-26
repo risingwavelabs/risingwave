@@ -151,7 +151,7 @@ CREATE FUNCTION digest( t string ) RETURNS bytea LANGUAGE javascript RUNTIME den
     const result = await subtle.sign({
     name: 'HMAC',
     }, key, message);
-    console.log('finished')
+    console.log('digest finished')
     return result;
 $$ ASYNC;
 
