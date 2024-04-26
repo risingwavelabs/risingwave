@@ -5436,8 +5436,8 @@ dependencies = [
 
 [[package]]
 name = "getrandom"
-version = "0.2.11"
-source = "git+https://github.com/madsim-rs/getrandom.git?rev=e79a7ae#e79a7aecbcf8a43a802d30742667b77d75c613bd"
+version = "0.2.12"
+source = "git+https://github.com/madsim-rs/getrandom.git?rev=8ffd43e#8ffd43e62a5076480e53275e93c21fcde4fe9f7f"
 dependencies = [
  "cfg-if",
  "js-sys",
