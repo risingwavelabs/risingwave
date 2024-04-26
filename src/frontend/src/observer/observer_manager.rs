@@ -19,7 +19,7 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::catalog::CatalogVersion;
-use risingwave_common::hash::ParallelUnitMapping;
+use risingwave_common::hash::WorkerMapping;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeFrontend};
@@ -27,7 +27,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{FragmentParallelUnitMapping, MetaSnapshot, SubscribeResponse};
+use risingwave_pb::meta::{FragmentWorkerMapping, MetaSnapshot, SubscribeResponse};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::watch::Sender;
 
@@ -72,7 +72,6 @@ impl ObserverState for FrontendObserverNode {
             Info::User(_) => {
                 self.handle_user_notification(resp);
             }
-            Info::ParallelUnitMapping(_) => self.handle_fragment_mapping_notification(resp),
             Info::Snapshot(_) => {
                 panic!(
                     "receiving a snapshot in the middle is unsupported now {:?}",
@@ -103,8 +102,9 @@ impl ObserverState for FrontendObserverNode {
             Info::HummockStats(stats) => {
                 self.handle_table_stats_notification(stats);
             }
-            Info::ServingParallelUnitMappings(m) => {
-                self.handle_fragment_serving_mapping_notification(m.mappings, resp.operation());
+            Info::StreamingWorkerMapping(_) => self.handle_fragment_mapping_notification(resp),
+            Info::ServingWorkerMappings(m) => {
+                self.handle_fragment_serving_mapping_notification(m.mappings, resp.operation())
             }
             Info::Recovery(_) => {
                 self.compute_client_pool.invalidate_all();
@@ -133,13 +133,13 @@ impl ObserverState for FrontendObserverNode {
             functions,
             connections,
             users,
-            parallel_unit_mappings,
-            serving_parallel_unit_mappings,
             nodes,
             hummock_snapshot,
             hummock_version: _,
             meta_backup_manifest_id: _,
             hummock_write_limits: _,
+            streaming_worker_mappings,
+            serving_worker_mappings,
             session_params,
             version,
         } = snapshot;
@@ -177,10 +177,11 @@ impl ObserverState for FrontendObserverNode {
         for user in users {
             user_guard.create_user(user)
         }
+
         self.worker_node_manager.refresh(
             nodes,
-            convert_pu_mapping(&parallel_unit_mappings),
-            convert_pu_mapping(&serving_parallel_unit_mappings),
+            convert_worker_mapping(&streaming_worker_mappings),
+            convert_worker_mapping(&serving_worker_mappings),
         );
         self.hummock_snapshot_manager
             .update(hummock_snapshot.unwrap());
@@ -387,12 +388,10 @@ impl FrontendObserverNode {
             return;
         };
         match info {
-            Info::ParallelUnitMapping(parallel_unit_mapping) => {
-                let fragment_id = parallel_unit_mapping.fragment_id;
+            Info::StreamingWorkerMapping(streaming_worker_mapping) => {
+                let fragment_id = streaming_worker_mapping.fragment_id;
                 let mapping = || {
-                    ParallelUnitMapping::from_protobuf(
-                        parallel_unit_mapping.mapping.as_ref().unwrap(),
-                    )
+                    WorkerMapping::from_protobuf(streaming_worker_mapping.mapping.as_ref().unwrap())
                 };
 
                 match resp.operation() {
@@ -417,20 +416,20 @@ impl FrontendObserverNode {
 
     fn handle_fragment_serving_mapping_notification(
         &mut self,
-        mappings: Vec<FragmentParallelUnitMapping>,
+        mappings: Vec<FragmentWorkerMapping>,
         op: Operation,
     ) {
         match op {
             Operation::Add | Operation::Update => {
                 self.worker_node_manager
-                    .upsert_serving_fragment_mapping(convert_pu_mapping(&mappings));
+                    .upsert_serving_fragment_mapping(convert_worker_mapping(&mappings));
             }
             Operation::Delete => self.worker_node_manager.remove_serving_fragment_mapping(
                 &mappings.into_iter().map(|m| m.fragment_id).collect_vec(),
             ),
             Operation::Snapshot => {
                 self.worker_node_manager
-                    .set_serving_fragment_mapping(convert_pu_mapping(&mappings));
+                    .set_serving_fragment_mapping(convert_worker_mapping(&mappings));
             }
             _ => panic!("receive an unsupported notify {:?}", op),
         }
@@ -470,17 +469,17 @@ impl FrontendObserverNode {
     }
 }
 
-fn convert_pu_mapping(
-    parallel_unit_mappings: &[FragmentParallelUnitMapping],
-) -> HashMap<FragmentId, ParallelUnitMapping> {
-    parallel_unit_mappings
+fn convert_worker_mapping(
+    worker_mappings: &[FragmentWorkerMapping],
+) -> HashMap<FragmentId, WorkerMapping> {
+    worker_mappings
         .iter()
         .map(
-            |FragmentParallelUnitMapping {
+            |FragmentWorkerMapping {
                  fragment_id,
                  mapping,
              }| {
-                let mapping = ParallelUnitMapping::from_protobuf(mapping.as_ref().unwrap());
+                let mapping = WorkerMapping::from_protobuf(mapping.as_ref().unwrap());
                 (*fragment_id, mapping)
             },
         )
