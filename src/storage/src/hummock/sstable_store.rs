@@ -384,10 +384,12 @@ impl SstableStore {
         let file_size = sst.meta.estimated_size;
         let data_path = self.get_sst_data_path(object_id);
 
-        let policy = if {
+        let disable_cache: fn() -> bool = || {
             fail_point!("disable_block_cache", |_| true);
             false
-        } {
+        };
+
+        let policy = if disable_cache() {
             CachePolicy::Disable
         } else {
             policy
