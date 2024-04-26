@@ -188,7 +188,11 @@ pub struct MetaOpts {
     /// Interval of reporting the number of nodes in the cluster.
     pub node_num_monitor_interval_sec: u64,
 
-    /// The Prometheus endpoint for dashboard service.
+    /// The Prometheus endpoint for Meta Dashboard Service.
+    /// The Dashboard service uses this in the following ways:
+    /// 1. Query Prometheus for relevant metrics to find Stream Graph Bottleneck, and display it.
+    /// 2. Provide cluster diagnostics, at `/api/monitor/diagnose` to troubleshoot cluster.
+    /// These are just examples which show how the Meta Dashboard Service queries Prometheus.
     pub prometheus_endpoint: Option<String>,
 
     /// The additional selector used when querying Prometheus.
