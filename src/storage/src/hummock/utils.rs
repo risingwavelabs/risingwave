@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 use std::fmt::{Debug, Formatter};
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
@@ -167,62 +167,12 @@ pub fn prune_nonoverlapping_ssts<'a>(
     ssts[start_table_idx..=end_table_idx].iter()
 }
 
-pub struct BarrierPriorityController {
-    waiters: BTreeMap<HummockEpoch, VecDeque<(Sender<MemoryTrackerImpl>, u64)>>,
-    max_seal_epoch: u64,
-    min_unseal_epoch: u64,
-    inflight_epoch_count: Arc<AtomicU64>,
-}
-
-impl BarrierPriorityController {
-    pub fn new(inflight_epoch_count: Arc<AtomicU64>) -> Self {
-        Self {
-            inflight_epoch_count,
-            min_unseal_epoch: 0,
-            waiters: BTreeMap::default(),
-            max_seal_epoch: 0,
-        }
-    }
-
-    fn can_write(&mut self, barrier: u64) -> bool {
-        if (barrier > self.max_seal_epoch && self.max_seal_epoch >= self.min_unseal_epoch)
-            || barrier <= self.min_unseal_epoch
-        {
-            self.min_unseal_epoch = barrier;
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn seal_epoch(&mut self, barrier: u64) {
-        // Only event handler thread will update this variable.
-        self.max_seal_epoch = barrier;
-    }
-
-    pub fn min_inflight_epoch(&self) -> Option<u64> {
-        if self.max_seal_epoch < self.min_unseal_epoch {
-            Some(self.min_unseal_epoch)
-        } else {
-            None
-        }
-    }
-}
-
-impl Debug for BarrierPriorityController {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BarrierPriorityController")
-            .field("min_unseal_epoch", &self.min_unseal_epoch)
-            .field("waiter", &self.waiters.keys())
-            .field("inflight_epoch_count", &self.inflight_epoch_count)
-            .finish_non_exhaustive()
-    }
-}
+type RequestQueue = VecDeque<(Sender<MemoryTrackerImpl>, u64)>;
 
 struct MemoryLimiterInner {
     total_size: AtomicU64,
-    controller: Mutex<BarrierPriorityController>,
-    inflight_barrier: Arc<AtomicU64>,
+    controller: Mutex<RequestQueue>,
+    pending_request_count: Arc<AtomicU64>,
     quota: u64,
     fast_quota: u64,
 }
@@ -237,41 +187,17 @@ impl MemoryLimiterInner {
     }
 
     fn may_notify_waiters(self: &Arc<Self>) {
-        let mut controller = self.controller.lock();
-        let mut first_inflight_epoch = controller.min_inflight_epoch();
-        while let Some(mut entry) = controller.waiters.first_entry() {
-            let epoch = *entry.key();
-            let que = entry.get_mut();
-
-            let is_first_barrier = if let Some(first_epoch) = first_inflight_epoch.as_ref() {
-                epoch <= *first_epoch
-            } else {
-                true
-            };
-
-            if is_first_barrier {
-                first_inflight_epoch = Some(epoch);
+        let mut waiters = self.controller.lock();
+        while let Some((tx, quota)) = waiters.pop_front() {
+            if !self.try_require_memory_in_capacity(quota, self.quota) {
+                waiters.push_front((tx, quota));
+                break;
             }
-            while let Some((tx, quota)) = que.pop_front() {
-                if (is_first_barrier && !self.try_require_memory(quota))
-                    || (!is_first_barrier
-                        && !self.try_require_memory_in_capacity(quota, self.fast_quota))
-                {
-                    que.push_front((tx, quota));
-                    break;
-                }
-                let _ = tx.send(MemoryTrackerImpl::new(self.clone(), quota));
-            }
-            if que.is_empty() {
-                entry.remove();
-            }
+            let _ = tx.send(MemoryTrackerImpl::new(self.clone(), quota));
         }
 
-        if let Some(first_epoch) = first_inflight_epoch {
-            controller.can_write(first_epoch);
-        }
-        self.inflight_barrier
-            .store(controller.waiters.len() as u64, AtomicOrdering::Release);
+        self.pending_request_count
+            .store(waiters.len() as u64, AtomicOrdering::Release);
     }
 
     fn try_require_memory(&self, quota: u64) -> bool {
@@ -299,31 +225,22 @@ impl MemoryLimiterInner {
         false
     }
 
-    async fn require_memory(self: &Arc<Self>, epoch: u64, quota: u64) -> MemoryTrackerImpl {
+    async fn require_memory(self: &Arc<Self>, quota: u64) -> MemoryTrackerImpl {
         let waiter = {
-            let mut controller = self.controller.lock();
-            // only allow first epoch get quota.
-            if controller.can_write(epoch) {
-                if self.try_require_memory(quota) {
-                    return MemoryTrackerImpl::new(self.clone(), quota);
-                }
-            } else if controller.waiters.is_empty() {
+            let mut waiters = self.controller.lock();
+            if waiters.is_empty() {
                 // When this request is the first waiter but the previous `MemoryTracker` is just release a large quota, it may skip notifying this waiter because it has checked `inflight_barrier` and found it was zero. So we must set it one and retry `try_require_memory_in_capacity` again to avoid deadlock.
-                self.inflight_barrier.store(1, AtomicOrdering::Release);
+                self.pending_request_count.store(1, AtomicOrdering::Release);
                 if self.try_require_memory_in_capacity(quota, self.fast_quota) {
-                    self.inflight_barrier.store(0, AtomicOrdering::Release);
+                    self.pending_request_count.store(0, AtomicOrdering::Release);
                     return MemoryTrackerImpl::new(self.clone(), quota);
                 }
             }
             let (tx, rc) = channel();
-            controller
-                .waiters
-                .entry(epoch)
-                .or_default()
-                .push_back((tx, quota));
+            waiters.push_back((tx, quota));
             // This variable can only update within lock.
-            self.inflight_barrier
-                .store(controller.waiters.len() as u64, AtomicOrdering::Release);
+            self.pending_request_count
+                .store(waiters.len() as u64, AtomicOrdering::Release);
             rc
         };
         waiter.await.unwrap()
@@ -383,12 +300,11 @@ impl MemoryLimiter {
 
     pub fn new_with_blocking_ratio(quota: u64, blocking_ratio: u64) -> Self {
         let main_quota = quota * blocking_ratio / 100;
-        let inflight_barrier = Arc::new(AtomicU64::new(0));
         Self {
             inner: Arc::new(MemoryLimiterInner {
                 total_size: AtomicU64::new(0),
-                controller: Mutex::new(BarrierPriorityController::new(inflight_barrier.clone())),
-                inflight_barrier,
+                controller: Mutex::new(VecDeque::default()),
+                pending_request_count: Arc::new(AtomicU64::new(0)),
                 fast_quota: main_quota,
                 quota,
             }),
@@ -416,10 +332,6 @@ impl MemoryLimiter {
         self.inner.quota
     }
 
-    pub fn seal_epoch(&self, epoch: u64) {
-        self.inner.controller.lock().seal_epoch(epoch);
-    }
-
     pub fn must_require_memory(&self, quota: u64) -> MemoryTracker {
         if !self.inner.try_require_memory(quota) {
             self.inner.add_memory(quota);
@@ -433,14 +345,7 @@ impl MemoryLimiter {
 
 impl MemoryLimiter {
     pub async fn require_memory(&self, quota: u64) -> MemoryTracker {
-        let inner = self.inner.require_memory(0, quota).await;
-        MemoryTracker { inner }
-    }
-
-    pub async fn require_memory_for_epoch(&self, quota: u64, epoch: u64) -> MemoryTracker {
-        // Since the over provision limiter gets blocked only when the current usage exceeds the
-        // memory quota, it is allowed to apply for more than the memory quota.
-        let inner = self.inner.require_memory(epoch, quota).await;
+        let inner = self.inner.require_memory(quota).await;
         MemoryTracker { inner }
     }
 }
@@ -478,7 +383,7 @@ impl Drop for MemoryTracker {
         if self
             .inner
             .limiter
-            .inflight_barrier
+            .pending_request_count
             .load(AtomicOrdering::Acquire)
             > 0
         {

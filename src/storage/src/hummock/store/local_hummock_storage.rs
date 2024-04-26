@@ -492,7 +492,7 @@ impl LocalHummockStorage {
                     .send(HummockEvent::BufferMayFlush)
                     .expect("should be able to send");
                 let tracker = limiter
-                    .require_memory_for_epoch(size as u64, epoch)
+                    .require_memory(size as u64)
                     .verbose_instrument_await("hummock_require_memory")
                     .await;
                 warn!(

@@ -900,7 +900,6 @@ impl HummockUploader {
                 UnsealedEpochData::default()
             };
         self.sealed_data.seal_new_epoch(epoch, unsealed_data);
-        self.buffer_tracker().get_memory_limiter().seal_epoch(epoch);
     }
 
     pub(crate) fn start_merge_imms(&mut self, sealed_epoch: HummockEpoch) {
