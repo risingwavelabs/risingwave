@@ -224,9 +224,11 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                         builder.append(Some(ScalarImpl::from(val.0)));
                                     });
                                 }
+                                Some(ScalarImpl::from(ListValue::new(builder.finish())))
                             }
                             Err(err) => {
                                 log_error!(name, err, "parse enum column failed");
+                                None
                             }
                         }
                     } else {
@@ -387,8 +389,8 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                 );
                             }
                         };
+                        Some(ScalarImpl::from(ListValue::new(builder.finish())))
                     }
-                    Some(ScalarImpl::from(ListValue::new(builder.finish())))
                 }
                 DataType::Struct(_) | DataType::Serial => {
                     // Interval, Struct, List are not supported
