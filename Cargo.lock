@@ -1812,7 +1812,7 @@ dependencies = [
  "bitflags 2.5.0",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "lazy_static",
  "lazycell",
  "log",
@@ -5004,9 +5004,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.7.3"
+version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc3f3a1dc21e11ef8d7872d46ae3f204d4275d069471f90ffa1030b39a298775"
+checksum = "f912badeb93c5314a220ae2df5e877c027044ae7dc5e9bfbfe218941a2bdbb6e"
 dependencies = [
  "ahash 0.8.6",
  "allocator-api2",
@@ -9316,7 +9316,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.12.1",
+ "parking_lot 0.11.2",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
