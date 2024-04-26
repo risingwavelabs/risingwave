@@ -372,7 +372,7 @@ mod test {
                     ),
                     frontend_opts: Some(
                         FrontendOpts {
-                            listen_addr: "127.0.0.1:4566",
+                            listen_addr: "0.0.0.0:4566",
                             advertise_addr: None,
                             meta_addr: List(
                                 [
