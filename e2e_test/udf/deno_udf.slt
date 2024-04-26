@@ -146,12 +146,18 @@ CREATE FUNCTION digest( t string ) RETURNS bytea LANGUAGE javascript RUNTIME den
         }, true, ['sign', 'verify']);
         const enc = new TextEncoder();
         const message = enc.encode(t);
+        console.log ('Signing message');
         const result = await subtle.sign({
         name: 'HMAC',
         }, key, message);
+        console.log('finished')
     return result;
 $$ ASYNC;
 
+query I
+select bit_length(digest('Hello'));
+----
+256
 
 statement ok
 drop function digest;
