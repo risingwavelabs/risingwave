@@ -44,6 +44,12 @@ impl CompactionPicker for IntraCompactionPicker {
         if l0.sub_levels.is_empty() {
             return None;
         }
+        if l0.sub_levels[0].level_type != LevelType::Nonoverlapping as i32
+            && l0.sub_levels[0].table_infos.len() > 1
+        {
+            stats.skip_by_overlapping += 1;
+            return None;
+        }
 
         let is_l0_pending_compact =
             level_handlers[0].is_level_all_pending_compact(&l0.sub_levels[0]);
