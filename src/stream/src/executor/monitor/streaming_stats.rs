@@ -70,6 +70,7 @@ pub struct StreamingMetrics {
     // Sink & materialized view
     pub sink_input_row_count: LabelGuardedIntCounterVec<3>,
     pub mview_input_row_count: IntCounterVec,
+    pub sink_chunk_buffer_size: LabelGuardedIntGaugeVec<3>,
 
     // Exchange (see also `compute::ExchangeServiceMetrics`)
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
@@ -242,6 +243,14 @@ impl StreamingMetrics {
             "stream_mview_input_row_count",
             "Total number of rows streamed into materialize executors",
             &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let sink_chunk_buffer_size = register_guarded_int_gauge_vec_with_registry!(
+            "stream_sink_chunk_buffer_size",
+            "Total size of chunks buffered in a barrier",
+            &["sink_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -1060,6 +1069,7 @@ impl StreamingMetrics {
             source_backfill_row_count,
             sink_input_row_count,
             mview_input_row_count,
+            sink_chunk_buffer_size,
             exchange_frag_recv_size,
             actor_output_buffer_blocking_duration_ns,
             actor_input_buffer_blocking_duration_ns,
