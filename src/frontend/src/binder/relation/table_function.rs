@@ -102,22 +102,24 @@ impl Binder {
             )));
         };
 
-        self.push_context();
-        let mut clause = Some(Clause::From);
-        std::mem::swap(&mut self.context.clause, &mut clause);
-        let func = self.bind_function(Function {
-            name,
-            args,
-            variadic: false,
-            over: None,
-            distinct: false,
-            order_by: vec![],
-            filter: None,
-            within_group: None,
-        });
-        self.context.clause = clause;
-        self.pop_context()?;
-        let func = func?;
+        let func = {
+            let mut guard = self.push_context();
+            let binder = guard.binder();
+            let mut clause = Some(Clause::From);
+            std::mem::swap(&mut binder.context.clause, &mut clause);
+            let func = binder.bind_function(Function {
+                name,
+                args,
+                variadic: false,
+                over: None,
+                distinct: false,
+                order_by: vec![],
+                filter: None,
+                within_group: None,
+            });
+            binder.context.clause = clause;
+            func?
+        };
 
         if let ExprImpl::TableFunction(func) = &func {
             if func.args.iter().any(|arg| arg.has_subquery()) {

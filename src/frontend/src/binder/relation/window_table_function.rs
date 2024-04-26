@@ -76,19 +76,23 @@ impl Binder {
     ) -> Result<BoundWindowTableFunction> {
         let mut args = args.into_iter();
 
-        self.push_context();
+        let (base, table_name, time_col, output_type, base_columns) = {
+            let mut guard = self.push_context();
+            let binder = guard.binder();
 
-        let (base, table_name) = self.bind_relation_by_function_arg(args.next(), ERROR_1ST_ARG)?;
+            let (base, table_name) =
+                binder.bind_relation_by_function_arg(args.next(), ERROR_1ST_ARG)?;
 
-        let time_col = self.bind_column_by_function_args(args.next(), ERROR_2ND_ARG_EXPR)?;
+            let time_col = binder.bind_column_by_function_args(args.next(), ERROR_2ND_ARG_EXPR)?;
 
-        let Some(output_type) = DataType::window_of(&time_col.data_type) else {
-            return Err(ErrorCode::BindError(ERROR_2ND_ARG_TYPE.to_string()).into());
+            let Some(output_type) = DataType::window_of(&time_col.data_type) else {
+                return Err(ErrorCode::BindError(ERROR_2ND_ARG_TYPE.to_string()).into());
+            };
+
+            let base_columns = std::mem::take(&mut binder.context.columns);
+
+            (base, table_name, time_col, output_type, base_columns)
         };
-
-        let base_columns = std::mem::take(&mut self.context.columns);
-
-        self.pop_context()?;
 
         let columns = base_columns
             .into_iter()

@@ -49,13 +49,15 @@ impl Binder {
             Some(t) => t,
             None => return Ok(None),
         };
-        self.push_lateral_context();
-        let mut root = self.bind_table_with_joins(first)?;
-        self.pop_and_merge_lateral_context()?;
+        let mut root = {
+            let mut guard = self.push_lateral_context();
+            guard.binder().bind_table_with_joins(first)?
+        };
         for t in from_iter {
-            self.push_lateral_context();
-            let right = self.bind_table_with_joins(t.clone())?;
-            self.pop_and_merge_lateral_context()?;
+            let right = {
+                let mut guard = self.push_lateral_context();
+                guard.binder().bind_table_with_joins(t.clone())?
+            };
 
             let is_lateral = match &right {
                 Relation::Subquery(subquery) if subquery.lateral => true,
@@ -154,84 +156,91 @@ impl Binder {
                 // First, we identify columns with the same name.
                 let old_context = self.context.clone();
                 let l_len = old_context.columns.len();
-                // Bind this table factor to an empty context
-                self.push_lateral_context();
-                let table_factor = table_factor.unwrap();
-                let relation = self.bind_table_factor(table_factor)?;
 
-                let using_columns = match c {
-                    JoinConstraint::Natural => None,
-                    JoinConstraint::Using(cols) => {
-                        // sanity check
-                        for col in &cols {
-                            if old_context.indices_of.get(&col.real_value()).is_none() {
-                                return Err(ErrorCode::ItemNotFound(format!("column \"{}\" specified in USING clause does not exist in left table", col.real_value())).into());
+                // Bind this table factor to an empty context
+                let (binary_expr, col_indices, relation) = {
+                    let mut guard = self.push_lateral_context();
+                    let binder = guard.binder();
+                    let table_factor = table_factor.unwrap();
+                    let relation = binder.bind_table_factor(table_factor)?;
+
+                    let using_columns = match c {
+                        JoinConstraint::Natural => None,
+                        JoinConstraint::Using(cols) => {
+                            // sanity check
+                            for col in &cols {
+                                if old_context.indices_of.get(&col.real_value()).is_none() {
+                                    return Err(ErrorCode::ItemNotFound(format!("column \"{}\" specified in USING clause does not exist in left table", col.real_value())).into());
+                                }
+                                if binder.context.indices_of.get(&col.real_value()).is_none() {
+                                    return Err(ErrorCode::ItemNotFound(format!("column \"{}\" specified in USING clause does not exist in right table", col.real_value())).into());
+                                }
                             }
-                            if self.context.indices_of.get(&col.real_value()).is_none() {
-                                return Err(ErrorCode::ItemNotFound(format!("column \"{}\" specified in USING clause does not exist in right table", col.real_value())).into());
-                            }
+                            Some(cols)
                         }
-                        Some(cols)
+                        _ => unreachable!(),
+                    };
+
+                    let mut columns = binder
+                        .context
+                        .indices_of
+                        .iter()
+                        .filter(|(_, idxs)| {
+                            idxs.iter().all(|i| !binder.context.columns[*i].is_hidden)
+                        })
+                        .map(|(s, idxes)| (Ident::new_unchecked(s.to_owned()), idxes))
+                        .collect::<Vec<_>>();
+                    columns.sort_by(|a, b| a.0.real_value().cmp(&b.0.real_value()));
+
+                    let mut col_indices = Vec::new();
+                    let mut binary_expr = Expr::Value(Value::Boolean(true));
+
+                    // Walk the RHS cols, checking to see if any share a name with any LHS cols
+                    for (column, indices_r) in columns {
+                        // TODO: is it ok to ignore quote style?
+                        // If we have a `USING` constraint, we only bind the columns appearing in the
+                        // constraint.
+                        if let Some(cols) = &using_columns
+                            && !cols.contains(&column)
+                        {
+                            continue;
+                        }
+                        let indices_l =
+                            match old_context.get_unqualified_indices(&column.real_value()) {
+                                Err(e) => {
+                                    if let ErrorCode::ItemNotFound(_) = e {
+                                        continue;
+                                    } else {
+                                        return Err(e.into());
+                                    }
+                                }
+                                Ok(idxs) => idxs,
+                            };
+                        // Select at most one column from each natural column group from left and right
+                        col_indices.push((indices_l[0], indices_r[0] + l_len));
+                        let left_expr = Self::get_identifier_from_indices(
+                            &old_context,
+                            &indices_l,
+                            column.clone(),
+                        )?;
+                        let right_expr = Self::get_identifier_from_indices(
+                            &binder.context,
+                            indices_r,
+                            column.clone(),
+                        )?;
+                        binary_expr = Expr::BinaryOp {
+                            left: Box::new(binary_expr),
+                            op: BinaryOperator::And,
+                            right: Box::new(Expr::BinaryOp {
+                                left: Box::new(left_expr),
+                                op: BinaryOperator::Eq,
+                                right: Box::new(right_expr),
+                            }),
+                        }
                     }
-                    _ => unreachable!(),
+                    (binary_expr, col_indices, relation)
                 };
 
-                let mut columns = self
-                    .context
-                    .indices_of
-                    .iter()
-                    .filter(|(_, idxs)| idxs.iter().all(|i| !self.context.columns[*i].is_hidden))
-                    .map(|(s, idxes)| (Ident::new_unchecked(s.to_owned()), idxes))
-                    .collect::<Vec<_>>();
-                columns.sort_by(|a, b| a.0.real_value().cmp(&b.0.real_value()));
-
-                let mut col_indices = Vec::new();
-                let mut binary_expr = Expr::Value(Value::Boolean(true));
-
-                // Walk the RHS cols, checking to see if any share a name with any LHS cols
-                for (column, indices_r) in columns {
-                    // TODO: is it ok to ignore quote style?
-                    // If we have a `USING` constraint, we only bind the columns appearing in the
-                    // constraint.
-                    if let Some(cols) = &using_columns
-                        && !cols.contains(&column)
-                    {
-                        continue;
-                    }
-                    let indices_l = match old_context.get_unqualified_indices(&column.real_value())
-                    {
-                        Err(e) => {
-                            if let ErrorCode::ItemNotFound(_) = e {
-                                continue;
-                            } else {
-                                return Err(e.into());
-                            }
-                        }
-                        Ok(idxs) => idxs,
-                    };
-                    // Select at most one column from each natural column group from left and right
-                    col_indices.push((indices_l[0], indices_r[0] + l_len));
-                    let left_expr = Self::get_identifier_from_indices(
-                        &old_context,
-                        &indices_l,
-                        column.clone(),
-                    )?;
-                    let right_expr = Self::get_identifier_from_indices(
-                        &self.context,
-                        indices_r,
-                        column.clone(),
-                    )?;
-                    binary_expr = Expr::BinaryOp {
-                        left: Box::new(binary_expr),
-                        op: BinaryOperator::And,
-                        right: Box::new(Expr::BinaryOp {
-                            left: Box::new(left_expr),
-                            op: BinaryOperator::Eq,
-                            right: Box::new(right_expr),
-                        }),
-                    }
-                }
-                self.pop_and_merge_lateral_context()?;
                 // Bind the expression first, before allowing disambiguation of the columns involved
                 // in the join
                 let expr = self.bind_expr(binary_expr)?;

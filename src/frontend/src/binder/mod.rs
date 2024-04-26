@@ -420,7 +420,8 @@ impl Binder {
         self.included_relations.clone()
     }
 
-    fn push_context(&mut self) {
+    #[must_use]
+    fn push_context(&mut self) -> PopContextGuard<'_> {
         let new_context = std::mem::take(&mut self.context);
         self.context
             .cte_to_relation
@@ -428,19 +429,12 @@ impl Binder {
         let new_lateral_contexts = std::mem::take(&mut self.lateral_contexts);
         self.upper_subquery_contexts
             .push((new_context, new_lateral_contexts));
+
+        PopContextGuard(self)
     }
 
-    fn pop_context(&mut self) -> Result<()> {
-        let (old_context, old_lateral_contexts) = self
-            .upper_subquery_contexts
-            .pop()
-            .ok_or_else(|| ErrorCode::InternalError("Popping non-existent context".to_string()))?;
-        self.context = old_context;
-        self.lateral_contexts = old_lateral_contexts;
-        Ok(())
-    }
-
-    fn push_lateral_context(&mut self) {
+    #[must_use]
+    fn push_lateral_context(&mut self) -> PopLateralContextGuard<'_> {
         let new_context = std::mem::take(&mut self.context);
         self.context
             .cte_to_relation
@@ -449,17 +443,7 @@ impl Binder {
             is_visible: false,
             context: new_context,
         });
-    }
-
-    fn pop_and_merge_lateral_context(&mut self) -> Result<()> {
-        let mut old_context = self
-            .lateral_contexts
-            .pop()
-            .ok_or_else(|| ErrorCode::InternalError("Popping non-existent context".to_string()))?
-            .context;
-        old_context.merge_context(self.context.clone())?;
-        self.context = old_context;
-        Ok(())
+        PopLateralContextGuard(self)
     }
 
     fn try_mark_lateral_as_visible(&mut self) {
@@ -508,6 +492,47 @@ impl Binder {
 
     pub fn udf_context_mut(&mut self) -> &mut UdfContext {
         &mut self.udf_context
+    }
+}
+
+pub struct PopContextGuard<'a>(&'a mut Binder);
+
+impl<'a> Drop for PopContextGuard<'a> {
+    fn drop(&mut self) {
+        let (old_context, old_lateral_contexts) = self
+            .0
+            .upper_subquery_contexts
+            .pop()
+            .expect("Popping non-existent context");
+        self.0.context = old_context;
+        self.0.lateral_contexts = old_lateral_contexts;
+    }
+}
+
+impl<'a> PopContextGuard<'a> {
+    pub fn binder(&mut self) -> &mut Binder {
+        &mut self.0
+    }
+}
+
+pub struct PopLateralContextGuard<'a>(&'a mut Binder);
+
+impl<'a> Drop for PopLateralContextGuard<'a> {
+    fn drop(&mut self) {
+        let mut old_context = self
+            .0
+            .lateral_contexts
+            .pop()
+            .expect("Popping non-existent context")
+            .context;
+        old_context.merge_context(self.0.context.clone()).unwrap();
+        self.0.context = old_context;
+    }
+}
+
+impl<'a> PopLateralContextGuard<'a> {
+    pub fn binder(&mut self) -> &mut Binder {
+        &mut self.0
     }
 }
 

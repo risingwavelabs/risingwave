@@ -505,17 +505,16 @@ impl Binder {
                     Ok(Relation::Subquery(Box::new(bound_subquery)))
                 } else {
                     // Non-lateral subqueries to not have access to the join-tree context.
-                    self.push_lateral_context();
-                    let bound_subquery = self.bind_subquery_relation(*subquery, alias, false)?;
-                    self.pop_and_merge_lateral_context()?;
+                    let mut guard = self.push_lateral_context();
+                    let bound_subquery = guard
+                        .binder()
+                        .bind_subquery_relation(*subquery, alias, false)?;
                     Ok(Relation::Subquery(Box::new(bound_subquery)))
                 }
             }
             TableFactor::NestedJoin(table_with_joins) => {
-                self.push_lateral_context();
-                let bound_join = self.bind_table_with_joins(*table_with_joins)?;
-                self.pop_and_merge_lateral_context()?;
-                Ok(bound_join)
+                let mut guard = self.push_lateral_context();
+                Ok(guard.binder().bind_table_with_joins(*table_with_joins)?)
             }
         }
     }

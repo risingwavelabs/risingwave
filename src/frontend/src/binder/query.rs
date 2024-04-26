@@ -144,10 +144,8 @@ impl Binder {
     ///
     /// After finishing binding, we pop the previous context from the stack.
     pub fn bind_query(&mut self, query: Query) -> Result<BoundQuery> {
-        self.push_context();
-        let result = self.bind_query_inner(query);
-        self.pop_context()?;
-        result
+        let mut guard = self.push_context();
+        guard.binder().bind_query_inner(query)
     }
 
     /// Bind a [`Query`] using the current [`BindContext`](super::BindContext).
@@ -400,10 +398,10 @@ impl Binder {
         right: SetExpr,
         all: bool,
     ) -> Result<()> {
-        self.push_context();
-        let result = self.bind_rcte_inner(with, entry, left, right, all);
-        self.pop_context()?;
-        result
+        let mut guard = self.push_context();
+        guard
+            .binder()
+            .bind_rcte_inner(with, entry, left, right, all)
     }
 
     fn bind_rcte_inner(
