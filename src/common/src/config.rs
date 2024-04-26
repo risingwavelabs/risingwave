@@ -1780,6 +1780,16 @@ impl EvictionConfig {
     }
 }
 
+impl From<EvictionConfig> for foyer::EvictionConfig {
+    fn from(value: EvictionConfig) -> Self {
+        match value {
+            EvictionConfig::Lru(lru) => foyer::EvictionConfig::Lru(lru),
+            EvictionConfig::Lfu(lfu) => foyer::EvictionConfig::Lfu(lfu),
+            EvictionConfig::S3Fifo(s3fifo) => foyer::EvictionConfig::S3Fifo(s3fifo),
+        }
+    }
+}
+
 pub struct StorageMemoryConfig {
     pub block_cache_capacity_mb: usize,
     pub block_cache_shard_num: usize,

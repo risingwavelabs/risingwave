@@ -1776,7 +1776,7 @@ dependencies = [
  "bitflags 2.5.0",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "log",
@@ -2430,15 +2430,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a31c789563b815f77f4250caee12365734369f942439b7defd71e18a48197130"
 dependencies = [
  "cc",
-]
-
-[[package]]
-name = "cmsketch"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93710598b87c37ea250ab17a36f9f79dbaf3bd20e55806cf09345103bc26d60e"
-dependencies = [
- "paste",
 ]
 
 [[package]]
@@ -4913,8 +4904,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.8.4"
-source = "git+https://github.com/mrcroxx/foyer?branch=main#900e41a01187e21db284731b1891b5fd79cb76fb"
+version = "0.8.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6eef1adf83f7f47fd5a23e512fdfb941322394fa6a47289b0965903430fd093c"
 dependencies = [
  "ahash 0.8.6",
  "anyhow",
@@ -4922,59 +4914,50 @@ dependencies = [
  "foyer-intrusive",
  "foyer-memory",
  "foyer-storage",
- "foyer-workspace-hack",
 ]
 
 [[package]]
 name = "foyer-common"
-version = "0.6.2"
-source = "git+https://github.com/mrcroxx/foyer?branch=main#900e41a01187e21db284731b1891b5fd79cb76fb"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "898f7643405e6d05145b487be896a5c9fcf395e0a05c30e5622b6b9379240739"
 dependencies = [
  "ahash 0.8.6",
- "anyhow",
  "bytes",
  "cfg-if",
  "crossbeam",
- "foyer-workspace-hack",
  "hashbrown 0.14.3",
  "itertools 0.12.1",
  "madsim-tokio",
  "nix 0.28.0",
  "parking_lot 0.12.1",
- "paste",
  "serde",
- "tracing",
 ]
 
 [[package]]
 name = "foyer-intrusive"
-version = "0.5.2"
-source = "git+https://github.com/mrcroxx/foyer?branch=main#900e41a01187e21db284731b1891b5fd79cb76fb"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7145b59837d77f0090582f5631a6e36f01f09e451ab82685fdba6c9bdac7bd0d"
 dependencies = [
  "bytes",
- "cmsketch 0.1.5",
  "foyer-common",
- "foyer-workspace-hack",
  "itertools 0.12.1",
  "memoffset",
  "parking_lot 0.12.1",
- "paste",
- "tracing",
- "twox-hash",
 ]
 
 [[package]]
 name = "foyer-memory"
-version = "0.3.2"
-source = "git+https://github.com/mrcroxx/foyer?branch=main#900e41a01187e21db284731b1891b5fd79cb76fb"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8bcbaa183e65ba49dbe7118992f120a925d4c74a87cc0c31c4b268f646f5618"
 dependencies = [
  "ahash 0.8.6",
- "anyhow",
  "bitflags 2.5.0",
- "cmsketch 0.2.0",
+ "cmsketch",
  "foyer-common",
  "foyer-intrusive",
- "foyer-workspace-hack",
  "futures",
  "hashbrown 0.14.3",
  "itertools 0.12.1",
@@ -4985,8 +4968,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.7.2"
-source = "git+https://github.com/mrcroxx/foyer?branch=main#900e41a01187e21db284731b1891b5fd79cb76fb"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc3f3a1dc21e11ef8d7872d46ae3f204d4275d069471f90ffa1030b39a298775"
 dependencies = [
  "ahash 0.8.6",
  "allocator-api2",
@@ -4998,7 +4982,6 @@ dependencies = [
  "either",
  "foyer-common",
  "foyer-memory",
- "foyer-workspace-hack",
  "futures",
  "itertools 0.12.1",
  "lazy_static",
@@ -5015,38 +4998,6 @@ dependencies = [
  "tracing",
  "twox-hash",
  "zstd 0.13.0",
-]
-
-[[package]]
-name = "foyer-workspace-hack"
-version = "0.5.2"
-source = "git+https://github.com/mrcroxx/foyer?branch=main#900e41a01187e21db284731b1891b5fd79cb76fb"
-dependencies = [
- "ahash 0.8.6",
- "cc",
- "crossbeam-channel",
- "crossbeam-epoch",
- "crossbeam-utils",
- "either",
- "futures-channel",
- "futures-core",
- "futures-executor",
- "futures-sink",
- "futures-util",
- "getrandom",
- "hashbrown 0.14.3",
- "itertools 0.12.1",
- "nix 0.28.0",
- "parking_lot 0.12.1",
- "parking_lot_core 0.9.8",
- "proc-macro2",
- "quote",
- "rand",
- "serde",
- "smallvec",
- "syn 2.0.57",
- "tokio",
- "tracing-core",
 ]
 
 [[package]]
@@ -9280,7 +9231,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.11.2",
+ "parking_lot 0.12.1",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
