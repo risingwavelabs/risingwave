@@ -134,7 +134,7 @@ impl SourceStreamChunkBuilder {
         builder.finish()
     }
 
-    pub fn op_num(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.op_builder.len()
     }
 
@@ -687,13 +687,13 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
         len: usize,
     }
     let mut current_transaction = None;
-    let mut yield_asap = false; // whether we should yield the chunk as soon as possible (txn commits)
 
     #[for_await]
     for batch in data_stream {
         let batch = batch?;
         let batch_len = batch.len();
 
+        let mut last_batch_not_yielded = false;
         if let Some(Transaction { len, id }) = &mut current_transaction {
             // Dirty state. The last batch is not yielded due to uncommitted transaction.
             if *len > MAX_ROWS_FOR_TRANSACTION {
@@ -704,17 +704,13 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     "transaction is larger than {MAX_ROWS_FOR_TRANSACTION} rows, force commit"
                 );
                 *len = 0; // reset `len` while keeping `id`
-                yield_asap = false;
                 yield builder.take(batch_len);
             } else {
-                // Normal transaction. After the transaction is committed, we should yield the last
-                // batch immediately, so set `yield_asap` to true.
-                yield_asap = true;
+                last_batch_not_yielded = true
             }
         } else {
             // Clean state. Reserve capacity for the builder.
             assert!(builder.is_empty());
-            assert!(!yield_asap);
             let _ = builder.take(batch_len);
         }
 
@@ -743,7 +739,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     .observe(lag_ms as f64);
             }
 
-            let old_op_num = builder.op_num();
+            let old_len = builder.len();
             match parser
                 .parse_one_with_txn(
                     msg.key,
@@ -759,12 +755,10 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                 // It's possible that parsing multiple rows in a single message PARTIALLY failed.
                 // We still have to maintain the row number in this case.
                 res @ (Ok(ParseResult::Rows) | Err(_)) => {
-                    // The number of rows added to the builder.
-                    let num = builder.op_num() - old_op_num;
-
-                    // Aggregate the number of rows in the current transaction.
+                    // Aggregate the number of new rows into the current transaction.
                     if let Some(Transaction { len, .. }) = &mut current_transaction {
-                        *len += num;
+                        let n_new_rows = builder.len() - old_len;
+                        *len += n_new_rows;
                     }
 
                     if let Err(error) = res {
@@ -793,32 +787,28 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     }
                 }
 
-                Ok(ParseResult::TransactionControl(txn_ctl)) => {
-                    match txn_ctl {
-                        TransactionControl::Begin { id } => {
-                            if let Some(Transaction { id: current_id, .. }) = &current_transaction {
-                                tracing::warn!(current_id, id, "already in transaction");
-                            }
-                            tracing::debug!("begin upstream transaction: id={}", id);
-                            current_transaction = Some(Transaction { id, len: 0 });
+                Ok(ParseResult::TransactionControl(txn_ctl)) => match txn_ctl {
+                    TransactionControl::Begin { id } => {
+                        if let Some(Transaction { id: current_id, .. }) = &current_transaction {
+                            tracing::warn!(current_id, id, "already in transaction");
                         }
-                        TransactionControl::Commit { id } => {
-                            let current_id = current_transaction.as_ref().map(|t| &t.id);
-                            if current_id != Some(&id) {
-                                tracing::warn!(?current_id, id, "transaction id mismatch");
-                            }
-                            tracing::debug!("commit upstream transaction: id={}", id);
-                            current_transaction = None;
-                        }
+                        tracing::debug!("begin upstream transaction: id={}", id);
+                        current_transaction = Some(Transaction { id, len: 0 });
                     }
+                    TransactionControl::Commit { id } => {
+                        let current_id = current_transaction.as_ref().map(|t| &t.id);
+                        if current_id != Some(&id) {
+                            tracing::warn!(?current_id, id, "transaction id mismatch");
+                        }
+                        tracing::debug!("commit upstream transaction: id={}", id);
+                        current_transaction = None;
 
-                    // Not in a transaction anymore and `yield_asap` is set, so we should yield the
-                    // chunk now.
-                    if current_transaction.is_none() && yield_asap {
-                        yield_asap = false;
-                        yield builder.take(batch_len - (i + 1));
+                        if last_batch_not_yielded {
+                            yield builder.take(batch_len - (i + 1));
+                            last_batch_not_yielded = false;
+                        }
                     }
-                }
+                },
             }
         }
 
@@ -831,8 +821,6 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
 
         // If we are not in a transaction, we should yield the chunk now.
         if current_transaction.is_none() {
-            yield_asap = false;
-
             yield builder.take(0);
         }
     }
