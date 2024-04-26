@@ -847,6 +847,12 @@ profile:
         password: 123456
         user-managed: true
 
+  mysql-only:
+    steps:
+      - use: mysql
+        user: happy
+        password: happy
+
   ci-redis:
     config-path: src/config/ci.toml
     steps:
@@ -1431,15 +1437,16 @@ template:
     # address of redis
     address: "127.0.0.1"
 
-  # MySQL service. Currently user-managed only
+  # MySQL service backed by docker.
   mysql:
     # Id to be picked-up by services
-    id: mysql
+    id: mysql-${port}
+
+    # address of mysql
+    address: "127.0.0.1"
 
     # listen port of mysql
     port: 8306
-    # address of mysql
-    address: "127.0.0.1"
 
     # Note: these configs are not validated by risedev. They are passed as-is to risedev-env
     # default user for mysql operations.
@@ -1447,4 +1454,6 @@ template:
     user: root
     password: ""
 
-    user-managed: true
+    # If `user-managed` is true, user is responsible for starting the service
+    # to serve at the above address and port in any way they see fit.
+    user-managed: false
