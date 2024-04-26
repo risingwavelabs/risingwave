@@ -847,12 +847,6 @@ profile:
         password: 123456
         user-managed: true
 
-  mysql-only:
-    steps:
-      - use: mysql
-        user: happy
-        password: happy
-
   ci-redis:
     config-path: src/config/ci.toml
     steps:
