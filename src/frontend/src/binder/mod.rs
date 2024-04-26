@@ -511,7 +511,7 @@ impl<'a> Drop for PopContextGuard<'a> {
 
 impl<'a> PopContextGuard<'a> {
     pub fn binder(&mut self) -> &mut Binder {
-        &mut self.0
+        self.0
     }
 }
 
@@ -532,7 +532,7 @@ impl<'a> Drop for PopLateralContextGuard<'a> {
 
 impl<'a> PopLateralContextGuard<'a> {
     pub fn binder(&mut self) -> &mut Binder {
-        &mut self.0
+        self.0
     }
 }
 
