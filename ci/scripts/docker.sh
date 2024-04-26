@@ -13,6 +13,14 @@ echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 echo "--- dockerhub login"
 echo "$DOCKER_TOKEN" | docker login -u "risingwavelabs" --password-stdin
 
+if [[ -n "${ORIGINAL_IMAGE_TAG+x}" ]] && [[ -n "${NEW_IMAGE_TAG+x}" ]]; then
+  echo "--- retag docker image"
+  docker pull ${ghcraddr}:${ORIGINAL_IMAGE_TAG}
+  docker tag ${ghcraddr}:${ORIGINAL_IMAGE_TAG} ${ghcraddr}:${NEW_IMAGE_TAG}-${arch}
+  docker push ${ghcraddr}:${NEW_IMAGE_TAG}-${arch}
+  exit 0
+fi
+
 # Build RisingWave docker image ${BUILDKITE_COMMIT}-${arch}
 echo "--- docker build and tag"
 docker buildx create \

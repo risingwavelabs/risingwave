@@ -157,10 +157,13 @@ pub use apply_hop_window_transpose_rule::*;
 mod agg_call_merge_rule;
 pub use agg_call_merge_rule::*;
 mod pull_up_correlated_predicate_agg_rule;
+mod source_to_iceberg_scan_rule;
 mod source_to_kafka_scan_rule;
 mod values_extract_project_rule;
+
 pub use batch::batch_push_limit_to_scan_rule::*;
 pub use pull_up_correlated_predicate_agg_rule::*;
+pub use source_to_iceberg_scan_rule::*;
 pub use source_to_kafka_scan_rule::*;
 pub use values_extract_project_rule::*;
 
@@ -236,6 +239,7 @@ macro_rules! for_all_rules {
             , { BatchPushLimitToScanRule }
             , { PullUpCorrelatedPredicateAggRule }
             , { SourceToKafkaScanRule }
+            , { SourceToIcebergScanRule }
         }
     };
 }

@@ -228,7 +228,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
             None,
             Arc::new(StreamingMetrics::unused()),
             state_table,
-            4, // 4 rows in a snapshot chunk
+            Some(4), // limit a snapshot chunk to have <= 4 rows by rate limit
             false,
             1,
             4,

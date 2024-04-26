@@ -12,26 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
-use futures::{stream, StreamExt};
-use futures_async_stream::try_stream;
+use futures::stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::Op;
 use risingwave_common::buffer::BitmapBuilder;
-use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_storage::StateStore;
+use risingwave_common::row::RowExt;
 
 use super::cache::DedupCache;
 use crate::common::metrics::MetricsInfo;
-use crate::common::table::state_table::StateTable;
-use crate::executor::error::StreamExecutorError;
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, Message,
-    StreamExecutorResult,
-};
-use crate::task::AtomicU64Ref;
+use crate::executor::prelude::*;
 
 /// [`AppendOnlyDedupExecutor`] drops any message that has duplicate pk columns with previous
 /// messages. It only accepts append-only input, and its output will be append-only as well.

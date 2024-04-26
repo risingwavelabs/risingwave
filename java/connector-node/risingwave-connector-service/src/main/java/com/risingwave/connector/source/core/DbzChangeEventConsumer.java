@@ -207,6 +207,9 @@ public class DbzChangeEventConsumer
                 default:
                     break;
             }
+
+            // mark the event as processed
+            committer.markProcessed(event);
         }
 
         LOG.debug("recv {} events", respBuilder.getEventsCount());
@@ -216,6 +219,8 @@ public class DbzChangeEventConsumer
             var response = respBuilder.build();
             outputChannel.put(response);
         }
+
+        committer.markBatchFinished();
     }
 
     public BlockingQueue<GetEventStreamResponse> getOutputChannel() {

@@ -192,11 +192,26 @@ pub async fn standalone(
         tracing::info!("starting meta-node thread with cli args: {:?}", opts);
 
         let _meta_handle = tokio::spawn(async move {
+            let dangerous_max_idle_secs = opts.dangerous_max_idle_secs;
             risingwave_meta_node::start(opts).await;
             tracing::warn!("meta is stopped, shutdown all nodes");
+            if let Some(idle_exit_secs) = dangerous_max_idle_secs {
+                eprintln!("{}",
+                          console::style(format_args!(
+                              "RisingWave playground exited after being idle for {idle_exit_secs} seconds. Bye!"
+                          )).bold());
+                std::process::exit(0);
+            }
         });
         // wait for the service to be ready
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let mut tries = 0;
+        while !risingwave_meta_node::is_server_started() {
+            if tries % 50 == 0 {
+                tracing::info!("waiting for meta service to be ready...");
+            }
+            tries += 1;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
     }
     if let Some(opts) = compute_opts {
         tracing::info!("starting compute-node thread with cli args: {:?}", opts);
@@ -344,6 +359,7 @@ mod test {
                             connector_rpc_sink_payload_format: None,
                             config_path: "src/config/test.toml",
                             total_memory_bytes: 34359738368,
+                            reserved_memory_bytes: None,
                             parallelism: 10,
                             role: Both,
                             metrics_level: None,

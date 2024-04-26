@@ -316,7 +316,8 @@
     LogicalProject { exprs: [b.b1, ] }
     └─LogicalApply { type: Inner, on: true, correlated_id: 1 }
       ├─LogicalScan { table: b, columns: [b.b1, b._row_id] }
-      └─LogicalValues { rows: [[Repeat(CorrelatedInputRef { index: 0, correlated_id: 1 }, 2:Int32)]], schema: Schema { fields: [:Varchar] } }
+      └─LogicalProject { exprs: [] }
+        └─LogicalValues { rows: [[Repeat(CorrelatedInputRef { index: 0, correlated_id: 1 }, 2:Int32)]], schema: Schema { fields: [:Varchar] } }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [b.b1, Repeat(b.b1, 2:Int32) as $expr1] }

@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::StreamExt;
 use risingwave_common::metrics::LabelGuardedIntCounter;
 
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{BoxedMessageStream, Execute};
-use crate::task::{ActorId, FragmentId};
+use crate::executor::prelude::*;
+use crate::task::FragmentId;
 
 #[derive(Default)]
 pub struct DummyExecutor;

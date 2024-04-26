@@ -14,35 +14,33 @@
 
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
-use std::fmt::Formatter;
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use anyhow::anyhow;
 use either::Either;
 use futures::stream::{select_with_strategy, PollNext};
-use futures::StreamExt;
-use futures_async_stream::try_stream;
+use itertools::Itertools;
 use prometheus::IntCounter;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
-use risingwave_common::row::Row;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::JsonbVal;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
-    BoxChunkSourceStream, SourceContext, SourceCtrlOpts, SplitId, SplitMetaData,
+    BoxChunkSourceStream, SourceContext, SourceCtrlOpts, SplitId, SplitImpl, SplitMetaData,
 };
-use risingwave_storage::StateStore;
 use serde::{Deserialize, Serialize};
-use source_backfill_executor::source_executor::WAIT_BARRIER_MULTIPLE_TIMES;
 use thiserror_ext::AsReport;
 
 use super::executor_core::StreamSourceCore;
 use super::source_backfill_state_table::BackfillStateTableHandler;
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::source_executor::apply_rate_limit;
-use crate::executor::*;
+use super::{apply_rate_limit, get_split_offset_col_idx};
+use crate::common::rate_limit::limited_chunk_size;
+use crate::executor::prelude::*;
+use crate::executor::source::source_executor::WAIT_BARRIER_MULTIPLE_TIMES;
+use crate::executor::{AddMutation, UpdateMutation};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum BackfillState {
@@ -136,8 +134,8 @@ pub struct SourceBackfillExecutorInner<S: StateStore> {
     /// System parameter reader to read barrier interval
     system_params: SystemParamsReaderRef,
 
-    // control options for connector level
-    source_ctrl_opts: SourceCtrlOpts,
+    /// Rate limit in rows/s.
+    rate_limit_rps: Option<u32>,
 }
 
 /// Local variables used in the backfill stage.
@@ -175,8 +173,8 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         stream_source_core: StreamSourceCore<S>,
         metrics: Arc<StreamingMetrics>,
         system_params: SystemParamsReaderRef,
-        source_ctrl_opts: SourceCtrlOpts,
         backfill_state_store: BackfillStateTableHandler<S>,
+        rate_limit_rps: Option<u32>,
     ) -> Self {
         let source_split_change_count = metrics.source_split_change_count.with_label_values(&[
             &stream_source_core.source_id.to_string(),
@@ -192,7 +190,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             metrics,
             source_split_change_count,
             system_params,
-            source_ctrl_opts,
+            rate_limit_rps,
         }
     }
 
@@ -212,7 +210,10 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             self.actor_ctx.fragment_id,
             self.stream_source_core.source_name.clone(),
             source_desc.metrics.clone(),
-            self.source_ctrl_opts.clone(),
+            SourceCtrlOpts {
+                chunk_size: limited_chunk_size(self.rate_limit_rps),
+                rate_limit: self.rate_limit_rps,
+            },
             source_desc.source.config.clone(),
         );
         let stream = source_desc
@@ -220,7 +221,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             .to_stream(Some(splits), column_ids, Arc::new(source_ctx))
             .await
             .map_err(StreamExecutorError::connector_error)?;
-        Ok(apply_rate_limit(stream, self.source_ctrl_opts.rate_limit).boxed())
+        Ok(apply_rate_limit(stream, self.rate_limit_rps).boxed())
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]

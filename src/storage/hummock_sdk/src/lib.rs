@@ -27,6 +27,7 @@
 
 mod key_cmp;
 use std::cmp::Ordering;
+use std::collections::HashMap;
 
 pub use key_cmp::*;
 use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
@@ -48,6 +49,9 @@ pub mod table_watermark;
 pub mod version;
 
 pub use compact::*;
+use risingwave_common::catalog::TableId;
+
+use crate::table_watermark::TableWatermarks;
 
 pub type HummockSstableObjectId = u64;
 pub type HummockSstableId = u64;
@@ -87,6 +91,18 @@ macro_rules! info_in_release {
             }
         }
     }
+}
+
+#[derive(Default, Debug)]
+pub struct SyncResult {
+    /// The size of all synced shared buffers.
+    pub sync_size: usize,
+    /// The `sst_info` of sync.
+    pub uncommitted_ssts: Vec<LocalSstableInfo>,
+    /// The collected table watermarks written by state tables.
+    pub table_watermarks: HashMap<TableId, TableWatermarks>,
+    /// Sstable that holds the uncommitted old value
+    pub old_value_ssts: Vec<LocalSstableInfo>,
 }
 
 #[derive(Debug, Clone)]

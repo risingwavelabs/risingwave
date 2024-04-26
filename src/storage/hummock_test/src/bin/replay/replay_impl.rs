@@ -20,7 +20,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::{Channel, NotificationClient, ObserverError};
 use risingwave_hummock_sdk::key::TableKey;
-use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
 use risingwave_hummock_trace::{
     GlobalReplay, LocalReplay, LocalReplayRead, ReplayItem, ReplayRead, ReplayStateStore,
     ReplayWrite, Result, TraceError, TracedBytes, TracedInitOptions, TracedNewLocalOptions,
@@ -33,7 +33,7 @@ use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
 use risingwave_storage::hummock::store::LocalHummockStorage;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::store::{
-    to_owned_item, LocalStateStore, StateStoreIterExt, StateStoreRead, SyncResult,
+    to_owned_item, LocalStateStore, StateStoreIterExt, StateStoreRead,
 };
 use risingwave_storage::{StateStore, StateStoreIter, StateStoreReadIter};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};

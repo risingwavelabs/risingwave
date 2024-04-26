@@ -76,7 +76,7 @@
         <commons.io.version>2.11.0</commons.io.version>
         <commons.text.version>1.10.0</commons.text.version>
         <commons.lang3.version>3.12.0</commons.lang3.version>
-        <debezium.version>2.4.2.Final</debezium.version>
+        <debezium.version>2.5.0.Alpha1</debezium.version>
         <jackson.version>2.13.5</jackson.version>
         <spark_sql.version>3.3.1</spark_sql.version>
         <hadoop.version>3.3.3</hadoop.version>
