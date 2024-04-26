@@ -192,7 +192,7 @@ fn run_batch_query(
             e.as_report()
         ))
     })?;
-    let batch_plan = plan_root.gen_batch_plan().map_err(|e| {
+    plan_root.gen_batch_plan().map_err(|e| {
         Failed::from(format!(
             "Failed to generate batch plan:\nReason:\n{}",
             e.as_report()
