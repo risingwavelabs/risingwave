@@ -109,8 +109,8 @@ pub struct PlanRoot {
 /// `PlanPhase` is used to track the phase of the `PlanRoot`.
 /// Usually, it begins from `Logical` and ends with `Batch` or `Stream`, unless we want to construct a `PlanRoot` from an intermediate phase.
 /// Typical phase transformation are:
-/// - Logical -> OptimizedLogicalForBatch -> Batch
-/// - Logical -> OptimizedLogicalForStream -> Stream
+/// - `Logical` -> `OptimizedLogicalForBatch` -> `Batch`
+/// - `Logical` -> `OptimizedLogicalForStream` -> `Stream`
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlanPhase {
     Logical,
