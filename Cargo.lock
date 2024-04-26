@@ -5530,28 +5530,6 @@ dependencies = [
 
 [[package]]
 name = "google-cloud-auth"
-version = "0.13.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3bf7cb7864f08a92e77c26bb230d021ea57691788fb5dd51793f96965d19e7f9"
-dependencies = [
- "async-trait",
- "base64 0.21.7",
- "google-cloud-metadata",
- "google-cloud-token",
- "home",
- "jsonwebtoken",
- "reqwest 0.11.20",
- "serde",
- "serde_json",
- "thiserror",
- "time",
- "tokio",
- "tracing",
- "urlencoding",
-]
-
-[[package]]
-name = "google-cloud-auth"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe54dd8b6eb2bcd5390998238bcc39d1daed4dbb70df2845832532540384fc41"
@@ -5574,9 +5552,9 @@ dependencies = [
 
 [[package]]
 name = "google-cloud-bigquery"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c48abc8687f4c4cc143dd5bd3da5f1d7ef38334e4af5cef6de4c39295c6a3fd0"
+checksum = "3fb34f6f1eff088c1aae7cad62f05320e0ea0d3796ba598ce7e49fb0461aa47a"
 dependencies = [
  "anyhow",
  "arrow 50.0.0",
@@ -5584,7 +5562,7 @@ dependencies = [
  "backon",
  "base64 0.21.7",
  "bigdecimal 0.4.2",
- "google-cloud-auth 0.13.2",
+ "google-cloud-auth",
  "google-cloud-gax",
  "google-cloud-googleapis",
  "google-cloud-token",
@@ -5645,7 +5623,7 @@ checksum = "0b2184a5c70b994e6d77eb1c140e193e7f5fe6015e9115322fac24f7e33f003c"
 dependencies = [
  "async-channel",
  "async-stream",
- "google-cloud-auth 0.14.0",
+ "google-cloud-auth",
  "google-cloud-gax",
  "google-cloud-googleapis",
  "google-cloud-token",
