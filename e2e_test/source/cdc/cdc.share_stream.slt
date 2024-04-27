@@ -396,7 +396,7 @@ select id, my_int from list_with_null_shared order by id;
 1 {1,2,NULL}
 2 {NULL,-1,-2}
 
-# will fix in https://github.com/risingwavelabs/risingwave/pull/16416
+# will fix in https://github.com/risingwavelabs/risingwave/pull/16416.
 query II
 select id, my_num from list_with_null_shared order by id;
 ----
