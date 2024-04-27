@@ -81,7 +81,8 @@ pub struct Reschedule {
     pub newly_created_actors: Vec<(StreamActor, PbActorStatus)>,
 }
 
-/// Replacing an old table with a new one. Used for `ALTER TABLE` and sink into table. All actors in the table job will be rebuilt.
+/// Replacing an old table with a new one. All actors in the table job will be rebuilt.
+/// Used for `ALTER TABLE` ([`Command::ReplaceTable`]) and sink into table ([`Command::CreateStreamingJob`]).
 #[derive(Debug, Clone)]
 pub struct ReplaceTablePlan {
     pub old_table_fragments: TableFragments,
@@ -172,6 +173,7 @@ pub enum Command {
         definition: String,
         ddl_type: DdlType,
         create_type: CreateType,
+        /// This is for create SINK into table.
         replace_table: Option<ReplaceTablePlan>,
     },
     /// `CancelStreamingJob` command generates a `Stop` barrier including the actors of the given
