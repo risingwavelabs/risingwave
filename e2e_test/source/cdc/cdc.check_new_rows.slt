@@ -120,3 +120,9 @@ select * from enum_to_varchar order by id;
 1 happy
 2 ok
 3 sad
+
+query II
+select id, my_bytea from list_with_null_shared order by id;
+----
+1 {"\\x00","\\x01",NULL}
+2 {NULL,"\\x99","\\xaa"}
