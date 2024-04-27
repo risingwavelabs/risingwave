@@ -720,13 +720,13 @@ if ! ${TMUX} ls &>/dev/null ; then
   exit 0
 fi
 
-# Kill other components
+# Kill other components with Ctrl+C/Ctrl+D
 ${TMUX} list-windows -F "#{window_name} #{pane_id}" \
-| grep -v 'kafka' \
-| grep -v 'zookeeper' \
+| grep --invert-match --extended-regexp '(kafka|zookeeper)' \
 | awk '{ print $2 }' \
 | xargs -I {} ${TMUX} send-keys -t {} C-c C-d
 
+# Kill kafka cleanly. Ctrl+C will lose data.
 if [[ -n $(${TMUX} list-windows | grep kafka) ]];
 then
   echo "kill kafka"
@@ -734,9 +734,6 @@ then
 
   echo "kill zookeeper"
   kill_zookeeper || true
-
-  # Kill their ${TMUX} sessions
-  ${TMUX} list-windows -t risedev -F "#{pane_id}" | xargs -I {} ${TMUX} send-keys -t {} C-c C-d
 fi
 
 ${TMUX} kill-server
