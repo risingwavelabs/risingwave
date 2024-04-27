@@ -316,6 +316,7 @@ CREATE TABLE list_with_null_shared (
     PRIMARY KEY (id)
 ) FROM pg_source TABLE 'public.list_with_null';
 
+# psql will convert `\\` to `\`, so here, `\\\\x99` and `\\\\xAA` should be considered as `\\x99` and `\\xAA`
 system ok
 psql -c "
 insert into numeric_table values(102, 57896044618658097711785492504343953926634992332820282019728792003956564819967);
@@ -327,7 +328,6 @@ insert into numeric_table values(105, 115792089237316195423570985008687907853269
 insert into numeric_table values(106, 'NaN'::numeric);
 insert into numeric_table values(107, 'Infinity'::numeric);
 INSERT INTO enum_table VALUES (2, 'ok');
---- psql will convert `\\` to `\`, so here, `\\\\x99` and `\\\\xAA` should be considered as `\\x99` and `\\xAA`
 INSERT INTO list_with_null VALUES (2, '{NULL,-1,-2}', '{NULL,nan,-inf}', '{NULL,sad,ok}', '{NULL,471acecf-a4b4-4ed3-a211-7fb2291f159f,9bc35adf-fb11-4130-944c-e7eadb96b829}', '{NULL,\\\\x99,\\\\xAA}');
 "
 
