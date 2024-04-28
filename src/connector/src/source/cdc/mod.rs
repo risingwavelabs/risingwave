@@ -40,6 +40,8 @@ pub const CDC_SNAPSHOT_BACKFILL: &str = "rw_cdc_backfill";
 pub const CDC_SHARING_MODE_KEY: &str = "rw.sharing.mode.enable";
 // User can set snapshot='false' to disable cdc backfill
 pub const CDC_BACKFILL_ENABLE_KEY: &str = "snapshot";
+pub const CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY: &str = "snapshot.interval";
+pub const CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY: &str = "snapshot.batch_size";
 // We enable transaction for shared cdc source by default
 pub const CDC_TRANSACTIONAL_KEY: &str = "transactional";
 
