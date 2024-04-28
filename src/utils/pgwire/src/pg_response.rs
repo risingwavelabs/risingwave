@@ -293,6 +293,7 @@ impl StatementType {
                 risingwave_sqlparser::ast::ObjectType::Connection => {
                     Ok(StatementType::DROP_CONNECTION)
                 }
+                risingwave_sqlparser::ast::ObjectType::Secret => Ok(StatementType::DROP_SECRET),
                 risingwave_sqlparser::ast::ObjectType::Subscription => {
                     Ok(StatementType::DROP_SUBSCRIPTION)
                 }

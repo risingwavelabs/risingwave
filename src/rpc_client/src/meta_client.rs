@@ -23,7 +23,7 @@ use async_trait::async_trait;
 use either::Either;
 use futures::stream::BoxStream;
 use lru::LruCache;
-use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
+use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, SecretId, TableId};
 use risingwave_common::config::{MetaConfig, MAX_CONNECTION_WINDOW_SIZE};
 use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::system_param::reader::SystemParamsReader;
@@ -200,6 +200,14 @@ impl MetaClient {
     pub async fn drop_connection(&self, connection_id: ConnectionId) -> Result<CatalogVersion> {
         let request = DropConnectionRequest { connection_id };
         let resp = self.inner.drop_connection(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn drop_secret(&self, secret_id: SecretId) -> Result<CatalogVersion> {
+        let request = DropSecretRequest {
+            secret_id: secret_id.into(),
+        };
+        let resp = self.inner.drop_secret(request).await?;
         Ok(resp.version)
     }
 

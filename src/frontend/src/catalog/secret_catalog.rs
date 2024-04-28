@@ -14,7 +14,7 @@
 
 use risingwave_pb::catalog::PbSecret;
 
-use crate::catalog::{DatabaseId, SecretId};
+use crate::catalog::{DatabaseId, OwnedByUserCatalog, SecretId};
 use crate::user::UserId;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -35,5 +35,11 @@ impl From<&PbSecret> for SecretCatalog {
             name: value.name.clone(),
             value: value.value.clone(),
         }
+    }
+}
+
+impl OwnedByUserCatalog for SecretCatalog {
+    fn owner(&self) -> UserId {
+        self.owner
     }
 }

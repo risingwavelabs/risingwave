@@ -36,6 +36,7 @@ use super::{
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
+use crate::catalog::secret_catalog::SecretCatalog;
 use crate::catalog::system_catalog::{
     get_sys_tables_in_schema, get_sys_views_in_schema, SystemTableCatalog,
 };
@@ -808,6 +809,21 @@ impl Catalog {
             }
         }
         Err(CatalogError::NotFound("view", view_id.to_string()))
+    }
+
+    pub fn get_secret_by_name<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        secret_name: &str,
+    ) -> CatalogResult<(&Arc<SecretCatalog>, &'a str)> {
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_secret_by_name(secret_name))
+            })?
+            .ok_or_else(|| CatalogError::NotFound("secret", secret_name.to_string()))
     }
 
     pub fn get_connection_by_name<'a>(

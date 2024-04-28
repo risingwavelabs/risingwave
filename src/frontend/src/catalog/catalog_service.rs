@@ -34,7 +34,7 @@ use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
 use super::root_catalog::Catalog;
-use super::{DatabaseId, TableId};
+use super::{DatabaseId, SecretId, TableId};
 use crate::error::Result;
 use crate::user::UserId;
 
@@ -177,6 +177,8 @@ pub trait CatalogWriter: Send + Sync {
     async fn drop_function(&self, function_id: FunctionId) -> Result<()>;
 
     async fn drop_connection(&self, connection_id: u32) -> Result<()>;
+
+    async fn drop_secret(&self, secret_id: SecretId) -> Result<()>;
 
     async fn alter_table_name(&self, table_id: u32, table_name: &str) -> Result<()>;
 
@@ -481,6 +483,11 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn drop_connection(&self, connection_id: u32) -> Result<()> {
         let version = self.meta_client.drop_connection(connection_id).await?;
+        self.wait_version(version).await
+    }
+
+    async fn drop_secret(&self, secret_id: SecretId) -> Result<()> {
+        let version = self.meta_client.drop_secret(secret_id).await?;
         self.wait_version(version).await
     }
 

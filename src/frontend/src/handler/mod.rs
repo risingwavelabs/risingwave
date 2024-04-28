@@ -74,6 +74,7 @@ pub mod drop_function;
 mod drop_index;
 pub mod drop_mv;
 mod drop_schema;
+pub mod drop_secret;
 pub mod drop_sink;
 pub mod drop_source;
 pub mod drop_subscription;
@@ -405,7 +406,8 @@ pub async fn handle(
                     ObjectType::Schema
                     | ObjectType::Database
                     | ObjectType::User
-                    | ObjectType::Connection => {
+                    | ObjectType::Connection
+                    | ObjectType::Secret => {
                         bail_not_implemented!("DROP CASCADE");
                     }
                 };
@@ -471,6 +473,9 @@ pub async fn handle(
                 ObjectType::Connection => {
                     drop_connection::handle_drop_connection(handler_args, object_name, if_exists)
                         .await
+                }
+                ObjectType::Secret => {
+                    drop_secret::handle_drop_secret(handler_args, object_name, if_exists).await
                 }
             }
         }
