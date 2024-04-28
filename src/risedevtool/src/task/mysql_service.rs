@@ -47,4 +47,4 @@ impl DockerServiceConfig for MySqlConfig {
 }
 
 /// Docker-backed MySQL service.
-pub type MysqlService = DockerService<MySqlConfig>;
+pub type MySqlService = DockerService<MySqlConfig>;
