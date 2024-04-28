@@ -220,13 +220,13 @@ explain create table enum_to_varchar (
 
 # generated column
 statement ok
-explain create table shipments (
+create table shipments (
   shipment_id INTEGER,
   order_id INTEGER,
   origin STRING,
   destination STRING,
   is_arrived boolean,
-  generated_c INGEGER AS shipment_id + order_id,
+  generated_c INTEGER AS shipment_id + order_id,
  PRIMARY KEY (shipment_id)
 ) with (
  connector = 'postgres-cdc',
