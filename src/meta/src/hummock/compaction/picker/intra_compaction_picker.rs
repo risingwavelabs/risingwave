@@ -22,6 +22,7 @@ use super::{
     CompactionInput, CompactionPicker, CompactionTaskValidator, LocalPickerStatistic,
     ValidationRuleType,
 };
+use crate::hummock::compaction::compaction_config::L0_MAX_SIZE;
 use crate::hummock::compaction::picker::TrivialMovePicker;
 use crate::hummock::compaction::{create_overlap_strategy, CompactionDeveloperConfig};
 use crate::hummock::level_handler::LevelHandler;
@@ -131,8 +132,12 @@ impl IntraCompactionPicker {
             max_vnode_partition_idx = idx;
         }
 
+        let is_too_large = l0.total_file_size > L0_MAX_SIZE;
         for (idx, level) in l0.sub_levels.iter().enumerate() {
-            if level.level_type() != LevelType::Nonoverlapping
+            if level.level_type() != LevelType::Nonoverlapping {
+                continue;
+            }
+            if (is_too_large && level.total_file_size > self.config.max_compaction_bytes)
                 || level.total_file_size > self.config.sub_level_max_compaction_bytes
             {
                 continue;
@@ -146,10 +151,13 @@ impl IntraCompactionPicker {
                 continue;
             }
 
-            let max_compaction_bytes = std::cmp::min(
-                self.config.max_compaction_bytes,
-                self.config.sub_level_max_compaction_bytes,
-            );
+            let mut max_compaction_bytes = self.config.sub_level_max_compaction_bytes;
+
+            let mut level0_sub_level_compact_level_count =
+                self.config.level0_sub_level_compact_level_count;
+            if is_too_large {
+                level0_sub_level_compact_level_count *= 2;
+            }
 
             let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
                 self.config.sub_level_max_compaction_bytes / 2,

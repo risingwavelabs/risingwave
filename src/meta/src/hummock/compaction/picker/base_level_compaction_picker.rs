@@ -24,11 +24,10 @@ use super::{
     CompactionInput, CompactionPicker, CompactionTaskValidator, LocalPickerStatistic,
     ValidationRuleType,
 };
+use crate::hummock::compaction::compaction_config::L0_MAX_SIZE;
 use crate::hummock::compaction::picker::TrivialMovePicker;
 use crate::hummock::compaction::{create_overlap_strategy, CompactionDeveloperConfig};
 use crate::hummock::level_handler::LevelHandler;
-
-const L0_MAX_SIZE: u64 = 32 * 1024 * 1024 * 1024; // 32GB
 
 pub struct LevelCompactionPicker {
     target_level: usize,

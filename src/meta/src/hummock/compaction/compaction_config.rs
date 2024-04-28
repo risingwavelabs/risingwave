@@ -18,6 +18,7 @@ use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::CompactionConfig;
 
 const MAX_LEVEL: u64 = 6;
+pub const L0_MAX_SIZE: u64 = 32 * 1024 * 1024 * 1024; // 32GB
 
 pub struct CompactionConfigBuilder {
     config: CompactionConfig,
