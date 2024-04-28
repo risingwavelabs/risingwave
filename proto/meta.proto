@@ -408,7 +408,6 @@ message MetaSnapshot {
   GetSessionParamsResponse session_params = 20;
   repeated catalog.Secret secrets = 23;
   // for streaming
-  repeated FragmentParallelUnitMapping parallel_unit_mappings = 9;
   repeated common.WorkerNode nodes = 10;
   hummock.HummockSnapshot hummock_snapshot = 11;
   hummock.HummockVersion hummock_version = 12;
