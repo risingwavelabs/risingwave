@@ -561,8 +561,6 @@ message StreamScanNode {
   catalog.Table arrangement_table = 10;
 }
 
-
-
 // Config options for CDC backfill
 message StreamCdcScanOptions {
   // Whether skip the backfill and only consume from upstream.
