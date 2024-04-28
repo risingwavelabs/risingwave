@@ -18,14 +18,15 @@ use std::rc::Rc;
 use educe::Educe;
 use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::ColumnOrder;
 
-use super::GenericPlanNode;
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::FunctionalDependencySet;
+
+const OP_NAME: &str = "op";
+const OP_TYPE: DataType = DataType::Int16;
 
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]
@@ -35,8 +36,6 @@ pub struct LogScan {
     pub output_col_idx: Vec<usize>,
     /// Descriptor of the table
     pub table_desc: Rc<TableDesc>,
-    /// Catalog of the op column
-    pub op_column: Rc<ColumnDesc>,
     /// Help `RowSeqLogScan` executor use a better chunk size
     pub chunk_size: Option<u32>,
 
@@ -53,19 +52,11 @@ impl LogScan {
 
     pub fn visit_exprs(&self, _v: &mut dyn ExprVisitor) {}
 
-    /// Get the ids of the output columns.
+    // Used for create batch exec, without op
     pub fn output_column_ids(&self) -> Vec<ColumnId> {
         self.output_col_idx
             .iter()
             .map(|i| self.get_table_columns()[*i].column_id)
-            .collect()
-    }
-
-    pub fn output_column_ids_to_batch(&self) -> Vec<ColumnId> {
-        self.output_col_idx
-            .iter()
-            .map(|i| self.get_table_columns()[*i].column_id)
-            .filter(|i| i != &self.op_column.column_id)
             .collect()
     }
 
@@ -74,18 +65,23 @@ impl LogScan {
     }
 
     pub(crate) fn column_names_with_table_prefix(&self) -> Vec<String> {
-        self.output_col_idx
+        let mut out_column_names: Vec<_> = self
+            .output_col_idx
             .iter()
             .map(|&i| format!("{}.{}", self.table_name, self.get_table_columns()[i].name))
-            .collect()
+            .collect();
+        out_column_names.push(format!("{}.{}", self.table_name, OP_NAME));
+        out_column_names
     }
 
     pub(crate) fn column_names(&self) -> Vec<String> {
-        println!("output_col_idx: {:?}", self.output_col_idx);
-        self.output_col_idx
+        let mut out_column_names: Vec<_> = self
+            .output_col_idx
             .iter()
             .map(|&i| self.get_table_columns()[i].name.clone())
-            .collect()
+            .collect();
+        out_column_names.push(OP_NAME.to_string());
+        out_column_names
     }
 
     pub fn distribution_key(&self) -> Option<Vec<usize>> {
@@ -102,32 +98,11 @@ impl LogScan {
             .collect()
     }
 
-    /// get the Mapping of columnIndex from internal column index to output column index
-    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        ColIndexMapping::with_remaining_columns(
-            &self.output_col_idx,
-            self.get_table_columns().len(),
-        )
-    }
-
-    /// Get the ids of the output columns and primary key columns.
-    pub fn output_and_pk_column_ids(&self) -> Vec<ColumnId> {
-        let mut ids = self.output_column_ids();
-        for column_order in self.primary_key() {
-            let id = self.get_table_columns()[column_order.column_index].column_id;
-            if !ids.contains(&id) {
-                ids.push(id);
-            }
-        }
-        ids
-    }
-
     /// Create a logical scan node for log table scan
     pub(crate) fn new(
         table_name: String,
         output_col_idx: Vec<usize>,
         table_desc: Rc<TableDesc>,
-        op_column: Rc<ColumnDesc>,
         ctx: OptimizerContextRef,
         old_epoch: u64,
         new_epoch: u64,
@@ -136,7 +111,6 @@ impl LogScan {
             table_name,
             output_col_idx,
             table_desc,
-            op_column,
             chunk_size: None,
             ctx,
             old_epoch,
@@ -156,25 +130,8 @@ impl LogScan {
         )
     }
 
-    pub(crate) fn get_id_to_op_idx_mapping(
-        output_col_idx: &[usize],
-        columns: Vec<ColumnDesc>,
-    ) -> HashMap<ColumnId, usize> {
-        let mut id_to_op_idx = HashMap::new();
-        output_col_idx
-            .iter()
-            .enumerate()
-            .for_each(|(op_idx, tb_idx)| {
-                let col = &columns[*tb_idx];
-                id_to_op_idx.insert(col.column_id, op_idx);
-            });
-        id_to_op_idx
-    }
-}
-
-impl GenericPlanNode for LogScan {
-    fn schema(&self) -> Schema {
-        let fields = self
+    pub(crate) fn schema(&self) -> Schema {
+        let mut fields: Vec<_> = self
             .output_col_idx
             .iter()
             .map(|tb_idx| {
@@ -182,49 +139,18 @@ impl GenericPlanNode for LogScan {
                 Field::from_with_table_name_prefix(col, &self.table_name)
             })
             .collect();
+        fields.push(Field::with_name(
+            OP_TYPE,
+            format!("{}.{}", &self.table_name, OP_NAME),
+        ));
         Schema { fields }
     }
 
-    fn stream_key(&self) -> Option<Vec<usize>> {
-        let id_to_op_idx =
-            Self::get_id_to_op_idx_mapping(&self.output_col_idx, self.get_table_columns());
-        self.table_desc
-            .stream_key
-            .iter()
-            .map(|&c| {
-                id_to_op_idx
-                    .get(&self.get_table_columns()[c].column_id)
-                    .copied()
-            })
-            .collect::<Option<Vec<_>>>()
-    }
-
-    fn ctx(&self) -> OptimizerContextRef {
+    pub(crate) fn ctx(&self) -> OptimizerContextRef {
         self.ctx.clone()
     }
 
-    fn functional_dependency(&self) -> FunctionalDependencySet {
-        let pk_indices = self.stream_key();
-        let col_num = self.output_col_idx.len();
-        match &pk_indices {
-            Some(pk_indices) => FunctionalDependencySet::with_key(col_num, pk_indices),
-            None => FunctionalDependencySet::new(col_num),
-        }
-    }
-}
-
-impl LogScan {
     pub fn get_table_columns(&self) -> Vec<ColumnDesc> {
-        let mut columns = self.table_desc.columns.clone();
-        columns.push(self.op_column.as_ref().clone());
-        columns
-    }
-
-    /// Get the descs of the output columns.
-    pub fn column_descs(&self) -> Vec<ColumnDesc> {
-        self.output_col_idx
-            .iter()
-            .map(|&i| self.get_table_columns()[i].clone())
-            .collect()
+        self.table_desc.columns.clone()
     }
 }

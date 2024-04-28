@@ -15,19 +15,22 @@
 use std::ops::{Bound, Deref};
 use std::sync::Arc;
 
+use bytes::Bytes;
 use futures::prelude::stream::StreamExt;
 use futures_async_stream::try_stream;
 use futures_util::pin_mut;
+use itertools::Itertools;
 use prometheus::Histogram;
 use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnId, Field, Schema};
 use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::types::ScalarImpl;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::{collect_data_chunk, TableDistribution};
+use risingwave_storage::table::{collect_data_chunk, KeyedRow, TableDistribution};
 use risingwave_storage::{dispatch_state_store, StateStore};
 
 use super::{
@@ -40,6 +43,8 @@ use crate::task::BatchTaskContext;
 pub struct LogRowSeqScanExecutor<S: StateStore> {
     chunk_size: usize,
     identity: String,
+    // It is table schema + op column
+    schema: Schema,
 
     /// Batch metrics.
     /// None: Local mode don't record mertics.
@@ -61,9 +66,15 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
         identity: String,
         metrics: Option<BatchMetricsWithTaskLabels>,
     ) -> Self {
+        let mut schema = table.schema().clone();
+        schema.fields.push(Field::with_name(
+            risingwave_common::types::DataType::Int16,
+            "op",
+        ));
         Self {
             chunk_size,
             identity,
+            schema,
             metrics,
             table,
             scan_ranges,
@@ -125,7 +136,7 @@ impl BoxedExecutorBuilder for LogStoreRowSeqScanExecutorBuilder {
 }
 impl<S: StateStore> Executor for LogRowSeqScanExecutor<S> {
     fn schema(&self) -> &Schema {
-        self.table.schema()
+        &self.schema
     }
 
     fn identity(&self) -> &str {
@@ -148,15 +159,9 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
             scan_ranges,
             old_epoch,
             new_epoch,
+            schema,
         } = *self;
         let table = std::sync::Arc::new(table);
-        let mut schema = table.schema().clone();
-        // Add op column
-        schema.fields.push(Field::with_name(
-            risingwave_common::types::DataType::Int16,
-            "op",
-        ));
-        let schema = Arc::new(schema);
 
         // Create collector.
         let histogram = metrics.as_ref().map(|metrics| {
@@ -176,7 +181,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
                 new_epoch.clone(),
                 chunk_size,
                 histogram.clone(),
-                schema.clone(),
+                Arc::new(schema.clone()),
             );
             #[for_await]
             for chunk in stream {
@@ -243,6 +248,18 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
         loop {
             let timer = histogram.as_ref().map(|histogram| histogram.start_timer());
 
+            let mut iter = iter.as_mut().map(|r| match r {
+                Ok((op, value)) => {
+                    let (k, row) = value.into_owned_row_key();
+                    let full_row = row
+                        .into_iter()
+                        .chain(vec![Some(ScalarImpl::Int16(op))])
+                        .collect_vec();
+                    let row = OwnedRow::new(full_row);
+                    Ok(KeyedRow::<Bytes>::new(k, row))
+                }
+                Err(e) => Err(e),
+            });
             let chunk = collect_data_chunk(&mut iter, &schema, Some(chunk_size))
                 .await
                 .map_err(BatchError::from)?;

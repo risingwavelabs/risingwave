@@ -463,6 +463,18 @@ impl LocalQueryExecution {
                         }
                     }
                     NodeBody::SysRowSeqScan(_) => {}
+                    _ => unreachable!(),
+                }
+
+                Ok(PlanNodePb {
+                    children: vec![],
+                    identity,
+                    node_body: Some(node_body),
+                })
+            }
+            PlanNodeType::BatchLogSeqScan => {
+                let mut node_body = execution_plan_node.node.clone();
+                match &mut node_body {
                     NodeBody::LogRowSeqScan(ref mut scan_node) => {
                         if let Some(partition) = partition {
                             let partition = partition

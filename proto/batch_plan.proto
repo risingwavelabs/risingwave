@@ -71,8 +71,9 @@ message FilterNode {
   expr.ExprNode search_condition = 1;
 }
 
-message LogRowSeqScanNode{
+message LogRowSeqScanNode {
   plan_common.StorageTableDesc table_desc = 1;
+  // This records the mandatory column_ids of the original table, excluding op
   repeated int32 column_ids = 2;
   // The partition to read for scan tasks.
   //

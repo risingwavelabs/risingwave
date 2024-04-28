@@ -27,7 +27,7 @@ use crate::types::DataType;
 
 /// Column ID is the unique identifier of a column in a table. Different from table ID, column ID is
 /// not globally unique.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ColumnId(i32);
 
 impl std::fmt::Debug for ColumnId {

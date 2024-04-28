@@ -29,7 +29,6 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
-use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_common::util::row_serde::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
@@ -658,7 +657,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         end_epoch: HummockReadEpoch,
         pk_prefix: impl Row,
         range_bounds: impl RangeBounds<OwnedRow>,
-    ) -> StorageResult<impl Stream<Item = StorageResult<KeyedRow<Bytes>>> + Send> {
+    ) -> StorageResult<impl Stream<Item = StorageResult<(i16, KeyedRow<Bytes>)>> + Send> {
         self.iter_log_with_pk_bounds(satrt_epoch, end_epoch, pk_prefix, range_bounds)
             .await
     }
@@ -669,7 +668,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         end_epoch: HummockReadEpoch,
         pk_prefix: impl Row,
         range_bounds: impl RangeBounds<OwnedRow>,
-    ) -> StorageResult<impl Stream<Item = StorageResult<KeyedRow<Bytes>>> + Send> {
+    ) -> StorageResult<impl Stream<Item = StorageResult<(i16, KeyedRow<Bytes>)>> + Send> {
         let start_key = self.serialize_pk_bound(&pk_prefix, range_bounds.start_bound(), true);
         let end_key = self.serialize_pk_bound(&pk_prefix, range_bounds.end_bound(), false);
 
@@ -891,21 +890,8 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterLogInner<S, SD> {
     }
 
     /// Yield a row with its primary key.
-    #[try_stream(ok = KeyedRow<Bytes>, error = StorageError)]
+    #[try_stream(ok = (i16, KeyedRow<Bytes>), error = StorageError)]
     async fn into_stream(mut self) {
-        let build_value_with_op = |value: &[u8], op: i16| -> Result<Vec<Datum>, StorageError> {
-            let full_row = self.row_deserializer.deserialize(value)?;
-            let result_row_in_value = self
-                .mapping
-                .project(OwnedRow::new(full_row))
-                .into_owned_row();
-            let result_row_vec = result_row_in_value
-                .into_iter()
-                .chain(vec![Some(ScalarImpl::Int16(op))])
-                .collect_vec();
-            Ok(result_row_vec)
-        };
-
         while let Some((k, v)) = self
             .iter
             .try_next()
@@ -914,38 +900,65 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterLogInner<S, SD> {
         {
             match v {
                 ChangeLogValue::Insert(value) => {
-                    let row = OwnedRow::new(build_value_with_op(value, 1)?);
+                    let full_row = self.row_deserializer.deserialize(value)?;
+                    let row = self
+                        .mapping
+                        .project(OwnedRow::new(full_row))
+                        .into_owned_row();
                     // TODO: may optimize the key clone
-                    yield KeyedRow::<Bytes> {
-                        vnode_prefixed_key: k.copy_into(),
-                        row,
-                    };
+                    yield (
+                        1,
+                        KeyedRow::<Bytes> {
+                            vnode_prefixed_key: k.copy_into(),
+                            row,
+                        },
+                    );
                 }
                 ChangeLogValue::Update {
                     new_value,
                     old_value,
                 } => {
-                    let row = OwnedRow::new(build_value_with_op(old_value, 3)?);
+                    let full_row = self.row_deserializer.deserialize(old_value)?;
+                    let row = self
+                        .mapping
+                        .project(OwnedRow::new(full_row))
+                        .into_owned_row();
                     // TODO: may optimize the key clone
-                    yield KeyedRow::<Bytes> {
-                        vnode_prefixed_key: k.copy_into(),
-                        row,
-                    };
-
-                    let row = OwnedRow::new(build_value_with_op(new_value, 4)?);
+                    yield (
+                        3,
+                        KeyedRow::<Bytes> {
+                            vnode_prefixed_key: k.copy_into(),
+                            row,
+                        },
+                    );
+                    let full_row = self.row_deserializer.deserialize(new_value)?;
+                    let row = self
+                        .mapping
+                        .project(OwnedRow::new(full_row))
+                        .into_owned_row();
                     // TODO: may optimize the key clone
-                    yield KeyedRow::<Bytes> {
-                        vnode_prefixed_key: k.copy_into(),
-                        row,
-                    };
+                    yield (
+                        4,
+                        KeyedRow::<Bytes> {
+                            vnode_prefixed_key: k.copy_into(),
+                            row,
+                        },
+                    );
                 }
                 ChangeLogValue::Delete(value) => {
-                    let row = OwnedRow::new(build_value_with_op(value, 2)?);
+                    let full_row = self.row_deserializer.deserialize(value)?;
+                    let row = self
+                        .mapping
+                        .project(OwnedRow::new(full_row))
+                        .into_owned_row();
                     // TODO: may optimize the key clone
-                    yield KeyedRow::<Bytes> {
-                        vnode_prefixed_key: k.copy_into(),
-                        row,
-                    };
+                    yield (
+                        2,
+                        KeyedRow::<Bytes> {
+                            vnode_prefixed_key: k.copy_into(),
+                            row,
+                        },
+                    );
                 }
             }
         }

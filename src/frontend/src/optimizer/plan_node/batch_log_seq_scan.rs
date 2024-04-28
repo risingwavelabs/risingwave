@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::Schema;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::LogRowSeqScanNode;
 use risingwave_pb::common::BatchQueryEpoch;
@@ -23,7 +22,6 @@ use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, ToDistributedBatch, TryToBatchPb};
 use crate::catalog::ColumnId;
 use crate::error::Result;
-use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
@@ -39,13 +37,9 @@ pub struct BatchLogSeqScan {
 impl BatchLogSeqScan {
     fn new_inner(core: generic::LogScan, dist: Distribution) -> Self {
         let order = Order::any();
-        let base = PlanBase::new_batch_with_core(&core, dist, order);
+        let base = PlanBase::new_batch(core.ctx(), core.schema(), dist, order);
 
         Self { base, core }
-    }
-
-    pub fn schema(&self) -> &Schema {
-        self.base.schema()
     }
 
     pub fn new(core: generic::LogScan) -> Self {
@@ -84,7 +78,7 @@ impl_plan_tree_node_for_leaf! { BatchLogSeqScan }
 impl Distill for BatchLogSeqScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let verbose = self.base.ctx().is_explain_verbose();
-        let mut vec = Vec::with_capacity(4);
+        let mut vec = Vec::with_capacity(3);
         vec.push(("table", Pretty::from(self.core.table_name.clone())));
         vec.push(("columns", self.core.columns_pretty(verbose)));
 
@@ -112,7 +106,7 @@ impl TryToBatchPb for BatchLogSeqScan {
             table_desc: Some(self.core.table_desc.try_to_protobuf()?),
             column_ids: self
                 .core
-                .output_column_ids_to_batch()
+                .output_column_ids()
                 .iter()
                 .map(ColumnId::get_id)
                 .collect(),
@@ -144,20 +138,6 @@ impl ToLocalBatch for BatchLogSeqScan {
     }
 }
 
-impl ExprRewritable for BatchLogSeqScan {
-    fn has_rewritable_expr(&self) -> bool {
-        true
-    }
+impl ExprRewritable for BatchLogSeqScan {}
 
-    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let core = self.core.clone();
-        core.rewrite_exprs(r);
-        Self::new(core).into()
-    }
-}
-
-impl ExprVisitable for BatchLogSeqScan {
-    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
-        self.core.visit_exprs(v);
-    }
-}
+impl ExprVisitable for BatchLogSeqScan {}
