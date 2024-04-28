@@ -22,8 +22,10 @@ use risingwave_common::array::stream_chunk::StreamChunkMut;
 use risingwave_common::array::Op;
 use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
+use risingwave_common_estimate_size::collections::EstimatedVec;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::dispatch_sink;
-use risingwave_connector::sink::catalog::SinkType;
+use risingwave_connector::sink::catalog::{SinkId, SinkType};
 use risingwave_connector::sink::log_store::{
     LogReader, LogReaderExt, LogStoreFactory, LogWriter, LogWriterExt,
 };
@@ -187,6 +189,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             && !self.sink_param.downstream_pk.is_empty();
         let processed_input = Self::process_msg(
             input,
+            self.sink_param.sink_id,
             self.sink_param.sink_type,
             stream_key,
             need_advance_delete,
@@ -194,6 +197,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             self.chunk_size,
             self.input_data_types,
             self.sink_param.downstream_pk.clone(),
+            self.actor_context.clone(),
         );
 
         if self.sink.is_sink_into_table() {
@@ -288,6 +292,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn process_msg(
         input: impl MessageStream,
+        sink_id: SinkId,
         sink_type: SinkType,
         stream_key: PkIndices,
         need_advance_delete: bool,
@@ -295,10 +300,11 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         chunk_size: usize,
         input_data_types: Vec<DataType>,
         down_stream_pk: Vec<usize>,
+        actor_context: ActorContextRef,
     ) {
         // need to buffer chunks during one barrier
         if need_advance_delete || re_construct_with_sink_pk {
-            let mut chunk_buffer = vec![];
+            let mut chunk_buffer = EstimatedVec::new();
             let mut watermark: Option<super::Watermark> = None;
             #[for_await]
             for msg in input {
@@ -306,9 +312,18 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     Message::Watermark(w) => watermark = Some(w),
                     Message::Chunk(c) => {
                         chunk_buffer.push(c);
+                        actor_context
+                            .streaming_metrics
+                            .sink_chunk_buffer_size
+                            .with_guarded_label_values(&[
+                                &sink_id.to_string(),
+                                &actor_context.id.to_string(),
+                                &actor_context.fragment_id.to_string(),
+                            ])
+                            .set(chunk_buffer.estimated_size() as i64);
                     }
                     Message::Barrier(barrier) => {
-                        let chunks = mem::take(&mut chunk_buffer);
+                        let chunks = mem::take(&mut chunk_buffer).into_inner();
                         let chunks = if need_advance_delete {
                             let mut delete_chunks = vec![];
                             let mut insert_chunks = vec![];

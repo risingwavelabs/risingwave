@@ -1004,6 +1004,40 @@ pub(super) async fn handle_create_table_plan(
 
             (None, Some(cdc_table)) => {
                 let context = OptimizerContext::new(handler_args, explain_options);
+                if append_only {
+                    return Err(ErrorCode::NotSupported(
+                        "append only modifier on the table created from a CDC source".into(),
+                        "Remove the APPEND ONLY clause".into(),
+                    )
+                    .into());
+                }
+
+                if !source_watermarks.is_empty() {
+                    return Err(ErrorCode::NotSupported(
+                        "watermark defined on the table created from a CDC source".into(),
+                        "Remove the Watermark definitions".into(),
+                    )
+                    .into());
+                }
+                if wildcard_idx.is_some() {
+                    return Err(ErrorCode::NotSupported(
+                        "star(\"*\") defined on the table created from a CDC source".into(),
+                        "Remove the star(\"*\") in the column list".into(),
+                    )
+                    .into());
+                }
+                for c in &column_defs {
+                    for op in &c.options {
+                        if let ColumnOption::GeneratedColumns(_) = op.option {
+                            return Err(ErrorCode::NotSupported(
+                                "generated column defined on the table created from a CDC source"
+                                    .into(),
+                                "Remove the generated column in the column list".into(),
+                            )
+                            .into());
+                        }
+                    }
+                }
                 let (plan, table) = gen_create_table_plan_for_cdc_source(
                     context.into(),
                     cdc_table.source_name.clone(),

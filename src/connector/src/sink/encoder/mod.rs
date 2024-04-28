@@ -144,8 +144,6 @@ pub enum CustomJsonType {
     Es,
     // starrocks' need jsonb is struct
     StarRocks,
-    // bigquery need null array -> []
-    BigQuery,
     None,
 }
 

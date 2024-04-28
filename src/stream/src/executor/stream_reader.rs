@@ -96,12 +96,14 @@ impl<const BIASED: bool, M: Send + 'static> StreamReaderWithPause<BIASED, M> {
     /// Pause the data stream.
     pub fn pause_stream(&mut self) {
         assert!(!self.paused, "already paused");
+        tracing::info!("data stream paused");
         self.paused = true;
     }
 
     /// Resume the data stream. Panic if the data stream is not paused.
     pub fn resume_stream(&mut self) {
         assert!(self.paused, "not paused");
+        tracing::info!("data stream resumed");
         self.paused = false;
     }
 }

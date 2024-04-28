@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bincode::Error;
 use risingwave_common::error::BoxedError;
 use thiserror::Error;
 
@@ -60,11 +59,4 @@ pub enum BackupError {
         #[backtrace]
         anyhow::Error,
     ),
-}
-
-impl From<bincode::Error> for BackupError {
-    fn from(value: Error) -> Self {
-        // TODO: match error
-        BackupError::Other(value.into())
-    }
 }

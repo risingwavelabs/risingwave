@@ -38,7 +38,6 @@ use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{StateTableInner, StateTableOpConsistencyLevel};
 use crate::executor::prelude::*;
-use crate::executor::{AddMutation, UpdateMutation};
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
 pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
@@ -239,10 +238,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     }
                 }
                 Message::Barrier(b) => {
-                    let mutation = b.mutation.as_deref();
                     // If a downstream mv depends on the current table, we need to do conflict check again.
                     if !self.may_have_downstream
-                        && Self::new_downstream_created(mutation, self.actor_context.id)
+                        && b.has_more_downstream_fragments(self.actor_context.id)
                     {
                         self.may_have_downstream = true;
                     }
@@ -268,35 +266,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     Message::Barrier(b)
                 }
             }
-        }
-    }
-
-    fn new_downstream_created(mutation: Option<&Mutation>, actor_id: ActorId) -> bool {
-        let Some(mutation) = mutation else {
-            return false;
-        };
-        match mutation {
-            // Add is for mv, index and sink creation.
-            Mutation::Add(AddMutation { adds, .. }) => adds.get(&actor_id).is_some(),
-            // AddAndUpdate is for sink-into-table.
-            Mutation::AddAndUpdate(
-                AddMutation { adds, .. },
-                UpdateMutation {
-                    dispatchers,
-                    actor_new_dispatchers: actor_dispatchers,
-                    ..
-                },
-            ) => {
-                adds.get(&actor_id).is_some()
-                    || actor_dispatchers.get(&actor_id).is_some()
-                    || dispatchers.get(&actor_id).is_some()
-            }
-            Mutation::Update(_)
-            | Mutation::Stop(_)
-            | Mutation::Pause
-            | Mutation::Resume
-            | Mutation::SourceChangeSplit(_)
-            | Mutation::Throttle(_) => false,
         }
     }
 }
