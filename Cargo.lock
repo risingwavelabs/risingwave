@@ -9907,7 +9907,6 @@ dependencies = [
  "assert_matches",
  "async-recursion",
  "async-trait",
- "bytes",
  "criterion",
  "either",
  "foyer",

@@ -27,7 +27,6 @@ use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
 use crate::scheduler::SchedulerResult;
 
-/// `BatchLogSeqScan` implements [`super::LogicalLogScan`] to scan from a row-oriented table
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchLogSeqScan {
     pub base: PlanBase<Batch>,

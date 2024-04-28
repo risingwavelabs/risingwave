@@ -15,7 +15,6 @@
 use std::ops::{Bound, Deref};
 use std::sync::Arc;
 
-use bytes::Bytes;
 use futures::prelude::stream::StreamExt;
 use futures_async_stream::try_stream;
 use futures_util::pin_mut;
@@ -215,13 +214,8 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
                     },
                 ),
             )
-            .await?;
-
-        pin_mut!(iter);
-        loop {
-            let timer = histogram.as_ref().map(|histogram| histogram.start_timer());
-
-            let mut iter = iter.as_mut().map(|r| match r {
+            .await?
+            .map(|r| match r {
                 Ok((op, value)) => {
                     let (k, row) = value.into_owned_row_key();
                     // Todo! To avoid create a full row.
@@ -230,10 +224,15 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
                         .chain(vec![Some(ScalarImpl::Int16(op.to_i16()))])
                         .collect_vec();
                     let row = OwnedRow::new(full_row);
-                    Ok(KeyedRow::<Bytes>::new(k, row))
+                    Ok(KeyedRow::<_>::new(k, row))
                 }
                 Err(e) => Err(e),
             });
+
+        pin_mut!(iter);
+        loop {
+            let timer = histogram.as_ref().map(|histogram| histogram.start_timer());
+
             let chunk = collect_data_chunk(&mut iter, &schema, Some(chunk_size))
                 .await
                 .map_err(BatchError::from)?;
