@@ -29,12 +29,12 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, Statement};
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::declare_cursor::create_stream_for_cursor;
+use crate::handler::query::BatchQueryPlanResult;
 use crate::handler::util::{
-    convert_epoch_to_logstore_i64, convert_logstore_i64_to_unix_millis,
-    gen_query_from_logstore_ge_rw_timestamp, gen_query_from_table_name,
+    gen_query_from_logstore_ge_rw_timestamp, gen_query_from_table_name, convert_logstore_u64_to_unix_millis,
 };
 use crate::handler::HandlerArgs;
-use crate::PgResponseStream;
+use crate::{PgResponseStream, TableCatalog};
 
 pub const KV_LOG_STORE_EPOCH: &str = "kv_log_store_epoch";
 const KV_LOG_STORE_ROW_OP: &str = "kv_log_store_row_op";
@@ -106,10 +106,10 @@ impl QueryCursor {
 enum State {
     InitLogStoreQuery {
         // The rw_timestamp used to initiate the query to read from subscription logstore.
-        seek_timestamp: i64,
+        seek_timestamp: u64,
 
         // If specified, the expected_timestamp must be an exact match for the next rw_timestamp.
-        expected_timestamp: Option<i64>,
+        expected_timestamp: Option<u64>,
     },
     Fetch {
         // Whether the query is reading from snapshot
@@ -118,7 +118,7 @@ enum State {
         from_snapshot: bool,
 
         // The rw_timestamp used to initiate the query to read from subscription logstore.
-        rw_timestamp: i64,
+        rw_timestamp: u64,
 
         // The row stream to from the batch query read.
         // It is returned from the batch execution.
@@ -137,6 +137,8 @@ enum State {
 pub struct SubscriptionCursor {
     cursor_name: String,
     subscription: Arc<SubscriptionCatalog>,
+    table: Arc<TableCatalog>,
+    log_query_epochs: Vec<u64>,
     cursor_need_drop_time: Instant,
     state: State,
 }
@@ -144,8 +146,9 @@ pub struct SubscriptionCursor {
 impl SubscriptionCursor {
     pub async fn new(
         cursor_name: String,
-        start_timestamp: Option<i64>,
+        start_timestamp: Option<u64>,
         subscription: Arc<SubscriptionCatalog>,
+        table: Arc<TableCatalog>,
         handle_args: &HandlerArgs,
     ) -> Result<Self> {
         let state = if let Some(start_timestamp) = start_timestamp {
@@ -173,7 +176,7 @@ impl SubscriptionCursor {
                     )
                 })?
                 .0;
-            let start_timestamp = convert_epoch_to_logstore_i64(pinned_epoch);
+            let start_timestamp = pinned_epoch;
 
             State::Fetch {
                 from_snapshot: true,
@@ -189,6 +192,8 @@ impl SubscriptionCursor {
         Ok(Self {
             cursor_name,
             subscription,
+            table,
+            log_query_epochs: vec![],
             cursor_need_drop_time,
             state,
         })
@@ -222,7 +227,7 @@ impl SubscriptionCursor {
 
                     // Get the rw_timestamp in the first row returned by the query if any.
                     // new_row_rw_timestamp == None means the query returns empty result.
-                    let new_row_rw_timestamp: Option<i64> = remaining_rows.front().map(|row| {
+                    let new_row_rw_timestamp: Option<u64> = remaining_rows.front().map(|row| {
                         std::str::from_utf8(row.index(0).as_ref().unwrap())
                             .unwrap()
                             .parse()
@@ -241,7 +246,7 @@ impl SubscriptionCursor {
                             return Err(ErrorCode::CatalogError(
                                 format!(
                                     " No data found for rw_timestamp {:?}, data may have been recycled, please recreate cursor",
-                                    convert_logstore_i64_to_unix_millis(expected_timestamp)
+                                    convert_logstore_u64_to_unix_millis(expected_timestamp)
                                 )
                                 .into(),
                             )
@@ -290,7 +295,7 @@ impl SubscriptionCursor {
                             ));
                         }
 
-                        let new_row_rw_timestamp: i64 = new_row
+                        let new_row_rw_timestamp: u64 = new_row
                             .get(0)
                             .unwrap()
                             .as_ref()
@@ -365,11 +370,13 @@ impl SubscriptionCursor {
     }
 
     async fn initiate_query(
-        rw_timestamp: Option<i64>,
+        rw_timestamp: Option<u64>,
         subscription: &SubscriptionCatalog,
         handle_args: HandlerArgs,
+        log_query_epochs: Vec<u64>,
     ) -> Result<(PgResponseStream, Vec<PgFieldDescriptor>)> {
         let query_stmt = if let Some(rw_timestamp) = rw_timestamp {
+            
             Statement::Query(Box::new(gen_query_from_logstore_ge_rw_timestamp(
                 &subscription.get_log_store_name(),
                 rw_timestamp,
@@ -411,10 +418,10 @@ impl SubscriptionCursor {
 
     pub fn build_row_with_logstore(
         mut row: Vec<Option<Bytes>>,
-        rw_timestamp: i64,
+        rw_timestamp: u64,
     ) -> Result<Vec<Option<Bytes>>> {
         let mut new_row = vec![Some(Bytes::from(
-            convert_logstore_i64_to_unix_millis(rw_timestamp).to_string(),
+            convert_logstore_u64_to_unix_millis(rw_timestamp).to_string(),
         ))];
         // need remove kv_log_store_epoch
         new_row.extend(row.drain(1..row.len()).collect_vec());
@@ -457,6 +464,15 @@ impl SubscriptionCursor {
         }
         new_descs
     }
+
+    pub fn create_batch_plan_for_cursor(
+        table_catalog: std::sync::Arc<TableCatalog>,
+        handle_args: HandlerArgs,
+        old_epoch: u64,
+        new_epoch: u64,
+    ) -> Result<BatchQueryPlanResult> {
+        todo!()
+    }
 }
 
 #[derive(Default)]
@@ -468,14 +484,16 @@ impl CursorManager {
     pub async fn add_subscription_cursor(
         &self,
         cursor_name: String,
-        start_timestamp: Option<i64>,
+        start_timestamp: Option<u64>,
         subscription: Arc<SubscriptionCatalog>,
+        table: Arc<TableCatalog>,
         handle_args: &HandlerArgs,
     ) -> Result<()> {
         let cursor = SubscriptionCursor::new(
             cursor_name.clone(),
             start_timestamp,
             subscription,
+            table,
             handle_args,
         )
         .await?;

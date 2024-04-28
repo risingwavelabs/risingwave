@@ -18,7 +18,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_sqlparser::ast::{DeclareCursorStatement, ObjectName, Query, Since, Statement};
 
 use super::query::{gen_batch_plan_by_statement, gen_batch_plan_fragmenter};
-use super::util::{convert_epoch_to_logstore_i64, convert_unix_millis_to_logstore_i64};
+use super::util::convert_unix_millis_to_logstore_u64;
 use super::RwPgResponse;
 use crate::error::{ErrorCode, Result};
 use crate::handler::query::create_stream;
@@ -58,19 +58,20 @@ async fn handle_declare_subscription_cursor(
     let cursor_from_subscription_name = sub_name.0.last().unwrap().real_value().clone();
     let subscription =
         session.get_subscription_by_name(schema_name, &cursor_from_subscription_name)?;
+    let table = session.get_table_by_id(subscription.dependent_relations.get(0).unwrap())?;
     // Start the first query of cursor, which includes querying the table and querying the subscription's logstore
     let start_rw_timestamp = match rw_timestamp {
         Some(risingwave_sqlparser::ast::Since::TimestampMsNum(start_rw_timestamp)) => {
             check_cursor_unix_millis(start_rw_timestamp, subscription.get_retention_seconds()?)?;
-            Some(convert_unix_millis_to_logstore_i64(start_rw_timestamp))
+            Some(convert_unix_millis_to_logstore_u64(start_rw_timestamp))
         }
         Some(risingwave_sqlparser::ast::Since::ProcessTime) => {
-            Some(convert_epoch_to_logstore_i64(Epoch::now().0))
+            Some(Epoch::now().0)
         }
         Some(risingwave_sqlparser::ast::Since::Begin) => {
             let min_unix_millis =
                 Epoch::now().as_unix_millis() - subscription.get_retention_seconds()? * 1000;
-            Some(convert_unix_millis_to_logstore_i64(min_unix_millis))
+            Some(convert_unix_millis_to_logstore_u64(min_unix_millis))
         }
         None => None,
     };
@@ -81,6 +82,7 @@ async fn handle_declare_subscription_cursor(
             cursor_name.clone(),
             start_rw_timestamp,
             subscription,
+            table,
             &handle_args,
         )
         .await?;

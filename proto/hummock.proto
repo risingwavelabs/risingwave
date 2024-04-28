@@ -895,9 +895,11 @@ message BranchedObject {
 }
 
 message ListEpochForSubscriptionRequest {
-  uint32 subscription_id = 1;
+  uint32 table_id = 1;
+  uint64 min_epoch = 2;
+  uint64 max_epoch = 3;
 }
 
 message ListEpochForSubscriptionResponse {
-  repeated uint64 list_epoch = 1;
+  repeated uint64 epochs = 1;
 }

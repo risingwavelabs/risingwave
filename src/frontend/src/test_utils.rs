@@ -242,7 +242,12 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn list_epoch_for_subscription(&self,_subscription_id: u32) -> Result<Vec<u64>>{
+    async fn list_epoch_for_subscription(
+        &self,
+        _table_id: u32,
+        _min_epoch: u64,
+        _max_epoch: u64,
+    ) -> Result<Vec<u64>> {
         unreachable!()
     }
 

@@ -36,6 +36,7 @@ use risingwave_common::config::default::compaction_config;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
+use risingwave_hummock_sdk::change_log::TableChangeLog;
 use risingwave_hummock_sdk::compact::{compact_task_to_string, statistics_compact_task};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids,
@@ -3301,6 +3302,31 @@ impl HummockManager {
         }
 
         Ok(())
+    }
+
+    #[named]
+    pub async fn list_epoch_for_subscription(
+        &self,
+        table_id: u32,
+        min_epoch: u64,
+        max_epoch: u64,
+    ) -> Vec<u64> {
+        let versioning = read_lock!(self, versioning).await;
+        if let Some(table_change_log) = versioning
+            .current_version
+            .table_change_log
+            .get(&TableId::new(table_id))
+        {
+            let table_change_log = TableChangeLog::from(table_change_log.clone());
+            let epochs = table_change_log
+                .filter_epoch((min_epoch, max_epoch))
+                .iter()
+                .flat_map(|a| a.epochs.clone())
+                .collect();
+            epochs
+        } else {
+            vec![]
+        }
     }
 }
 

@@ -596,12 +596,19 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn list_epoch_for_subscription(&self,subscription_id: u32) -> Result<Vec<u64>>{
+    pub async fn list_epoch_for_subscription(
+        &self,
+        table_id: u32,
+        min_epoch: u64,
+        max_epoch: u64,
+    ) -> Result<Vec<u64>> {
         let request = ListEpochForSubscriptionRequest {
-            subscription_id,
+            table_id,
+            min_epoch,
+            max_epoch,
         };
         let resp = self.inner.list_epoch_for_subscription(request).await?;
-        Ok(resp.list_epoch)
+        Ok(resp.epochs)
     }
 
     pub async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<CatalogVersion> {

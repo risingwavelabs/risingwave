@@ -666,6 +666,22 @@ impl HummockManagerService for HummockServiceImpl {
         let response = Response::new(CancelCompactTaskResponse { ret });
         return Ok(response);
     }
+
+    async fn list_epoch_for_subscription(
+        &self,
+        request: Request<ListEpochForSubscriptionRequest>,
+    ) -> Result<Response<ListEpochForSubscriptionResponse>, Status> {
+        let ListEpochForSubscriptionRequest {
+            table_id,
+            min_epoch,
+            max_epoch,
+        } = request.into_inner();
+        let epochs = self
+            .hummock_manager
+            .list_epoch_for_subscription(table_id, min_epoch, max_epoch)
+            .await;
+        Ok(Response::new(ListEpochForSubscriptionResponse { epochs }))
+    }
 }
 
 #[cfg(test)]

@@ -222,7 +222,7 @@ pub fn gen_query_from_table_name(from_name: ObjectName) -> Query {
     }
 }
 
-pub fn gen_query_from_logstore_ge_rw_timestamp(logstore_name: &str, rw_timestamp: i64) -> Query {
+pub fn gen_query_from_logstore_ge_rw_timestamp(logstore_name: &str, rw_timestamp: u64) -> Query {
     let table_factor = TableFactor::Table {
         name: ObjectName(vec![logstore_name.into()]),
         alias: None,
@@ -263,18 +263,12 @@ pub fn gen_query_from_logstore_ge_rw_timestamp(logstore_name: &str, rw_timestamp
     }
 }
 
-pub fn convert_unix_millis_to_logstore_i64(unix_millis: u64) -> i64 {
-    let epoch = Epoch::from_unix_millis(unix_millis);
-    convert_epoch_to_logstore_i64(epoch.0)
+pub fn convert_unix_millis_to_logstore_u64(unix_millis: u64) -> u64 {
+    Epoch::from_unix_millis(unix_millis).0
 }
 
-pub fn convert_epoch_to_logstore_i64(epoch: u64) -> i64 {
-    epoch as i64 ^ (1i64 << 63)
-}
-
-pub fn convert_logstore_i64_to_unix_millis(logstore_i64: i64) -> u64 {
-    let epoch = Epoch::from(logstore_i64 as u64 ^ (1u64 << 63));
-    epoch.as_unix_millis()
+pub fn convert_logstore_u64_to_unix_millis(logstore_u64: u64) -> u64 {
+    Epoch::from(logstore_u64).as_unix_millis()
 }
 
 #[cfg(test)]
