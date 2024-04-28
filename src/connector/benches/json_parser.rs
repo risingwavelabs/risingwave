@@ -132,7 +132,7 @@ fn bench_json_parser(c: &mut Criterion) {
         .build()
         .unwrap();
     let records = generate_json_rows();
-    let ctx = Arc::new(SourceContext::default());
+    let ctx = Arc::new(SourceContext::dummy());
     c.bench_function("json_parser", |b| {
         b.to_async(&rt).iter_batched(
             || records.clone(),

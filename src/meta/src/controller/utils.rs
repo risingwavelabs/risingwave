@@ -16,6 +16,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use anyhow::anyhow;
 use itertools::Itertools;
+use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::fragment::DistributionType;
@@ -23,12 +24,12 @@ use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
-    object_dependency, schema, secret, sink, source, table, user, user_privilege, view, ActorId,
-    DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId, PrivilegeId,
-    SchemaId, SourceId, StreamNode, UserId,
+    object_dependency, schema, secret, sink, source, table, user, user_privilege, view, worker_property,
+    ActorId, DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId,
+    PrivilegeId, SchemaId, SourceId, StreamNode, UserId, WorkerId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction, PbSecret};
-use risingwave_pb::meta::PbFragmentParallelUnitMapping;
+use risingwave_pb::meta::{PbFragmentParallelUnitMapping, PbFragmentWorkerMapping};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode, StreamSource};
 use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
@@ -811,10 +812,12 @@ where
 pub async fn get_fragment_mappings<C>(
     db: &C,
     job_id: ObjectId,
-) -> MetaResult<Vec<PbFragmentParallelUnitMapping>>
+) -> MetaResult<Vec<PbFragmentWorkerMapping>>
 where
     C: ConnectionTrait,
 {
+    let parallel_unit_to_worker = get_parallel_unit_to_worker_map(db).await?;
+
     let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
         .select_only()
         .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
@@ -825,9 +828,13 @@ where
 
     Ok(fragment_mappings
         .into_iter()
-        .map(|(fragment_id, mapping)| PbFragmentParallelUnitMapping {
+        .map(|(fragment_id, mapping)| PbFragmentWorkerMapping {
             fragment_id: fragment_id as _,
-            mapping: Some(mapping.to_protobuf()),
+            mapping: Some(
+                ParallelUnitMapping::from_protobuf(&mapping.to_protobuf())
+                    .to_worker(&parallel_unit_to_worker)
+                    .to_protobuf(),
+            ),
         })
         .collect())
 }
@@ -943,4 +950,31 @@ where
     }
 
     Ok((source_fragment_ids, actors.into_iter().collect()))
+}
+
+pub(crate) async fn get_parallel_unit_to_worker_map<C>(db: &C) -> MetaResult<HashMap<u32, u32>>
+where
+    C: ConnectionTrait,
+{
+    let worker_parallel_units = WorkerProperty::find()
+        .select_only()
+        .columns([
+            worker_property::Column::WorkerId,
+            worker_property::Column::ParallelUnitIds,
+        ])
+        .into_tuple::<(WorkerId, I32Array)>()
+        .all(db)
+        .await?;
+
+    let parallel_unit_to_worker = worker_parallel_units
+        .into_iter()
+        .flat_map(|(worker_id, parallel_unit_ids)| {
+            parallel_unit_ids
+                .into_inner()
+                .into_iter()
+                .map(move |parallel_unit_id| (parallel_unit_id as u32, worker_id as u32))
+        })
+        .collect::<HashMap<_, _>>();
+
+    Ok(parallel_unit_to_worker)
 }

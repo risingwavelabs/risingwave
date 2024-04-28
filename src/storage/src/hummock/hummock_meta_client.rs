@@ -17,7 +17,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::{HummockSstableObjectId, LocalSstableInfo, SstObjectIdRange};
+use risingwave_hummock_sdk::{HummockSstableObjectId, SstObjectIdRange, SyncResult};
 use risingwave_pb::hummock::{HummockSnapshot, SubscribeCompactionEventRequest, VacuumTask};
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{CompactionEventItem, HummockMetaClient, MetaClient};
@@ -78,11 +78,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
-    async fn commit_epoch(
-        &self,
-        _epoch: HummockEpoch,
-        _sstables: Vec<LocalSstableInfo>,
-    ) -> Result<()> {
+    async fn commit_epoch(&self, _epoch: HummockEpoch, _sync_result: SyncResult) -> Result<()> {
         panic!("Only meta service can commit_epoch in production.")
     }
 

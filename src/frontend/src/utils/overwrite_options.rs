@@ -20,7 +20,7 @@ pub struct OverwriteOptions {
 }
 
 impl OverwriteOptions {
-    const STREAMING_RATE_LIMIT_KEY: &'static str = "streaming_rate_limit";
+    pub(crate) const STREAMING_RATE_LIMIT_KEY: &'static str = "streaming_rate_limit";
 
     pub fn new(args: &mut HandlerArgs) -> Self {
         let streaming_rate_limit = {

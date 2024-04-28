@@ -30,7 +30,7 @@ use risingwave_batch::task::{ShutdownToken, TaskId};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
-use risingwave_common::hash::ParallelUnitMapping;
+use risingwave_common::hash::WorkerMapping;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::tracing::{InstrumentStream, TracingContext};
 use risingwave_connector::source::SplitMetaData;
@@ -312,12 +312,12 @@ impl LocalQueryExecution {
                     // Similar to the distributed case (StageRunner::schedule_tasks).
                     // Set `vnode_ranges` of the scan node in `local_execute_plan` of each
                     // `exchange_source`.
-                    let (parallel_unit_ids, vnode_bitmaps): (Vec<_>, Vec<_>) =
+                    let (worker_ids, vnode_bitmaps): (Vec<_>, Vec<_>) =
                         vnode_bitmaps.clone().into_iter().unzip();
                     let workers = self
                         .worker_node_manager
                         .manager
-                        .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
+                        .get_workers_by_worker_ids(&worker_ids)?;
                     for (idx, (worker_node, partition)) in
                         (workers.into_iter().zip_eq_fast(vnode_bitmaps.into_iter())).enumerate()
                     {
@@ -472,7 +472,9 @@ impl LocalQueryExecution {
                     node_body: Some(node_body),
                 })
             }
-            PlanNodeType::BatchSource => {
+            PlanNodeType::BatchSource
+            | PlanNodeType::BatchKafkaScan
+            | PlanNodeType::BatchIcebergScan => {
                 let mut node_body = execution_plan_node.node.clone();
                 match &mut node_body {
                     NodeBody::Source(ref mut source_node) => {
@@ -560,10 +562,7 @@ impl LocalQueryExecution {
     }
 
     #[inline(always)]
-    fn get_table_dml_vnode_mapping(
-        &self,
-        table_id: &TableId,
-    ) -> SchedulerResult<ParallelUnitMapping> {
+    fn get_table_dml_vnode_mapping(&self, table_id: &TableId) -> SchedulerResult<WorkerMapping> {
         let guard = self.front_env.catalog_reader().read_guard();
 
         let table = guard
@@ -587,11 +586,11 @@ impl LocalQueryExecution {
             // dml should use streaming vnode mapping
             let vnode_mapping = self.get_table_dml_vnode_mapping(table_id)?;
             let worker_node = {
-                let parallel_unit_ids = vnode_mapping.iter_unique().collect_vec();
+                let worker_ids = vnode_mapping.iter_unique().collect_vec();
                 let candidates = self
                     .worker_node_manager
                     .manager
-                    .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
+                    .get_workers_by_worker_ids(&worker_ids)?;
                 if candidates.is_empty() {
                     return Err(BatchError::EmptyWorkerNodes.into());
                 }

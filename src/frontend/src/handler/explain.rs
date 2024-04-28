@@ -39,16 +39,16 @@ use crate::utils::explain_stream_graph;
 use crate::OptimizerContextRef;
 
 async fn do_handle_explain(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
+    explain_options: ExplainOptions,
     stmt: Statement,
     blocks: &mut Vec<String>,
 ) -> Result<()> {
     // Workaround to avoid `Rc` across `await` point.
     let mut batch_plan_fragmenter = None;
+    let session = handler_args.session.clone();
 
     {
-        let session = context.session_ctx().clone();
-
         let (plan, context) = match stmt {
             // `CREATE TABLE` takes the ownership of the `OptimizerContext` to avoid `Rc` across
             // `await` point. We can only take the reference back from the `PlanRef` if it's
@@ -72,7 +72,8 @@ async fn do_handle_explain(
                 let source_schema = source_schema.map(|s| s.into_v2_with_warning());
 
                 let (plan, _source, _table, _job_type) = handle_create_table_plan(
-                    context,
+                    handler_args,
+                    explain_options,
                     col_id_gen,
                     source_schema,
                     cdc_table_info,
@@ -91,7 +92,8 @@ async fn do_handle_explain(
                 (Ok(plan), context)
             }
             Statement::CreateSink { stmt } => {
-                let partition_info = get_partition_compute_info(context.with_options()).await?;
+                let partition_info = get_partition_compute_info(&handler_args.with_options).await?;
+                let context = OptimizerContext::new(handler_args, explain_options);
                 let plan = gen_sink_plan(&session, context.into(), stmt, partition_info)
                     .map(|plan| plan.sink_plan)?;
                 let context = plan.ctx();
@@ -102,7 +104,8 @@ async fn do_handle_explain(
             // `OptimizerContext` even if the planning fails. This enables us to log the partial
             // traces for better debugging experience.
             _ => {
-                let context: OptimizerContextRef = context.into();
+                let context: OptimizerContextRef =
+                    OptimizerContext::new(handler_args, explain_options).into();
                 let plan = match stmt {
                     // -- Streaming DDLs --
                     Statement::CreateView {
@@ -164,13 +167,16 @@ async fn do_handle_explain(
                     | Statement::Delete { .. }
                     | Statement::Update { .. }
                     | Statement::Query { .. } => {
-                        gen_batch_plan_by_statement(&session, context.clone(), stmt).map(|x| x.plan)
+                        gen_batch_plan_by_statement(&session, context, stmt).map(|x| x.plan)
                     }
 
                     _ => bail_not_implemented!("unsupported statement {:?}", stmt),
                 };
 
-                (plan, context)
+                let plan = plan?;
+                let context = plan.ctx().clone();
+
+                (Ok(plan) as Result<_>, context)
             }
         };
 
@@ -247,10 +253,8 @@ pub async fn handle_explain(
         bail_not_implemented!(issue = 4856, "explain analyze");
     }
 
-    let context = OptimizerContext::new(handler_args.clone(), options.clone());
-
     let mut blocks = Vec::new();
-    let result = do_handle_explain(context, stmt, &mut blocks).await;
+    let result = do_handle_explain(handler_args, options.clone(), stmt, &mut blocks).await;
 
     if let Err(e) = result {
         if options.trace {

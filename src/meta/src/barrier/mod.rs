@@ -16,6 +16,7 @@ use std::assert_matches::assert_matches;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::pending;
+use std::iter::empty;
 use std::mem::{replace, take};
 use std::sync::Arc;
 use std::time::Duration;
@@ -30,6 +31,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
+use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::table_watermark::{
     merge_multiple_new_table_watermarks, TableWatermarks,
 };
@@ -38,7 +40,6 @@ use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::PausedReason;
-use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use thiserror_ext::AsReport;
@@ -77,7 +78,7 @@ mod schedule;
 mod state;
 mod trace;
 
-pub use self::command::{Command, ReplaceTablePlan, Reschedule};
+pub use self::command::{BarrierKind, Command, ReplaceTablePlan, Reschedule};
 pub use self::rpc::StreamRpcManager;
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
@@ -190,6 +191,9 @@ pub struct GlobalBarrierManager {
     state: BarrierManagerState,
 
     checkpoint_control: CheckpointControl,
+
+    /// The `prev_epoch` of pending non checkpoint barriers
+    pending_non_checkpoint_barriers: Vec<u64>,
 
     active_streaming_nodes: ActiveStreamingWorkerNodes,
 
@@ -477,6 +481,7 @@ impl GlobalBarrierManager {
             env,
             state: initial_invalid_state,
             checkpoint_control,
+            pending_non_checkpoint_barriers: Vec::new(),
             active_streaming_nodes,
             control_stream_manager,
         }
@@ -720,8 +725,11 @@ impl GlobalBarrierManager {
         let info = self.state.apply_command(&command);
 
         let (prev_epoch, curr_epoch) = self.state.next_epoch_pair();
+        self.pending_non_checkpoint_barriers
+            .push(prev_epoch.value().0);
         let kind = if checkpoint {
-            BarrierKind::Checkpoint
+            let epochs = take(&mut self.pending_non_checkpoint_barriers);
+            BarrierKind::Checkpoint(epochs)
         } else {
             BarrierKind::Barrier
         };
@@ -782,6 +790,7 @@ impl GlobalBarrierManager {
     async fn failure_recovery(&mut self, err: MetaError) {
         self.context.tracker.lock().await.abort_all(&err);
         self.checkpoint_control.clear_on_err(&err).await;
+        self.pending_non_checkpoint_barriers.clear();
 
         if self.enable_recovery {
             self.context
@@ -844,8 +853,11 @@ impl GlobalBarrierManagerContext {
         assert!(state.node_to_collect.is_empty());
         let resps = state.resps;
         let wait_commit_timer = self.metrics.barrier_wait_commit_latency.start_timer();
-        let (commit_info, create_mview_progress) = collect_commit_epoch_info(resps, &command_ctx);
-        if let Err(e) = self.update_snapshot(&command_ctx, commit_info).await {
+        let create_mview_progress = resps
+            .iter()
+            .flat_map(|resp| resp.create_mview_progress.iter().cloned())
+            .collect();
+        if let Err(e) = self.update_snapshot(&command_ctx, resps).await {
             for notifier in notifiers {
                 notifier.notify_collection_failed(e.clone());
             }
@@ -872,7 +884,7 @@ impl GlobalBarrierManagerContext {
     async fn update_snapshot(
         &self,
         command_ctx: &CommandContext,
-        commit_info: CommitEpochInfo,
+        resps: Vec<BarrierCompleteResponse>,
     ) -> MetaResult<()> {
         {
             {
@@ -881,17 +893,13 @@ impl GlobalBarrierManagerContext {
                 // because the storage engine will query from new to old in the order in which
                 // the L0 layer files are generated.
                 // See https://github.com/risingwave-labs/risingwave/issues/1251
-                let kind = command_ctx.kind;
                 // hummock_manager commit epoch.
                 let mut new_snapshot = None;
 
-                match kind {
-                    BarrierKind::Unspecified => unreachable!(),
-                    BarrierKind::Initial => assert!(
-                        commit_info.sstables.is_empty(),
-                        "no sstables should be produced in the first epoch"
-                    ),
-                    BarrierKind::Checkpoint => {
+                match &command_ctx.kind {
+                    BarrierKind::Initial => {}
+                    BarrierKind::Checkpoint(epochs) => {
+                        let commit_info = collect_commit_epoch_info(resps, command_ctx, epochs);
                         new_snapshot = self
                             .hummock_manager
                             .commit_epoch(command_ctx.prev_epoch.value().0, commit_info)
@@ -1138,11 +1146,12 @@ pub type BarrierManagerRef = GlobalBarrierManagerContext;
 fn collect_commit_epoch_info(
     resps: Vec<BarrierCompleteResponse>,
     command_ctx: &CommandContext,
-) -> (CommitEpochInfo, Vec<CreateMviewProgress>) {
+    epochs: &Vec<u64>,
+) -> CommitEpochInfo {
     let mut sst_to_worker: HashMap<HummockSstableObjectId, WorkerId> = HashMap::new();
     let mut synced_ssts: Vec<ExtendedSstableInfo> = vec![];
     let mut table_watermarks = Vec::with_capacity(resps.len());
-    let mut progresses = Vec::new();
+    let mut old_value_ssts = Vec::with_capacity(resps.len());
     for resp in resps {
         let ssts_iter = resp.synced_sstables.into_iter().map(|grouped| {
             let sst_info = grouped.sst.expect("field not None");
@@ -1155,7 +1164,7 @@ fn collect_commit_epoch_info(
         });
         synced_ssts.extend(ssts_iter);
         table_watermarks.push(resp.table_watermarks);
-        progresses.extend(resp.create_mview_progress);
+        old_value_ssts.extend(resp.old_value_sstables);
     }
     let new_table_fragment_info = if let Command::CreateStreamingJob {
         table_fragments, ..
@@ -1174,7 +1183,15 @@ fn collect_commit_epoch_info(
         None
     };
 
-    let info = CommitEpochInfo::new(
+    let table_new_change_log = build_table_change_log_delta(
+        old_value_ssts.into_iter(),
+        synced_ssts.iter().map(|sst| &sst.sst_info),
+        epochs,
+        // TODO: pass log store table id and the corresponding truncate_epoch
+        empty(),
+    );
+
+    CommitEpochInfo::new(
         synced_ssts,
         merge_multiple_new_table_watermarks(
             table_watermarks
@@ -1194,6 +1211,6 @@ fn collect_commit_epoch_info(
         ),
         sst_to_worker,
         new_table_fragment_info,
-    );
-    (info, progresses)
+        table_new_change_log,
+    )
 }

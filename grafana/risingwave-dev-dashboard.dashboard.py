@@ -3953,6 +3953,16 @@ def section_sink_metrics(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_bytes(
+                    "Chunk Buffer Size",
+                    "Total size of chunks buffered in a barrier",
+                    [
+                        panels.target(
+                            f"sum({metric('stream_sink_chunk_buffer_size')}) by (sink_id, actor_id) * on(actor_id) group_left(sink_name) {metric('sink_info')}",
+                            "sink {{sink_id}} {{sink_name}} - actor {{actor_id}}",
+                        ),
+                    ],
+                ),
             ],
         )
     ]

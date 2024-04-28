@@ -15,13 +15,14 @@
 use risingwave_pb::catalog::{PbSink, PbSinkType};
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     ColumnCatalogArray, ColumnOrderArray, ConnectionId, I32Array, Property, SinkFormatDesc, SinkId,
     TableId,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum SinkType {
     #[sea_orm(string_value = "APPEND_ONLY")]
@@ -53,7 +54,7 @@ impl From<PbSinkType> for SinkType {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "sink")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]

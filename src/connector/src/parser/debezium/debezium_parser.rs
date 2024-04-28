@@ -24,9 +24,8 @@ use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::json::TimestamptzHandling;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
-    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, JsonProperties,
-    ParseResult, ParserFormat, ProtocolProperties, SourceStreamChunkRowWriter,
-    SpecificParserConfig,
+    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, ParseResult,
+    ParserFormat, ProtocolProperties, SourceStreamChunkRowWriter, SpecificParserConfig,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -112,6 +111,8 @@ impl DebeziumParser {
     }
 
     pub async fn new_for_test(rw_columns: Vec<SourceColumnDesc>) -> ConnectorResult<Self> {
+        use crate::parser::JsonProperties;
+
         let props = SpecificParserConfig {
             key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {
@@ -120,7 +121,7 @@ impl DebeziumParser {
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
-        Self::new(props, rw_columns, Default::default()).await
+        Self::new(props, rw_columns, SourceContext::dummy().into()).await
     }
 
     pub async fn parse_inner(
@@ -199,7 +200,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
 
     use super::*;
-    use crate::parser::{SourceStreamChunkBuilder, TransactionControl};
+    use crate::parser::{JsonProperties, SourceStreamChunkBuilder, TransactionControl};
     use crate::source::{ConnectorProperties, DataType};
 
     #[tokio::test]
@@ -228,7 +229,7 @@ mod tests {
         };
         let source_ctx = SourceContext {
             connector_props: ConnectorProperties::PostgresCdc(Box::default()),
-            ..Default::default()
+            ..SourceContext::dummy()
         };
         let mut parser = DebeziumParser::new(props, columns.clone(), Arc::new(source_ctx))
             .await

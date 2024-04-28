@@ -266,6 +266,7 @@ impl From<ObjectModel<subscription::Model>> for PbSubscription {
             subscription_from_name: value.0.subscription_from_name,
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
+            subscription_internal_table_name: value.0.subscription_internal_table_name,
         }
     }
 }
@@ -349,6 +350,8 @@ impl From<ObjectModel<function::Model>> for PbFunction {
             compressed_binary: value.0.compressed_binary,
             kind: Some(value.0.kind.into()),
             always_retry_on_network_error: value.0.always_retry_on_network_error,
+            runtime: value.0.runtime,
+            function_type: value.0.function_type,
         }
     }
 }
