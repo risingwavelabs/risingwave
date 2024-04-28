@@ -202,8 +202,10 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             is_finished = state.is_finished,
             snapshot_row_count = total_snapshot_row_count,
             rate_limit = self.rate_limit_rps,
-            "start cdc backfill. options: disable_backfill: {}, snapshot_barrier_interval: {}, snapshot_batch_size: {}",
-            self.disable_backfill, self.snapshot_interval, self.snapshot_batch_size
+            disable_backfill = self.disable_backfill,
+            snapshot_interval = self.snapshot_interval,
+            snapshot_batch_size = self.snapshot_batch_size,
+            "start cdc backfill",
         );
 
         // CDC Backfill Algorithm:

@@ -28,7 +28,7 @@ use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReader
 use super::external::ExternalStorageTable;
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::backfill::utils::{get_new_pos, iter_chunks};
-use crate::executor::{StreamExecutorError, StreamExecutorResult,};
+use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 pub trait UpstreamTableRead {
     fn snapshot_read_full_table(

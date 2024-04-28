@@ -16,13 +16,13 @@ use anyhow::Result;
 
 use super::{ExecuteContext, Task};
 
-pub struct ConfigureGrpcNodeTask {
+pub struct ConfigureTcpNodeTask {
     advertise_address: String,
     port: u16,
     user_managed: bool,
 }
 
-impl ConfigureGrpcNodeTask {
+impl ConfigureTcpNodeTask {
     pub fn new(advertise_address: String, port: u16, user_managed: bool) -> Result<Self> {
         Ok(Self {
             advertise_address,
@@ -32,8 +32,12 @@ impl ConfigureGrpcNodeTask {
     }
 }
 
-impl Task for ConfigureGrpcNodeTask {
+impl Task for ConfigureTcpNodeTask {
     fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
+        assert!(
+            ctx.id.is_some(),
+            "Service should be set before executing ConfigureTcpNodeTask"
+        );
         let address = format!("{}:{}", self.advertise_address, self.port);
 
         if self.user_managed {

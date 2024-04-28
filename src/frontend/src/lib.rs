@@ -90,7 +90,7 @@ pub struct FrontendOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.
     /// Usually the localhost + desired port.
-    #[clap(long, env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:4566")]
+    #[clap(long, env = "RW_LISTEN_ADDR", default_value = "0.0.0.0:4566")]
     pub listen_addr: String,
 
     /// The address for contacting this instance of the service.

@@ -576,13 +576,10 @@ impl ExternalTableReaderImpl {
 mod tests {
 
     use futures::pin_mut;
-    use futures_async_stream::{for_await, try_stream};
+    use futures_async_stream::for_await;
     use maplit::{convert_args, hashmap};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
-    use risingwave_common::row::OwnedRow;
     use risingwave_common::types::DataType;
-    use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-    use risingwave_common::types::ScalarImpl;
 
     use crate::source::cdc::external::{
         CdcOffset, ExternalTableReader, MySqlExternalTableReader, MySqlOffset, SchemaTableName,
@@ -627,9 +624,10 @@ mod tests {
     #[tokio::test]
     async fn test_mysql_table_reader() {
         let columns = vec![
-            ColumnDesc::named("O_ORDERKEY", ColumnId::new(1), DataType::Int64),
-            ColumnDesc::named("O_CUSTKEY", ColumnId::new(2), DataType::Int64),
-            ColumnDesc::named("O_ORDERSTATUS", ColumnId::new(3), DataType::Varchar),
+            ColumnDesc::named("v1", ColumnId::new(1), DataType::Int32),
+            ColumnDesc::named("v2", ColumnId::new(2), DataType::Decimal),
+            ColumnDesc::named("v3", ColumnId::new(3), DataType::Varchar),
+            ColumnDesc::named("v4", ColumnId::new(4), DataType::Date),
         ];
         let rw_schema = Schema {
             fields: columns.iter().map(Field::from).collect(),
@@ -639,41 +637,28 @@ mod tests {
                 "port" => "8306",
                 "username" => "root",
                 "password" => "123456",
-                "database.name" => "mydb",
-                "table.name" => "orders_rw"));
+                "database.name" => "mytest",
+                "table.name" => "t1"));
 
         let reader = MySqlExternalTableReader::new(props, rw_schema)
             .await
             .unwrap();
-        // let offset = reader.current_cdc_offset().await.unwrap();
-        // println!("BinlogOffset: {:?}", offset);
-        //
-        // let off0_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000001", "pos": 105622, "snapshot": true }, "isHeartbeat": false }"#;
-        // let parser = MySqlExternalTableReader::get_cdc_offset_parser();
-        // println!("parsed offset: {:?}", parser(off0_str).unwrap());
-        //
-        // let table_name = SchemaTableName {
-        //     schema_name: "mytest".to_string(),
-        //     table_name: "t1".to_string(),
-        // };
+        let offset = reader.current_cdc_offset().await.unwrap();
+        println!("BinlogOffset: {:?}", offset);
 
-        let mut cnt : usize = 0;
-        let start_pk = Some(OwnedRow::new(vec![Some(ScalarImpl::Int64(900000))]));
-        loop {
-            let row_stream = reader.snapshot_read(SchemaTableName {
-                schema_name: "mydb".to_string(),
-                table_name: "orders_rw".to_string(),
-            },  start_pk.clone(), vec!["O_ORDERKEY".to_string()], 1000);
-            let mut builder = DataChunkBuilder::new(rw_schema.data_types(), 256);
-            let chunk_stream = iter_chunks(row_stream, &mut builder);
-            pin_mut!(chunk_stream);
-            #[for_await]
-            for chunk in chunk_stream {
-                let chunk = chunk?;
-                cnt += chunk.capacity();
-                // println!("chunk: {:#?}", chunk);
-                println!("cnt: {}", cnt);
-            }
+        let off0_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000001", "pos": 105622, "snapshot": true }, "isHeartbeat": false }"#;
+        let parser = MySqlExternalTableReader::get_cdc_offset_parser();
+        println!("parsed offset: {:?}", parser(off0_str).unwrap());
+        let table_name = SchemaTableName {
+            schema_name: "mytest".to_string(),
+            table_name: "t1".to_string(),
+        };
+
+        let stream = reader.snapshot_read(table_name, None, vec!["v1".to_string()], 1000);
+        pin_mut!(stream);
+        #[for_await]
+        for row in stream {
+            println!("OwnedRow: {:?}", row);
         }
     }
 }

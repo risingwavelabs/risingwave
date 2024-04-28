@@ -173,6 +173,7 @@ async fn test_table_materialize() -> StreamResult<()> {
             barrier_rx,
             system_params_manager.get_params(),
             None,
+            false,
         )
         .boxed(),
     );

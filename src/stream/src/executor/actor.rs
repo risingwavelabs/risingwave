@@ -49,6 +49,7 @@ pub struct ActorContext {
 
     pub streaming_metrics: Arc<StreamingMetrics>,
 
+    /// This is the number of dispatchers when the actor is created. It will not be updated during runtime when new downstreams are added.
     pub initial_dispatch_num: usize,
 }
 
