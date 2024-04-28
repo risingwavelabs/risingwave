@@ -293,6 +293,9 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
         (PbFormatType::Maxwell, PbEncodeType::Json) => (SourceFormat::Maxwell, SourceEncode::Json),
         (PbFormatType::Canal, PbEncodeType::Json) => (SourceFormat::Canal, SourceEncode::Json),
         (PbFormatType::Plain, PbEncodeType::Csv) => (SourceFormat::Plain, SourceEncode::Csv),
+        (PbFormatType::Plain, PbEncodeType::Parquet) => {
+            (SourceFormat::Plain, SourceEncode::Parquet)
+        }
         (PbFormatType::Native, PbEncodeType::Native) => {
             (SourceFormat::Native, SourceEncode::Native)
         }

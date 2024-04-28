@@ -39,7 +39,7 @@ use risingwave_pb::catalog::{
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use thiserror_ext::AsReport;
 
-use self::avro::AvroAccessBuilder;
+use self::{avro::AvroAccessBuilder, parquet_parser::ParquetParser};
 use self::bytes_parser::BytesAccessBuilder;
 pub use self::mysql::mysql_row_to_owned_row;
 use self::plain_parser::PlainParser;
@@ -69,11 +69,11 @@ mod bytes_parser;
 mod canal;
 mod common;
 mod csv_parser;
-mod parquet_parser;
 mod debezium;
 mod json_parser;
 mod maxwell;
 mod mysql;
+mod parquet_parser;
 pub mod plain_parser;
 mod postgres;
 mod protobuf;
@@ -907,6 +907,7 @@ impl AccessBuilderImpl {
 pub enum ByteStreamSourceParserImpl {
     Csv(CsvParser),
     Json(JsonParser),
+    Parquet(ParquetParser),
     Debezium(DebeziumParser),
     Plain(PlainParser),
     Upsert(UpsertParser),
@@ -946,6 +947,9 @@ impl ByteStreamSourceParserImpl {
         match (protocol, encode) {
             (ProtocolProperties::Plain, EncodingProperties::Csv(config)) => {
                 CsvParser::new(rw_columns, *config, source_ctx).map(Self::Csv)
+            }
+            (ProtocolProperties::Plain, EncodingProperties::Parquet) => {
+                ParquetParser::new().map(Self::Parquet)
             }
             (ProtocolProperties::DebeziumMongo, EncodingProperties::Json(_)) => {
                 DebeziumMongoJsonParser::new(rw_columns, source_ctx).map(Self::DebeziumMongoJson)
@@ -1066,6 +1070,7 @@ pub enum EncodingProperties {
     Json(JsonProperties),
     MongoJson(JsonProperties),
     Bytes(BytesProperties),
+    Parquet,
     Native,
     /// Encoding can't be specified because the source will determines it. Now only used in Iceberg.
     None,
