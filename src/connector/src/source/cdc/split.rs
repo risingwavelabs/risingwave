@@ -64,6 +64,10 @@ trait CdcSplitTrait: Send + Sync {
             )
         })?;
 
+        println!(
+            "[rc] for debug, dbz_offset.source_offset: {:?}",
+            dbz_offset.source_offset
+        );
         // heartbeat event should not update the `snapshot_done` flag
         if !dbz_offset.is_heartbeat {
             snapshot_done = match dbz_offset.source_offset.snapshot {
