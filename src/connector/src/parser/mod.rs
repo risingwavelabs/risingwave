@@ -640,7 +640,7 @@ const MAX_ROWS_FOR_TRANSACTION: usize = 4096;
 async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream: BoxSourceStream) {
     let columns = parser.columns().to_vec();
 
-    let mut heartbeat_builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
+    let mut heartbeat_builder = SourceStreamChunkBuilder::with_capacity(columns.clone(), 0);
     let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
 
     struct Transaction {
