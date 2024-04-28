@@ -187,7 +187,7 @@ impl CommonSplitReader for KafkaSplitReader {
         interval.tick().await;
         let mut bytes_current_second = 0;
         let mut num_messages = 0;
-        let max_chunk_size = self.source_ctx.source_ctrl_opts.chunk_size;
+        let max_chunk_size = self.source_ctx.source_ctrl_opts.max_chunk_size;
         let mut res = Vec::with_capacity(max_chunk_size);
         // ingest kafka message header can be expensive, do it only when required
         let require_message_header = self.parser_config.common.rw_columns.iter().any(|col_desc| {

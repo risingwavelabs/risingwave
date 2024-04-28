@@ -104,7 +104,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             self.stream_source_core.source_name.clone(),
             source_desc.metrics.clone(),
             SourceCtrlOpts {
-                chunk_size: limited_chunk_size(self.rate_limit_rps),
+                max_chunk_size: limited_chunk_size(self.rate_limit_rps),
                 rate_limit: self.rate_limit_rps,
             },
             source_desc.source.config.clone(),
