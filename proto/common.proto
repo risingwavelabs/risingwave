@@ -92,12 +92,6 @@ message ParallelUnitMapping {
   repeated uint32 data = 2;
 }
 
-// Vnode mapping for stream fragments. Stores mapping from virtual node to worker id.
-message WorkerMapping {
-  repeated uint32 original_indices = 1;
-  repeated uint32 data = 2;
-}
-
 message BatchQueryEpoch {
   oneof epoch {
     uint64 committed = 1;

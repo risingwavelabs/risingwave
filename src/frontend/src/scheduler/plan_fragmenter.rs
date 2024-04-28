@@ -30,7 +30,7 @@ use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableDesc;
 use risingwave_common::hash::table_distribution::TableDistribution;
-use risingwave_common::hash::{VirtualNode, WorkerId, WorkerMapping};
+use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode};
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use risingwave_connector::source::filesystem::opendal_source::{OpendalGcs, OpendalS3};
@@ -392,12 +392,12 @@ pub struct TableScanInfo {
     /// full vnode bitmap, since we need to know where to schedule the singleton scan task.
     ///
     /// `None` iff the table is a system table.
-    partitions: Option<HashMap<WorkerId, TablePartitionInfo>>,
+    partitions: Option<HashMap<ParallelUnitId, TablePartitionInfo>>,
 }
 
 impl TableScanInfo {
     /// For normal tables, `partitions` should always be `Some`.
-    pub fn new(name: String, partitions: HashMap<WorkerId, TablePartitionInfo>) -> Self {
+    pub fn new(name: String, partitions: HashMap<ParallelUnitId, TablePartitionInfo>) -> Self {
         Self {
             name,
             partitions: Some(partitions),
@@ -1150,10 +1150,10 @@ impl BatchPlanFragmenter {
 fn derive_partitions(
     scan_ranges: &[ScanRange],
     table_desc: &TableDesc,
-    vnode_mapping: &WorkerMapping,
-) -> SchedulerResult<HashMap<WorkerId, TablePartitionInfo>> {
+    vnode_mapping: &ParallelUnitMapping,
+) -> SchedulerResult<HashMap<ParallelUnitId, TablePartitionInfo>> {
     let num_vnodes = vnode_mapping.len();
-    let mut partitions: HashMap<WorkerId, (BitmapBuilder, Vec<_>)> = HashMap::new();
+    let mut partitions: HashMap<ParallelUnitId, (BitmapBuilder, Vec<_>)> = HashMap::new();
 
     if scan_ranges.is_empty() {
         return Ok(vnode_mapping
@@ -1181,25 +1181,24 @@ fn derive_partitions(
         match vnode {
             None => {
                 // put this scan_range to all partitions
-                vnode_mapping
-                    .to_bitmaps()
-                    .into_iter()
-                    .for_each(|(worker_id, vnode_bitmap)| {
+                vnode_mapping.to_bitmaps().into_iter().for_each(
+                    |(parallel_unit_id, vnode_bitmap)| {
                         let (bitmap, scan_ranges) = partitions
-                            .entry(worker_id)
+                            .entry(parallel_unit_id)
                             .or_insert_with(|| (BitmapBuilder::zeroed(num_vnodes), vec![]));
                         vnode_bitmap
                             .iter()
                             .enumerate()
                             .for_each(|(vnode, b)| bitmap.set(vnode, b));
                         scan_ranges.push(scan_range.to_protobuf());
-                    });
+                    },
+                );
             }
             // scan a single partition
             Some(vnode) => {
-                let worker_id = vnode_mapping[vnode];
+                let parallel_unit_id = vnode_mapping[vnode];
                 let (bitmap, scan_ranges) = partitions
-                    .entry(worker_id)
+                    .entry(parallel_unit_id)
                     .or_insert_with(|| (BitmapBuilder::zeroed(num_vnodes), vec![]));
                 bitmap.set(vnode.to_index(), true);
                 scan_ranges.push(scan_range.to_protobuf());
