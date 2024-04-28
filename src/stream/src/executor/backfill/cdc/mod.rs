@@ -23,11 +23,11 @@ pub use upstream_table::external::ExternalStorageTable;
 #[derive(Debug, Clone)]
 pub struct CdcScanOptions {
     /// Whether to disable backfill
-    disable_backfill: bool,
+    pub disable_backfill: bool,
     /// Barreir interval to start a new snapshot read
-    snapshot_interval: u32,
+    pub snapshot_interval: u32,
     /// Batch size for a snapshot read query
-    snapshot_batch_size: u32,
+    pub snapshot_batch_size: u32,
 }
 
 impl Default for CdcScanOptions {
