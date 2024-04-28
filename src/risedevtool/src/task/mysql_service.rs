@@ -12,93 +12,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::env;
-use std::path::Path;
-use std::process::{Command, Stdio};
+use super::docker_service::{DockerService, DockerServiceConfig};
+use crate::MySqlConfig;
 
-use anyhow::{Context, Result};
-
-use super::{ExecuteContext, Task};
-use crate::{DummyService, MySqlConfig};
-
-// TODO: extract to a common docker-backed service
-pub struct MysqlService {
-    config: MySqlConfig,
-}
-
-impl MysqlService {
-    pub fn new(config: MySqlConfig) -> Result<Self> {
-        Ok(Self { config })
-    }
-
-    fn check_docker_installed() -> Result<()> {
-        Command::new("docker")
-            .arg("--version")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .context("mysql service requires docker to be installed")
-            .map(|_| ())
-    }
-
-    fn docker_pull(&self) -> Command {
-        let mut cmd = Command::new("docker");
-        cmd.arg("pull").arg(&self.config.image);
-        cmd
-    }
-
-    fn docker_run_args(&self) -> Command {
-        let mut cmd = Command::new("docker");
-        cmd.arg("run")
-            .arg("--rm")
-            .arg("--name")
-            .arg(format!("risedev-{}", self.config.id))
-            .arg("-e")
-            .arg("MYSQL_ALLOW_EMPTY_PASSWORD=1")
-            .arg("-e")
-            .arg(format!("MYSQL_USER={}", self.config.user))
-            .arg("-e")
-            .arg(format!("MYSQL_PASSWORD={}", self.config.password))
-            .arg("-e")
-            .arg(format!("MYSQL_DATABASE={}", self.config.database))
-            .arg("-p")
-            .arg(format!("{}:{}:3306", self.config.address, self.config.port));
-        cmd
-    }
-}
-
-impl Task for MysqlService {
-    fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
-        if self.config.user_managed {
-            return DummyService::new(&self.config.id).execute(ctx);
-        }
-
-        ctx.service(self);
-
-        Self::check_docker_installed()?;
-
-        ctx.pb.set_message("pulling image...");
-        ctx.run_command(self.docker_pull())?;
-
-        ctx.pb.set_message("starting...");
-
-        let mut run_cmd = self.docker_run_args();
-        if self.config.persist_data {
-            let path = Path::new(&env::var("PREFIX_DATA")?).join(self.id());
-            fs_err::create_dir_all(&path)?;
-            run_cmd
-                .arg("-v")
-                .arg(format!("{}:/var/lib/mysql", path.to_string_lossy()));
-        }
-        run_cmd.arg(&self.config.image);
-
-        ctx.run_command(ctx.tmux_run(run_cmd)?)?;
-
-        ctx.pb.set_message("started");
-        Ok(())
-    }
-
+impl DockerServiceConfig for MySqlConfig {
     fn id(&self) -> String {
-        self.config.id.clone()
+        self.id.clone()
+    }
+
+    fn is_user_managed(&self) -> bool {
+        self.user_managed
+    }
+
+    fn image(&self) -> String {
+        self.image.clone()
+    }
+
+    fn envs(&self) -> Vec<(String, String)> {
+        vec![
+            ("MYSQL_ALLOW_EMPTY_PASSWORD".to_owned(), "1".to_owned()),
+            ("MYSQL_USER".to_owned(), self.user.clone()),
+            ("MYSQL_PASSWORD".to_owned(), self.password.clone()),
+            ("MYSQL_DATABASE".to_owned(), self.database.clone()),
+        ]
+    }
+
+    fn ports(&self) -> Vec<(String, String)> {
+        vec![(format!("{}:{}", self.address, self.port), "3306".to_owned())]
+    }
+
+    fn data_path(&self) -> Option<String> {
+        self.persist_data.then(|| "/var/lib/mysql".to_owned())
     }
 }
+
+/// Docker-backed MySQL service.
+pub type MysqlService = DockerService<MySqlConfig>;

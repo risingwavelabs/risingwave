@@ -319,7 +319,7 @@ fn task_main(
             ServiceConfig::MySql(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-                MysqlService::new(c.clone())?.execute(&mut ctx)?;
+                MysqlService::new(c.clone()).execute(&mut ctx)?;
                 let mut task =
                     risedev::ConfigureTcpNodeTask::new(c.address.clone(), c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;

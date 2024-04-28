@@ -15,6 +15,7 @@
 mod compactor_service;
 mod compute_node_service;
 mod configure_tmux_service;
+mod docker_service;
 mod dummy_service;
 mod ensure_stop_service;
 mod etcd_service;
