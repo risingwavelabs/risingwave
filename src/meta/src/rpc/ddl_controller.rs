@@ -65,6 +65,7 @@ use tracing::log::warn;
 use tracing::Instrument;
 
 use crate::barrier::BarrierManagerRef;
+use crate::error::MetaErrorInner;
 use crate::manager::{
     CatalogManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId, IdCategory,
     IdCategoryType, IndexId, LocalNotification, MetaSrvEnv, MetadataManager, MetadataManagerV1,
@@ -610,6 +611,21 @@ impl DdlController {
     }
 
     async fn create_secret(&self, mut secret: Secret) -> MetaResult<NotificationVersion> {
+        // The 'secret' part of the request we receive from the frontend is in plaintext;
+        // here, we need to encrypt it before storing it in the catalog.
+
+        let encrypted_payload = simplestcrypt::encrypt_and_serialize(
+            self.env.opts.secret_store_private_key.as_bytes(),
+            secret.get_value().as_bytes(),
+        )
+        .map_err(|e| {
+            MetaError::from(MetaErrorInner::InvalidParameter(format!(
+                "failed to encrypt secret {}: {:?}",
+                secret.name, e
+            )))
+        })?;
+        secret.value = encrypted_payload;
+
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
                 secret.id = self.gen_unique_id::<{ IdCategory::Secret }>().await?;

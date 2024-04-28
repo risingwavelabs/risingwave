@@ -44,7 +44,7 @@ pub async fn handle_create_secret(
             return Err(ErrorCode::InvalidParameterValue(
                 "secret payload must be a string".to_string(),
             )
-                .into());
+            .into());
         }
     };
 

@@ -203,7 +203,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
     fn from(value: ObjectModel<sink::Model>) -> Self {
         let mut secret_ref_hashmap: HashMap<String, u32> = HashMap::new();
         if let Some(secret_ref) = value.0.secret_ref.as_ref() {
-            let json_value: Value = serde_json::from_str(&secret_ref).unwrap();
+            let json_value: Value = serde_json::from_str(secret_ref).unwrap();
             json_value.as_object().unwrap().iter().for_each(|(k, v)| {
                 secret_ref_hashmap.insert(k.to_string(), v.as_u64().unwrap() as u32);
             });

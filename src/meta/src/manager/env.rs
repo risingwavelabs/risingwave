@@ -271,6 +271,9 @@ pub struct MetaOpts {
     pub enable_check_task_level_overlap: bool,
     pub enable_dropped_column_reclaim: bool,
     pub object_store_config: ObjectStoreConfig,
+
+    // The private key for the secret store, used when the secret is stored in the meta.
+    pub secret_store_private_key: Vec<u8>,
 }
 
 impl MetaOpts {
@@ -327,6 +330,7 @@ impl MetaOpts {
             enable_check_task_level_overlap: true,
             enable_dropped_column_reclaim: false,
             object_store_config: ObjectStoreConfig::default(),
+            secret_store_private_key: "demo-secret-private-key".as_bytes().to_vec(),
         }
     }
 }
