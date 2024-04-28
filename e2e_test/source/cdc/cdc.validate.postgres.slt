@@ -169,9 +169,6 @@ create table shipments (
 ) format canal encode csv;
 
 statement ok
-drop table shipments;
-
-statement ok
 explain create table numeric_to_rw_int256 (
   id int,
   num rw_int256,
