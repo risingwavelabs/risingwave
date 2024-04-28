@@ -596,6 +596,14 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    pub async fn list_epoch_for_subscription(&self,subscription_id: u32) -> Result<Vec<u64>>{
+        let request = ListEpochForSubscriptionRequest {
+            subscription_id,
+        };
+        let resp = self.inner.list_epoch_for_subscription(request).await?;
+        Ok(resp.list_epoch)
+    }
+
     pub async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<CatalogVersion> {
         let request = DropIndexRequest {
             index_id: index_id.index_id,
@@ -1974,6 +1982,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, list_compact_task_assignment, ListCompactTaskAssignmentRequest, ListCompactTaskAssignmentResponse }
             ,{ hummock_client, list_compact_task_progress, ListCompactTaskProgressRequest, ListCompactTaskProgressResponse }
             ,{ hummock_client, cancel_compact_task, CancelCompactTaskRequest, CancelCompactTaskResponse}
+            ,{ hummock_client, list_epoch_for_subscription, ListEpochForSubscriptionRequest, ListEpochForSubscriptionResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

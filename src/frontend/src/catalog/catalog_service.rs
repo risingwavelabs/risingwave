@@ -204,6 +204,8 @@ pub trait CatalogWriter: Send + Sync {
         object: alter_set_schema_request::Object,
         new_schema_id: u32,
     ) -> Result<()>;
+
+    async fn list_epoch_for_subscription(&self,subscription_id: u32) -> Result<Vec<u64>>;
 }
 
 #[derive(Clone)]
@@ -567,6 +569,10 @@ impl CatalogWriter for CatalogWriterImpl {
             .map_err(|e| anyhow!(e))?;
 
         Ok(())
+    }
+
+    async fn list_epoch_for_subscription(&self,subscription_id: u32) -> Result<Vec<u64>>{
+        Ok(self.meta_client.list_epoch_for_subscription(subscription_id).await?)
     }
 }
 

@@ -242,6 +242,10 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn list_epoch_for_subscription(&self,_subscription_id: u32) -> Result<Vec<u64>>{
+        unreachable!()
+    }
+
     async fn create_schema(
         &self,
         db_id: DatabaseId,
