@@ -753,7 +753,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                         if let Some(Transaction { id: current_id, .. }) = &current_transaction {
                             tracing::warn!(current_id, id, "already in transaction");
                         }
-                        tracing::debug!("begin upstream transaction: id={}", id);
+                        tracing::debug!(id, "begin upstream transaction");
                         current_transaction = Some(Transaction { id, len: 0 });
                     }
                     TransactionControl::Commit { id } => {
@@ -761,7 +761,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                         if current_id != Some(&id) {
                             tracing::warn!(?current_id, id, "transaction id mismatch");
                         }
-                        tracing::debug!("commit upstream transaction: id={}", id);
+                        tracing::debug!(id, "commit upstream transaction");
                         current_transaction = None;
 
                         if last_batch_not_yielded {
