@@ -25,6 +25,7 @@ use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{Either, Itertools};
+use risingwave_common::array::Op;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
@@ -415,7 +416,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
 pub trait PkAndRowStream = Stream<Item = StorageResult<KeyedRow<Bytes>>> + Send;
 
 /// The row iterator of the storage table.
-/// The wrapper of [`StorageTableInnerIter`] if pk is not persisted.
+/// The wrapper of stream item `StorageResult<KeyedRow<Bytes>>` if pk is not persisted.
 
 #[async_trait::async_trait]
 impl<S: PkAndRowStream + Unpin> TableIter for S {
@@ -429,7 +430,7 @@ impl<S: PkAndRowStream + Unpin> TableIter for S {
 
 /// Iterators
 impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
-    /// Get multiple [`StorageTableInnerIter`] based on the specified vnodes of this table with
+    /// Get multiple stream item `StorageResult<KeyedRow<Bytes>>` based on the specified vnodes of this table with
     /// `vnode_hint`, and merge or concat them by given `ordered`.
     async fn iter_with_encoded_key_range(
         &self,
@@ -626,7 +627,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         .await
     }
 
-    /// Construct a [`StorageTableInnerIter`] for batch executors.
+    /// Construct a stream item `StorageResult<KeyedRow<Bytes>>` for batch executors.
     /// Differs from the streaming one, this iterator will wait for the epoch before iteration
     pub async fn batch_iter_with_pk_bounds(
         &self,
@@ -657,18 +658,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         end_epoch: HummockReadEpoch,
         pk_prefix: impl Row,
         range_bounds: impl RangeBounds<OwnedRow>,
-    ) -> StorageResult<impl Stream<Item = StorageResult<(i16, KeyedRow<Bytes>)>> + Send> {
-        self.iter_log_with_pk_bounds(satrt_epoch, end_epoch, pk_prefix, range_bounds)
-            .await
-    }
-
-    async fn iter_log_with_pk_bounds(
-        &self,
-        satrt_epoch: HummockReadEpoch,
-        end_epoch: HummockReadEpoch,
-        pk_prefix: impl Row,
-        range_bounds: impl RangeBounds<OwnedRow>,
-    ) -> StorageResult<impl Stream<Item = StorageResult<(i16, KeyedRow<Bytes>)>> + Send> {
+    ) -> StorageResult<impl Stream<Item = StorageResult<(Op, KeyedRow<Bytes>)>> + Send> {
         let start_key = self.serialize_pk_bound(&pk_prefix, range_bounds.start_bound(), true);
         let end_key = self.serialize_pk_bound(&pk_prefix, range_bounds.end_bound(), false);
 
@@ -875,12 +865,6 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterLogInner<S, SD> {
                 read_options,
             )
             .await?;
-        // For `HummockStorage`, a cluster recovery will clear storage data and make subsequent
-        // `HummockReadEpoch::Current` read incomplete.
-        // `validate_read_epoch` is a safeguard against that incorrect read. It rejects the read
-        // result if any recovery has happened after `try_wait_epoch`.
-        store.validate_read_epoch(end_epoch)?;
-        store.validate_read_epoch(satrt_epoch)?;
         let iter = Self {
             iter,
             mapping,
@@ -890,7 +874,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterLogInner<S, SD> {
     }
 
     /// Yield a row with its primary key.
-    #[try_stream(ok = (i16, KeyedRow<Bytes>), error = StorageError)]
+    #[try_stream(ok = (Op, KeyedRow<Bytes>), error = StorageError)]
     async fn into_stream(mut self) {
         while let Some((k, v)) = self
             .iter
@@ -907,7 +891,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterLogInner<S, SD> {
                         .into_owned_row();
                     // TODO: may optimize the key clone
                     yield (
-                        1,
+                        Op::Insert,
                         KeyedRow::<Bytes> {
                             vnode_prefixed_key: k.copy_into(),
                             row,
@@ -925,7 +909,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterLogInner<S, SD> {
                         .into_owned_row();
                     // TODO: may optimize the key clone
                     yield (
-                        3,
+                        Op::UpdateDelete,
                         KeyedRow::<Bytes> {
                             vnode_prefixed_key: k.copy_into(),
                             row,
@@ -938,7 +922,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterLogInner<S, SD> {
                         .into_owned_row();
                     // TODO: may optimize the key clone
                     yield (
-                        4,
+                        Op::UpdateInsert,
                         KeyedRow::<Bytes> {
                             vnode_prefixed_key: k.copy_into(),
                             row,
@@ -953,7 +937,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterLogInner<S, SD> {
                         .into_owned_row();
                     // TODO: may optimize the key clone
                     yield (
-                        2,
+                        Op::Delete,
                         KeyedRow::<Bytes> {
                             vnode_prefixed_key: k.copy_into(),
                             row,

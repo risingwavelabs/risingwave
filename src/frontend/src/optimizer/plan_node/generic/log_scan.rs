@@ -17,12 +17,11 @@ use std::rc::Rc;
 
 use educe::Educe;
 use pretty_xmlish::Pretty;
-use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
+use risingwave_common::catalog::{Field, Schema, TableDesc};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use crate::catalog::ColumnId;
-use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 
 const OP_NAME: &str = "op";
@@ -48,15 +47,11 @@ pub struct LogScan {
 }
 
 impl LogScan {
-    pub fn rewrite_exprs(&self, _rewriter: &mut dyn ExprRewriter) {}
-
-    pub fn visit_exprs(&self, _v: &mut dyn ExprVisitor) {}
-
     // Used for create batch exec, without op
     pub fn output_column_ids(&self) -> Vec<ColumnId> {
         self.output_col_idx
             .iter()
-            .map(|i| self.get_table_columns()[*i].column_id)
+            .map(|i| self.table_desc.columns[*i].column_id)
             .collect()
     }
 
@@ -64,11 +59,11 @@ impl LogScan {
         &self.table_desc.pk
     }
 
-    pub(crate) fn column_names_with_table_prefix(&self) -> Vec<String> {
+    fn column_names_with_table_prefix(&self) -> Vec<String> {
         let mut out_column_names: Vec<_> = self
             .output_col_idx
             .iter()
-            .map(|&i| format!("{}.{}", self.table_name, self.get_table_columns()[i].name))
+            .map(|&i| format!("{}.{}", self.table_name, self.table_desc.columns[i].name))
             .collect();
         out_column_names.push(format!("{}.{}", self.table_name, OP_NAME));
         out_column_names
@@ -78,7 +73,7 @@ impl LogScan {
         let mut out_column_names: Vec<_> = self
             .output_col_idx
             .iter()
-            .map(|&i| self.get_table_columns()[i].name.clone())
+            .map(|&i| self.table_desc.columns[i].name.clone())
             .collect();
         out_column_names.push(OP_NAME.to_string());
         out_column_names
@@ -135,7 +130,7 @@ impl LogScan {
             .output_col_idx
             .iter()
             .map(|tb_idx| {
-                let col = &self.get_table_columns()[*tb_idx];
+                let col = &self.table_desc.columns[*tb_idx];
                 Field::from_with_table_name_prefix(col, &self.table_name)
             })
             .collect();
@@ -148,9 +143,5 @@ impl LogScan {
 
     pub(crate) fn ctx(&self) -> OptimizerContextRef {
         self.ctx.clone()
-    }
-
-    pub fn get_table_columns(&self) -> Vec<ColumnDesc> {
-        self.table_desc.columns.clone()
     }
 }

@@ -33,9 +33,7 @@ use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::{collect_data_chunk, KeyedRow, TableDistribution};
 use risingwave_storage::{dispatch_state_store, StateStore};
 
-use super::{
-    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ScanRange,
-};
+use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 use crate::error::{BatchError, Result};
 use crate::monitor::BatchMetricsWithTaskLabels;
 use crate::task::BatchTaskContext;
@@ -51,7 +49,6 @@ pub struct LogRowSeqScanExecutor<S: StateStore> {
     metrics: Option<BatchMetricsWithTaskLabels>,
 
     table: StorageTable<S>,
-    scan_ranges: Vec<ScanRange>,
     old_epoch: BatchQueryEpoch,
     new_epoch: BatchQueryEpoch,
 }
@@ -59,7 +56,6 @@ pub struct LogRowSeqScanExecutor<S: StateStore> {
 impl<S: StateStore> LogRowSeqScanExecutor<S> {
     pub fn new(
         table: StorageTable<S>,
-        scan_ranges: Vec<ScanRange>,
         old_epoch: BatchQueryEpoch,
         new_epoch: BatchQueryEpoch,
         chunk_size: usize,
@@ -77,7 +73,6 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
             schema,
             metrics,
             table,
-            scan_ranges,
             old_epoch,
             new_epoch,
         }
@@ -115,7 +110,6 @@ impl BoxedExecutorBuilder for LogStoreRowSeqScanExecutorBuilder {
             // Or it's single distribution, e.g., distinct agg. We scan in a single executor.
             None => Some(TableDistribution::all_vnodes()),
         };
-        let scan_ranges = vec![ScanRange::full()];
 
         let chunk_size = source.context.get_config().developer.chunk_size as u32;
         let metrics = source.context().batch_metrics();
@@ -124,7 +118,6 @@ impl BoxedExecutorBuilder for LogStoreRowSeqScanExecutorBuilder {
             let table = StorageTable::new_partial(state_store, column_ids, vnodes, table_desc);
             Ok(Box::new(LogRowSeqScanExecutor::new(
                 table,
-                scan_ranges,
                 log_store_seq_scan_node.old_epoch.clone().unwrap(),
                 log_store_seq_scan_node.new_epoch.clone().unwrap(),
                 chunk_size as usize,
@@ -156,7 +149,6 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
             identity,
             metrics,
             table,
-            scan_ranges,
             old_epoch,
             new_epoch,
             schema,
@@ -173,42 +165,33 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
         // Range Scan
         // WARN: DO NOT use `select` to execute range scans concurrently
         //       it can consume too much memory if there're too many ranges.
-        for range in scan_ranges {
-            let stream = Self::execute_range(
-                table.clone(),
-                range,
-                old_epoch.clone(),
-                new_epoch.clone(),
-                chunk_size,
-                histogram.clone(),
-                Arc::new(schema.clone()),
-            );
-            #[for_await]
-            for chunk in stream {
-                let chunk = chunk?;
-                yield chunk;
-            }
+        let stream = Self::execute_range(
+            table.clone(),
+            old_epoch.clone(),
+            new_epoch.clone(),
+            chunk_size,
+            histogram.clone(),
+            Arc::new(schema.clone()),
+        );
+        #[for_await]
+        for chunk in stream {
+            let chunk = chunk?;
+            yield chunk;
         }
     }
 
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn execute_range(
         table: Arc<StorageTable<S>>,
-        scan_range: ScanRange,
         old_epoch: BatchQueryEpoch,
         new_epoch: BatchQueryEpoch,
         chunk_size: usize,
         histogram: Option<impl Deref<Target = Histogram>>,
         schema: Arc<Schema>,
     ) {
-        let ScanRange {
-            pk_prefix,
-            next_col_bounds,
-        } = scan_range;
+        let pk_prefix = OwnedRow::default();
 
         let order_type = table.pk_serializer().get_order_types()[pk_prefix.len()];
-        let (start_bound, end_bound) = (next_col_bounds.0, next_col_bounds.1);
-        assert!(pk_prefix.len() < table.pk_indices().len());
         // Range Scan.
         let iter = table
             .batch_iter_log_with_pk_bounds(
@@ -216,29 +199,19 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
                 new_epoch.into(),
                 &pk_prefix,
                 (
-                    match start_bound {
-                        Bound::Unbounded => {
-                            if order_type.nulls_are_first() {
-                                // `NULL`s are at the start bound side, we should exclude them to meet SQL semantics.
-                                Bound::Excluded(OwnedRow::new(vec![None]))
-                            } else {
-                                // Both start and end are unbounded, so we need to select all rows.
-                                Bound::Unbounded
-                            }
-                        }
-                        _ => unimplemented!("Log iter range need full"),
+                    if order_type.nulls_are_first() {
+                        // `NULL`s are at the start bound side, we should exclude them to meet SQL semantics.
+                        Bound::Excluded(OwnedRow::new(vec![None]))
+                    } else {
+                        // Both start and end are unbounded, so we need to select all rows.
+                        Bound::Unbounded
                     },
-                    match end_bound {
-                        Bound::Unbounded => {
-                            if order_type.nulls_are_last() {
-                                // `NULL`s are at the end bound side, we should exclude them to meet SQL semantics.
-                                Bound::Excluded(OwnedRow::new(vec![None]))
-                            } else {
-                                // Both start and end are unbounded, so we need to select all rows.
-                                Bound::Unbounded
-                            }
-                        }
-                        _ => unimplemented!("Log iter range need full"),
+                    if order_type.nulls_are_last() {
+                        // `NULL`s are at the end bound side, we should exclude them to meet SQL semantics.
+                        Bound::Excluded(OwnedRow::new(vec![None]))
+                    } else {
+                        // Both start and end are unbounded, so we need to select all rows.
+                        Bound::Unbounded
                     },
                 ),
             )
@@ -251,9 +224,10 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
             let mut iter = iter.as_mut().map(|r| match r {
                 Ok((op, value)) => {
                     let (k, row) = value.into_owned_row_key();
+                    // Todo! To avoid create a full row.
                     let full_row = row
                         .into_iter()
-                        .chain(vec![Some(ScalarImpl::Int16(op))])
+                        .chain(vec![Some(ScalarImpl::Int16(op.to_i16()))])
                         .collect_vec();
                     let row = OwnedRow::new(full_row);
                     Ok(KeyedRow::<Bytes>::new(k, row))
