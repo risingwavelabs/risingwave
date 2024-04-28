@@ -275,6 +275,7 @@ impl NotificationServiceImpl {
             subscriptions,
             functions,
             connections,
+            secrets,
             users,
             nodes,
             hummock_snapshot,
