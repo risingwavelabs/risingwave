@@ -676,6 +676,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
 
         let process_time_ms = chrono::Utc::now().timestamp_millis();
         for (i, msg) in batch.into_iter().enumerate() {
+            println!("[rc] for debug, msg: {:?}", msg);
             if msg.key.is_none() && msg.payload.is_none() {
                 tracing::debug!(
                     offset = msg.offset,
