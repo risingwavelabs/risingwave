@@ -39,6 +39,7 @@ use crate::executor::backfill::cdc::upstream_table::snapshot::{
 use crate::executor::backfill::utils::{
     get_cdc_chunk_last_offset, get_new_pos, mapping_chunk, mapping_message, mark_cdc_chunk,
 };
+use crate::executor::backfill::CdcScanOptions;
 use crate::executor::prelude::*;
 use crate::task::CreateMviewProgress;
 
@@ -70,12 +71,7 @@ pub struct CdcBackfillExecutor<S: StateStore> {
     /// Rate limit in rows/s.
     rate_limit_rps: Option<u32>,
 
-    /// Whether to disable backfill
-    disable_backfill: bool,
-    /// Barreir interval to start a new snapshot read
-    snapshot_interval: u32,
-    /// Batch size for a snapshot read query
-    snapshot_batch_size: u32,
+    options: CdcScanOptions,
 }
 
 impl<S: StateStore> CdcBackfillExecutor<S> {
@@ -89,9 +85,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         metrics: Arc<StreamingMetrics>,
         state_table: StateTable<S>,
         rate_limit_rps: Option<u32>,
-        disable_backfill: bool,
-        snapshot_interval: u32,
-        snapshot_batch_size: u32,
+        disable_backfill: bool, // backward compatibility
+        scan_options: Option<CdcScanOptions>,
     ) -> Self {
         let pk_in_output_indices = external_table.pk_in_output_indices().clone().unwrap();
         let upstream_table_id = external_table.table_id().table_id;
@@ -100,6 +95,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             state_table,
             pk_in_output_indices.len() + METADATA_STATE_LEN,
         );
+
+        let options = scan_options.unwrap_or(CdcScanOptions {
+            disable_backfill,
+            ..Default::default()
+        });
 
         Self {
             actor_ctx,
@@ -110,9 +110,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             progress,
             metrics,
             rate_limit_rps,
-            disable_backfill,
-            snapshot_interval,
-            snapshot_batch_size,
+            options,
         }
     }
 
@@ -176,7 +174,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let state = state_impl.restore_state().await?;
         current_pk_pos = state.current_pk_pos.clone();
 
-        let to_backfill = !self.disable_backfill && !state.is_finished;
+        let to_backfill = !self.options.disable_backfill && !state.is_finished;
 
         // The first barrier message should be propagated.
         yield Message::Barrier(first_barrier);
@@ -202,9 +200,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             is_finished = state.is_finished,
             snapshot_row_count = total_snapshot_row_count,
             rate_limit = self.rate_limit_rps,
-            disable_backfill = self.disable_backfill,
-            snapshot_interval = self.snapshot_interval,
-            snapshot_batch_size = self.snapshot_batch_size,
+            disable_backfill = self.options.disable_backfill,
+            snapshot_interval = self.options.snapshot_interval,
+            snapshot_batch_size = self.options.snapshot_batch_size,
             "start cdc backfill",
         );
 
@@ -271,7 +269,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 );
 
                 let right_snapshot = pin!(upstream_table_reader
-                    .snapshot_read_full_table(read_args, self.snapshot_batch_size)
+                    .snapshot_read_full_table(read_args, self.options.snapshot_batch_size)
                     .map(Either::Right));
 
                 let (right_snapshot, valve) = pausable(right_snapshot);
@@ -300,7 +298,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     // increase the barrier count and check whether need to start a new snapshot
                                     barrier_count += 1;
                                     let can_start_new_snapshot =
-                                        barrier_count == self.snapshot_interval;
+                                        barrier_count == self.options.snapshot_interval;
 
                                     if let Some(mutation) = barrier.mutation.as_deref() {
                                         use crate::executor::Mutation;
@@ -569,7 +567,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 state_impl.commit_state(pending_barrier.epoch).await?;
                 yield Message::Barrier(pending_barrier);
             }
-        } else if self.disable_backfill {
+        } else if self.options.disable_backfill {
             // If backfill is disabled, we just mark the backfill as finished
             tracing::info!(
                 upstream_table_id,

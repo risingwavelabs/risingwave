@@ -590,8 +590,9 @@ message StreamCdcScanNode {
   // The rate limit for the stream cdc scan node.
   optional uint32 rate_limit = 6;
 
-  reserved 7;
-  reserved "disable_backfill";
+  // Whether skip the backfill and only consume from upstream.
+  // keep it for backward compatibility, new stream plan will use `options.disable_backfill`
+  bool disable_backfill = 7;
 
   StreamCdcScanOptions options = 8;
 }

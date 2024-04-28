@@ -19,11 +19,11 @@ use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::cdc::external::{CdcTableType, SchemaTableName};
 use risingwave_pb::plan_common::ExternalTableDesc;
-use risingwave_pb::stream_plan::{StreamCdcScanNode, StreamCdcScanOptions};
+use risingwave_pb::stream_plan::StreamCdcScanNode;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::{CdcBackfillExecutor, Executor, ExternalStorageTable};
+use crate::executor::{CdcBackfillExecutor, CdcScanOptions, Executor, ExternalStorageTable};
 
 pub struct StreamCdcScanExecutorBuilder;
 
@@ -44,7 +44,6 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             .collect_vec();
 
         let table_desc: &ExternalTableDesc = node.get_cdc_table_desc()?;
-        let options: &StreamCdcScanOptions = node.get_options()?;
 
         let table_schema: Schema = table_desc.columns.iter().map(Into::into).collect();
         assert_eq!(output_indices, (0..table_schema.len()).collect_vec());
@@ -88,6 +87,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
         let state_table =
             StateTable::from_table_catalog(node.get_state_table()?, state_store, vnodes).await;
 
+        let scan_options = node.options.clone().map(CdcScanOptions::from_proto);
         let exec = CdcBackfillExecutor::new(
             params.actor_context.clone(),
             external_table,
@@ -97,9 +97,8 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             params.executor_stats,
             state_table,
             node.rate_limit,
-            options.disable_backfill,
-            options.snapshot_barrier_interval,
-            options.snapshot_batch_size,
+            node.disable_backfill,
+            scan_options,
         );
         Ok((params.info, exec).into())
     }
