@@ -4940,9 +4940,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.8.6"
+version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6eef1adf83f7f47fd5a23e512fdfb941322394fa6a47289b0965903430fd093c"
+checksum = "6e7321845edd6be7f1d505413409d119cddf1fc110197d1d0606fb28cbec6d28"
 dependencies = [
  "ahash 0.8.6",
  "anyhow",
@@ -4954,9 +4954,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-version = "0.6.3"
+version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "898f7643405e6d05145b487be896a5c9fcf395e0a05c30e5622b6b9379240739"
+checksum = "deef44aeda48784c3ec1316fe64ed8d9cacbd50b37afcfd1aa211d4eb6360b61"
 dependencies = [
  "ahash 0.8.6",
  "bytes",
@@ -4967,6 +4967,7 @@ dependencies = [
  "madsim-tokio",
  "nix 0.28.0",
  "parking_lot 0.12.1",
+ "rustversion",
  "serde",
 ]
 
@@ -4985,9 +4986,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.3.4"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "288d623178ec76749108a148de3245cfa6b7798fda2875b96a6dfe5372a2d0de"
+checksum = "c28baff47d3b1e4a4d416186066ec7bd590b7b50b6332a25e62fab1686904570"
 dependencies = [
  "ahash 0.8.6",
  "bitflags 2.5.0",
@@ -5000,13 +5001,14 @@ dependencies = [
  "libc",
  "madsim-tokio",
  "parking_lot 0.12.1",
+ "serde",
 ]
 
 [[package]]
 name = "foyer-storage"
-version = "0.7.4"
+version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f912badeb93c5314a220ae2df5e877c027044ae7dc5e9bfbfe218941a2bdbb6e"
+checksum = "e3ec3638bdc66bc1c83aba27805770d2cafd18ec553e337e2563d69a5676898b"
 dependencies = [
  "ahash 0.8.6",
  "allocator-api2",
