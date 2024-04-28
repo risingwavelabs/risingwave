@@ -368,6 +368,17 @@ impl CatalogWriter for MockCatalogWriter {
         unreachable!()
     }
 
+    async fn create_secret(
+        &self,
+        _secret_name: String,
+        _database_id: u32,
+        _schema_id: u32,
+        _owner_id: u32,
+        _payload: Vec<u8>,
+    ) -> Result<()> {
+        unreachable!()
+    }
+
     async fn comment_on(&self, _comment: PbComment) -> Result<()> {
         unreachable!()
     }

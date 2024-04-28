@@ -254,7 +254,7 @@ pub async fn handle(
         Statement::CreateConnection { stmt } => {
             create_connection::handle_create_connection(handler_args, stmt).await
         }
-        Statement::CreateSecret { .. } => {
+        Statement::CreateSecret { stmt } => {
             create_secret::handle_create_secret(handler_args, stmt).await
         }
         Statement::CreateFunction {

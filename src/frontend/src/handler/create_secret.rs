@@ -14,7 +14,7 @@ pub async fn handle_create_secret(
     let (schema_name, connection_name) =
         Binder::resolve_schema_qualified_name(db_name, stmt.secret_name.clone())?;
 
-    if let Err(e) = session.check_secret_name_duplicated(stmt.secret_name) {
+    if let Err(e) = session.check_secret_name_duplicated(stmt.secret_name.clone()) {
         return if stmt.if_not_exists {
             Ok(PgResponse::builder(StatementType::CREATE_SECRET)
                 .notice(format!("secret \"{}\" exists, skipping", connection_name))
@@ -25,19 +25,19 @@ pub async fn handle_create_secret(
     }
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
     let secret_payload = match &stmt.credential {
-        &Value::SingleQuotedString(s) => s.as_bytes().to_vec(),
+        Value::SingleQuotedString(ref s) => s.as_bytes().to_vec(),
         _ => {
             return Err(ErrorCode::InvalidParameterValue(
                 "secret payload must be a string".to_string(),
             )
-            .into())
+            .into());
         }
     };
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .create_secret(
-            secret_name,
+            stmt.secret_name.real_value(),
             database_id,
             schema_id,
             session.user_id(),

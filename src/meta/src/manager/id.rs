@@ -162,6 +162,7 @@ pub struct IdGeneratorManager {
     parallel_unit: Arc<StoredIdGenerator>,
     compaction_group: Arc<StoredIdGenerator>,
     connection: Arc<StoredIdGenerator>,
+    secret: Arc<StoredIdGenerator>,
 }
 
 impl IdGeneratorManager {
@@ -187,7 +188,7 @@ impl IdGeneratorManager {
                     "user",
                     Some(NON_RESERVED_USER_ID as u64),
                 )
-                .await,
+                    .await,
             ),
             backup: Arc::new(StoredIdGenerator::new(meta_store.clone(), "backup", Some(1)).await),
             hummock_ss_table_id: Arc::new(
@@ -206,11 +207,13 @@ impl IdGeneratorManager {
                     "compaction_group",
                     Some(StaticCompactionGroupId::End as u64 + 1),
                 )
-                .await,
+                    .await,
             ),
             connection: Arc::new(
                 StoredIdGenerator::new(meta_store.clone(), "connection", None).await,
             ),
+            secret: Arc::new(
+                StoredIdGenerator::new(meta_store.clone(), "secret", None).await, ),
         }
     }
 
@@ -232,6 +235,7 @@ impl IdGeneratorManager {
             IdCategory::HummockCompactionTask => &self.hummock_compaction_task,
             IdCategory::CompactionGroup => &self.compaction_group,
             IdCategory::Connection => &self.connection,
+            IdCategory::Secret => &self.secret,
             _ => unreachable!(),
         }
     }
@@ -266,9 +270,9 @@ mod tests {
             let id_generator = &id_generator;
             async move { id_generator.generate().await }
         }))
-        .await
-        .into_iter()
-        .collect::<MetadataModelResult<Vec<_>>>()?;
+            .await
+            .into_iter()
+            .collect::<MetadataModelResult<Vec<_>>>()?;
         assert_eq!(ids, (0..10000).collect::<Vec<_>>());
 
         let id_generator_two = StoredIdGenerator::new(meta_store.clone(), "default", None).await;
@@ -276,9 +280,9 @@ mod tests {
             let id_generator = &id_generator_two;
             async move { id_generator.generate().await }
         }))
-        .await
-        .into_iter()
-        .collect::<MetadataModelResult<Vec<_>>>()?;
+            .await
+            .into_iter()
+            .collect::<MetadataModelResult<Vec<_>>>()?;
         assert_eq!(ids, (10000..20000).collect::<Vec<_>>());
 
         let id_generator_three = StoredIdGenerator::new(meta_store.clone(), "table", None).await;
@@ -286,9 +290,9 @@ mod tests {
             let id_generator = &id_generator_three;
             async move { id_generator.generate().await }
         }))
-        .await
-        .into_iter()
-        .collect::<MetadataModelResult<Vec<_>>>()?;
+            .await
+            .into_iter()
+            .collect::<MetadataModelResult<Vec<_>>>()?;
         assert_eq!(ids, (0..10000).collect::<Vec<_>>());
 
         let actor_id_generator = StoredIdGenerator::new(meta_store.clone(), "actor", Some(1)).await;
@@ -296,9 +300,9 @@ mod tests {
             let id_generator = &actor_id_generator;
             async move { id_generator.generate_interval(100).await }
         }))
-        .await
-        .into_iter()
-        .collect::<MetadataModelResult<Vec<_>>>()?;
+            .await
+            .into_iter()
+            .collect::<MetadataModelResult<Vec<_>>>()?;
 
         let vec_expect = (0..100).map(|e| e * 100 + 1).collect::<Vec<_>>();
         assert_eq!(ids, vec_expect);
@@ -308,9 +312,9 @@ mod tests {
             let id_generator = &actor_id_generator_two;
             async move { id_generator.generate_interval(10).await }
         }))
-        .await
-        .into_iter()
-        .collect::<MetadataModelResult<Vec<_>>>()?;
+            .await
+            .into_iter()
+            .collect::<MetadataModelResult<Vec<_>>>()?;
 
         let vec_expect = (0..100).map(|e| 10001 + e * 10).collect::<Vec<_>>();
         assert_eq!(ids, vec_expect);
@@ -326,9 +330,9 @@ mod tests {
             let manager = &manager;
             async move { manager.generate::<{ IdCategory::Test }>().await }
         }))
-        .await
-        .into_iter()
-        .collect::<MetadataModelResult<Vec<_>>>()?;
+            .await
+            .into_iter()
+            .collect::<MetadataModelResult<Vec<_>>>()?;
         assert_eq!(ids, (0..10000).collect::<Vec<_>>());
 
         let ids = future::join_all((0..100).map(|_i| {
@@ -339,9 +343,9 @@ mod tests {
                     .await
             }
         }))
-        .await
-        .into_iter()
-        .collect::<MetadataModelResult<Vec<_>>>()?;
+            .await
+            .into_iter()
+            .collect::<MetadataModelResult<Vec<_>>>()?;
         let vec_expect = (0..100).map(|e| e * 9999 + 1).collect::<Vec<_>>();
         assert_eq!(ids, vec_expect);
 
