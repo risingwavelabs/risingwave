@@ -640,6 +640,7 @@ const MAX_ROWS_FOR_TRANSACTION: usize = 4096;
 async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream: BoxSourceStream) {
     let columns = parser.columns().to_vec();
 
+    let mut heartbeat_builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
     let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
 
     struct Transaction {
@@ -676,18 +677,19 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
 
         let process_time_ms = chrono::Utc::now().timestamp_millis();
         for (i, msg) in batch.into_iter().enumerate() {
-            println!("[rc] for debug, msg: {:?}", msg);
             if msg.key.is_none() && msg.payload.is_none() {
                 tracing::debug!(
                     offset = msg.offset,
                     "got a empty message, could be a heartbeat"
                 );
                 // Emit an empty invisible row for the heartbeat message.
-                parser.emit_empty_row(builder.row_writer().invisible().with_meta(MessageMeta {
-                    meta: &msg.meta,
-                    split_id: &msg.split_id,
-                    offset: &msg.offset,
-                }));
+                parser.emit_empty_row(heartbeat_builder.row_writer().invisible().with_meta(
+                    MessageMeta {
+                        meta: &msg.meta,
+                        split_id: &msg.split_id,
+                        offset: &msg.offset,
+                    },
+                ));
                 continue;
             }
 
@@ -772,6 +774,13 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     }
                 },
             }
+        }
+
+        // emit heartbeat for each message batch
+        // we must emit heartbeat chunk before the data chunk,
+        // otherwise the source offset could be backward due to the heartbeat
+        if !heartbeat_builder.is_empty() {
+            yield heartbeat_builder.take(0);
         }
 
         // If we are not in a transaction, we should yield the chunk now.
