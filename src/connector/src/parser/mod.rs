@@ -69,6 +69,7 @@ mod bytes_parser;
 mod canal;
 mod common;
 mod csv_parser;
+mod parquet_parser;
 mod debezium;
 mod json_parser;
 mod maxwell;
@@ -579,6 +580,7 @@ pub enum ParserFormat {
     DebeziumMongo,
     Upsert,
     Plain,
+    Parquet,
 }
 
 /// `ByteStreamSourceParser` is a new message parser, the parser should consume

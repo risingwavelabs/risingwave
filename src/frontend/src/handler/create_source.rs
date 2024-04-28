@@ -114,6 +114,36 @@ async fn extract_json_table_schema(
     }
 }
 
+/// Map a PARQUET schema to a relational schema
+async fn extract_parquet_table_schema(
+    schema_config: &Option<(AstString, bool)>,
+    with_properties: &HashMap<String, String>,
+    format_encode_options: &mut BTreeMap<String, String>,
+) -> Result<Option<Vec<ColumnCatalog>>> {
+    match schema_config {
+        None => Ok(None),
+        Some((schema_location, use_schema_registry)) => {
+            let schema_registry_auth = use_schema_registry.then(|| {
+                let auth = SchemaRegistryAuth::from(&*format_encode_options);
+                try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_USERNAME);
+                try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_PASSWORD);
+                auth
+            });
+            Ok(Some(
+                schema_to_columns(&schema_location.0, schema_registry_auth, with_properties)
+                    .await?
+                    .into_iter()
+                    .map(|col| ColumnCatalog {
+                        column_desc: col.into(),
+                        is_hidden: false,
+                    })
+                    .collect_vec(),
+            ))
+        }
+    }
+}
+
+
 /// Note: these columns are added in `SourceStreamChunkRowWriter::do_action`.
 /// May also look for the usage of `SourceColumnType`.
 pub fn debezium_cdc_source_schema() -> Vec<ColumnCatalog> {
@@ -431,6 +461,12 @@ pub(crate) async fn bind_columns_from_source(
 
             stream_source_info.csv_delimiter = delimiter as i32;
             stream_source_info.csv_has_header = has_header;
+
+            None
+        }
+        (Format::Plain, Encode::Parquet) => {
+            // extract_parquet_table_schema();
+            // todo!();
 
             None
         }
@@ -1003,7 +1039,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Csv, Encode::Json],
                 ),
                 OPENDAL_S3_CONNECTOR => hashmap!(
-                    Format::Plain => vec![Encode::Csv, Encode::Json],
+                    Format::Plain => vec![Encode::Csv, Encode::Json, Encode::Parquet],
                 ),
                 GCS_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Csv, Encode::Json],

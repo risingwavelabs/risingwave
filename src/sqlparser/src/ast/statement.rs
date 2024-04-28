@@ -192,7 +192,7 @@ impl Encode {
             "PARQUET" => Encode::Parquet,
             "NONE" => Encode::None, // used by iceberg
             _ => return Err(ParserError::ParserError(
-                "expected AVRO | BYTES | CSV | PROTOBUF | JSON | NATIVE | TEMPLATE | PARQUET | NONE after Encode"
+                "expected AVRO | BYTES | CSV | PROTOBUF | JSON | NATIVE | TEMPLATE | NONE after Encode"
                     .to_string(),
             )),
         })
