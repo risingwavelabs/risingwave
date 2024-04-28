@@ -12,6 +12,7 @@
             cargo-make
             cargo-nextest
             cargo-binstall
+            cargo-sort
             typos
           ];
       in
@@ -19,9 +20,6 @@
         packages =
           rust-toolchain
           ++ (with pkgs; [
-            # gcc
-            # clang
-            # lld
             gnumake
             cmake
             protobuf
