@@ -226,6 +226,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     )
                     .boxed()
                 } else {
+                    let is_shared = source.info.as_ref().is_some_and(|info| info.is_shared());
                     SourceExecutor::new(
                         params.actor_context.clone(),
                         Some(stream_source_core),
@@ -233,6 +234,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         barrier_receiver,
                         system_params,
                         source.rate_limit,
+                        is_shared,
                     )
                     .boxed()
                 }
@@ -262,6 +264,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 barrier_receiver,
                 system_params,
                 None,
+                false,
             );
             Ok((params.info, exec).into())
         }

@@ -19,9 +19,7 @@ use std::ops::Index;
 
 use educe::Educe;
 use itertools::Itertools;
-use risingwave_pb::common::{
-    ParallelUnit, ParallelUnitMapping as ParallelUnitMappingProto, PbWorkerMapping,
-};
+use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping as ParallelUnitMappingProto};
 use risingwave_pb::stream_plan::ActorMapping as ActorMappingProto;
 
 use super::bitmap::VnodeBitmapExt;
@@ -32,7 +30,6 @@ use crate::util::iter_util::ZipEqDebug;
 
 // TODO: find a better place for this.
 pub type ActorId = u32;
-pub type WorkerId = u32;
 
 /// Trait for items that can be used as keys in [`VnodeMapping`].
 pub trait VnodeMappingItem {
@@ -257,12 +254,6 @@ pub mod marker {
     impl VnodeMappingItem for ParallelUnit {
         type Item = ParallelUnitId;
     }
-
-    /// A marker type for items of [`WorkerId`].
-    pub struct Worker;
-    impl VnodeMappingItem for Worker {
-        type Item = WorkerId;
-    }
 }
 
 /// A mapping from [`VirtualNode`] to [`ActorId`].
@@ -274,11 +265,6 @@ pub type ExpandedActorMapping = ExpandedMapping<marker::Actor>;
 pub type ParallelUnitMapping = VnodeMapping<marker::ParallelUnit>;
 /// An expanded mapping from [`VirtualNode`] to [`ParallelUnitId`].
 pub type ExpandedParallelUnitMapping = ExpandedMapping<marker::ParallelUnit>;
-
-/// A mapping from [`VirtualNode`] to [`WorkerId`].
-pub type WorkerMapping = VnodeMapping<marker::Worker>;
-/// An expanded mapping from [`VirtualNode`] to [`WorkerId`].
-pub type ExpandedWorkerMapping = ExpandedMapping<marker::Worker>;
 
 impl ActorMapping {
     /// Transform this actor mapping to a parallel unit mapping, essentially `transform`.
@@ -307,30 +293,6 @@ impl ActorMapping {
     }
 }
 
-impl WorkerMapping {
-    /// Create a uniform worker mapping from the given worker ids
-    pub fn build_from_ids(worker_ids: &[WorkerId]) -> Self {
-        Self::new_uniform(worker_ids.iter().cloned())
-    }
-
-    /// Create a worker mapping from the protobuf representation.
-    pub fn from_protobuf(proto: &PbWorkerMapping) -> Self {
-        assert_eq!(proto.original_indices.len(), proto.data.len());
-        Self {
-            original_indices: proto.original_indices.clone(),
-            data: proto.data.clone(),
-        }
-    }
-
-    /// Convert this worker mapping to the protobuf representation.
-    pub fn to_protobuf(&self) -> PbWorkerMapping {
-        PbWorkerMapping {
-            original_indices: self.original_indices.clone(),
-            data: self.data.clone(),
-        }
-    }
-}
-
 impl ParallelUnitMapping {
     /// Create a uniform parallel unit mapping from the given parallel units, essentially
     /// `new_uniform`.
@@ -345,11 +307,6 @@ impl ParallelUnitMapping {
 
     /// Transform this parallel unit mapping to an actor mapping, essentially `transform`.
     pub fn to_actor(&self, to_map: &HashMap<ParallelUnitId, ActorId>) -> ActorMapping {
-        self.transform(to_map)
-    }
-
-    /// Transform this parallel unit mapping to an worker mapping, essentially `transform`.
-    pub fn to_worker(&self, to_map: &HashMap<ParallelUnitId, WorkerId>) -> WorkerMapping {
         self.transform(to_map)
     }
 

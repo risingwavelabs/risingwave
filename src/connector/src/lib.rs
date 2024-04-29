@@ -34,6 +34,7 @@
 #![feature(error_generic_member_access)]
 #![feature(negative_impls)]
 #![feature(register_tool)]
+#![feature(assert_matches)]
 #![register_tool(rw)]
 #![recursion_limit = "256"]
 

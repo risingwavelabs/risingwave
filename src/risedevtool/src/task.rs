@@ -15,6 +15,8 @@
 mod compactor_service;
 mod compute_node_service;
 mod configure_tmux_service;
+mod docker_service;
+mod dummy_service;
 mod ensure_stop_service;
 mod etcd_service;
 mod frontend_service;
@@ -22,6 +24,7 @@ mod grafana_service;
 mod kafka_service;
 mod meta_node_service;
 mod minio_service;
+mod mysql_service;
 mod prometheus_service;
 mod pubsub_service;
 mod redis_service;
@@ -36,7 +39,7 @@ mod utils;
 mod zookeeper_service;
 
 use std::env;
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::Arc;
@@ -51,6 +54,7 @@ pub use utils::*;
 pub use self::compactor_service::*;
 pub use self::compute_node_service::*;
 pub use self::configure_tmux_service::*;
+pub use self::dummy_service::DummyService;
 pub use self::ensure_stop_service::*;
 pub use self::etcd_service::*;
 pub use self::frontend_service::*;
@@ -58,6 +62,7 @@ pub use self::grafana_service::*;
 pub use self::kafka_service::*;
 pub use self::meta_node_service::*;
 pub use self::minio_service::*;
+pub use self::mysql_service::*;
 pub use self::prometheus_service::*;
 pub use self::pubsub_service::*;
 pub use self::redis_service::*;
@@ -150,7 +155,7 @@ where
 
         writeln!(self.log, "---")?;
 
-        output.status.exit_ok()?;
+        output.status.exit_ok().context(full_output)?;
 
         Ok(output)
     }
@@ -255,7 +260,11 @@ where
 
     /// Wait for a user-managed service to be available
     pub fn wait_tcp_user(&mut self, server: impl AsRef<str>) -> anyhow::Result<()> {
-        let addr = server.as_ref().parse()?;
+        let addr = server
+            .as_ref()
+            .to_socket_addrs()?
+            .next()
+            .unwrap_or_else(|| panic!("failed to resolve {}", server.as_ref()));
         wait(
             || {
                 TcpStream::connect_timeout(&addr, Duration::from_secs(1))?;
