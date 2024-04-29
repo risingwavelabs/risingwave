@@ -35,7 +35,7 @@ echo "~~~ clean up docker"
 if [ $(docker ps -aq |wc -l) -gt 0 ]; then
   docker rm -f $(docker ps -aq)
 fi
-docker network prune -f -a
+docker network prune -f
 docker volume prune -f -a
 
 echo "~~~ ghcr login"
