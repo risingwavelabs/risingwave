@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cell::RefCell;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -27,6 +28,10 @@ use super::{
 use crate::hummock::compaction::picker::TrivialMovePicker;
 use crate::hummock::compaction::{create_overlap_strategy, CompactionDeveloperConfig};
 use crate::hummock::level_handler::LevelHandler;
+
+std::thread_local! {
+    static LOG_COUNTER: RefCell<usize> = RefCell::new(0);
+}
 
 pub struct LevelCompactionPicker {
     target_level: usize,
@@ -253,13 +258,21 @@ impl LevelCompactionPicker {
                 stats,
             ) {
                 if l0.total_file_size > target_level.total_file_size * 8 {
-                    tracing::warn!("skip task with level count: {}, file count: {}, select size: {}, target size: {}, target level size: {}",
-                        result.input_levels.len(),
-                        result.total_file_count,
-                        result.select_input_size,
-                        result.target_input_size,
-                        target_level.total_file_size,
-                    );
+                    let log_counter = LOG_COUNTER.with_borrow_mut(|counter| {
+                        *counter += 1;
+                        *counter
+                    });
+
+                    // reduce log
+                    if log_counter % 100 == 0 {
+                        tracing::warn!("skip task with level count: {}, file count: {}, select size: {}, target size: {}, target level size: {}",
+                            result.input_levels.len(),
+                            result.total_file_count,
+                            result.select_input_size,
+                            result.target_input_size,
+                            target_level.total_file_size,
+                        );
+                    }
                 }
                 continue;
             }
