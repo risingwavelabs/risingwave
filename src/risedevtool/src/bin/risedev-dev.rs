@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, Context, Result};
 use console::style;
 use fs_err::OpenOptions;
 use indicatif::ProgressBar;
@@ -26,8 +26,9 @@ use risedev::util::{complete_spin, fail_spin};
 use risedev::{
     generate_risedev_env, preflight_check, CompactorService, ComputeNodeService, ConfigExpander,
     ConfigureTmuxTask, DummyService, EnsureStopService, ExecuteContext, FrontendService,
-    GrafanaService, KafkaService, MetaNodeService, MinioService, PrometheusService, PubsubService,
-    RedisService, ServiceConfig, SqliteConfig, Task, TempoService, ZooKeeperService, RISEDEV_NAME,
+    GrafanaService, KafkaService, MetaNodeService, MinioService, MySqlService, PrometheusService,
+    PubsubService, RedisService, ServiceConfig, SqliteConfig, Task, TempoService, ZooKeeperService,
+    RISEDEV_NAME,
 };
 use tempfile::tempdir;
 use thiserror_ext::AsReport;
@@ -318,16 +319,12 @@ fn task_main(
             ServiceConfig::MySql(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-                // TODO: support starting mysql in RiseDev. Currently it's user-managed only
-                if !c.user_managed {
-                    bail!("Non user-managed MySQL is not supported yet. Please use user-managed MySQL.");
-                }
-                DummyService::new(&c.id).execute(&mut ctx)?;
+                MySqlService::new(c.clone()).execute(&mut ctx)?;
                 let mut task =
                     risedev::ConfigureTcpNodeTask::new(c.address.clone(), c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
-                    .set_message(format!("mysql {}:{}/", c.address, c.port));
+                    .set_message(format!("mysql {}:{}", c.address, c.port));
             }
         }
 

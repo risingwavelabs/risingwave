@@ -166,7 +166,7 @@ cat <<EOF | rpk topic produce shared_source -f "%p %v\\n" -p 0
 EOF
 done'
 
-sleep 2s
+sleep 3s
 
 query IT rowsort
 select v1, count(*) from s0 group by v1;
