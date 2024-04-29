@@ -53,6 +53,9 @@ pub struct GcsProperties {
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
+
+    #[serde(rename = "decompression_format")]
+    pub decompression_format: Option<String>,
 }
 
 impl UnknownFields for GcsProperties {
@@ -147,6 +150,9 @@ pub struct PosixFsProperties {
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
+
+    #[serde(rename = "decompression_format")]
+    pub decompression_format: Option<String>,
 }
 
 impl UnknownFields for PosixFsProperties {

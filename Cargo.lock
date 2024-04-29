@@ -10479,6 +10479,7 @@ dependencies = [
  "arrow-schema 50.0.0",
  "arrow-select 50.0.0",
  "assert_matches",
+ "async-compression",
  "async-nats",
  "async-trait",
  "auto_enums",

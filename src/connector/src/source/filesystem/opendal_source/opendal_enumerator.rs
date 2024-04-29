@@ -33,6 +33,7 @@ pub struct OpendalEnumerator<Src: OpendalSource> {
     pub(crate) prefix: Option<String>,
     pub(crate) matcher: Option<glob::Pattern>,
     pub(crate) marker: PhantomData<Src>,
+    pub(crate) decompression_format: Option<String>,
 }
 
 #[async_trait]

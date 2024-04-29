@@ -58,7 +58,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
             );
         }
 
-        builder.enable_virtual_host_style();
+        // builder.enable_virtual_host_style();
 
         if let Some(assume_role) = assume_role {
             builder.role_arn(&assume_role);
@@ -73,7 +73,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         } else {
             (None, None)
         };
-
+        let decompression_format = s3_properties.decompression_format;
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())
@@ -84,6 +84,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
             prefix,
             matcher,
             marker: PhantomData,
+            decompression_format,
         })
     }
 }

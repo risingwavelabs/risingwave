@@ -280,6 +280,7 @@ mod tests {
             access: None,
             secret: None,
             endpoint_url: None,
+            decompression_format: None,
         }
         .into();
         let mut enumerator =

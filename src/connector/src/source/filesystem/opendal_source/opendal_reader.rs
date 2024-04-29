@@ -13,13 +13,15 @@
 // limitations under the License.
 
 use std::future::IntoFuture;
+use std::pin::Pin;
 
+use async_compression::tokio::bufread::GzipDecoder;
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use opendal::Operator;
 use risingwave_common::array::StreamChunk;
-use tokio::io::BufReader;
+use tokio::io::{AsyncRead, BufReader};
 use tokio_util::io::{ReaderStream, StreamReader};
 
 use super::opendal_enumerator::OpendalEnumerator;
@@ -35,6 +37,7 @@ use crate::source::{
 
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const STREAM_READER_CAPACITY: usize = 4096;
+
 #[derive(Debug, Clone)]
 pub struct OpendalReader<Src: OpendalSource> {
     connector: OpendalEnumerator<Src>,
@@ -81,8 +84,12 @@ impl<Src: OpendalSource> OpendalReader<Src> {
 
             let split_id = split.id();
 
-            let data_stream =
-                Self::stream_read_object(self.connector.op.clone(), split, self.source_ctx.clone());
+            let data_stream = Self::stream_read_object(
+                self.connector.op.clone(),
+                split,
+                self.source_ctx.clone(),
+                self.connector.decompression_format.clone(),
+            );
 
             let parser =
                 ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx).await?;
@@ -115,6 +122,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         op: Operator,
         split: OpendalFsSplit<Src>,
         source_ctx: SourceContextRef,
+        decompression_format: Option<String>,
     ) {
         let actor_id = source_ctx.actor_id.to_string();
         let fragment_id = source_ctx.fragment_id.to_string();
@@ -134,7 +142,20 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         let stream_reader = StreamReader::new(
             reader.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
         );
-        let buf_reader = BufReader::new(stream_reader);
+
+        let buf_reader: Pin<Box<dyn AsyncRead + Send>> = match decompression_format {
+            Some(format) if format == *"gzip" => {
+                let gzip_decoder = GzipDecoder::new(stream_reader);
+                Box::pin(BufReader::new(gzip_decoder)) as Pin<Box<dyn AsyncRead + Send>>
+            }
+            None => Box::pin(BufReader::new(stream_reader)) as Pin<Box<dyn AsyncRead + Send>>,
+            Some(format) => {
+                tracing::error!("The input decompression format {format} is not supported. Currently, only gzip format decompression is supported.");
+                // todo: handle error
+                todo!()
+            }
+        };
+
         let stream = ReaderStream::with_capacity(buf_reader, STREAM_READER_CAPACITY);
 
         let mut offset: usize = split.offset;

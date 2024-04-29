@@ -22,6 +22,7 @@ apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "5349b0c7b
     "xz",
 ] }
 arrow-array = { workspace = true }
+async-compression = "0.4.5"
 arrow-row = { workspace = true }
 arrow-schema = { workspace = true }
 arrow-select = { workspace = true }
