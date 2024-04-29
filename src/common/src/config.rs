@@ -1151,7 +1151,7 @@ pub mod default {
         }
 
         pub fn move_table_size_limit() -> u64 {
-            10 * 1024 * 1024 * 1024 // 10GB
+            100 * 1024 * 1024 * 1024 // 100GB
         }
 
         pub fn split_group_size_limit() -> u64 {
@@ -1163,7 +1163,8 @@ pub mod default {
         }
 
         pub fn table_write_throughput_threshold() -> u64 {
-            16 * 1024 * 1024 // 16MB
+            // tmp change for test
+            160 * 1024 * 1024 // 160MB
         }
 
         pub fn min_table_split_write_throughput() -> u64 {
