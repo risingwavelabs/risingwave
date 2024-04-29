@@ -14,6 +14,7 @@
 
 use await_tree::InstrumentAwait;
 use futures::{Stream, StreamExt, TryStreamExt};
+use risingwave_common::catalog::TableId;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
 use risingwave_storage::dispatch_state_store;
@@ -65,7 +66,21 @@ impl StreamService for StreamServiceImpl {
         let req = request.into_inner();
 
         let actor_id = req.actor_id;
-        let res = self.mgr.build_actors(actor_id).await;
+        let res = self
+            .mgr
+            .build_actors(
+                actor_id,
+                req.related_subscriptions
+                    .into_iter()
+                    .map(|(table_id, subscriptions)| {
+                        (
+                            TableId::new(table_id),
+                            subscriptions.subscription_ids.into_iter().collect(),
+                        )
+                    })
+                    .collect(),
+            )
+            .await;
         match res {
             Err(e) => {
                 error!(error = %e.as_report(), "failed to build actors");

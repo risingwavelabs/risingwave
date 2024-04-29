@@ -46,6 +46,7 @@ mod progress;
 mod tests;
 
 pub use progress::CreateMviewProgress;
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
@@ -214,6 +215,7 @@ pub(super) enum LocalActorOperation {
     },
     BuildActors {
         actors: Vec<ActorId>,
+        related_subscriptions: HashMap<TableId, HashSet<u32>>,
         result_sender: oneshot::Sender<StreamResult<()>>,
     },
     UpdateActorInfo {
@@ -481,8 +483,9 @@ impl LocalBarrierWorker {
             }
             LocalActorOperation::BuildActors {
                 actors,
+                related_subscriptions,
                 result_sender,
-            } => self.start_create_actors(&actors, result_sender),
+            } => self.start_create_actors(&actors, related_subscriptions, result_sender),
             LocalActorOperation::UpdateActorInfo {
                 new_actor_infos,
                 result_sender,
