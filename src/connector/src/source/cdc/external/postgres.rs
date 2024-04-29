@@ -354,7 +354,7 @@ mod tests {
                 "database.name" => "mydb",
                 "schema.name" => "public",
                 "table.name" => "t1"));
-        let reader = PostgresExternalTableReader::new(props, rw_schema)
+        let reader = PostgresExternalTableReader::new(props, rw_schema, vec![0, 1], 1000)
             .await
             .unwrap();
 
