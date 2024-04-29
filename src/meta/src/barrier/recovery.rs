@@ -309,6 +309,7 @@ impl GlobalBarrierManagerContext {
         scheduled_barriers: &ScheduledBarriers,
     ) -> MetaResult<bool> {
         let (dropped_actors, cancelled) = scheduled_barriers.pre_apply_drop_cancel_scheduled();
+        tracing::trace!(target: "cancel_stream_job", "pre_apply_drop_cancel dropped_tables: {:?}", cancelled);
         let applied = !dropped_actors.is_empty() || !cancelled.is_empty();
         if !cancelled.is_empty() {
             let unregister_table_ids = match &self.metadata_manager {

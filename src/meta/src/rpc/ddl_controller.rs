@@ -155,7 +155,7 @@ pub enum DdlCommand {
 impl DdlCommand {
     fn allow_in_recovery(&self) -> bool {
         match self {
-            DdlCommand::DropDatabase(_)
+            | DdlCommand::DropDatabase(_)
             | DdlCommand::DropSchema(_)
             | DdlCommand::DropSource(_, _)
             | DdlCommand::DropFunction(_)

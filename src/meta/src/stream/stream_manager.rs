@@ -132,6 +132,9 @@ impl CreatingStreamingJobInfo {
             if let Some(job) = jobs.get_mut(&job_id) {
                 if let Some(shutdown_tx) = job.shutdown_tx.take() {
                     let (tx, rx) = oneshot::channel();
+                    tracing::debug!(target: "cancel_stream_job",
+                                    "sending cancel streaming job {job_id}"
+                                );
                     if shutdown_tx
                         .send(CreatingState::Canceling { finish_tx: tx })
                         .await
@@ -271,6 +274,9 @@ impl GlobalStreamManager {
                     }
                     CreatingState::Canceling { finish_tx } => {
                         tracing::debug!(id=?table_id, "cancelling streaming job");
+                        tracing::debug!(target: "cancel_stream_job",
+                                    "cancelling streaming job {table_id}"
+                                );
                         if let Ok(table_fragments) = self
                             .metadata_manager
                             .get_job_fragments_by_id(&table_id)
@@ -278,7 +284,7 @@ impl GlobalStreamManager {
                         {
                             // try to cancel buffered creating command.
                             if self.barrier_scheduler.try_cancel_scheduled_create(table_id) {
-                                tracing::debug!(
+                                tracing::debug!(target: "cancel_stream_job",
                                     "cancelling streaming job {table_id} in buffer queue."
                                 );
                                 let node_actors = table_fragments.worker_actor_ids();
@@ -299,7 +305,7 @@ impl GlobalStreamManager {
                                         .await?;
                                 }
                             } else if !table_fragments.is_created() {
-                                tracing::debug!(
+                                tracing::debug!(target: "cancel_stream_job",
                                     "cancelling streaming job {table_id} by issue cancel command."
                                 );
 
@@ -612,6 +618,7 @@ impl GlobalStreamManager {
     /// Cleanup of their state will be cleaned up after the `CancelStreamJob` command succeeds,
     /// by the barrier manager for both of them.
     pub async fn cancel_streaming_jobs(&self, table_ids: Vec<TableId>) -> Vec<TableId> {
+        tracing::debug!(target: "cancel_stream_job", "cancelling streaming jobs");
         if table_ids.is_empty() {
             return vec![];
         }

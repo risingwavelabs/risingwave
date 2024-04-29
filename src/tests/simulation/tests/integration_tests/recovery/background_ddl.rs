@@ -17,7 +17,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Result};
 use risingwave_common::error::AsReport;
 use risingwave_simulation::cluster::{Cluster, Configuration, Session};
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 
 use crate::utils::{
     kill_cn_and_meta_and_wait_recover, kill_cn_and_wait_recover, kill_random_and_wait_recover,
@@ -502,5 +502,80 @@ async fn test_background_agg_mv_recovery() -> Result<()> {
     session.run("DROP MATERIALIZED VIEW mv1;").await?;
     session.run("DROP TABLE t1;").await?;
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_recovery_cancel_high_barrier_latency() -> Result<()> {
+    init_logger();
+    let mut cluster = Cluster::start(Configuration::enable_arrangement_backfill()).await?;
+    let mut session = cluster.start_session();
+    session.run("CREATE TABLE t(v1 int);").await?;
+    session
+        .run("INSERT INTO t select 1 from generate_series(1, 100000);")
+        .await?;
+    session
+        .flush()
+        .await?;
+
+    // Find the timeout where the barrier latency is high enough
+    // to make the cancel step timeout.
+    let mut timeout_threshold_secs = 1;
+    loop {
+        let mut session = cluster.start_session();
+        // Control the streaming rate limit, so we can wait till 100 records and cancel.
+        session
+            .run("SET BACKGROUND_DDL=true")
+            .await?;
+        session.run("SET STREAMING_RATE_LIMIT=30").await?;
+        session
+            .run("CREATE MATERIALIZED VIEW m1 AS SELECT x.v1 FROM t x join t y on x.v1 = y.v1;")
+            .await?;
+        sleep(Duration::from_secs(timeout_threshold_secs)).await;
+        let ids = session
+            .run("select ddl_id from rw_catalog.rw_ddl_progress;")
+            .await?;
+        tracing::info!("selected streaming jobs to cancel {:?}", ids);
+        tracing::info!("cancelling streaming jobs");
+        let ids = ids.split('\n').collect::<Vec<_>>().join(",");
+        let result = timeout(Duration::from_micros(500), async move {
+            let result = session.run(&format!("cancel jobs {};", ids)).await.unwrap();
+            tracing::info!("cancelled streaming jobs, {}", result);
+            let ids = result
+                .split('\n')
+                .map(|s| {
+                    s.parse::<u32>()
+                        .map_err(|_e| anyhow!("failed to parse {}", s))
+                })
+                .collect::<Result<Vec<_>>>().unwrap();
+        }).await;
+        println!("timeout: {timeout_threshold_secs}s, result: {result:?}");
+        if result.is_err() {
+            // Threshold is found.
+            // Trigger recovery to let the cancel still take effect.
+            let mut session = cluster.start_session();
+            // cluster.kill_nodes_and_restart(["meta-1", "compute-1"], 2).await;
+            session.run("recover;").await?;
+            // Keep running until succeeds
+            while session.run("flush;").await.is_err() {
+
+            }
+            session.run("recover;").await?;
+            // Keep running until succeeds
+            while session.run("flush;").await.is_err() {
+
+            }
+            break;
+        } else {
+            println!("timeout: {timeout_threshold_secs}s, result: {result:?}");
+            timeout_threshold_secs += 1;
+            continue;
+        }
+    }
+
+    // Make sure no more streaming jobs are running.
+    let mut session = cluster.start_session();
+    let result = session.run("select count(*) from rw_catalog.rw_ddl_progress;").await?;
+    assert_eq!(result, "0");
     Ok(())
 }
