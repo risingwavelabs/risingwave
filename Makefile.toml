@@ -726,6 +726,13 @@ ${TMUX} list-windows -F "#{window_name} #{pane_id}" \
 | awk '{ print $2 }' \
 | xargs -I {} ${TMUX} send-keys -t {} C-c C-d
 
+# Stop docker components
+containers=$(docker ps -a -q -f name=risedev- 2>/dev/null) || true
+if [[ -n ${containers} ]]; then
+  echo "Stopping docker components..."
+  docker stop ${containers}
+fi
+
 # Kill kafka cleanly. Ctrl+C will lose data.
 if [[ -n $(${TMUX} list-windows | grep kafka) ]];
 then

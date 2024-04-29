@@ -53,6 +53,10 @@ impl CompactionPicker for IntraCompactionPicker {
             return None;
         }
 
+        if let Some(ret) = self.pick_l0_trivial_move_file(l0, level_handlers, stats) {
+            return Some(ret);
+        }
+
         let vnode_partition_count = self.config.split_weight_by_vnode;
 
         if let Some(ret) =
@@ -61,12 +65,7 @@ impl CompactionPicker for IntraCompactionPicker {
             return Some(ret);
         }
 
-        if let Some(ret) = self.pick_l0_intra(l0, &level_handlers[0], vnode_partition_count, stats)
-        {
-            return Some(ret);
-        }
-
-        self.pick_l0_trivial_move_file(l0, level_handlers, stats)
+        self.pick_l0_intra(l0, &level_handlers[0], vnode_partition_count, stats)
     }
 }
 
@@ -785,5 +784,73 @@ pub mod tests {
             .pick_whole_level(&l0, &level_handler, 4, &mut LocalPickerStatistic::default())
             .unwrap();
         assert_eq!(ret.input_levels.len(), 2);
+    }
+
+    #[test]
+    fn test_priority() {
+        let config = Arc::new(
+            CompactionConfigBuilder::new()
+                .level0_max_compact_file_number(20)
+                .sub_level_max_compaction_bytes(1)
+                .level0_sub_level_compact_level_count(1)
+                .build(),
+        );
+        let mut table_infos = vec![];
+        for epoch in 1..3 {
+            let base = epoch * 100;
+            let mut ssts = vec![];
+            for i in 1..50 {
+                let left = (i as usize) * 100;
+                let right = left + 100;
+                ssts.push(generate_table(base + i, 1, left, right, epoch));
+            }
+            table_infos.push(ssts);
+        }
+
+        let mut l0 = generate_l0_nonoverlapping_multi_sublevels(table_infos);
+        // trivial-move
+        l0.sub_levels[1]
+            .table_infos
+            .push(generate_table(9999, 900000000, 0, 100, 1));
+
+        l0.sub_levels[0].total_file_size = 1;
+        l0.sub_levels[1].total_file_size = 1;
+
+        let mut picker = IntraCompactionPicker::new_with_validator(
+            config,
+            Arc::new(CompactionTaskValidator::unused()),
+            Arc::new(CompactionDeveloperConfig::default()),
+        );
+        let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let mut local_stats = LocalPickerStatistic::default();
+
+        let levels = Levels {
+            l0: Some(l0),
+            levels: vec![generate_level(1, vec![generate_table(100, 1, 0, 1000, 1)])],
+            member_table_ids: vec![1],
+            ..Default::default()
+        };
+
+        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
+        assert!(is_l0_trivial_move(ret.as_ref().unwrap()));
+        ret.as_ref()
+            .unwrap()
+            .add_pending_task(1, &mut levels_handler);
+        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
+        assert!(ret.is_some());
+        let input = ret.as_ref().unwrap();
+        assert_eq!(input.input_levels.len(), 2);
+        assert_ne!(
+            levels.l0.as_ref().unwrap().get_sub_levels()[0]
+                .table_infos
+                .len(),
+            input.input_levels[0].table_infos.len()
+        );
+        assert_ne!(
+            levels.l0.as_ref().unwrap().get_sub_levels()[1]
+                .table_infos
+                .len(),
+            input.input_levels[1].table_infos.len()
+        );
     }
 }
