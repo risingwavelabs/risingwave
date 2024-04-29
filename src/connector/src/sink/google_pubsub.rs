@@ -72,10 +72,8 @@ pub struct GooglePubSubConfig {
 
 impl GooglePubSubConfig {
     fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
-        serde_json::from_value::<GooglePubSubConfig>(
-            serde_json::to_value(values).expect("impossible"),
-        )
-        .map_err(|e| SinkError::Config(anyhow!(e)))
+        serde_json::from_value::<GooglePubSubConfig>(serde_json::to_value(values).unwrap())
+            .map_err(|e| SinkError::Config(anyhow!(e)))
     }
 
     pub(crate) fn initialize_env(&self) {
