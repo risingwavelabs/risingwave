@@ -185,15 +185,9 @@ For example, you can modify the default section to:
     - use: frontend
     - use: prometheus
     - use: grafana
-    - use: zookeeper
-      persist-data: true
     - use: kafka
       persist-data: true
 ```
-
-> [!NOTE]
->
-> The Kafka service depends on the ZooKeeper service. If you want to enable the Kafka component, enable the ZooKeeper component first.
 
 Now you can run `./risedev d` to start a new dev cluster. The new dev cluster will contain components as configured in the yaml file. RiseDev will automatically configure the components to use the available storage service and to monitor the target.
 

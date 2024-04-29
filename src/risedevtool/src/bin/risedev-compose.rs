@@ -201,7 +201,7 @@ fn main() -> Result<()> {
             ServiceConfig::Pubsub(_) => {
                 return Err(anyhow!("not supported, please use redpanda instead"))
             }
-            ServiceConfig::ZooKeeper(_) => {
+            ServiceConfig::DummyZooKeeper(_) => {
                 return Err(anyhow!("not supported, please use redpanda instead"))
             }
             ServiceConfig::Opendal(_) => continue,
