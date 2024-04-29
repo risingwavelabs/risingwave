@@ -24,7 +24,7 @@ shift $((OPTIND -1))
 
 cleanup() {
   echo "--- clean Demos"
-  python3 clean_demos.py --case "${case}"
+  python3 integration_tests/scripts/clean_demos.py --case "${case}"
 }
 
 trap cleanup EXIT
@@ -61,8 +61,7 @@ fi
 echo "--- case: ${case}, format: ${format}"
 
 if [ "${case}" == "client-library" ]; then
-  cd integration_tests/client-library
-  python3 client_test.py
+  python3 integration_tests/client-library/client_test.py
   exit 0
 fi
 
@@ -77,11 +76,9 @@ export PATH=$PATH:$HOME/.local/bin
 echo "--- download rwctest-key"
 aws secretsmanager get-secret-value --secret-id "gcp-buildkite-rwctest-key" --region us-east-2 --query "SecretString" --output text >gcp-rwctest.json
 
-cd integration_tests/scripts
-
 echo "--- rewrite docker compose for protobuf"
 if [ "${format}" == "protobuf" ]; then
-  python3 gen_pb_compose.py "${case}" "${format}"
+  python3 integration_tests/scripts/gen_pb_compose.py "${case}" "${format}"
 fi
 
 echo "--- set vm.max_map_count=2000000 for doris"
@@ -89,7 +86,7 @@ max_map_count_original_value=$(sysctl -n vm.max_map_count)
 sudo sysctl -w vm.max_map_count=2000000
 
 echo "--- run Demos"
-python3 run_demos.py --case "${case}" --format "${format}"
+python3 integration_tests/scripts/run_demos.py --case "${case}" --format "${format}"
 
 echo "--- run docker ps"
 docker ps
@@ -97,7 +94,7 @@ docker ps
 echo "--- check if the ingestion is successful"
 # extract the type of upstream source,e.g. mysql,postgres,etc
 upstream=$(echo "${case}" | cut -d'-' -f 1)
-python3 check_data.py "${case}" "${upstream}"
+python3 integration_tests/scripts/check_data.py "${case}" "${upstream}"
 
 echo "--- reset vm.max_map_count={$max_map_count_original_value}"
 sudo sysctl -w vm.max_map_count="$max_map_count_original_value"
