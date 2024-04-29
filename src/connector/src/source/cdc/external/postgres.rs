@@ -182,12 +182,13 @@ impl PostgresExternalTableReader {
                 .collect_vec();
 
             let table_name = SchemaTableName::from_properties(&properties);
+            let order_key = primary_keys.iter().join(",");
             let scan_sql = format!(
                 "SELECT {} FROM {} WHERE {} ORDER BY {} LIMIT {scan_limit}",
                 field_names,
                 Self::get_normalized_table_name(&table_name),
                 Self::filter_expression(&primary_keys),
-                primary_keys.iter().join(","),
+                order_key,
             );
             client.prepare(&scan_sql).await?
         };
