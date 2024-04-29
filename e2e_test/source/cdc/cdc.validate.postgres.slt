@@ -230,11 +230,11 @@ create table shipments (
  PRIMARY KEY (shipment_id)
 ) with (
  connector = 'postgres-cdc',
- hostname = 'db',
- port = '5432',
- username = 'postgres',
- password = 'postgres',
- database.name = 'cdc_test',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
  schema.name = 'public',
  table.name = 'shipments',
  slot.name = 'shipments'
