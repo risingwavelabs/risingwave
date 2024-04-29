@@ -38,6 +38,10 @@ impl MockExternalTableReader {
         }
     }
 
+    pub fn get_normalized_table_name(_table_name: &SchemaTableName) -> String {
+        "`mock_table`".to_string()
+    }
+
     pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
         Box::new(move |_| Ok(CdcOffset::MySql(MySqlOffset::default())))
     }
@@ -88,10 +92,6 @@ impl MockExternalTableReader {
 }
 
 impl ExternalTableReader for MockExternalTableReader {
-    fn get_normalized_table_name(&self, _table_name: &SchemaTableName) -> String {
-        "`mock_table`".to_string()
-    }
-
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
         static IDX: AtomicUsize = AtomicUsize::new(0);
 

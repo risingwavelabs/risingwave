@@ -73,6 +73,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
                 properties.clone(),
                 table_schema.clone(),
                 table_pk_indices.clone(),
+                1000,
             )
             .await?;
 

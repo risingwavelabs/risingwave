@@ -70,13 +70,15 @@ impl CdcTableType {
         with_properties: HashMap<String, String>,
         schema: Schema,
         pk_indices: Vec<usize>,
+        scan_limit: u32,
     ) -> ConnectorResult<ExternalTableReaderImpl> {
         match self {
             Self::MySql => Ok(ExternalTableReaderImpl::MySql(
                 MySqlExternalTableReader::new(with_properties, schema).await?,
             )),
             Self::Postgres => Ok(ExternalTableReaderImpl::Postgres(
-                PostgresExternalTableReader::new(with_properties, schema, pk_indices).await?,
+                PostgresExternalTableReader::new(with_properties, schema, pk_indices, scan_limit)
+                    .await?,
             )),
             _ => bail!("invalid external table type: {:?}", *self),
         }
@@ -208,8 +210,6 @@ impl MySqlOffset {
 pub type CdcOffsetParseFunc = Box<dyn Fn(&str) -> ConnectorResult<CdcOffset> + Send>;
 
 pub trait ExternalTableReader {
-    fn get_normalized_table_name(&self, table_name: &SchemaTableName) -> String;
-
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset>;
 
     fn snapshot_read(
@@ -221,14 +221,12 @@ pub trait ExternalTableReader {
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>>;
 }
 
-#[derive(Debug)]
 pub enum ExternalTableReaderImpl {
     MySql(MySqlExternalTableReader),
     Postgres(PostgresExternalTableReader),
     Mock(MockExternalTableReader),
 }
 
-#[derive(Debug)]
 pub struct MySqlExternalTableReader {
     config: ExternalTableConfig,
     rw_schema: Schema,
@@ -283,11 +281,6 @@ impl fmt::Display for SslMode {
 }
 
 impl ExternalTableReader for MySqlExternalTableReader {
-    fn get_normalized_table_name(&self, table_name: &SchemaTableName) -> String {
-        // schema name is the database name in mysql
-        format!("`{}`.`{}`", table_name.schema_name, table_name.table_name)
-    }
-
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
         let mut conn = self.conn.lock().await;
 
@@ -350,6 +343,11 @@ impl MySqlExternalTableReader {
         })
     }
 
+    pub fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
+        // schema name is the database name in mysql
+        format!("`{}`.`{}`", table_name.schema_name, table_name.table_name)
+    }
+
     pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
         Box::new(move |offset| {
             Ok(CdcOffset::MySql(MySqlOffset::parse_debezium_offset(
@@ -374,7 +372,7 @@ impl MySqlExternalTableReader {
             format!(
                 "SELECT {} FROM {} ORDER BY {} LIMIT {limit}",
                 self.field_names,
-                self.get_normalized_table_name(&table_name),
+                Self::get_normalized_table_name(&table_name),
                 order_key,
             )
         } else {
@@ -382,7 +380,7 @@ impl MySqlExternalTableReader {
             format!(
                 "SELECT {} FROM {} WHERE {} ORDER BY {} LIMIT {limit}",
                 self.field_names,
-                self.get_normalized_table_name(&table_name),
+                Self::get_normalized_table_name(&table_name),
                 filter_expr,
                 order_key,
             )
@@ -504,16 +502,6 @@ impl MySqlExternalTableReader {
 }
 
 impl ExternalTableReader for ExternalTableReaderImpl {
-    fn get_normalized_table_name(&self, table_name: &SchemaTableName) -> String {
-        match self {
-            ExternalTableReaderImpl::MySql(mysql) => mysql.get_normalized_table_name(table_name),
-            ExternalTableReaderImpl::Postgres(postgres) => {
-                postgres.get_normalized_table_name(table_name)
-            }
-            ExternalTableReaderImpl::Mock(mock) => mock.get_normalized_table_name(table_name),
-        }
-    }
-
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
         match self {
             ExternalTableReaderImpl::MySql(mysql) => mysql.current_cdc_offset().await,

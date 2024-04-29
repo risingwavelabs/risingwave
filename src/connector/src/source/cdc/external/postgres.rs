@@ -22,15 +22,14 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
 use postgres_openssl::MakeTlsConnector;
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DatumAdapter;
 use risingwave_common::util::iter_util::ZipEqFast;
 use serde_derive::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
-use tokio_postgres::types::PgLsn;
-use tokio_postgres::NoTls;
+use tokio_postgres::types::{PgLsn, Type as PgType};
+use tokio_postgres::{NoTls, Statement};
 
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::postgres_row_to_owned_row;
@@ -74,25 +73,15 @@ impl PostgresOffset {
     }
 }
 
-#[derive(Debug)]
 pub struct PostgresExternalTableReader {
     config: ExternalTableConfig,
     rw_schema: Schema,
     field_names: String,
-    // store the name of uuid fields
-    pk_uuid_field_bitmap: Bitmap,
-
+    prepared_scan_stmt: Statement,
     client: tokio::sync::Mutex<tokio_postgres::Client>,
 }
 
 impl ExternalTableReader for PostgresExternalTableReader {
-    fn get_normalized_table_name(&self, table_name: &SchemaTableName) -> String {
-        format!(
-            "\"{}\".\"{}\"",
-            table_name.schema_name, table_name.table_name
-        )
-    }
-
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
         let mut client = self.client.lock().await;
         // start a transaction to read current lsn and txid
@@ -129,11 +118,12 @@ impl PostgresExternalTableReader {
         properties: HashMap<String, String>,
         rw_schema: Schema,
         pk_indices: Vec<usize>,
+        scan_limit: u32,
     ) -> ConnectorResult<Self> {
         tracing::debug!(?rw_schema, "create postgres external table reader");
 
         let config = serde_json::from_value::<ExternalTableConfig>(
-            serde_json::to_value(properties).unwrap(),
+            serde_json::to_value(properties.clone()).unwrap(),
         )
         .context("failed to extract postgres connector properties")?;
 
@@ -185,44 +175,41 @@ impl PostgresExternalTableReader {
             .map(|f| Self::quote_column(&f.name))
             .join(",");
 
-        // query upstream to get the name of uuid fields
-        let rows = client
-            .query(
-                "SELECT column_name FROM information_schema.columns WHERE table_name = $1 AND table_schema = $2 AND data_type = 'uuid'",
-                &[&config.table, &config.schema],
-            ).await?;
+        let prepared_scan_stmt = {
+            let primary_keys = pk_indices
+                .iter()
+                .map(|i| rw_schema.fields[*i].name.clone())
+                .collect_vec();
 
-        let field_idx_map: HashMap<String, usize> = rw_schema
-            .fields
-            .iter()
-            .enumerate()
-            .map(|(i, f)| (f.name.clone(), i))
-            .collect();
-
-        // mark uuid field in the table schema
-        let mut uuid_field_bitmap = BitmapBuilder::zeroed(rw_schema.fields.len());
-        rows.iter().for_each(|row| {
-            let name: String = row.get::<_, String>(0);
-            if let Some(idx) = field_idx_map.get(&name) {
-                uuid_field_bitmap.set(*idx, true);
-            }
-        });
-
-        let mut pk_bitmap = BitmapBuilder::zeroed(pk_indices.len());
-        let uuid_field_bitmap = uuid_field_bitmap.finish();
-        for (i, pk_idx) in pk_indices.into_iter().enumerate() {
-            if uuid_field_bitmap.is_set(pk_idx) {
-                pk_bitmap.set(i, true);
-            }
-        }
+            let table_name = SchemaTableName::from_properties(&properties);
+            let scan_sql = format!(
+                "SELECT {} FROM {} WHERE {} ORDER BY {} LIMIT {scan_limit}",
+                field_names,
+                Self::get_normalized_table_name(&table_name),
+                Self::filter_expression(&primary_keys),
+                primary_keys.iter().join(","),
+            );
+            client.prepare(&scan_sql).await?
+        };
 
         Ok(Self {
             config,
             rw_schema,
             field_names,
-            pk_uuid_field_bitmap: pk_bitmap.finish(),
+            prepared_scan_stmt,
             client: tokio::sync::Mutex::new(client),
         })
+    }
+
+    pub fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
+        format!(
+            "\"{}\".\"{}\"",
+            table_name.schema_name, table_name.table_name
+        )
+    }
+
+    pub fn primary_key_types(&self) -> &[PgType] {
+        self.prepared_scan_stmt.params()
     }
 
     pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
@@ -242,44 +229,38 @@ impl PostgresExternalTableReader {
         limit: u32,
     ) {
         let order_key = primary_keys.iter().join(",");
-        let sql = if start_pk_row.is_none() {
-            format!(
-                "SELECT {} FROM {} ORDER BY {} LIMIT {limit}",
-                self.field_names,
-                self.get_normalized_table_name(&table_name),
-                order_key,
-            )
-        } else {
-            let filter_expr = Self::filter_expression(&primary_keys);
-            format!(
-                "SELECT {} FROM {} WHERE {} ORDER BY {} LIMIT {limit}",
-                self.field_names,
-                self.get_normalized_table_name(&table_name),
-                filter_expr,
-                order_key,
-            )
-        };
-
         let client = self.client.lock().await;
         client.execute("set time zone '+00:00'", &[]).await?;
 
-        let params: Vec<DatumAdapter> = match start_pk_row {
-            Some(pk_row) => pk_row
-                .into_iter()
-                .zip_eq_fast(self.pk_uuid_field_bitmap.iter())
-                .map(|(datum, is_uuid)| {
-                    if is_uuid && let Some(scalar) = datum {
-                        let uuid = uuid::Uuid::try_parse(scalar.as_utf8()).expect("parse uuid");
-                        DatumAdapter::Uuid(uuid)
-                    } else {
-                        DatumAdapter::Datum(datum)
-                    }
-                })
-                .collect(),
-            None => Vec::new(),
+        let stream = match start_pk_row {
+            Some(pk_row) => {
+                let pk_types = self.primary_key_types();
+                let params = pk_row
+                    .into_iter()
+                    .zip_eq_fast(pk_types.iter())
+                    .map(|(datum, pg_type)| match (&datum, pg_type) {
+                        (&Some(ref scalar), &PgType::UUID) => {
+                            let uuid = uuid::Uuid::try_parse(scalar.as_utf8()).expect("parse uuid");
+                            DatumAdapter::Uuid(uuid)
+                        }
+                        _ => DatumAdapter::Datum(datum),
+                    })
+                    .collect_vec();
+
+                client.query_raw(&self.prepared_scan_stmt, &params).await?
+            }
+            None => {
+                let sql = format!(
+                    "SELECT {} FROM {} ORDER BY {} LIMIT {limit}",
+                    self.field_names,
+                    Self::get_normalized_table_name(&table_name),
+                    order_key,
+                );
+                let params: Vec<DatumAdapter> = vec![];
+                client.query_raw(&sql, &params).await?
+            }
         };
 
-        let stream = client.query_raw(&sql, &params).await?;
         let row_stream = stream.map(|row| {
             let row = row?;
             Ok::<_, crate::error::ConnectorError>(postgres_row_to_owned_row(row, &self.rw_schema))
