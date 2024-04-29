@@ -24,16 +24,15 @@ use futures::future::try_join_all;
 use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{pin_mut, FutureExt, StreamExt};
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorId;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
-use risingwave_pb::stream_plan::{Barrier, BarrierMutation, StreamActor};
-use risingwave_pb::stream_service::build_actors_request::SubscriptionIds;
+use risingwave_pb::stream_plan::{Barrier, BarrierMutation};
 use risingwave_pb::stream_service::{
     streaming_control_stream_request, streaming_control_stream_response, BarrierCompleteResponse,
-    BroadcastActorInfoTableRequest, BuildActorsRequest, DropActorsRequest, InjectBarrierRequest,
-    StreamingControlStreamRequest, StreamingControlStreamResponse, UpdateActorsRequest,
+    BroadcastActorInfoTableRequest, BuildActorInfo, BuildActorsRequest, DropActorsRequest,
+    InjectBarrierRequest, StreamingControlStreamRequest, StreamingControlStreamResponse,
+    UpdateActorsRequest,
 };
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::StreamClient;
@@ -404,36 +403,18 @@ impl StreamRpcManager {
         &self,
         node_map: &HashMap<WorkerId, WorkerNode>,
         node_actors: impl Iterator<Item = (WorkerId, Vec<ActorId>)>,
-        related_subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
     ) -> MetaResult<()> {
         self.make_request(
             node_actors.map(|(worker_id, actors)| (node_map.get(&worker_id).unwrap(), actors)),
-            |client, actors| {
-                let related_subscriptions = related_subscriptions.clone();
-                async move {
-                    let request_id = Self::new_request_id();
-                    tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
-                    client
-                        .build_actors(BuildActorsRequest {
-                            request_id,
-                            actor_id: actors,
-                            related_subscriptions: related_subscriptions
-                                .iter()
-                                .map(|(table_id, subscriptions)| {
-                                    (
-                                        table_id.table_id,
-                                        SubscriptionIds {
-                                            subscription_ids: subscriptions
-                                                .keys()
-                                                .cloned()
-                                                .collect(),
-                                        },
-                                    )
-                                })
-                                .collect(),
-                        })
-                        .await
-                }
+            |client, actors| async move {
+                let request_id = Self::new_request_id();
+                tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
+                client
+                    .build_actors(BuildActorsRequest {
+                        request_id,
+                        actor_id: actors,
+                    })
+                    .await
             },
         )
         .await?;
@@ -447,7 +428,7 @@ impl StreamRpcManager {
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
         broadcast_worker_ids: impl Iterator<Item = WorkerId>,
         actor_infos_to_broadcast: impl Iterator<Item = ActorInfo>,
-        node_actors_to_create: impl Iterator<Item = (WorkerId, Vec<StreamActor>)>,
+        node_actors_to_create: impl Iterator<Item = (WorkerId, Vec<BuildActorInfo>)>,
     ) -> MetaResult<()> {
         let actor_infos = actor_infos_to_broadcast.collect_vec();
         let mut node_actors_to_create = node_actors_to_create.collect::<HashMap<_, _>>();
@@ -466,7 +447,7 @@ impl StreamRpcManager {
                         .await?;
                     if let Some(actors) = actors {
                         let request_id = Self::new_request_id();
-                        let actor_ids = actors.iter().map(|actor| actor.actor_id).collect_vec();
+                        let actor_ids = actors.iter().map(|actor| actor.actor.as_ref().unwrap().actor_id).collect_vec();
                         tracing::debug!(request_id = request_id.as_str(), actors = ?actor_ids, "update actors");
                         client
                             .update_actors(UpdateActorsRequest { request_id, actors })
