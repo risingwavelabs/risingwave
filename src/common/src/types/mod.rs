@@ -19,7 +19,7 @@
 
 use std::convert::TryFrom;
 use std::error::Error;
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
 use std::hash::Hash;
 use std::str::FromStr;
 
@@ -597,7 +597,7 @@ impl !PartialOrd for ScalarRefImpl<'_> {}
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
 
-/// An adapter type to support upstream data types that don't have ScalarImpl implementations
+/// An adapter type to support upstream data types that don't have `ScalarImpl` implementations
 #[derive(Debug)]
 pub enum DatumAdapter {
     Datum(Datum),
