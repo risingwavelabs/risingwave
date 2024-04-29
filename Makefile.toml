@@ -689,41 +689,13 @@ script = '''
 
 set -euo pipefail
 
-wait_kafka_exit() {
-  # Follow kafka-server-stop.sh
-  while [[ -n "$(ps ax | grep ' kafka\.Kafka ' | grep java | grep -v grep | awk '{print $1}')" ]]; do
-    echo "Waiting for kafka to exit"
-    sleep 1
-  done
-}
-
-wait_zookeeper_exit() {
-  # Follow zookeeper-server-stop.sh
-  while [[ -n "$(ps ax | grep java | grep -i QuorumPeerMain | grep -v grep | awk '{print $1}')" ]]; do
-    echo "Waiting for zookeeper to exit"
-    sleep 1
-  done
-}
-
-kill_kafka() {
-  ${PREFIX_BIN}/kafka/bin/kafka-server-stop.sh
-  wait_kafka_exit
-}
-
-kill_zookeeper() {
-  ${PREFIX_BIN}/kafka/bin/zookeeper-server-stop.sh
-  wait_zookeeper_exit
-}
-
 if ! ${TMUX} ls &>/dev/null ; then
   echo "No risedev cluster to kill. Exiting..."
   exit 0
 fi
 
-# Kill other components
+# Kill tmux components
 ${TMUX} list-windows -F "#{window_name} #{pane_id}" \
-| grep -v 'kafka' \
-| grep -v 'zookeeper' \
 | awk '{ print $2 }' \
 | xargs -I {} ${TMUX} send-keys -t {} C-c C-d
 
@@ -732,19 +704,6 @@ containers=$(docker ps -a -q -f name=risedev- 2>/dev/null) || true
 if [[ -n ${containers} ]]; then
   echo "Stopping docker components..."
   docker stop ${containers}
-fi
-
-# Kill kafka and zookeeper
-if [[ -n $(${TMUX} list-windows | grep kafka) ]];
-then
-  echo "kill kafka"
-  kill_kafka || true
-
-  echo "kill zookeeper"
-  kill_zookeeper || true
-
-  # Kill their ${TMUX} sessions
-  ${TMUX} list-windows -t risedev -F "#{pane_id}" | xargs -I {} ${TMUX} send-keys -t {} C-c C-d
 fi
 
 ${TMUX} kill-server
