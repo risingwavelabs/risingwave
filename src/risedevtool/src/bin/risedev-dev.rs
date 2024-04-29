@@ -275,9 +275,8 @@ fn task_main(
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 DummyService::new(&c.id).execute(&mut ctx)?;
-                ctx.pb.set_message(format!(
-                    "dummy service for compatibility, not actually started"
-                ));
+                ctx.pb
+                    .set_message("dummy service for compatibility, not actually started");
             }
             ServiceConfig::Kafka(c) => {
                 let mut ctx =
