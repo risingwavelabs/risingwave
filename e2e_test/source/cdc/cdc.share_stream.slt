@@ -417,7 +417,7 @@ select * from numeric_list_to_rw_int256_list_shared order by id;
 query II
 select * from numeric_list_to_numeric_list_shared order by id;
 ----
-1 {NULL,6,NULL,NULL,NULL}
+1 {3.14,6,NULL,NULL,NULL}
 2 {NaN,Infinity,-Infinity}
 
 query II

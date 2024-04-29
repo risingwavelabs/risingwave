@@ -436,25 +436,25 @@ fn pg_numeric_to_numeric(num: Option<PgNumeric>, name: &str) -> Option<ScalarImp
 
 fn pg_numeric_to_rw_int256(val: Option<PgNumeric>, name: &str) -> Option<ScalarImpl> {
     match val {
-        Some(pg_numeric) => {
-            match pg_numeric {
-                PgNumeric::Normalized(big_decimal) => {match Int256::from_str(big_decimal.to_string().as_str()) {
+        Some(pg_numeric) => match pg_numeric {
+            PgNumeric::Normalized(big_decimal) => {
+                match Int256::from_str(big_decimal.to_string().as_str()) {
                     Ok(num) => Some(ScalarImpl::from(num)),
                     Err(err) => {
                         log_error!(name, err, "parse numeric string as rw_int256 failed");
                         None
                     }
-                }},
-                _ => None,
+                }
             }
+            _ => None,
         },
         // NULL
-        None => None
+        None => None,
     }
 }
 
 fn pg_numeric_to_varchar(val: Option<PgNumeric>) -> Option<ScalarImpl> {
-    val.map(|pg_numeric| 
+    val.map(|pg_numeric|
         // FIXME(kexiang): NEGATIVE_INFINITY -> -Infinity, POSITIVE_INFINITY -> Infinity, NAN -> NaN
         // https://github.com/risingwavelabs/risingwave/issues/16395
         // The current implementation is to ensure consistency with the behavior of cdc event parsor.
@@ -463,10 +463,9 @@ fn pg_numeric_to_varchar(val: Option<PgNumeric>) -> Option<ScalarImpl> {
             PgNumeric::Normalized(big_decimal) => big_decimal.to_string(),
             PgNumeric::PositiveInf => String::from("POSITIVE_INFINITY"),
             PgNumeric::NaN => String::from("NAN"),
-        }
-    ).map(ScalarImpl::from)
+        })
+    .map(ScalarImpl::from)
 }
-
 
 #[derive(Clone, Debug)]
 struct EnumString(String);
