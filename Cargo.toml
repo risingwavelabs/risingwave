@@ -20,7 +20,6 @@ members = [
     "src/expr/core",
     "src/expr/impl",
     "src/expr/macro",
-    "src/expr/udf",
     "src/frontend",
     "src/frontend/macro",
     "src/frontend/planner_test",

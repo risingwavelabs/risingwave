@@ -72,7 +72,6 @@ risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 risingwave_storage = { workspace = true }
-risingwave_udf = { workspace = true }
 risingwave_variables = { workspace = true }
 rw_futures_util = { workspace = true }
 serde = { version = "1", features = ["derive"] }
