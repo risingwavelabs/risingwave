@@ -14,8 +14,10 @@
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::error::Error;
 
 use anyhow::Context;
+use bytes::BytesMut;
 use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
@@ -24,11 +26,11 @@ use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
 use postgres_openssl::MakeTlsConnector;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::DatumAdapter;
+use risingwave_common::types::Datum;
 use risingwave_common::util::iter_util::ZipEqFast;
 use serde_derive::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
-use tokio_postgres::types::{PgLsn, Type as PgType};
+use tokio_postgres::types::{to_sql_checked, IsNull, PgLsn, ToSql, Type as PgType};
 use tokio_postgres::{NoTls, Statement};
 
 use crate::error::{ConnectorError, ConnectorResult};
@@ -70,6 +72,33 @@ impl PostgresOffset {
                 .lsn
                 .context("invalid postgres lsn")?,
         })
+    }
+}
+
+/// An adapter type to support upstream data types that don't have `ScalarImpl` implementations
+#[derive(Debug)]
+pub enum DatumAdapter {
+    Datum(Datum),
+    Uuid(uuid::Uuid),
+}
+
+impl ToSql for DatumAdapter {
+    to_sql_checked!();
+
+    fn to_sql(
+        &self,
+        ty: &PgType,
+        out: &mut BytesMut,
+    ) -> Result<IsNull, Box<dyn Error + Sync + Send>> {
+        match self {
+            DatumAdapter::Datum(Some(scalar)) => scalar.as_scalar_ref_impl().to_sql(ty, out),
+            DatumAdapter::Datum(None) => Ok(IsNull::Yes),
+            DatumAdapter::Uuid(uuid) => uuid.to_sql(ty, out),
+        }
+    }
+
+    fn accepts(_ty: &PgType) -> bool {
+        true
     }
 }
 
