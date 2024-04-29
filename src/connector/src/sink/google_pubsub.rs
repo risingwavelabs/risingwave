@@ -121,11 +121,6 @@ impl Sink for GooglePubSubSink {
                 "Google Pub/Sub sink only support append-only mode"
             )));
         }
-        if !matches!(self.format_desc.encode, SinkEncode::Json) {
-            return Err(SinkError::GooglePubSub(anyhow!(
-                "Google Pub/Sub sink only support `Json` sink encode"
-            )));
-        }
 
         let conf = &self.config;
         if matches!((&conf.emulator_host, &conf.credentials), (None, None)) {
