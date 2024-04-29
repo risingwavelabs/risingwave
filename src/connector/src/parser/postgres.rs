@@ -436,20 +436,17 @@ fn pg_numeric_to_numeric(num: Option<PgNumeric>, name: &str) -> Option<ScalarImp
 
 fn pg_numeric_to_rw_int256(val: Option<PgNumeric>, name: &str) -> Option<ScalarImpl> {
     match val {
-        Some(pg_numeric) => match pg_numeric {
-            PgNumeric::Normalized(big_decimal) => {
-                match Int256::from_str(big_decimal.to_string().as_str()) {
-                    Ok(num) => Some(ScalarImpl::from(num)),
-                    Err(err) => {
-                        log_error!(name, err, "parse numeric string as rw_int256 failed");
-                        None
-                    }
+        Some(PgNumeric::Normalized(big_decimal)) => {
+            match Int256::from_str(big_decimal.to_string().as_str()) {
+                Ok(num) => Some(ScalarImpl::from(num)),
+                Err(err) => {
+                    log_error!(name, err, "parse numeric string as rw_int256 failed");
+                    None
                 }
             }
-            _ => None,
-        },
-        // NULL
-        None => None,
+        }
+        // inf, -inf, nan or NULL
+        _ => None,
     }
 }
 
