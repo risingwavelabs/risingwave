@@ -874,18 +874,18 @@ profile:
         enable-tiered-cache: true
       - use: frontend
       - use: compactor
-      - use: pubsub
-        persist-data: true
+      # - use: pubsub
+      #   persist-data: true
       - use: kafka
-        user-managed: true
-        address: message_queue
+        # user-managed: true
+        # address: message_queue
         port: 29092
-      - use: mysql
-        port: 3306
-        address: mysql
-        user: root
-        password: 123456
-        user-managed: true
+      # - use: mysql
+      #   port: 3306
+      #   address: mysql
+      #   user: root
+      #   password: 123456
+      #   user-managed: true
 
   ci-redis:
     config-path: src/config/ci.toml
