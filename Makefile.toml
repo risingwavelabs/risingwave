@@ -131,8 +131,7 @@ rm -rf "${PREFIX_PROFILING}"
 [tasks.reset-rw]
 category = "RiseDev - Start/Stop"
 description = "Clean all data in the default database dev of the running RisingWave"
-dependencies = ["check-risedev-env-file"]
-env_files = ["${PREFIX_CONFIG}/risedev-env"]
+dependencies = ["check-and-load-risedev-env-file"]
 script = '''
 #!/usr/bin/env bash
 psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root -d dev -c "CREATE DATABASE risedev_tmp;"
@@ -568,11 +567,16 @@ if [ ! -f "${RC_ENV_FILE}" ]; then
 fi
 '''
 
+[tasks.check-and-load-risedev-env-file]
+private = true
+category = "RiseDev - Prepare"
+dependencies = ["check-risedev-env-file"]
+env_files = ["${PREFIX_CONFIG}/risedev-env"]
+
 [tasks.psql-env]
 category = "RiseDev - Start/Stop"
 description = "Dump env configuration for psql"
-dependencies = ["check-risedev-env-file"]
-env_files = ["${PREFIX_CONFIG}/risedev-env"]
+dependencies = ["check-and-load-risedev-env-file"]
 script = '''
 #!/usr/bin/env bash
 cat <<EOF > "${PREFIX_CONFIG}/psql-env"
@@ -590,8 +594,7 @@ echo "   $(tput setaf 4)source ${PREFIX_CONFIG}/psql-env$(tput sgr0)"
 [tasks.psql]
 category = "RiseDev - Start/Stop"
 description = "Run local psql client with default connection parameters. You can pass extra arguments to psql."
-dependencies = ["check-risedev-env-file"]
-env_files = ["${PREFIX_CONFIG}/risedev-env"]
+dependencies = ["check-and-load-risedev-env-file"]
 script = '''
 #!/usr/bin/env bash
 psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root -d dev "$@"
@@ -600,8 +603,7 @@ psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root
 [tasks.ctl]
 category = "RiseDev - Start/Stop"
 description = "Start RiseCtl"
-dependencies = ["check-risedev-env-file"]
-env_files = ["${PREFIX_CONFIG}/risedev-env"]
+dependencies = ["check-and-load-risedev-env-file"]
 script = '''
 #!/usr/bin/env bash
 cargo run -p risingwave_cmd_all --profile "${RISINGWAVE_BUILD_PROFILE}" -- ctl "$@"
@@ -725,6 +727,14 @@ ${TMUX} list-windows -F "#{window_name} #{pane_id}" \
 | awk '{ print $2 }' \
 | xargs -I {} ${TMUX} send-keys -t {} C-c C-d
 
+# Stop docker components
+containers=$(docker ps -a -q -f name=risedev- 2>/dev/null) || true
+if [[ -n ${containers} ]]; then
+  echo "Stopping docker components..."
+  docker stop ${containers}
+fi
+
+# Kill kafka and zookeeper
 if [[ -n $(${TMUX} list-windows | grep kafka) ]];
 then
   echo "kill kafka"
@@ -1308,16 +1318,27 @@ echo "All processes has exited."
 """
 
 [tasks.slt]
-env = { SLT_HOST = "${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS}", SLT_PORT = "${RISEDEV_RW_FRONTEND_PORT}", SLT_DB = "dev" }
 category = "RiseDev - Test - SQLLogicTest"
 install_crate = { version = "0.20.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
   "--help",
 ], install_command = "binstall" }
-dependencies = ["check-risedev-env-file"]
-env_files = ["${PREFIX_CONFIG}/risedev-env"]
+dependencies = ["check-and-load-risedev-env-file"]
 command = "sqllogictest"
 args = ["${@}"]
 description = "🌟 Run SQLLogicTest"
+
+[tasks.slt.env]
+SLT_HOST = "${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS}"
+SLT_PORT = "${RISEDEV_RW_FRONTEND_PORT}"
+SLT_DB = "dev"
+PATH = "${PWD}/e2e_test/commands:${PATH}"
+
+[tasks.slt-clean]
+category = "RiseDev - Test - SQLLogicTest"
+dependencies = ["clean-kafka", "reset-rw"]
+description = "Run SQLLogicTest with a clean environment"
+run_task = "slt"
+args = ["${@}"]
 
 [tasks.slt-streaming]
 category = "RiseDev - Test - SQLLogicTest"
@@ -1433,3 +1454,15 @@ script = """
 vars = dump_variables
 echo ${vars}
 """
+
+[tasks.show-risedev-env]
+description = "Show risedev-env environment variables"
+dependencies = ["check-risedev-env-file"]
+script = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+cat ${PREFIX_CONFIG}/risedev-env
+echo "Hint: To load the environment variables into the shell, you may run:"
+echo "$(tput setaf 4)\set -a; source ${PREFIX_CONFIG}/risedev-env; set +a$(tput sgr0)"
+'''
