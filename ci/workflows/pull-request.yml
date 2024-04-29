@@ -472,7 +472,7 @@ steps:
     retry: *auto-retry
 
   - label: "unit test (deterministic simulation)"
-    command: "ci/scripts/deterministic-unit-test.sh"
+    command: "MADSIM_TEST_NUM=100 timeout 40m ci/scripts/deterministic-unit-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/skip-ci") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-unit-test-deterministic-simulation"
