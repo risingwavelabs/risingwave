@@ -1,4 +1,5 @@
 # CDC Postgres source validate test
+control substitution on
 
 # invalid username
 statement error
