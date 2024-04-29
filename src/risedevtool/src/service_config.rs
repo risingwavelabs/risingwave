@@ -336,6 +336,26 @@ pub struct RedisConfig {
     pub address: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct MySqlConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub port: u16,
+    pub address: String,
+
+    pub user: String,
+    pub password: String,
+    pub database: String,
+
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
 /// All service configuration
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServiceConfig {
@@ -356,6 +376,7 @@ pub enum ServiceConfig {
     Redis(RedisConfig),
     ZooKeeper(ZooKeeperConfig),
     RedPanda(RedPandaConfig),
+    MySql(MySqlConfig),
 }
 
 impl ServiceConfig {
@@ -378,6 +399,7 @@ impl ServiceConfig {
             Self::Redis(c) => &c.id,
             Self::RedPanda(c) => &c.id,
             Self::Opendal(c) => &c.id,
+            Self::MySql(c) => &c.id,
         }
     }
 
@@ -400,6 +422,7 @@ impl ServiceConfig {
             Self::Redis(c) => Some(c.port),
             Self::RedPanda(_c) => None,
             Self::Opendal(_) => None,
+            Self::MySql(c) => Some(c.port),
         }
     }
 
@@ -422,6 +445,7 @@ impl ServiceConfig {
             Self::Redis(_c) => false,
             Self::RedPanda(_c) => false,
             Self::Opendal(_c) => false,
+            Self::MySql(c) => c.user_managed,
         }
     }
 }

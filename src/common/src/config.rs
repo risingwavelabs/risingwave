@@ -1305,7 +1305,7 @@ pub mod default {
         }
 
         pub fn compactor_max_task_multiplier() -> f32 {
-            2.5000
+            3.0000
         }
 
         pub fn compactor_memory_available_proportion() -> f64 {
@@ -1354,7 +1354,7 @@ pub mod default {
         }
 
         pub fn enable_fast_compaction() -> bool {
-            false
+            true
         }
 
         pub fn check_compaction_result() -> bool {

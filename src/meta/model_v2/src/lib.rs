@@ -43,6 +43,7 @@ pub mod index;
 pub mod object;
 pub mod object_dependency;
 pub mod schema;
+pub mod serde_seaql_migration;
 pub mod session_parameter;
 pub mod sink;
 pub mod source;
@@ -83,7 +84,7 @@ pub type HummockSstableObjectId = i64;
 pub type FragmentId = i32;
 pub type ActorId = i32;
 
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum JobStatus {
     #[sea_orm(string_value = "INITIAL")]
@@ -115,7 +116,7 @@ impl From<JobStatus> for PbStreamJobState {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum CreateType {
     #[sea_orm(string_value = "BACKGROUND")]
@@ -170,7 +171,7 @@ macro_rules! derive_from_json_struct {
 /// Defines struct with a byte array that derives `DeriveValueType`, it will helps to map blob stored in database to Pb struct.
 macro_rules! derive_from_blob {
     ($struct_name:ident, $field_type:ty) => {
-        #[derive(Clone, PartialEq, Eq, Serialize, Deserialize, DeriveValueType)]
+        #[derive(Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, DeriveValueType)]
         pub struct $struct_name(#[sea_orm] Vec<u8>);
 
         impl $struct_name {
@@ -212,7 +213,7 @@ macro_rules! derive_from_blob {
 /// Defines struct with a byte array that derives `DeriveValueType`, it will helps to map blob stored in database to Pb struct array.
 macro_rules! derive_array_from_blob {
     ($struct_name:ident, $field_type:ty, $field_array_name:ident) => {
-        #[derive(Clone, PartialEq, Eq, DeriveValueType)]
+        #[derive(Clone, PartialEq, Eq, DeriveValueType, serde::Deserialize, serde::Serialize)]
         pub struct $struct_name(#[sea_orm] Vec<u8>);
 
         #[derive(Clone, PartialEq, ::prost::Message)]

@@ -21,7 +21,7 @@ use std::sync::{Arc, LazyLock};
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use foyer::memory::CacheContext;
-use futures::future::try_join_all;
+use futures::future::{try_join, try_join_all};
 use futures::{stream, FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
@@ -38,7 +38,7 @@ use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorMana
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
 use crate::hummock::compactor::context::{await_tree_key, CompactorContext};
 use crate::hummock::compactor::{check_flush_result, CompactOutput, Compactor};
-use crate::hummock::event_handler::uploader::UploadTaskPayload;
+use crate::hummock::event_handler::uploader::{UploadTaskOutput, UploadTaskPayload};
 use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::iterator::{Forward, HummockIterator, MergeIterator, UserIterator};
 use crate::hummock::shared_buffer::shared_buffer_batch::{
@@ -62,9 +62,9 @@ pub async fn compact(
     payload: UploadTaskPayload,
     compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
     filter_key_extractor_manager: FilterKeyExtractorManager,
-) -> HummockResult<Vec<LocalSstableInfo>> {
+) -> HummockResult<UploadTaskOutput> {
     let mut grouped_payload: HashMap<CompactionGroupId, UploadTaskPayload> = HashMap::new();
-    for imm in payload {
+    for imm in &payload {
         let compaction_group_id = match compaction_group_index.get(&imm.table_id) {
             // compaction group id is used only as a hint for grouping different data.
             // If the compaction group id is not found for the table id, we can assign a
@@ -79,14 +79,14 @@ pub async fn compact(
         grouped_payload
             .entry(compaction_group_id)
             .or_default()
-            .push(imm);
+            .push(imm.clone());
     }
 
-    let mut futures = vec![];
+    let mut new_value_futures = vec![];
     for (id, group_payload) in grouped_payload {
         let id_copy = id;
-        futures.push(
-            compact_shared_buffer(
+        new_value_futures.push(
+            compact_shared_buffer::<true>(
                 context.clone(),
                 sstable_object_id_manager.clone(),
                 filter_key_extractor_manager.clone(),
@@ -104,24 +104,53 @@ pub async fn compact(
             .instrument_await(format!("shared_buffer_compact_compaction_group {}", id)),
         );
     }
-    // Note that the output is reordered compared with input `payload`.
-    let result = try_join_all(futures)
-        .await?
+
+    let old_value_payload = payload
         .into_iter()
-        .flatten()
+        .filter(|imm| imm.has_old_value())
         .collect_vec();
-    Ok(result)
+
+    let old_value_future = async {
+        if old_value_payload.is_empty() {
+            Ok(vec![])
+        } else {
+            compact_shared_buffer::<false>(
+                context.clone(),
+                sstable_object_id_manager,
+                filter_key_extractor_manager,
+                old_value_payload,
+            )
+            .await
+        }
+    };
+
+    // Note that the output is reordered compared with input `payload`.
+    let (grouped_new_value_ssts, old_value_ssts) =
+        try_join(try_join_all(new_value_futures), old_value_future).await?;
+
+    let new_value_ssts = grouped_new_value_ssts.into_iter().flatten().collect_vec();
+    Ok(UploadTaskOutput {
+        new_value_ssts,
+        old_value_ssts,
+        wait_poll_timer: None,
+    })
 }
 
 const MIN_SPLIT_TABLE_SIZE: u64 = 64 * 1024 * 1024; // 64MB in once checkpoint, only for large table.
 
 /// For compaction from shared buffer to level 0, this is the only function gets called.
-async fn compact_shared_buffer(
+///
+/// The `IS_NEW_VALUE` flag means for the given payload, we are doing compaction using its new value or old value.
+/// When `IS_NEW_VALUE` is false, we are compacting with old value, and the payload imms should have `old_values` not `None`
+async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
     context: CompactorContext,
     sstable_object_id_manager: SstableObjectIdManagerRef,
     filter_key_extractor_manager: FilterKeyExtractorManager,
     mut payload: UploadTaskPayload,
 ) -> HummockResult<Vec<LocalSstableInfo>> {
+    if !IS_NEW_VALUE {
+        assert!(payload.iter().all(|imm| imm.has_old_value()));
+    }
     // Local memory compaction looks at all key ranges.
 
     let mut table_size: HashMap<u32, u64> = HashMap::default();
@@ -177,7 +206,7 @@ async fn compact_shared_buffer(
         );
         let mut forward_iters = Vec::with_capacity(payload.len());
         for imm in &payload {
-            forward_iters.push(imm.clone().into_forward_iter());
+            forward_iters.push(imm.clone().into_directed_iter::<Forward, IS_NEW_VALUE>());
         }
         let compaction_executor = context.compaction_executor.clone();
         let multi_filter_key_extractor = multi_filter_key_extractor.clone();
@@ -309,6 +338,11 @@ pub async fn merge_imms_in_memory(
     assert!(imms.iter().rev().map(|imm| imm.batch_id()).is_sorted());
     let max_imm_id = imms[0].batch_id();
 
+    let has_old_value = imms[0].has_old_value();
+    // TODO: make sure that the corner case on switch_op_consistency is handled
+    // If the imm of a table id contains old value, all other imm of the same table id should have old value
+    assert!(imms.iter().all(|imm| imm.has_old_value() == has_old_value));
+
     let mut imm_iters = Vec::with_capacity(imms.len());
     let key_count = imms.iter().map(|imm| imm.key_count()).sum();
     let value_count = imms.iter().map(|imm| imm.value_count()).sum();
@@ -336,6 +370,11 @@ pub async fn merge_imms_in_memory(
 
     let mut merged_entries: Vec<SharedBufferKeyEntry> = Vec::with_capacity(key_count);
     let mut values: Vec<VersionedSharedBufferValue> = Vec::with_capacity(value_count);
+    let mut old_values: Option<Vec<Bytes>> = if has_old_value {
+        Some(Vec::with_capacity(value_count))
+    } else {
+        None
+    };
 
     merged_entries.push(SharedBufferKeyEntry {
         key: first_item_key.clone(),
@@ -380,6 +419,9 @@ pub async fn merge_imms_in_memory(
                 .iter()
                 .map(|(epoch_with_gap, value)| (*epoch_with_gap, value.clone())),
         );
+        if let Some(old_values) = &mut old_values {
+            old_values.extend(key_entry.old_values.expect("should exist").iter().cloned())
+        }
         mi.advance_peek_to_next_key();
         // Since there is no blocking point in this method, but it is cpu intensive, we call this method
         // to do cooperative scheduling
@@ -391,6 +433,7 @@ pub async fn merge_imms_in_memory(
             epochs,
             merged_entries,
             values,
+            old_values,
             merged_size,
             max_imm_id,
             memory_tracker,
@@ -570,7 +613,7 @@ mod tests {
     use risingwave_hummock_sdk::key::{prefix_slice_with_vnode, TableKey};
 
     use crate::hummock::compactor::shared_buffer_compact::generate_splits;
-    use crate::hummock::value::HummockValue;
+    use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferValue;
     use crate::mem_table::ImmutableMemtable;
     use crate::opts::StorageOpts;
 
@@ -588,7 +631,7 @@ mod tests {
             0,
             vec![(
                 generate_key("dddd"),
-                HummockValue::put(Bytes::from_static(b"v3")),
+                SharedBufferValue::Insert(Bytes::from_static(b"v3")),
             )],
             1024 * 1024,
             TableId::new(1),
@@ -598,7 +641,7 @@ mod tests {
             0,
             vec![(
                 generate_key("abb"),
-                HummockValue::put(Bytes::from_static(b"v3")),
+                SharedBufferValue::Insert(Bytes::from_static(b"v3")),
             )],
             (1024 + 256) * 1024,
             TableId::new(1),
@@ -609,7 +652,7 @@ mod tests {
             0,
             vec![(
                 generate_key("abc"),
-                HummockValue::put(Bytes::from_static(b"v2")),
+                SharedBufferValue::Insert(Bytes::from_static(b"v2")),
             )],
             (1024 + 512) * 1024,
             TableId::new(1),
@@ -619,7 +662,7 @@ mod tests {
             0,
             vec![(
                 generate_key("aaa"),
-                HummockValue::put(Bytes::from_static(b"v3")),
+                SharedBufferValue::Insert(Bytes::from_static(b"v3")),
             )],
             (1024 + 512) * 1024,
             TableId::new(1),
@@ -630,7 +673,7 @@ mod tests {
             0,
             vec![(
                 generate_key("aaa"),
-                HummockValue::put(Bytes::from_static(b"v3")),
+                SharedBufferValue::Insert(Bytes::from_static(b"v3")),
             )],
             (1024 + 256) * 1024,
             TableId::new(2),

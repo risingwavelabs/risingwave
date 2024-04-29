@@ -18,4 +18,4 @@ syn = { version = "2", features = ["full", "extra-traits"] }
 [dev-dependencies]
 expect-test = "1"
 indoc = "2"
-prettyplease = "0.2"
+prettyplease = { version = "0.2", features = ["verbatim"] }

@@ -487,6 +487,7 @@ define_keywords!(
     STDDEV_SAMP,
     STDIN,
     STORED,
+    STREAMING_RATE_LIMIT,
     STRING,
     STRUCT,
     SUBMULTISET,
