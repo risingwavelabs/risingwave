@@ -62,7 +62,6 @@ pub enum Components {
     Hdfs,
     PrometheusAndGrafana,
     Etcd,
-    Kafka,
     Pubsub,
     Redis,
     Tracing,
@@ -83,7 +82,6 @@ impl Components {
             Self::Hdfs => "[Component] Hummock: Hdfs Backend",
             Self::PrometheusAndGrafana => "[Component] Metrics: Prometheus + Grafana",
             Self::Etcd => "[Component] Etcd",
-            Self::Kafka => "[Component] Kafka",
             Self::Pubsub => "[Component] Google Pubsub",
             Self::Redis => "[Component] Redis",
             Self::BuildConnectorNode => "[Build] Build RisingWave Connector (Java)",
@@ -116,11 +114,6 @@ Required if you want to view metrics."
             Self::Etcd => {
                 "
 Required if you want to persistent meta-node data.
-                "
-            }
-            Self::Kafka => {
-                "
-Required if you want to create source from Kafka.
                 "
             }
             Self::Pubsub => {
@@ -202,7 +195,6 @@ As a result, RisingWave will dump the core on panics.
             "ENABLE_HDFS" => Some(Self::Hdfs),
             "ENABLE_PROMETHEUS_GRAFANA" => Some(Self::PrometheusAndGrafana),
             "ENABLE_ETCD" => Some(Self::Etcd),
-            "ENABLE_KAFKA" => Some(Self::Kafka),
             "ENABLE_PUBSUB" => Some(Self::Pubsub),
             "ENABLE_BUILD_RUST" => Some(Self::RustComponents),
             "ENABLE_BUILD_DASHBOARD" => Some(Self::Dashboard),
@@ -223,7 +215,6 @@ As a result, RisingWave will dump the core on panics.
             Self::Hdfs => "ENABLE_HDFS",
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",
             Self::Etcd => "ENABLE_ETCD",
-            Self::Kafka => "ENABLE_KAFKA",
             Self::Pubsub => "ENABLE_PUBSUB",
             Self::Redis => "ENABLE_REDIS",
             Self::RustComponents => "ENABLE_BUILD_RUST",
