@@ -349,8 +349,11 @@ pub struct MySqlConfig {
 
     pub user: String,
     pub password: String,
+    pub database: String,
 
+    pub image: String,
     pub user_managed: bool,
+    pub persist_data: bool,
 }
 
 /// All service configuration

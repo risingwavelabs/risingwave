@@ -74,11 +74,12 @@ impl StreamChunkBuilder {
             .iter()
             .map(|datatype| datatype.create_array_builder(initial_capacity))
             .collect();
+        let vis_builder = BitmapBuilder::with_capacity(initial_capacity);
         Self {
             ops,
             column_builders,
             data_types,
-            vis_builder: BitmapBuilder::default(),
+            vis_builder,
             max_chunk_size: Some(max_chunk_size),
             initial_capacity,
             size: 0,

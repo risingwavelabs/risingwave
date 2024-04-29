@@ -65,9 +65,7 @@ async fn handle_declare_subscription_cursor(
             check_cursor_unix_millis(start_rw_timestamp, subscription.get_retention_seconds()?)?;
             Some(convert_unix_millis_to_logstore_u64(start_rw_timestamp))
         }
-        Some(risingwave_sqlparser::ast::Since::ProcessTime) => {
-            Some(Epoch::now().0)
-        }
+        Some(risingwave_sqlparser::ast::Since::ProcessTime) => Some(Epoch::now().0),
         Some(risingwave_sqlparser::ast::Since::Begin) => {
             let min_unix_millis =
                 Epoch::now().as_unix_millis() - subscription.get_retention_seconds()? * 1000;
@@ -113,7 +111,7 @@ async fn handle_declare_query_cursor(
     query: Box<Query>,
 ) -> Result<RwPgResponse> {
     let (row_stream, pg_descs) =
-        create_stream_for_cursor(handle_args.clone(), Statement::Query(query)).await?;
+        create_stream_for_cursor_stmt(handle_args.clone(), Statement::Query(query)).await?;
     handle_args
         .session
         .get_cursor_manager()
@@ -122,7 +120,7 @@ async fn handle_declare_query_cursor(
     Ok(PgResponse::empty_result(StatementType::DECLARE_CURSOR))
 }
 
-pub async fn create_stream_for_cursor(
+pub async fn create_stream_for_cursor_stmt(
     handle_args: HandlerArgs,
     stmt: Statement,
 ) -> Result<(PgResponseStream, Vec<PgFieldDescriptor>)> {

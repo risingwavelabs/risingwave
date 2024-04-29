@@ -905,10 +905,7 @@ impl SessionImpl {
         Ok(subscription.clone())
     }
 
-    pub fn get_table_by_id(
-        &self,
-        table_id: &TableId,
-    ) -> Result<Arc<TableCatalog>> {
+    pub fn get_table_by_id(&self, table_id: &TableId) -> Result<Arc<TableCatalog>> {
         let catalog_reader = self.env().catalog_reader().read_guard();
         Ok(catalog_reader.get_table_by_id(table_id)?.clone())
     }
@@ -919,7 +916,10 @@ impl SessionImpl {
         min_epoch: u64,
         max_epoch: u64,
     ) -> Result<Vec<u64>> {
-        self.env.catalog_writer.list_epoch_for_subscription(table_id, min_epoch, max_epoch).await
+        self.env
+            .catalog_writer
+            .list_epoch_for_subscription(table_id, min_epoch, max_epoch)
+            .await
     }
 
     pub fn clear_cancel_query_flag(&self) {

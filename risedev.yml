@@ -1447,20 +1447,32 @@ template:
     # address of redis
     address: "127.0.0.1"
 
-  # MySQL service. Currently user-managed only
+  # MySQL service backed by docker.
   mysql:
     # Id to be picked-up by services
-    id: mysql
+    id: mysql-${port}
 
-    # listen port of mysql
-    port: 8306
     # address of mysql
     address: "127.0.0.1"
 
-    # Note: these configs are not validated by risedev. They are passed as-is to risedev-env
-    # default user for mysql operations.
-    # This is not used in RISEDEV_MYSQL_WITH_OPTIONS_COMMON.
+    # listen port of mysql
+    port: 8306
+
+    # Note:
+    # - This will be used to initialize the MySQL instance if it's fresh.
+    # - In user-managed mode, these configs are not validated by risedev.
+    #   They are passed as-is to risedev-env default user for MySQL operations.
+    # - This is not used in RISEDEV_MYSQL_WITH_OPTIONS_COMMON.
     user: root
     password: ""
+    database: "risedev"
 
-    user-managed: true
+    # The docker image. Can be overridden to use a different version.
+    image: "mysql:8"
+
+    # If set to true, data will be persisted at data/{id}.
+    persist-data: true
+
+    # If `user-managed` is true, user is responsible for starting the service
+    # to serve at the above address and port in any way they see fit.
+    user-managed: false

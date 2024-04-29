@@ -12,34 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::ops::Index;
 use core::time::Duration;
 use std::collections::{HashMap, VecDeque};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
 use bytes::Bytes;
+use fixedbitset::FixedBitSet;
 use futures::StreamExt;
-use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
+use pgwire::pg_response::StatementType;
 use pgwire::types::Row;
+use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::DataType;
+use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Statement};
 
+use super::SessionImpl;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::handler::declare_cursor::create_stream_for_cursor;
-use crate::handler::query::BatchQueryPlanResult;
+use crate::handler::declare_cursor::create_stream_for_cursor_stmt;
+use crate::handler::query::{create_stream, gen_batch_plan_fragmenter, BatchQueryPlanResult};
 use crate::handler::util::{
-    gen_query_from_logstore_ge_rw_timestamp, gen_query_from_table_name, convert_logstore_u64_to_unix_millis,
+    convert_logstore_u64_to_unix_millis,
+    gen_query_from_table_name,
 };
 use crate::handler::HandlerArgs;
-use crate::{PgResponseStream, TableCatalog};
-
-pub const KV_LOG_STORE_EPOCH: &str = "kv_log_store_epoch";
-const KV_LOG_STORE_ROW_OP: &str = "kv_log_store_row_op";
-pub const KV_LOG_STORE_SEQ_ID: &str = "kv_log_store_seq_id";
-pub const KV_LOG_STORE_VNODE: &str = "kv_log_store_vnode";
+use crate::optimizer::plan_node::{generic, BatchLogSeqScan};
+use crate::optimizer::property::{Order, RequiredDist};
+use crate::optimizer::PlanRoot;
+use crate::{OptimizerContext, OptimizerContextRef, PgResponseStream, PlanRef, TableCatalog};
 
 pub enum Cursor {
     Subscription(SubscriptionCursor),
@@ -138,7 +141,6 @@ pub struct SubscriptionCursor {
     cursor_name: String,
     subscription: Arc<SubscriptionCatalog>,
     table: Arc<TableCatalog>,
-    log_query_epochs: Vec<u64>,
     cursor_need_drop_time: Instant,
     state: State,
 }
@@ -162,7 +164,7 @@ impl SubscriptionCursor {
             //
             // TODO: is this the right behavior? Should we delay the query stream initiation till the first fetch?
             let (row_stream, pg_descs) =
-                Self::initiate_query(None, &subscription, handle_args.clone()).await?;
+                Self::initiate_query(None, &table, handle_args.clone()).await?;
             let pinned_epoch = handle_args
                 .session
                 .get_pinned_snapshot()
@@ -193,7 +195,6 @@ impl SubscriptionCursor {
             cursor_name,
             subscription,
             table,
-            log_query_epochs: vec![],
             cursor_need_drop_time,
             state,
         })
@@ -212,64 +213,41 @@ impl SubscriptionCursor {
                     let from_snapshot = false;
 
                     // Initiate a new batch query to continue fetching
-                    let (mut row_stream, pg_descs) = Self::initiate_query(
-                        Some(*seek_timestamp),
-                        &self.subscription,
+                    let rw_timestamp = Self::get_next_rw_timestamp(
+                        *seek_timestamp,
+                        self.table.id.table_id,
+                        *expected_timestamp,
                         handle_args.clone(),
                     )
-                    .await?;
-                    self.cursor_need_drop_time = Instant::now()
-                        + Duration::from_secs(self.subscription.get_retention_seconds()?);
-
-                    // Try refill remaining rows
-                    let mut remaining_rows = VecDeque::new();
-                    Self::try_refill_remaining_rows(&mut row_stream, &mut remaining_rows).await?;
-
-                    // Get the rw_timestamp in the first row returned by the query if any.
-                    // new_row_rw_timestamp == None means the query returns empty result.
-                    let new_row_rw_timestamp: Option<u64> = remaining_rows.front().map(|row| {
-                        std::str::from_utf8(row.index(0).as_ref().unwrap())
-                            .unwrap()
-                            .parse()
-                            .unwrap()
-                    });
-
-                    // Check expected_timestamp against the rw_timestamp of the first row.
-                    // Return an error if there is no new row or there is a mismatch.
-                    if let Some(expected_timestamp) = expected_timestamp {
-                        let expected_timestamp = *expected_timestamp;
-                        if new_row_rw_timestamp.is_none()
-                            || new_row_rw_timestamp.unwrap() != expected_timestamp
-                        {
-                            // Transition to Invalid state and return and error
-                            self.state = State::Invalid;
-                            return Err(ErrorCode::CatalogError(
-                                format!(
-                                    " No data found for rw_timestamp {:?}, data may have been recycled, please recreate cursor",
-                                    convert_logstore_u64_to_unix_millis(expected_timestamp)
-                                )
-                                .into(),
+                    .await;
+                    match rw_timestamp {
+                        Ok(Some(rw_timestamp)) => {
+                            let (mut row_stream, pg_descs) = Self::initiate_query(
+                                Some(rw_timestamp),
+                                &self.table,
+                                handle_args.clone(),
                             )
-                            .into());
+                            .await?;
+                            self.cursor_need_drop_time = Instant::now()
+                                + Duration::from_secs(self.subscription.get_retention_seconds()?);
+                            let mut remaining_rows = VecDeque::new();
+                            Self::try_refill_remaining_rows(&mut row_stream, &mut remaining_rows)
+                                .await?;
+                            // Transition to the Fetch state
+                            self.state = State::Fetch {
+                                from_snapshot,
+                                rw_timestamp,
+                                row_stream,
+                                pg_descs,
+                                remaining_rows,
+                            };
+                        }
+                        Ok(None) => return Ok((None, vec![])),
+                        Err(e) => {
+                            self.state = State::Invalid;
+                            return Err(e);
                         }
                     }
-
-                    // Return None if no data is found for the rw_timestamp in logstore.
-                    // This happens when reaching EOF of logstore. This check cannot be moved before the
-                    // expected_timestamp check to ensure that an error is returned on empty result when
-                    // expected_timstamp is set.
-                    if new_row_rw_timestamp.is_none() {
-                        return Ok((None, pg_descs));
-                    }
-
-                    // Transition to the Fetch state
-                    self.state = State::Fetch {
-                        from_snapshot,
-                        rw_timestamp: new_row_rw_timestamp.unwrap(),
-                        row_stream,
-                        pg_descs,
-                        remaining_rows,
-                    };
                 }
                 State::Fetch {
                     from_snapshot,
@@ -288,35 +266,13 @@ impl SubscriptionCursor {
                         // 1. Fetch the next row
                         let new_row = row.take();
                         if from_snapshot {
-                            // 1a. The rw_timestamp in the table is all the same, so don't need to check.
                             return Ok((
-                                Some(Row::new(Self::build_row_with_snapshot(new_row))),
+                                Some(Row::new(Self::build_row(new_row, None)?)),
                                 pg_descs.clone(),
                             ));
-                        }
-
-                        let new_row_rw_timestamp: u64 = new_row
-                            .get(0)
-                            .unwrap()
-                            .as_ref()
-                            .map(|bytes| std::str::from_utf8(bytes).unwrap().parse().unwrap())
-                            .unwrap();
-
-                        if new_row_rw_timestamp != rw_timestamp {
-                            // 1b. Find the next rw_timestamp.
-                            // Initiate a new batch query to avoid query timeout and pinning version for too long.
-                            // expected_timestamp shouold be set to ensure there is no data missing in the next query.
-                            self.state = State::InitLogStoreQuery {
-                                seek_timestamp: new_row_rw_timestamp,
-                                expected_timestamp: Some(new_row_rw_timestamp),
-                            };
                         } else {
-                            // 1c. The rw_timestamp of this row is equal to self.rw_timestamp, return row
                             return Ok((
-                                Some(Row::new(Self::build_row_with_logstore(
-                                    new_row,
-                                    rw_timestamp,
-                                )?)),
+                                Some(Row::new(Self::build_row(new_row, Some(rw_timestamp))?)),
                                 pg_descs.clone(),
                             ));
                         }
@@ -325,7 +281,7 @@ impl SubscriptionCursor {
                         // Initiate a new batch query using the rw_timestamp + 1.
                         // expected_timestamp don't need to be set as the next rw_timestamp is unknown.
                         self.state = State::InitLogStoreQuery {
-                            seek_timestamp: rw_timestamp + 1,
+                            seek_timestamp: rw_timestamp,
                             expected_timestamp: None,
                         };
                     }
@@ -369,27 +325,65 @@ impl SubscriptionCursor {
         }
     }
 
+    async fn get_next_rw_timestamp(
+        seek_timestamp: u64,
+        table_id: u32,
+        expected_timestamp: Option<u64>,
+        handle_args: HandlerArgs,
+    ) -> Result<Option<u64>> {
+        // The epoch here must be pulled every time, otherwise there will be cache consistency issues
+        let new_epochs = handle_args
+            .session
+            .catalog_writer()?
+            .list_epoch_for_subscription(table_id, seek_timestamp, MAX_EPOCH - 1)
+            .await?;
+        // To verify if the epoch list has expired, we will pull the already consumed epoch as the first one
+        if let Some(expected_timestamp) = expected_timestamp
+            && (new_epochs.is_empty() || &expected_timestamp != new_epochs.first().unwrap())
+        {
+            return Err(ErrorCode::CatalogError(
+                format!(
+                    " No data found for rw_timestamp {:?}, data may have been recycled, please recreate cursor",
+                    convert_logstore_u64_to_unix_millis(expected_timestamp)
+                )
+                .into(),
+            )
+            .into());
+        }
+
+        if new_epochs.len() <= 1 {
+            return Ok(None);
+        }
+        Ok(new_epochs.get(1).cloned())
+    }
+
     async fn initiate_query(
         rw_timestamp: Option<u64>,
-        subscription: &SubscriptionCatalog,
+        table_catalog: &TableCatalog,
         handle_args: HandlerArgs,
-        log_query_epochs: Vec<u64>,
     ) -> Result<(PgResponseStream, Vec<PgFieldDescriptor>)> {
-        let query_stmt = if let Some(rw_timestamp) = rw_timestamp {
-            
-            Statement::Query(Box::new(gen_query_from_logstore_ge_rw_timestamp(
-                &subscription.get_log_store_name(),
-                rw_timestamp,
-            )))
+        let (row_stream, pg_descs) = if let Some(rw_timestamp) = rw_timestamp {
+            let context = OptimizerContext::from_handler_args(handle_args.clone());
+            let session = handle_args.session;
+            let plan_fragmenter_result = gen_batch_plan_fragmenter(
+                &session,
+                Self::create_batch_plan_for_cursor(
+                    table_catalog,
+                    &session,
+                    context.into(),
+                    rw_timestamp,
+                    rw_timestamp,
+                )?,
+            )?;
+            create_stream(session, plan_fragmenter_result, vec![]).await?
         } else {
-            let subscription_from_table_name = ObjectName(vec![Ident::from(
-                subscription.subscription_from_name.as_ref(),
-            )]);
-            Statement::Query(Box::new(gen_query_from_table_name(
+            let subscription_from_table_name =
+                ObjectName(vec![Ident::from(table_catalog.name.as_ref())]);
+            let query_stmt = Statement::Query(Box::new(gen_query_from_table_name(
                 subscription_from_table_name,
-            )))
+            )));
+            create_stream_for_cursor_stmt(handle_args, query_stmt).await?
         };
-        let (row_stream, pg_descs) = create_stream_for_cursor(handle_args, query_stmt).await?;
         Ok((
             row_stream,
             Self::build_desc(pg_descs, rw_timestamp.is_none()),
@@ -410,68 +404,95 @@ impl SubscriptionCursor {
         Ok(())
     }
 
-    pub fn build_row_with_snapshot(row: Vec<Option<Bytes>>) -> Vec<Option<Bytes>> {
-        let mut new_row = vec![None, Some(Bytes::from(1i16.to_string()))];
-        new_row.extend(row);
-        new_row
-    }
-
-    pub fn build_row_with_logstore(
+    pub fn build_row(
         mut row: Vec<Option<Bytes>>,
-        rw_timestamp: u64,
+        rw_timestamp: Option<u64>,
     ) -> Result<Vec<Option<Bytes>>> {
-        let mut new_row = vec![Some(Bytes::from(
-            convert_logstore_u64_to_unix_millis(rw_timestamp).to_string(),
-        ))];
-        // need remove kv_log_store_epoch
-        new_row.extend(row.drain(1..row.len()).collect_vec());
-        Ok(new_row)
+        let new_row = if let Some(rw_timestamp) = rw_timestamp {
+            vec![Some(Bytes::from(
+                convert_logstore_u64_to_unix_millis(rw_timestamp).to_string(),
+            ))]
+        } else {
+            vec![Some(Bytes::from(1i16.to_string())),None]
+        };
+        row.extend(new_row);
+        Ok(row)
     }
 
     pub fn build_desc(
         mut descs: Vec<PgFieldDescriptor>,
         from_snapshot: bool,
     ) -> Vec<PgFieldDescriptor> {
-        let mut new_descs = vec![
-            PgFieldDescriptor::new(
-                "rw_timestamp".to_owned(),
-                DataType::Int64.to_oid(),
-                DataType::Int64.type_len(),
-            ),
-            PgFieldDescriptor::new(
+        if from_snapshot {
+            descs.push(PgFieldDescriptor::new(
                 "op".to_owned(),
                 DataType::Int16.to_oid(),
                 DataType::Int16.type_len(),
-            ),
-        ];
-        // need remove kv_log_store_epoch and kv_log_store_row_op
-        if from_snapshot {
-            new_descs.extend(descs)
-        } else {
-            assert_eq!(
-                descs.get(0).unwrap().get_name(),
-                KV_LOG_STORE_EPOCH,
-                "Cursor query logstore: first column must be {}",
-                KV_LOG_STORE_EPOCH
-            );
-            assert_eq!(
-                descs.get(1).unwrap().get_name(),
-                KV_LOG_STORE_ROW_OP,
-                "Cursor query logstore: first column must be {}",
-                KV_LOG_STORE_ROW_OP
-            );
-            new_descs.extend(descs.drain(2..descs.len()));
+            ));
         }
-        new_descs
+        descs.push(PgFieldDescriptor::new(
+            "rw_timestamp".to_owned(),
+            DataType::Int64.to_oid(),
+            DataType::Int64.type_len(),
+        ));
+        descs
     }
 
     pub fn create_batch_plan_for_cursor(
-        table_catalog: std::sync::Arc<TableCatalog>,
-        handle_args: HandlerArgs,
+        table_catalog: &TableCatalog,
+        session: &SessionImpl,
+        context: OptimizerContextRef,
         old_epoch: u64,
         new_epoch: u64,
     ) -> Result<BatchQueryPlanResult> {
-        todo!()
+        let out_col_idx = table_catalog
+            .columns
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| !v.is_hidden)
+            .map(|(i, _)| i)
+            .collect::<Vec<_>>();
+        let core = generic::LogScan::new(
+            table_catalog.name.clone(),
+            out_col_idx,
+            Rc::new(table_catalog.table_desc()),
+            context,
+            old_epoch,
+            new_epoch,
+        );
+        let batch_log_seq_scan = BatchLogSeqScan::new(core);
+        let out_fields = FixedBitSet::from_iter(0..batch_log_seq_scan.core().schema().len());
+        let out_names = batch_log_seq_scan.core().column_names();
+        // Here we just need a plan_root to call the method, only out_fields and out_names will be used
+        let mut plan_root = PlanRoot::new(
+            PlanRef::from(batch_log_seq_scan.clone()),
+            RequiredDist::single(),
+            Order::default(),
+            out_fields,
+            out_names,
+        );
+        let schema = batch_log_seq_scan.core().schema().clone();
+        let (batch_log_seq_scan, query_mode) = match session.config().query_mode() {
+            QueryMode::Auto => (
+                plan_root.gen_batch_distributed_plan(PlanRef::from(batch_log_seq_scan))?,
+                QueryMode::Local,
+            ),
+            QueryMode::Local => (
+                plan_root.gen_batch_local_plan(PlanRef::from(batch_log_seq_scan))?,
+                QueryMode::Local,
+            ),
+            QueryMode::Distributed => (
+                plan_root.gen_batch_distributed_plan(PlanRef::from(batch_log_seq_scan))?,
+                QueryMode::Distributed,
+            ),
+        };
+        Ok(BatchQueryPlanResult {
+            plan: batch_log_seq_scan,
+            query_mode,
+            schema,
+            stmt_type: StatementType::SELECT,
+            dependent_relations: table_catalog.dependent_relations.clone(),
+        })
     }
 }
 

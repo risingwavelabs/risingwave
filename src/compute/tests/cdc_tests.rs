@@ -47,8 +47,8 @@ use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::test_utils::MockSource;
 use risingwave_stream::executor::{
     expect_first_barrier, ActorContext, AddMutation, Barrier, BoxedMessageStream,
-    CdcBackfillExecutor, Execute, Executor as StreamExecutor, ExecutorInfo, ExternalStorageTable,
-    MaterializeExecutor, Message, Mutation, StreamExecutorError,
+    CdcBackfillExecutor, CdcScanOptions, Execute, Executor as StreamExecutor, ExecutorInfo,
+    ExternalStorageTable, MaterializeExecutor, Message, Mutation, StreamExecutorError,
 };
 
 // mock upstream binlog offset starting from "1.binlog, pos=0"
@@ -230,8 +230,11 @@ async fn test_cdc_backfill() -> StreamResult<()> {
             state_table,
             Some(4), // limit a snapshot chunk to have <= 4 rows by rate limit
             false,
-            1,
-            4,
+            Some(CdcScanOptions {
+                disable_backfill: false,
+                snapshot_interval: 1,
+                snapshot_batch_size: 4,
+            }),
         )
         .boxed(),
     );

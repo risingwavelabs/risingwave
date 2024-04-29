@@ -32,12 +32,11 @@ use risingwave_common::types::{write_date_time_tz, DataType, ScalarRefImpl, Time
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, CompatibleSourceSchema, ConnectorSchema, Expr, ObjectName, OrderByExpr, Query,
-    Select, SelectItem, SetExpr, TableFactor, TableWithJoins, Value,
+    CompatibleSourceSchema, ConnectorSchema, ObjectName, Query,
+    Select, SelectItem, SetExpr, TableFactor, TableWithJoins,
 };
 
 use crate::error::{ErrorCode, Result as RwResult};
-use crate::session::cursor_manager::{KV_LOG_STORE_EPOCH, KV_LOG_STORE_SEQ_ID, KV_LOG_STORE_VNODE};
 use crate::session::{current, SessionImpl};
 
 pin_project! {
@@ -222,46 +221,46 @@ pub fn gen_query_from_table_name(from_name: ObjectName) -> Query {
     }
 }
 
-pub fn gen_query_from_logstore_ge_rw_timestamp(logstore_name: &str, rw_timestamp: u64) -> Query {
-    let table_factor = TableFactor::Table {
-        name: ObjectName(vec![logstore_name.into()]),
-        alias: None,
-        as_of: None,
-    };
-    let from = vec![TableWithJoins {
-        relation: table_factor,
-        joins: vec![],
-    }];
-    let selection = Some(Expr::BinaryOp {
-        left: Box::new(Expr::Identifier(KV_LOG_STORE_EPOCH.into())),
-        op: BinaryOperator::GtEq,
-        right: Box::new(Expr::Value(Value::Number(rw_timestamp.to_string()))),
-    });
-    let except_columns = vec![
-        Expr::Identifier(KV_LOG_STORE_SEQ_ID.into()),
-        Expr::Identifier(KV_LOG_STORE_VNODE.into()),
-    ];
-    let select = Select {
-        from,
-        projection: vec![SelectItem::Wildcard(Some(except_columns))],
-        selection,
-        ..Default::default()
-    };
-    let order_by = vec![OrderByExpr {
-        expr: Expr::Identifier(KV_LOG_STORE_EPOCH.into()),
-        asc: None,
-        nulls_first: None,
-    }];
-    let body = SetExpr::Select(Box::new(select));
-    Query {
-        with: None,
-        body,
-        order_by,
-        limit: None,
-        offset: None,
-        fetch: None,
-    }
-}
+// pub fn gen_query_from_logstore_ge_rw_timestamp(logstore_name: &str, rw_timestamp: u64) -> Query {
+//     let table_factor = TableFactor::Table {
+//         name: ObjectName(vec![logstore_name.into()]),
+//         alias: None,
+//         as_of: None,
+//     };
+//     let from = vec![TableWithJoins {
+//         relation: table_factor,
+//         joins: vec![],
+//     }];
+//     let selection = Some(Expr::BinaryOp {
+//         left: Box::new(Expr::Identifier(KV_LOG_STORE_EPOCH.into())),
+//         op: BinaryOperator::GtEq,
+//         right: Box::new(Expr::Value(Value::Number(rw_timestamp.to_string()))),
+//     });
+//     let except_columns = vec![
+//         Expr::Identifier(KV_LOG_STORE_SEQ_ID.into()),
+//         Expr::Identifier(KV_LOG_STORE_VNODE.into()),
+//     ];
+//     let select = Select {
+//         from,
+//         projection: vec![SelectItem::Wildcard(Some(except_columns))],
+//         selection,
+//         ..Default::default()
+//     };
+//     let order_by = vec![OrderByExpr {
+//         expr: Expr::Identifier(KV_LOG_STORE_EPOCH.into()),
+//         asc: None,
+//         nulls_first: None,
+//     }];
+//     let body = SetExpr::Select(Box::new(select));
+//     Query {
+//         with: None,
+//         body,
+//         order_by,
+//         limit: None,
+//         offset: None,
+//         fetch: None,
+//     }
+// }
 
 pub fn convert_unix_millis_to_logstore_u64(unix_millis: u64) -> u64 {
     Epoch::from_unix_millis(unix_millis).0
