@@ -8,7 +8,7 @@
       │ └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
       └─LogicalProject { exprs: [(1:Int32 + 1:Int32) as $expr1] }
         └─LogicalFilter { predicate: (1:Int32 < 10:Int32) }
-          └─LogicalCteRef
+          └─LogicalCteRef { share_id: 0 }
 - name: output column follows lhs
   sql: WITH RECURSIVE t1 AS (SELECT 1 AS a UNION ALL SELECT a + 1 FROM t1 WHERE a < 10) SELECT a FROM t1;
   logical_plan: |-
@@ -18,7 +18,7 @@
       │ └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
       └─LogicalProject { exprs: [(1:Int32 + 1:Int32) as $expr1] }
         └─LogicalFilter { predicate: (1:Int32 < 10:Int32) }
-          └─LogicalCteRef
+          └─LogicalCteRef { share_id: 0 }
 - name: name a is leaked outside
   sql: WITH RECURSIVE t1 AS (SELECT 1 AS a UNION ALL SELECT a + 1 FROM t1 WHERE a < 10) SELECT a;
   binder_error: |

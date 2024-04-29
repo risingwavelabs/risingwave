@@ -15,7 +15,7 @@
 use std::hash::Hash;
 
 use itertools::Itertools;
-use pretty_xmlish::StrAssocArr;
+use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::Schema;
 
 use super::{impl_distill_unit_from_fields, GenericPlanNode, GenericPlanRef};
@@ -83,7 +83,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for CteRef<PlanRef> {
 
 impl<PlanRef: GenericPlanRef> CteRef<PlanRef> {
     pub fn fields_pretty<'a>(&self) -> StrAssocArr<'a> {
-        vec![]
+        vec![("share_id", Pretty::debug(&self.share_id))]
     }
 }
 
