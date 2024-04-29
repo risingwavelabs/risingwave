@@ -1,0 +1,78 @@
+############## Create kafka seed data
+
+statement ok
+create table kafka_seed_data (v1 int);
+
+statement ok
+insert into kafka_seed_data select * from generate_series(1, 1000);
+
+############## Sink into kafka
+
+statement ok
+create sink kafka_sink
+from
+  kafka_seed_data with (
+    allow.auto.create.topics = true,
+    properties.bootstrap.server = 'message_queue:29092',
+    topic = 'rate_limit_source_kafka_0',
+    type = 'append-only',
+    force_append_only='true',
+    connector = 'kafka'
+);
+
+# Make sure that records are flushed.
+statement ok
+flush;
+
+############## Source from kafka (rate_limit = 0)
+
+# Wait for topic to be created
+skipif in-memory
+sleep 3s
+
+statement ok
+create table kafka_source (v1 int) with (
+  connector = 'kafka',
+  topic = 'rate_limit_source_kafka_0',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest',
+  streaming_rate_limit = 0
+) FORMAT PLAIN ENCODE JSON
+
+statement ok
+flush;
+
+############## Check data
+
+skipif in-memory
+sleep 3s
+
+############## Table should have 0 records, since source has (rate_limit = 0)
+
+query I
+select * from kafka_source;
+----
+
+############## Should still be able to insert
+
+statement ok
+insert into kafka_source values(1);
+
+statement ok
+flush;
+
+query I
+select * from kafka_source;
+----
+1
+
+############## Cleanup
+
+statement ok
+drop table kafka_source;
+
+statement ok
+drop sink kafka_sink;
+
+statement ok
+drop table kafka_seed_data;

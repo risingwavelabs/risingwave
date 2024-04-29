@@ -703,6 +703,7 @@ fn gen_table_plan_inner(
         version: INITIAL_SOURCE_VERSION_ID,
         initialized_at_cluster_version: None,
         created_at_cluster_version: None,
+        rate_limit: context.overwrite_options().streaming_rate_limit,
     });
 
     let source_catalog = source.as_ref().map(|source| Rc::new((source).into()));

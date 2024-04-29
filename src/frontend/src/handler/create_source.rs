@@ -80,7 +80,7 @@ use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
 use crate::session::SessionImpl;
-use crate::utils::resolve_privatelink_in_with_option;
+use crate::utils::{resolve_privatelink_in_with_option, OverwriteOptions};
 use crate::{bind_data_type, build_graph, OptimizerContext, WithOptions};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
@@ -1298,10 +1298,11 @@ pub async fn check_iceberg_source(
 }
 
 pub async fn handle_create_source(
-    handler_args: HandlerArgs,
+    mut handler_args: HandlerArgs,
     stmt: CreateSourceStatement,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
+    let overwrite_options = OverwriteOptions::new(&mut handler_args);
 
     if let Either::Right(resp) = session.check_relation_name_duplicated(
         stmt.source_name.clone(),
@@ -1416,6 +1417,8 @@ pub async fn handle_create_source(
         resolve_privatelink_in_with_option(&mut with_options, &schema_name, &session)?;
     let definition = handler_args.normalized_sql.clone();
 
+    let rate_limit = overwrite_options.streaming_rate_limit;
+
     let source = PbSource {
         id: TableId::placeholder().table_id,
         schema_id,
@@ -1436,6 +1439,7 @@ pub async fn handle_create_source(
         version: INITIAL_SOURCE_VERSION_ID,
         initialized_at_cluster_version: None,
         created_at_cluster_version: None,
+        rate_limit,
     };
 
     let catalog_writer = session.catalog_writer()?;

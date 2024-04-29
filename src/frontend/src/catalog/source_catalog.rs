@@ -46,6 +46,7 @@ pub struct SourceCatalog {
     pub version: SourceVersionId,
     pub created_at_cluster_version: Option<String>,
     pub initialized_at_cluster_version: Option<String>,
+    pub rate_limit: Option<u32>,
 }
 
 impl SourceCatalog {
@@ -77,6 +78,7 @@ impl SourceCatalog {
             version: self.version,
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
+            rate_limit: self.rate_limit,
         }
     }
 
@@ -120,6 +122,7 @@ impl From<&PbSource> for SourceCatalog {
         let version = prost.version;
 
         let connection_id = prost.connection_id;
+        let rate_limit = prost.rate_limit;
 
         Self {
             id,
@@ -140,6 +143,7 @@ impl From<&PbSource> for SourceCatalog {
             version,
             created_at_cluster_version: prost.created_at_cluster_version.clone(),
             initialized_at_cluster_version: prost.initialized_at_cluster_version.clone(),
+            rate_limit,
         }
     }
 }

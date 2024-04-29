@@ -39,6 +39,7 @@ pub struct Model {
     pub optional_associated_table_id: Option<TableId>,
     pub connection_id: Option<ConnectionId>,
     pub version: i64,
+    pub rate_limit: Option<u32>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -101,6 +102,7 @@ impl From<PbSource> for ActiveModel {
             optional_associated_table_id: Set(optional_associated_table_id),
             connection_id: Set(source.connection_id.map(|id| id as _)),
             version: Set(source.version as _),
+            rate_limit: Set(source.rate_limit),
         }
     }
 }

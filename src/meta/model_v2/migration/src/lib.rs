@@ -9,6 +9,7 @@ mod m20240410_082733_with_version_column_migration;
 mod m20240410_154406_session_params;
 mod m20240417_062305_subscription_internal_table_name;
 mod m20240418_142249_function_runtime;
+mod m20240425_053608_add_rate_limit_to_source_catalog;
 
 pub struct Migrator;
 
@@ -23,26 +24,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20240410_154406_session_params::Migration),
             Box::new(m20240417_062305_subscription_internal_table_name::Migration),
             Box::new(m20240418_142249_function_runtime::Migration),
+            Box::new(m20240425_053608_add_rate_limit_to_source_catalog::Migration),
         ]
-    }
-}
-
-#[macro_export]
-macro_rules! assert_not_has_tables {
-    ($manager:expr, $( $table:ident ),+) => {
-        $(
-            assert!(
-                !$manager
-                    .has_table($table::Table.to_string())
-                    .await?,
-                "Table `{}` already exists",
-                $table::Table.to_string()
-            );
-        )+
-    };
-}
-
-#[macro_export]
 macro_rules! drop_tables {
     ($manager:expr, $( $table:ident ),+) => {
         $(

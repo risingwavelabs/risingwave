@@ -177,6 +177,7 @@ impl From<ObjectModel<source::Model>> for PbSource {
                 .map(|id| PbOptionalAssociatedTableId::AssociatedTableId(id as _)),
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
+            rate_limit: value.0.rate_limit,
         }
     }
 }
