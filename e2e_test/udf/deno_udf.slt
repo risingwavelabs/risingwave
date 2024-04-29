@@ -143,8 +143,8 @@ CREATE FUNCTION digest( t string ) RETURNS bytea LANGUAGE javascript RUNTIME den
     const key = await subtle.generateKey({
         name: 'HMAC',
         hash: 'SHA-256',
-        length: 256,
         }, true, ['sign', 'verify']);
+    console.log('Creating message')
     const enc = new TextEncoder();
     const message = enc.encode(t);
     console.log ('Signing message');
