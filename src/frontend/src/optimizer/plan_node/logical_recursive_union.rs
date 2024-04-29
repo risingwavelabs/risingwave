@@ -13,12 +13,14 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use smallvec::{smallvec, SmallVec};
 
 use super::expr_visitable::ExprVisitable;
-use super::utils::impl_distill_by_unit;
+use super::generic::GenericPlanRef;
+use super::utils::{childless_record, Distill};
 use super::{
     generic, ColPrunable, ColumnPruningContext, ExprRewritable, Logical, PlanBase, PlanTreeNode,
     PredicatePushdown, PredicatePushdownContext, RewriteStreamContext, ToBatch, ToStream,
@@ -49,6 +51,10 @@ impl LogicalRecursiveUnion {
     pub fn create(base_plan: PlanRef, recursive: PlanRef) -> PlanRef {
         Self::new(base_plan, recursive).into()
     }
+
+    pub(super) fn pretty_fields(base: impl GenericPlanRef, name: &str) -> XmlNode<'_> {
+        childless_record(name, vec![("id", Pretty::debug(&base.id().0))])
+    }
 }
 
 impl PlanTreeNode for LogicalRecursiveUnion {
@@ -62,7 +68,11 @@ impl PlanTreeNode for LogicalRecursiveUnion {
     }
 }
 
-impl_distill_by_unit!(LogicalRecursiveUnion, core, "LogicalRecursiveUnion");
+impl Distill for LogicalRecursiveUnion {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        Self::pretty_fields(&self.base, "LogicalRecursiveUnion")
+    }
+}
 
 impl ColPrunable for LogicalRecursiveUnion {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
