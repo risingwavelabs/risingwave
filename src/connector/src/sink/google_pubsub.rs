@@ -16,7 +16,12 @@ use std::collections::HashMap;
 use std::usize;
 
 use anyhow::{anyhow, Context};
+use google_cloud_gax::conn::Environment;
 use google_cloud_googleapis::pubsub::v1::PubsubMessage;
+use google_cloud_pubsub::apiv1;
+use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
+use google_cloud_pubsub::client::google_cloud_auth::project;
+use google_cloud_pubsub::client::google_cloud_auth::token::DefaultTokenSourceProvider;
 use google_cloud_pubsub::client::{Client, ClientConfig};
 use google_cloud_pubsub::publisher::Publisher;
 use risingwave_common::array::StreamChunk;
@@ -28,7 +33,7 @@ use tonic::Status;
 use with_options::WithOptions;
 
 use super::catalog::desc::SinkDesc;
-use super::catalog::{SinkEncode, SinkFormatDesc};
+use super::catalog::SinkFormatDesc;
 use super::formatter::SinkFormatterImpl;
 use super::log_store::DeliveryFutureManagerAddFuture;
 use super::writer::{
@@ -74,16 +79,6 @@ impl GooglePubSubConfig {
     fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
         serde_json::from_value::<GooglePubSubConfig>(serde_json::to_value(values).unwrap())
             .map_err(|e| SinkError::Config(anyhow!(e)))
-    }
-
-    pub(crate) fn initialize_env(&self) {
-        tracing::debug!("setting pubsub environment variables");
-        if let Some(emulator_host) = &self.emulator_host {
-            std::env::set_var("PUBSUB_EMULATOR_HOST", emulator_host);
-        }
-        if let Some(credentials) = &self.credentials {
-            std::env::set_var("GOOGLE_APPLICATION_CREDENTIALS_JSON", credentials);
-        }
     }
 }
 
@@ -180,16 +175,42 @@ impl GooglePubSubSinkWriter {
         db_name: String,
         sink_from_name: String,
     ) -> Result<Self> {
-        config.initialize_env();
+        let environment = if let Some(ref cred) = config.credentials {
+            let auth_config = project::Config {
+                audience: Some(apiv1::conn_pool::AUDIENCE),
+                scopes: Some(&apiv1::conn_pool::SCOPES),
+                sub: None,
+            };
+            let cred_file = CredentialsFile::new_from_str(cred).await.map_err(|e| {
+                SinkError::GooglePubSub(anyhow!(
+                    "Failed to create Google Cloud Pub/Sub credentials file: {}",
+                    e
+                ))
+            })?;
+            let provider =
+                DefaultTokenSourceProvider::new_with_credentials(auth_config, Box::new(cred_file))
+                    .await
+                    .map_err(|e| {
+                        SinkError::GooglePubSub(anyhow!(
+                            "Failed to create Google Cloud Pub/Sub token source provider: {}",
+                            e
+                        ))
+                    })?;
+            Environment::GoogleCloud(Box::new(provider))
+        } else if let Some(emu_host) = config.emulator_host {
+            Environment::Emulator(emu_host)
+        } else {
+            return Err(SinkError::GooglePubSub(anyhow!(
+                "Missing emulator_host or credentials in Google Pub/Sub sink"
+            )));
+        };
 
         let client_config = ClientConfig {
             endpoint: config.endpoint,
             project_id: Some(config.project_id),
+            environment,
             ..Default::default()
-        }
-        .with_auth()
-        .await
-        .map_err(|e| SinkError::GooglePubSub(anyhow!(e)))?;
+        };
         let client = Client::new(client_config)
             .await
             .map_err(|e| SinkError::GooglePubSub(anyhow!(e)))?;
