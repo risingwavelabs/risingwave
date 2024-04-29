@@ -66,13 +66,21 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             .map(|k| k.column_index as usize)
             .collect_vec();
 
+        let scan_options = node
+            .options
+            .as_ref()
+            .map(CdcScanOptions::from_proto)
+            .unwrap_or(CdcScanOptions {
+                disable_backfill: node.disable_backfill,
+                ..Default::default()
+            });
         let table_type = CdcTableType::from_properties(&properties);
         let table_reader = table_type
             .create_table_reader(
                 properties.clone(),
                 table_schema.clone(),
                 table_pk_indices.clone(),
-                1000,
+                scan_options.snapshot_batch_size,
             )
             .await?;
 
@@ -93,7 +101,6 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
         let state_table =
             StateTable::from_table_catalog(node.get_state_table()?, state_store, vnodes).await;
 
-        let scan_options = node.options.clone().map(CdcScanOptions::from_proto);
         let exec = CdcBackfillExecutor::new(
             params.actor_context.clone(),
             external_table,
@@ -103,7 +110,6 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             params.executor_stats,
             state_table,
             node.rate_limit,
-            node.disable_backfill,
             scan_options,
         );
         Ok((params.info, exec).into())
