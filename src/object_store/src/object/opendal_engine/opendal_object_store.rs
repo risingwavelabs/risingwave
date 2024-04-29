@@ -73,7 +73,7 @@ impl ObjectStore for OpendalObjectStore {
             EngineType::Obs => String::default(),
             EngineType::Oss => String::default(),
             EngineType::Webhdfs => String::default(),
-            EngineType::Azblob => String::default(),
+            EngineType::Azblob => prefix::azblob::get_object_prefix(obj_id),
             EngineType::Fs => String::default(),
         }
     }

@@ -23,3 +23,15 @@ pub(crate) mod s3 {
         obj_prefix
     }
 }
+
+pub(crate) mod azblob {
+    /// The number of Azblob bucket prefixes
+    pub(crate) const NUM_BUCKET_PREFIXES_AZBLOB: u32 = 256;
+
+    pub(crate) fn get_object_prefix(obj_id: u64) -> String {
+        let prefix = crc32fast::hash(&obj_id.to_be_bytes()) % NUM_BUCKET_PREFIXES_AZBLOB;
+        let mut obj_prefix = prefix.to_string();
+        obj_prefix.push('/');
+        obj_prefix
+    }
+}
