@@ -99,7 +99,7 @@ pub enum ExprError {
     Udf(
         #[from]
         #[backtrace]
-        risingwave_udf::Error,
+        Box<arrow_udf_flight::Error>,
     ),
 
     #[error("not a constant")]
@@ -149,6 +149,12 @@ impl From<PbFieldNotFound> for ExprError {
             "Failed to decode prost: field not found `{}`",
             err.0
         ))
+    }
+}
+
+impl From<arrow_udf_flight::Error> for ExprError {
+    fn from(err: arrow_udf_flight::Error) -> Self {
+        Self::Udf(Box::new(err))
     }
 }
 

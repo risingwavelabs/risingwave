@@ -23,10 +23,8 @@ use arrow_udf_js_deno::{CallMode as DenoCallMode, Runtime as DenoRuntime};
 #[cfg(feature = "embedded-python-udf")]
 use arrow_udf_python::{CallMode as PythonCallMode, Runtime as PythonRuntime};
 use cfg_or_panic::cfg_or_panic;
-use futures_util::stream;
-use risingwave_common::array::{ArrayError, DataChunk, I32Array};
+use risingwave_common::array::{DataChunk, I32Array};
 use risingwave_common::bail;
-use thiserror_ext::AsReport;
 
 use super::*;
 use crate::expr::expr_udf::UdfImpl;
@@ -62,10 +60,7 @@ impl UdfImpl {
         match self {
             UdfImpl::External(client) => {
                 #[for_await]
-                for res in client
-                    .call_stream(identifier, stream::once(async { input }))
-                    .await?
-                {
+                for res in client.call_table_function(identifier, &input).await? {
                     yield res?;
                 }
             }
@@ -182,15 +177,7 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
     let arg_schema = Arc::new(Schema::new(
         udtf.arg_types
             .iter()
-            .map::<Result<_>, _>(|t| {
-                Ok(Field::new(
-                    "",
-                    DataType::from(t).try_into().map_err(|e: ArrayError| {
-                        risingwave_udf::Error::unsupported(e.to_report_string())
-                    })?,
-                    true,
-                ))
-            })
+            .map::<Result<_>, _>(|t| Ok(Field::new("", DataType::from(t).try_into()?, true)))
             .try_collect::<_, Fields, _>()?,
     ));
 

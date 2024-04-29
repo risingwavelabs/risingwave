@@ -19,7 +19,9 @@ use std::sync::{Arc, LazyLock, Weak};
 use std::time::Duration;
 
 use anyhow::{Context, Error};
+use arrow_array::RecordBatch;
 use arrow_schema::{Field, Fields, Schema};
+use arrow_udf_flight::Client as FlightClient;
 use arrow_udf_js::{CallMode as JsCallMode, Runtime as JsRuntime};
 #[cfg(feature = "embedded-deno-udf")]
 use arrow_udf_js_deno::{CallMode as DenoCallMode, Runtime as DenoRuntime};
@@ -29,13 +31,16 @@ use arrow_udf_wasm::Runtime as WasmRuntime;
 use await_tree::InstrumentAwait;
 use cfg_or_panic::cfg_or_panic;
 use moka::sync::Cache;
-use risingwave_common::array::{ArrayError, ArrayRef, DataChunk};
+use prometheus::{
+    exponential_buckets, register_histogram_vec_with_registry,
+    register_int_counter_vec_with_registry, HistogramVec, IntCounter, IntCounterVec, Registry,
+};
+use risingwave_common::array::{ArrayRef, DataChunk};
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::expr_context::FRAGMENT_ID;
 use risingwave_pb::expr::ExprNode;
-use risingwave_udf::metrics::GLOBAL_METRICS;
-use risingwave_udf::ArrowFlightUdfClient;
 use thiserror_ext::AsReport;
 
 use super::{BoxedExpression, Build};
@@ -51,6 +56,7 @@ pub struct UserDefinedFunction {
     arg_schema: Arc<Schema>,
     imp: UdfImpl,
     identifier: String,
+    link: Option<String>,
     span: await_tree::Span,
     /// Number of remaining successful calls until retry is enabled.
     /// This parameter is designed to prevent continuous retry on every call, which would increase delay.
@@ -70,7 +76,7 @@ const INITIAL_RETRY_COUNT: u8 = 16;
 
 #[derive(Debug)]
 pub enum UdfImpl {
-    External(Arc<ArrowFlightUdfClient>),
+    External(Arc<FlightClient>),
     Wasm(Arc<WasmRuntime>),
     JavaScript(JsRuntime),
     #[cfg(feature = "embedded-python-udf")]
@@ -125,10 +131,6 @@ impl UserDefinedFunction {
         let fragment_id = FRAGMENT_ID::try_with(ToOwned::to_owned)
             .unwrap_or(0)
             .to_string();
-        let addr = match &self.imp {
-            UdfImpl::External(client) => client.get_addr(),
-            _ => "",
-        };
         let language = match &self.imp {
             UdfImpl::Wasm(_) => "wasm",
             UdfImpl::JavaScript(_) => "javascript(quickjs)",
@@ -138,7 +140,12 @@ impl UserDefinedFunction {
             UdfImpl::Deno(_) => "javascript(deno)",
             UdfImpl::External(_) => "external",
         };
-        let labels: &[&str; 4] = &[addr, language, &self.identifier, fragment_id.as_str()];
+        let labels: &[&str; 4] = &[
+            self.link.as_deref().unwrap_or(""),
+            language,
+            &self.identifier,
+            fragment_id.as_str(),
+        ];
         metrics
             .udf_input_chunk_rows
             .with_label_values(labels)
@@ -166,28 +173,27 @@ impl UserDefinedFunction {
             UdfImpl::External(client) => {
                 let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
                 let result = if self.always_retry_on_network_error {
-                    client
-                        .call_with_always_retry_on_network_error(
-                            &self.identifier,
-                            arrow_input,
-                            &fragment_id,
-                        )
-                        .instrument_await(self.span.clone())
-                        .await
+                    call_with_always_retry_on_network_error(
+                        &client,
+                        &self.identifier,
+                        &arrow_input,
+                        &metrics.udf_retry_count.with_label_values(labels),
+                    )
+                    .instrument_await(self.span.clone())
+                    .await
                 } else {
                     let result = if disable_retry_count != 0 {
                         client
-                            .call(&self.identifier, arrow_input)
+                            .call(&self.identifier, &arrow_input)
                             .instrument_await(self.span.clone())
                             .await
                     } else {
-                        client
-                            .call_with_retry(&self.identifier, arrow_input)
+                        call_with_retry(&client, &self.identifier, &arrow_input)
                             .instrument_await(self.span.clone())
                             .await
                     };
                     let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
-                    let connection_error = matches!(&result, Err(e) if e.is_connection_error());
+                    let connection_error = matches!(&result, Err(e) if is_connection_error(e));
                     if connection_error && disable_retry_count != INITIAL_RETRY_COUNT {
                         // reset count on connection error
                         self.disable_retry_count
@@ -240,6 +246,52 @@ impl UserDefinedFunction {
         }
 
         Ok(array.clone())
+    }
+}
+
+/// Call a function, retry up to 5 times / 3s if connection is broken.
+async fn call_with_retry(
+    client: &FlightClient,
+    id: &str,
+    input: &RecordBatch,
+) -> Result<RecordBatch, arrow_udf_flight::Error> {
+    let mut backoff = Duration::from_millis(100);
+    for i in 0..5 {
+        match client.call(id, input).await {
+            Err(err) if is_connection_error(&err) && i != 4 => {
+                tracing::error!(error = %err.as_report(), "UDF connection error. retry...");
+            }
+            ret => return ret,
+        }
+        tokio::time::sleep(backoff).await;
+        backoff *= 2;
+    }
+    unreachable!()
+}
+
+/// Always retry on connection error
+async fn call_with_always_retry_on_network_error(
+    client: &FlightClient,
+    id: &str,
+    input: &RecordBatch,
+    retry_count: &IntCounter,
+) -> Result<RecordBatch, arrow_udf_flight::Error> {
+    let mut backoff = Duration::from_millis(100);
+    loop {
+        match client.call(id, input).await {
+            Err(err) if is_tonic_error(&err) => {
+                tracing::error!(error = %err.as_report(), "UDF tonic error. retry...");
+            }
+            ret => {
+                if ret.is_err() {
+                    tracing::error!(error = %ret.as_ref().unwrap_err().as_report(), "UDF error. exiting...");
+                }
+                return ret;
+            }
+        }
+        retry_count.inc();
+        tokio::time::sleep(backoff).await;
+        backoff *= 2;
     }
 }
 
@@ -352,15 +404,7 @@ impl Build for UserDefinedFunction {
         let arg_schema = Arc::new(Schema::new(
             udf.arg_types
                 .iter()
-                .map::<Result<_>, _>(|t| {
-                    Ok(Field::new(
-                        "",
-                        DataType::from(t).try_into().map_err(|e: ArrayError| {
-                            risingwave_udf::Error::unsupported(e.to_report_string())
-                        })?,
-                        true,
-                    ))
-                })
+                .map::<Result<_>, _>(|t| Ok(Field::new("", DataType::from(t).try_into()?, true)))
                 .try_collect::<Fields>()?,
         ));
 
@@ -371,6 +415,7 @@ impl Build for UserDefinedFunction {
             arg_schema,
             imp,
             identifier: identifier.clone(),
+            link: udf.link.clone(),
             span: format!("udf_call({})", identifier).into(),
             disable_retry_count: AtomicU8::new(0),
             always_retry_on_network_error: udf.always_retry_on_network_error,
@@ -382,8 +427,8 @@ impl Build for UserDefinedFunction {
 /// Get or create a client for the given UDF service.
 ///
 /// There is a global cache for clients, so that we can reuse the same client for the same service.
-pub(crate) fn get_or_create_flight_client(link: &str) -> Result<Arc<ArrowFlightUdfClient>> {
-    static CLIENTS: LazyLock<std::sync::Mutex<HashMap<String, Weak<ArrowFlightUdfClient>>>> =
+pub(crate) fn get_or_create_flight_client(link: &str) -> Result<Arc<FlightClient>> {
+    static CLIENTS: LazyLock<std::sync::Mutex<HashMap<String, Weak<FlightClient>>>> =
         LazyLock::new(Default::default);
     let mut clients = CLIENTS.lock().unwrap();
     if let Some(client) = clients.get(link).and_then(|c| c.upgrade()) {
@@ -391,8 +436,10 @@ pub(crate) fn get_or_create_flight_client(link: &str) -> Result<Arc<ArrowFlightU
         Ok(client)
     } else {
         // create new client
-        let client = Arc::new(ArrowFlightUdfClient::connect_lazy(link)?);
-        clients.insert(link.into(), Arc::downgrade(&client));
+        let client = Arc::new(tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(FlightClient::connect(link.to_owned()))
+        })?);
+        clients.insert(link.to_owned(), Arc::downgrade(&client));
         Ok(client)
     }
 }
@@ -417,4 +464,110 @@ pub fn get_or_create_wasm_runtime(binary: &[u8]) -> Result<Arc<WasmRuntime>> {
     let runtime = Arc::new(arrow_udf_wasm::Runtime::new(binary)?);
     RUNTIMES.insert(md5, runtime.clone());
     Ok(runtime)
+}
+
+/// Returns true if the arrow flight error is caused by a connection error.
+fn is_connection_error(err: &arrow_udf_flight::Error) -> bool {
+    match err {
+        // Connection refused
+        arrow_udf_flight::Error::Tonic(status) if status.code() == tonic::Code::Unavailable => true,
+        _ => false,
+    }
+}
+
+fn is_tonic_error(err: &arrow_udf_flight::Error) -> bool {
+    match err {
+        arrow_udf_flight::Error::Tonic(_)
+        | arrow_udf_flight::Error::Flight(arrow_flight::error::FlightError::Tonic(_)) => true,
+        _ => false,
+    }
+}
+
+/// Monitor metrics for UDF.
+#[derive(Debug, Clone)]
+struct Metrics {
+    /// Number of successful UDF calls.
+    udf_success_count: IntCounterVec,
+    /// Number of failed UDF calls.
+    udf_failure_count: IntCounterVec,
+    /// Total number of retried UDF calls.
+    udf_retry_count: IntCounterVec,
+    /// Input chunk rows of UDF calls.
+    udf_input_chunk_rows: HistogramVec,
+    /// The latency of UDF calls in seconds.
+    udf_latency: HistogramVec,
+    /// Total number of input rows of UDF calls.
+    udf_input_rows: IntCounterVec,
+    /// Total number of input bytes of UDF calls.
+    udf_input_bytes: IntCounterVec,
+}
+
+/// Global UDF metrics.
+static GLOBAL_METRICS: LazyLock<Metrics> = LazyLock::new(|| Metrics::new(&GLOBAL_METRICS_REGISTRY));
+
+impl Metrics {
+    fn new(registry: &Registry) -> Self {
+        let labels = &["link", "language", "name", "fragment_id"];
+        let udf_success_count = register_int_counter_vec_with_registry!(
+            "udf_success_count",
+            "Total number of successful UDF calls",
+            labels,
+            registry
+        )
+        .unwrap();
+        let udf_failure_count = register_int_counter_vec_with_registry!(
+            "udf_failure_count",
+            "Total number of failed UDF calls",
+            labels,
+            registry
+        )
+        .unwrap();
+        let udf_retry_count = register_int_counter_vec_with_registry!(
+            "udf_retry_count",
+            "Total number of retried UDF calls",
+            labels,
+            registry
+        )
+        .unwrap();
+        let udf_input_chunk_rows = register_histogram_vec_with_registry!(
+            "udf_input_chunk_rows",
+            "Input chunk rows of UDF calls",
+            labels,
+            exponential_buckets(1.0, 2.0, 10).unwrap(), // 1 to 1024
+            registry
+        )
+        .unwrap();
+        let udf_latency = register_histogram_vec_with_registry!(
+            "udf_latency",
+            "The latency(s) of UDF calls",
+            labels,
+            exponential_buckets(0.000001, 2.0, 30).unwrap(), // 1us to 1000s
+            registry
+        )
+        .unwrap();
+        let udf_input_rows = register_int_counter_vec_with_registry!(
+            "udf_input_rows",
+            "Total number of input rows of UDF calls",
+            labels,
+            registry
+        )
+        .unwrap();
+        let udf_input_bytes = register_int_counter_vec_with_registry!(
+            "udf_input_bytes",
+            "Total number of input bytes of UDF calls",
+            labels,
+            registry
+        )
+        .unwrap();
+
+        Metrics {
+            udf_success_count,
+            udf_failure_count,
+            udf_retry_count,
+            udf_input_chunk_rows,
+            udf_latency,
+            udf_input_rows,
+            udf_input_bytes,
+        }
+    }
 }

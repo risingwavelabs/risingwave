@@ -14,6 +14,7 @@
 
 use anyhow::{anyhow, Context};
 use arrow_schema::Fields;
+use arrow_udf_flight::Client as FlightClient;
 use bytes::Bytes;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
@@ -23,7 +24,6 @@ use risingwave_expr::expr::get_or_create_wasm_runtime;
 use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 use risingwave_pb::catalog::Function;
 use risingwave_sqlparser::ast::{CreateFunctionBody, ObjectName, OperateFunctionArg};
-use risingwave_udf::ArrowFlightUdfClient;
 
 use super::*;
 use crate::catalog::CatalogError;
@@ -166,9 +166,7 @@ pub async fn handle_create_function(
 
             // check UDF server
             {
-                let client = ArrowFlightUdfClient::connect(&l)
-                    .await
-                    .map_err(|e| anyhow!(e))?;
+                let client = FlightClient::connect(&l).await.map_err(|e| anyhow!(e))?;
                 /// A helper function to create a unnamed field from data type.
                 fn to_field(data_type: arrow_schema::DataType) -> arrow_schema::Field {
                     arrow_schema::Field::new("", data_type, true)
@@ -182,15 +180,29 @@ pub async fn handle_create_function(
                 let returns = arrow_schema::Schema::new(match kind {
                     Kind::Scalar(_) => vec![to_field(return_type.clone().try_into()?)],
                     Kind::Table(_) => vec![
-                        arrow_schema::Field::new("row_index", arrow_schema::DataType::Int32, true),
+                        arrow_schema::Field::new("row", arrow_schema::DataType::Int32, true),
                         to_field(return_type.clone().try_into()?),
                     ],
                     _ => unreachable!(),
                 });
-                client
-                    .check(&identifier, &args, &returns)
+                let function = client
+                    .get(&identifier)
                     .await
                     .context("failed to check UDF signature")?;
+                if !data_types_match(&function.args, &args) {
+                    return Err(ErrorCode::InvalidParameterValue(format!(
+                        "argument type mismatch, expect: {:?}, actual: {:?}",
+                        args, function.args,
+                    ))
+                    .into());
+                }
+                if !data_types_match(&function.returns, &returns) {
+                    return Err(ErrorCode::InvalidParameterValue(format!(
+                        "return type mismatch, expect: {:?}, actual: {:?}",
+                        returns, function.returns,
+                    ))
+                    .into());
+                }
             }
             link = Some(l);
         }
@@ -480,4 +492,16 @@ fn datatype_name(ty: &DataType) -> String {
                 .join(",")
         ),
     }
+}
+
+/// Check if two list of data types match, ignoring field names.
+fn data_types_match(a: &arrow_schema::Schema, b: &arrow_schema::Schema) -> bool {
+    if a.fields().len() != b.fields().len() {
+        return false;
+    }
+    #[allow(clippy::disallowed_methods)]
+    a.fields()
+        .iter()
+        .zip(b.fields())
+        .all(|(a, b)| a.data_type().equals_datatype(b.data_type()))
 }
