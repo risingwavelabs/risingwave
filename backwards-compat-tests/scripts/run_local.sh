@@ -53,6 +53,7 @@ setup_new_cluster() {
 
 main() {
   set -euo pipefail
+  export BC_KAFKA_ADDR="localhost:29092"
   get_rw_versions
   setup_old_cluster
   configure_rw

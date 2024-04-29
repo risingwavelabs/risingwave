@@ -49,8 +49,6 @@ full-without-monitoring:
     - use: compute-node
     - use: frontend
     - use: compactor
-    - use: zookeeper
-    - use: kafka
 EOF
 
 cat <<EOF > risedev-components.user.env
@@ -58,7 +56,6 @@ RISEDEV_CONFIGURED=true
 
 ENABLE_MINIO=true
 ENABLE_ETCD=true
-ENABLE_KAFKA=true
 
 # Fetch risingwave binary from release.
 ENABLE_BUILD_RUST=false
@@ -84,8 +81,6 @@ full-without-monitoring:
     - use: compute-node
     - use: frontend
     - use: compactor
-    - use: zookeeper
-    - use: kafka
 EOF
 
 cat <<EOF > risedev-components.user.env
@@ -93,7 +88,6 @@ RISEDEV_CONFIGURED=true
 
 ENABLE_MINIO=true
 ENABLE_ETCD=true
-ENABLE_KAFKA=true
 
 # Make sure that it builds
 ENABLE_BUILD_RUST=true
@@ -141,6 +135,7 @@ main() {
   git fetch --all
   get_rw_versions
 
+  export BC_KAFKA_ADDR="kafka:9093"
   setup_old_cluster
   seed_old_cluster "$OLD_VERSION"
 

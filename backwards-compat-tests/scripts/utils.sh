@@ -122,14 +122,14 @@ check_version() {
 create_kafka_topic() {
   "$KAFKA_PATH"/bin/kafka-topics.sh \
     --create \
-    --topic backwards_compat_test_kafka_source --bootstrap-server localhost:29092
+    --topic backwards_compat_test_kafka_source --bootstrap-server "${BC_KAFKA_ADDR}"
 }
 
 insert_json_kafka() {
   local JSON=$1
   echo "$JSON" | "$KAFKA_PATH"/bin/kafka-console-producer.sh \
     --topic backwards_compat_test_kafka_source \
-    --bootstrap-server localhost:29092 \
+    --bootstrap-server "${BC_KAFKA_ADDR}" \
     --property "parse.key=true" \
     --property "key.separator=,"
 }

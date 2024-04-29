@@ -248,22 +248,6 @@ profile:
       # - use: prometheus
       # - use: grafana
 
-  full-benchmark:
-    steps:
-      - use: minio
-      - use: etcd
-      - use: meta-node
-      - use: compute-node
-      - use: frontend
-      - use: compactor
-      - use: prometheus
-        remote-write: true
-        remote-write-region: "ap-southeast-1"
-        remote-write-url: "https://aps-workspaces.ap-southeast-1.amazonaws.com/workspaces/ws-f3841dad-6a5c-420f-8f62-8f66487f512a/api/v1/remote_write"
-      - use: grafana
-      - use: kafka
-        persist-data: true
-
   3etcd-3meta:
     steps:
       - use: minio
@@ -401,6 +385,7 @@ profile:
       # Do not use kafka here, we will spawn it separately,
       # so we don't have to re-generate data each time.
       # RW will still be ale to talk to it.
+      # pTODO(bk)
       # - use: kafka
       #   port: 9092
       #   persist-data: true
@@ -894,19 +879,6 @@ profile:
         enable-tiered-cache: true
       - use: frontend
       - use: compactor
-
-  ci-1cn-1fe-kafka-with-recovery:
-    config-path: src/config/ci-recovery.toml
-    steps:
-      - use: minio
-      - use: etcd
-      - use: meta-node
-      - use: compute-node
-        enable-tiered-cache: true
-      - use: frontend
-      - use: compactor
-      - use: kafka
-        persist-data: true
 
   ci-meta-backup-test-etcd:
     config-path: src/config/ci-meta-backup-test.toml
