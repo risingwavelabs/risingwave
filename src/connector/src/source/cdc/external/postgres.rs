@@ -120,7 +120,11 @@ impl PostgresExternalTableReader {
         pk_indices: Vec<usize>,
         scan_limit: u32,
     ) -> ConnectorResult<Self> {
-        tracing::debug!(?rw_schema, "create postgres external table reader");
+        tracing::info!(
+            ?rw_schema,
+            ?pk_indices,
+            "create postgres external table reader"
+        );
 
         let config = serde_json::from_value::<ExternalTableConfig>(
             serde_json::to_value(properties.clone()).unwrap(),
