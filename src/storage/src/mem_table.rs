@@ -220,7 +220,7 @@ impl MemTable {
                     .into()),
                     KeyOp::Update(value) => {
                         let (original_old_value, original_new_value) = std::mem::take(value);
-                        if ENABLE_SANITY_CHECK && original_new_value != old_value {
+                        if ENABLE_SANITY_CHECK && !value_checker(original_new_value, &old_value) {
                             return Err(Box::new(MemTableError::InconsistentOperation {
                                 key: e.key().clone(),
                                 prev: e.get().clone(),
