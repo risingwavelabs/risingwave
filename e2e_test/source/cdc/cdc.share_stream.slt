@@ -304,6 +304,18 @@ CREATE TABLE enum_to_varchar_shared (
     PRIMARY KEY (id)
 ) FROM pg_source TABLE 'public.enum_table';
 
+
+statement ok
+CREATE TABLE list_with_null_shared (
+    id int,
+    my_int int[],
+    my_num varchar[],
+    my_mood varchar[],
+    my_uuid varchar[],
+    my_bytea bytea[],
+    PRIMARY KEY (id)
+) FROM pg_source TABLE 'public.list_with_null';
+
 system ok
 psql -c "
 insert into numeric_table values(102, 57896044618658097711785492504343953926634992332820282019728792003956564819967);
