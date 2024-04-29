@@ -22,14 +22,21 @@ while getopts 'c:f:' opt; do
 done
 shift $((OPTIND -1))
 
+cleanup() {
+  echo "--- clean Demos"
+  python3 clean_demos.py --case "${case}"
+}
+
+trap cleanup EXIT
+
 echo "export INTEGRATION_TEST_CASE=${case}" > env_vars.sh
 
 echo "~~~ clean up docker"
 if [ $(docker ps -aq |wc -l) -gt 0 ]; then
   docker rm -f $(docker ps -aq)
 fi
-docker network prune -f
-docker volume prune -f
+docker network prune -f -a
+docker volume prune -f -a
 
 echo "~~~ ghcr login"
 echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
@@ -91,9 +98,6 @@ echo "--- check if the ingestion is successful"
 # extract the type of upstream source,e.g. mysql,postgres,etc
 upstream=$(echo "${case}" | cut -d'-' -f 1)
 python3 check_data.py "${case}" "${upstream}"
-
-echo "--- clean Demos"
-python3 clean_demos.py --case "${case}"
 
 echo "--- reset vm.max_map_count={$max_map_count_original_value}"
 sudo sysctl -w vm.max_map_count="$max_map_count_original_value"
