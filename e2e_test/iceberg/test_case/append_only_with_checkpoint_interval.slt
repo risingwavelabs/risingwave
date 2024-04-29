@@ -5,6 +5,7 @@ statement ok
 CREATE TABLE s1 (i1 int, i2 varchar, i3 varchar) WITH (
     connector = 'datagen',
     fields.i1.kind = 'sequence',
+    fields.i1.end = '10',
     fields.i2.kind = 'random',
     fields.i2.length = '32',
     fields.i2.seed = '4',

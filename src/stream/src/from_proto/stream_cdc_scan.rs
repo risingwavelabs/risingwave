@@ -23,7 +23,7 @@ use risingwave_pb::stream_plan::StreamCdcScanNode;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::{CdcBackfillExecutor, Executor, ExternalStorageTable};
+use crate::executor::{CdcBackfillExecutor, CdcScanOptions, Executor, ExternalStorageTable};
 
 pub struct StreamCdcScanExecutorBuilder;
 
@@ -44,7 +44,6 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             .collect_vec();
 
         let table_desc: &ExternalTableDesc = node.get_cdc_table_desc()?;
-        let disable_backfill = node.disable_backfill;
 
         let table_schema: Schema = table_desc.columns.iter().map(Into::into).collect();
         assert_eq!(output_indices, (0..table_schema.len()).collect_vec());
@@ -94,13 +93,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
         let state_table =
             StateTable::from_table_catalog(node.get_state_table()?, state_store, vnodes).await;
 
-        // adjust backfill chunk size if rate limit is set.
-        let chunk_size = params.env.config().developer.chunk_size;
-        let backfill_chunk_size = node
-            .rate_limit
-            .map(|x| std::cmp::min(x as usize, chunk_size))
-            .unwrap_or(chunk_size);
-
+        let scan_options = node.options.clone().map(CdcScanOptions::from_proto);
         let exec = CdcBackfillExecutor::new(
             params.actor_context.clone(),
             external_table,
@@ -109,8 +102,9 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             None,
             params.executor_stats,
             state_table,
-            backfill_chunk_size,
-            disable_backfill,
+            node.rate_limit,
+            node.disable_backfill,
+            scan_options,
         );
         Ok((params.info, exec).into())
     }

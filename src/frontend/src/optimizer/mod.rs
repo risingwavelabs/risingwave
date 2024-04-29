@@ -972,8 +972,14 @@ fn require_additional_exchange_on_root_in_distributed_mode(plan: PlanRef) -> boo
         plan.node_type() == PlanNodeType::BatchSeqScan
     }
 
+    fn is_log_table(plan: &PlanRef) -> bool {
+        plan.node_type() == PlanNodeType::BatchLogSeqScan
+    }
+
     fn is_source(plan: &PlanRef) -> bool {
         plan.node_type() == PlanNodeType::BatchSource
+            || plan.node_type() == PlanNodeType::BatchKafkaScan
+            || plan.node_type() == PlanNodeType::BatchIcebergScan
     }
 
     fn is_insert(plan: &PlanRef) -> bool {
@@ -994,6 +1000,7 @@ fn require_additional_exchange_on_root_in_distributed_mode(plan: PlanRef) -> boo
         || exist_and_no_exchange_before(&plan, is_insert)
         || exist_and_no_exchange_before(&plan, is_update)
         || exist_and_no_exchange_before(&plan, is_delete)
+        || exist_and_no_exchange_before(&plan, is_log_table)
 }
 
 /// The purpose is same as `require_additional_exchange_on_root_in_distributed_mode`. We separate
@@ -1005,6 +1012,8 @@ fn require_additional_exchange_on_root_in_local_mode(plan: PlanRef) -> bool {
 
     fn is_source(plan: &PlanRef) -> bool {
         plan.node_type() == PlanNodeType::BatchSource
+            || plan.node_type() == PlanNodeType::BatchKafkaScan
+            || plan.node_type() == PlanNodeType::BatchIcebergScan
     }
 
     fn is_insert(plan: &PlanRef) -> bool {

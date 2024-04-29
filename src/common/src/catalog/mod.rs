@@ -21,14 +21,15 @@ pub mod test_utils;
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 pub use column::*;
 pub use external_table::*;
+use futures::stream::BoxStream;
 pub use internal_table::*;
 use parse_display::Display;
 pub use physical_table::*;
 use risingwave_pb::catalog::{
     CreateType as PbCreateType, HandleConflictBehavior as PbHandleConflictBehavior,
+    StreamJobStatus as PbStreamJobStatus,
 };
 use risingwave_pb::plan_common::ColumnDescVersion;
 pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
@@ -148,9 +149,9 @@ pub fn cdc_table_name_column_desc() -> ColumnDesc {
 }
 
 /// The local system catalog reader in the frontend node.
-#[async_trait]
 pub trait SysCatalogReader: Sync + Send + 'static {
-    async fn read_table(&self, table_id: &TableId) -> Result<DataChunk, BoxedError>;
+    /// Reads the data of the system catalog table.
+    fn read_table(&self, table_id: TableId) -> BoxStream<'_, Result<DataChunk, BoxedError>>;
 }
 
 pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;
@@ -474,6 +475,29 @@ impl ConflictBehavior {
             ConflictBehavior::Overwrite => "Overwrite".to_string(),
             ConflictBehavior::IgnoreConflict => "IgnoreConflict".to_string(),
             ConflictBehavior::DoUpdateIfNotNull => "DoUpdateIfNotNull".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Display, Hash, PartialOrd, PartialEq, Eq, Ord)]
+pub enum StreamJobStatus {
+    #[default]
+    Creating,
+    Created,
+}
+
+impl StreamJobStatus {
+    pub fn from_proto(stream_job_status: PbStreamJobStatus) -> Self {
+        match stream_job_status {
+            PbStreamJobStatus::Creating => StreamJobStatus::Creating,
+            PbStreamJobStatus::Created | PbStreamJobStatus::Unspecified => StreamJobStatus::Created,
+        }
+    }
+
+    pub fn to_proto(self) -> PbStreamJobStatus {
+        match self {
+            StreamJobStatus::Creating => PbStreamJobStatus::Creating,
+            StreamJobStatus::Created => PbStreamJobStatus::Created,
         }
     }
 }

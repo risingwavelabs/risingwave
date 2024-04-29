@@ -27,7 +27,7 @@ use risingwave_pb::catalog::CreateType;
 use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
-use risingwave_pb::stream_plan::barrier::BarrierKind;
+use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
@@ -81,12 +81,19 @@ pub struct Reschedule {
     pub newly_created_actors: Vec<(StreamActor, PbActorStatus)>,
 }
 
+/// Replacing an old table with a new one. All actors in the table job will be rebuilt.
+/// Used for `ALTER TABLE` ([`Command::ReplaceTable`]) and sink into table ([`Command::CreateStreamingJob`]).
 #[derive(Debug, Clone)]
 pub struct ReplaceTablePlan {
     pub old_table_fragments: TableFragments,
     pub new_table_fragments: TableFragments,
     pub merge_updates: Vec<MergeUpdate>,
     pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
+    /// For a table with connector, the `SourceExecutor` actor will also be rebuilt with new actor ids.
+    /// We need to reassign splits for it.
+    ///
+    /// Note that there's no `SourceBackfillExecutor` involved for table with connector, so we don't need to worry about
+    /// backfill_splits.
     pub init_split_assignment: SplitAssignment,
 }
 
@@ -166,6 +173,7 @@ pub enum Command {
         definition: String,
         ddl_type: DdlType,
         create_type: CreateType,
+        /// This is for create SINK into table.
         replace_table: Option<ReplaceTablePlan>,
     },
     /// `CancelStreamingJob` command generates a `Stop` barrier including the actors of the given
@@ -301,6 +309,40 @@ impl Command {
     pub fn need_checkpoint(&self) -> bool {
         // todo! Reviewing the flow of different command to reduce the amount of checkpoint
         !matches!(self, Command::Plain(None) | Command::Resume(_))
+    }
+}
+
+#[derive(Debug)]
+pub enum BarrierKind {
+    Initial,
+    Barrier,
+    /// Hold a list of previous non-checkpoint prev-epoch + current prev-epoch
+    Checkpoint(Vec<u64>),
+}
+
+impl BarrierKind {
+    pub fn to_protobuf(&self) -> PbBarrierKind {
+        match self {
+            BarrierKind::Initial => PbBarrierKind::Initial,
+            BarrierKind::Barrier => PbBarrierKind::Barrier,
+            BarrierKind::Checkpoint(_) => PbBarrierKind::Checkpoint,
+        }
+    }
+
+    pub fn is_checkpoint(&self) -> bool {
+        matches!(self, BarrierKind::Checkpoint(_))
+    }
+
+    pub fn is_initial(&self) -> bool {
+        matches!(self, BarrierKind::Initial)
+    }
+
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            BarrierKind::Initial => "Initial",
+            BarrierKind::Barrier => "Barrier",
+            BarrierKind::Checkpoint(_) => "Checkpoint",
+        }
     }
 }
 

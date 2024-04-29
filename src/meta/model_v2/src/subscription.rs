@@ -15,10 +15,11 @@
 use risingwave_pb::catalog::PbSubscription;
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
+use serde::{Deserialize, Serialize};
 
 use crate::{ColumnCatalogArray, ColumnOrderArray, I32Array, Property, SubscriptionId};
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "subscription")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
@@ -30,6 +31,7 @@ pub struct Model {
     pub properties: Property,
     pub definition: String,
     pub subscription_from_name: String,
+    pub subscription_internal_table_name: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -63,6 +65,7 @@ impl From<PbSubscription> for ActiveModel {
             properties: Set(pb_subscription.properties.into()),
             definition: Set(pb_subscription.definition),
             subscription_from_name: Set(pb_subscription.subscription_from_name),
+            subscription_internal_table_name: Set(pb_subscription.subscription_internal_table_name),
         }
     }
 }

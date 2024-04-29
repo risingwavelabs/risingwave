@@ -872,14 +872,7 @@ mod tests {
                             let _ = tx.send(Ok(StreamingControlStreamResponse {
                                 response: Some(
                                     streaming_control_stream_response::Response::CompleteBarrier(
-                                        BarrierCompleteResponse {
-                                            request_id: "".to_string(),
-                                            status: None,
-                                            create_mview_progress: vec![],
-                                            synced_sstables: vec![],
-                                            worker_id: 0,
-                                            table_watermarks: Default::default(),
-                                        },
+                                        BarrierCompleteResponse::default(),
                                     ),
                                 ),
                             }));

@@ -169,8 +169,10 @@ fn generate_with_options_yaml_inner(path: &Path) -> String {
     let struct_infos = flatten_nested_options(struct_infos);
 
     // Generate the output
-    "# THIS FILE IS AUTO_GENERATED. DO NOT EDIT\n\n".to_string()
-        + &serde_yaml::to_string(&struct_infos).unwrap()
+    format!(
+        "# THIS FILE IS AUTO_GENERATED. DO NOT EDIT\n\n{}",
+        serde_yaml::to_string(&struct_infos).unwrap()
+    )
 }
 
 #[derive(Debug, Serialize, Clone)]

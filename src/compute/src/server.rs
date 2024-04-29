@@ -103,7 +103,7 @@ pub async fn compute_node_serve(
 
     // Register to the cluster. We're not ready to serve until activate is called.
     let (meta_client, system_params) = MetaClient::register_new(
-        opts.meta_address,
+        opts.meta_address.clone(),
         WorkerType::ComputeNode,
         &advertise_addr,
         Property {
@@ -122,8 +122,7 @@ pub async fn compute_node_serve(
     let embedded_compactor_enabled =
         embedded_compactor_enabled(state_store_url, config.storage.disable_remote_compactor);
 
-    let (reserved_memory_bytes, non_reserved_memory_bytes) =
-        reserve_memory_bytes(opts.total_memory_bytes);
+    let (reserved_memory_bytes, non_reserved_memory_bytes) = reserve_memory_bytes(&opts);
     let storage_memory_config = storage_memory_config(
         non_reserved_memory_bytes,
         embedded_compactor_enabled,
