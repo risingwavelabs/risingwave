@@ -117,7 +117,7 @@ impl Sink for GooglePubSubSink {
 
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {
-            return Err(SinkError::Nats(anyhow!(
+            return Err(SinkError::GooglePubSub(anyhow!(
                 "Google Pub/Sub sink only support append-only mode"
             )));
         }
