@@ -321,12 +321,13 @@ reqsign = { git = "https://github.com/wcy-fdu/reqsign.git", rev = "002ee2a" }
 # patch to remove preserve_order from serde_json
 deno_core = { git = "https://github.com/bakjos/deno_core", rev = "9b241c6" }
 # patch to user reqwest 0.12.2
-deno_fetch = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_http = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_net = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_tls = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_web = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_websocket = { git = "https://github.com/bakjos/deno", rev = "787a232" }
+deno_crypto = { git = "https://github.com/bakjos/deno", rev = "ad615b9" }
+deno_fetch = { git = "https://github.com/bakjos/deno", rev = "ad615b9" }
+deno_http = { git = "https://github.com/bakjos/deno", rev = "ad615b9" }
+deno_net = { git = "https://github.com/bakjos/deno", rev = "ad615b9" }
+deno_tls = { git = "https://github.com/bakjos/deno", rev = "ad615b9" }
+deno_web = { git = "https://github.com/bakjos/deno", rev = "ad615b9" }
+deno_websocket = { git = "https://github.com/bakjos/deno", rev = "ad615b9" }
 
 [workspace.metadata.dylint]
 libraries = [{ path = "./lints" }]
