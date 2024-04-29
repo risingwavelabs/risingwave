@@ -162,6 +162,10 @@ pub struct RdKafkaPropertiesProducer {
     )]
     #[serde_as(as = "DisplayFromStr")]
     max_in_flight_requests_per_connection: usize,
+
+    #[serde(rename = "properties.request.required.acks")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    request_required_acks: Option<i32>,
 }
 
 impl RdKafkaPropertiesProducer {
@@ -195,6 +199,9 @@ impl RdKafkaPropertiesProducer {
         }
         if let Some(v) = &self.compression_codec {
             c.set("compression.codec", v.to_string());
+        }
+        if let Some(v) = self.request_required_acks {
+            c.set("request.required.acks", v.to_string());
         }
         c.set("message.timeout.ms", self.message_timeout_ms.to_string());
         c.set(
@@ -603,6 +610,7 @@ mod test {
             "properties.compression.codec".to_string() => "zstd".to_string(),
             "properties.message.timeout.ms".to_string() => "114514".to_string(),
             "properties.max.in.flight.requests.per.connection".to_string() => "114514".to_string(),
+            "properties.request.required.acks".to_string() => "-1".to_string(),
         };
         let c = KafkaConfig::from_hashmap(props).unwrap();
         assert_eq!(
@@ -618,6 +626,10 @@ mod test {
             c.rdkafka_properties_producer
                 .max_in_flight_requests_per_connection,
             114514
+        );
+        assert_eq!(
+            c.rdkafka_properties_producer.request_required_acks,
+            Some(-1)
         );
 
         let props: HashMap<String, String> = hashmap! {

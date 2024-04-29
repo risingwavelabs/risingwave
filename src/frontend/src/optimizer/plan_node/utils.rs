@@ -41,7 +41,6 @@ pub struct TableCatalogBuilder {
     value_indices: Option<Vec<usize>>,
     vnode_col_idx: Option<usize>,
     column_names: HashMap<String, i32>,
-    read_prefix_len_hint: usize,
     watermark_columns: Option<FixedBitSet>,
     dist_key_in_pk: Option<Vec<usize>>,
 }
@@ -136,7 +135,7 @@ impl TableCatalogBuilder {
     /// anticipated read prefix pattern (number of fields) for the table, which can be utilized for
     /// implementing the table's bloom filter or other storage optimization techniques.
     pub fn build(self, distribution_key: Vec<usize>, read_prefix_len_hint: usize) -> TableCatalog {
-        assert!(self.read_prefix_len_hint <= self.pk.len());
+        assert!(read_prefix_len_hint <= self.pk.len());
         let watermark_columns = match self.watermark_columns {
             Some(w) => w,
             None => FixedBitSet::with_capacity(self.columns.len()),
