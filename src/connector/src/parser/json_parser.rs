@@ -106,10 +106,11 @@ impl JsonParser {
         })
     }
 
+    #[cfg(test)]
     pub fn new_for_test(rw_columns: Vec<SourceColumnDesc>) -> ConnectorResult<Self> {
         Ok(Self {
             rw_columns,
-            source_ctx: Default::default(),
+            source_ctx: SourceContext::dummy().into(),
             payload_start_idx: 0,
         })
     }
@@ -218,7 +219,7 @@ mod tests {
         EncodingProperties, JsonProperties, ProtocolProperties, SourceColumnDesc,
         SourceStreamChunkBuilder, SpecificParserConfig,
     };
-    use crate::source::SourceColumnType;
+    use crate::source::{SourceColumnType, SourceContext};
 
     fn get_payload() -> Vec<Vec<u8>> {
         vec![
@@ -251,7 +252,7 @@ mod tests {
         let parser = JsonParser::new(
             SpecificParserConfig::DEFAULT_PLAIN_JSON,
             descs.clone(),
-            Default::default(),
+            SourceContext::dummy().into(),
         )
         .unwrap();
 
@@ -361,7 +362,7 @@ mod tests {
         let parser = JsonParser::new(
             SpecificParserConfig::DEFAULT_PLAIN_JSON,
             descs.clone(),
-            Default::default(),
+            SourceContext::dummy().into(),
         )
         .unwrap();
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 3);
@@ -432,7 +433,7 @@ mod tests {
         let parser = JsonParser::new(
             SpecificParserConfig::DEFAULT_PLAIN_JSON,
             descs.clone(),
-            Default::default(),
+            SourceContext::dummy().into(),
         )
         .unwrap();
         let payload = br#"
@@ -504,7 +505,7 @@ mod tests {
         let parser = JsonParser::new(
             SpecificParserConfig::DEFAULT_PLAIN_JSON,
             descs.clone(),
-            Default::default(),
+            SourceContext::dummy().into(),
         )
         .unwrap();
         let payload = br#"
@@ -550,7 +551,7 @@ mod tests {
         let parser = JsonParser::new(
             SpecificParserConfig::DEFAULT_PLAIN_JSON,
             descs.clone(),
-            Default::default(),
+            SourceContext::dummy().into(),
         )
         .unwrap();
         let payload = br#"
@@ -614,7 +615,7 @@ mod tests {
             }),
             protocol_config: ProtocolProperties::Upsert,
         };
-        let mut parser = UpsertParser::new(props, descs.clone(), Default::default())
+        let mut parser = UpsertParser::new(props, descs.clone(), SourceContext::dummy().into())
             .await
             .unwrap();
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);

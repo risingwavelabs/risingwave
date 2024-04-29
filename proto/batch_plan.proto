@@ -71,6 +71,18 @@ message FilterNode {
   expr.ExprNode search_condition = 1;
 }
 
+message LogRowSeqScanNode {
+  plan_common.StorageTableDesc table_desc = 1;
+  // This records the mandatory column_ids of the original table, excluding op
+  repeated int32 column_ids = 2;
+  // The partition to read for scan tasks.
+  //
+  // Will be filled by the scheduler.
+  common.Buffer vnode_bitmap = 3;
+  common.BatchQueryEpoch old_epoch = 4;
+  common.BatchQueryEpoch new_epoch = 5;
+}
+
 message InsertNode {
   // Id of the table to perform inserting.
   uint32 table_id = 1;
@@ -326,6 +338,7 @@ message PlanNode {
     SourceNode source = 34;
     SortOverWindowNode sort_over_window = 35;
     MaxOneRowNode max_one_row = 36;
+    LogRowSeqScanNode log_row_seq_scan = 37;
     // The following nodes are used for testing.
     bool block_executor = 100;
     bool busy_loop_executor = 101;

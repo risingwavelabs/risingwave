@@ -12,19 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::StreamExt;
-use futures_async_stream::try_stream;
 use risingwave_common::array::Op;
-use risingwave_common::catalog::Schema;
-use risingwave_storage::StateStore;
 
 use super::sort_buffer::SortBuffer;
-use super::{
-    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, Message,
-    StreamExecutorError, Watermark,
-};
-use crate::common::table::state_table::StateTable;
-use crate::common::StreamChunkBuilder;
+use crate::executor::prelude::*;
 
 pub struct SortExecutor<S: StateStore> {
     input: Executor,

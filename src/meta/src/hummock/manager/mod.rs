@@ -263,6 +263,7 @@ pub struct CommitEpochInfo {
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
     pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
     pub new_table_fragment_info: Option<NewTableFragmentInfo>,
+    pub change_log_delta: HashMap<TableId, ChangeLogDelta>,
 }
 
 impl CommitEpochInfo {
@@ -271,12 +272,14 @@ impl CommitEpochInfo {
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
         sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
         new_table_fragment_info: Option<NewTableFragmentInfo>,
+        change_log_delta: HashMap<TableId, ChangeLogDelta>,
     ) -> Self {
         Self {
             sstables,
             new_table_watermarks,
             sst_to_context,
             new_table_fragment_info,
+            change_log_delta,
         }
     }
 
@@ -290,6 +293,7 @@ impl CommitEpochInfo {
             HashMap::new(),
             sst_to_context,
             None,
+            HashMap::new(),
         )
     }
 }
@@ -917,7 +921,6 @@ impl HummockManager {
         let developer_config = Arc::new(CompactionDeveloperConfig::new_from_meta_opts(
             &self.env.opts,
         ));
-        const MAX_TRIVIAL_MOVE_TASK_COUNT: usize = 256;
         'outside: for compaction_group_id in compaction_groups {
             if pick_tasks.len() >= max_select_count {
                 break;
@@ -1076,7 +1079,7 @@ impl HummockManager {
                     );
                     current_version.apply_version_delta(&version_delta);
                     trivial_tasks.push(compact_task);
-                    if trivial_tasks.len() >= MAX_TRIVIAL_MOVE_TASK_COUNT {
+                    if trivial_tasks.len() >= self.env.opts.max_trivial_move_task_count_per_loop {
                         break 'outside;
                     }
                 } else {
@@ -1624,6 +1627,7 @@ impl HummockManager {
             new_table_watermarks,
             sst_to_context,
             new_table_fragment_info,
+            change_log_delta,
         } = commit_info;
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
@@ -1659,6 +1663,7 @@ impl HummockManager {
         );
         new_version_delta.max_committed_epoch = epoch;
         new_version_delta.new_table_watermarks = new_table_watermarks;
+        new_version_delta.change_log_delta = change_log_delta;
 
         let mut table_compaction_group_mapping = old_version.build_compaction_group_info();
 
@@ -3475,6 +3480,7 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
 type CompactionRequestChannelItem = (CompactionGroupId, compact_task::TaskType);
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_pb::hummock::hummock_version_delta::ChangeLogDelta;
 use tokio::sync::mpsc::error::SendError;
 
 use super::compaction::CompactionSelector;

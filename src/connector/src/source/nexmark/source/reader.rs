@@ -211,7 +211,7 @@ impl NexmarkSplitReader {
 mod tests {
     use super::*;
     use crate::source::nexmark::{NexmarkProperties, NexmarkSplitEnumerator};
-    use crate::source::{SourceEnumeratorContext, SplitEnumerator};
+    use crate::source::{SourceContext, SourceEnumeratorContext, SplitEnumerator};
 
     #[tokio::test]
     async fn test_nexmark_split_reader() -> crate::error::ConnectorResult<()> {
@@ -224,7 +224,7 @@ mod tests {
         };
 
         let mut enumerator =
-            NexmarkSplitEnumerator::new(props.clone(), SourceEnumeratorContext::default().into())
+            NexmarkSplitEnumerator::new(props.clone(), SourceEnumeratorContext::dummy().into())
                 .await?;
         let list_splits_resp: Vec<_> = enumerator.list_splits().await?.into_iter().collect();
 
@@ -236,7 +236,7 @@ mod tests {
                 props.clone(),
                 state,
                 Default::default(),
-                Default::default(),
+                SourceContext::dummy().into(),
                 None,
             )
             .await?
@@ -261,7 +261,7 @@ mod tests {
         };
 
         let mut enumerator =
-            NexmarkSplitEnumerator::new(props.clone(), SourceEnumeratorContext::default().into())
+            NexmarkSplitEnumerator::new(props.clone(), SourceEnumeratorContext::dummy().into())
                 .await?;
         let list_splits_resp: Vec<_> = enumerator.list_splits().await?.into_iter().collect();
 
@@ -271,7 +271,7 @@ mod tests {
                 props.clone(),
                 state,
                 Default::default(),
-                Default::default(),
+                SourceContext::dummy().into(),
                 None,
             )
             .await?

@@ -46,7 +46,9 @@ use risingwave_connector::sink::{
 use risingwave_connector::source::datagen::{
     DatagenProperties, DatagenSplitEnumerator, DatagenSplitReader,
 };
-use risingwave_connector::source::{Column, DataType, SplitEnumerator, SplitReader};
+use risingwave_connector::source::{
+    Column, DataType, SourceContext, SourceEnumeratorContext, SplitEnumerator, SplitReader,
+};
 use risingwave_pb::connector_service::SinkPayloadFormat;
 use risingwave_stream::executor::test_utils::prelude::ColumnDesc;
 use risingwave_stream::executor::{Barrier, Message, MessageStreamItem, StreamExecutorError};
@@ -200,10 +202,12 @@ impl MockDatagenSource {
             rows_per_second,
             fields: HashMap::default(),
         };
-        let mut datagen_enumerator =
-            DatagenSplitEnumerator::new(properties.clone(), Default::default())
-                .await
-                .unwrap();
+        let mut datagen_enumerator = DatagenSplitEnumerator::new(
+            properties.clone(),
+            SourceEnumeratorContext::dummy().into(),
+        )
+        .await
+        .unwrap();
         let parser_config = ParserConfig {
             specific: SpecificParserConfig {
                 key_encoding_config: None,
@@ -220,7 +224,7 @@ impl MockDatagenSource {
                     properties.clone(),
                     vec![splits],
                     parser_config.clone(),
-                    Default::default(),
+                    SourceContext::dummy().into(),
                     Some(source_schema.clone()),
                 )
                 .await

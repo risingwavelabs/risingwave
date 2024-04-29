@@ -195,6 +195,10 @@ impl SessionImpl {
         })
     }
 
+    pub fn get_pinned_snapshot(&self) -> Option<ReadSnapshot> {
+        self.txn_ctx().snapshot.clone()
+    }
+
     /// Unpin snapshot by replacing the snapshot with None.
     pub fn unpin_snapshot(&self) {
         self.txn_ctx().snapshot = None;

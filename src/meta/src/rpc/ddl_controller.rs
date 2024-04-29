@@ -356,8 +356,15 @@ impl DdlController {
         &self,
         table_id: u32,
         parallelism: PbTableParallelism,
-        deferred: bool,
+        mut deferred: bool,
     ) -> MetaResult<()> {
+        if self.barrier_manager.check_status_running().is_err() {
+            tracing::info!(
+                "alter parallelism is set to deferred mode because the system is in recovery state"
+            );
+            deferred = true;
+        }
+
         if !deferred
             && !self
                 .metadata_manager
@@ -838,7 +845,7 @@ impl DdlController {
         async fn new_enumerator_for_validate<P: SourceProperties>(
             source_props: P,
         ) -> Result<P::SplitEnumerator, ConnectorError> {
-            P::SplitEnumerator::new(source_props, SourceEnumeratorContext::default().into()).await
+            P::SplitEnumerator::new(source_props, SourceEnumeratorContext::dummy().into()).await
         }
 
         for actor in &stream_scan_fragment.actors {

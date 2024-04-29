@@ -1,0 +1,36 @@
+# TODO: the test triggers a recovery caused by a known issue: https://github.com/risingwavelabs/risingwave/issues/12474.
+# We should consider using a mechanism designed for testing recovery instead of depending on a bug.
+
+statement ok
+create table t (v int);
+
+statement ok
+create materialized view mv as select generate_series(1, 10), coalesce(pg_sleep(2), v) / 0 bomb from t;
+
+# The bomb will be triggered after 2 seconds of sleep, so the insertion should return successfully.
+statement ok
+insert into t values (1);
+
+# Wait for recovery to complete.
+sleep 15s
+
+# Check that there's a log entry for barrier collection failure on the mata node.
+# Extract the message to check that it contains the root cause of the failure.
+query T
+with error as (
+    select info->'collectBarrierFail'->'error' #>> '{}' as error
+    from rw_catalog.rw_event_logs
+    where event_type = 'COLLECT_BARRIER_FAIL'
+    order by timestamp desc
+    limit 1
+)
+select
+case when error like '%Actor % exited unexpectedly: Executor error: Chunk operation error: Division by zero%' then 'ok'
+     else error
+end as result
+from error;
+----
+ok
+
+statement ok
+drop table t cascade;

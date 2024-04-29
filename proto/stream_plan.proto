@@ -435,6 +435,8 @@ message TemporalJoinNode {
   plan_common.StorageTableDesc table_desc = 7;
   // The output indices of the lookup side table
   repeated uint32 table_output_indices = 8;
+  // The state table used for non-append-only temporal join.
+  optional catalog.Table memo_table = 9;
 }
 
 message DynamicFilterNode {
@@ -559,6 +561,16 @@ message StreamScanNode {
   catalog.Table arrangement_table = 10;
 }
 
+// Config options for CDC backfill
+message StreamCdcScanOptions {
+  // Whether skip the backfill and only consume from upstream.
+  bool disable_backfill = 1;
+
+  uint32 snapshot_barrier_interval = 2;
+
+  uint32 snapshot_batch_size = 3;
+}
+
 message StreamCdcScanNode {
   uint32 table_id = 1;
 
@@ -579,7 +591,10 @@ message StreamCdcScanNode {
   optional uint32 rate_limit = 6;
 
   // Whether skip the backfill and only consume from upstream.
+  // keep it for backward compatibility, new stream plan will use `options.disable_backfill`
   bool disable_backfill = 7;
+
+  StreamCdcScanOptions options = 8;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.

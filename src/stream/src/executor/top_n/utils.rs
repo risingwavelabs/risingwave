@@ -13,26 +13,18 @@
 // limitations under the License.
 
 use std::future::Future;
-use std::sync::Arc;
 
-use futures::StreamExt;
-use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::Op;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::Schema;
-use risingwave_common::row::{CompactedRow, Row, RowDeserializer};
+use risingwave_common::row::{CompactedRow, RowDeserializer};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::CacheKey;
-use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
-use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, Message,
-    Watermark,
-};
+use crate::executor::prelude::*;
 
 pub trait TopNExecutorBase: Send + 'static {
     /// Apply the chunk to the dirty state and get the diffs.

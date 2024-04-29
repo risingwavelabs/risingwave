@@ -196,6 +196,7 @@ message Subscription {
   optional string created_at_cluster_version = 16;
 
   string subscription_from_name = 17;
+  optional string subscription_internal_table_name = 18;
 }
 
 message Connection {
@@ -263,6 +264,10 @@ message Function {
   // The zstd-compressed binary of the function.
   optional bytes compressed_binary = 17;
   bool always_retry_on_network_error = 16;
+  // The runtime used when javascript is used as the language. Could be "quickjs" or "deno".
+  optional string runtime = 18;
+  // The function type, which is used to execute the function. Could be "sync", "async", "generator" or "async_generator"
+  optional string function_type = 19;
 
   oneof kind {
     ScalarFunction scalar = 11;

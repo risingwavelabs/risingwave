@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound;
-use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::rc::Rc;
 
 use educe::Educe;
@@ -65,9 +63,6 @@ pub struct Source {
     #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,
 
-    /// Kafka timestamp range, currently we only support kafka, so we just leave it like this.
-    pub(crate) kafka_timestamp_range: (Bound<i64>, Bound<i64>),
-
     pub as_of: Option<AsOf>,
 }
 
@@ -113,6 +108,12 @@ impl Source {
             .is_some_and(|catalog| catalog.with_properties.is_iceberg_connector())
     }
 
+    pub fn is_kafka_connector(&self) -> bool {
+        self.catalog
+            .as_ref()
+            .is_some_and(|catalog| catalog.with_properties.is_kafka_connector())
+    }
+
     /// Currently, only iceberg source supports time travel.
     pub fn support_time_travel(&self) -> bool {
         self.is_iceberg_connector()
@@ -136,29 +137,27 @@ impl Source {
         (self, original_row_id_index)
     }
 
-    pub fn kafka_timestamp_range_value(&self) -> (Option<i64>, Option<i64>) {
-        let (lower_bound, upper_bound) = &self.kafka_timestamp_range;
-        let lower_bound = match lower_bound {
-            Included(t) => Some(*t),
-            Excluded(t) => Some(*t - 1),
-            Unbounded => None,
-        };
-
-        let upper_bound = match upper_bound {
-            Included(t) => Some(*t),
-            Excluded(t) => Some(*t + 1),
-            Unbounded => None,
-        };
-        (lower_bound, upper_bound)
-    }
-
-    pub fn infer_internal_table_catalog(require_dist_key: bool) -> TableCatalog {
-        // note that source's internal table is to store partition_id -> offset mapping and its
-        // schema is irrelevant to input schema
-        // On the premise of ensuring that the materialized_source data can be cleaned up, keep the
-        // state in source.
-        // Source state doesn't maintain retention_seconds, internal_table_subset function only
-        // returns retention_seconds so default is used here
+    /// Source's state table is `partition_id -> offset_info`.
+    /// Its schema is irrelevant to the data's schema.
+    ///
+    /// ## Notes on the distribution of the state table (`is_distributed`)
+    ///
+    /// Source executors are always distributed, but their state tables are special.
+    ///
+    /// ### `StreamSourceExecutor`: singleton (only one vnode)
+    ///
+    /// Its states are not sharded by consistent hash.
+    ///
+    /// Each actor accesses (point get) some partitions (a.k.a splits).
+    /// They are assigned by `SourceManager` in meta,
+    /// instead of `vnode` computed from the `partition_id`.
+    ///
+    /// ### `StreamFsFetch`: distributed by `partition_id`
+    ///
+    /// Each actor accesses (range scan) splits according to the `vnode`
+    /// computed from `partition_id`.
+    /// This is a normal distributed table.
+    pub fn infer_internal_table_catalog(is_distributed: bool) -> TableCatalog {
         let mut builder = TableCatalogBuilder::default();
 
         let key = Field {
@@ -179,7 +178,7 @@ impl Source {
         builder.add_order_column(ordered_col_idx, OrderType::ascending());
 
         builder.build(
-            if require_dist_key {
+            if is_distributed {
                 vec![ordered_col_idx]
             } else {
                 vec![]

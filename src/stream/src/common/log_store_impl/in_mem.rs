@@ -319,7 +319,7 @@ mod tests {
     use std::task::Poll;
 
     use futures::FutureExt;
-    use risingwave_common::array::Op;
+    use risingwave_common::array::{Op, StreamChunkBuilder};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::{test_epoch, EpochPair};
     use risingwave_connector::sink::log_store::{
@@ -327,7 +327,6 @@ mod tests {
     };
 
     use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
-    use crate::common::StreamChunkBuilder;
 
     #[tokio::test]
     async fn test_in_memory_log_store() {
@@ -339,7 +338,8 @@ mod tests {
         let epoch2 = test_epoch(3);
 
         let ops = vec![Op::Insert, Op::Delete, Op::UpdateInsert, Op::UpdateDelete];
-        let mut builder = StreamChunkBuilder::new(10000, vec![DataType::Int64, DataType::Varchar]);
+        let mut builder =
+            StreamChunkBuilder::unlimited(vec![DataType::Int64, DataType::Varchar], None);
         for (i, op) in ops.into_iter().enumerate() {
             assert!(builder
                 .append_row(
