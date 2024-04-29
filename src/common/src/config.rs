@@ -434,6 +434,11 @@ pub struct MetaDeveloperConfig {
     pub enable_trivial_move: bool,
     #[serde(default = "default::developer::enable_check_task_level_overlap")]
     pub enable_check_task_level_overlap: bool,
+    #[serde(default = "default::developer::max_trivial_move_task_count_per_loop")]
+    pub max_trivial_move_task_count_per_loop: usize,
+
+    #[serde(default = "default::developer::max_get_task_probe_times")]
+    pub max_get_task_probe_times: usize,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -1564,6 +1569,14 @@ pub mod default {
 
         pub fn enable_check_task_level_overlap() -> bool {
             false
+        }
+
+        pub fn max_trivial_move_task_count_per_loop() -> usize {
+            256
+        }
+
+        pub fn max_get_task_probe_times() -> usize {
+            5
         }
 
         pub fn memory_controller_threshold_aggressive() -> f64 {
