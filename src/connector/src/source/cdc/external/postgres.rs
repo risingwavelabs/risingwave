@@ -244,7 +244,7 @@ impl PostgresExternalTableReader {
                     .into_iter()
                     .zip_eq_fast(pk_types.iter())
                     .map(|(datum, pg_type)| match (&datum, pg_type) {
-                        (&Some(ref scalar), &PgType::UUID) => {
+                        (Some(scalar), &PgType::UUID) => {
                             let uuid = uuid::Uuid::try_parse(scalar.as_utf8()).expect("parse uuid");
                             DatumAdapter::Uuid(uuid)
                         }
