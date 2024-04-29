@@ -278,9 +278,8 @@ impl HummockManager {
             for input_ssts in &compact_task.input_ssts {
                 for sst in &input_ssts.table_infos {
                     existing_table_ids.extend(sst.table_ids.iter());
-                    if sst.table_ids.len() == 1 {
-                        *table_size.entry(sst.table_ids[0]).or_default() += sst.file_size;
-                    }
+                    *table_size.entry(sst.table_ids[0]).or_default() +=
+                        sst.file_size / (sst.table_ids.len() as u64);
                 }
             }
             compact_task

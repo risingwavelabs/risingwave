@@ -35,6 +35,7 @@ use crate::hummock::{
 use crate::monitor::CompactorMetrics;
 
 pub type UploadJoinHandle = JoinHandle<HummockResult<()>>;
+const MIN_SST_SIZE: i64 = 2 * 1024 * 1024; // 4MB
 
 #[async_trait::async_trait]
 pub trait TableBuilderFactory {
@@ -227,6 +228,14 @@ where
                 } else {
                     // default
                     self.largest_vnode_in_current_partition = VirtualNode::MAX.to_index();
+                }
+            } else if let Some(builder) = self.current_builder.as_ref() {
+                let stats = builder.get_last_table_stats();
+                if stats.total_key_size + stats.total_value_size >= MIN_SST_SIZE {
+                    self.split_weight_by_vnode = 0;
+                    self.last_table_id = user_key.table_id.table_id;
+                    self.largest_vnode_in_current_partition = VirtualNode::MAX.to_index();
+                    switch_builder = true;
                 }
             }
         }
