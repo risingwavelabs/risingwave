@@ -362,16 +362,14 @@ impl SharedBufferBatch {
         let kv_size = batch_items
             .iter()
             .map(|(k, v)| {
-                k.len()
-                    + {
-                        match v {
-                            SharedBufferValue::Insert(val) | SharedBufferValue::Update(val) => {
-                                val.len()
-                            }
-                            SharedBufferValue::Delete => 0,
+                k.len() + {
+                    match v {
+                        SharedBufferValue::Insert(val) | SharedBufferValue::Update(val) => {
+                            val.len()
                         }
+                        SharedBufferValue::Delete => 0,
                     }
-                    + size_of_val(v)
+                }
             })
             .sum::<usize>();
         (kv_size + old_value_size, old_value_size)
