@@ -27,7 +27,7 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Statement};
 
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
-use crate::error::{ErrorCode, Result, RwError};
+use crate::error::{ErrorCode, Result};
 use crate::handler::declare_cursor::create_stream_for_cursor;
 use crate::handler::util::{
     convert_epoch_to_logstore_i64, convert_logstore_i64_to_unix_millis,
@@ -78,9 +78,7 @@ impl QueryCursor {
             let rows = self.row_stream.next().await;
             let rows = match rows {
                 None => return Ok(None),
-                Some(row) => {
-                    row.map_err(|err| RwError::from(ErrorCode::InternalError(format!("{}", err))))?
-                }
+                Some(row) => row?,
             };
             self.remaining_rows = rows.into_iter().collect();
         }
@@ -396,9 +394,7 @@ impl SubscriptionCursor {
         if remaining_rows.is_empty()
             && let Some(row_set) = row_stream.next().await
         {
-            remaining_rows.extend(row_set.map_err(|e| {
-                ErrorCode::InternalError(format!("Cursor get next chunk error {:?}", e.to_string()))
-            })?);
+            remaining_rows.extend(row_set?);
         }
         Ok(())
     }

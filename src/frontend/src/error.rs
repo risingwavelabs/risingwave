@@ -237,3 +237,10 @@ impl From<JoinError> for RwError {
         ErrorCode::Uncategorized(join_error.into()).into()
     }
 }
+
+// For errors without a concrete type, put them into `Uncategorized`.
+impl From<BoxedError> for RwError {
+    fn from(e: BoxedError) -> Self {
+        ErrorCode::Uncategorized(e.into()).into()
+    }
+}
