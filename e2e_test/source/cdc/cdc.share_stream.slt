@@ -324,6 +324,8 @@ CREATE TABLE list_with_null_shared (
     id int,
     my_int int[],
     my_num varchar[],
+    my_num_1 numeric[],
+    my_num_2 rw_int256[],
     my_mood varchar[],
     my_uuid varchar[],
     my_bytea bytea[],
