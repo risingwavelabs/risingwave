@@ -213,12 +213,17 @@ pub enum Command {
     /// the `rate_limit` of `FlowControl` Executor after `StreamScan` or Source.
     Throttle(ThrottleConfig),
 
+    /// `CreateSubscription` command generates a `CreateSubscriptionMutation` to notify
+    /// materialize executor to start storing old value for subscription.
     CreateSubscription {
         subscription_id: u32,
         upstream_mv_table_id: TableId,
         retention_second: u64,
     },
 
+    /// `DropSubscription` command generates a `DropSubscriptionMutation` to notify
+    /// materialize executor to stop storing old value when there is no
+    /// subscription depending on it.
     DropSubscription {
         subscription_id: u32,
         upstream_mv_table_id: TableId,
