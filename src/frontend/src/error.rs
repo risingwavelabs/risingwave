@@ -241,6 +241,9 @@ impl From<JoinError> for RwError {
 // For errors without a concrete type, put them into `Uncategorized`.
 impl From<BoxedError> for RwError {
     fn from(e: BoxedError) -> Self {
-        ErrorCode::Uncategorized(e.into()).into()
+        // Show that the error is of `BoxedKind`, instead of `AdhocKind` which loses the sources.
+        // This is essentially expanded from `anyhow::anyhow!(e)`.
+        let e = anyhow::__private::kind::BoxedKind::anyhow_kind(&e).new(e);
+        ErrorCode::Uncategorized(e).into()
     }
 }
