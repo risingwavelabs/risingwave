@@ -2229,6 +2229,11 @@ def section_hummock_write(outer_panels):
                             "uploading task size - {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
+                        panels.target(
+                            f"sum({metric('state_store_old_value_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "old value size - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
                     ],
                 ),
                 panels.timeseries_latency(
@@ -3827,6 +3832,10 @@ def section_sink_metrics(outer_panels):
                             f"{metric('log_store_latest_read_epoch')}",
                             "latest read epoch @ {{connector}} {{sink_id}} {{executor_id}}",
                         ),
+                        panels.target(
+                            f"{metric('kv_log_store_buffer_unconsumed_min_epoch')}",
+                            "Kv log store uncomsuned min epoch @ {{connector}} {{sink_id}} {{executor_id}}",
+                        ),
                     ],
                 ),
                 panels.timeseries_latency(
@@ -3930,6 +3939,24 @@ def section_sink_metrics(outer_panels):
                         panels.target(
                             f"sum(rate({metric('kv_log_store_storage_write_size')}[$__rate_interval])) by (executor_id, connector, sink_id)",
                             "{{executor_id}} - {{connector}} @ {{sink_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Kv Log Store Buffer State",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('kv_log_store_buffer_unconsumed_item_count')}",
+                            "Unconsumed item count @ {{connector}} {{sink_id}} {{executor_id}}",
+                        ),
+                        panels.target(
+                            f"{metric('kv_log_store_buffer_unconsumed_row_count')}",
+                            "Unconsumed row count @ {{connector}} {{sink_id}} {{executor_id}}",
+                        ),
+                        panels.target(
+                            f"{metric('kv_log_store_buffer_unconsumed_epoch_count')}",
+                            "Unconsumed epoch count @ {{connector}} {{sink_id}} {{executor_id}}",
                         ),
                     ],
                 ),

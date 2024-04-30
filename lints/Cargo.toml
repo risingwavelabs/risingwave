@@ -16,7 +16,7 @@ path = "ui/format_error.rs"
 [dependencies]
 clippy_utils = { git = "https://github.com/rust-lang/rust-clippy", rev = "6fd0258e45105161b7e759a22e7350958e5cb0b1" }
 dylint_linting = "2.6.0"
-itertools = { workspace = true }
+itertools = "0.12"
 
 [dev-dependencies]
 dylint_testing = "2.6.0"
