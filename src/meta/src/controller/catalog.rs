@@ -483,7 +483,7 @@ impl CatalogController {
             return Err(MetaError::catalog_id_not_found("subscription", job_id));
         }
 
-        // mark the target subscription as `Created`.
+        // mark the target subscription as `Create`.
         let job = subscription::ActiveModel {
             subscription_id: Set(job_id),
             subscription_state: Set(SubscriptionState::Create.into()),

@@ -26,8 +26,7 @@ use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::{Binder, OptimizerContext, OptimizerContextRef};
 
-// used to store result of `gen_subscription_plan`
-pub fn gen_subscription_plan(
+pub fn create_subscription_catalog(
     session: &SessionImpl,
     context: OptimizerContextRef,
     stmt: CreateSubscriptionStatement,
@@ -82,7 +81,7 @@ pub async fn handle_create_subscription(
     };
     let subscription_catalog = {
         let context = Rc::new(OptimizerContext::from_handler_args(handle_args));
-        gen_subscription_plan(&session, context.clone(), stmt)?
+        create_subscription_catalog(&session, context.clone(), stmt)?
     };
 
     let _job_guard =

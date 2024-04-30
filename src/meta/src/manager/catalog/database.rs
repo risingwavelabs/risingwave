@@ -18,6 +18,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableOption;
+use risingwave_pb::catalog::subscription::PbSubscriptionState;
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::{
     Connection, CreateType, Database, Function, Index, PbStreamJobStatus, Schema, Sink, Source,
@@ -185,7 +186,7 @@ impl DatabaseManager {
                 .collect_vec(),
             self.subscriptions
                 .values()
-                .filter(|t| t.subscription_state == PbStreamJobStatus::Created as i32)
+                .filter(|t| t.subscription_state == PbSubscriptionState::Create as i32)
                 .cloned()
                 .collect_vec(),
             self.indexes

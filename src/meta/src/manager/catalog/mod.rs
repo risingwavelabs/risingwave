@@ -3185,11 +3185,6 @@ impl CatalogManager {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let mut subscriptions = BTreeMapTransaction::new(&mut database_core.subscriptions);
-        println!(
-            "finish_create_subscription_procedure{:?}: subscription_id: {:?}",
-            subscriptions.tree_ref(),
-            subscription_id
-        );
         let mut subscription = subscriptions
             .get(&subscription_id)
             .ok_or_else(|| anyhow!("subscription not found"))?
