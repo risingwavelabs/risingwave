@@ -99,11 +99,14 @@ impl MonitorService for MonitorServiceImpl {
             Default::default()
         };
 
+        let barrier_worker_state = self.stream_mgr.inspect_barrier_state().await?;
+
         Ok(Response::new(StackTraceResponse {
             actor_traces,
             rpc_traces,
             compaction_task_traces,
             inflight_barrier_traces: barrier_traces,
+            barrier_worker_state: vec![barrier_worker_state],
         }))
     }
 

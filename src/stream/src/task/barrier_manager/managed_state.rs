@@ -124,6 +124,15 @@ fn sync_epoch(
     }
 }
 
+#[derive(Debug)]
+pub(super) struct ManagedBarrierStateDebugInfo<'a> {
+    #[expect(dead_code)]
+    epoch_barrier_state_map: &'a BTreeMap<u64, BarrierState>,
+
+    #[expect(dead_code)]
+    create_mview_progress: &'a HashMap<u64, HashMap<ActorId, BackfillState>>,
+}
+
 pub(super) struct ManagedBarrierState {
     /// Record barrier state for each epoch of concurrent checkpoints.
     ///
@@ -167,6 +176,13 @@ impl ManagedBarrierState {
             streaming_metrics,
             await_epoch_completed_futures: FuturesOrdered::new(),
             barrier_await_tree_reg,
+        }
+    }
+
+    pub(super) fn to_debug_info(&self) -> ManagedBarrierStateDebugInfo<'_> {
+        ManagedBarrierStateDebugInfo {
+            epoch_barrier_state_map: &self.epoch_barrier_state_map,
+            create_mview_progress: &self.create_mview_progress,
         }
     }
 

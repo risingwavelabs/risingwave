@@ -13,21 +13,15 @@
 // limitations under the License.
 
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::StackTraceResponseExt;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::monitor_service::StackTraceResponse;
 use risingwave_rpc_client::{CompactorClient, ComputeClientPool};
 
 use crate::CtlContext;
 
-fn merge(a: &mut StackTraceResponse, b: StackTraceResponse) {
-    a.actor_traces.extend(b.actor_traces);
-    a.rpc_traces.extend(b.rpc_traces);
-    a.compaction_task_traces.extend(b.compaction_task_traces);
-    a.inflight_barrier_traces.extend(b.inflight_barrier_traces);
-}
-
 pub async fn dump(context: &CtlContext) -> anyhow::Result<()> {
-    let mut all = Default::default();
+    let mut all = StackTraceResponse::default();
 
     let meta_client = context.meta_client().await?;
 
@@ -41,7 +35,7 @@ pub async fn dump(context: &CtlContext) -> anyhow::Result<()> {
     for cn in compute_nodes {
         let client = clients.get(&cn).await?;
         let response = client.stack_trace().await?;
-        merge(&mut all, response);
+        all.merge_other(response);
     }
 
     let compactor_nodes = meta_client
@@ -52,7 +46,7 @@ pub async fn dump(context: &CtlContext) -> anyhow::Result<()> {
         let addr: HostAddr = compactor.get_host().unwrap().into();
         let client = CompactorClient::new(addr).await?;
         let response = client.stack_trace().await?;
-        merge(&mut all, response);
+        all.merge_other(response);
     }
 
     if all.actor_traces.is_empty()
@@ -62,30 +56,7 @@ pub async fn dump(context: &CtlContext) -> anyhow::Result<()> {
     {
         println!("No traces found. No actors are running, or `--async-stack-trace` not set?");
     } else {
-        if !all.actor_traces.is_empty() {
-            println!("--- Actor Traces ---");
-            for (key, trace) in all.actor_traces {
-                println!(">> Actor {key}\n{trace}");
-            }
-        }
-        if !all.rpc_traces.is_empty() {
-            println!("\n\n--- RPC Traces ---");
-            for (key, trace) in all.rpc_traces {
-                println!(">> RPC {key}\n{trace}");
-            }
-        }
-        if !all.compaction_task_traces.is_empty() {
-            println!("\n\n--- Compactor Traces ---");
-            for (key, trace) in all.compaction_task_traces {
-                println!(">> Compaction Task {key}\n{trace}");
-            }
-        }
-        if !all.inflight_barrier_traces.is_empty() {
-            println!("\n\n--- Inflight Barrier Traces ---");
-            for (name, trace) in &all.inflight_barrier_traces {
-                println!(">> Barrier {name}\n{trace}");
-            }
-        }
+        println!("{:?}", all.output());
     }
 
     Ok(())
