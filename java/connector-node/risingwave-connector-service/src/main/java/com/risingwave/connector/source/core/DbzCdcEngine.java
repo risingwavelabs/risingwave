@@ -17,6 +17,7 @@ package com.risingwave.connector.source.core;
 import static io.debezium.config.CommonConnectorConfig.TOPIC_PREFIX;
 import static io.debezium.schema.AbstractTopicNamingStrategy.*;
 
+import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.proto.ConnectorServiceProto;
 import io.debezium.embedded.Connect;
 import io.debezium.engine.DebeziumEngine;
@@ -33,6 +34,7 @@ public class DbzCdcEngine implements Runnable {
 
     /** If config is not valid will throw exceptions */
     public DbzCdcEngine(
+            SourceTypeE connector,
             long sourceId,
             Properties config,
             DebeziumEngine.CompletionCallback completionCallback) {
@@ -41,6 +43,7 @@ public class DbzCdcEngine implements Runnable {
         var transactionTopic = String.format("%s.%s", topicPrefix, DEFAULT_TRANSACTION_TOPIC);
         var consumer =
                 new DbzChangeEventConsumer(
+                        connector,
                         sourceId,
                         heartbeatTopicPrefix,
                         transactionTopic,
