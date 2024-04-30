@@ -183,6 +183,50 @@ create sink invalid_pk_column from t_kafka with (
     primary_key = 'id,invalid'
 );
 
+### Test sink with key encode ###
+
+statement error sink key encode unsupported: JSON, only TEXT supported
+create sink sink_text_error from t_kafka with (
+  connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+  topic = 'test-rw-sink-text-key-id',
+  primary_key = 'id')
+format plain encode json (
+  force_append_only='true'
+) key encode json ;
+
+statement error The key encode is TEXT, but the primary key has 2 columns. The key encode TEXT requires the primary key to be a single column.
+create sink sink_text_error from t_kafka with (
+  connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+  topic = 'test-rw-sink-text-key-id',
+  primary_key = 'id, v_varchar')
+format plain encode json (
+  force_append_only='true'
+) key encode text ;
+
+statement error The key encode is TEXT, but the primary key column v_bytea has type bytea. The key encode TEXT requires the primary key column to be of type varchar, bool, small int, int, or big int.
+create sink sink_text_error from t_kafka with (
+  connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+  topic = 'test-rw-sink-text-key-id',
+  primary_key = 'v_bytea')
+format plain encode json (
+  force_append_only='true'
+) key encode text ;
+
+statement ok
+create sink sink_text_id from t_kafka with (
+  connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+  topic = 'test-rw-sink-text-key-id',
+  primary_key = 'id')
+format plain encode json (
+  force_append_only='true'
+) key encode text ;
+
+#======
+
 statement ok
 insert into t_kafka values
     (1, '8DfUFencLe', 31031, 1872, 1872, 26261.416, 23956.39329760601, '2023-04-14 06:27:14.104742', '\x00', '0 second', '0001-01-01', '00:00:01.123456', '0001-01-01 00:00:00.123456'::timestamptz, '{}'),
