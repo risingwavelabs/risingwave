@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::Schema;
+use risingwave_common::types::ToText;
 
 use super::RowEncoder;
 
@@ -42,15 +43,18 @@ impl RowEncoder for TextEncoder {
         self.col_indices.as_ref().map(Vec::as_ref)
     }
 
-    fn encode(&self, row: impl risingwave_common::row::Row) -> crate::sink::Result<Self::Output> {
-        unimplemented!()
-    }
-
     fn encode_cols(
         &self,
         row: impl risingwave_common::row::Row,
-        col_indices: impl Iterator<Item = usize>,
+        col_indices: impl Iterator<Item=usize>,
     ) -> crate::sink::Result<Self::Output> {
-        unimplemented!()
+        assert_eq!(col_indices.count(), 1, "TextEncoder can only encode one column");
+        let mut result = String::new();
+        for col_index in col_indices {
+            let datum = row.datum_at(col_index);
+            result = datum.to_text();
+        }
+
+        Ok(result)
     }
 }
