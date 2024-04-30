@@ -75,33 +75,6 @@ impl PostgresOffset {
     }
 }
 
-/// An adapter type to support upstream data types that don't have `ScalarImpl` implementations
-#[derive(Debug)]
-pub enum DatumAdapter {
-    Datum(Datum),
-    Uuid(uuid::Uuid),
-}
-
-impl ToSql for DatumAdapter {
-    to_sql_checked!();
-
-    fn to_sql(
-        &self,
-        ty: &PgType,
-        out: &mut BytesMut,
-    ) -> Result<IsNull, Box<dyn Error + Sync + Send>> {
-        match self {
-            DatumAdapter::Datum(Some(scalar)) => scalar.as_scalar_ref_impl().to_sql(ty, out),
-            DatumAdapter::Datum(None) => Ok(IsNull::Yes),
-            DatumAdapter::Uuid(uuid) => uuid.to_sql(ty, out),
-        }
-    }
-
-    fn accepts(_ty: &PgType) -> bool {
-        true
-    }
-}
-
 pub struct PostgresExternalTableReader {
     config: ExternalTableConfig,
     rw_schema: Schema,
