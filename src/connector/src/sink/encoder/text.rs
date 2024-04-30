@@ -46,9 +46,9 @@ impl RowEncoder for TextEncoder {
     fn encode_cols(
         &self,
         row: impl risingwave_common::row::Row,
-        col_indices: impl Iterator<Item=usize>,
+        col_indices: impl Iterator<Item = usize>,
     ) -> crate::sink::Result<Self::Output> {
-        assert_eq!(col_indices.count(), 1, "TextEncoder can only encode one column");
+        // It is guaranteed by the caller that col_indices contains only one element
         let mut result = String::new();
         for col_index in col_indices {
             let datum = row.datum_at(col_index);

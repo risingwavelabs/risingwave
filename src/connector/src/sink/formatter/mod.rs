@@ -107,7 +107,13 @@ impl SinkFormatterImpl {
         let message_key_text_encode = format_desc
             .key_encode
             .as_ref()
-            .map(|encode| matches!(encode, SinkEncode::Text));
+            .map(|encode| matches!(encode, SinkEncode::Text))
+            .unwrap_or(false);
+        if message_key_text_encode && pk_indices.len() != 1 {
+            return Err(SinkError::Config(anyhow!(
+                "Only one primary key column is supported for text key encoding"
+            )));
+        }
 
         match format_desc.format {
             SinkFormat::AppendOnly => {
@@ -122,8 +128,8 @@ impl SinkFormatterImpl {
                     )
                 });
 
-                match format_desc.encode {
-                    SinkEncode::Json => {
+                match (message_key_text_encode, &format_desc.encode) {
+                    (false, SinkEncode::Json) => {
                         let val_encoder = JsonEncoder::new(
                             schema,
                             None,
@@ -135,7 +141,22 @@ impl SinkFormatterImpl {
                         let formatter = AppendOnlyFormatter::new(key_encoder, val_encoder);
                         Ok(SinkFormatterImpl::AppendOnlyJson(formatter))
                     }
-                    SinkEncode::Protobuf => {
+                    (true, SinkEncode::Json) => {
+                        let key_encoder =
+                            TextEncoder::new(schema.clone(), Some(pk_indices.clone()));
+                        let val_encoder = JsonEncoder::new(
+                            schema,
+                            None,
+                            DateHandlingMode::FromCe,
+                            TimestampHandlingMode::Milli,
+                            timestamptz_mode,
+                            TimeHandlingMode::Milli,
+                        );
+                        Ok(SinkFormatterImpl::AppendOnlyTextJson(
+                            AppendOnlyFormatter::new(Some(key_encoder), val_encoder),
+                        ))
+                    }
+                    (false, SinkEncode::Protobuf) => {
                         // By passing `None` as `aws_auth_props`, reading from `s3://` not supported yet.
                         let (descriptor, sid) = crate::schema::protobuf::fetch_descriptor(
                             &format_desc.options,
@@ -152,8 +173,28 @@ impl SinkFormatterImpl {
                         let formatter = AppendOnlyFormatter::new(key_encoder, val_encoder);
                         Ok(SinkFormatterImpl::AppendOnlyProto(formatter))
                     }
-                    SinkEncode::Avro => err_unsupported(),
-                    SinkEncode::Template => {
+                    (true, SinkEncode::Protobuf) => {
+                        let key_encoder =
+                            TextEncoder::new(schema.clone(), Some(pk_indices.clone()));
+                        // By passing `None` as `aws_auth_props`, reading from `s3://` not supported yet.
+                        let (descriptor, sid) = crate::schema::protobuf::fetch_descriptor(
+                            &format_desc.options,
+                            topic,
+                            None,
+                        )
+                        .await
+                        .map_err(|e| SinkError::Config(anyhow!(e)))?;
+                        let header = match sid {
+                            None => ProtoHeader::None,
+                            Some(sid) => ProtoHeader::ConfluentSchemaRegistry(sid),
+                        };
+                        let val_encoder = ProtoEncoder::new(schema, None, descriptor, header)?;
+                        Ok(SinkFormatterImpl::AppendOnlyTextProto(
+                            AppendOnlyFormatter::new(Some(key_encoder), val_encoder),
+                        ))
+                    }
+                    (_, SinkEncode::Avro) => err_unsupported(),
+                    (false, SinkEncode::Template) => {
                         let key_format = format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
                             SinkError::Config(anyhow!(
                                 "Cannot find 'key_format',please set it or use JSON"
@@ -175,7 +216,21 @@ impl SinkFormatterImpl {
                             AppendOnlyFormatter::new(Some(key_encoder), val_encoder),
                         ))
                     }
-                    ref encode => Err(SinkError::Config(anyhow!(
+                    (true, SinkEncode::Template) => {
+                        let key_encoder =
+                            TextEncoder::new(schema.clone(), Some(pk_indices.clone()));
+                        let value_format =
+                            format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
+                                SinkError::Config(anyhow!(
+                                    "Cannot find 'redis_value_format',please set it or use JSON"
+                                ))
+                            })?;
+                        let val_encoder = TemplateEncoder::new(schema, None, value_format.clone());
+                        Ok(SinkFormatterImpl::AppendOnlyTextTemplate(
+                            AppendOnlyFormatter::new(Some(key_encoder), val_encoder),
+                        ))
+                    }
+                    (_, ref encode) => Err(SinkError::Config(anyhow!(
                         "Unsupported encode for append-only: {:?}",
                         encode
                     ))),
@@ -195,8 +250,8 @@ impl SinkFormatterImpl {
                 )))
             }
             SinkFormat::Upsert => {
-                match format_desc.encode {
-                    SinkEncode::Json => {
+                match (message_key_text_encode, &format_desc.encode) {
+                    (false, SinkEncode::Json) => {
                         let mut key_encoder = JsonEncoder::new(
                             schema.clone(),
                             Some(pk_indices),
@@ -238,7 +293,41 @@ impl SinkFormatterImpl {
                         let formatter = UpsertFormatter::new(key_encoder, val_encoder);
                         Ok(SinkFormatterImpl::UpsertJson(formatter))
                     }
-                    SinkEncode::Template => {
+                    (true, SinkEncode::Json) => {
+                        let key_encoder =
+                            TextEncoder::new(schema.clone(), Some(pk_indices.clone()));
+                        let mut val_encoder = JsonEncoder::new(
+                            schema,
+                            None,
+                            DateHandlingMode::FromCe,
+                            TimestampHandlingMode::Milli,
+                            timestamptz_mode,
+                            TimeHandlingMode::Milli,
+                        );
+
+                        if let Some(s) = format_desc.options.get("schemas.enable") {
+                            match s.to_lowercase().parse::<bool>() {
+                                Ok(true) => {
+                                    let kafka_connect = KafkaConnectParams {
+                                        schema_name: format!("{}.{}", db_name, sink_from_name),
+                                    };
+                                    val_encoder = val_encoder.with_kafka_connect(kafka_connect);
+                                }
+                                Ok(false) => {}
+                                _ => {
+                                    return Err(SinkError::Config(anyhow!(
+                                        "schemas.enable is expected to be `true` or `false`, got {}",
+                                        s
+                                    )));
+                                }
+                            }
+                        };
+                        Ok(SinkFormatterImpl::UpsertTextJson(UpsertFormatter::new(
+                            key_encoder,
+                            val_encoder,
+                        )))
+                    }
+                    (false, SinkEncode::Template) => {
                         let key_format = format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
                             SinkError::Config(anyhow!(
                                 "Cannot find 'key_format',please set it or use JSON"
@@ -261,7 +350,22 @@ impl SinkFormatterImpl {
                             val_encoder,
                         )))
                     }
-                    SinkEncode::Avro => {
+                    (true, SinkEncode::Template) => {
+                        let key_encoder =
+                            TextEncoder::new(schema.clone(), Some(pk_indices.clone()));
+                        let value_format =
+                            format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
+                                SinkError::Config(anyhow!(
+                                    "Cannot find 'redis_value_format',please set it or use JSON"
+                                ))
+                            })?;
+                        let val_encoder = TemplateEncoder::new(schema, None, value_format.clone());
+                        Ok(SinkFormatterImpl::UpsertTextTemplate(UpsertFormatter::new(
+                            key_encoder,
+                            val_encoder,
+                        )))
+                    }
+                    (false, SinkEncode::Avro) => {
                         let (key_schema, val_schema) =
                             crate::schema::avro::fetch_schema(&format_desc.options, topic)
                                 .await
@@ -281,9 +385,25 @@ impl SinkFormatterImpl {
                         let formatter = UpsertFormatter::new(key_encoder, val_encoder);
                         Ok(SinkFormatterImpl::UpsertAvro(formatter))
                     }
-                    SinkEncode::Protobuf => err_unsupported(),
+                    (true, SinkEncode::Avro) => {
+                        let key_encoder =
+                            TextEncoder::new(schema.clone(), Some(pk_indices.clone()));
+                        let (_, val_schema) =
+                            crate::schema::avro::fetch_schema(&format_desc.options, topic)
+                                .await
+                                .map_err(|e| SinkError::Config(anyhow!(e)))?;
+                        let val_encoder = AvroEncoder::new(
+                            schema.clone(),
+                            None,
+                            val_schema.schema,
+                            AvroHeader::ConfluentSchemaRegistry(val_schema.id),
+                        )?;
+                        let formatter = UpsertFormatter::new(key_encoder, val_encoder);
+                        Ok(SinkFormatterImpl::UpsertTextAvro(formatter))
+                    }
+                    (_, SinkEncode::Protobuf) => err_unsupported(),
 
-                    ref encode => Err(SinkError::Config(anyhow!(
+                    (_, ref encode) => Err(SinkError::Config(anyhow!(
                         "Unsupported encode for upsert: {:?}",
                         encode
                     ))),
