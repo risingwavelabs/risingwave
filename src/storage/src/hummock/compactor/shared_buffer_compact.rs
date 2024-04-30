@@ -156,7 +156,6 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
         .map(|imm| imm.table_id.table_id)
         .dedup()
         .collect();
-
     assert!(!existing_table_ids.is_empty());
 
     let multi_filter_key_extractor = filter_key_extractor_manager
@@ -195,7 +194,6 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
     } else {
         BTreeMap::default()
     };
-
     for (split_index, key_range) in splits.into_iter().enumerate() {
         let compactor = SharedBufferCompactRunner::new(
             split_index,

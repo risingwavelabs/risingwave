@@ -148,7 +148,6 @@ impl LevelCompactionPicker {
     ) -> Option<CompactionInput> {
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
         let min_compaction_bytes = self.config.sub_level_max_compaction_bytes;
-
         let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
             min_compaction_bytes,
             // divide by 2 because we need to select files of base level and it need use the other

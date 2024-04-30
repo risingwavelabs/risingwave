@@ -35,7 +35,7 @@ use crate::hummock::{
 use crate::monitor::CompactorMetrics;
 
 pub type UploadJoinHandle = JoinHandle<HummockResult<()>>;
-const MIN_SST_SIZE: usize = 4 * 1024 * 1024; // 4MB
+const MIN_SST_SIZE: usize = 2 * 1024 * 1024; // 2MB
 
 #[async_trait::async_trait]
 pub trait TableBuilderFactory {

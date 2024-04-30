@@ -592,10 +592,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.writer.data_len() > 0
     }
 
-    pub fn get_last_table_stats(&self) -> &TableStats {
-        &self.last_table_stats
-    }
-
     /// Returns true if we roughly reached capacity
     pub fn reach_capacity(&self) -> bool {
         self.approximate_len() >= self.options.capacity

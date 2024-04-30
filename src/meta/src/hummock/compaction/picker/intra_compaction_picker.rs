@@ -127,7 +127,7 @@ impl IntraCompactionPicker {
 
         for (idx, level) in l0.sub_levels.iter().enumerate() {
             if level.level_type() != LevelType::Nonoverlapping
-                || level.total_file_size > self.config.sub_level_max_compaction_bytes
+                || level.total_file_size > self.config.max_bytes_for_level_base
             {
                 continue;
             }
