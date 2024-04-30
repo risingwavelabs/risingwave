@@ -294,7 +294,7 @@ impl NonOverlapSubLevelPicker {
                 }
 
                 // When size / file count has exceeded the limit, we need to abandon this plan, it cannot be expanded to the last sub_level
-                if max_select_level_count > 1
+                if max_select_level_count >= self.min_depth
                     && (add_files_size >= self.max_compaction_bytes
                         || add_files_count >= self.max_file_count as usize)
                 {
