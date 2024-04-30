@@ -14,10 +14,8 @@
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::error::Error;
 
 use anyhow::Context;
-use bytes::BytesMut;
 use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
@@ -26,11 +24,10 @@ use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
 use postgres_openssl::MakeTlsConnector;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::Datum;
 use risingwave_common::util::iter_util::ZipEqFast;
 use serde_derive::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
-use tokio_postgres::types::{to_sql_checked, IsNull, PgLsn, ToSql, Type as PgType};
+use tokio_postgres::types::PgLsn;
 use tokio_postgres::{NoTls, Statement};
 
 use crate::error::{ConnectorError, ConnectorResult};
