@@ -49,6 +49,7 @@ pub struct RedisCommon {
     #[serde(rename = "redis.url")]
     pub url: String,
 }
+
 pub enum RedisConn {
     // Redis deployed as a cluster, clusters with only one node should also use this conn
     Cluster(ClusterConnection),
@@ -101,7 +102,7 @@ impl RedisCommon {
                                 Err(SinkError::Redis(
                                     "redis.url must be array of string".to_string(),
                                 )
-                                .into())
+                                    .into())
                             }
                         })
                         .collect::<ConnectorResult<Vec<String>>>()?;
@@ -121,6 +122,7 @@ impl RedisCommon {
         }
     }
 }
+
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct RedisConfig {
@@ -186,8 +188,8 @@ impl Sink for RedisSink {
             self.db_name.clone(),
             self.sink_from_name.clone(),
         )
-        .await?
-        .into_log_sinker(usize::MAX))
+            .await?
+            .into_log_sinker(usize::MAX))
     }
 
     async fn validate(&self) -> Result<()> {
@@ -241,6 +243,7 @@ struct RedisSinkPayloadWriter {
     // the command pipeline for write-commit
     pipe: Pipeline,
 }
+
 impl RedisSinkPayloadWriter {
     pub async fn new(config: RedisConfig) -> Result<Self> {
         let conn = config.common.build_conn().await?;
@@ -302,7 +305,7 @@ impl RedisSinkWriter {
             sink_from_name,
             "NO_TOPIC",
         )
-        .await?;
+            .await?;
 
         Ok(Self {
             schema,
@@ -327,7 +330,7 @@ impl RedisSinkWriter {
             "t1".to_string(),
             "NO_TOPIC",
         )
-        .await?;
+            .await?;
         Ok(Self {
             schema,
             pk_indices,
@@ -386,6 +389,7 @@ mod test {
             format: SinkFormat::AppendOnly,
             encode: SinkEncode::Json,
             options: BTreeMap::default(),
+            key_encode: None,
         };
 
         let mut redis_sink_writer = RedisSinkWriter::mock(schema, vec![0], &format_desc)
@@ -408,10 +412,10 @@ mod test {
             .expect("failed to write batch");
         let expected_a =
             vec![
-            (0, "*3\r\n$3\r\nSET\r\n$8\r\n{\"id\":1}\r\n$23\r\n{\"id\":1,\"name\":\"Alice\"}\r\n"),
-            (1, "*3\r\n$3\r\nSET\r\n$8\r\n{\"id\":2}\r\n$21\r\n{\"id\":2,\"name\":\"Bob\"}\r\n"),
-            (2, "*3\r\n$3\r\nSET\r\n$8\r\n{\"id\":3}\r\n$23\r\n{\"id\":3,\"name\":\"Clare\"}\r\n"),
-        ];
+                (0, "*3\r\n$3\r\nSET\r\n$8\r\n{\"id\":1}\r\n$23\r\n{\"id\":1,\"name\":\"Alice\"}\r\n"),
+                (1, "*3\r\n$3\r\nSET\r\n$8\r\n{\"id\":2}\r\n$21\r\n{\"id\":2,\"name\":\"Bob\"}\r\n"),
+                (2, "*3\r\n$3\r\nSET\r\n$8\r\n{\"id\":3}\r\n$23\r\n{\"id\":3,\"name\":\"Clare\"}\r\n"),
+            ];
 
         redis_sink_writer
             .payload_writer
