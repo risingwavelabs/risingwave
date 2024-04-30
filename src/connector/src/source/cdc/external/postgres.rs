@@ -208,6 +208,7 @@ impl PostgresExternalTableReader {
             .map(|f| Self::quote_column(&f.name))
             .join(",");
 
+        // prepare once
         let prepared_scan_stmt = {
             let primary_keys = pk_indices
                 .iter()
@@ -242,10 +243,6 @@ impl PostgresExternalTableReader {
         )
     }
 
-    pub fn primary_key_types(&self) -> &[PgType] {
-        self.prepared_scan_stmt.params()
-    }
-
     pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
         Box::new(move |offset| {
             Ok(CdcOffset::Postgres(PostgresOffset::parse_debezium_offset(
@@ -267,19 +264,16 @@ impl PostgresExternalTableReader {
         client.execute("set time zone '+00:00'", &[]).await?;
 
         let stream = match start_pk_row {
-            Some(pk_row) => {
-                let pk_types = self.primary_key_types();
+            Some(ref pk_row) => {
                 let params = pk_row
                     .into_iter()
-                    .zip_eq_fast(pk_types.iter())
-                    .map(|(datum, pg_type)| match (&datum, pg_type) {
-                        (Some(scalar), &PgType::UUID) => {
-                            let uuid = uuid::Uuid::try_parse(scalar.as_utf8()).expect("parse uuid");
-                            DatumAdapter::Uuid(uuid)
-                        }
-                        _ => DatumAdapter::Datum(datum),
+                    .zip_eq_fast(self.prepared_scan_stmt.params())
+                    .map(|(datum, ty)| {
+                        datum
+                            .map(|scalar| scalar_adapter::to_extra(scalar, ty))
+                            .transpose()
                     })
-                    .collect_vec();
+                    .try_collect()?;
 
                 client.query_raw(&self.prepared_scan_stmt, &params).await?
             }
@@ -325,6 +319,70 @@ impl PostgresExternalTableReader {
 
     fn quote_column(column: &str) -> String {
         format!("\"{}\"", column)
+    }
+}
+
+mod scalar_adapter {
+    use pg_bigdecimal::PgNumeric;
+    use risingwave_common::types::ScalarRefImpl;
+    use tokio_postgres::types::{to_sql_checked, IsNull, Kind, ToSql, Type};
+
+    use crate::parser::EnumString;
+
+    #[derive(Debug)]
+    pub(super) enum ScalarAdapter<'a> {
+        Builtin(ScalarRefImpl<'a>),
+        Uuid(uuid::Uuid),
+        Numeric(PgNumeric),
+        Enum(EnumString),
+    }
+    impl ToSql for ScalarAdapter<'_> {
+        to_sql_checked!();
+
+        fn to_sql(
+            &self,
+            ty: &Type,
+            out: &mut bytes::BytesMut,
+        ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>> {
+            match self {
+                ScalarAdapter::Builtin(v) => v.to_sql(ty, out),
+                ScalarAdapter::Uuid(v) => v.to_sql(ty, out),
+                ScalarAdapter::Numeric(v) => v.to_sql(ty, out),
+                ScalarAdapter::Enum(v) => v.to_sql(ty, out),
+            }
+        }
+
+        fn accepts(_ty: &Type) -> bool {
+            true
+        }
+    }
+
+    pub(super) fn to_extra<'a>(
+        scalar: ScalarRefImpl<'a>,
+        ty: &Type,
+    ) -> super::ConnectorResult<ScalarAdapter<'a>> {
+        Ok(match (scalar, ty, ty.kind()) {
+            (ScalarRefImpl::Utf8(s), &Type::UUID, _) => ScalarAdapter::Uuid(s.parse().unwrap()),
+            (ScalarRefImpl::Utf8(s), &Type::NUMERIC, _) => {
+                ScalarAdapter::Numeric(string_to_pg_numeric(s).unwrap())
+            }
+            (ScalarRefImpl::Int256(s), &Type::NUMERIC, _) => {
+                ScalarAdapter::Numeric(string_to_pg_numeric(&s.to_string()).unwrap())
+            }
+            (ScalarRefImpl::Utf8(s), _, Kind::Enum(_)) => {
+                ScalarAdapter::Enum(EnumString(s.to_owned()))
+            }
+            _ => ScalarAdapter::Builtin(scalar),
+        })
+    }
+
+    fn string_to_pg_numeric(s: &str) -> super::ConnectorResult<PgNumeric> {
+        Ok(match s {
+            "NEGATIVE_INFINITY" => PgNumeric::NegativeInf,
+            "POSITIVE_INFINITY" => PgNumeric::PositiveInf,
+            "NAN" => PgNumeric::NaN,
+            _ => PgNumeric::Normalized(s.parse().unwrap()),
+        })
     }
 }
 
