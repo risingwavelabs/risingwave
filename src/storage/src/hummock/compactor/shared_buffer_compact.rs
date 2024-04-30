@@ -136,8 +136,6 @@ pub async fn compact(
     })
 }
 
-const MIN_SPLIT_TABLE_SIZE: u64 = 64 * 1024 * 1024; // 64MB in once checkpoint, only for large table.
-
 /// For compaction from shared buffer to level 0, this is the only function gets called.
 ///
 /// The `IS_NEW_VALUE` flag means for the given payload, we are doing compaction using its new value or old value.
@@ -153,13 +151,12 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
     }
     // Local memory compaction looks at all key ranges.
 
-    let mut table_size: HashMap<u32, u64> = HashMap::default();
-    let mut existing_table_ids: HashSet<u32> = HashSet::default();
-    for imm in &payload {
-        existing_table_ids.insert(imm.table_id.table_id);
-        let v = table_size.entry(imm.table_id.table_id).or_default();
-        *v += imm.size() as u64;
-    }
+    let mut existing_table_ids: HashSet<u32> = payload
+        .iter()
+        .map(|imm| imm.table_id.table_id)
+        .dedup()
+        .collect();
+
     assert!(!existing_table_ids.is_empty());
 
     let multi_filter_key_extractor = filter_key_extractor_manager
@@ -182,17 +179,22 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
     });
 
     let total_key_count = payload.iter().map(|imm| imm.key_count()).sum::<usize>();
-    let (splits, sub_compaction_sstable_size, table_vnode_partition) = generate_splits(
-        &payload,
-        &existing_table_ids,
-        &table_size,
-        context.storage_opts.as_ref(),
-    );
+    let (splits, sub_compaction_sstable_size, split_weight_by_vnode) =
+        generate_splits(&payload, &existing_table_ids, context.storage_opts.as_ref());
     let parallelism = splits.len();
     let mut compact_success = true;
     let mut output_ssts = Vec::with_capacity(parallelism);
     let mut compaction_futures = vec![];
     let use_block_based_filter = BlockedXor16FilterBuilder::is_kv_count_too_large(total_key_count);
+
+    let table_vnode_partition = if existing_table_ids.len() == 1 {
+        let table_id = existing_table_ids.iter().next().unwrap();
+        vec![(*table_id, split_weight_by_vnode)]
+            .into_iter()
+            .collect()
+    } else {
+        BTreeMap::default()
+    };
 
     for (split_index, key_range) in splits.into_iter().enumerate() {
         let compactor = SharedBufferCompactRunner::new(
@@ -447,12 +449,10 @@ pub async fn merge_imms_in_memory(
 fn generate_splits(
     payload: &UploadTaskPayload,
     existing_table_ids: &HashSet<u32>,
-    table_size: &HashMap<u32, u64>,
     storage_opts: &StorageOpts,
-) -> (Vec<KeyRange>, u64, BTreeMap<u32, u32>) {
+) -> (Vec<KeyRange>, u64, u32) {
     let mut size_and_start_user_keys = vec![];
     let mut compact_data_size = 0;
-    let mut table_vnode_partition = BTreeMap::default();
     for imm in payload {
         let data_size = {
             // calculate encoded bytes of key var length
@@ -505,11 +505,6 @@ fn generate_splits(
                 }
             }
         }
-        for (table_id, sz) in table_size {
-            if existing_table_ids.contains(table_id) && *sz > MIN_SPLIT_TABLE_SIZE {
-                table_vnode_partition.insert(*table_id, 1);
-            }
-        }
     } else {
         // Collect vnodes in imm
         let mut vnodes = vec![];
@@ -529,15 +524,16 @@ fn generate_splits(
                 avg_vnode_size *= 2;
             }
         }
-        for table_id in existing_table_ids {
-            table_vnode_partition.insert(*table_id, vnode_partition_count as u32);
-        }
     }
 
     // mul 1.2 for other extra memory usage.
     // Ensure that the size of each sstable is still less than `sstable_size` after optimization to avoid generating a huge size sstable which will affect the object store
     let sub_compaction_sstable_size = std::cmp::min(sstable_size, sub_compaction_data_size * 6 / 5);
-    (splits, sub_compaction_sstable_size, table_vnode_partition)
+    (
+        splits,
+        sub_compaction_sstable_size,
+        vnode_partition_count as u32,
+    )
 }
 
 pub struct SharedBufferCompactRunner {
@@ -604,7 +600,7 @@ impl SharedBufferCompactRunner {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashSet;
 
     use bytes::Bytes;
     use risingwave_common::catalog::TableId;
@@ -686,19 +682,13 @@ mod tests {
             ..Default::default()
         };
         let payload = vec![imm1, imm2, imm3, imm4, imm5];
-        let (splits, _sstable_capacity, vnodes) = generate_splits(
-            &payload,
-            &HashSet::from_iter([1, 2]),
-            &HashMap::from_iter([(2, 200)]),
-            &storage_opts,
-        );
+        let (splits, _sstable_capacity, vnode) =
+            generate_splits(&payload, &HashSet::from_iter([1, 2]), &storage_opts);
         assert_eq!(
             splits.len(),
             storage_opts.share_buffers_sync_parallelism as usize
         );
-        for vnode in vnodes.values() {
-            assert_eq!(*vnode, 0);
-        }
+        assert_eq!(vnode, 0);
         for i in 1..splits.len() {
             assert_eq!(splits[i].left, splits[i - 1].right);
             assert!(splits[i].left > splits[i - 1].left);
