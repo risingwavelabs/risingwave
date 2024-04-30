@@ -15,10 +15,11 @@
 use risingwave_pb::catalog::PbSubscription;
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
+use serde::{Deserialize, Serialize};
 
 use crate::{ColumnCatalogArray, ColumnOrderArray, I32Array, Property, SubscriptionId};
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "subscription")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
