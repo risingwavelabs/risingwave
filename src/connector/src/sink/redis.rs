@@ -102,7 +102,7 @@ impl RedisCommon {
                                 Err(SinkError::Redis(
                                     "redis.url must be array of string".to_string(),
                                 )
-                                    .into())
+                                .into())
                             }
                         })
                         .collect::<ConnectorResult<Vec<String>>>()?;
@@ -188,8 +188,8 @@ impl Sink for RedisSink {
             self.db_name.clone(),
             self.sink_from_name.clone(),
         )
-            .await?
-            .into_log_sinker(usize::MAX))
+        .await?
+        .into_log_sinker(usize::MAX))
     }
 
     async fn validate(&self) -> Result<()> {
@@ -305,7 +305,7 @@ impl RedisSinkWriter {
             sink_from_name,
             "NO_TOPIC",
         )
-            .await?;
+        .await?;
 
         Ok(Self {
             schema,
@@ -330,7 +330,7 @@ impl RedisSinkWriter {
             "t1".to_string(),
             "NO_TOPIC",
         )
-            .await?;
+        .await?;
         Ok(Self {
             schema,
             pk_indices,

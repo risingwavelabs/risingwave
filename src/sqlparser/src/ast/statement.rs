@@ -94,13 +94,19 @@ pub struct CreateSourceStatement {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Format {
     Native,
-    None,          // Keyword::NONE
-    Debezium,      // Keyword::DEBEZIUM
-    DebeziumMongo, // Keyword::DEBEZIUM_MONGO
-    Maxwell,       // Keyword::MAXWELL
-    Canal,         // Keyword::CANAL
-    Upsert,        // Keyword::UPSERT
-    Plain,         // Keyword::PLAIN
+    None,
+    // Keyword::NONE
+    Debezium,
+    // Keyword::DEBEZIUM
+    DebeziumMongo,
+    // Keyword::DEBEZIUM_MONGO
+    Maxwell,
+    // Keyword::MAXWELL
+    Canal,
+    // Keyword::CANAL
+    Upsert,
+    // Keyword::UPSERT
+    Plain, // Keyword::PLAIN
 }
 
 // TODO: unify with `from_keyword`
@@ -133,12 +139,12 @@ impl Format {
             "PLAIN" => Format::Plain,
             "UPSERT" => Format::Upsert,
             "NATIVE" => Format::Native, // used internally for schema change
-            "NONE" => Format::None, // used by iceberg
+            "NONE" => Format::None,     // used by iceberg
             _ => {
                 return Err(ParserError::ParserError(
                     "expected CANAL | PROTOBUF | DEBEZIUM | MAXWELL | PLAIN | NATIVE | NONE after FORMAT"
                         .to_string(),
-                ))
+                ));
             }
         })
     }
@@ -147,13 +153,20 @@ impl Format {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Encode {
-    Avro,     // Keyword::Avro
-    Csv,      // Keyword::CSV
-    Protobuf, // Keyword::PROTOBUF
-    Json,     // Keyword::JSON
-    Bytes,    // Keyword::BYTES
-    None,     // Keyword::None
-    Text,     // Keyword::TEXT
+    Avro,
+    // Keyword::Avro
+    Csv,
+    // Keyword::CSV
+    Protobuf,
+    // Keyword::PROTOBUF
+    Json,
+    // Keyword::JSON
+    Bytes,
+    // Keyword::BYTES
+    None,
+    // Keyword::None
+    Text,
+    // Keyword::TEXT
     Native,
     Template,
 }
@@ -645,6 +658,7 @@ impl ParseTo for CreateSubscriptionStatement {
         })
     }
 }
+
 impl fmt::Display for CreateSubscriptionStatement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut v: Vec<String> = vec![];
@@ -676,6 +690,7 @@ impl fmt::Display for DeclareCursor {
         v.iter().join(" ").fmt(f)
     }
 }
+
 // sql_grammar!(DeclareCursorStatement {
 //     cursor_name: Ident,
 //     [Keyword::SUBSCRIPTION]
@@ -714,6 +729,7 @@ impl ParseTo for DeclareCursorStatement {
         })
     }
 }
+
 impl fmt::Display for DeclareCursorStatement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut v: Vec<String> = vec![];
@@ -785,6 +801,7 @@ impl ParseTo for CloseCursorStatement {
         Ok(Self { cursor_name })
     }
 }
+
 impl fmt::Display for CloseCursorStatement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut v: Vec<String> = vec![];

@@ -150,18 +150,19 @@ impl IcebergPartitionInfo {
         ))
     }
 }
+
 #[inline]
 fn find_column_idx_by_name(columns: &[ColumnCatalog], col_name: &str) -> Result<usize> {
     columns
-            .iter()
-            .position(|col| col.column_desc.name == col_name)
-            .ok_or_else(|| {
-                ErrorCode::SinkError(Box::new(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!("Sink primary key column not found: {}. Please use ',' as the delimiter for different primary key columns.", col_name)
-                )))
+        .iter()
+        .position(|col| col.column_desc.name == col_name)
+        .ok_or_else(|| {
+            ErrorCode::SinkError(Box::new(Error::new(
+                ErrorKind::InvalidInput,
+                format!("Sink primary key column not found: {}. Please use ',' as the delimiter for different primary key columns.", col_name),
+            )))
                 .into()
-            })
+        })
 }
 
 /// [`StreamSink`] represents a table/connector sink at the very end of the graph.
@@ -344,24 +345,25 @@ impl StreamSink {
                         ),
                     ))).into());
                 }
-            }
-            let key_col_catalog = columns.get(downstream_pk[0]).unwrap();
-            match &key_col_catalog.column_desc.data_type {
-                DataType::Varchar
-                | DataType::Boolean
-                | DataType::Int16
-                | DataType::Int32
-                | DataType::Int64 => {}
-                _ => {
-                    // why we don't allow float as text for key encode: https://github.com/risingwavelabs/risingwave/issues/6412
-                    return Err(ErrorCode::SinkError(Box::new(Error::new(
-                        ErrorKind::InvalidInput,
-                        format!(
-                            "The key encode is TEXT, but the primary key column {} has type {}. The key encode TEXT requires the primary key column to be of type varchar, bool, small int, int, or big int.",
-                            key_col_catalog.column_desc.name,
-                            key_col_catalog.column_desc.data_type
-                        ),
-                    ))).into());
+
+                let key_col_catalog = columns.get(downstream_pk[0]).unwrap();
+                match &key_col_catalog.column_desc.data_type {
+                    DataType::Varchar
+                    | DataType::Boolean
+                    | DataType::Int16
+                    | DataType::Int32
+                    | DataType::Int64 => {}
+                    _ => {
+                        // why we don't allow float as text for key encode: https://github.com/risingwavelabs/risingwave/issues/6412
+                        return Err(ErrorCode::SinkError(Box::new(Error::new(
+                            ErrorKind::InvalidInput,
+                            format!(
+                                "The key encode is TEXT, but the primary key column {} has type {}. The key encode TEXT requires the primary key column to be of type varchar, bool, small int, int, or big int.",
+                                key_col_catalog.column_desc.name,
+                                key_col_catalog.column_desc.data_type
+                            ),
+                        ))).into());
+                    }
                 }
             }
         }
@@ -516,16 +518,16 @@ impl StreamSink {
             (false, true, false) => {
                 Err(ErrorCode::SinkError(Box::new(Error::new(
                     ErrorKind::InvalidInput,
-                        format!("The sink cannot be append-only. Please add \"force_append_only='true'\" in {} options to force the sink to be append-only. Notice that this will cause the sink executor to drop any UPDATE or DELETE message.", if syntax_legacy {"WITH"} else {"FORMAT ENCODE"}),
+                    format!("The sink cannot be append-only. Please add \"force_append_only='true'\" in {} options to force the sink to be append-only. Notice that this will cause the sink executor to drop any UPDATE or DELETE message.", if syntax_legacy { "WITH" } else { "FORMAT ENCODE" }),
                 )))
-                .into())
+                    .into())
             }
             (_, false, true) => {
                 Err(ErrorCode::SinkError(Box::new(Error::new(
                     ErrorKind::InvalidInput,
-                    format!("Cannot force the sink to be append-only without \"{}\".", if syntax_legacy {"type='append-only'"} else {"FORMAT PLAIN"}),
+                    format!("Cannot force the sink to be append-only without \"{}\".", if syntax_legacy { "type='append-only'" } else { "FORMAT PLAIN" }),
                 )))
-                .into())
+                    .into())
             }
         }
     }
@@ -663,6 +665,7 @@ mod test {
             },
         ]
     }
+
     #[test]
     fn test_iceberg_convert_to_expression() {
         let partition_type = StructType::new(vec![
