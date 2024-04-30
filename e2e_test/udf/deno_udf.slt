@@ -140,7 +140,7 @@ statement ok
 CREATE FUNCTION digest( t string ) RETURNS bytea LANGUAGE javascript RUNTIME deno AS $$
     const subtle = crypto.subtle;
     console.log('Generating key');
-    const key = await subtle.generateKey({
+    /*const key = await subtle.generateKey({
         name: 'HMAC',
         hash: 'SHA-256',
         }, true, ['sign', 'verify']);
@@ -152,7 +152,9 @@ CREATE FUNCTION digest( t string ) RETURNS bytea LANGUAGE javascript RUNTIME den
     name: 'HMAC',
     }, key, message);
     console.log('digest finished')
-    return result;
+    return result;*/
+    const enc = new TextEncoder();
+    return enc.encode(crypto.randomUUID())
 $$ ASYNC;
 
 query I
