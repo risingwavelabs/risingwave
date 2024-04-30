@@ -63,7 +63,7 @@ impl PlanTreeNode for LogicalRecursiveUnion {
     }
 
     fn clone_with_inputs(&self, inputs: &[PlanRef]) -> PlanRef {
-        let mut inputs = inputs.into_iter().cloned();
+        let mut inputs = inputs.iter().cloned();
         Self::create(inputs.next().unwrap(), inputs.next().unwrap())
     }
 }
