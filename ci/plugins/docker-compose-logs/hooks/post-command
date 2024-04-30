@@ -7,7 +7,6 @@ source env_vars.sh
 COMPOSE_FILE_PATH="integration_tests/${INTEGRATION_TEST_CASE}/docker-compose.yml"
 
 if [ $BUILDKITE_COMMAND_EXIT_STATUS -ne 0 ]; then
-
   if docker-compose -f "$COMPOSE_FILE_PATH" ps | grep "risingwave-standalone" > /dev/null; then
       echo "--- upload risingwave standalone docker compose logs"
       docker-compose -f "$COMPOSE_FILE_PATH" logs risingwave-standalone > risingwave-standalone.log
@@ -20,3 +19,6 @@ if [ $BUILDKITE_COMMAND_EXIT_STATUS -ne 0 ]; then
   fi
     buildkite-agent artifact upload "./risingwave-*.log"
 fi
+
+echo "--- Docker clean"
+python3 integration_tests/scripts/clean_demos.py --case "${INTEGRATION_TEST_CASE}"
