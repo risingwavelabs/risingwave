@@ -100,7 +100,6 @@ message DropSinkResponse {
 
 message CreateSubscriptionRequest {
   catalog.Subscription subscription = 1;
-  stream_plan.StreamFragmentGraph fragment_graph = 2;
 }
 
 message CreateSubscriptionResponse {
@@ -111,6 +110,7 @@ message CreateSubscriptionResponse {
 message DropSubscriptionRequest {
   uint32 subscription_id = 1;
   bool cascade = 2;
+  uint32 dependent_table = 3;
 }
 
 message DropSubscriptionResponse {

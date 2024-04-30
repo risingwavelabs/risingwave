@@ -3490,24 +3490,8 @@ impl Parser {
                 AlterSubscriptionOperation::SetSchema {
                     new_schema_name: schema_name,
                 }
-            } else if self.parse_keyword(Keyword::PARALLELISM) {
-                if self.expect_keyword(Keyword::TO).is_err()
-                    && self.expect_token(&Token::Eq).is_err()
-                {
-                    return self.expected(
-                        "TO or = after ALTER TABLE SET PARALLELISM",
-                        self.peek_token(),
-                    );
-                }
-                let value = self.parse_set_variable()?;
-                let deferred = self.parse_keyword(Keyword::DEFERRED);
-
-                AlterSubscriptionOperation::SetParallelism {
-                    parallelism: value,
-                    deferred,
-                }
             } else {
-                return self.expected("SCHEMA/PARALLELISM after SET", self.peek_token());
+                return self.expected("SCHEMA after SET", self.peek_token());
             }
         } else {
             return self.expected(

@@ -32,8 +32,8 @@ use risingwave_common::types::{write_date_time_tz, DataType, ScalarRefImpl, Time
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{
-    CompatibleSourceSchema, ConnectorSchema, ObjectName, Query,
-    Select, SelectItem, SetExpr, TableFactor, TableWithJoins,
+    CompatibleSourceSchema, ConnectorSchema, ObjectName, Query, Select, SelectItem, SetExpr,
+    TableFactor, TableWithJoins,
 };
 
 use crate::error::{ErrorCode, Result as RwResult};

@@ -18,9 +18,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use itertools::Itertools;
-use risingwave_common::catalog::{
-    is_subscription_internal_table, TableOption, DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS,
-};
+use risingwave_common::catalog::{TableOption, DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
 use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_common::{bail, current_cluster_version};
@@ -35,6 +33,7 @@ use risingwave_meta_model_v2::{
     FunctionId, I32Array, IndexId, JobStatus, ObjectId, PrivateLinkService, Property, SchemaId,
     SinkId, SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, TableId, UserId,
 };
+use risingwave_pb::catalog::subscription::SubscriptionState;
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
     PbComment, PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
@@ -61,6 +60,7 @@ use sea_orm::{
 };
 use tokio::sync::{RwLock, RwLockReadGuard};
 
+use super::utils::check_subscription_name_duplicate;
 use crate::controller::rename::{alter_relation_rename, alter_relation_rename_refs};
 use crate::controller::utils::{
     check_connection_name_duplicate, check_database_name_duplicate,
@@ -426,6 +426,112 @@ impl CatalogController {
             )
             .await;
         Ok(version)
+    }
+
+    pub async fn create_subscription_catalog(
+        &self,
+        pb_subscription: &mut PbSubscription,
+    ) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        ensure_user_id(pb_subscription.owner as _, &txn).await?;
+        ensure_object_id(ObjectType::Database, pb_subscription.database_id as _, &txn).await?;
+        ensure_object_id(ObjectType::Schema, pb_subscription.schema_id as _, &txn).await?;
+        check_subscription_name_duplicate(pb_subscription, &txn).await?;
+
+        let obj = Self::create_object(
+            &txn,
+            ObjectType::Subscription,
+            pb_subscription.owner as _,
+            Some(pb_subscription.database_id as _),
+            Some(pb_subscription.schema_id as _),
+        )
+        .await?;
+        pb_subscription.id = obj.oid as _;
+        let subscription: subscription::ActiveModel = pb_subscription.clone().into();
+        Subscription::insert(subscription).exec(&txn).await?;
+
+        // record object dependency.
+        ObjectDependency::insert(object_dependency::ActiveModel {
+            oid: Set(pb_subscription.dependent_table as _),
+            used_by: Set(pb_subscription.id as _),
+            ..Default::default()
+        })
+        .exec(&txn)
+        .await?;
+        txn.commit().await?;
+        Ok(())
+    }
+
+    pub async fn finish_create_subscription_catalog(&self, subscription_id: u32) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let job_id = subscription_id as i32;
+
+        // update `created_at` as now() and `created_at_cluster_version` as current cluster version.
+        let res = Object::update_many()
+            .col_expr(object::Column::CreatedAt, Expr::current_timestamp().into())
+            .col_expr(
+                object::Column::CreatedAtClusterVersion,
+                current_cluster_version().into(),
+            )
+            .filter(object::Column::Oid.eq(job_id))
+            .exec(&txn)
+            .await?;
+        if res.rows_affected == 0 {
+            return Err(MetaError::catalog_id_not_found("subscription", job_id));
+        }
+
+        // mark the target subscription as `Created`.
+        let job = subscription::ActiveModel {
+            subscription_id: Set(job_id),
+            subscription_state: Set(SubscriptionState::Create.into()),
+            ..Default::default()
+        };
+        job.update(&txn).await?;
+        txn.commit().await?;
+
+        Ok(())
+    }
+
+    pub async fn notify_create_subscription(
+        &self,
+        subscription_id: u32,
+    ) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let job_id = subscription_id as i32;
+        let (subscription, obj) = Subscription::find_by_id(job_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("subscription", job_id))?;
+
+        let relations = vec![PbRelation {
+            relation_info: Some(PbRelationInfo::Subscription(
+                ObjectModel(subscription, obj.unwrap()).into(),
+            )),
+        }];
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Add,
+                NotificationInfo::RelationGroup(PbRelationGroup { relations }),
+            )
+            .await;
+        Ok(version)
+    }
+
+    pub async fn clean_dirty_subscription(&self) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let filter = subscription::ActiveModel {
+            subscription_state: Set(SubscriptionState::Init.into()),
+            ..Default::default()
+        };
+        filter.delete(&txn).await?;
+        txn.commit().await?;
+        Ok(())
     }
 
     pub async fn list_background_creating_mviews(&self) -> MetaResult<Vec<table::Model>> {
@@ -924,28 +1030,6 @@ impl CatalogController {
                 relations.push(PbRelation {
                     relation_info: Some(PbRelationInfo::Sink(
                         ObjectModel(sink, obj.unwrap()).into(),
-                    )),
-                });
-            }
-            ObjectType::Subscription => {
-                let (mut subscription, obj) = Subscription::find_by_id(job_id)
-                    .find_also_related(Object)
-                    .one(&txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("subscription", job_id))?;
-                let log_store_names: Vec<_> = internal_table_objs
-                    .iter()
-                    .filter(|a| is_subscription_internal_table(&subscription.name, &a.0.name))
-                    .map(|a| &a.0.name)
-                    .collect();
-                if log_store_names.len() != 1 {
-                    bail!("A subscription can only have one log_store_name");
-                }
-                subscription.subscription_internal_table_name =
-                    log_store_names.get(0).cloned().cloned();
-                relations.push(PbRelation {
-                    relation_info: Some(PbRelationInfo::Subscription(
-                        ObjectModel(subscription, obj.unwrap()).into(),
                     )),
                 });
             }
@@ -1472,35 +1556,6 @@ impl CatalogController {
                 relations.push(PbRelationInfo::Subscription(
                     ObjectModel(subscription, obj).into(),
                 ));
-
-                // internal tables.
-                let internal_tables: Vec<TableId> = Table::find()
-                    .select_only()
-                    .column(table::Column::TableId)
-                    .filter(table::Column::BelongsToJobId.eq(object_id))
-                    .into_tuple()
-                    .all(&txn)
-                    .await?;
-
-                Object::update_many()
-                    .col_expr(
-                        object::Column::OwnerId,
-                        SimpleExpr::Value(Value::Int(Some(new_owner))),
-                    )
-                    .filter(object::Column::Oid.is_in(internal_tables.clone()))
-                    .exec(&txn)
-                    .await?;
-
-                let table_objs = Table::find()
-                    .find_also_related(Object)
-                    .filter(table::Column::TableId.is_in(internal_tables))
-                    .all(&txn)
-                    .await?;
-                for (table, table_obj) in table_objs {
-                    relations.push(PbRelationInfo::Table(
-                        ObjectModel(table, table_obj.unwrap()).into(),
-                    ));
-                }
             }
             ObjectType::View => {
                 let view = View::find_by_id(object_id)
@@ -1732,37 +1787,6 @@ impl CatalogController {
                 relations.push(PbRelationInfo::Subscription(
                     ObjectModel(subscription, obj).into(),
                 ));
-
-                // internal tables.
-                let internal_tables: Vec<TableId> = Table::find()
-                    .select_only()
-                    .column(table::Column::TableId)
-                    .filter(table::Column::BelongsToJobId.eq(object_id))
-                    .into_tuple()
-                    .all(&txn)
-                    .await?;
-
-                if !internal_tables.is_empty() {
-                    Object::update_many()
-                        .col_expr(
-                            object::Column::SchemaId,
-                            SimpleExpr::Value(Value::Int(Some(new_schema))),
-                        )
-                        .filter(object::Column::Oid.is_in(internal_tables.clone()))
-                        .exec(&txn)
-                        .await?;
-
-                    let table_objs = Table::find()
-                        .find_also_related(Object)
-                        .filter(table::Column::TableId.is_in(internal_tables))
-                        .all(&txn)
-                        .await?;
-                    for (table, table_obj) in table_objs {
-                        relations.push(PbRelationInfo::Table(
-                            ObjectModel(table, table_obj.unwrap()).into(),
-                        ));
-                    }
-                }
             }
             ObjectType::View => {
                 let view = View::find_by_id(object_id)

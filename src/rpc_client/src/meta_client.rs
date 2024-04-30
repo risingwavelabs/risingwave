@@ -384,11 +384,9 @@ impl MetaClient {
     pub async fn create_subscription(
         &self,
         subscription: PbSubscription,
-        graph: StreamFragmentGraph,
     ) -> Result<CatalogVersion> {
         let request = CreateSubscriptionRequest {
             subscription: Some(subscription),
-            fragment_graph: Some(graph),
         };
 
         let resp = self.inner.create_subscription(request).await?;
@@ -587,10 +585,12 @@ impl MetaClient {
         &self,
         subscription_id: u32,
         cascade: bool,
+        dependent_table: u32,
     ) -> Result<CatalogVersion> {
         let request = DropSubscriptionRequest {
             subscription_id,
             cascade,
+            dependent_table,
         };
         let resp = self.inner.drop_subscription(request).await?;
         Ok(resp.version)

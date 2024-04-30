@@ -1112,7 +1112,20 @@ impl CommandContext {
                     .await;
             }
 
-            Command::CreateSubscription { .. } => {}
+            Command::CreateSubscription {
+                subscription_id, ..
+            } => match &self.barrier_manager_context.metadata_manager {
+                MetadataManager::V1(mgr) => {
+                    mgr.catalog_manager
+                        .finish_create_subscription_procedure(*subscription_id)
+                        .await?;
+                }
+                MetadataManager::V2(mgr) => {
+                    mgr.catalog_controller
+                        .finish_create_subscription_catalog(*subscription_id)
+                        .await?;
+                }
+            },
             Command::DropSubscription { .. } => {}
         }
 

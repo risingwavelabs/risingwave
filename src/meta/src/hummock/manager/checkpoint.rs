@@ -162,17 +162,12 @@ impl HummockManager {
                         .map(|t| (t.object_id, t.file_size)),
                 );
             }
-
             versions_object_ids.extend(version_delta.newly_added_object_ids());
         }
 
         // Object ids that once exist in any hummock version but not exist in the latest hummock version
         let removed_object_ids = &versions_object_ids - &current_version.get_object_ids();
-
-        let total_file_size = removed_object_ids
-            .iter()
-            .map(|t| object_sizes.get(t).copied().unwrap())
-            .sum::<u64>();
+        let total_file_size = 0;
         stale_objects.insert(
             current_version.id,
             StaleObjects {

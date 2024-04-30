@@ -117,11 +117,7 @@ pub trait CatalogWriter: Send + Sync {
         affected_table_change: Option<PbReplaceTablePlan>,
     ) -> Result<()>;
 
-    async fn create_subscription(
-        &self,
-        subscription: PbSubscription,
-        graph: StreamFragmentGraph,
-    ) -> Result<()>;
+    async fn create_subscription(&self, subscription: PbSubscription) -> Result<()>;
 
     async fn create_function(&self, function: PbFunction) -> Result<()>;
 
@@ -156,7 +152,12 @@ pub trait CatalogWriter: Send + Sync {
         affected_table_change: Option<PbReplaceTablePlan>,
     ) -> Result<()>;
 
-    async fn drop_subscription(&self, subscription_id: u32, cascade: bool) -> Result<()>;
+    async fn drop_subscription(
+        &self,
+        subscription_id: u32,
+        cascade: bool,
+        dependent_table: u32,
+    ) -> Result<()>;
 
     async fn drop_database(&self, database_id: u32) -> Result<()>;
 
@@ -346,15 +347,8 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn create_subscription(
-        &self,
-        subscription: PbSubscription,
-        graph: StreamFragmentGraph,
-    ) -> Result<()> {
-        let version = self
-            .meta_client
-            .create_subscription(subscription, graph)
-            .await?;
+    async fn create_subscription(&self, subscription: PbSubscription) -> Result<()> {
+        let version = self.meta_client.create_subscription(subscription).await?;
         self.wait_version(version).await
     }
 
@@ -433,10 +427,15 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn drop_subscription(&self, subscription_id: u32, cascade: bool) -> Result<()> {
+    async fn drop_subscription(
+        &self,
+        subscription_id: u32,
+        cascade: bool,
+        dependent_table: u32,
+    ) -> Result<()> {
         let version = self
             .meta_client
-            .drop_subscription(subscription_id, cascade)
+            .drop_subscription(subscription_id, cascade, dependent_table)
             .await?;
         self.wait_version(version).await
     }

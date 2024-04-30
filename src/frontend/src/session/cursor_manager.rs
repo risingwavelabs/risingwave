@@ -34,10 +34,7 @@ use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::declare_cursor::create_stream_for_cursor_stmt;
 use crate::handler::query::{create_stream, gen_batch_plan_fragmenter, BatchQueryPlanResult};
-use crate::handler::util::{
-    convert_logstore_u64_to_unix_millis,
-    gen_query_from_table_name,
-};
+use crate::handler::util::{convert_logstore_u64_to_unix_millis, gen_query_from_table_name};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{generic, BatchLogSeqScan};
 use crate::optimizer::property::{Order, RequiredDist};
@@ -133,6 +130,8 @@ enum State {
 
         // A cache to store the remaining rows from the row stream.
         remaining_rows: VecDeque<Row>,
+
+        expected_timestamp: Option<u64>,
     },
     Invalid,
 }
@@ -186,6 +185,7 @@ impl SubscriptionCursor {
                 row_stream,
                 pg_descs,
                 remaining_rows: VecDeque::new(),
+                expected_timestamp: None,
             }
         };
 
@@ -213,15 +213,15 @@ impl SubscriptionCursor {
                     let from_snapshot = false;
 
                     // Initiate a new batch query to continue fetching
-                    let rw_timestamp = Self::get_next_rw_timestamp(
+                    match Self::get_next_rw_timestamp(
                         *seek_timestamp,
                         self.table.id.table_id,
                         *expected_timestamp,
                         handle_args.clone(),
                     )
-                    .await;
-                    match rw_timestamp {
-                        Ok(Some(rw_timestamp)) => {
+                    .await
+                    {
+                        Ok((Some(rw_timestamp), expected_timestamp)) => {
                             let (mut row_stream, pg_descs) = Self::initiate_query(
                                 Some(rw_timestamp),
                                 &self.table,
@@ -240,9 +240,10 @@ impl SubscriptionCursor {
                                 row_stream,
                                 pg_descs,
                                 remaining_rows,
+                                expected_timestamp,
                             };
                         }
-                        Ok(None) => return Ok((None, vec![])),
+                        Ok((None, _)) => return Ok((None, vec![])),
                         Err(e) => {
                             self.state = State::Invalid;
                             return Err(e);
@@ -255,6 +256,7 @@ impl SubscriptionCursor {
                     row_stream,
                     pg_descs,
                     remaining_rows,
+                    expected_timestamp,
                 } => {
                     let from_snapshot = *from_snapshot;
                     let rw_timestamp = *rw_timestamp;
@@ -278,12 +280,17 @@ impl SubscriptionCursor {
                         }
                     } else {
                         // 2. Reach EOF for the current query.
-                        // Initiate a new batch query using the rw_timestamp + 1.
-                        // expected_timestamp don't need to be set as the next rw_timestamp is unknown.
-                        self.state = State::InitLogStoreQuery {
-                            seek_timestamp: rw_timestamp,
-                            expected_timestamp: None,
-                        };
+                        if let Some(expected_timestamp) = expected_timestamp {
+                            self.state = State::InitLogStoreQuery {
+                                seek_timestamp: *expected_timestamp,
+                                expected_timestamp: Some(*expected_timestamp),
+                            };
+                        } else {
+                            self.state = State::InitLogStoreQuery {
+                                seek_timestamp: rw_timestamp + 1,
+                                expected_timestamp: None,
+                            };
+                        }
                     }
                 }
                 State::Invalid => {
@@ -330,14 +337,14 @@ impl SubscriptionCursor {
         table_id: u32,
         expected_timestamp: Option<u64>,
         handle_args: HandlerArgs,
-    ) -> Result<Option<u64>> {
+    ) -> Result<(Option<u64>, Option<u64>)> {
         // The epoch here must be pulled every time, otherwise there will be cache consistency issues
         let new_epochs = handle_args
             .session
             .catalog_writer()?
             .list_epoch_for_subscription(table_id, seek_timestamp, MAX_EPOCH - 1)
             .await?;
-        // To verify if the epoch list has expired, we will pull the already consumed epoch as the first one
+
         if let Some(expected_timestamp) = expected_timestamp
             && (new_epochs.is_empty() || &expected_timestamp != new_epochs.first().unwrap())
         {
@@ -350,11 +357,7 @@ impl SubscriptionCursor {
             )
             .into());
         }
-
-        if new_epochs.len() <= 1 {
-            return Ok(None);
-        }
-        Ok(new_epochs.get(1).cloned())
+        Ok((new_epochs.get(0).cloned(), new_epochs.get(1).cloned()))
     }
 
     async fn initiate_query(
@@ -413,7 +416,7 @@ impl SubscriptionCursor {
                 convert_logstore_u64_to_unix_millis(rw_timestamp).to_string(),
             ))]
         } else {
-            vec![Some(Bytes::from(1i16.to_string())),None]
+            vec![Some(Bytes::from(1i16.to_string())), None]
         };
         row.extend(new_row);
         Ok(row)

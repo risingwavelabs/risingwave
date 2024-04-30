@@ -24,11 +24,11 @@ use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
-    object_dependency, schema, sink, source, table, user, user_privilege, view, worker_property,
-    ActorId, DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId,
-    PrivilegeId, SchemaId, SourceId, StreamNode, UserId, WorkerId,
+    object_dependency, schema, sink, source, subscription, table, user, user_privilege, view,
+    worker_property, ActorId, DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping,
+    I32Array, ObjectId, PrivilegeId, SchemaId, SourceId, StreamNode, UserId, WorkerId,
 };
-use risingwave_pb::catalog::{PbConnection, PbFunction};
+use risingwave_pb::catalog::{PbConnection, PbFunction, PbSubscription};
 use risingwave_pb::meta::{PbFragmentParallelUnitMapping, PbFragmentWorkerMapping};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode, StreamSource};
@@ -406,6 +406,33 @@ where
         return Err(MetaError::catalog_duplicated(
             "connection",
             &pb_connection.name,
+        ));
+    }
+    Ok(())
+}
+
+pub async fn check_subscription_name_duplicate<C>(
+    pb_subscription: &PbSubscription,
+    db: &C,
+) -> MetaResult<()>
+where
+    C: ConnectionTrait,
+{
+    let count = Subscription::find()
+        .inner_join(Object)
+        .filter(
+            object::Column::DatabaseId
+                .eq(pb_subscription.database_id as DatabaseId)
+                .and(object::Column::SchemaId.eq(pb_subscription.schema_id as SchemaId))
+                .and(subscription::Column::Name.eq(&pb_subscription.name)),
+        )
+        .count(db)
+        .await?;
+    if count > 0 {
+        assert_eq!(count, 1);
+        return Err(MetaError::catalog_duplicated(
+            "subscription",
+            &pb_subscription.name,
         ));
     }
     Ok(())

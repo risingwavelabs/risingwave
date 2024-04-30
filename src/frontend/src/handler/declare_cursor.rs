@@ -58,7 +58,7 @@ async fn handle_declare_subscription_cursor(
     let cursor_from_subscription_name = sub_name.0.last().unwrap().real_value().clone();
     let subscription =
         session.get_subscription_by_name(schema_name, &cursor_from_subscription_name)?;
-    let table = session.get_table_by_id(subscription.dependent_relations.get(0).unwrap())?;
+    let table = session.get_table_by_id(&subscription.dependent_table)?;
     // Start the first query of cursor, which includes querying the table and querying the subscription's logstore
     let start_rw_timestamp = match rw_timestamp {
         Some(risingwave_sqlparser::ast::Since::TimestampMsNum(start_rw_timestamp)) => {

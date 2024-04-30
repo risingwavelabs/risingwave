@@ -67,6 +67,7 @@ impl GlobalBarrierManagerContext {
     async fn clean_dirty_streaming_jobs(&self) -> MetaResult<()> {
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
+                mgr.catalog_manager.clean_dirty_subscription().await?;
                 // Please look at `CatalogManager::clean_dirty_tables` for more details.
                 mgr.catalog_manager
                     .clean_dirty_tables(mgr.fragment_manager.clone())
@@ -97,6 +98,7 @@ impl GlobalBarrierManagerContext {
                     .await;
             }
             MetadataManager::V2(mgr) => {
+                mgr.catalog_controller.clean_dirty_subscription().await?;
                 let ReleaseContext { source_ids, .. } =
                     mgr.catalog_controller.clean_dirty_creating_jobs().await?;
 

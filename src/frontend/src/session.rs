@@ -910,6 +910,25 @@ impl SessionImpl {
         Ok(catalog_reader.get_table_by_id(table_id)?.clone())
     }
 
+    pub fn get_table_by_name(
+        &self,
+        table_name: &str,
+        db_id: u32,
+        schema_id: u32,
+    ) -> Result<Arc<TableCatalog>> {
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        let table = catalog_reader
+            .get_schema_by_id(&DatabaseId::from(db_id), &SchemaId::from(schema_id))?
+            .get_table_by_name(table_name)
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("table \"{}\" does not exist", table_name),
+                )
+            })?;
+        Ok(table.clone())
+    }
+
     pub async fn list_epoch_for_subscription(
         &self,
         table_id: u32,
