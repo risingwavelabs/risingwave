@@ -410,12 +410,20 @@ mod test {
             .write_chunk(chunk_a, manager.start_write_chunk(0, 0))
             .await
             .expect("failed to write batch");
-        let expected_a =
-            vec![
-                (0, "*3\r\n$3\r\nSET\r\n$8\r\n{\"id\":1}\r\n$23\r\n{\"id\":1,\"name\":\"Alice\"}\r\n"),
-                (1, "*3\r\n$3\r\nSET\r\n$8\r\n{\"id\":2}\r\n$21\r\n{\"id\":2,\"name\":\"Bob\"}\r\n"),
-                (2, "*3\r\n$3\r\nSET\r\n$8\r\n{\"id\":3}\r\n$23\r\n{\"id\":3,\"name\":\"Clare\"}\r\n"),
-            ];
+        let expected_a = vec![
+            (
+                0,
+                "*3\r\n$3\r\nSET\r\n$8\r\n{\"id\":1}\r\n$23\r\n{\"id\":1,\"name\":\"Alice\"}\r\n",
+            ),
+            (
+                1,
+                "*3\r\n$3\r\nSET\r\n$8\r\n{\"id\":2}\r\n$21\r\n{\"id\":2,\"name\":\"Bob\"}\r\n",
+            ),
+            (
+                2,
+                "*3\r\n$3\r\nSET\r\n$8\r\n{\"id\":3}\r\n$23\r\n{\"id\":3,\"name\":\"Clare\"}\r\n",
+            ),
+        ];
 
         redis_sink_writer
             .payload_writer
@@ -457,6 +465,7 @@ mod test {
             format: SinkFormat::AppendOnly,
             encode: SinkEncode::Template,
             options: btree_map,
+            key_encode: None,
         };
 
         let mut redis_sink_writer = RedisSinkWriter::mock(schema, vec![0], &format_desc)
