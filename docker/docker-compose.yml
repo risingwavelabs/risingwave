@@ -56,7 +56,7 @@ services:
     volumes:
       - "./risingwave.toml:/risingwave.toml"
     environment:
-      RUST_BACKTRACE: "full"
+      RUST_BACKTRACE: "1"
       # If ENABLE_TELEMETRY is not set, telemetry will start by default
       ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
     container_name: risingwave-standalone
