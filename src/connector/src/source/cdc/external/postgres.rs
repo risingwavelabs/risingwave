@@ -334,12 +334,12 @@ mod scalar_adapter {
         ty: &Type,
     ) -> super::ConnectorResult<ScalarAdapter<'a>> {
         Ok(match (scalar, ty, ty.kind()) {
-            (ScalarRefImpl::Utf8(s), &Type::UUID, _) => ScalarAdapter::Uuid(s.parse().unwrap()),
+            (ScalarRefImpl::Utf8(s), &Type::UUID, _) => ScalarAdapter::Uuid(s.parse()?),
             (ScalarRefImpl::Utf8(s), &Type::NUMERIC, _) => {
-                ScalarAdapter::Numeric(string_to_pg_numeric(s).unwrap())
+                ScalarAdapter::Numeric(string_to_pg_numeric(s)?)
             }
             (ScalarRefImpl::Int256(s), &Type::NUMERIC, _) => {
-                ScalarAdapter::Numeric(string_to_pg_numeric(&s.to_string()).unwrap())
+                ScalarAdapter::Numeric(string_to_pg_numeric(&s.to_string())?)
             }
             (ScalarRefImpl::Utf8(s), _, Kind::Enum(_)) => {
                 ScalarAdapter::Enum(EnumString(s.to_owned()))
