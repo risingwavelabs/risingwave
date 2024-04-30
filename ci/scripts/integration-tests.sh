@@ -22,16 +22,10 @@ while getopts 'c:f:' opt; do
 done
 shift $((OPTIND -1))
 
-cleanup() {
-  echo "--- clean Demos"
-  python3 integration_tests/scripts/clean_demos.py --case "${case}"
-}
-
-trap cleanup EXIT
-
 echo "export INTEGRATION_TEST_CASE=${case}" > env_vars.sh
 
 echo "~~~ clean up docker"
+# shellcheck disable=SC2046
 if [ $(docker ps -aq |wc -l) -gt 0 ]; then
   docker rm -f $(docker ps -aq)
 fi
