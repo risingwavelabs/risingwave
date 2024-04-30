@@ -56,7 +56,6 @@ pub struct HealthCheck {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ComposeFile {
-    pub version: String,
     pub services: BTreeMap<String, ComposeService>,
     pub volumes: BTreeMap<String, ComposeVolume>,
     pub name: String,

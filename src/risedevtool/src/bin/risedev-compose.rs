@@ -247,7 +247,6 @@ fn main() -> Result<()> {
                 }
             });
             let compose_file = ComposeFile {
-                version: "3".into(),
                 services: services.clone(),
                 volumes: node_volumes,
                 name: format!("risingwave-{}", opts.profile),
@@ -305,7 +304,6 @@ fn main() -> Result<()> {
             }
         }
         let compose_file = ComposeFile {
-            version: "3".into(),
             services,
             volumes,
             name: format!("risingwave-{}", opts.profile),

@@ -1,5 +1,4 @@
 ---
-version: "3"
 x-airflow-common:
   &airflow-common
   image: apache/airflow:2.6.2-python3.10

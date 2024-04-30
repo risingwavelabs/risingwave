@@ -9,7 +9,6 @@ x-superset-volumes:
   - ./docker:/app/docker
   - superset_home:/app/superset_home
 
-version: "3.7"
 services:
   risingwave-standalone:
     extends:

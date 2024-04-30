@@ -1,5 +1,4 @@
 ---
-version: "3"
 x-image: &image
   image: ${RW_IMAGE:-risingwavelabs/risingwave:nightly-20231211}
 services:

@@ -1,5 +1,4 @@
 ---
-version: "3"
 services:
   compactor-0:
     image: ghcr.io/risingwavelabs/risingwave:RisingWave_1.6.1_HDFS_2.7-x86_64
