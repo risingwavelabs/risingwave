@@ -24,6 +24,7 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
+use prometheus::IntGauge;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, TableKeyRange, UserKey};
@@ -119,12 +120,40 @@ impl SharedBufferKeyEntry {
 }
 
 #[derive(Debug)]
+pub(crate) struct SharedBufferBatchOldValues {
+    /// Store the old values. If some, the length should be the same as `new_values`. It contains empty `Bytes` when the
+    /// corresponding `new_value` is `Insert`, and contains the old values of `Update` and `Delete`.
+    values: Vec<Bytes>,
+    pub size: usize,
+    pub global_old_value_size: IntGauge,
+}
+
+impl Drop for SharedBufferBatchOldValues {
+    fn drop(&mut self) {
+        self.global_old_value_size.sub(self.size as _);
+    }
+}
+
+impl SharedBufferBatchOldValues {
+    pub(crate) fn new(values: Vec<Bytes>, size: usize, global_old_value_size: IntGauge) -> Self {
+        global_old_value_size.add(size as _);
+        Self {
+            values,
+            size,
+            global_old_value_size,
+        }
+    }
+
+    pub(crate) fn for_test(values: Vec<Bytes>, size: usize) -> Self {
+        Self::new(values, size, IntGauge::new("test", "test").unwrap())
+    }
+}
+
+#[derive(Debug)]
 pub(crate) struct SharedBufferBatchInner {
     entries: Vec<SharedBufferKeyEntry>,
     new_values: Vec<VersionedSharedBufferValue>,
-    /// Store the old values. If some, the length should be the same as `new_values`. It contains empty `Bytes` when the
-    /// corresponding `new_value` is `Insert`, and contains the old values of `Update` and `Delete`.
-    old_values: Option<Vec<Bytes>>,
+    old_values: Option<SharedBufferBatchOldValues>,
     /// The epochs of the data in batch, sorted in ascending order (old to new)
     epochs: Vec<HummockEpoch>,
     /// Total size of all key-value items (excluding the `epoch` of value versions)
@@ -140,14 +169,14 @@ impl SharedBufferBatchInner {
         epoch: HummockEpoch,
         spill_offset: u16,
         payload: Vec<SharedBufferItem>,
-        old_values: Option<Vec<Bytes>>,
+        old_values: Option<SharedBufferBatchOldValues>,
         size: usize,
         _tracker: Option<MemoryTracker>,
     ) -> Self {
         assert!(!payload.is_empty());
         debug_assert!(payload.iter().is_sorted_by_key(|(key, _)| key));
         if let Some(old_values) = &old_values {
-            assert_eq!(old_values.len(), payload.len());
+            assert_eq!(old_values.values.len(), payload.len());
         }
 
         let epoch_with_gap = EpochWithGap::new(epoch, spill_offset);
@@ -182,7 +211,7 @@ impl SharedBufferBatchInner {
         epochs: Vec<HummockEpoch>,
         entries: Vec<SharedBufferKeyEntry>,
         new_values: Vec<VersionedSharedBufferValue>,
-        old_values: Option<Vec<Bytes>>,
+        old_values: Option<SharedBufferBatchOldValues>,
         size: usize,
         imm_id: ImmId,
         tracker: Option<MemoryTracker>,
@@ -283,7 +312,10 @@ impl SharedBufferBatch {
         epoch: HummockEpoch,
         table_id: TableId,
     ) -> Self {
-        let size = Self::measure_batch_size(&sorted_items, old_values.as_deref());
+        let (size, old_value_size) = Self::measure_batch_size(&sorted_items, old_values.as_deref());
+
+        let old_values = old_values
+            .map(|old_values| SharedBufferBatchOldValues::for_test(old_values, old_value_size));
 
         Self {
             inner: Arc::new(SharedBufferBatchInner::new(
@@ -317,12 +349,17 @@ impl SharedBufferBatch {
             .sum()
     }
 
+    /// Return (total size, old value size or 0)
     pub fn measure_batch_size(
         batch_items: &[SharedBufferItem],
         old_values: Option<&[Bytes]>,
-    ) -> usize {
+    ) -> (usize, usize) {
+        let old_value_size = old_values
+            .iter()
+            .flat_map(|slice| slice.iter().map(|value| size_of_val(value) + value.len()))
+            .sum::<usize>();
         // size = Sum(length of full key + length of user value)
-        batch_items
+        let kv_size = batch_items
             .iter()
             .map(|(k, v)| {
                 k.len()
@@ -336,11 +373,8 @@ impl SharedBufferBatch {
                     }
                     + size_of_val(v)
             })
-            .sum::<usize>()
-            + old_values
-                .iter()
-                .flat_map(|slice| slice.iter().map(|value| size_of_val(value) + value.len()))
-                .sum::<usize>()
+            .sum::<usize>();
+        (kv_size + old_value_size, old_value_size)
     }
 
     pub fn filter<R, B>(&self, table_id: TableId, table_key_range: &R) -> bool
@@ -468,6 +502,10 @@ impl SharedBufferBatch {
         self.inner.size
     }
 
+    pub(crate) fn old_values(&self) -> Option<&SharedBufferBatchOldValues> {
+        self.inner.old_values.as_ref()
+    }
+
     pub fn batch_id(&self) -> SharedBufferBatchId {
         self.inner.batch_id
     }
@@ -476,11 +514,11 @@ impl SharedBufferBatch {
         &self.inner.epochs
     }
 
-    pub fn build_shared_buffer_batch(
+    pub(crate) fn build_shared_buffer_batch(
         epoch: HummockEpoch,
         spill_offset: u16,
         sorted_items: Vec<SharedBufferItem>,
-        old_values: Option<Vec<Bytes>>,
+        old_values: Option<SharedBufferBatchOldValues>,
         size: usize,
         table_id: TableId,
         instance_id: LocalInstanceId,
@@ -695,11 +733,9 @@ impl SharedBufferBatchIterator<Forward> {
         SharedBufferVersionedEntryRef {
             key: &self.inner.entries[self.current_entry_idx].key,
             new_values: &self.inner.new_values[self.current_value_idx..self.value_end_offset],
-            old_values: self
-                .inner
-                .old_values
-                .as_ref()
-                .map(|old_values| &old_values[self.current_value_idx..self.value_end_offset]),
+            old_values: self.inner.old_values.as_ref().map(|old_values| {
+                &old_values.values[self.current_value_idx..self.value_end_offset]
+            }),
         }
     }
 }
@@ -734,7 +770,7 @@ impl<D: HummockIteratorDirection, const IS_NEW_VALUE: bool> HummockIterator
                 .into()
         } else {
             HummockValue::put(
-                self.inner.old_values.as_ref().unwrap()[self.current_value_idx].as_ref(),
+                self.inner.old_values.as_ref().unwrap().values[self.current_value_idx].as_ref(),
             )
         }
     }
