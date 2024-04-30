@@ -9,7 +9,7 @@ unset RUSTC_WRAPPER # disable sccache, see https://github.com/mozilla/sccache/is
 echo "--- List all available lints"
 output=$(cargo dylint list)
 if [ -z "$output" ]; then
-  echo "No lints detected. There might be an issue with the configuration of the lints crate."
+  echo "ERROR: No lints detected. There might be an issue with the configuration of the lints crate."
   exit 1
 else
   echo "$output"
