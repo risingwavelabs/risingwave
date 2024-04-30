@@ -21,6 +21,7 @@ use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::array::arrow::{FromArrow, IcebergArrowConvert};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     is_column_ids_dedup, ColumnCatalog, ColumnDesc, ColumnId, Schema, TableId,
@@ -1219,11 +1220,10 @@ pub async fn extract_iceberg_columns(
             .iter()
             .enumerate()
             .map(|(i, field)| {
-                let data_type = field.data_type().clone();
                 let column_desc = ColumnDesc::named(
                     field.name(),
                     ColumnId::new((i as u32).try_into().unwrap()),
-                    data_type.into(),
+                    IcebergArrowConvert.from_field(field).unwrap(),
                 );
                 ColumnCatalog {
                     column_desc,
@@ -1288,11 +1288,7 @@ pub async fn check_iceberg_source(
         .collect::<Vec<_>>();
     let new_iceberg_schema = arrow_schema::Schema::new(new_iceberg_field);
 
-    risingwave_connector::sink::iceberg::try_matches_arrow_schema(
-        &schema,
-        &new_iceberg_schema,
-        true,
-    )?;
+    risingwave_connector::sink::iceberg::try_matches_arrow_schema(&schema, &new_iceberg_schema)?;
 
     Ok(())
 }

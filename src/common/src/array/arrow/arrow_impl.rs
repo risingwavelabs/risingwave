@@ -409,6 +409,7 @@ pub trait ToArrow {
 }
 
 /// Defines how to convert Arrow arrays to RisingWave arrays.
+#[allow(clippy::wrong_self_convention)]
 pub trait FromArrow {
     /// Converts Arrow `RecordBatch` to RisingWave `DataChunk`.
     fn from_record_batch(&self, batch: &arrow_array::RecordBatch) -> Result<DataChunk, ArrayError> {
@@ -469,12 +470,12 @@ pub trait FromArrow {
         })
     }
 
-    /// Converts Arrow LargeUtf8 type to RisingWave data type.
+    /// Converts Arrow `LargeUtf8` type to RisingWave data type.
     fn from_large_utf8(&self) -> Result<DataType, ArrayError> {
         Ok(DataType::Jsonb)
     }
 
-    /// Converts Arrow LargeBinary type to RisingWave data type.
+    /// Converts Arrow `LargeBinary` type to RisingWave data type.
     fn from_large_binary(&self) -> Result<DataType, ArrayError> {
         Ok(DataType::Decimal)
     }

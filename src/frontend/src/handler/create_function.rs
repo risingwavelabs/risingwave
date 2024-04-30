@@ -17,6 +17,7 @@ use arrow_schema::Fields;
 use bytes::Bytes;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
+use risingwave_common::array::arrow::{ToArrow, UdfArrowConvert};
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::get_or_create_wasm_runtime;
@@ -170,20 +171,20 @@ pub async fn handle_create_function(
                     .await
                     .map_err(|e| anyhow!(e))?;
                 /// A helper function to create a unnamed field from data type.
-                fn to_field(data_type: arrow_schema::DataType) -> arrow_schema::Field {
-                    arrow_schema::Field::new("", data_type, true)
+                fn to_field(data_type: &DataType) -> Result<arrow_schema::Field> {
+                    Ok(UdfArrowConvert.to_arrow_field("", data_type)?)
                 }
                 let args = arrow_schema::Schema::new(
                     arg_types
                         .iter()
-                        .map::<Result<_>, _>(|t| Ok(to_field(t.try_into()?)))
+                        .map(|t| to_field(t))
                         .try_collect::<_, Fields, _>()?,
                 );
                 let returns = arrow_schema::Schema::new(match kind {
-                    Kind::Scalar(_) => vec![to_field(return_type.clone().try_into()?)],
+                    Kind::Scalar(_) => vec![to_field(&return_type)?],
                     Kind::Table(_) => vec![
                         arrow_schema::Field::new("row_index", arrow_schema::DataType::Int32, true),
-                        to_field(return_type.clone().try_into()?),
+                        to_field(&return_type)?,
                     ],
                     _ => unreachable!(),
                 });
