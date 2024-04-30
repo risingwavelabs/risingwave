@@ -25,7 +25,7 @@ use itertools::Itertools;
 use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
 use postgres_openssl::MakeTlsConnector;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::OwnedRow;
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::Datum;
 use risingwave_common::util::iter_util::ZipEqFast;
 use serde_derive::{Deserialize, Serialize};
@@ -265,8 +265,8 @@ impl PostgresExternalTableReader {
 
         let stream = match start_pk_row {
             Some(ref pk_row) => {
-                let params = pk_row
-                    .into_iter()
+                let params: Vec<Option<scalar_adapter::ScalarAdapter<'_>>> = pk_row
+                    .iter()
                     .zip_eq_fast(self.prepared_scan_stmt.params())
                     .map(|(datum, ty)| {
                         datum
@@ -284,7 +284,7 @@ impl PostgresExternalTableReader {
                     Self::get_normalized_table_name(&table_name),
                     order_key,
                 );
-                let params: Vec<DatumAdapter> = vec![];
+                let params: Vec<Option<scalar_adapter::ScalarAdapter<'_>>> = vec![];
                 client.query_raw(&sql, &params).await?
             }
         };
@@ -336,6 +336,7 @@ mod scalar_adapter {
         Numeric(PgNumeric),
         Enum(EnumString),
     }
+
     impl ToSql for ScalarAdapter<'_> {
         to_sql_checked!();
 
@@ -357,6 +358,7 @@ mod scalar_adapter {
         }
     }
 
+    /// convert `ScalarRefImpl` to `ScalarAdapter` so that we can correctly encode to postgres value
     pub(super) fn to_extra<'a>(
         scalar: ScalarRefImpl<'a>,
         ty: &Type,
