@@ -71,7 +71,7 @@ impl CompactionPicker for IntraCompactionPicker {
 
 impl IntraCompactionPicker {
     #[cfg(test)]
-    pub fn new(
+    pub fn for_test(
         config: Arc<CompactionConfig>,
         developer_config: Arc<CompactionDeveloperConfig>,
     ) -> IntraCompactionPicker {
@@ -87,6 +87,7 @@ impl IntraCompactionPicker {
         compaction_task_validator: Arc<CompactionTaskValidator>,
         developer_config: Arc<CompactionDeveloperConfig>,
     ) -> IntraCompactionPicker {
+        assert!(config.level0_sub_level_compact_level_count > 1);
         IntraCompactionPicker {
             config,
             compaction_task_validator,
@@ -414,7 +415,7 @@ pub mod tests {
                 .level0_sub_level_compact_level_count(1)
                 .build(),
         );
-        IntraCompactionPicker::new(config, Arc::new(CompactionDeveloperConfig::default()))
+        IntraCompactionPicker::for_test(config, Arc::new(CompactionDeveloperConfig::default()))
     }
 
     #[test]
@@ -528,8 +529,10 @@ pub mod tests {
                     .level0_overlapping_sub_level_compact_level_count(4)
                     .build(),
             );
-            let mut picker =
-                IntraCompactionPicker::new(config, Arc::new(CompactionDeveloperConfig::default()));
+            let mut picker = IntraCompactionPicker::for_test(
+                config,
+                Arc::new(CompactionDeveloperConfig::default()),
+            );
             let mut local_stats = LocalPickerStatistic::default();
             let ret = picker
                 .pick_compaction(&levels, &levels_handler, &mut local_stats)
@@ -574,8 +577,10 @@ pub mod tests {
                     .level0_sub_level_compact_level_count(1)
                     .build(),
             );
-            let mut picker =
-                IntraCompactionPicker::new(config, Arc::new(CompactionDeveloperConfig::default()));
+            let mut picker = IntraCompactionPicker::for_test(
+                config,
+                Arc::new(CompactionDeveloperConfig::default()),
+            );
             let mut local_stats = LocalPickerStatistic::default();
             let ret = picker
                 .pick_compaction(&levels, &levels_handler, &mut local_stats)
@@ -644,8 +649,10 @@ pub mod tests {
                     .level0_sub_level_compact_level_count(1)
                     .build(),
             );
-            let mut picker =
-                IntraCompactionPicker::new(config, Arc::new(CompactionDeveloperConfig::default()));
+            let mut picker = IntraCompactionPicker::for_test(
+                config,
+                Arc::new(CompactionDeveloperConfig::default()),
+            );
             let mut local_stats = LocalPickerStatistic::default();
             let ret = picker
                 .pick_compaction(&levels, &levels_handler, &mut local_stats)
@@ -698,7 +705,7 @@ pub mod tests {
                 .build(),
         );
         let mut picker =
-            IntraCompactionPicker::new(config, Arc::new(CompactionDeveloperConfig::default()));
+            IntraCompactionPicker::for_test(config, Arc::new(CompactionDeveloperConfig::default()));
 
         // Cannot trivial move because there is only 1 sub-level.
         let l0 = generate_l0_overlapping_sublevels(vec![vec![
@@ -792,7 +799,7 @@ pub mod tests {
             CompactionConfigBuilder::new()
                 .level0_max_compact_file_number(20)
                 .sub_level_max_compaction_bytes(1)
-                .level0_sub_level_compact_level_count(1)
+                .level0_sub_level_compact_level_count(2)
                 .build(),
         );
         let mut table_infos = vec![];

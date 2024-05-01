@@ -6,6 +6,15 @@ set -euo pipefail
 source ci/scripts/common.sh
 unset RUSTC_WRAPPER # disable sccache, see https://github.com/mozilla/sccache/issues/861
 
+echo "--- List all available lints"
+output=$(cargo dylint list)
+if [ -z "$output" ]; then
+  echo "ERROR: No lints detected. There might be an issue with the configuration of the lints crate."
+  exit 1
+else
+  echo "$output"
+fi
+
 echo "--- Run dylint check (dev, all features)"
 # Instead of `-D warnings`, we only deny warnings from our own lints. This is because...
 # - Warnings from `check` or `clippy` are already checked in `check.sh`.
