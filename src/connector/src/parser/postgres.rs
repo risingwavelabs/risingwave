@@ -262,16 +262,35 @@ fn postgres_cell_to_scalar_impl(
                         match res {
                             Ok(val) => {
                                 if let Some(v) = val {
-                                    // In Debezium, when there's inf, -inf or nan in a list, the whole list will fallback null.
+                                    // In Debezium, when there's inf, -inf, nan or invalid item in a list, the whole list will fallback null.
                                     // So we directly return None here to keep backfill behavior consistent with Debezium behavior.
                                     for val in v {
                                         match val {
-                                            Some(PgNumeric::NaN)
-                                            | Some(PgNumeric::NegativeInf)
-                                            | Some(PgNumeric::PositiveInf) => return None,
-                                            _ => {}
+                                            Some(num) => match num {
+                                                PgNumeric::NegativeInf
+                                                | PgNumeric::PositiveInf
+                                                | PgNumeric::NaN => return None,
+                                                PgNumeric::Normalized(big_decimal) => {
+                                                    match Decimal::from_str(
+                                                        big_decimal.to_string().as_str(),
+                                                    ) {
+                                                        Ok(num) => {
+                                                            builder.append(Some(ScalarImpl::from(
+                                                                num,
+                                                            )));
+                                                        }
+                                                        Err(err) => {
+                                                            log_error!(name, err, "parse numeric string as rw_int256 failed");
+                                                            return None;
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            // NULL
+                                            None => {
+                                                builder.append(Option::<ScalarImpl>::None);
+                                            }
                                         };
-                                        builder.append(pg_numeric_to_numeric(val, name))
                                     }
                                 }
                             }
@@ -386,7 +405,7 @@ fn postgres_cell_to_scalar_impl(
                         match res {
                             Ok(val) => {
                                 if let Some(v) = val {
-                                    // In Debezium, when there's inf, -inf or nan in a numeric list, the whole list will fallback null.
+                                    // In Debezium, when there's inf, -inf, nan or invalid item in a list, the whole list will fallback null.
                                     // In Json Parser, when there's a numeric with decimal part in a numeric list, the whole list will fallback null.
                                     // So we directly return None here to keep backfill behavior consistent with Debezium behavior.
                                     for val in v {
