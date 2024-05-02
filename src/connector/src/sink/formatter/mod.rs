@@ -91,14 +91,33 @@ pub trait FromBuilder: Sized {
 impl FromBuilder for JsonEncoder {
     async fn from_builder(b: &Builder<'_>, pk_indices: Option<Vec<usize>>) -> Result<Self> {
         let timestamptz_mode = TimestamptzHandlingMode::from_options(&b.format_desc.options)?;
-        Ok(JsonEncoder::new(
+        let encoder = JsonEncoder::new(
             b.schema.clone(),
             pk_indices,
             DateHandlingMode::FromCe,
             TimestampHandlingMode::Milli,
             timestamptz_mode,
             TimeHandlingMode::Milli,
-        ))
+        );
+        let encoder = if let Some(s) = b.format_desc.options.get("schemas.enable") {
+            match s.to_lowercase().parse::<bool>() {
+                Ok(true) => {
+                    let kafka_connect = KafkaConnectParams {
+                        schema_name: format!("{}.{}", b.db_name, b.sink_from_name),
+                    };
+                    encoder.with_kafka_connect(kafka_connect)
+                }
+                Ok(false) => encoder,
+                _ => {
+                    return Err(SinkError::Config(anyhow!(
+                        "schemas.enable is expected to be `true` or `false`, got {s}",
+                    )));
+                }
+            }
+        } else {
+            encoder
+        };
+        Ok(encoder)
     }
 }
 impl FromBuilder for ProtoEncoder {
@@ -115,6 +134,30 @@ impl FromBuilder for ProtoEncoder {
             Some(sid) => ProtoHeader::ConfluentSchemaRegistry(sid),
         };
         ProtoEncoder::new(b.schema.clone(), None, descriptor, header)
+    }
+}
+impl FromBuilder for AvroEncoder {
+    async fn from_builder(b: &Builder<'_>, pk_indices: Option<Vec<usize>>) -> Result<Self> {
+        let loader =
+            crate::schema::SchemaLoader::from_format_options(b.topic, &b.format_desc.options)
+                .map_err(|e| SinkError::Config(anyhow!(e)))?;
+
+        let (schema_id, avro) = match pk_indices {
+            Some(_) => loader
+                .load_key_schema()
+                .await
+                .map_err(|e| SinkError::Config(anyhow!(e)))?,
+            None => loader
+                .load_val_schema()
+                .await
+                .map_err(|e| SinkError::Config(anyhow!(e)))?,
+        };
+        AvroEncoder::new(
+            b.schema.clone(),
+            pk_indices,
+            std::sync::Arc::new(avro),
+            AvroHeader::ConfluentSchemaRegistry(schema_id),
+        )
     }
 }
 impl FromBuilder for TemplateEncoder {
@@ -162,7 +205,6 @@ impl SinkFormatterImpl {
                 format_desc.encode,
             )))
         };
-        let timestamptz_mode = TimestamptzHandlingMode::from_options(&format_desc.options)?;
         let builder = Builder {
             format_desc,
             schema: schema.clone(),
@@ -200,87 +242,27 @@ impl SinkFormatterImpl {
             SinkFormat::Upsert => {
                 match format_desc.encode {
                     SinkEncode::Json => {
-                        let mut key_encoder = JsonEncoder::new(
-                            schema.clone(),
-                            Some(pk_indices),
-                            DateHandlingMode::FromCe,
-                            TimestampHandlingMode::Milli,
-                            timestamptz_mode,
-                            TimeHandlingMode::Milli,
-                        );
-                        let mut val_encoder = JsonEncoder::new(
-                            schema,
-                            None,
-                            DateHandlingMode::FromCe,
-                            TimestampHandlingMode::Milli,
-                            timestamptz_mode,
-                            TimeHandlingMode::Milli,
-                        );
-
-                        if let Some(s) = format_desc.options.get("schemas.enable") {
-                            match s.to_lowercase().parse::<bool>() {
-                                Ok(true) => {
-                                    let kafka_connect = KafkaConnectParams {
-                                        schema_name: format!("{}.{}", db_name, sink_from_name),
-                                    };
-                                    key_encoder =
-                                        key_encoder.with_kafka_connect(kafka_connect.clone());
-                                    val_encoder = val_encoder.with_kafka_connect(kafka_connect);
-                                }
-                                Ok(false) => {}
-                                _ => {
-                                    return Err(SinkError::Config(anyhow!(
-                                        "schemas.enable is expected to be `true` or `false`, got {}",
-                                        s
-                                    )));
-                                }
-                            }
-                        };
+                        let key_encoder =
+                            JsonEncoder::from_builder(&builder, Some(pk_indices)).await?;
+                        let val_encoder = JsonEncoder::from_builder(&builder, None).await?;
 
                         // Initialize the upsert_stream
                         let formatter = UpsertFormatter::new(key_encoder, val_encoder);
                         Ok(SinkFormatterImpl::UpsertJson(formatter))
                     }
                     SinkEncode::Template => {
-                        let key_format = format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
-                            SinkError::Config(anyhow!(
-                                "Cannot find 'key_format',please set it or use JSON"
-                            ))
-                        })?;
-                        let value_format =
-                            format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
-                                SinkError::Config(anyhow!(
-                                    "Cannot find 'redis_value_format',please set it or use JSON"
-                                ))
-                            })?;
-                        let key_encoder = TemplateEncoder::new(
-                            schema.clone(),
-                            Some(pk_indices),
-                            key_format.clone(),
-                        );
-                        let val_encoder = TemplateEncoder::new(schema, None, value_format.clone());
+                        let key_encoder =
+                            TemplateEncoder::from_builder(&builder, Some(pk_indices)).await?;
+                        let val_encoder = TemplateEncoder::from_builder(&builder, None).await?;
                         Ok(SinkFormatterImpl::UpsertTemplate(UpsertFormatter::new(
                             key_encoder,
                             val_encoder,
                         )))
                     }
                     SinkEncode::Avro => {
-                        let (key_schema, val_schema) =
-                            crate::schema::avro::fetch_schema(&format_desc.options, topic)
-                                .await
-                                .map_err(|e| SinkError::Config(anyhow!(e)))?;
-                        let key_encoder = AvroEncoder::new(
-                            schema.clone(),
-                            Some(pk_indices),
-                            key_schema.schema,
-                            AvroHeader::ConfluentSchemaRegistry(key_schema.id),
-                        )?;
-                        let val_encoder = AvroEncoder::new(
-                            schema.clone(),
-                            None,
-                            val_schema.schema,
-                            AvroHeader::ConfluentSchemaRegistry(val_schema.id),
-                        )?;
+                        let key_encoder =
+                            AvroEncoder::from_builder(&builder, Some(pk_indices)).await?;
+                        let val_encoder = AvroEncoder::from_builder(&builder, None).await?;
                         let formatter = UpsertFormatter::new(key_encoder, val_encoder);
                         Ok(SinkFormatterImpl::UpsertAvro(formatter))
                     }
