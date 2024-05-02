@@ -27,6 +27,7 @@ use pgwire::types::{Format, Row};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::types::Fields;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_pb::meta::PbThrottleTarget;
 use risingwave_sqlparser::ast::*;
 
 use self::util::{DataChunkToRowSetAdapter, SourceSchemaCompatExt};
@@ -44,6 +45,7 @@ mod alter_rename;
 mod alter_set_schema;
 mod alter_source_column;
 mod alter_source_with_sr;
+mod alter_streaming_rate_limit;
 mod alter_system;
 mod alter_table_column;
 mod alter_table_with_sr;
@@ -655,6 +657,18 @@ pub async fn handle(
             name,
             operation: AlterTableOperation::RefreshSchema,
         } => alter_table_with_sr::handle_refresh_schema(handler_args, name).await,
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::SetStreamingRateLimit { rate_limit },
+        } => {
+            alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                handler_args,
+                PbThrottleTarget::TableWithSource,
+                name,
+                rate_limit,
+            )
+            .await
+        }
         Statement::AlterIndex {
             name,
             operation: AlterIndexOperation::RenameIndex { index_name },
@@ -758,6 +772,19 @@ pub async fn handle(
                 )
                 .await
             }
+        }
+        Statement::AlterView {
+            materialized,
+            name,
+            operation: AlterViewOperation::SetStreamingRateLimit { rate_limit },
+        } if materialized => {
+            alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                handler_args,
+                PbThrottleTarget::Mv,
+                name,
+                rate_limit,
+            )
+            .await
         }
         Statement::AlterSink {
             name,
@@ -896,6 +923,18 @@ pub async fn handle(
             name,
             operation: AlterSourceOperation::RefreshSchema,
         } => alter_source_with_sr::handler_refresh_schema(handler_args, name).await,
+        Statement::AlterSource {
+            name,
+            operation: AlterSourceOperation::SetStreamingRateLimit { rate_limit },
+        } => {
+            alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                handler_args,
+                PbThrottleTarget::Source,
+                name,
+                rate_limit,
+            )
+            .await
+        }
         Statement::AlterFunction {
             name,
             args,

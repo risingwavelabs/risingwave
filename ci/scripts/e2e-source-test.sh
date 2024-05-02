@@ -156,6 +156,10 @@ risedev slt './e2e_test/source/basic/*.slt'
 risedev slt './e2e_test/source/basic/old_row_format_syntax/*.slt'
 risedev slt './e2e_test/source/basic/alter/kafka.slt'
 
+echo "--- e2e, kafka alter source rate limit"
+risedev slt './e2e_test/source/basic/alter/rate_limit_source_kafka.slt'
+risedev slt './e2e_test/source/basic/alter/rate_limit_table_kafka.slt'
+
 echo "--- e2e, kafka alter source"
 chmod +x ./scripts/source/prepare_data_after_alter.sh
 ./scripts/source/prepare_data_after_alter.sh 2

@@ -649,7 +649,6 @@ mod tests {
         let off0_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000001", "pos": 105622, "snapshot": true }, "isHeartbeat": false }"#;
         let parser = MySqlExternalTableReader::get_cdc_offset_parser();
         println!("parsed offset: {:?}", parser(off0_str).unwrap());
-
         let table_name = SchemaTableName {
             schema_name: "mytest".to_string(),
             table_name: "t1".to_string(),

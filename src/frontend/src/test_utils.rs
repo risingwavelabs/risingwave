@@ -55,7 +55,7 @@ use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistributi
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::{EventLog, PbTableParallelism, SystemParams};
+use risingwave_pb::meta::{EventLog, PbTableParallelism, PbThrottleTarget, SystemParams};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
@@ -1072,6 +1072,15 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn recover(&self) -> RpcResult<()> {
+        unimplemented!()
+    }
+
+    async fn apply_throttle(
+        &self,
+        _kind: PbThrottleTarget,
+        _id: u32,
+        _rate_limit: Option<u32>,
+    ) -> RpcResult<()> {
         unimplemented!()
     }
 }

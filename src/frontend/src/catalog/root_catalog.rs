@@ -616,6 +616,7 @@ impl Catalog {
         ))
     }
 
+    /// Used to get `TableCatalog` for Materialized Views, Tables and Indexes.
     pub fn get_table_by_name<'a>(
         &self,
         db_name: &str,

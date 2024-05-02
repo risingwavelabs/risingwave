@@ -50,6 +50,7 @@ impl DistributedQueryStream {
 }
 
 impl Stream for DistributedQueryStream {
+    // TODO(error-handling): use a concrete error type.
     type Item = Result<DataChunk, BoxedError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {

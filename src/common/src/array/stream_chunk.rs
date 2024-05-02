@@ -80,6 +80,15 @@ impl Op {
             Op::UpdateInsert => Op::Insert,
         }
     }
+
+    pub fn to_i16(self) -> i16 {
+        match self {
+            Op::Insert => 1,
+            Op::Delete => 2,
+            Op::UpdateInsert => 3,
+            Op::UpdateDelete => 4,
+        }
+    }
 }
 
 pub type Ops<'a> = &'a [Op];

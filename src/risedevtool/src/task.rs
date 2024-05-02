@@ -15,6 +15,7 @@
 mod compactor_service;
 mod compute_node_service;
 mod configure_tmux_service;
+mod docker_service;
 mod dummy_service;
 mod ensure_stop_service;
 mod etcd_service;
@@ -23,6 +24,7 @@ mod grafana_service;
 mod kafka_service;
 mod meta_node_service;
 mod minio_service;
+mod mysql_service;
 mod prometheus_service;
 mod pubsub_service;
 mod redis_service;
@@ -60,6 +62,7 @@ pub use self::grafana_service::*;
 pub use self::kafka_service::*;
 pub use self::meta_node_service::*;
 pub use self::minio_service::*;
+pub use self::mysql_service::*;
 pub use self::prometheus_service::*;
 pub use self::pubsub_service::*;
 pub use self::redis_service::*;
@@ -152,7 +155,7 @@ where
 
         writeln!(self.log, "---")?;
 
-        output.status.exit_ok()?;
+        output.status.exit_ok().context(full_output)?;
 
         Ok(output)
     }

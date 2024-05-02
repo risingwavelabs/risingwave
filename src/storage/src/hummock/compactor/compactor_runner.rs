@@ -921,6 +921,10 @@ where
         table_stats_drop.insert(last_table_id, std::mem::take(&mut last_table_stats));
     }
     iter.collect_local_statistic(&mut local_stats);
+    add_table_stats_map(
+        &mut table_stats_drop,
+        &local_stats.skipped_by_watermark_table_stats,
+    );
     local_stats.report_compactor(compactor_metrics.as_ref());
     compaction_statistics.delta_drop_stat = table_stats_drop;
 

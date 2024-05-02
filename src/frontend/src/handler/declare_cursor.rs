@@ -12,18 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::rc::Rc;
+
+use fixedbitset::FixedBitSet;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::session_config::QueryMode;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_sqlparser::ast::{DeclareCursorStatement, ObjectName, Query, Since, Statement};
 
-use super::query::{gen_batch_plan_by_statement, gen_batch_plan_fragmenter};
+use super::query::{gen_batch_plan_by_statement, gen_batch_plan_fragmenter, BatchQueryPlanResult};
 use super::util::{convert_epoch_to_logstore_i64, convert_unix_millis_to_logstore_i64};
 use super::RwPgResponse;
 use crate::error::{ErrorCode, Result};
 use crate::handler::query::create_stream;
 use crate::handler::HandlerArgs;
-use crate::{Binder, OptimizerContext, PgResponseStream};
+use crate::optimizer::plan_node::{generic, BatchLogSeqScan};
+use crate::optimizer::property::{Order, RequiredDist};
+use crate::optimizer::PlanRoot;
+use crate::{Binder, OptimizerContext, PgResponseStream, PlanRef, TableCatalog};
 
 pub async fn handle_declare_cursor(
     handle_args: HandlerArgs,
@@ -131,4 +138,61 @@ pub async fn create_stream_for_cursor(
         gen_batch_plan_fragmenter(&session, plan_result)?
     };
     create_stream(session, plan_fragmenter_result, vec![]).await
+}
+
+pub fn create_batch_plan_for_cursor(
+    table_catalog: std::sync::Arc<TableCatalog>,
+    handle_args: HandlerArgs,
+    old_epoch: u64,
+    new_epoch: u64,
+) -> Result<BatchQueryPlanResult> {
+    let context = OptimizerContext::from_handler_args(handle_args.clone());
+    let out_col_idx = table_catalog
+        .columns
+        .iter()
+        .enumerate()
+        .filter(|(_, v)| !v.is_hidden)
+        .map(|(i, _)| i)
+        .collect::<Vec<_>>();
+    let core = generic::LogScan::new(
+        table_catalog.name.clone(),
+        out_col_idx,
+        Rc::new(table_catalog.table_desc()),
+        Rc::new(context),
+        old_epoch,
+        new_epoch,
+    );
+    let batch_log_seq_scan = BatchLogSeqScan::new(core);
+    let out_fields = FixedBitSet::from_iter(0..batch_log_seq_scan.core().schema().len());
+    let out_names = batch_log_seq_scan.core().column_names();
+    // Here we just need a plan_root to call the method, only out_fields and out_names will be used
+    let mut plan_root = PlanRoot::new(
+        PlanRef::from(batch_log_seq_scan.clone()),
+        RequiredDist::single(),
+        Order::default(),
+        out_fields,
+        out_names,
+    );
+    let schema = batch_log_seq_scan.core().schema().clone();
+    let (batch_log_seq_scan, query_mode) = match handle_args.session.config().query_mode() {
+        QueryMode::Auto => (
+            plan_root.gen_batch_distributed_plan(PlanRef::from(batch_log_seq_scan))?,
+            QueryMode::Local,
+        ),
+        QueryMode::Local => (
+            plan_root.gen_batch_local_plan(PlanRef::from(batch_log_seq_scan))?,
+            QueryMode::Local,
+        ),
+        QueryMode::Distributed => (
+            plan_root.gen_batch_distributed_plan(PlanRef::from(batch_log_seq_scan))?,
+            QueryMode::Distributed,
+        ),
+    };
+    Ok(BatchQueryPlanResult {
+        plan: batch_log_seq_scan,
+        query_mode,
+        schema,
+        stmt_type: StatementType::SELECT,
+        dependent_relations: table_catalog.dependent_relations.clone(),
+    })
 }

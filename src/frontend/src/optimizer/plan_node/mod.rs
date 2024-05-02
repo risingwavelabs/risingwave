@@ -827,6 +827,7 @@ mod batch_hash_join;
 mod batch_hop_window;
 mod batch_insert;
 mod batch_limit;
+mod batch_log_seq_scan;
 mod batch_lookup_join;
 mod batch_max_one_row;
 mod batch_nested_loop_join;
@@ -926,6 +927,7 @@ pub use batch_iceberg_scan::BatchIcebergScan;
 pub use batch_insert::BatchInsert;
 pub use batch_kafka_scan::BatchKafkaScan;
 pub use batch_limit::BatchLimit;
+pub use batch_log_seq_scan::BatchLogSeqScan;
 pub use batch_lookup_join::BatchLookupJoin;
 pub use batch_max_one_row::BatchMaxOneRow;
 pub use batch_nested_loop_join::BatchNestedLoopJoin;
@@ -1073,6 +1075,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, Update }
             , { Batch, SeqScan }
             , { Batch, SysSeqScan }
+            , { Batch, LogSeqScan }
             , { Batch, HashJoin }
             , { Batch, NestedLoopJoin }
             , { Batch, Values }
@@ -1181,6 +1184,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, Filter }
             , { Batch, SeqScan }
             , { Batch, SysSeqScan }
+            , { Batch, LogSeqScan }
             , { Batch, HashJoin }
             , { Batch, NestedLoopJoin }
             , { Batch, Values }
