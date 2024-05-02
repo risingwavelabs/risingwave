@@ -77,6 +77,44 @@ pub enum SinkFormatterImpl {
     UpsertTemplate(UpsertFormatter<TemplateEncoder, TemplateEncoder>),
 }
 
+struct Builder<'a> {
+    format_desc: &'a SinkFormatDesc,
+    schema: Schema,
+    db_name: String,
+    sink_from_name: String,
+    topic: &'a str,
+}
+
+impl JsonEncoder {
+    async fn from_builder(b: &Builder<'_>, pk_indices: Option<Vec<usize>>) -> Result<Self> {
+        let timestamptz_mode = TimestamptzHandlingMode::from_options(&b.format_desc.options)?;
+        Ok(JsonEncoder::new(
+            b.schema.clone(),
+            pk_indices,
+            DateHandlingMode::FromCe,
+            TimestampHandlingMode::Milli,
+            timestamptz_mode,
+            TimeHandlingMode::Milli,
+        ))
+    }
+}
+impl ProtoEncoder {
+    async fn from_builder(b: &Builder<'_>, pk_indices: Option<Vec<usize>>) -> Result<Self> {
+        // TODO: const generic
+        assert!(pk_indices.is_none());
+        // By passing `None` as `aws_auth_props`, reading from `s3://` not supported yet.
+        let (descriptor, sid) =
+            crate::schema::protobuf::fetch_descriptor(&b.format_desc.options, b.topic, None)
+                .await
+                .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        let header = match sid {
+            None => ProtoHeader::None,
+            Some(sid) => ProtoHeader::ConfluentSchemaRegistry(sid),
+        };
+        ProtoEncoder::new(b.schema.clone(), None, descriptor, header)
+    }
+}
+
 impl SinkFormatterImpl {
     pub async fn new(
         format_desc: &SinkFormatDesc,
@@ -94,47 +132,31 @@ impl SinkFormatterImpl {
             )))
         };
         let timestamptz_mode = TimestamptzHandlingMode::from_options(&format_desc.options)?;
+        let builder = Builder {
+            format_desc,
+            schema: schema.clone(),
+            db_name: db_name.clone(),
+            sink_from_name: sink_from_name.clone(),
+            topic,
+        };
 
         match format_desc.format {
             SinkFormat::AppendOnly => {
-                let key_encoder = (!pk_indices.is_empty()).then(|| {
-                    JsonEncoder::new(
-                        schema.clone(),
-                        Some(pk_indices.clone()),
-                        DateHandlingMode::FromCe,
-                        TimestampHandlingMode::Milli,
-                        timestamptz_mode,
-                        TimeHandlingMode::Milli,
-                    )
-                });
+                let key_encoder = match pk_indices.is_empty() {
+                    true => None,
+                    false => {
+                        Some(JsonEncoder::from_builder(&builder, Some(pk_indices.clone())).await?)
+                    }
+                };
 
                 match format_desc.encode {
                     SinkEncode::Json => {
-                        let val_encoder = JsonEncoder::new(
-                            schema,
-                            None,
-                            DateHandlingMode::FromCe,
-                            TimestampHandlingMode::Milli,
-                            timestamptz_mode,
-                            TimeHandlingMode::Milli,
-                        );
+                        let val_encoder = JsonEncoder::from_builder(&builder, None).await?;
                         let formatter = AppendOnlyFormatter::new(key_encoder, val_encoder);
                         Ok(SinkFormatterImpl::AppendOnlyJson(formatter))
                     }
                     SinkEncode::Protobuf => {
-                        // By passing `None` as `aws_auth_props`, reading from `s3://` not supported yet.
-                        let (descriptor, sid) = crate::schema::protobuf::fetch_descriptor(
-                            &format_desc.options,
-                            topic,
-                            None,
-                        )
-                        .await
-                        .map_err(|e| SinkError::Config(anyhow!(e)))?;
-                        let header = match sid {
-                            None => ProtoHeader::None,
-                            Some(sid) => ProtoHeader::ConfluentSchemaRegistry(sid),
-                        };
-                        let val_encoder = ProtoEncoder::new(schema, None, descriptor, header)?;
+                        let val_encoder = ProtoEncoder::from_builder(&builder, None).await?;
                         let formatter = AppendOnlyFormatter::new(key_encoder, val_encoder);
                         Ok(SinkFormatterImpl::AppendOnlyProto(formatter))
                     }
