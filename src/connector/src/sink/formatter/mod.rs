@@ -212,6 +212,13 @@ impl FormatFromBuilder for DebeziumJsonFormatter {
         ))
     }
 }
+async fn build<T, F>(f: F, b: &Builder<'_>, pk_indices: Vec<usize>) -> Result<SinkFormatterImpl>
+where
+    T: FormatFromBuilder,
+    F: FnOnce(T) -> SinkFormatterImpl,
+{
+    T::from_builder(b, pk_indices).await.map(f)
+}
 
 impl SinkFormatterImpl {
     pub async fn new(
@@ -222,13 +229,6 @@ impl SinkFormatterImpl {
         sink_from_name: String,
         topic: &str,
     ) -> Result<Self> {
-        let err_unsupported = || {
-            Err(SinkError::Config(anyhow!(
-                "sink format/encode unsupported: {:?} {:?}",
-                format_desc.format,
-                format_desc.encode,
-            )))
-        };
         let builder = Builder {
             format_desc,
             schema: schema.clone(),
@@ -237,42 +237,36 @@ impl SinkFormatterImpl {
             topic,
         };
 
-        match format_desc.format {
-            SinkFormat::AppendOnly => match format_desc.encode {
-                SinkEncode::Json => Ok(SinkFormatterImpl::AppendOnlyJson(
-                    AppendOnlyFormatter::from_builder(&builder, pk_indices).await?,
-                )),
-                SinkEncode::Protobuf => Ok(SinkFormatterImpl::AppendOnlyProto(
-                    AppendOnlyFormatter::from_builder(&builder, pk_indices).await?,
-                )),
-                SinkEncode::Avro => err_unsupported(),
-                SinkEncode::Template => Ok(SinkFormatterImpl::AppendOnlyTemplate(
-                    AppendOnlyFormatter::from_builder(&builder, pk_indices).await?,
-                )),
-            },
-            SinkFormat::Debezium => {
-                if format_desc.encode != SinkEncode::Json {
-                    return err_unsupported();
-                }
-
-                Ok(SinkFormatterImpl::DebeziumJson(
-                    DebeziumJsonFormatter::from_builder(&builder, pk_indices).await?,
-                ))
+        match (&format_desc.format, &format_desc.encode) {
+            (SinkFormat::AppendOnly, SinkEncode::Json) => {
+                build(SinkFormatterImpl::AppendOnlyJson, &builder, pk_indices).await
             }
-            SinkFormat::Upsert => match format_desc.encode {
-                SinkEncode::Json => {
-                    let formatter = UpsertFormatter::from_builder(&builder, pk_indices).await?;
-                    Ok(SinkFormatterImpl::UpsertJson(formatter))
-                }
-                SinkEncode::Template => Ok(SinkFormatterImpl::UpsertTemplate(
-                    UpsertFormatter::from_builder(&builder, pk_indices).await?,
-                )),
-                SinkEncode::Avro => {
-                    let formatter = UpsertFormatter::from_builder(&builder, pk_indices).await?;
-                    Ok(SinkFormatterImpl::UpsertAvro(formatter))
-                }
-                SinkEncode::Protobuf => err_unsupported(),
-            },
+            (SinkFormat::AppendOnly, SinkEncode::Protobuf) => {
+                build(SinkFormatterImpl::AppendOnlyProto, &builder, pk_indices).await
+            }
+            (SinkFormat::AppendOnly, SinkEncode::Template) => {
+                build(SinkFormatterImpl::AppendOnlyTemplate, &builder, pk_indices).await
+            }
+
+            (SinkFormat::Upsert, SinkEncode::Json) => {
+                build(SinkFormatterImpl::UpsertJson, &builder, pk_indices).await
+            }
+            (SinkFormat::Upsert, SinkEncode::Avro) => {
+                build(SinkFormatterImpl::UpsertAvro, &builder, pk_indices).await
+            }
+            (SinkFormat::Upsert, SinkEncode::Template) => {
+                build(SinkFormatterImpl::UpsertTemplate, &builder, pk_indices).await
+            }
+            (SinkFormat::Debezium, SinkEncode::Json) => {
+                build(SinkFormatterImpl::DebeziumJson, &builder, pk_indices).await
+            }
+            (SinkFormat::AppendOnly, SinkEncode::Avro)
+            | (SinkFormat::Upsert, SinkEncode::Protobuf)
+            | (SinkFormat::Debezium, _) => Err(SinkError::Config(anyhow!(
+                "sink format/encode unsupported: {:?} {:?}",
+                format_desc.format,
+                format_desc.encode,
+            ))),
         }
     }
 }
