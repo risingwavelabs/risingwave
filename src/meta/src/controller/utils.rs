@@ -23,9 +23,9 @@ use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
-    object_dependency, schema, secret, sink, source, table, user, user_privilege, view,
-     ActorId, DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping,
-    I32Array, ObjectId, PrivilegeId, SchemaId, SourceId, StreamNode, UserId,
+    object_dependency, schema, sink, source, table, user, user_privilege, view, ActorId,
+    DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId, PrivilegeId,
+    SchemaId, SourceId, StreamNode, UserId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction, PbSecret};
 use risingwave_pb::meta::PbFragmentParallelUnitMapping;

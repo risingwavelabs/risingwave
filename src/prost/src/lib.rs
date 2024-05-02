@@ -56,7 +56,7 @@ pub mod batch_plan;
 #[cfg_attr(madsim, path = "sim/task_service.rs")]
 pub mod task_service;
 #[rustfmt::skip]
-#[cfg_attr(madsim, path="sim/connector_service.rs")]
+#[cfg_attr(madsim, path = "sim/connector_service.rs")]
 pub mod connector_service;
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/stream_plan.rs")]
@@ -91,6 +91,10 @@ pub mod health;
 #[rustfmt::skip]
 #[path = "sim/telemetry.rs"]
 pub mod telemetry;
+
+#[rustfmt::skip]
+#[path = "sim/secret.rs"]
+pub mod secret;
 #[rustfmt::skip]
 #[path = "connector_service.serde.rs"]
 pub mod connector_service_serde;
@@ -157,6 +161,10 @@ pub mod java_binding_serde;
 #[rustfmt::skip]
 #[path = "telemetry.serde.rs"]
 pub mod telemetry_serde;
+
+#[rustfmt::skip]
+#[path = "secret.serde.rs"]
+pub mod secret_serde;
 
 #[derive(Clone, PartialEq, Eq, Debug, Error)]
 #[error("field `{0}` not found")]

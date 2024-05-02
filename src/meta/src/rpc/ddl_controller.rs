@@ -615,8 +615,8 @@ impl DdlController {
         // here, we need to encrypt it before storing it in the catalog.
 
         let encrypted_payload = simplestcrypt::encrypt_and_serialize(
-            self.env.opts.secret_store_private_key.as_bytes(),
-            secret.get_value().as_bytes(),
+            self.env.opts.secret_store_private_key.as_slice(),
+            secret.get_value().as_slice(),
         )
         .map_err(|e| {
             MetaError::from(MetaErrorInner::InvalidParameter(format!(

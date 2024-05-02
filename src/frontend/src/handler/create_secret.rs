@@ -13,11 +13,17 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_sqlparser::ast::{CreateSecretStatement, Value};
+use prost::Message;
+use risingwave_sqlparser::ast::{CreateSecretStatement, SqlOption, Value};
 
 use crate::error::{ErrorCode, Result};
 use crate::handler::{HandlerArgs, RwPgResponse};
-use crate::Binder;
+use crate::{Binder, WithOptions};
+
+const SECRET_BACKEND_KEY: &str = "backend";
+
+const SECRET_BACKEND_META: &str = "meta";
+const SECRET_BACKEND_HASHICORP_VAULT: &str = "hashicorp_vault";
 
 pub async fn handle_create_secret(
     handler_args: HandlerArgs,
@@ -37,16 +43,58 @@ pub async fn handle_create_secret(
             Err(e)
         };
     }
-    let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
-    let secret_payload = match &stmt.credential {
-        Value::SingleQuotedString(ref s) => s.as_bytes().to_vec(),
-        _ => {
-            return Err(ErrorCode::InvalidParameterValue(
-                "secret payload must be a string".to_string(),
-            )
+
+    // check if the secret backend is supported
+    let with_props = WithOptions::try_from(stmt.with_properties.0.as_ref() as &[SqlOption])?;
+    let secret_payload: Vec<u8> = {
+        if let Some(backend) = with_props.inner().get(SECRET_BACKEND_KEY) {
+            match backend.to_lowercase().as_ref() {
+                SECRET_BACKEND_META => {
+                    let backend = risingwave_pb::secret::Secret {
+                        secret_backend: Some(risingwave_pb::secret::secret::SecretBackend::Meta(
+                            risingwave_pb::secret::SecretMetaBackend { value: vec![] },
+                        )),
+                    };
+                    backend.encode_to_vec()
+                }
+                SECRET_BACKEND_HASHICORP_VAULT => {
+                    if stmt.credential != Value::Null {
+                        return Err(ErrorCode::InvalidParameterValue(
+                            "credential must be null for hashicorp_vault backend".to_string(),
+                        )
+                        .into());
+                    }
+                    todo!()
+                }
+                _ => {
+                    return Err(ErrorCode::InvalidParameterValue(format!(
+                        "secret backend \"{}\" is not supported. Supported backends are: {}",
+                        backend,
+                        [SECRET_BACKEND_META, SECRET_BACKEND_HASHICORP_VAULT].join(",")
+                    ))
+                    .into());
+                }
+            }
+        } else {
+            return Err(ErrorCode::InvalidParameterValue(format!(
+                "secret backend is not specified in with clause. Supported backends are: {}",
+                [SECRET_BACKEND_META, SECRET_BACKEND_HASHICORP_VAULT].join(",")
+            ))
             .into());
         }
     };
+
+    let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
+    // let secret_payload = match &stmt.credential {
+    //     Value::SingleQuotedString(ref s) => s.as_bytes().to_vec(),
+    //     Value::Null => Vec::new(),
+    //     _ => {
+    //         return Err(ErrorCode::InvalidParameterValue(
+    //             "secret payload must be a string".to_string(),
+    //         )
+    //             .into());
+    //     }
+    // };
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer

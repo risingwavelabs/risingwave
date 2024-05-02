@@ -668,6 +668,7 @@ impl fmt::Display for DeclareCursor {
         v.iter().join(" ").fmt(f)
     }
 }
+
 // sql_grammar!(DeclareCursorStatement {
 //     cursor_name: Ident,
 //     [Keyword::SUBSCRIPTION]
@@ -706,6 +707,7 @@ impl ParseTo for DeclareCursorStatement {
         })
     }
 }
+
 impl fmt::Display for DeclareCursorStatement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut v: Vec<String> = vec![];
@@ -777,6 +779,7 @@ impl ParseTo for CloseCursorStatement {
         Ok(Self { cursor_name })
     }
 }
+
 impl fmt::Display for CloseCursorStatement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut v: Vec<String> = vec![];
@@ -837,19 +840,24 @@ pub struct CreateSecretStatement {
     pub if_not_exists: bool,
     pub secret_name: ObjectName,
     pub credential: Value,
+    pub with_properties: WithProperties,
 }
 
 impl ParseTo for CreateSecretStatement {
     fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], parser);
         impl_parse_to!(secret_name: ObjectName, parser);
-        parser.expect_keyword(Keyword::AS)?;
+        impl_parse_to!(with_properties: WithProperties, parser);
+        let mut credential = Value::Null;
+        if parser.parse_keyword(Keyword::AS) {
+            credential = parser.parse_value()?;
+        }
         // impl_parse_to!(credential: Value, parser);
-        let credential = parser.parse_value()?;
         Ok(Self {
             if_not_exists,
             secret_name,
             credential,
+            with_properties,
         })
     }
 }
