@@ -77,15 +77,18 @@ pub enum SinkFormatterImpl {
     UpsertTemplate(UpsertFormatter<TemplateEncoder, TemplateEncoder>),
 }
 
-struct Builder<'a> {
+pub struct Builder<'a> {
     format_desc: &'a SinkFormatDesc,
     schema: Schema,
     db_name: String,
     sink_from_name: String,
     topic: &'a str,
 }
+pub trait FromBuilder: Sized {
+    async fn from_builder(b: &Builder<'_>, pk_indices: Option<Vec<usize>>) -> Result<Self>;
+}
 
-impl JsonEncoder {
+impl FromBuilder for JsonEncoder {
     async fn from_builder(b: &Builder<'_>, pk_indices: Option<Vec<usize>>) -> Result<Self> {
         let timestamptz_mode = TimestamptzHandlingMode::from_options(&b.format_desc.options)?;
         Ok(JsonEncoder::new(
@@ -98,7 +101,7 @@ impl JsonEncoder {
         ))
     }
 }
-impl ProtoEncoder {
+impl FromBuilder for ProtoEncoder {
     async fn from_builder(b: &Builder<'_>, pk_indices: Option<Vec<usize>>) -> Result<Self> {
         // TODO: const generic
         assert!(pk_indices.is_none());
@@ -112,6 +115,34 @@ impl ProtoEncoder {
             Some(sid) => ProtoHeader::ConfluentSchemaRegistry(sid),
         };
         ProtoEncoder::new(b.schema.clone(), None, descriptor, header)
+    }
+}
+impl FromBuilder for TemplateEncoder {
+    async fn from_builder(b: &Builder<'_>, pk_indices: Option<Vec<usize>>) -> Result<Self> {
+        let option_name = match pk_indices {
+            Some(_) => KEY_FORMAT,
+            None => VALUE_FORMAT,
+        };
+        let template = b.format_desc.options.get(option_name).ok_or_else(|| {
+            SinkError::Config(anyhow!(
+                "Cannot find '{option_name}',please set it or use JSON"
+            ))
+        })?;
+        Ok(TemplateEncoder::new(
+            b.schema.clone(),
+            pk_indices,
+            template.clone(),
+        ))
+    }
+}
+impl<KE: FromBuilder, VE: FromBuilder> AppendOnlyFormatter<KE, VE> {
+    async fn from_builder(b: &Builder<'_>, pk_indices: Vec<usize>) -> Result<Self> {
+        let key_encoder = match pk_indices.is_empty() {
+            true => None,
+            false => Some(KE::from_builder(b, Some(pk_indices.clone())).await?),
+        };
+        let val_encoder = VE::from_builder(b, None).await?;
+        Ok(AppendOnlyFormatter::new(key_encoder, val_encoder))
     }
 }
 
@@ -141,50 +172,18 @@ impl SinkFormatterImpl {
         };
 
         match format_desc.format {
-            SinkFormat::AppendOnly => {
-                let key_encoder = match pk_indices.is_empty() {
-                    true => None,
-                    false => {
-                        Some(JsonEncoder::from_builder(&builder, Some(pk_indices.clone())).await?)
-                    }
-                };
-
-                match format_desc.encode {
-                    SinkEncode::Json => {
-                        let val_encoder = JsonEncoder::from_builder(&builder, None).await?;
-                        let formatter = AppendOnlyFormatter::new(key_encoder, val_encoder);
-                        Ok(SinkFormatterImpl::AppendOnlyJson(formatter))
-                    }
-                    SinkEncode::Protobuf => {
-                        let val_encoder = ProtoEncoder::from_builder(&builder, None).await?;
-                        let formatter = AppendOnlyFormatter::new(key_encoder, val_encoder);
-                        Ok(SinkFormatterImpl::AppendOnlyProto(formatter))
-                    }
-                    SinkEncode::Avro => err_unsupported(),
-                    SinkEncode::Template => {
-                        let key_format = format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
-                            SinkError::Config(anyhow!(
-                                "Cannot find 'key_format',please set it or use JSON"
-                            ))
-                        })?;
-                        let value_format =
-                            format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
-                                SinkError::Config(anyhow!(
-                                    "Cannot find 'redis_value_format',please set it or use JSON"
-                                ))
-                            })?;
-                        let key_encoder = TemplateEncoder::new(
-                            schema.clone(),
-                            Some(pk_indices),
-                            key_format.clone(),
-                        );
-                        let val_encoder = TemplateEncoder::new(schema, None, value_format.clone());
-                        Ok(SinkFormatterImpl::AppendOnlyTemplate(
-                            AppendOnlyFormatter::new(Some(key_encoder), val_encoder),
-                        ))
-                    }
-                }
-            }
+            SinkFormat::AppendOnly => match format_desc.encode {
+                SinkEncode::Json => Ok(SinkFormatterImpl::AppendOnlyJson(
+                    AppendOnlyFormatter::from_builder(&builder, pk_indices).await?,
+                )),
+                SinkEncode::Protobuf => Ok(SinkFormatterImpl::AppendOnlyProto(
+                    AppendOnlyFormatter::from_builder(&builder, pk_indices).await?,
+                )),
+                SinkEncode::Avro => err_unsupported(),
+                SinkEncode::Template => Ok(SinkFormatterImpl::AppendOnlyTemplate(
+                    AppendOnlyFormatter::from_builder(&builder, pk_indices).await?,
+                )),
+            },
             SinkFormat::Debezium => {
                 if format_desc.encode != SinkEncode::Json {
                     return err_unsupported();
