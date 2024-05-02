@@ -77,14 +77,14 @@ pub enum SinkFormatterImpl {
     UpsertTemplate(UpsertFormatter<TemplateEncoder, TemplateEncoder>),
 }
 
-pub struct Builder<'a> {
+struct Builder<'a> {
     format_desc: &'a SinkFormatDesc,
     schema: Schema,
     db_name: String,
     sink_from_name: String,
     topic: &'a str,
 }
-pub trait FromBuilder: Sized {
+trait FromBuilder: Sized {
     async fn from_builder(b: &Builder<'_>, pk_indices: Option<Vec<usize>>) -> Result<Self>;
 }
 
@@ -178,7 +178,11 @@ impl FromBuilder for TemplateEncoder {
         ))
     }
 }
-impl<KE: FromBuilder, VE: FromBuilder> AppendOnlyFormatter<KE, VE> {
+trait FormatFromBuilder: Sized {
+    async fn from_builder(b: &Builder<'_>, pk_indices: Vec<usize>) -> Result<Self>;
+}
+
+impl<KE: FromBuilder, VE: FromBuilder> FormatFromBuilder for AppendOnlyFormatter<KE, VE> {
     async fn from_builder(b: &Builder<'_>, pk_indices: Vec<usize>) -> Result<Self> {
         let key_encoder = match pk_indices.is_empty() {
             true => None,
@@ -186,6 +190,26 @@ impl<KE: FromBuilder, VE: FromBuilder> AppendOnlyFormatter<KE, VE> {
         };
         let val_encoder = VE::from_builder(b, None).await?;
         Ok(AppendOnlyFormatter::new(key_encoder, val_encoder))
+    }
+}
+impl<KE: FromBuilder, VE: FromBuilder> FormatFromBuilder for UpsertFormatter<KE, VE> {
+    async fn from_builder(b: &Builder<'_>, pk_indices: Vec<usize>) -> Result<Self> {
+        let key_encoder = KE::from_builder(b, Some(pk_indices.clone())).await?;
+        let val_encoder = VE::from_builder(b, None).await?;
+        Ok(UpsertFormatter::new(key_encoder, val_encoder))
+    }
+}
+impl FormatFromBuilder for DebeziumJsonFormatter {
+    async fn from_builder(b: &Builder<'_>, pk_indices: Vec<usize>) -> Result<Self> {
+        assert_eq!(b.format_desc.encode, SinkEncode::Json);
+
+        Ok(DebeziumJsonFormatter::new(
+            b.schema.clone(),
+            pk_indices,
+            b.db_name.clone(),
+            b.sink_from_name.clone(),
+            DebeziumAdapterOpts::default(),
+        ))
     }
 }
 
@@ -231,44 +255,24 @@ impl SinkFormatterImpl {
                     return err_unsupported();
                 }
 
-                Ok(SinkFormatterImpl::DebeziumJson(DebeziumJsonFormatter::new(
-                    schema,
-                    pk_indices,
-                    db_name,
-                    sink_from_name,
-                    DebeziumAdapterOpts::default(),
-                )))
+                Ok(SinkFormatterImpl::DebeziumJson(
+                    DebeziumJsonFormatter::from_builder(&builder, pk_indices).await?,
+                ))
             }
-            SinkFormat::Upsert => {
-                match format_desc.encode {
-                    SinkEncode::Json => {
-                        let key_encoder =
-                            JsonEncoder::from_builder(&builder, Some(pk_indices)).await?;
-                        let val_encoder = JsonEncoder::from_builder(&builder, None).await?;
-
-                        // Initialize the upsert_stream
-                        let formatter = UpsertFormatter::new(key_encoder, val_encoder);
-                        Ok(SinkFormatterImpl::UpsertJson(formatter))
-                    }
-                    SinkEncode::Template => {
-                        let key_encoder =
-                            TemplateEncoder::from_builder(&builder, Some(pk_indices)).await?;
-                        let val_encoder = TemplateEncoder::from_builder(&builder, None).await?;
-                        Ok(SinkFormatterImpl::UpsertTemplate(UpsertFormatter::new(
-                            key_encoder,
-                            val_encoder,
-                        )))
-                    }
-                    SinkEncode::Avro => {
-                        let key_encoder =
-                            AvroEncoder::from_builder(&builder, Some(pk_indices)).await?;
-                        let val_encoder = AvroEncoder::from_builder(&builder, None).await?;
-                        let formatter = UpsertFormatter::new(key_encoder, val_encoder);
-                        Ok(SinkFormatterImpl::UpsertAvro(formatter))
-                    }
-                    SinkEncode::Protobuf => err_unsupported(),
+            SinkFormat::Upsert => match format_desc.encode {
+                SinkEncode::Json => {
+                    let formatter = UpsertFormatter::from_builder(&builder, pk_indices).await?;
+                    Ok(SinkFormatterImpl::UpsertJson(formatter))
                 }
-            }
+                SinkEncode::Template => Ok(SinkFormatterImpl::UpsertTemplate(
+                    UpsertFormatter::from_builder(&builder, pk_indices).await?,
+                )),
+                SinkEncode::Avro => {
+                    let formatter = UpsertFormatter::from_builder(&builder, pk_indices).await?;
+                    Ok(SinkFormatterImpl::UpsertAvro(formatter))
+                }
+                SinkEncode::Protobuf => err_unsupported(),
+            },
         }
     }
 }
