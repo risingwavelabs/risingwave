@@ -84,6 +84,10 @@ struct Builder<'a> {
     sink_from_name: String,
     topic: &'a str,
 }
+struct FormatterParams<'a> {
+    builder: Builder<'a>,
+    pk_indices: Vec<usize>,
+}
 trait FromBuilder: Sized {
     async fn from_builder(b: &Builder<'_>, pk_indices: Option<Vec<usize>>) -> Result<Self>;
 }
@@ -179,45 +183,45 @@ impl FromBuilder for TemplateEncoder {
     }
 }
 trait FormatFromBuilder: Sized {
-    async fn from_builder(b: &Builder<'_>, pk_indices: Vec<usize>) -> Result<Self>;
+    async fn from_builder(b: FormatterParams<'_>) -> Result<Self>;
 }
 
 impl<KE: FromBuilder, VE: FromBuilder> FormatFromBuilder for AppendOnlyFormatter<KE, VE> {
-    async fn from_builder(b: &Builder<'_>, pk_indices: Vec<usize>) -> Result<Self> {
-        let key_encoder = match pk_indices.is_empty() {
+    async fn from_builder(b: FormatterParams<'_>) -> Result<Self> {
+        let key_encoder = match b.pk_indices.is_empty() {
             true => None,
-            false => Some(KE::from_builder(b, Some(pk_indices.clone())).await?),
+            false => Some(KE::from_builder(&b.builder, Some(b.pk_indices)).await?),
         };
-        let val_encoder = VE::from_builder(b, None).await?;
+        let val_encoder = VE::from_builder(&b.builder, None).await?;
         Ok(AppendOnlyFormatter::new(key_encoder, val_encoder))
     }
 }
 impl<KE: FromBuilder, VE: FromBuilder> FormatFromBuilder for UpsertFormatter<KE, VE> {
-    async fn from_builder(b: &Builder<'_>, pk_indices: Vec<usize>) -> Result<Self> {
-        let key_encoder = KE::from_builder(b, Some(pk_indices.clone())).await?;
-        let val_encoder = VE::from_builder(b, None).await?;
+    async fn from_builder(b: FormatterParams<'_>) -> Result<Self> {
+        let key_encoder = KE::from_builder(&b.builder, Some(b.pk_indices)).await?;
+        let val_encoder = VE::from_builder(&b.builder, None).await?;
         Ok(UpsertFormatter::new(key_encoder, val_encoder))
     }
 }
 impl FormatFromBuilder for DebeziumJsonFormatter {
-    async fn from_builder(b: &Builder<'_>, pk_indices: Vec<usize>) -> Result<Self> {
-        assert_eq!(b.format_desc.encode, SinkEncode::Json);
+    async fn from_builder(b: FormatterParams<'_>) -> Result<Self> {
+        assert_eq!(b.builder.format_desc.encode, SinkEncode::Json);
 
         Ok(DebeziumJsonFormatter::new(
-            b.schema.clone(),
-            pk_indices,
-            b.db_name.clone(),
-            b.sink_from_name.clone(),
+            b.builder.schema,
+            b.pk_indices,
+            b.builder.db_name,
+            b.builder.sink_from_name,
             DebeziumAdapterOpts::default(),
         ))
     }
 }
-async fn build<T, F>(f: F, b: &Builder<'_>, pk_indices: Vec<usize>) -> Result<SinkFormatterImpl>
+async fn build<T, F>(f: F, p: FormatterParams<'_>) -> Result<SinkFormatterImpl>
 where
     T: FormatFromBuilder,
     F: FnOnce(T) -> SinkFormatterImpl,
 {
-    T::from_builder(b, pk_indices).await.map(f)
+    T::from_builder(p).await.map(f)
 }
 
 impl SinkFormatterImpl {
@@ -229,44 +233,35 @@ impl SinkFormatterImpl {
         sink_from_name: String,
         topic: &str,
     ) -> Result<Self> {
-        let builder = Builder {
-            format_desc,
-            schema: schema.clone(),
-            db_name: db_name.clone(),
-            sink_from_name: sink_from_name.clone(),
-            topic,
+        use {SinkEncode as E, SinkFormat as F, SinkFormatterImpl as Impl};
+        let p = FormatterParams {
+            builder: Builder {
+                format_desc,
+                schema,
+                db_name,
+                sink_from_name,
+                topic,
+            },
+            pk_indices,
         };
 
         match (&format_desc.format, &format_desc.encode) {
-            (SinkFormat::AppendOnly, SinkEncode::Json) => {
-                build(SinkFormatterImpl::AppendOnlyJson, &builder, pk_indices).await
+            (F::AppendOnly, E::Json) => build(Impl::AppendOnlyJson, p).await,
+            (F::AppendOnly, E::Protobuf) => build(Impl::AppendOnlyProto, p).await,
+            (F::AppendOnly, E::Template) => build(Impl::AppendOnlyTemplate, p).await,
+            (F::Upsert, E::Json) => build(Impl::UpsertJson, p).await,
+            (F::Upsert, E::Avro) => build(Impl::UpsertAvro, p).await,
+            (F::Upsert, E::Template) => build(Impl::UpsertTemplate, p).await,
+            (F::Debezium, E::Json) => build(Impl::DebeziumJson, p).await,
+            (F::AppendOnly, E::Avro)
+            | (F::Upsert, E::Protobuf)
+            | (F::Debezium, E::Avro | E::Protobuf | E::Template) => {
+                Err(SinkError::Config(anyhow!(
+                    "sink format/encode unsupported: {:?} {:?}",
+                    format_desc.format,
+                    format_desc.encode,
+                )))
             }
-            (SinkFormat::AppendOnly, SinkEncode::Protobuf) => {
-                build(SinkFormatterImpl::AppendOnlyProto, &builder, pk_indices).await
-            }
-            (SinkFormat::AppendOnly, SinkEncode::Template) => {
-                build(SinkFormatterImpl::AppendOnlyTemplate, &builder, pk_indices).await
-            }
-
-            (SinkFormat::Upsert, SinkEncode::Json) => {
-                build(SinkFormatterImpl::UpsertJson, &builder, pk_indices).await
-            }
-            (SinkFormat::Upsert, SinkEncode::Avro) => {
-                build(SinkFormatterImpl::UpsertAvro, &builder, pk_indices).await
-            }
-            (SinkFormat::Upsert, SinkEncode::Template) => {
-                build(SinkFormatterImpl::UpsertTemplate, &builder, pk_indices).await
-            }
-            (SinkFormat::Debezium, SinkEncode::Json) => {
-                build(SinkFormatterImpl::DebeziumJson, &builder, pk_indices).await
-            }
-            (SinkFormat::AppendOnly, SinkEncode::Avro)
-            | (SinkFormat::Upsert, SinkEncode::Protobuf)
-            | (SinkFormat::Debezium, _) => Err(SinkError::Config(anyhow!(
-                "sink format/encode unsupported: {:?} {:?}",
-                format_desc.format,
-                format_desc.encode,
-            ))),
         }
     }
 }
