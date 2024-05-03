@@ -34,3 +34,6 @@ rustflags = [
 # Disable simd backend for curve25519-dalek
 # rustflags = ["--cfg", "tokio_unstable", "--cfg", "curve25519_dalek_backend=\"serial\""]
 rustflags = ["--cfg", "tokio_unstable", "--cfg", "curve25519_dalek_backend=\"serial\""]
+
+[llvm]
+assertions = true
