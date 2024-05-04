@@ -232,8 +232,8 @@ public class DbzConnectorConfig {
                         ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
             }
 
-            var mongodbUrl = userProps.get("mongodb.url");
-            var collection = userProps.get("collection.name");
+            var mongodbUrl = userProps.get(MongoDb.MONGO_URL);
+            var collection = userProps.get(MongoDb.MONGO_COLLECTION_NAME);
             var connectionStr = new ConnectionString(mongodbUrl);
             var connectorName =
                     String.format(
