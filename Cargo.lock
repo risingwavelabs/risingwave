@@ -3669,7 +3669,8 @@ checksum = "a13951ea98c0a4c372f162d669193b4c9d991512de9f2381dd161027f34b26b1"
 [[package]]
 name = "deno_crypto"
 version = "0.158.0"
-source = "git+https://github.com/bakjos/deno?rev=7180c6b#7180c6b2b06ea0c5abbfc79793ed4abaabd21069"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b26b7ac283934ee9c1ebb0b2328e4edda1487dd147d444c886993a96edf74b79"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -3697,7 +3698,6 @@ dependencies = [
  "signature 2.2.0",
  "spki 0.7.2",
  "tokio",
- "tracing",
  "uuid",
  "x25519-dalek",
 ]
@@ -3705,7 +3705,7 @@ dependencies = [
 [[package]]
 name = "deno_fetch"
 version = "0.168.0"
-source = "git+https://github.com/bakjos/deno?rev=7180c6b#7180c6b2b06ea0c5abbfc79793ed4abaabd21069"
+source = "git+https://github.com/bakjos/deno?rev=787a232#787a232c51f1ea390a2aff2b622016217d854328"
 dependencies = [
  "bytes",
  "data-url",
@@ -3724,7 +3724,7 @@ dependencies = [
 [[package]]
 name = "deno_http"
 version = "0.141.0"
-source = "git+https://github.com/bakjos/deno?rev=7180c6b#7180c6b2b06ea0c5abbfc79793ed4abaabd21069"
+source = "git+https://github.com/bakjos/deno?rev=787a232#787a232c51f1ea390a2aff2b622016217d854328"
 dependencies = [
  "async-compression",
  "async-trait",
@@ -3801,7 +3801,7 @@ dependencies = [
 [[package]]
 name = "deno_net"
 version = "0.136.0"
-source = "git+https://github.com/bakjos/deno?rev=7180c6b#7180c6b2b06ea0c5abbfc79793ed4abaabd21069"
+source = "git+https://github.com/bakjos/deno?rev=787a232#787a232c51f1ea390a2aff2b622016217d854328"
 dependencies = [
  "deno_core",
  "deno_tls",
@@ -3843,7 +3843,7 @@ dependencies = [
 [[package]]
 name = "deno_tls"
 version = "0.131.0"
-source = "git+https://github.com/bakjos/deno?rev=7180c6b#7180c6b2b06ea0c5abbfc79793ed4abaabd21069"
+source = "git+https://github.com/bakjos/deno?rev=787a232#787a232c51f1ea390a2aff2b622016217d854328"
 dependencies = [
  "deno_core",
  "deno_native_certs",
@@ -3879,7 +3879,7 @@ dependencies = [
 [[package]]
 name = "deno_web"
 version = "0.175.0"
-source = "git+https://github.com/bakjos/deno?rev=7180c6b#7180c6b2b06ea0c5abbfc79793ed4abaabd21069"
+source = "git+https://github.com/bakjos/deno?rev=787a232#787a232c51f1ea390a2aff2b622016217d854328"
 dependencies = [
  "async-trait",
  "base64-simd 0.8.0",
@@ -3906,7 +3906,7 @@ dependencies = [
 [[package]]
 name = "deno_websocket"
 version = "0.149.0"
-source = "git+https://github.com/bakjos/deno?rev=7180c6b#7180c6b2b06ea0c5abbfc79793ed4abaabd21069"
+source = "git+https://github.com/bakjos/deno?rev=787a232#787a232c51f1ea390a2aff2b622016217d854328"
 dependencies = [
  "bytes",
  "deno_core",
@@ -9278,7 +9278,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.12.1",
+ "parking_lot 0.11.2",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",

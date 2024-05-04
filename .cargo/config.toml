@@ -31,5 +31,4 @@ rustflags = [
 
 # Flags for all targets.
 [target.'cfg(all())']
-# Disable simd backend for curve25519-dalek
 rustflags = ["--cfg", "tokio_unstable"]
