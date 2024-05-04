@@ -47,6 +47,7 @@ public class DbzConnectorConfig {
 
     /* MySQL configs */
     public static final String MYSQL_SERVER_ID = "server.id";
+    public static final String MYSQL_SSL_MODE = "ssl.mode";
 
     /* Postgres configs */
     public static final String PG_SLOT_NAME = "slot.name";

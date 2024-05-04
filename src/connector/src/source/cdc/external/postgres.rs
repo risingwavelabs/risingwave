@@ -144,8 +144,8 @@ impl PostgresExternalTableReader {
 
         #[cfg(not(madsim))]
         let connector = match config.sslmode {
-            SslMode::Disable => MaybeMakeTlsConnector::NoTls(NoTls),
-            SslMode::Prefer => match SslConnector::builder(SslMethod::tls()) {
+            SslMode::Disabled => MaybeMakeTlsConnector::NoTls(NoTls),
+            SslMode::Preferred => match SslConnector::builder(SslMethod::tls()) {
                 Ok(mut builder) => {
                     // disable certificate verification for `prefer`
                     builder.set_verify(SslVerifyMode::NONE);
@@ -156,7 +156,7 @@ impl PostgresExternalTableReader {
                     MaybeMakeTlsConnector::NoTls(NoTls)
                 }
             },
-            SslMode::Require => {
+            SslMode::Required => {
                 let mut builder = SslConnector::builder(SslMethod::tls())?;
                 // disable certificate verification for `require`
                 builder.set_verify(SslVerifyMode::NONE);

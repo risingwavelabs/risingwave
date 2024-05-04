@@ -229,7 +229,6 @@ pub enum ExternalTableReaderImpl {
 
 #[derive(Debug)]
 pub struct MySqlExternalTableReader {
-    config: ExternalTableConfig,
     rw_schema: Schema,
     field_names: String,
     // use mutex to provide shared mutable access to the connection
@@ -250,7 +249,7 @@ pub struct ExternalTableConfig {
     #[serde(rename = "table.name")]
     pub table: String,
     /// `ssl.mode` specifies the SSL/TLS encryption level for secure communication with Postgres.
-    /// Choices include `disable`, `prefer`, and `require`.
+    /// Choices include `disabled`, `preferred`, and `required`.
     /// This field is optional.
     #[serde(rename = "ssl.mode", default = "Default::default")]
     pub sslmode: SslMode,
@@ -259,24 +258,24 @@ pub struct ExternalTableConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SslMode {
-    Disable,
-    Prefer,
-    Require,
+    Disabled,
+    Preferred,
+    Required,
 }
 
 impl Default for SslMode {
     fn default() -> Self {
-        // default to `disable` for backward compatibility
-        Self::Disable
+        // default to `disabled` for backward compatibility
+        Self::Disabled
     }
 }
 
 impl fmt::Display for SslMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            SslMode::Disable => "disable",
-            SslMode::Prefer => "prefer",
-            SslMode::Require => "require",
+            SslMode::Disabled => "disabled",
+            SslMode::Preferred => "preferred",
+            SslMode::Required => "required",
         })
     }
 }
@@ -320,19 +319,31 @@ impl MySqlExternalTableReader {
         with_properties: HashMap<String, String>,
         rw_schema: Schema,
     ) -> ConnectorResult<Self> {
-        tracing::debug!(?rw_schema, "create mysql external table reader");
-
         let config = serde_json::from_value::<ExternalTableConfig>(
             serde_json::to_value(with_properties).unwrap(),
         )
         .context("failed to extract mysql connector properties")?;
 
-        let database_url = format!(
-            "mysql://{}:{}@{}:{}/{}",
-            config.username, config.password, config.host, config.port, config.database
-        );
-        let opts = mysql_async::Opts::from_url(&database_url).map_err(mysql_async::Error::Url)?;
-        let conn = mysql_async::Conn::new(opts).await?;
+        tracing::debug!(?rw_schema, ?config, "create mysql external table reader");
+
+        let mut opts_builder = mysql_async::OptsBuilder::default()
+            .user(Some(config.username))
+            .pass(Some(config.password))
+            .ip_or_hostname(config.host)
+            .tcp_port(config.port.parse::<u16>().unwrap())
+            .db_name(Some(config.database));
+
+        opts_builder = match config.sslmode {
+            SslMode::Disabled | SslMode::Preferred => opts_builder.ssl_opts(None),
+            SslMode::Required => {
+                let ssl_without_verify = mysql_async::SslOpts::default()
+                    .with_danger_accept_invalid_certs(true)
+                    .with_danger_skip_domain_validation(true);
+                opts_builder.ssl_opts(Some(ssl_without_verify))
+            }
+        };
+
+        let conn = mysql_async::Conn::new(mysql_async::Opts::from(opts_builder)).await?;
 
         let field_names = rw_schema
             .fields
@@ -342,7 +353,6 @@ impl MySqlExternalTableReader {
             .join(",");
 
         Ok(Self {
-            config,
             rw_schema,
             field_names,
             conn: tokio::sync::Mutex::new(conn),
