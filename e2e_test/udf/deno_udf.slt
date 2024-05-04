@@ -139,19 +139,16 @@ drop function split;
 statement ok
 CREATE FUNCTION digest( t string ) RETURNS bytea LANGUAGE javascript RUNTIME deno AS $$
     const subtle = crypto.subtle;
-    console.log('Generating key');
     const key = await subtle.generateKey({
         name: 'HMAC',
         hash: 'SHA-256',
+        length: 256,
         }, true, ['sign', 'verify']);
-    console.log('Creating message')
-    const enc = new TextEncoder();
-    const message = enc.encode(t);
-    console.log ('Signing message');
-    const result = await subtle.sign({
-    name: 'HMAC',
-    }, key, message);
-    console.log('digest finished')
+        const enc = new TextEncoder();
+        const message = enc.encode(t);
+        const result = await subtle.sign({
+        name: 'HMAC',
+        }, key, message);
     return result;
 $$ ASYNC;
 
