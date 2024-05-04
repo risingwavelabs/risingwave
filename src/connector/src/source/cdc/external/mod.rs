@@ -324,8 +324,6 @@ impl MySqlExternalTableReader {
         )
         .context("failed to extract mysql connector properties")?;
 
-        tracing::debug!(?rw_schema, ?config, "create mysql external table reader");
-
         let mut opts_builder = mysql_async::OptsBuilder::default()
             .user(Some(config.username))
             .pass(Some(config.password))
