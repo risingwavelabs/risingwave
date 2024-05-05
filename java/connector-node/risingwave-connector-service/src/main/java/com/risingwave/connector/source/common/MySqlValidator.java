@@ -52,7 +52,8 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         properties.setProperty("user", userProps.get(DbzConnectorConfig.USER));
         properties.setProperty("password", userProps.get(DbzConnectorConfig.PASSWORD));
         properties.setProperty(
-                "sslMode", userProps.getOrDefault(DbzConnectorConfig.MYSQL_SSL_MODE, "disabled"));
+                "sslMode", userProps.getOrDefault(DbzConnectorConfig.MYSQL_SSL_MODE, "DISABLED"));
+        properties.setProperty("allowPublicKeyRetrieval", "true");
 
         this.jdbcConnection = DriverManager.getConnection(jdbcUrl, properties);
         this.isCdcSourceJob = isCdcSourceJob;
