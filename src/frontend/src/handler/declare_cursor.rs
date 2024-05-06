@@ -69,6 +69,8 @@ async fn handle_declare_subscription_cursor(
         Some(risingwave_sqlparser::ast::Since::Begin) => {
             let min_unix_millis =
                 Epoch::now().as_unix_millis() - subscription.get_retention_seconds()? * 1000;
+            let subscription_build_millis = subscription.created_at_epoch.unwrap().as_unix_millis();
+            let min_unix_millis = std::cmp::max(min_unix_millis, subscription_build_millis);
             Some(convert_unix_millis_to_logstore_u64(min_unix_millis))
         }
         None => None,

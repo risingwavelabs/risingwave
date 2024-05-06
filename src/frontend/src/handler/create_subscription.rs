@@ -32,15 +32,21 @@ pub fn create_subscription_catalog(
     stmt: CreateSubscriptionStatement,
 ) -> Result<SubscriptionCatalog> {
     let db_name = session.database();
-    let (_, subscription_name) =
+    let (subscription_schema_name, subscription_name) =
         Binder::resolve_schema_qualified_name(db_name, stmt.subscription_name.clone())?;
-    let (schema_name, subscription_from_table_name) =
+    let (table_schema_name, subscription_from_table_name) =
         Binder::resolve_schema_qualified_name(db_name, stmt.subscription_from.clone())?;
-    let (database_id, schema_id) =
-        session.get_database_and_schema_id_for_create(schema_name.clone())?;
+    let (table_database_id, table_schema_id) =
+        session.get_database_and_schema_id_for_create(table_schema_name.clone())?;
+    let (subscription_database_id, subscription_schema_id) =
+        session.get_database_and_schema_id_for_create(subscription_schema_name.clone())?;
     let definition = context.normalized_sql().to_owned();
     let dependent_table = session
-        .get_table_by_name(&subscription_from_table_name, database_id, schema_id)?
+        .get_table_by_name(
+            &subscription_from_table_name,
+            table_database_id,
+            table_schema_id,
+        )?
         .id;
 
     let subscription_catalog = SubscriptionCatalog {
@@ -48,8 +54,8 @@ pub fn create_subscription_catalog(
         name: subscription_name,
         definition,
         properties: context.with_options().clone().into_inner(),
-        database_id,
-        schema_id,
+        database_id: subscription_database_id,
+        schema_id: subscription_schema_id,
         dependent_table,
         owner: UserId::new(session.user_id()),
         initialized_at_epoch: None,

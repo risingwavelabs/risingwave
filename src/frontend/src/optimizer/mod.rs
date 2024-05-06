@@ -966,11 +966,6 @@ impl PlanRoot {
         )
     }
 
-    /// Set the plan root's required dist.
-    pub fn set_required_dist(&mut self, required_dist: RequiredDist) {
-        self.required_dist = required_dist;
-    }
-
     pub fn should_use_arrangement_backfill(&self) -> bool {
         let ctx = self.plan.ctx();
         let session_ctx = ctx.session_ctx();

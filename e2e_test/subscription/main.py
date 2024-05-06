@@ -109,8 +109,6 @@ def test_cursor_since_begin():
     execute_insert("insert into t1 values(6,6)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
-    check_rows_data([1,2],row,1)
-    row = execute_query("fetch next from cur",conn)
     check_rows_data([4,4],row,1)
     row = execute_query("fetch next from cur",conn)
     check_rows_data([5,5],row,1)
@@ -163,8 +161,6 @@ def test_cursor_since_rw_timestamp():
     execute_insert("declare cur subscription cursor for sub since begin()",conn)
     execute_insert("insert into t1 values(6,6)",conn)
     execute_insert("flush",conn)
-    row = execute_query("fetch next from cur",conn)
-    check_rows_data([1,2],row,1)
     row = execute_query("fetch next from cur",conn)
     valuelen = len(row[0])
     rw_timestamp_1 = row[0][valuelen - 1]

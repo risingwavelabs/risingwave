@@ -33,12 +33,8 @@ message BroadcastActorInfoTableRequest {
 
 // Create channels and gRPC connections for a fragment
 message BuildActorsRequest {
-  message SubscriptionIds {
-    repeated uint32 subscription_ids = 1;
-  }
   string request_id = 1;
   repeated uint32 actor_id = 2;
-  map<uint32, SubscriptionIds> related_subscriptions = 3;
 }
 
 message BuildActorsResponse {

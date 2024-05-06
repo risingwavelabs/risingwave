@@ -24,12 +24,10 @@ use futures::future::try_join_all;
 use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{pin_mut, FutureExt, StreamExt};
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorId;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::stream_plan::{Barrier, BarrierMutation};
-use risingwave_pb::stream_service::build_actors_request::SubscriptionIds;
 use risingwave_pb::stream_service::{
     streaming_control_stream_request, streaming_control_stream_response, BarrierCompleteResponse,
     BroadcastActorInfoTableRequest, BuildActorInfo, BuildActorsRequest, DropActorsRequest,
@@ -405,36 +403,18 @@ impl StreamRpcManager {
         &self,
         node_map: &HashMap<WorkerId, WorkerNode>,
         node_actors: impl Iterator<Item = (WorkerId, Vec<ActorId>)>,
-        related_subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
     ) -> MetaResult<()> {
         self.make_request(
             node_actors.map(|(worker_id, actors)| (node_map.get(&worker_id).unwrap(), actors)),
-            |client, actors| {
-                let related_subscriptions = related_subscriptions.clone();
-                async move {
-                    let request_id = Self::new_request_id();
-                    tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
-                    client
-                        .build_actors(BuildActorsRequest {
-                            request_id,
-                            actor_id: actors,
-                            related_subscriptions: related_subscriptions
-                                .iter()
-                                .map(|(table_id, subscriptions)| {
-                                    (
-                                        table_id.table_id,
-                                        SubscriptionIds {
-                                            subscription_ids: subscriptions
-                                                .keys()
-                                                .cloned()
-                                                .collect(),
-                                        },
-                                    )
-                                })
-                                .collect(),
-                        })
-                        .await
-                }
+            |client, actors| async move {
+                let request_id = Self::new_request_id();
+                tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
+                client
+                    .build_actors(BuildActorsRequest {
+                        request_id,
+                        actor_id: actors,
+                    })
+                    .await
             },
         )
         .await?;

@@ -343,6 +343,10 @@ impl SubscriptionCursor {
             .list_epoch_for_subscription(table_id, seek_timestamp, MAX_EPOCH - 1)
             .await?;
 
+        println!(
+            "expected_timestamp{:?},{:?},{:?}",
+            expected_timestamp, new_epochs, seek_timestamp
+        );
         if let Some(expected_timestamp) = expected_timestamp
             && (new_epochs.is_empty() || &expected_timestamp != new_epochs.first().unwrap())
         {

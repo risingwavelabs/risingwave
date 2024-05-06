@@ -177,8 +177,9 @@ message Sink {
 
 message Subscription {
   enum SubscriptionState {
-    INIT = 0;
-    CREATE = 1;
+    UNSPECIFIED = 0;
+    INIT = 1;
+    CREATE = 2;
   }
   uint32 id = 1;
   string name = 2;

@@ -655,10 +655,12 @@ impl DdlController {
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
+                let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
                 let initialized_at_epoch = Some(Epoch::now().0);
                 let initialized_at_cluster_version = Some(current_cluster_version());
                 subscription.initialized_at_epoch = initialized_at_epoch;
                 subscription.initialized_at_cluster_version = initialized_at_cluster_version;
+                subscription.id = id;
 
                 mgr.catalog_manager
                     .start_create_subscription_procedure(&subscription)
