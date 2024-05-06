@@ -23,6 +23,7 @@ import com.risingwave.proto.Data;
 import io.grpc.Status;
 import java.sql.*;
 import java.util.*;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,20 +59,27 @@ public class JDBCSink implements SinkWriter {
             // column name -> java.sql.Types
             Map<String, Integer> columnTypeMapping =
                     getColumnTypeMapping(conn, config.getTableName(), config.getSchemaName());
-            // create an array that each slot corresponding to each column in TableSchema
-            var columnSqlTypes = new int[tableSchema.getNumColumns()];
-            for (int columnIdx = 0; columnIdx < tableSchema.getNumColumns(); columnIdx++) {
-                var columnName = tableSchema.getColumnNames()[columnIdx];
-                columnSqlTypes[columnIdx] = columnTypeMapping.get(columnName);
-            }
+
+            // A vector of upstream column types
+            List<Integer> columnSqlTypes =
+                    Arrays.stream(tableSchema.getColumnNames())
+                            .map(columnTypeMapping::get)
+                            .collect(Collectors.toList());
+
+            List<Integer> pkIndices =
+                    tableSchema.getPrimaryKeys().stream()
+                            .map(tableSchema::getColumnIndex)
+                            .collect(Collectors.toList());
+
             LOG.info(
-                    "schema = {}, table = {}: columnSqlTypes = {}",
+                    "schema = {}, table = {}, columnSqlTypes = {}, pkIndices = {}",
                     config.getSchemaName(),
                     config.getTableName(),
-                    Arrays.toString(columnSqlTypes));
+                    columnSqlTypes,
+                    pkIndices);
 
             if (factory.isPresent()) {
-                this.jdbcDialect = factory.get().create(columnSqlTypes);
+                this.jdbcDialect = factory.get().create(columnSqlTypes, pkIndices);
             } else {
                 throw Status.INVALID_ARGUMENT
                         .withDescription("Unsupported jdbc url: " + jdbcUrl)
@@ -303,11 +311,7 @@ public class JDBCSink implements SinkWriter {
                         .asRuntimeException();
             }
             try {
-                int placeholderIdx = 1;
-                for (String primaryKey : pkColumnNames) {
-                    Object fromRow = tableSchema.getFromRow(primaryKey, row);
-                    deleteStatement.setObject(placeholderIdx++, fromRow);
-                }
+                jdbcDialect.bindDeleteStatement(deleteStatement, row);
                 deleteStatement.addBatch();
             } catch (SQLException e) {
                 throw Status.INTERNAL

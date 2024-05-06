@@ -70,6 +70,7 @@ pub struct StreamingMetrics {
     // Sink & materialized view
     pub sink_input_row_count: LabelGuardedIntCounterVec<3>,
     pub mview_input_row_count: IntCounterVec,
+    pub sink_chunk_buffer_size: LabelGuardedIntGaugeVec<3>,
 
     // Exchange (see also `compute::ExchangeServiceMetrics`)
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
@@ -158,6 +159,10 @@ pub struct StreamingMetrics {
     pub kv_log_store_rewind_delay: LabelGuardedHistogramVec<3>,
     pub kv_log_store_storage_read_count: LabelGuardedIntCounterVec<4>,
     pub kv_log_store_storage_read_size: LabelGuardedIntCounterVec<4>,
+    pub kv_log_store_buffer_unconsumed_item_count: LabelGuardedIntGaugeVec<3>,
+    pub kv_log_store_buffer_unconsumed_row_count: LabelGuardedIntGaugeVec<3>,
+    pub kv_log_store_buffer_unconsumed_epoch_count: LabelGuardedIntGaugeVec<3>,
+    pub kv_log_store_buffer_unconsumed_min_epoch: LabelGuardedIntGaugeVec<3>,
 
     // Sink iceberg metrics
     pub iceberg_write_qps: LabelGuardedIntCounterVec<2>,
@@ -242,6 +247,14 @@ impl StreamingMetrics {
             "stream_mview_input_row_count",
             "Total number of rows streamed into materialize executors",
             &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let sink_chunk_buffer_size = register_guarded_int_gauge_vec_with_registry!(
+            "stream_sink_chunk_buffer_size",
+            "Total size of chunks buffered in a barrier",
+            &["sink_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -896,6 +909,42 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let kv_log_store_buffer_unconsumed_item_count =
+            register_guarded_int_gauge_vec_with_registry!(
+                "kv_log_store_buffer_unconsumed_item_count",
+                "Number of Unconsumed Item in buffer",
+                &["executor_id", "connector", "sink_id"],
+                registry
+            )
+            .unwrap();
+
+        let kv_log_store_buffer_unconsumed_row_count =
+            register_guarded_int_gauge_vec_with_registry!(
+                "kv_log_store_buffer_unconsumed_row_count",
+                "Number of Unconsumed Row in buffer",
+                &["executor_id", "connector", "sink_id"],
+                registry
+            )
+            .unwrap();
+
+        let kv_log_store_buffer_unconsumed_epoch_count =
+            register_guarded_int_gauge_vec_with_registry!(
+                "kv_log_store_buffer_unconsumed_epoch_count",
+                "Number of Unconsumed Epoch in buffer",
+                &["executor_id", "connector", "sink_id"],
+                registry
+            )
+            .unwrap();
+
+        let kv_log_store_buffer_unconsumed_min_epoch =
+            register_guarded_int_gauge_vec_with_registry!(
+                "kv_log_store_buffer_unconsumed_min_epoch",
+                "Number of Unconsumed Epoch in buffer",
+                &["executor_id", "connector", "sink_id"],
+                registry
+            )
+            .unwrap();
+
         let lru_current_watermark_time_ms = register_int_gauge_with_registry!(
             "lru_current_watermark_time_ms",
             "Current LRU manager watermark time(ms)",
@@ -1060,6 +1109,7 @@ impl StreamingMetrics {
             source_backfill_row_count,
             sink_input_row_count,
             mview_input_row_count,
+            sink_chunk_buffer_size,
             exchange_frag_recv_size,
             actor_output_buffer_blocking_duration_ns,
             actor_input_buffer_blocking_duration_ns,
@@ -1120,6 +1170,10 @@ impl StreamingMetrics {
             kv_log_store_rewind_delay,
             kv_log_store_storage_read_count,
             kv_log_store_storage_read_size,
+            kv_log_store_buffer_unconsumed_item_count,
+            kv_log_store_buffer_unconsumed_row_count,
+            kv_log_store_buffer_unconsumed_epoch_count,
+            kv_log_store_buffer_unconsumed_min_epoch,
             iceberg_write_qps,
             iceberg_write_latency,
             iceberg_rolling_unflushed_data_file,

@@ -188,7 +188,11 @@ pub struct MetaOpts {
     /// Interval of reporting the number of nodes in the cluster.
     pub node_num_monitor_interval_sec: u64,
 
-    /// The Prometheus endpoint for dashboard service.
+    /// The Prometheus endpoint for Meta Dashboard Service.
+    /// The Dashboard service uses this in the following ways:
+    /// 1. Query Prometheus for relevant metrics to find Stream Graph Bottleneck, and display it.
+    /// 2. Provide cluster diagnostics, at `/api/monitor/diagnose` to troubleshoot cluster.
+    /// These are just examples which show how the Meta Dashboard Service queries Prometheus.
     pub prometheus_endpoint: Option<String>,
 
     /// The additional selector used when querying Prometheus.
@@ -267,6 +271,12 @@ pub struct MetaOpts {
     pub enable_check_task_level_overlap: bool,
     pub enable_dropped_column_reclaim: bool,
     pub object_store_config: ObjectStoreConfig,
+
+    /// The maximum number of trivial move tasks to be picked in a single loop
+    pub max_trivial_move_task_count_per_loop: usize,
+
+    /// The maximum number of times to probe for PullTaskEvent
+    pub max_get_task_probe_times: usize,
 }
 
 impl MetaOpts {
@@ -323,6 +333,8 @@ impl MetaOpts {
             enable_check_task_level_overlap: true,
             enable_dropped_column_reclaim: false,
             object_store_config: ObjectStoreConfig::default(),
+            max_trivial_move_task_count_per_loop: 256,
+            max_get_task_probe_times: 5,
         }
     }
 }

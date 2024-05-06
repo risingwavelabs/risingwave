@@ -25,7 +25,7 @@ use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
@@ -36,13 +36,14 @@ use risingwave_expr::expr::{Expression, NonStrictExpression};
 use risingwave_pb::data::PbEpoch;
 use risingwave_pb::expr::PbInputRef;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
-use risingwave_pb::stream_plan::barrier_mutation::PbMutation;
+use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
 use risingwave_pb::stream_plan::stream_message::StreamMessage;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    BarrierMutation, CombinedMutation, Dispatchers, PauseMutation, PbAddMutation, PbBarrier,
-    PbDispatcher, PbStreamMessage, PbUpdateMutation, PbWatermark, ResumeMutation,
-    SourceChangeSplitMutation, StopMutation, ThrottleMutation,
+    BarrierMutation, CombinedMutation, CreateSubscriptionMutation, Dispatchers,
+    DropSubscriptionMutation, PauseMutation, PbAddMutation, PbBarrier, PbDispatcher,
+    PbStreamMessage, PbUpdateMutation, PbWatermark, ResumeMutation, SourceChangeSplitMutation,
+    StopMutation, ThrottleMutation,
 };
 use smallvec::SmallVec;
 
@@ -109,7 +110,7 @@ mod utils;
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
 pub use backfill::arrangement_backfill::*;
-pub use backfill::cdc::{CdcBackfillExecutor, ExternalStorageTable};
+pub use backfill::cdc::{CdcBackfillExecutor, CdcScanOptions, ExternalStorageTable};
 pub use backfill::no_shuffle_backfill::*;
 pub use barrier_recv::BarrierRecvExecutor;
 pub use batch_query::BatchQueryExecutor;
@@ -285,6 +286,14 @@ pub enum Mutation {
     Resume,
     Throttle(HashMap<ActorId, Option<u32>>),
     AddAndUpdate(AddMutation, UpdateMutation),
+    CreateSubscription {
+        subscription_id: u32,
+        upstream_mv_table_id: TableId,
+    },
+    DropSubscription {
+        subscription_id: u32,
+        upstream_mv_table_id: TableId,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -370,6 +379,54 @@ impl Barrier {
                 added_actors.contains(&actor_id)
             }
             _ => false,
+        }
+    }
+
+    /// Whether this barrier adds new downstream fragment for the actor with `upstream_actor_id`.
+    ///
+    /// # Use case
+    /// Some optimizations are applied when an actor doesn't have any downstreams ("standalone" actors).
+    /// * Pause a standalone shared `SourceExecutor`.
+    /// * Disable a standalone `MaterializeExecutor`'s conflict check.
+    ///
+    /// This is implemented by checking `actor_context.initial_dispatch_num` on startup, and
+    /// check `has_more_downstream_fragments` on barrier to see whether the optimization
+    /// needs to be turned off.
+    ///
+    /// ## Some special cases not included
+    ///
+    /// Note that this is not `has_new_downstream_actor/fragment`. For our use case, we only
+    /// care about **number of downstream fragments** (more precisely, existence).
+    /// - When scaling, the number of downstream actors is changed, and they are "new", but downstream fragments is not changed.
+    /// - When `ALTER TABLE sink_into_table`, the fragment is replaced with a "new" one, but the number is not changed.
+    pub fn has_more_downstream_fragments(&self, upstream_actor_id: ActorId) -> bool {
+        let Some(mutation) = self.mutation.as_deref() else {
+            return false;
+        };
+        match mutation {
+            // Add is for mv, index and sink creation.
+            Mutation::Add(AddMutation { adds, .. }) => adds.get(&upstream_actor_id).is_some(),
+            // AddAndUpdate is for sink-into-table.
+            Mutation::AddAndUpdate(
+                AddMutation { adds, .. },
+                UpdateMutation {
+                    dispatchers,
+                    actor_new_dispatchers,
+                    ..
+                },
+            ) => {
+                adds.get(&upstream_actor_id).is_some()
+                    || actor_new_dispatchers.get(&upstream_actor_id).is_some()
+                    || dispatchers.get(&upstream_actor_id).is_some()
+            }
+            Mutation::Update(_)
+            | Mutation::Stop(_)
+            | Mutation::Pause
+            | Mutation::Resume
+            | Mutation::SourceChangeSplit(_)
+            | Mutation::Throttle(_)
+            | Mutation::CreateSubscription { .. }
+            | Mutation::DropSubscription { .. } => false,
         }
     }
 
@@ -550,6 +607,20 @@ impl Mutation {
                     },
                 ],
             }),
+            Mutation::CreateSubscription {
+                upstream_mv_table_id,
+                subscription_id,
+            } => PbMutation::CreateSubscription(CreateSubscriptionMutation {
+                upstream_mv_table_id: upstream_mv_table_id.table_id,
+                subscription_id: *subscription_id,
+            }),
+            Mutation::DropSubscription {
+                upstream_mv_table_id,
+                subscription_id,
+            } => PbMutation::DropSubscription(DropSubscriptionMutation {
+                upstream_mv_table_id: upstream_mv_table_id.table_id,
+                subscription_id: *subscription_id,
+            }),
         }
     }
 
@@ -647,7 +718,14 @@ impl Mutation {
                     .map(|(actor_id, limit)| (*actor_id, limit.rate_limit))
                     .collect(),
             ),
-
+            PbMutation::CreateSubscription(create) => Mutation::CreateSubscription {
+                upstream_mv_table_id: TableId::new(create.upstream_mv_table_id),
+                subscription_id: create.subscription_id,
+            },
+            PbMutation::DropSubscription(drop) => Mutation::DropSubscription {
+                upstream_mv_table_id: TableId::new(drop.upstream_mv_table_id),
+                subscription_id: drop.subscription_id,
+            },
             PbMutation::Combined(CombinedMutation { mutations }) => match &mutations[..] {
                 [BarrierMutation {
                     mutation: Some(add),

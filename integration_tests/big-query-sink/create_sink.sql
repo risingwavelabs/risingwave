@@ -27,3 +27,15 @@ FROM
     -- region = '${aws_region}',
     -- force_append_only='true',
 -- );
+
+CREATE SINK bq_sink_data_types_sink
+FROM
+    bq_sink_data_types WITH (
+    connector = 'bigquery',
+    type = 'append-only',
+    bigquery.local.path= '/gcp-rwctest.json',
+    bigquery.project= 'rwctest',
+    bigquery.dataset= 'bqtest',
+    bigquery.table= 'bq_sink_data_types',
+    force_append_only='true'
+);

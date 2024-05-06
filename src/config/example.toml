@@ -75,6 +75,8 @@ meta_cached_traces_num = 256
 meta_cached_traces_memory_limit_bytes = 134217728
 meta_enable_trivial_move = true
 meta_enable_check_task_level_overlap = false
+meta_max_trivial_move_task_count_per_loop = 256
+meta_max_get_task_probe_times = 5
 
 [batch]
 enable_barrier_read = false
@@ -118,7 +120,7 @@ write_conflict_detection_enabled = true
 max_prefetch_block_number = 16
 disable_remote_compactor = false
 share_buffer_upload_concurrency = 8
-compactor_max_task_multiplier = 2.5
+compactor_max_task_multiplier = 3.0
 compactor_memory_available_proportion = 0.8
 sstable_id_remote_fetch_number = 10
 min_sst_size_for_streaming_upload = 33554432
@@ -129,7 +131,7 @@ max_version_pinning_duration_sec = 10800
 compactor_max_sst_key_count = 2097152
 compact_iter_recreate_timeout_ms = 600000
 compactor_max_sst_size = 536870912
-enable_fast_compaction = false
+enable_fast_compaction = true
 check_compaction_result = false
 max_preload_io_retry_times = 3
 compactor_fast_max_compact_delete_ratio = 40

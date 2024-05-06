@@ -2229,6 +2229,11 @@ def section_hummock_write(outer_panels):
                             "uploading task size - {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
+                        panels.target(
+                            f"sum({metric('state_store_old_value_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "old value size - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
                     ],
                 ),
                 panels.timeseries_latency(
@@ -3827,6 +3832,10 @@ def section_sink_metrics(outer_panels):
                             f"{metric('log_store_latest_read_epoch')}",
                             "latest read epoch @ {{connector}} {{sink_id}} {{executor_id}}",
                         ),
+                        panels.target(
+                            f"{metric('kv_log_store_buffer_unconsumed_min_epoch')}",
+                            "Kv log store uncomsuned min epoch @ {{connector}} {{sink_id}} {{executor_id}}",
+                        ),
                     ],
                 ),
                 panels.timeseries_latency(
@@ -3933,6 +3942,24 @@ def section_sink_metrics(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Kv Log Store Buffer State",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('kv_log_store_buffer_unconsumed_item_count')}",
+                            "Unconsumed item count @ {{connector}} {{sink_id}} {{executor_id}}",
+                        ),
+                        panels.target(
+                            f"{metric('kv_log_store_buffer_unconsumed_row_count')}",
+                            "Unconsumed row count @ {{connector}} {{sink_id}} {{executor_id}}",
+                        ),
+                        panels.target(
+                            f"{metric('kv_log_store_buffer_unconsumed_epoch_count')}",
+                            "Unconsumed epoch count @ {{connector}} {{sink_id}} {{executor_id}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_ops(
                     "Kv Log Store Rewind Rate",
                     "",
@@ -3950,6 +3977,16 @@ def section_sink_metrics(outer_panels):
                         panels.target(
                             f"histogram_quantile(1.0, sum(rate({metric('kv_log_store_rewind_delay_bucket')}[$__rate_interval])) by (le, executor_id, connector, sink_id))",
                             "{{executor_id}} - {{connector}} @ {{sink_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Chunk Buffer Size",
+                    "Total size of chunks buffered in a barrier",
+                    [
+                        panels.target(
+                            f"sum({metric('stream_sink_chunk_buffer_size')}) by (sink_id, actor_id) * on(actor_id) group_left(sink_name) {metric('sink_info')}",
+                            "sink {{sink_id}} {{sink_name}} - actor {{actor_id}}",
                         ),
                     ],
                 ),
