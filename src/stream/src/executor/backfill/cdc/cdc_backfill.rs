@@ -85,8 +85,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         metrics: Arc<StreamingMetrics>,
         state_table: StateTable<S>,
         rate_limit_rps: Option<u32>,
-        disable_backfill: bool, // backward compatibility
-        scan_options: Option<CdcScanOptions>,
+        options: CdcScanOptions,
     ) -> Self {
         let pk_in_output_indices = external_table.pk_in_output_indices().clone().unwrap();
         let upstream_table_id = external_table.table_id().table_id;
@@ -95,11 +94,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             state_table,
             pk_in_output_indices.len() + METADATA_STATE_LEN,
         );
-
-        let options = scan_options.unwrap_or(CdcScanOptions {
-            disable_backfill,
-            ..Default::default()
-        });
 
         Self {
             actor_ctx,

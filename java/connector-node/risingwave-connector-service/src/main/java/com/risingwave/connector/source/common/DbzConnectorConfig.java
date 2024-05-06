@@ -47,6 +47,7 @@ public class DbzConnectorConfig {
 
     /* MySQL configs */
     public static final String MYSQL_SERVER_ID = "server.id";
+    public static final String MYSQL_SSL_MODE = "ssl.mode";
 
     /* Postgres configs */
     public static final String PG_SLOT_NAME = "slot.name";
@@ -231,8 +232,8 @@ public class DbzConnectorConfig {
                         ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
             }
 
-            var mongodbUrl = userProps.get("mongodb.url");
-            var collection = userProps.get("collection.name");
+            var mongodbUrl = userProps.get(MongoDb.MONGO_URL);
+            var collection = userProps.get(MongoDb.MONGO_COLLECTION_NAME);
             var connectionStr = new ConnectionString(mongodbUrl);
             var connectorName =
                     String.format(
