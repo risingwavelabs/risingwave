@@ -177,7 +177,7 @@ pub async fn handle_create_function(
                 let args = arrow_schema::Schema::new(
                     arg_types
                         .iter()
-                        .map(|t| to_field(t))
+                        .map(to_field)
                         .try_collect::<_, Fields, _>()?,
                 );
                 let returns = arrow_schema::Schema::new(match kind {
