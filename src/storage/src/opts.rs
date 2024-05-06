@@ -122,14 +122,6 @@ pub struct StorageOpts {
     pub backup_storage_directory: String,
     /// max time which wait for preload. 0 represent do not do any preload.
     pub max_preload_wait_time_mill: u64,
-    /// object store streaming read timeout.
-    pub object_store_streaming_read_timeout_ms: u64,
-    /// object store streaming upload timeout.
-    pub object_store_streaming_upload_timeout_ms: u64,
-    /// object store upload timeout.
-    pub object_store_upload_timeout_ms: u64,
-    /// object store read timeout.
-    pub object_store_read_timeout_ms: u64,
 
     pub compactor_max_sst_key_count: u64,
     pub compactor_max_task_multiplier: f32,
@@ -236,19 +228,8 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             cache_refill_unit: c.storage.cache_refill.unit,
             cache_refill_threshold: c.storage.cache_refill.threshold,
             max_preload_wait_time_mill: c.storage.max_preload_wait_time_mill,
-            object_store_streaming_read_timeout_ms: c
-                .storage
-                .object_store
-                .retry
-                .streaming_read_timeout_ms,
             compact_iter_recreate_timeout_ms: c.storage.compact_iter_recreate_timeout_ms,
-            object_store_streaming_upload_timeout_ms: c
-                .storage
-                .object_store
-                .retry
-                .streaming_upload_timeout_ms,
-            object_store_read_timeout_ms: c.storage.object_store.retry.read_timeout_ms,
-            object_store_upload_timeout_ms: c.storage.object_store.retry.upload_timeout_ms,
+
             max_preload_io_retry_times: c.storage.max_preload_io_retry_times,
             backup_storage_url: p.backup_storage_url().to_string(),
             backup_storage_directory: p.backup_storage_directory().to_string(),

@@ -1030,15 +1030,6 @@ pub struct S3ObjectStoreDeveloperConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct ObjectStoreRetryConfig {
-    #[serde(default = "default::object_store_config::object_store_streaming_read_timeout_ms")]
-    pub streaming_read_timeout_ms: u64,
-    #[serde(default = "default::object_store_config::object_store_streaming_upload_timeout_ms")]
-    pub streaming_upload_timeout_ms: u64,
-    #[serde(default = "default::object_store_config::object_store_upload_timeout_ms")]
-    pub upload_timeout_ms: u64,
-    #[serde(default = "default::object_store_config::object_store_read_timeout_ms")]
-    pub read_timeout_ms: u64,
-
     #[serde(default = "default::object_store_config::object_store_req_retry_interval_ms")]
     pub req_retry_interval_ms: u64,
     #[serde(default = "default::object_store_config::object_store_req_retry_max_delay_ms")]
@@ -1743,27 +1734,6 @@ pub mod default {
         const DEFAULT_RETRY_INTERVAL_MS: u64 = 1000; // 1s
         const DEFAULT_RETRY_MAX_DELAY_MS: u64 = 10 * 1000; // 10s
         const DEFAULT_RETRY_MAX_RETRY_ATTEMPTS: usize = 3;
-        pub const UNLIMITED_MAX_TIMEOUT: u64 = 24 * 7 * 3600 * 1000;
-
-        /// DEPRECATED: This config will be deprecated in the future version, use `object_store_streaming_read_attempt_timeout_ms` instead.
-        pub fn object_store_streaming_read_timeout_ms() -> u64 {
-            UNLIMITED_MAX_TIMEOUT
-        }
-
-        /// DEPRECATED: This config will be deprecated in the future version, use `object_store_streaming_upload_attempt_timeout_ms` instead.
-        pub fn object_store_streaming_upload_timeout_ms() -> u64 {
-            UNLIMITED_MAX_TIMEOUT
-        }
-
-        /// DEPRECATED: This config will be deprecated in the future version, use `object_store_upload_attempt_timeout_ms` instead.
-        pub fn object_store_upload_timeout_ms() -> u64 {
-            UNLIMITED_MAX_TIMEOUT
-        }
-
-        /// DEPRECATED: This config will be deprecated in the future version, use `object_store_read_attempt_timeout_ms` instead.
-        pub fn object_store_read_timeout_ms() -> u64 {
-            UNLIMITED_MAX_TIMEOUT
-        }
 
         pub fn object_store_set_atomic_write_dir() -> bool {
             false

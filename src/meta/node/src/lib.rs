@@ -257,17 +257,20 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         const MIN_TIMEOUT_INTERVAL_SEC: u64 = 20;
         let compaction_task_max_progress_interval_secs = {
             let retry_config = &config.storage.object_store.retry;
-            let max_streming_read_timeout_ms = retry_config.streaming_read_timeout_ms
+            let max_streming_read_timeout_ms = retry_config.streaming_read_attempt_timeout_ms
                 * retry_config.streaming_read_retry_attempts as u64;
-            let max_streaming_upload_timeout_ms = retry_config.streaming_upload_timeout_ms
+            let max_streaming_upload_timeout_ms = retry_config.streaming_upload_attempt_timeout_ms
                 * retry_config.streaming_upload_retry_attempts as u64;
+            let max_streaming_upload_finish_timeout_ms =
+                retry_config.streaming_upload_finish_attempt_timeout_ms as u64;
             let max_upload_timeout_ms =
-                retry_config.upload_timeout_ms * retry_config.upload_retry_attempts as u64;
+                retry_config.upload_attempt_timeout_ms * retry_config.upload_retry_attempts as u64;
             let max_read_timeout_ms =
-                retry_config.read_timeout_ms * retry_config.read_retry_attempts as u64;
+                retry_config.read_attempt_timeout_ms * retry_config.read_retry_attempts as u64;
             let max_timeout_ms = max_streming_read_timeout_ms
                 .max(max_upload_timeout_ms)
                 .max(max_streaming_upload_timeout_ms)
+                .max(max_streaming_upload_finish_timeout_ms)
                 .max(max_read_timeout_ms)
                 .max(config.meta.compaction_task_max_progress_interval_secs * 1000);
 

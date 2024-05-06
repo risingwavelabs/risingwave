@@ -51,7 +51,6 @@ use futures::future::{try_join_all, BoxFuture, FutureExt};
 use futures::{stream, Stream, StreamExt, TryStreamExt};
 use hyper::Body;
 use itertools::Itertools;
-use risingwave_common::config::default::object_store_config::UNLIMITED_MAX_TIMEOUT;
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::monitor::connection::monitor_connector;
 use risingwave_common::range::RangeBoundsExt;
@@ -227,7 +226,7 @@ impl S3StreamingUploader {
                         }
                     }
                 },
-                RetryCondition::new(UNLIMITED_MAX_TIMEOUT, operation_type, metrics.clone()),
+                RetryCondition::new(operation_type, metrics.clone()),
             )
             .await;
 

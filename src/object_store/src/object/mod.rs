@@ -16,7 +16,7 @@
 pub mod sim;
 use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use bytes::Bytes;
 
@@ -40,7 +40,6 @@ mod prefix;
 
 pub use error::*;
 use object_metrics::ObjectStoreMetrics;
-use risingwave_common::config::default::object_store_config::UNLIMITED_MAX_TIMEOUT;
 use thiserror_ext::AsReport;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
@@ -560,13 +559,13 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .await
         };
 
-        let retry_condition = RetryCondition::new(
-            self.config.retry.upload_timeout_ms,
+        let res = retry_request(
+            builder,
+            &self.config,
             operation_type,
             self.object_store_metrics.clone(),
-        );
-
-        let res = retry_request(builder, &self.config, operation_type, retry_condition).await;
+        )
+        .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
         res
@@ -589,27 +588,22 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .await
         };
 
-        let retry_condition = RetryCondition::new(
-            self.config.retry.streaming_upload_timeout_ms,
+        let res = retry_request(
+            builder,
+            &self.config,
             operation_type,
             self.object_store_metrics.clone(),
-        );
-
-        let res = retry_request(builder, &self.config, operation_type, retry_condition).await;
+        )
+        .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
-        let streaming_upload_timeout_ms =
-            if self.config.retry.streaming_upload_timeout_ms != UNLIMITED_MAX_TIMEOUT {
-                self.config.retry.streaming_upload_timeout_ms
-            } else {
-                self.config.retry.streaming_upload_attempt_timeout_ms
-            };
-
         Ok(MonitoredStreamingUploader::new(
             media_type,
             res?,
             self.object_store_metrics.clone(),
-            Some(Duration::from_millis(streaming_upload_timeout_ms)),
+            Some(Duration::from_millis(
+                self.config.retry.streaming_upload_attempt_timeout_ms,
+            )),
             Some(Duration::from_millis(
                 self.config.retry.streaming_upload_finish_attempt_timeout_ms,
             )),
@@ -625,12 +619,6 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .with_label_values(&[self.media_type(), operation_type_str])
             .start_timer();
 
-        let retry_condition = RetryCondition::new(
-            self.config.retry.read_timeout_ms,
-            operation_type,
-            self.object_store_metrics.clone(),
-        );
-
         let builder = || async {
             self.inner
                 .read(path, range.clone())
@@ -638,7 +626,13 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .await
         };
 
-        let res = retry_request(builder, &self.config, operation_type, retry_condition).await;
+        let res = retry_request(
+            builder,
+            &self.config,
+            operation_type,
+            self.object_store_metrics.clone(),
+        )
+        .await;
 
         if let Err(e) = &res
             && e.is_object_not_found_error()
@@ -678,12 +672,6 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .with_label_values(&[media_type, operation_type_str])
             .start_timer();
 
-        let retry_condition = RetryCondition::new(
-            self.config.retry.streaming_read_timeout_ms,
-            operation_type,
-            self.object_store_metrics.clone(),
-        );
-
         let builder = || async {
             self.inner
                 .streaming_read(path, range.clone())
@@ -691,7 +679,13 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .await
         };
 
-        let res = retry_request(builder, &self.config, operation_type, retry_condition).await;
+        let res = retry_request(
+            builder,
+            &self.config,
+            operation_type,
+            self.object_store_metrics.clone(),
+        )
+        .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
 
@@ -699,15 +693,9 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             media_type,
             res?,
             self.object_store_metrics.clone(),
-            if self.config.retry.streaming_read_timeout_ms != UNLIMITED_MAX_TIMEOUT {
-                Some(Duration::from_millis(
-                    self.config.retry.streaming_read_timeout_ms,
-                ))
-            } else {
-                Some(Duration::from_millis(
-                    self.config.retry.streaming_read_attempt_timeout_ms,
-                ))
-            },
+            Some(Duration::from_millis(
+                self.config.retry.streaming_read_attempt_timeout_ms,
+            )),
         ))
     }
 
@@ -727,13 +715,13 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .await
         };
 
-        let retry_condition = RetryCondition::new(
-            UNLIMITED_MAX_TIMEOUT,
+        let res = retry_request(
+            builder,
+            &self.config,
             operation_type,
             self.object_store_metrics.clone(),
-        );
-
-        let res = retry_request(builder, &self.config, operation_type, retry_condition).await;
+        )
+        .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
         res
@@ -755,13 +743,13 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .await
         };
 
-        let retry_condition = RetryCondition::new(
-            UNLIMITED_MAX_TIMEOUT,
+        let res = retry_request(
+            builder,
+            &self.config,
             operation_type,
             self.object_store_metrics.clone(),
-        );
-
-        let res = retry_request(builder, &self.config, operation_type, retry_condition).await;
+        )
+        .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
         res
@@ -783,13 +771,13 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .await
         };
 
-        let retry_condition = RetryCondition::new(
-            UNLIMITED_MAX_TIMEOUT,
+        let res = retry_request(
+            builder,
+            &self.config,
             operation_type,
             self.object_store_metrics.clone(),
-        );
-
-        let res = retry_request(builder, &self.config, operation_type, retry_condition).await;
+        )
+        .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
         res
@@ -812,13 +800,13 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .await
         };
 
-        let retry_condition = RetryCondition::new(
-            UNLIMITED_MAX_TIMEOUT,
+        let res = retry_request(
+            builder,
+            &self.config,
             operation_type,
             self.object_store_metrics.clone(),
-        );
-
-        let res = retry_request(builder, &self.config, operation_type, retry_condition).await;
+        )
+        .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
         res
@@ -1086,23 +1074,15 @@ fn get_attempt_timeout_by_type(config: &ObjectStoreConfig, operation_type: Opera
 }
 
 struct RetryCondition {
-    max_duration_ms: u64,
     operation_type: OperationType,
-    init_instant: Instant,
     retry_count: usize,
     metrics: Arc<ObjectStoreMetrics>,
 }
 
 impl RetryCondition {
-    fn new(
-        max_duration_ms: u64,
-        operation_type: OperationType,
-        metrics: Arc<ObjectStoreMetrics>,
-    ) -> Self {
+    fn new(operation_type: OperationType, metrics: Arc<ObjectStoreMetrics>) -> Self {
         Self {
-            max_duration_ms,
             operation_type,
-            init_instant: Instant::now(),
             retry_count: 0,
             metrics,
         }
@@ -1110,13 +1090,7 @@ impl RetryCondition {
 
     #[inline(always)]
     fn should_retry_inner(&mut self, err: &ObjectError) -> bool {
-        let should_retry = if self.init_instant.elapsed().as_millis() > self.max_duration_ms as u128
-        {
-            false
-        } else {
-            err.should_retry()
-        };
-
+        let should_retry = err.should_retry();
         if should_retry {
             self.retry_count += 1;
         }
@@ -1146,7 +1120,7 @@ async fn retry_request<F, T, B>(
     builder: B,
     config: &ObjectStoreConfig,
     operation_type: OperationType,
-    retry_condition: RetryCondition,
+    object_store_metrics: Arc<ObjectStoreMetrics>,
 ) -> ObjectResult<T>
 where
     B: Fn() -> F,
@@ -1155,6 +1129,8 @@ where
     let backoff = get_retry_strategy(config, operation_type);
     let timeout_duration =
         Duration::from_millis(get_attempt_timeout_by_type(config, operation_type));
+
+    let retry_condition = RetryCondition::new(operation_type, object_store_metrics);
 
     let f = || async {
         let future = builder();
