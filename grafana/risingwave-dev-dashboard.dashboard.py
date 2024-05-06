@@ -3854,7 +3854,7 @@ def section_sink_metrics(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum({metric('log_store_reader_backpressure_rate')}) by (connector, sink_id, executor_id)",
+                            f"sum({metric('log_store_reader_backpressure_ratio')}) by (connector, sink_id, executor_id)",
                             "Backpressure @ {{connector}} {{sink_id}} {{executor_id}}",
                         ),
                     ],

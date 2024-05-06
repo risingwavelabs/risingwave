@@ -258,11 +258,11 @@ impl<R: LogReader> LogReader for BackpressureMonitoredLogReader<R> {
             {
                 // On checkpoint barrier, measure backpressure rate and reset timer
                 let total_time = self.measurement_start_time.elapsed().as_micros() as f64;
-                let backpressure_rate = self.total_wait_new_future_micro_secs / total_time;
+                let backpressure_ratio = self.total_wait_new_future_micro_secs / total_time;
 
                 self.metrics
-                    .log_store_reader_backpressure_rate
-                    .set(backpressure_rate);
+                    .log_store_reader_backpressure_ratio
+                    .set(backpressure_ratio);
 
                 self.measurement_start_time = Instant::now();
                 self.total_wait_new_future_micro_secs = 0.0;

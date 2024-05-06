@@ -153,7 +153,7 @@ pub struct StreamingMetrics {
     pub log_store_write_rows: LabelGuardedIntCounterVec<3>,
     pub log_store_latest_read_epoch: LabelGuardedIntGaugeVec<3>,
     pub log_store_read_rows: LabelGuardedIntCounterVec<3>,
-    pub log_store_reader_backpressure_rate: LabelGuardedGaugeVec<3>,
+    pub log_store_reader_backpressure_ratio: LabelGuardedGaugeVec<3>,
     pub kv_log_store_storage_write_count: LabelGuardedIntCounterVec<3>,
     pub kv_log_store_storage_write_size: LabelGuardedIntCounterVec<3>,
     pub kv_log_store_rewind_count: LabelGuardedIntCounterVec<3>,
@@ -845,8 +845,8 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let log_store_reader_backpressure_rate = register_guarded_gauge_vec_with_registry!(
-            "log_store_reader_backpressure_rate",
+        let log_store_reader_backpressure_ratio = register_guarded_gauge_vec_with_registry!(
+            "log_store_reader_backpressure_ratio",
             "The read rate of rows",
             &["executor_id", "connector", "sink_id"],
             registry
@@ -1173,7 +1173,7 @@ impl StreamingMetrics {
             log_store_write_rows,
             log_store_latest_read_epoch,
             log_store_read_rows,
-            log_store_reader_backpressure_rate,
+            log_store_reader_backpressure_ratio,
             kv_log_store_storage_write_count,
             kv_log_store_storage_write_size,
             kv_log_store_rewind_count,
@@ -1243,8 +1243,8 @@ impl StreamingMetrics {
         let log_store_read_rows = self
             .log_store_read_rows
             .with_guarded_label_values(&label_list);
-        let log_store_reader_backpressure_rate = self
-            .log_store_reader_backpressure_rate
+        let log_store_reader_backpressure_ratio = self
+            .log_store_reader_backpressure_ratio
             .with_guarded_label_values(&label_list);
 
         let label_list = [identity, sink_id_str];
@@ -1272,7 +1272,7 @@ impl StreamingMetrics {
             log_store_write_rows,
             log_store_latest_read_epoch,
             log_store_read_rows,
-            log_store_reader_backpressure_rate,
+            log_store_reader_backpressure_ratio,
             iceberg_write_qps,
             iceberg_write_latency,
             iceberg_rolling_unflushed_data_file,
