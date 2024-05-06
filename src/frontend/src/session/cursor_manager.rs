@@ -341,7 +341,6 @@ impl SubscriptionCursor {
             .catalog_writer()?
             .list_change_log_epochs(table_id, seek_timestamp, 2)
             .await?;
-
         if let Some(expected_timestamp) = expected_timestamp
             && (new_epochs.is_empty() || &expected_timestamp != new_epochs.first().unwrap())
         {
