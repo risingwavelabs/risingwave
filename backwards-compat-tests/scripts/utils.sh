@@ -19,7 +19,6 @@ RECOVERY_DURATION=20
 
 # Setup test directory
 TEST_DIR=.risingwave/backwards-compat-tests/
-KAFKA_PATH=.risingwave/bin/kafka
 mkdir -p $TEST_DIR
 cp -r backwards-compat-tests/slt/* $TEST_DIR
 
@@ -79,18 +78,16 @@ check_version() {
 }
 
 create_kafka_topic() {
-  "$KAFKA_PATH"/bin/kafka-topics.sh \
-    --create \
-    --topic backwards_compat_test_kafka_source --bootstrap-server kafka:9093
+  RPK_BROKERS=kafka:9093 \
+  rpk topic create backwards_compat_test_kafka_source
 }
 
 insert_json_kafka() {
   local JSON=$1
-  echo "$JSON" | "$KAFKA_PATH"/bin/kafka-console-producer.sh \
-    --topic backwards_compat_test_kafka_source \
-    --bootstrap-server kafka:9093 \
-    --property "parse.key=true" \
-    --property "key.separator=,"
+
+  echo "$JSON" | \
+  RPK_BROKERS=kafka:9093 \
+  rpk topic produce backwards_compat_test_kafka_source -f "%k,%v"
 }
 
 seed_json_kafka() {
