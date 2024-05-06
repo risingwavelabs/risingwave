@@ -31,7 +31,7 @@ use super::{Locations, RescheduleOptions, ScaleControllerRef, TableResizePolicy}
 use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan, StreamRpcManager};
 use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, StreamingJob};
 use crate::model::{ActorId, MetadataModel, TableFragments, TableParallelism};
-use crate::stream::SourceManagerRef;
+use crate::stream::{to_build_actor_info, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
 pub type GlobalStreamManagerRef = Arc<GlobalStreamManager>;
@@ -346,6 +346,10 @@ impl GlobalStreamManager {
             .chain(existing_locations.actor_infos());
 
         let building_worker_actors = building_locations.worker_actors();
+        let subscriptions = self
+            .metadata_manager
+            .get_mv_depended_subscriptions()
+            .await?;
 
         // We send RPC request in two stages.
         // The first stage does 2 things: broadcast actor info, and send local actor ids to
@@ -359,7 +363,13 @@ impl GlobalStreamManager {
                 building_worker_actors.iter().map(|(worker_id, actors)| {
                     let stream_actors = actors
                         .iter()
-                        .map(|actor_id| actor_map[actor_id].clone())
+                        .map(|actor_id| {
+                            to_build_actor_info(
+                                actor_map[actor_id].clone(),
+                                &subscriptions,
+                                table_fragments.table_id(),
+                            )
+                        })
                         .collect::<Vec<_>>();
                     (*worker_id, stream_actors)
                 }),
@@ -804,6 +814,7 @@ mod tests {
             let req = request.into_inner();
             let mut guard = self.inner.actor_streams.lock().unwrap();
             for actor in req.get_actors() {
+                let actor = actor.actor.as_ref().unwrap();
                 guard.insert(actor.get_actor_id(), actor.clone());
             }
 

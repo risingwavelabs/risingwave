@@ -264,6 +264,7 @@ enum ThrottleTarget {
   THROTTLE_TARGET_UNSPECIFIED = 0;
   SOURCE = 1;
   MV = 2;
+  TABLE_WITH_SOURCE = 3;
 }
 
 message ApplyThrottleRequest {

@@ -34,6 +34,7 @@ use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, DispatcherType, FragmentTypeFlag, StreamActor, StreamNode,
 };
+use risingwave_pb::stream_service::BuildActorInfo;
 use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::barrier::Reschedule;
@@ -44,7 +45,7 @@ use crate::model::{
     TableParallelism, ValTransaction,
 };
 use crate::storage::Transaction;
-use crate::stream::{SplitAssignment, TableRevision};
+use crate::stream::{to_build_actor_info, SplitAssignment, TableRevision};
 use crate::{MetaError, MetaResult};
 
 pub struct FragmentManagerCore {
@@ -855,14 +856,20 @@ impl FragmentManager {
     pub async fn all_node_actors(
         &self,
         include_inactive: bool,
-    ) -> HashMap<WorkerId, Vec<StreamActor>> {
+        subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
+    ) -> HashMap<WorkerId, Vec<BuildActorInfo>> {
         let mut actor_maps = HashMap::new();
 
         let map = &self.core.read().await.table_fragments;
         for fragments in map.values() {
+            let table_id = fragments.table_id();
             for (node_id, actors) in fragments.worker_actors(include_inactive) {
                 let node_actors = actor_maps.entry(node_id).or_insert_with(Vec::new);
-                node_actors.extend(actors);
+                node_actors.extend(
+                    actors
+                        .into_iter()
+                        .map(|actor| to_build_actor_info(actor, subscriptions, table_id)),
+                );
             }
         }
 

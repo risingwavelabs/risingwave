@@ -10,7 +10,7 @@ impl MigrationTrait for Migration {
                 MigrationTable::alter()
                     .table(Subscription::Table)
                     .add_column(
-                        ColumnDef::new(Subscription::SubscriptionInternalTableName).integer(),
+                        ColumnDef::new(Subscription::SubscriptionInternalTableName).string(),
                     )
                     .to_owned(),
             )

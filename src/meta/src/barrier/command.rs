@@ -21,6 +21,8 @@ use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorMapping;
+use risingwave_common::types::Timestamptz;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::catalog::CreateType;
@@ -32,12 +34,13 @@ use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
-    AddMutation, BarrierMutation, CombinedMutation, Dispatcher, Dispatchers, PauseMutation,
-    ResumeMutation, SourceChangeSplitMutation, StopMutation, StreamActor, ThrottleMutation,
-    UpdateMutation,
+    AddMutation, BarrierMutation, CombinedMutation, CreateSubscriptionMutation, Dispatcher,
+    Dispatchers, DropSubscriptionMutation, PauseMutation, ResumeMutation,
+    SourceChangeSplitMutation, StopMutation, StreamActor, ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use thiserror_ext::AsReport;
+use tracing::warn;
 
 use super::info::{ActorDesc, CommandActorChanges, InflightActorInfo};
 use super::trace::TracedEpoch;
@@ -81,12 +84,19 @@ pub struct Reschedule {
     pub newly_created_actors: Vec<(StreamActor, PbActorStatus)>,
 }
 
+/// Replacing an old table with a new one. All actors in the table job will be rebuilt.
+/// Used for `ALTER TABLE` ([`Command::ReplaceTable`]) and sink into table ([`Command::CreateStreamingJob`]).
 #[derive(Debug, Clone)]
 pub struct ReplaceTablePlan {
     pub old_table_fragments: TableFragments,
     pub new_table_fragments: TableFragments,
     pub merge_updates: Vec<MergeUpdate>,
     pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
+    /// For a table with connector, the `SourceExecutor` actor will also be rebuilt with new actor ids.
+    /// We need to reassign splits for it.
+    ///
+    /// Note that there's no `SourceBackfillExecutor` involved for table with connector, so we don't need to worry about
+    /// backfill_splits.
     pub init_split_assignment: SplitAssignment,
 }
 
@@ -166,6 +176,7 @@ pub enum Command {
         definition: String,
         ddl_type: DdlType,
         create_type: CreateType,
+        /// This is for create SINK into table.
         replace_table: Option<ReplaceTablePlan>,
     },
     /// `CancelStreamingJob` command generates a `Stop` barrier including the actors of the given
@@ -201,6 +212,22 @@ pub enum Command {
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
     /// the `rate_limit` of `FlowControl` Executor after `StreamScan` or Source.
     Throttle(ThrottleConfig),
+
+    /// `CreateSubscription` command generates a `CreateSubscriptionMutation` to notify
+    /// materialize executor to start storing old value for subscription.
+    CreateSubscription {
+        subscription_id: u32,
+        upstream_mv_table_id: TableId,
+        retention_second: u64,
+    },
+
+    /// `DropSubscription` command generates a `DropSubscriptionMutation` to notify
+    /// materialize executor to stop storing old value when there is no
+    /// subscription depending on it.
+    DropSubscription {
+        subscription_id: u32,
+        upstream_mv_table_id: TableId,
+    },
 }
 
 impl Command {
@@ -285,6 +312,8 @@ impl Command {
             Command::ReplaceTable(plan) => Some(plan.actor_changes()),
             Command::SourceSplitAssignment(_) => None,
             Command::Throttle(_) => None,
+            Command::CreateSubscription { .. } => None,
+            Command::DropSubscription { .. } => None,
         }
     }
 
@@ -663,6 +692,22 @@ impl CommandContext {
                     tracing::debug!("update mutation: {mutation:?}");
                     Some(mutation)
                 }
+
+                Command::CreateSubscription {
+                    upstream_mv_table_id,
+                    subscription_id,
+                    ..
+                } => Some(Mutation::CreateSubscription(CreateSubscriptionMutation {
+                    upstream_mv_table_id: upstream_mv_table_id.table_id,
+                    subscription_id: *subscription_id,
+                })),
+                Command::DropSubscription {
+                    upstream_mv_table_id,
+                    subscription_id,
+                } => Some(Mutation::DropSubscription(DropSubscriptionMutation {
+                    upstream_mv_table_id: upstream_mv_table_id.table_id,
+                    subscription_id: *subscription_id,
+                })),
             };
 
         mutation
@@ -1071,8 +1116,21 @@ impl CommandContext {
                     )
                     .await;
             }
+
+            Command::CreateSubscription { .. } => {}
+            Command::DropSubscription { .. } => {}
         }
 
         Ok(())
+    }
+
+    pub fn get_truncate_epoch(&self, retention_second: u64) -> Epoch {
+        let Some(truncate_timestamptz) = Timestamptz::from_secs(
+            self.prev_epoch.value().as_timestamptz().timestamp() - retention_second as i64,
+        ) else {
+            warn!(retention_second, prev_epoch = ?self.prev_epoch.value(), "invalid retention second value");
+            return self.prev_epoch.value();
+        };
+        Epoch::from_unix_millis(truncate_timestamptz.timestamp_millis() as u64)
     }
 }
