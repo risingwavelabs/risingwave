@@ -8,16 +8,16 @@ statement ok
 create table t (a int, b int default 900, c int default 9000);
 
 statement error
-create sink s into t(aaa) as select a from s with(type = 'append-only');
+create sink ss into t(aaa) as select a from s with(type = 'append-only');
 
 statement error
-create sink s into t(a) as select a, b from s with(type = 'append-only');
+create sink ss into t(a) as select a, b from s with(type = 'append-only');
 
 statement error
-create sink s into t(a) as select a, b from s with(type = 'append-only');
+create sink ss into t(a, b) as select b from s with(type = 'append-only');
 
 statement error
-create sink s into t(a, b, c, a) as select a, b from s with(type = 'append-only');
+create sink ss into t(a, b, c, a) as select a, b from s with(type = 'append-only');
 
 statement ok
 create sink s1 into t(a,B,c) as select c, b, a from s with(type = 'append-only');
