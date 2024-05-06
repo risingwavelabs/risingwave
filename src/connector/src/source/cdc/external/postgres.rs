@@ -267,7 +267,7 @@ impl PostgresExternalTableReader {
 
         let row_stream = stream.map(|row| {
             let row = row?;
-            postgres_row_to_owned_row(row, &self.rw_schema)
+            Ok::<_, crate::error::ConnectorError>(postgres_row_to_owned_row(row, &self.rw_schema))
         });
 
         pin_mut!(row_stream);

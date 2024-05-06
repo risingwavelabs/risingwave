@@ -18,6 +18,7 @@ use anyhow::anyhow;
 use bytes::BytesMut;
 use pg_bigdecimal::PgNumeric;
 use risingwave_common::types::{DataType, Int256, ScalarImpl, ScalarRefImpl};
+use thiserror_ext::AsReport;
 use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql, Type};
 
 use crate::error::ConnectorResult;
@@ -129,6 +130,15 @@ impl<'a> FromSql<'a> for ScalarAdapter<'_> {
 }
 
 impl ScalarAdapter<'_> {
+    pub fn name(&self) -> String {
+        match self {
+            ScalarAdapter::Builtin(_) => "Builtin".to_string(),
+            ScalarAdapter::Uuid(_) => "Uuid".to_string(),
+            ScalarAdapter::Numeric(_) => "Numeric".to_string(),
+            ScalarAdapter::Enum(_) => "Enum".to_string(),
+        }
+    }
+
     /// convert `ScalarRefImpl` to `ScalarAdapter` so that we can correctly encode to postgres value
     pub(crate) fn from_scalar<'a>(
         scalar: ScalarRefImpl<'a>,
@@ -149,33 +159,38 @@ impl ScalarAdapter<'_> {
         })
     }
 
-    pub fn into_scalar(self, ty: DataType) -> ConnectorResult<ScalarImpl> {
+    pub fn into_scalar(self, ty: DataType) -> Option<ScalarImpl> {
         match (&self, &ty) {
-            (ScalarAdapter::Builtin(scalar), _) => Ok(scalar.into_scalar_impl()),
+            (ScalarAdapter::Builtin(scalar), _) => Some(scalar.into_scalar_impl()),
             (ScalarAdapter::Uuid(uuid), &DataType::Varchar) => {
-                Ok(ScalarImpl::from(uuid.to_string()))
+                Some(ScalarImpl::from(uuid.to_string()))
             }
             (ScalarAdapter::Numeric(numeric), &DataType::Varchar) => {
-                Ok(ScalarImpl::from(pg_numeric_to_string(numeric)))
+                Some(ScalarImpl::from(pg_numeric_to_string(numeric)))
             }
             (ScalarAdapter::Numeric(numeric), &DataType::Int256) => {
                 pg_numeric_to_rw_int256(numeric)
             }
-            (ScalarAdapter::Enum(EnumString(s)), &DataType::Varchar) => Ok(ScalarImpl::from(s)),
-            _ => Err(anyhow!(
-                "failed to convert ScalarAdapter from {:?} to {:?}",
-                self,
-                ty
-            )
-            .into()),
+            (ScalarAdapter::Enum(EnumString(s)), &DataType::Varchar) => Some(ScalarImpl::from(s)),
+            _ => {
+                tracing::error!(
+                    adapter = self.name(),
+                    rw_type = ty.pg_name(),
+                    "failed to convert to ScalarAdapter: invalid conversion"
+                );
+                None
+            }
         }
     }
 }
 
-fn pg_numeric_to_rw_int256(val: &PgNumeric) -> ConnectorResult<ScalarImpl> {
+fn pg_numeric_to_rw_int256(val: &PgNumeric) -> Option<ScalarImpl> {
     match Int256::from_str(pg_numeric_to_string(val).as_str()) {
-        Ok(num) => Ok(ScalarImpl::from(num)),
-        Err(err) => Err(anyhow!("failed to convert PgNumeric to Int256: {}", err).into()),
+        Ok(num) => Some(ScalarImpl::from(num)),
+        Err(err) => {
+            tracing::error!(error = %err.as_report(), "failed to convert PgNumeric to Int256");
+            None
+        }
     }
 }
 
