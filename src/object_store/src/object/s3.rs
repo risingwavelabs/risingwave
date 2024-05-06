@@ -59,8 +59,8 @@ use tokio::task::JoinHandle;
 
 use super::object_metrics::ObjectStoreMetrics;
 use super::{
-    prefix, BoxedStreamingUploader, Bytes, ObjectError, ObjectErrorInner, ObjectMetadata,
-    ObjectRangeBounds, ObjectResult, ObjectStore, StreamingUploader,
+    prefix, retry_request, BoxedStreamingUploader, Bytes, ObjectError, ObjectErrorInner,
+    ObjectMetadata, ObjectRangeBounds, ObjectResult, ObjectStore, StreamingUploader,
 };
 use crate::object::{
     get_attempt_timeout_by_type, get_retry_strategy, try_update_failure_metric, ObjectDataStream,
@@ -238,6 +238,8 @@ impl S3StreamingUploader {
     }
 
     async fn flush_multipart_and_complete(&mut self) -> ObjectResult<()> {
+        let operation_type = OperationType::StreamingUploadFinish;
+
         if !self.buf.is_empty() {
             self.upload_next_part().await?;
         }
@@ -265,24 +267,28 @@ impl S3StreamingUploader {
                 .collect_vec(),
         );
 
-        self.client
-            .complete_multipart_upload()
-            .bucket(&self.bucket)
-            .key(&self.key)
-            .upload_id(self.upload_id.as_ref().unwrap())
-            .multipart_upload(
-                CompletedMultipartUpload::builder()
-                    .set_parts(completed_parts)
-                    .build(),
-            )
-            .send()
-            .await
-            .map_err(|err| {
-                set_error_should_retry::<CompleteMultipartUploadError>(
-                    self.config.clone(),
-                    err.into(),
+        let builder = || async {
+            self.client
+                .complete_multipart_upload()
+                .bucket(&self.bucket)
+                .key(&self.key)
+                .upload_id(self.upload_id.as_ref().unwrap())
+                .multipart_upload(
+                    CompletedMultipartUpload::builder()
+                        .set_parts(completed_parts.clone())
+                        .build(),
                 )
-            })?;
+                .send()
+                .await
+                .map_err(|err| {
+                    set_error_should_retry::<CompleteMultipartUploadError>(
+                        self.config.clone(),
+                        err.into(),
+                    )
+                })
+        };
+
+        retry_request(builder, &self.config, operation_type, self.metrics.clone()).await?;
 
         Ok(())
     }

@@ -1058,12 +1058,6 @@ pub struct ObjectStoreRetryConfig {
     )]
     pub streaming_upload_retry_attempts: usize,
 
-    // streaming_upload_finish
-    #[serde(
-        default = "default::object_store_config::object_store_streaming_upload_finish_attempt_timeout_ms"
-    )]
-    pub streaming_upload_finish_attempt_timeout_ms: u64,
-
     // read
     #[serde(default = "default::object_store_config::object_store_read_attempt_timeout_ms")]
     pub read_attempt_timeout_ms: u64,
@@ -1779,11 +1773,6 @@ pub mod default {
 
         pub fn object_store_streaming_upload_retry_attempts() -> usize {
             DEFAULT_RETRY_MAX_RETRY_ATTEMPTS
-        }
-
-        //  finish
-        pub fn object_store_streaming_upload_finish_attempt_timeout_ms() -> u64 {
-            20 * 1000 // 20s
         }
 
         // tips: depend on block_size

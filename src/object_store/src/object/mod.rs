@@ -310,7 +310,6 @@ pub struct MonitoredStreamingUploader {
     operation_size: usize,
     media_type: &'static str,
     streaming_upload_timeout: Option<Duration>,
-    streaming_upload_finish_timeout: Option<Duration>,
 }
 
 impl MonitoredStreamingUploader {
@@ -319,7 +318,6 @@ impl MonitoredStreamingUploader {
         handle: BoxedStreamingUploader,
         object_store_metrics: Arc<ObjectStoreMetrics>,
         streaming_upload_timeout: Option<Duration>,
-        streaming_upload_finish_timeout: Option<Duration>,
     ) -> Self {
         Self {
             inner: handle,
@@ -327,7 +325,6 @@ impl MonitoredStreamingUploader {
             operation_size: 0,
             media_type,
             streaming_upload_timeout,
-            streaming_upload_finish_timeout,
         }
     }
 }
@@ -385,23 +382,11 @@ impl MonitoredStreamingUploader {
             .with_label_values(&[self.media_type, operation_type_str])
             .start_timer();
 
-        let future = async {
-            self.inner
-                .finish()
-                .verbose_instrument_await(operation_type_str)
-                .await
-        };
-        let res = match self.streaming_upload_finish_timeout.as_ref() {
-            None => future.await,
-            Some(timeout) => tokio::time::timeout(*timeout, future)
-                .await
-                .unwrap_or_else(|_| {
-                    Err(ObjectError::timeout(format!(
-                        "{} timeout",
-                        operation_type_str
-                    )))
-                }),
-        };
+        let res = self
+            .inner
+            .finish()
+            .verbose_instrument_await(operation_type_str)
+            .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
         self.object_store_metrics
@@ -584,20 +569,11 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .with_label_values(&[media_type, operation_type_str])
             .start_timer();
 
-        let builder = || async {
-            self.inner
-                .streaming_upload(path)
-                .verbose_instrument_await(operation_type_str)
-                .await
-        };
-
-        let res = retry_request(
-            builder,
-            &self.config,
-            operation_type,
-            self.object_store_metrics.clone(),
-        )
-        .await;
+        let res = self
+            .inner
+            .streaming_upload(path)
+            .verbose_instrument_await(operation_type_str)
+            .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
         Ok(MonitoredStreamingUploader::new(
@@ -606,9 +582,6 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             self.object_store_metrics.clone(),
             Some(Duration::from_millis(
                 self.config.retry.streaming_upload_attempt_timeout_ms,
-            )),
-            Some(Duration::from_millis(
-                self.config.retry.streaming_upload_finish_attempt_timeout_ms,
             )),
         ))
     }
@@ -1059,12 +1032,9 @@ fn get_retry_attempts_by_type(config: &ObjectStoreConfig, operation_type: Operat
 fn get_attempt_timeout_by_type(config: &ObjectStoreConfig, operation_type: OperationType) -> u64 {
     match operation_type {
         OperationType::Upload => config.retry.upload_attempt_timeout_ms,
-        OperationType::StreamingUploadInit | OperationType::StreamingUpload => {
-            config.retry.streaming_upload_attempt_timeout_ms
-        }
-        OperationType::StreamingUploadFinish => {
-            config.retry.streaming_upload_finish_attempt_timeout_ms
-        }
+        OperationType::StreamingUploadInit
+        | OperationType::StreamingUpload
+        | OperationType::StreamingUploadFinish => config.retry.streaming_upload_attempt_timeout_ms,
         OperationType::Read => config.retry.read_attempt_timeout_ms,
         OperationType::StreamingReadInit | OperationType::StreamingRead => {
             config.retry.streaming_read_attempt_timeout_ms

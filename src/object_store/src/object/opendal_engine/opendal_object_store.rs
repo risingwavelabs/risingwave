@@ -160,7 +160,9 @@ impl ObjectStore for OpendalObjectStore {
             .range(range)
             .await?;
         let stream = reader.into_stream().map(|item| {
-            item.map_err(|e| ObjectError::internal(format!("OpendalError: {}", e.as_report())))
+            item.map_err(|e| {
+                ObjectError::internal(format!("reader into_stream fail {}", e.as_report()))
+            })
         });
 
         Ok(Box::pin(stream))
