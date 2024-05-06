@@ -25,8 +25,8 @@ full-without-monitoring:
     - use: compactor
     - use: kafka
       user-managed: true
-      address: kafka
-      port: 9093
+      address: message_queue
+      port: 29092
 EOF
 
 cat <<EOF > risedev-components.user.env

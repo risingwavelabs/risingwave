@@ -78,7 +78,7 @@ check_version() {
 }
 
 create_kafka_topic() {
-  RPK_BROKERS=kafka:9093 \
+  RPK_BROKERS=message_queue:29092 \
   rpk topic create backwards_compat_test_kafka_source
 }
 
@@ -86,7 +86,7 @@ insert_json_kafka() {
   local JSON=$1
 
   echo "$JSON" | \
-  RPK_BROKERS=kafka:9093 \
+  RPK_BROKERS=message_queue:29092 \
   rpk topic produce backwards_compat_test_kafka_source -f "%k,%v"
 }
 
