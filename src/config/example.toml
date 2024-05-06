@@ -195,7 +195,6 @@ upload_attempt_timeout_ms = 8000
 upload_retry_attempts = 3
 streaming_upload_attempt_timeout_ms = 5000
 streaming_upload_retry_attempts = 3
-streaming_upload_finish_attempt_timeout_ms = 20000
 read_attempt_timeout_ms = 8000
 read_retry_attempts = 3
 streaming_read_attempt_timeout_ms = 3000
