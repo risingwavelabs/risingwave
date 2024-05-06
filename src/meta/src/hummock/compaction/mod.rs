@@ -194,7 +194,7 @@ pub fn create_compaction_task(
     let target_file_size = if input.target_level == 0 {
         compaction_config.target_file_size_base
     } else if input.target_level == base_level {
-        let task_size = input.target_input_size + input.select_input_size'
+        let task_size = input.target_input_size + input.select_input_size;
         if task_size < compaction_config.max_bytes_for_level_base {
             // This is just a temporary optimization measure. We hope to reduce the size of SST as much
             // as possible to reduce the amount of data blocked by a single task during compaction,
@@ -205,7 +205,13 @@ pub fn create_compaction_task(
             compaction_config.target_file_size_base
         } else {
             const MAX_FILE_COUNT: u64 = 256;
-            std::cmp::max(compaction_config.target_file_size_base, task_size / MAX_FILE_COUNT)
+            std::cmp::min(
+                compaction_config.max_bytes_for_level_base,
+                std::cmp::max(
+                    compaction_config.target_file_size_base,
+                    task_size / MAX_FILE_COUNT,
+                ),
+            )
         }
     } else {
         assert!(input.target_level >= base_level);
