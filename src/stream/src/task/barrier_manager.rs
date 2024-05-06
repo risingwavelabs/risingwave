@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::future::pending;
 use std::sync::Arc;
 use std::time::Duration;
@@ -61,6 +61,7 @@ use risingwave_pb::stream_service::{
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Actor, Barrier, DispatchExecutor, Mutation, StreamExecutorError};
+use crate::task::barrier_manager::managed_state::ManagedBarrierStateDebugInfo;
 use crate::task::barrier_manager::progress::BackfillState;
 
 /// If enabled, all actors will be grouped in the same tracing span within one epoch.
@@ -97,6 +98,10 @@ impl ControlStreamHandle {
         Self {
             pair: Some((sender, request_stream)),
         }
+    }
+
+    pub(super) fn connected(&self) -> bool {
+        self.pair.is_some()
     }
 
     fn reset_stream_with_err(&mut self, err: Status) {
@@ -231,6 +236,9 @@ pub(super) enum LocalActorOperation {
         senders: Vec<UnboundedSender<Barrier>>,
         result_sender: oneshot::Sender<()>,
     },
+    InspectState {
+        result_sender: oneshot::Sender<String>,
+    },
 }
 
 pub(super) struct CreateActorOutput {
@@ -254,7 +262,7 @@ pub(crate) struct StreamActorManagerState {
     pub(super) creating_actors: FuturesUnordered<
         AttachedFuture<
             JoinHandle<StreamResult<CreateActorOutput>>,
-            oneshot::Sender<StreamResult<()>>,
+            (BTreeSet<ActorId>, oneshot::Sender<StreamResult<()>>),
         >,
     >,
 }
@@ -275,7 +283,7 @@ impl StreamActorManagerState {
         oneshot::Sender<StreamResult<()>>,
         StreamResult<CreateActorOutput>,
     ) {
-        let (join_result, sender) = pending_on_none(self.creating_actors.next()).await;
+        let (join_result, (_, sender)) = pending_on_none(self.creating_actors.next()).await;
         (
             sender,
             try { join_result.context("failed to join creating actors futures")?? },
@@ -295,6 +303,16 @@ pub(crate) struct StreamActorManager {
 
     /// Runtime for the streaming actors.
     pub(super) runtime: BackgroundShutdownRuntime,
+}
+
+#[derive(Debug)]
+#[expect(dead_code)]
+pub(super) struct LocalBarrierWorkerDebugInfo<'a> {
+    actor_to_send: BTreeSet<ActorId>,
+    running_actors: BTreeSet<ActorId>,
+    creating_actors: Vec<BTreeSet<ActorId>>,
+    managed_barrier_state: ManagedBarrierStateDebugInfo<'a>,
+    has_control_stream_connected: bool,
 }
 
 /// [`LocalBarrierWorker`] manages barrier control flow, used by local stream manager.
@@ -352,6 +370,21 @@ impl LocalBarrierWorker {
             barrier_event_rx: event_rx,
             actor_failure_rx: failure_rx,
             root_failure: None,
+        }
+    }
+
+    fn to_debug_info(&self) -> LocalBarrierWorkerDebugInfo<'_> {
+        LocalBarrierWorkerDebugInfo {
+            actor_to_send: self.barrier_senders.keys().cloned().collect(),
+            running_actors: self.actor_manager_state.handles.keys().cloned().collect(),
+            creating_actors: self
+                .actor_manager_state
+                .creating_actors
+                .iter()
+                .map(|fut| fut.item().0.clone())
+                .collect(),
+            managed_barrier_state: self.state.to_debug_info(),
+            has_control_stream_connected: self.control_stream_handle.connected(),
         }
     }
 
@@ -503,6 +536,9 @@ impl LocalBarrierWorker {
             } => {
                 self.register_sender(actor_id, senders);
                 let _ = result_sender.send(());
+            }
+            LocalActorOperation::InspectState { result_sender } => {
+                let _ = result_sender.send(format!("{:#?}", self.to_debug_info()));
             }
         }
     }

@@ -18,6 +18,7 @@ use std::fmt::Debug;
 use std::mem::take;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::anyhow;
 use async_recursion::async_recursion;
@@ -255,6 +256,21 @@ impl LocalStreamManager {
             })
             .await?
     }
+
+    pub async fn inspect_barrier_state(&self) -> StreamResult<String> {
+        info!("start inspecting barrier state");
+        let start = Instant::now();
+        self.actor_op_tx
+            .send_and_await(|result_sender| LocalActorOperation::InspectState { result_sender })
+            .inspect(|result| {
+                info!(
+                    ok = result.is_ok(),
+                    time = ?start.elapsed(),
+                    "finish inspecting barrier state"
+                );
+            })
+            .await
+    }
 }
 
 impl LocalBarrierWorker {
@@ -310,7 +326,7 @@ impl LocalBarrierWorker {
         actors: &[ActorId],
         result_sender: oneshot::Sender<StreamResult<()>>,
     ) {
-        let actors = {
+        let actors: Vec<_> = {
             let actor_result = actors
                 .iter()
                 .map(|actor_id| {
@@ -328,6 +344,10 @@ impl LocalBarrierWorker {
                 }
             }
         };
+        let actor_ids = actors
+            .iter()
+            .map(|actor| actor.actor.as_ref().unwrap().actor_id)
+            .collect();
         let actor_manager = self.actor_manager.clone();
         let create_actors_fut = crate::CONFIG.scope(
             self.actor_manager.env.config().clone(),
@@ -336,7 +356,7 @@ impl LocalBarrierWorker {
         let join_handle = self.actor_manager.runtime.spawn(create_actors_fut);
         self.actor_manager_state
             .creating_actors
-            .push(AttachedFuture::new(join_handle, result_sender));
+            .push(AttachedFuture::new(join_handle, (actor_ids, result_sender)));
     }
 }
 
