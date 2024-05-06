@@ -23,13 +23,13 @@ use prometheus::{
 };
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
-    LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
-    RelabeledGuardedHistogramVec,
+    LabelGuardedGaugeVec, LabelGuardedHistogramVec, LabelGuardedIntCounterVec,
+    LabelGuardedIntGaugeVec, RelabeledGuardedHistogramVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
-    register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
-    register_guarded_int_gauge_vec_with_registry,
+    register_guarded_gauge_vec_with_registry, register_guarded_histogram_vec_with_registry,
+    register_guarded_int_counter_vec_with_registry, register_guarded_int_gauge_vec_with_registry,
 };
 use risingwave_connector::sink::SinkMetrics;
 
@@ -153,6 +153,7 @@ pub struct StreamingMetrics {
     pub log_store_write_rows: LabelGuardedIntCounterVec<3>,
     pub log_store_latest_read_epoch: LabelGuardedIntGaugeVec<3>,
     pub log_store_read_rows: LabelGuardedIntCounterVec<3>,
+    pub log_store_reader_backpressure_rate: LabelGuardedGaugeVec<3>,
     pub kv_log_store_storage_write_count: LabelGuardedIntCounterVec<3>,
     pub kv_log_store_storage_write_size: LabelGuardedIntCounterVec<3>,
     pub kv_log_store_rewind_count: LabelGuardedIntCounterVec<3>,
@@ -844,6 +845,14 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let log_store_reader_backpressure_rate = register_guarded_gauge_vec_with_registry!(
+            "log_store_reader_backpressure_rate",
+            "The read rate of rows",
+            &["executor_id", "connector", "sink_id"],
+            registry
+        )
+        .unwrap();
+
         let kv_log_store_storage_write_count = register_guarded_int_counter_vec_with_registry!(
             "kv_log_store_storage_write_count",
             "Write row count throughput of kv log store",
@@ -1164,6 +1173,7 @@ impl StreamingMetrics {
             log_store_write_rows,
             log_store_latest_read_epoch,
             log_store_read_rows,
+            log_store_reader_backpressure_rate,
             kv_log_store_storage_write_count,
             kv_log_store_storage_write_size,
             kv_log_store_rewind_count,
@@ -1233,6 +1243,9 @@ impl StreamingMetrics {
         let log_store_read_rows = self
             .log_store_read_rows
             .with_guarded_label_values(&label_list);
+        let log_store_reader_backpressure_rate = self
+            .log_store_reader_backpressure_rate
+            .with_guarded_label_values(&label_list);
 
         let label_list = [identity, sink_id_str];
         let iceberg_write_qps = self
@@ -1259,6 +1272,7 @@ impl StreamingMetrics {
             log_store_write_rows,
             log_store_latest_read_epoch,
             log_store_read_rows,
+            log_store_reader_backpressure_rate,
             iceberg_write_qps,
             iceberg_write_latency,
             iceberg_rolling_unflushed_data_file,

@@ -3844,6 +3844,16 @@ def section_sink_metrics(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_percentage(
+                    "Log Store Backpressure ratio",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('log_store_reader_backpressure_rate')}) by (connector, sink_id, executor_id)",
+                            "Backpressure @ {{connector}} {{sink_id}} {{executor_id}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_latency(
                     "Log Store Consume Persistent Log Lag",
                     "",

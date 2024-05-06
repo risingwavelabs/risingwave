@@ -18,6 +18,7 @@ use std::fmt::Debug;
 use std::future::{poll_fn, Future};
 use std::sync::Arc;
 use std::task::Poll;
+use std::time::Instant;
 
 use futures::{TryFuture, TryFutureExt};
 use risingwave_common::array::StreamChunk;
@@ -161,10 +162,7 @@ pub trait LogReader: Send + Sized + 'static {
 
     /// Mark that all items emitted so far have been consumed and it is safe to truncate the log
     /// from the current offset.
-    fn truncate(
-        &mut self,
-        offset: TruncateOffset,
-    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
+    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()>;
 
     /// Reset the log reader to after the latest truncate offset
     ///
@@ -205,10 +203,7 @@ impl<F: Fn(StreamChunk) -> StreamChunk + Send + 'static, R: LogReader> LogReader
         Ok((epoch, item))
     }
 
-    fn truncate(
-        &mut self,
-        offset: TruncateOffset,
-    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
         self.inner.truncate(offset)
     }
 
@@ -219,10 +214,93 @@ impl<F: Fn(StreamChunk) -> StreamChunk + Send + 'static, R: LogReader> LogReader
     }
 }
 
+pub struct BackpressureMonitoredLogReader<R: LogReader> {
+    inner: R,
+    /// Start time of the current measurement.
+    measurement_start_time: Instant,
+    /// Start time to wait for new future after poll ready
+    wait_new_future_start_time: Option<Instant>,
+    /// Total time to wait for creating new future
+    total_wait_new_future_micro_secs: f64,
+    metrics: SinkMetrics,
+}
+
+impl<R: LogReader> BackpressureMonitoredLogReader<R> {
+    fn new(inner: R, metrics: SinkMetrics) -> Self {
+        Self {
+            inner,
+            measurement_start_time: Instant::now(),
+            wait_new_future_start_time: None,
+            total_wait_new_future_micro_secs: 0.0,
+            metrics,
+        }
+    }
+}
+
+impl<R: LogReader> LogReader for BackpressureMonitoredLogReader<R> {
+    fn init(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        self.measurement_start_time = Instant::now();
+        self.wait_new_future_start_time = None;
+        self.total_wait_new_future_micro_secs = 0.0;
+        self.inner.init()
+    }
+
+    fn next_item(
+        &mut self,
+    ) -> impl Future<Output = LogStoreResult<(u64, LogStoreReadItem)>> + Send + '_ {
+        if let Some(start_time) = self.wait_new_future_start_time.take() {
+            self.total_wait_new_future_micro_secs += start_time.elapsed().as_micros() as f64;
+        }
+        self.inner.next_item().inspect_ok(|(_, item)| {
+            if let LogStoreReadItem::Barrier {
+                is_checkpoint: true,
+            } = item
+            {
+                // On checkpoint barrier, measure backpressure rate and reset timer
+                let total_time = self.measurement_start_time.elapsed().as_micros() as f64;
+                let backpressure_rate = self.total_wait_new_future_micro_secs / total_time;
+
+                self.metrics
+                    .log_store_reader_backpressure_rate
+                    .set(backpressure_rate);
+
+                self.measurement_start_time = Instant::now();
+                self.total_wait_new_future_micro_secs = 0.0;
+            }
+            // Set start time when return ready
+            self.wait_new_future_start_time = Some(Instant::now());
+        })
+    }
+
+    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
+        self.inner.truncate(offset)
+    }
+
+    fn rewind(
+        &mut self,
+    ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
+        self.inner.rewind().inspect_ok(|_| {
+            self.measurement_start_time = Instant::now();
+            self.wait_new_future_start_time = None;
+            self.total_wait_new_future_micro_secs = 0.0;
+        })
+    }
+}
+
 pub struct MonitoredLogReader<R: LogReader> {
     inner: R,
     read_epoch: u64,
     metrics: SinkMetrics,
+}
+
+impl<R: LogReader> MonitoredLogReader<R> {
+    pub fn new(inner: R, metrics: SinkMetrics) -> Self {
+        Self {
+            inner,
+            read_epoch: INVALID_EPOCH,
+            metrics,
+        }
+    }
 }
 
 impl<R: LogReader> LogReader for MonitoredLogReader<R> {
@@ -244,8 +322,8 @@ impl<R: LogReader> LogReader for MonitoredLogReader<R> {
         })
     }
 
-    async fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
-        self.inner.truncate(offset).await
+    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
+        self.inner.truncate(offset)
     }
 
     fn rewind(
@@ -267,12 +345,8 @@ where
         TransformChunkLogReader { f, inner: self }
     }
 
-    pub fn monitored(self, metrics: SinkMetrics) -> MonitoredLogReader<T> {
-        MonitoredLogReader {
-            read_epoch: INVALID_EPOCH,
-            inner: self,
-            metrics,
-        }
+    pub fn monitored(self, metrics: SinkMetrics) -> impl LogReader {
+        BackpressureMonitoredLogReader::new(MonitoredLogReader::new(self, metrics.clone()), metrics)
     }
 }
 
