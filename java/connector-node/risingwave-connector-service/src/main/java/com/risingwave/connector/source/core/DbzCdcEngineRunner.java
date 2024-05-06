@@ -14,7 +14,6 @@
 
 package com.risingwave.connector.source.core;
 
-import com.risingwave.connector.api.source.*;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
 import com.risingwave.connector.source.common.DbzSourceUtils;
 import com.risingwave.java.binding.Binding;
@@ -43,6 +42,7 @@ public class DbzCdcEngineRunner {
             var sourceId = config.getSourceId();
             var engine =
                     new DbzCdcEngine(
+                            config.getSourceType(),
                             config.getSourceId(),
                             config.getResolvedDebeziumProps(),
                             (success, message, error) -> {
@@ -76,6 +76,7 @@ public class DbzCdcEngineRunner {
             final DbzCdcEngineRunner finalRunner = runner;
             var engine =
                     new DbzCdcEngine(
+                            config.getSourceType(),
                             config.getSourceId(),
                             config.getResolvedDebeziumProps(),
                             (success, message, error) -> {

@@ -488,6 +488,7 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
             .expect("failed to get schema path");
     let content = content
         .replace("127.0.0.1:29092", "192.168.11.1:29092")
+        .replace("localhost:29092", "192.168.11.1:29092")
         .replace(
             "/risingwave/avro-simple-schema.avsc",
             simple_avsc_full_path.to_str().unwrap(),

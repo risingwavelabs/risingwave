@@ -46,18 +46,16 @@ mod progress;
 mod tests;
 
 pub use progress::CreateMviewProgress;
-use risingwave_common::catalog::TableId;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
 use risingwave_pb::common::ActorInfo;
-use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::streaming_control_stream_request::{InitRequest, Request};
 use risingwave_pb::stream_service::streaming_control_stream_response::InitResponse;
 use risingwave_pb::stream_service::{
-    streaming_control_stream_response, BarrierCompleteResponse, StreamingControlStreamRequest,
-    StreamingControlStreamResponse,
+    streaming_control_stream_response, BarrierCompleteResponse, BuildActorInfo,
+    StreamingControlStreamRequest, StreamingControlStreamResponse,
 };
 
 use crate::executor::exchange::permit::Receiver;
@@ -210,12 +208,11 @@ pub(super) enum LocalActorOperation {
         result_sender: oneshot::Sender<()>,
     },
     UpdateActors {
-        actors: Vec<stream_plan::StreamActor>,
+        actors: Vec<BuildActorInfo>,
         result_sender: oneshot::Sender<StreamResult<()>>,
     },
     BuildActors {
         actors: Vec<ActorId>,
-        related_subscriptions: HashMap<TableId, HashSet<u32>>,
         result_sender: oneshot::Sender<StreamResult<()>>,
     },
     UpdateActorInfo {
@@ -248,7 +245,7 @@ pub(crate) struct StreamActorManagerState {
     pub(super) handles: HashMap<ActorId, ActorHandle>,
 
     /// Stores all actor information, taken after actor built.
-    pub(super) actors: HashMap<ActorId, stream_plan::StreamActor>,
+    pub(super) actors: HashMap<ActorId, BuildActorInfo>,
 
     /// Stores all actor tokio runtime monitoring tasks.
     pub(super) actor_monitor_tasks: HashMap<ActorId, ActorHandle>,
@@ -483,9 +480,8 @@ impl LocalBarrierWorker {
             }
             LocalActorOperation::BuildActors {
                 actors,
-                related_subscriptions,
                 result_sender,
-            } => self.start_create_actors(&actors, related_subscriptions, result_sender),
+            } => self.start_create_actors(&actors, result_sender),
             LocalActorOperation::UpdateActorInfo {
                 new_actor_infos,
                 result_sender,

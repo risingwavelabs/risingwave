@@ -3260,8 +3260,13 @@ impl Parser {
                     parallelism: value,
                     deferred,
                 }
+            } else if let Some(rate_limit) = self.parse_alter_streaming_rate_limit()? {
+                AlterTableOperation::SetStreamingRateLimit { rate_limit }
             } else {
-                return self.expected("SCHEMA/PARALLELISM after SET", self.peek_token());
+                return self.expected(
+                    "SCHEMA/PARALLELISM/STREAMING_RATE_LIMIT after SET",
+                    self.peek_token(),
+                );
             }
         } else if self.parse_keyword(Keyword::DROP) {
             let _ = self.parse_keyword(Keyword::COLUMN);
@@ -3316,6 +3321,31 @@ impl Parser {
             name: table_name,
             operation,
         })
+    }
+
+    /// STREAMING_RATE_LIMIT = default | NUMBER
+    /// STREAMING_RATE_LIMIT TO default | NUMBER
+    pub fn parse_alter_streaming_rate_limit(&mut self) -> Result<Option<i32>, ParserError> {
+        if !self.parse_keyword(Keyword::STREAMING_RATE_LIMIT) {
+            return Ok(None);
+        }
+        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
+            return self.expected(
+                "TO or = after ALTER TABLE SET STREAMING_RATE_LIMIT",
+                self.peek_token(),
+            );
+        }
+        let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
+            -1
+        } else {
+            let s = self.parse_number_value()?;
+            if let Ok(n) = s.parse::<i32>() {
+                n
+            } else {
+                return self.expected("number or DEFAULT", self.peek_token());
+            }
+        };
+        Ok(Some(rate_limit))
     }
 
     pub fn parse_alter_index(&mut self) -> Result<Statement, ParserError> {
@@ -3397,8 +3427,15 @@ impl Parser {
                     parallelism: value,
                     deferred,
                 }
+            } else if materialized
+                && let Some(rate_limit) = self.parse_alter_streaming_rate_limit()?
+            {
+                AlterViewOperation::SetStreamingRateLimit { rate_limit }
             } else {
-                return self.expected("SCHEMA/PARALLELISM after SET", self.peek_token());
+                return self.expected(
+                    "SCHEMA/PARALLELISM/STREAMING_RATE_LIMIT after SET",
+                    self.peek_token(),
+                );
             }
         } else {
             return self.expected(
@@ -3531,6 +3568,8 @@ impl Parser {
                 AlterSourceOperation::SetSchema {
                     new_schema_name: schema_name,
                 }
+            } else if let Some(rate_limit) = self.parse_alter_streaming_rate_limit()? {
+                AlterSourceOperation::SetStreamingRateLimit { rate_limit }
             } else {
                 return self.expected("SCHEMA after SET", self.peek_token());
             }
@@ -3541,7 +3580,7 @@ impl Parser {
             AlterSourceOperation::RefreshSchema
         } else {
             return self.expected(
-                "RENAME, ADD COLUMN or OWNER TO or SET after ALTER SOURCE",
+                "RENAME, ADD COLUMN, OWNER TO, SET or STREAMING_RATE_LIMIT after ALTER SOURCE",
                 self.peek_token(),
             );
         };

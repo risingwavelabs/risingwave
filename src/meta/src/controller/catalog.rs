@@ -19,7 +19,6 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{TableOption, DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
-use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
@@ -45,9 +44,7 @@ use risingwave_pb::meta::relation::PbRelationInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
-use risingwave_pb::meta::{
-    FragmentParallelUnitMapping, PbFragmentWorkerMapping, PbRelation, PbRelationGroup,
-};
+use risingwave_pb::meta::{PbRelation, PbRelationGroup};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
 use risingwave_pb::user::PbUserInfo;
@@ -66,9 +63,9 @@ use crate::controller::utils::{
     check_connection_name_duplicate, check_database_name_duplicate,
     check_function_signature_duplicate, check_relation_name_duplicate, check_schema_name_duplicate,
     ensure_object_id, ensure_object_not_refer, ensure_schema_empty, ensure_user_id,
-    get_fragment_mappings, get_fragment_mappings_by_jobs, get_parallel_unit_to_worker_map,
-    get_referring_objects, get_referring_objects_cascade, get_user_privilege,
-    list_user_info_by_ids, resolve_source_register_info_for_jobs, PartialObject,
+    get_fragment_mappings, get_fragment_mappings_by_jobs, get_referring_objects,
+    get_referring_objects_cascade, get_user_privilege, list_user_info_by_ids,
+    resolve_source_register_info_for_jobs, PartialObject,
 };
 use crate::controller::ObjectModel;
 use crate::manager::{Catalog, MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
@@ -277,29 +274,7 @@ impl CatalogController {
             .into_tuple()
             .all(&txn)
             .await?;
-
-        let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
-
         let fragment_mappings = get_fragment_mappings_by_jobs(&txn, streaming_jobs.clone()).await?;
-
-        let fragment_mappings = fragment_mappings
-            .into_iter()
-            .map(
-                |FragmentParallelUnitMapping {
-                     fragment_id,
-                     mapping,
-                 }| {
-                    PbFragmentWorkerMapping {
-                        fragment_id,
-                        mapping: Some(
-                            ParallelUnitMapping::from_protobuf(&mapping.unwrap())
-                                .to_worker(&parallel_unit_to_worker)
-                                .to_protobuf(),
-                        ),
-                    }
-                },
-            )
-            .collect();
 
         // The schema and objects in the database will be delete cascade.
         let res = Object::delete_by_id(database_id).exec(&txn).await?;
@@ -320,7 +295,6 @@ impl CatalogController {
                 }),
             )
             .await;
-
         self.notify_fragment_mapping(NotificationOperation::Delete, fragment_mappings)
             .await;
         Ok((
@@ -2113,7 +2087,6 @@ impl CatalogController {
 
         let (source_fragments, removed_actors) =
             resolve_source_register_info_for_jobs(&txn, to_drop_streaming_jobs.clone()).await?;
-
         let fragment_mappings =
             get_fragment_mappings_by_jobs(&txn, to_drop_streaming_jobs.clone()).await?;
 
@@ -2139,8 +2112,6 @@ impl CatalogController {
             ));
         }
         let user_infos = list_user_info_by_ids(to_update_user_ids, &txn).await?;
-
-        let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
 
         txn.commit().await?;
 
@@ -2216,26 +2187,6 @@ impl CatalogController {
                 NotificationInfo::RelationGroup(PbRelationGroup { relations }),
             )
             .await;
-
-        let fragment_mappings = fragment_mappings
-            .into_iter()
-            .map(
-                |FragmentParallelUnitMapping {
-                     fragment_id,
-                     mapping,
-                 }| {
-                    PbFragmentWorkerMapping {
-                        fragment_id,
-                        mapping: Some(
-                            ParallelUnitMapping::from_protobuf(&mapping.unwrap())
-                                .to_worker(&parallel_unit_to_worker)
-                                .to_protobuf(),
-                        ),
-                    }
-                },
-            )
-            .collect();
-
         self.notify_fragment_mapping(NotificationOperation::Delete, fragment_mappings)
             .await;
 

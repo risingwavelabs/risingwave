@@ -41,7 +41,7 @@ impl Default for CdcScanOptions {
 }
 
 impl CdcScanOptions {
-    pub fn from_proto(proto: StreamCdcScanOptions) -> Self {
+    pub fn from_proto(proto: &StreamCdcScanOptions) -> Self {
         Self {
             disable_backfill: proto.disable_backfill,
             snapshot_interval: proto.snapshot_barrier_interval,

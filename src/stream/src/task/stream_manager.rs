@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use core::time::Duration;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::mem::take;
 use std::sync::atomic::AtomicU64;
@@ -31,10 +31,10 @@ use risingwave_common::config::MetricLevel;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{StreamActor, StreamNode};
+use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest;
 use risingwave_pb::stream_service::{
-    StreamingControlStreamRequest, StreamingControlStreamResponse,
+    BuildActorInfo, StreamingControlStreamRequest, StreamingControlStreamResponse,
 };
 use risingwave_storage::monitor::HummockTraceFutureExt;
 use risingwave_storage::{dispatch_state_store, StateStore};
@@ -220,7 +220,7 @@ impl LocalStreamManager {
             .await
     }
 
-    pub async fn update_actors(&self, actors: Vec<stream_plan::StreamActor>) -> StreamResult<()> {
+    pub async fn update_actors(&self, actors: Vec<BuildActorInfo>) -> StreamResult<()> {
         self.actor_op_tx
             .send_and_await(|result_sender| LocalActorOperation::UpdateActors {
                 actors,
@@ -229,15 +229,10 @@ impl LocalStreamManager {
             .await?
     }
 
-    pub async fn build_actors(
-        &self,
-        actors: Vec<ActorId>,
-        related_subscriptions: HashMap<TableId, HashSet<u32>>,
-    ) -> StreamResult<()> {
+    pub async fn build_actors(&self, actors: Vec<ActorId>) -> StreamResult<()> {
         self.actor_op_tx
             .send_and_await(|result_sender| LocalActorOperation::BuildActors {
                 actors,
-                related_subscriptions,
                 result_sender,
             })
             .await?
@@ -304,10 +299,7 @@ impl LocalBarrierWorker {
         self.actor_manager.env.dml_manager_ref().clear();
     }
 
-    pub(super) fn update_actors(
-        &mut self,
-        actors: Vec<stream_plan::StreamActor>,
-    ) -> StreamResult<()> {
+    pub(super) fn update_actors(&mut self, actors: Vec<BuildActorInfo>) -> StreamResult<()> {
         self.actor_manager_state.update_actors(actors)
     }
 
@@ -316,7 +308,6 @@ impl LocalBarrierWorker {
     pub(super) fn start_create_actors(
         &mut self,
         actors: &[ActorId],
-        related_subscriptions: HashMap<TableId, HashSet<u32>>,
         result_sender: oneshot::Sender<StreamResult<()>>,
     ) {
         let actors = {
@@ -340,11 +331,7 @@ impl LocalBarrierWorker {
         let actor_manager = self.actor_manager.clone();
         let create_actors_fut = crate::CONFIG.scope(
             self.actor_manager.env.config().clone(),
-            actor_manager.create_actors(
-                actors,
-                self.current_shared_context.clone(),
-                related_subscriptions,
-            ),
+            actor_manager.create_actors(actors, self.current_shared_context.clone()),
         );
         let join_handle = self.actor_manager.runtime.spawn(create_actors_fut);
         self.actor_manager_state
@@ -540,20 +527,32 @@ impl StreamActorManager {
 
     async fn create_actors(
         self: Arc<Self>,
-        actors: Vec<StreamActor>,
+        actors: Vec<BuildActorInfo>,
         shared_context: Arc<SharedContext>,
-        related_subscriptions: HashMap<TableId, HashSet<u32>>,
     ) -> StreamResult<CreateActorOutput> {
         let mut ret = Vec::with_capacity(actors.len());
         let create_actor_context = CreateActorContext::default();
         for actor in actors {
+            let BuildActorInfo {
+                actor,
+                related_subscriptions,
+            } = actor;
+            let actor = actor.unwrap();
             let actor_id = actor.actor_id;
             let actor_context = ActorContext::create(
                 &actor,
                 self.env.total_mem_usage(),
                 self.streaming_metrics.clone(),
                 actor.dispatcher.len(),
-                related_subscriptions.clone(),
+                related_subscriptions
+                    .into_iter()
+                    .map(|(table_id, subscription_ids)| {
+                        (
+                            TableId::new(table_id),
+                            HashSet::from_iter(subscription_ids.subscription_ids),
+                        )
+                    })
+                    .collect(),
             );
             let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
             let expr_context = actor.expr_context.clone().unwrap();
@@ -739,9 +738,9 @@ impl StreamActorManagerState {
         self.actor_monitor_tasks.clear();
     }
 
-    fn update_actors(&mut self, actors: Vec<stream_plan::StreamActor>) -> StreamResult<()> {
+    fn update_actors(&mut self, actors: Vec<BuildActorInfo>) -> StreamResult<()> {
         for actor in actors {
-            let actor_id = actor.get_actor_id();
+            let actor_id = actor.actor.as_ref().unwrap().get_actor_id();
             self.actors
                 .try_insert(actor_id, actor)
                 .map_err(|_| anyhow!("duplicated actor {}", actor_id))?;
