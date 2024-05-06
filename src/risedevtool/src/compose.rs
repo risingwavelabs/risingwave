@@ -117,7 +117,6 @@ fn get_cmd_args(cmd: &Command, with_argv_0: bool) -> Result<Vec<String>> {
     Ok(result)
 }
 
-
 fn health_check_port(port: u16) -> HealthCheck {
     HealthCheck {
         test: vec![
