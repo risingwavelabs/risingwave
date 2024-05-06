@@ -121,7 +121,7 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                     // Note: It's only used to map the numeric type in upstream Postgres to RisingWave's rw_int256.
                     let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
                     match res {
-                        Ok(val) => val.map_or(None, |v| v.into_scalar(DataType::Int256)),
+                        Ok(val) => val.and_then(|v| v.into_scalar(DataType::Int256)),
                         Err(err) => {
                             log_error!(name, err, "parse numeric column as pg_numeric failed");
                             None
@@ -133,7 +133,7 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                         // enum type needs to be handled separately
                         let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
                         match res {
-                            Ok(val) => val.map_or(None, |v| v.into_scalar(DataType::Varchar)),
+                            Ok(val) => val.and_then(|v| v.into_scalar(DataType::Varchar)),
                             Err(err) => {
                                 log_error!(name, err, "parse enum column failed");
                                 None
@@ -145,9 +145,7 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                             Type::UUID => {
                                 let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
                                 match res {
-                                    Ok(val) => {
-                                        val.map_or(None, |v| v.into_scalar(DataType::Varchar))
-                                    }
+                                    Ok(val) => val.and_then(|v| v.into_scalar(DataType::Varchar)),
                                     Err(err) => {
                                         log_error!(name, err, "parse uuid column failed");
                                         None
@@ -161,9 +159,7 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                 // Note: It's only used to map the numeric type in upstream Postgres to RisingWave's varchar.
                                 let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
                                 match res {
-                                    Ok(val) => {
-                                        val.map_or(None, |v| v.into_scalar(DataType::Varchar))
-                                    }
+                                    Ok(val) => val.and_then(|v| v.into_scalar(DataType::Varchar)),
                                     Err(err) => {
                                         log_error!(
                                             name,
@@ -271,7 +267,7 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                             Ok(val) => {
                                                 if let Some(vec) = val {
                                                     for val in vec {
-                                                        builder.append(val.map_or(None, |v| {
+                                                        builder.append(val.and_then(|v| {
                                                             v.into_scalar(DataType::Varchar)
                                                         }))
                                                     }
@@ -291,7 +287,7 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                             Ok(val) => {
                                                 if let Some(vec) = val {
                                                     for val in vec {
-                                                        builder.append(val.map_or(None, |v| {
+                                                        builder.append(val.and_then(|v| {
                                                             v.into_scalar(DataType::Varchar)
                                                         }))
                                                     }
@@ -378,9 +374,11 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                     Ok(val) => {
                                         if let Some(vec) = val {
                                             for val in vec {
-                                                builder.append(val.map_or(None, |v| {
-                                                    v.into_scalar(DataType::Int256)
-                                                }))
+                                                builder.append(
+                                                    val.and_then(|v| {
+                                                        v.into_scalar(DataType::Int256)
+                                                    }),
+                                                )
                                             }
                                         }
                                     }
