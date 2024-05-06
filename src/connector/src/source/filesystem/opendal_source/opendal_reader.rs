@@ -148,7 +148,14 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 let gzip_decoder = GzipDecoder::new(stream_reader);
                 Box::pin(BufReader::new(gzip_decoder)) as Pin<Box<dyn AsyncRead + Send>>
             }
-            None => Box::pin(BufReader::new(stream_reader)) as Pin<Box<dyn AsyncRead + Send>>,
+            None => {
+                if object_name.ends_with(".gz") || object_name.ends_with(".gzip"){
+                    let gzip_decoder = GzipDecoder::new(stream_reader);
+                    Box::pin(BufReader::new(gzip_decoder)) as Pin<Box<dyn AsyncRead + Send>>
+                } else {
+                    Box::pin(BufReader::new(stream_reader)) as Pin<Box<dyn AsyncRead + Send>>
+                }
+            }
             Some(format) => {
                 tracing::error!("The input decompression format {format} is not supported. Currently, only gzip format decompression is supported.");
                 // todo: handle error
