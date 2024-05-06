@@ -233,12 +233,12 @@ pub trait ToArrow {
         };
         let values = self.to_array(field.data_type(), array.values())?;
         let offsets = OffsetBuffer::new(array.offsets().iter().map(|&o| o as i32).collect());
-        let nulls = array.null_bitmap().into();
+        let nulls = (!array.null_bitmap().all()).then(|| array.null_bitmap().into());
         Ok(Arc::new(arrow_array::ListArray::new(
             field.clone(),
             offsets,
             values,
-            Some(nulls),
+            nulls,
         )))
     }
 
