@@ -179,6 +179,7 @@ impl PlanRoot {
     /// (`out_fields`).
     pub fn into_unordered_subplan(self) -> PlanRef {
         assert_eq!(self.phase, PlanPhase::Logical);
+        assert_eq!(self.plan.convention(), Convention::Logical);
         if self.out_fields.count_ones(..) == self.out_fields.len() {
             return self.plan;
         }
@@ -198,6 +199,7 @@ impl PlanRoot {
         use crate::utils::{Condition, IndexSet};
 
         assert_eq!(self.phase, PlanPhase::Logical);
+        assert_eq!(self.plan.convention(), Convention::Logical);
         let Ok(select_idx) = self.out_fields.ones().exactly_one() else {
             bail!("subquery must return only one column");
         };
@@ -233,21 +235,26 @@ impl PlanRoot {
     /// Apply logical optimization to the plan for stream.
     pub fn gen_optimized_logical_plan_for_stream(&mut self) -> Result<PlanRef> {
         assert_eq!(self.phase, PlanPhase::Logical);
+        assert_eq!(self.plan.convention(), Convention::Logical);
         self.plan = LogicalOptimizer::gen_optimized_logical_plan_for_stream(self.plan.clone())?;
         self.phase = PlanPhase::OptimizedLogicalForStream;
+        assert_eq!(self.plan.convention(), Convention::Logical);
         Ok(self.plan.clone())
     }
 
     /// Apply logical optimization to the plan for batch.
     pub fn gen_optimized_logical_plan_for_batch(&mut self) -> Result<PlanRef> {
         assert_eq!(self.phase, PlanPhase::Logical);
+        assert_eq!(self.plan.convention(), Convention::Logical);
         self.plan = LogicalOptimizer::gen_optimized_logical_plan_for_batch(self.plan.clone())?;
         self.phase = PlanPhase::OptimizedLogicalForBatch;
+        assert_eq!(self.plan.convention(), Convention::Logical);
         Ok(self.plan.clone())
     }
 
     /// Optimize and generate a singleton batch physical plan without exchange nodes.
     pub fn gen_batch_plan(&mut self) -> Result<PlanRef> {
+        assert_eq!(self.plan.convention(), Convention::Logical);
         let mut plan = match self.phase {
             PlanPhase::Logical => {
                 // Logical optimization
@@ -321,12 +328,14 @@ impl PlanRoot {
 
         self.plan = plan;
         self.phase = PlanPhase::Batch;
+        assert_eq!(self.plan.convention(), Convention::Batch);
         Ok(self.plan.clone())
     }
 
     /// Optimize and generate a batch query plan for distributed execution.
     pub fn gen_batch_distributed_plan(mut self) -> Result<PlanRef> {
         assert_eq!(self.phase, PlanPhase::Batch);
+        assert_eq!(self.plan.convention(), Convention::Batch);
         self.required_dist = RequiredDist::single();
         let mut plan = self.plan;
 
@@ -356,12 +365,14 @@ impl PlanRoot {
             ApplyOrder::BottomUp,
         ));
 
+        assert_eq!(plan.convention(), Convention::Batch);
         Ok(plan)
     }
 
     /// Optimize and generate a batch query plan for local execution.
     pub fn gen_batch_local_plan(self) -> Result<PlanRef> {
         assert_eq!(self.phase, PlanPhase::Batch);
+        assert_eq!(self.plan.convention(), Convention::Batch);
         let mut plan = self.plan;
 
         // Convert to local plan node
@@ -397,12 +408,14 @@ impl PlanRoot {
             ApplyOrder::BottomUp,
         ));
 
+        assert_eq!(plan.convention(), Convention::Batch);
         Ok(plan)
     }
 
     /// Generate optimized stream plan
     fn gen_optimized_stream_plan(&mut self, emit_on_window_close: bool) -> Result<PlanRef> {
         assert_eq!(self.phase, PlanPhase::Logical);
+        assert_eq!(self.plan.convention(), Convention::Logical);
         let stream_scan_type = if self.should_use_arrangement_backfill() {
             StreamScanType::ArrangementBackfill
         } else {
@@ -417,6 +430,7 @@ impl PlanRoot {
         stream_scan_type: StreamScanType,
     ) -> Result<PlanRef> {
         assert_eq!(self.phase, PlanPhase::Logical);
+        assert_eq!(self.plan.convention(), Convention::Logical);
         let ctx = self.plan.ctx();
         let _explain_trace = ctx.is_explain_trace();
 
@@ -466,6 +480,7 @@ impl PlanRoot {
 
         self.plan = plan;
         self.phase = PlanPhase::Stream;
+        assert_eq!(self.plan.convention(), Convention::Stream);
         Ok(self.plan.clone())
     }
 
@@ -476,6 +491,7 @@ impl PlanRoot {
         stream_scan_type: StreamScanType,
     ) -> Result<PlanRef> {
         assert_eq!(self.phase, PlanPhase::Logical);
+        assert_eq!(self.plan.convention(), Convention::Logical);
         let ctx = self.plan.ctx();
         let explain_trace = ctx.is_explain_trace();
 
@@ -582,8 +598,10 @@ impl PlanRoot {
         retention_seconds: Option<NonZeroU32>,
     ) -> Result<StreamMaterialize> {
         assert_eq!(self.phase, PlanPhase::Logical);
+        assert_eq!(self.plan.convention(), Convention::Logical);
         let stream_plan = self.gen_optimized_stream_plan(false)?;
         assert_eq!(self.phase, PlanPhase::Stream);
+        assert_eq!(stream_plan.convention(), Convention::Stream);
 
         assert!(!pk_column_ids.is_empty() || row_id_index.is_some());
 
@@ -819,8 +837,10 @@ impl PlanRoot {
     ) -> Result<StreamMaterialize> {
         let cardinality = self.compute_cardinality();
         assert_eq!(self.phase, PlanPhase::Logical);
+        assert_eq!(self.plan.convention(), Convention::Logical);
         let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
         assert_eq!(self.phase, PlanPhase::Stream);
+        assert_eq!(stream_plan.convention(), Convention::Stream);
 
         StreamMaterialize::create(
             stream_plan,
@@ -845,8 +865,10 @@ impl PlanRoot {
     ) -> Result<StreamMaterialize> {
         let cardinality = self.compute_cardinality();
         assert_eq!(self.phase, PlanPhase::Logical);
+        assert_eq!(self.plan.convention(), Convention::Logical);
         let stream_plan = self.gen_optimized_stream_plan(false)?;
         assert_eq!(self.phase, PlanPhase::Stream);
+        assert_eq!(stream_plan.convention(), Convention::Stream);
 
         StreamMaterialize::create(
             stream_plan,
@@ -885,9 +907,11 @@ impl PlanRoot {
             StreamScanType::Backfill
         };
         assert_eq!(self.phase, PlanPhase::Logical);
+        assert_eq!(self.plan.convention(), Convention::Logical);
         let stream_plan =
             self.gen_optimized_stream_plan_inner(emit_on_window_close, stream_scan_type)?;
         assert_eq!(self.phase, PlanPhase::Stream);
+        assert_eq!(stream_plan.convention(), Convention::Stream);
         StreamSink::create(
             stream_plan,
             sink_name,
@@ -921,9 +945,11 @@ impl PlanRoot {
     ) -> Result<StreamSubscription> {
         let stream_scan_type = StreamScanType::UpstreamOnly;
         assert_eq!(self.phase, PlanPhase::Logical);
+        assert_eq!(self.plan.convention(), Convention::Logical);
         let stream_plan =
             self.gen_optimized_stream_plan_inner(emit_on_window_close, stream_scan_type)?;
         assert_eq!(self.phase, PlanPhase::Stream);
+        assert_eq!(stream_plan.convention(), Convention::Stream);
 
         StreamSubscription::create(
             database_id,
