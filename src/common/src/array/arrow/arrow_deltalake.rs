@@ -126,7 +126,7 @@ mod test {
             arrow_schema::DataType::List(Arc::new(Field::new(
                 "test",
                 arrow_schema::DataType::Decimal128(10, 0),
-                false,
+                true,
             ))),
             false,
         )]);
