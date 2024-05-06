@@ -110,7 +110,6 @@ message CreateSubscriptionResponse {
 message DropSubscriptionRequest {
   uint32 subscription_id = 1;
   bool cascade = 2;
-  uint32 dependent_table = 3;
 }
 
 message DropSubscriptionResponse {

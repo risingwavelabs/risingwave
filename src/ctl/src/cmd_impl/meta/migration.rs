@@ -562,7 +562,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             .map(|s| {
                 object_dependencies.push(object_dependency::ActiveModel {
                     id: NotSet,
-                    oid: Set(s.dependent_table as _),
+                    oid: Set(s.dependent_table_id as _),
                     used_by: Set(s.id as _),
                 });
                 s.into()

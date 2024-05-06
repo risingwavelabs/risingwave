@@ -58,17 +58,17 @@ async fn handle_declare_subscription_cursor(
     let cursor_from_subscription_name = sub_name.0.last().unwrap().real_value().clone();
     let subscription =
         session.get_subscription_by_name(schema_name, &cursor_from_subscription_name)?;
-    let table = session.get_table_by_id(&subscription.dependent_table)?;
+    let table = session.get_table_by_id(&subscription.dependent_table_id)?;
     // Start the first query of cursor, which includes querying the table and querying the subscription's logstore
     let start_rw_timestamp = match rw_timestamp {
         Some(risingwave_sqlparser::ast::Since::TimestampMsNum(start_rw_timestamp)) => {
-            check_cursor_unix_millis(start_rw_timestamp, subscription.get_retention_seconds()?)?;
+            check_cursor_unix_millis(start_rw_timestamp, subscription.retention_seconds)?;
             Some(convert_unix_millis_to_logstore_u64(start_rw_timestamp))
         }
         Some(risingwave_sqlparser::ast::Since::ProcessTime) => Some(Epoch::now().0),
         Some(risingwave_sqlparser::ast::Since::Begin) => {
             let min_unix_millis =
-                Epoch::now().as_unix_millis() - subscription.get_retention_seconds()? * 1000;
+                Epoch::now().as_unix_millis() - subscription.retention_seconds * 1000;
             let subscription_build_millis = subscription.created_at_epoch.unwrap().as_unix_millis();
             let min_unix_millis = std::cmp::max(min_unix_millis, subscription_build_millis);
             Some(convert_unix_millis_to_logstore_u64(min_unix_millis))

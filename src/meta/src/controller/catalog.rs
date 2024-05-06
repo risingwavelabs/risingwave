@@ -30,7 +30,8 @@ use risingwave_meta_model_v2::{
     sink, source, streaming_job, subscription, table, user_privilege, view, ActorId,
     ActorUpstreamActors, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId,
     FunctionId, I32Array, IndexId, JobStatus, ObjectId, PrivateLinkService, Property, SchemaId,
-    SinkId, SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, TableId, UserId,
+    SinkId, SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId,
+    UserId,
 };
 use risingwave_pb::catalog::subscription::SubscriptionState;
 use risingwave_pb::catalog::table::PbTableType;
@@ -428,7 +429,7 @@ impl CatalogController {
 
         // record object dependency.
         ObjectDependency::insert(object_dependency::ActiveModel {
-            oid: Set(pb_subscription.dependent_table as _),
+            oid: Set(pb_subscription.dependent_table_id as _),
             used_by: Set(pb_subscription.id as _),
             ..Default::default()
         })
@@ -460,7 +461,7 @@ impl CatalogController {
         // mark the target subscription as `Create`.
         let job = subscription::ActiveModel {
             subscription_id: Set(job_id),
-            subscription_state: Set(SubscriptionState::Create.into()),
+            subscription_state: Set(SubscriptionState::Created.into()),
             ..Default::default()
         };
         job.update(&txn).await?;
@@ -499,11 +500,13 @@ impl CatalogController {
     pub async fn clean_dirty_subscription(&self) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
-        let filter = subscription::ActiveModel {
-            subscription_state: Set(SubscriptionState::Init.into()),
-            ..Default::default()
-        };
-        filter.delete(&txn).await?;
+        let _res = Subscription::delete_many()
+            .filter(
+                subscription::Column::SubscriptionState
+                    .eq(Into::<i32>::into(SubscriptionState::Init)),
+            )
+            .exec(&txn)
+            .await?;
         txn.commit().await?;
         Ok(())
     }
@@ -2636,6 +2639,25 @@ impl CatalogController {
             .into_iter()
             .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
             .collect())
+    }
+
+    pub async fn get_subscription_by_id(
+        &self,
+        subscription_id: SubscriptionId,
+    ) -> MetaResult<PbSubscription> {
+        let inner = self.inner.read().await;
+        let subscription_objs = Subscription::find()
+            .find_also_related(Object)
+            .filter(subscription::Column::SubscriptionId.eq(subscription_id))
+            .all(&inner.db)
+            .await?;
+        let subscription: PbSubscription = subscription_objs
+            .into_iter()
+            .map(|(subscription, obj)| ObjectModel(subscription, obj.unwrap()).into())
+            .find_or_first(|_| true)
+            .ok_or_else(|| anyhow!("cant find subscription with id {}", subscription_id))?;
+
+        Ok(subscription)
     }
 
     pub async fn find_creating_streaming_job_ids(

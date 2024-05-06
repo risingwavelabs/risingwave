@@ -26,7 +26,6 @@ use pgwire::pg_response::StatementType;
 use pgwire::types::Row;
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::DataType;
-use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Statement};
 
 use super::SessionImpl;
@@ -188,7 +187,7 @@ impl SubscriptionCursor {
         };
 
         let cursor_need_drop_time =
-            Instant::now() + Duration::from_secs(subscription.get_retention_seconds()?);
+            Instant::now() + Duration::from_secs(subscription.retention_seconds);
         Ok(Self {
             cursor_name,
             subscription,
@@ -227,7 +226,7 @@ impl SubscriptionCursor {
                             )
                             .await?;
                             self.cursor_need_drop_time = Instant::now()
-                                + Duration::from_secs(self.subscription.get_retention_seconds()?);
+                                + Duration::from_secs(self.subscription.retention_seconds);
                             let mut remaining_rows = VecDeque::new();
                             Self::try_refill_remaining_rows(&mut row_stream, &mut remaining_rows)
                                 .await?;
@@ -340,13 +339,9 @@ impl SubscriptionCursor {
         let new_epochs = handle_args
             .session
             .catalog_writer()?
-            .list_epoch_for_subscription(table_id, seek_timestamp, MAX_EPOCH - 1)
+            .list_change_log_epochs(table_id, seek_timestamp, 2)
             .await?;
 
-        println!(
-            "expected_timestamp{:?},{:?},{:?}",
-            expected_timestamp, new_epochs, seek_timestamp
-        );
         if let Some(expected_timestamp) = expected_timestamp
             && (new_epochs.is_empty() || &expected_timestamp != new_epochs.first().unwrap())
         {

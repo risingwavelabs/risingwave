@@ -585,29 +585,27 @@ impl MetaClient {
         &self,
         subscription_id: u32,
         cascade: bool,
-        dependent_table: u32,
     ) -> Result<CatalogVersion> {
         let request = DropSubscriptionRequest {
             subscription_id,
             cascade,
-            dependent_table,
         };
         let resp = self.inner.drop_subscription(request).await?;
         Ok(resp.version)
     }
 
-    pub async fn list_epoch_for_subscription(
+    pub async fn list_change_log_epochs(
         &self,
         table_id: u32,
         min_epoch: u64,
-        max_epoch: u64,
+        max_count: u32,
     ) -> Result<Vec<u64>> {
-        let request = ListEpochForSubscriptionRequest {
+        let request = ListChangeLogEpochsRequest {
             table_id,
             min_epoch,
-            max_epoch,
+            max_count,
         };
-        let resp = self.inner.list_epoch_for_subscription(request).await?;
+        let resp = self.inner.list_change_log_epochs(request).await?;
         Ok(resp.epochs)
     }
 
@@ -1991,7 +1989,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, list_compact_task_assignment, ListCompactTaskAssignmentRequest, ListCompactTaskAssignmentResponse }
             ,{ hummock_client, list_compact_task_progress, ListCompactTaskProgressRequest, ListCompactTaskProgressResponse }
             ,{ hummock_client, cancel_compact_task, CancelCompactTaskRequest, CancelCompactTaskResponse}
-            ,{ hummock_client, list_epoch_for_subscription, ListEpochForSubscriptionRequest, ListEpochForSubscriptionResponse }
+            ,{ hummock_client, list_change_log_epochs, ListChangeLogEpochsRequest, ListChangeLogEpochsResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

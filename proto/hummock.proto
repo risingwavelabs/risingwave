@@ -833,7 +833,7 @@ service HummockManagerService {
   rpc ListCompactTaskAssignment(ListCompactTaskAssignmentRequest) returns (ListCompactTaskAssignmentResponse);
   rpc ListCompactTaskProgress(ListCompactTaskProgressRequest) returns (ListCompactTaskProgressResponse);
   rpc CancelCompactTask(CancelCompactTaskRequest) returns (CancelCompactTaskResponse);
-  rpc ListEpochForSubscription(ListEpochForSubscriptionRequest) returns (ListEpochForSubscriptionResponse);
+  rpc ListChangeLogEpochs(ListChangeLogEpochsRequest) returns (ListChangeLogEpochsResponse);
 }
 
 message CompactionConfig {
@@ -894,12 +894,12 @@ message BranchedObject {
   uint64 compaction_group_id = 3;
 }
 
-message ListEpochForSubscriptionRequest {
+message ListChangeLogEpochsRequest {
   uint32 table_id = 1;
   uint64 min_epoch = 2;
-  uint64 max_epoch = 3;
+  uint32 max_count = 3;
 }
 
-message ListEpochForSubscriptionResponse {
+message ListChangeLogEpochsResponse {
   repeated uint64 epochs = 1;
 }

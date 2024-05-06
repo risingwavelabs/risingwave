@@ -37,8 +37,8 @@ pub struct SubscriptionCatalog {
     /// Full SQL definition of the subscription. For debug now.
     pub definition: String,
 
-    /// The properties of the subscription, only `retention`.
-    pub properties: BTreeMap<String, String>,
+    /// The retention seconds of the subscription.
+    pub retention_seconds: u64,
 
     /// The database id
     pub database_id: u32,
@@ -47,7 +47,7 @@ pub struct SubscriptionCatalog {
     pub schema_id: u32,
 
     /// The subscription depends on the upstream list
-    pub dependent_table: TableId,
+    pub dependent_table_id: TableId,
 
     /// The user id
     pub owner: UserId,
@@ -82,8 +82,8 @@ impl SubscriptionId {
 }
 
 impl SubscriptionCatalog {
-    pub fn get_retention_seconds(&self) -> Result<u64> {
-        let retention_seconds_str = self.properties.get("retention").ok_or_else(|| {
+    pub fn set_retention_seconds(&mut self, properties: BTreeMap<String, String>) -> Result<()> {
+        let retention_seconds_str = properties.get("retention").ok_or_else(|| {
             ErrorCode::InternalError("Subscription retention time not set.".to_string())
         })?;
         let retention_seconds = (Interval::from_str(retention_seconds_str)
@@ -95,8 +95,8 @@ impl SubscriptionCatalog {
             })?
             .epoch_in_micros()
             / 1000000) as u64;
-
-        Ok(retention_seconds)
+        self.retention_seconds = retention_seconds;
+        Ok(())
     }
 
     pub fn create_sql(&self) -> String {
@@ -108,7 +108,7 @@ impl SubscriptionCatalog {
             id: self.id.subscription_id,
             name: self.name.clone(),
             definition: self.definition.clone(),
-            properties: self.properties.clone().into_iter().collect(),
+            retention_seconds: self.retention_seconds,
             database_id: self.database_id,
             schema_id: self.schema_id,
             initialized_at_epoch: self.initialized_at_epoch.map(|e| e.0),
@@ -116,7 +116,7 @@ impl SubscriptionCatalog {
             owner: self.owner.into(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             created_at_cluster_version: self.created_at_cluster_version.clone(),
-            dependent_table: self.dependent_table.table_id,
+            dependent_table_id: self.dependent_table_id.table_id,
             subscription_state: PbSubscriptionState::Init.into(),
         }
     }
@@ -128,10 +128,10 @@ impl From<&PbSubscription> for SubscriptionCatalog {
             id: SubscriptionId::new(prost.id),
             name: prost.name.clone(),
             definition: prost.definition.clone(),
-            properties: prost.properties.clone().into_iter().collect(),
+            retention_seconds: prost.retention_seconds,
             database_id: prost.database_id,
             schema_id: prost.schema_id,
-            dependent_table: TableId::new(prost.dependent_table),
+            dependent_table_id: TableId::new(prost.dependent_table_id),
             owner: prost.owner.into(),
             created_at_epoch: prost.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: prost.initialized_at_epoch.map(Epoch::from),

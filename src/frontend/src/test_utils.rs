@@ -242,11 +242,11 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn list_epoch_for_subscription(
+    async fn list_change_log_epochs(
         &self,
         _table_id: u32,
         _min_epoch: u64,
-        _max_epoch: u64,
+        _max_count: u32,
     ) -> Result<Vec<u64>> {
         unreachable!()
     }
@@ -473,12 +473,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_subscription(
-        &self,
-        subscription_id: u32,
-        cascade: bool,
-        _dependent_table: u32,
-    ) -> Result<()> {
+    async fn drop_subscription(&self, subscription_id: u32, cascade: bool) -> Result<()> {
         if cascade {
             return Err(ErrorCode::NotSupported(
                 "drop cascade in MockCatalogWriter is unsupported".to_string(),

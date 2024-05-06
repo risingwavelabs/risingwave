@@ -225,7 +225,7 @@ impl From<ObjectModel<subscription::Model>> for PbSubscription {
             database_id: value.1.database_id.unwrap() as _,
             name: value.0.name,
             owner: value.1.owner_id as _,
-            properties: value.0.properties.0,
+            retention_seconds: value.0.retention_seconds as _,
             definition: value.0.definition,
             initialized_at_epoch: Some(
                 Epoch::from_unix_millis(value.1.initialized_at.timestamp_millis() as _).0,
@@ -235,7 +235,7 @@ impl From<ObjectModel<subscription::Model>> for PbSubscription {
             ),
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
-            dependent_table: value.0.dependent_table,
+            dependent_table_id: value.0.dependent_table_id,
             subscription_state: PbSubscriptionState::Init as _,
         }
     }

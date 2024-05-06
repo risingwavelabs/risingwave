@@ -63,11 +63,7 @@ pub async fn handle_drop_subscription(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .drop_subscription(
-            subscription_id.subscription_id,
-            cascade,
-            subscription.dependent_table.table_id,
-        )
+        .drop_subscription(subscription_id.subscription_id, cascade)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_SUBSCRIPTION))

@@ -667,20 +667,20 @@ impl HummockManagerService for HummockServiceImpl {
         return Ok(response);
     }
 
-    async fn list_epoch_for_subscription(
+    async fn list_change_log_epochs(
         &self,
-        request: Request<ListEpochForSubscriptionRequest>,
-    ) -> Result<Response<ListEpochForSubscriptionResponse>, Status> {
-        let ListEpochForSubscriptionRequest {
+        request: Request<ListChangeLogEpochsRequest>,
+    ) -> Result<Response<ListChangeLogEpochsResponse>, Status> {
+        let ListChangeLogEpochsRequest {
             table_id,
             min_epoch,
-            max_epoch,
+            max_count,
         } = request.into_inner();
         let epochs = self
             .hummock_manager
-            .list_epoch_for_subscription(table_id, min_epoch, max_epoch)
+            .list_change_log_epochs(table_id, min_epoch, max_count)
             .await;
-        Ok(Response::new(ListEpochForSubscriptionResponse { epochs }))
+        Ok(Response::new(ListChangeLogEpochsResponse { epochs }))
     }
 }
 

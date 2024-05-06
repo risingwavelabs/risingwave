@@ -125,7 +125,7 @@ impl DatabaseManager {
         }));
         let subscriptions = BTreeMap::from_iter(subscriptions.into_iter().map(|subscription| {
             *relation_ref_count
-                .entry(subscription.dependent_table)
+                .entry(subscription.dependent_table_id)
                 .or_default() += 1;
             (subscription.id, subscription)
         }));
@@ -186,7 +186,7 @@ impl DatabaseManager {
                 .collect_vec(),
             self.subscriptions
                 .values()
-                .filter(|t| t.subscription_state == PbSubscriptionState::Create as i32)
+                .filter(|t| t.subscription_state == PbSubscriptionState::Created as i32)
                 .cloned()
                 .collect_vec(),
             self.indexes

@@ -336,10 +336,9 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<DropSubscriptionResponse>, Status> {
         let request = request.into_inner();
         let subscription_id = request.subscription_id;
-        let dependent_table = request.dependent_table;
         let drop_mode = DropMode::from_request_setting(request.cascade);
 
-        let command = DdlCommand::DropSubscription(subscription_id, dependent_table, drop_mode);
+        let command = DdlCommand::DropSubscription(subscription_id, drop_mode);
 
         let version = self.ddl_controller.run_command(command).await?;
 

@@ -69,7 +69,7 @@ use crate::manager::{
     CatalogManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId, IdCategory,
     IdCategoryType, IndexId, LocalNotification, MetaSrvEnv, MetadataManager, MetadataManagerV1,
     NotificationVersion, RelationIdEnum, SchemaId, SinkId, SourceId, StreamingClusterInfo,
-    StreamingJob, TableId, UserId, ViewId, IGNORED_NOTIFICATION_VERSION,
+    StreamingJob, SubscriptionId, TableId, UserId, ViewId, IGNORED_NOTIFICATION_VERSION,
 };
 use crate::model::{FragmentId, StreamContext, TableFragments, TableParallelism};
 use crate::rpc::cloud_provider::AwsEc2Client;
@@ -149,7 +149,7 @@ pub enum DdlCommand {
     DropConnection(ConnectionId),
     CommentOn(Comment),
     CreateSubscription(Subscription),
-    DropSubscription(u32, u32, DropMode),
+    DropSubscription(SubscriptionId, DropMode),
 }
 
 impl DdlCommand {
@@ -335,9 +335,8 @@ impl DdlController {
                 DdlCommand::CreateSubscription(subscription) => {
                     ctrl.create_subscription(subscription).await
                 }
-                DdlCommand::DropSubscription(subscription_id, dependent_table, drop_mode) => {
-                    ctrl.drop_subscription(subscription_id, dependent_table, drop_mode)
-                        .await
+                DdlCommand::DropSubscription(subscription_id, drop_mode) => {
+                    ctrl.drop_subscription(subscription_id, drop_mode).await
                 }
             }
         }
@@ -704,14 +703,18 @@ impl DdlController {
 
     async fn drop_subscription(
         &self,
-        subscription_id: u32,
-        table_id: u32,
+        subscription_id: SubscriptionId,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
         tracing::debug!("preparing drop subscription");
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
+                let table_id = mgr
+                    .catalog_manager
+                    .get_subscription_by_id(subscription_id)
+                    .await?
+                    .dependent_table_id;
                 let (version, _) = mgr
                     .catalog_manager
                     .drop_relation(
@@ -727,6 +730,11 @@ impl DdlController {
                 Ok(version)
             }
             MetadataManager::V2(mgr) => {
+                let table_id = mgr
+                    .catalog_controller
+                    .get_subscription_by_id(subscription_id as i32)
+                    .await?
+                    .dependent_table_id;
                 let (_, version) = mgr
                     .catalog_controller
                     .drop_relation(ObjectType::Subscription, subscription_id as _, drop_mode)

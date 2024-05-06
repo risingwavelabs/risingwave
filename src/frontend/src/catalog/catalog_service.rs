@@ -152,12 +152,7 @@ pub trait CatalogWriter: Send + Sync {
         affected_table_change: Option<PbReplaceTablePlan>,
     ) -> Result<()>;
 
-    async fn drop_subscription(
-        &self,
-        subscription_id: u32,
-        cascade: bool,
-        dependent_table: u32,
-    ) -> Result<()>;
+    async fn drop_subscription(&self, subscription_id: u32, cascade: bool) -> Result<()>;
 
     async fn drop_database(&self, database_id: u32) -> Result<()>;
 
@@ -206,11 +201,11 @@ pub trait CatalogWriter: Send + Sync {
         new_schema_id: u32,
     ) -> Result<()>;
 
-    async fn list_epoch_for_subscription(
+    async fn list_change_log_epochs(
         &self,
         table_id: u32,
         min_epoch: u64,
-        max_epoch: u64,
+        max_count: u32,
     ) -> Result<Vec<u64>>;
 }
 
@@ -427,15 +422,10 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn drop_subscription(
-        &self,
-        subscription_id: u32,
-        cascade: bool,
-        dependent_table: u32,
-    ) -> Result<()> {
+    async fn drop_subscription(&self, subscription_id: u32, cascade: bool) -> Result<()> {
         let version = self
             .meta_client
-            .drop_subscription(subscription_id, cascade, dependent_table)
+            .drop_subscription(subscription_id, cascade)
             .await?;
         self.wait_version(version).await
     }
@@ -575,15 +565,15 @@ impl CatalogWriter for CatalogWriterImpl {
         Ok(())
     }
 
-    async fn list_epoch_for_subscription(
+    async fn list_change_log_epochs(
         &self,
         table_id: u32,
         min_epoch: u64,
-        max_epoch: u64,
+        max_count: u32,
     ) -> Result<Vec<u64>> {
         Ok(self
             .meta_client
-            .list_epoch_for_subscription(table_id, min_epoch, max_epoch)
+            .list_change_log_epochs(table_id, min_epoch, max_count)
             .await?)
     }
 }

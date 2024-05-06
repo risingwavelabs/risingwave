@@ -929,15 +929,15 @@ impl SessionImpl {
         Ok(table.clone())
     }
 
-    pub async fn list_epoch_for_subscription(
+    pub async fn list_change_log_epochs(
         &self,
         table_id: u32,
         min_epoch: u64,
-        max_epoch: u64,
+        max_count: u32,
     ) -> Result<Vec<u64>> {
         self.env
             .catalog_writer
-            .list_epoch_for_subscription(table_id, min_epoch, max_epoch)
+            .list_change_log_epochs(table_id, min_epoch, max_count)
             .await
     }
 

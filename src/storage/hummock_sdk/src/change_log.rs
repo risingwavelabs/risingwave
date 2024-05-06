@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::cmp::min;
 use std::collections::HashMap;
 
 use risingwave_common::catalog::TableId;
@@ -31,6 +32,20 @@ impl TableChangeLog {
             epoch_change_log.epochs.first().expect("non-empty") <= &max_epoch
         });
         &self.0[start..end]
+    }
+
+    pub fn get_epochs(&self, min_epoch: u64, max_count: usize) -> Vec<u64> {
+        let start = self.0.partition_point(|epoch_change_log| {
+            epoch_change_log.epochs.last().expect("non-empty") < &min_epoch
+        });
+
+        let epochs = self.0[start..]
+            .iter()
+            .flat_map(|a| a.epochs.clone())
+            .filter(|a| a >= &min_epoch)
+            .collect::<Vec<_>>();
+        let end = min(max_count, epochs.len());
+        epochs[..end].into()
     }
 
     pub fn truncate(&mut self, truncate_epoch: u64) {

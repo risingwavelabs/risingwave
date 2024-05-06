@@ -41,7 +41,7 @@ pub fn create_subscription_catalog(
     let (subscription_database_id, subscription_schema_id) =
         session.get_database_and_schema_id_for_create(subscription_schema_name.clone())?;
     let definition = context.normalized_sql().to_owned();
-    let dependent_table = session
+    let dependent_table_id = session
         .get_table_by_name(
             &subscription_from_table_name,
             table_database_id,
@@ -49,20 +49,22 @@ pub fn create_subscription_catalog(
         )?
         .id;
 
-    let subscription_catalog = SubscriptionCatalog {
+    let mut subscription_catalog = SubscriptionCatalog {
         id: SubscriptionId::placeholder(),
         name: subscription_name,
         definition,
-        properties: context.with_options().clone().into_inner(),
+        retention_seconds: 0,
         database_id: subscription_database_id,
         schema_id: subscription_schema_id,
-        dependent_table,
+        dependent_table_id,
         owner: UserId::new(session.user_id()),
         initialized_at_epoch: None,
         created_at_epoch: None,
         created_at_cluster_version: None,
         initialized_at_cluster_version: None,
     };
+
+    subscription_catalog.set_retention_seconds(context.with_options().clone().into_inner())?;
 
     Ok(subscription_catalog)
 }
