@@ -71,7 +71,7 @@ pub fn gen_subscription_plan(
     session.check_privileges(&check_items)?;
 
     let with_options = context.with_options().clone();
-    let mut plan_root = Planner::new(context).plan_query(bound)?;
+    let plan_root = Planner::new(context).plan_query(bound)?;
 
     let subscription_plan = plan_root.gen_subscription_plan(
         database_id,
