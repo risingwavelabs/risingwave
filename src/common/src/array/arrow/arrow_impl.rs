@@ -494,6 +494,7 @@ pub trait FromArrow {
     /// Converts Arrow `Array` to RisingWave `ArrayImpl`.
     fn from_array(&self, array: &arrow_array::ArrayRef) -> Result<ArrayImpl, ArrayError> {
         use arrow_schema::DataType::*;
+        use arrow_schema::IntervalUnit::*;
         use arrow_schema::TimeUnit::*;
         match array.data_type() {
             Boolean => self.from_bool_array(array.as_any().downcast_ref().unwrap()),
@@ -507,6 +508,9 @@ pub trait FromArrow {
             Time64(Microsecond) => self.from_time64us_array(array.as_any().downcast_ref().unwrap()),
             Timestamp(Microsecond, _) => {
                 self.from_timestampus_array(array.as_any().downcast_ref().unwrap())
+            }
+            Interval(MonthDayNano) => {
+                self.from_interval_array(array.as_any().downcast_ref().unwrap())
             }
             Utf8 => self.from_utf8_array(array.as_any().downcast_ref().unwrap()),
             Binary => self.from_binary_array(array.as_any().downcast_ref().unwrap()),
@@ -573,6 +577,13 @@ pub trait FromArrow {
         array: &arrow_array::TimestampMicrosecondArray,
     ) -> Result<ArrayImpl, ArrayError> {
         Ok(ArrayImpl::Timestamp(array.into()))
+    }
+
+    fn from_interval_array(
+        &self,
+        array: &arrow_array::IntervalMonthDayNanoArray,
+    ) -> Result<ArrayImpl, ArrayError> {
+        Ok(ArrayImpl::Interval(array.into()))
     }
 
     fn from_utf8_array(&self, array: &arrow_array::StringArray) -> Result<ArrayImpl, ArrayError> {
