@@ -119,6 +119,7 @@ public class SourceTestClient {
                         .putProperties("server.id", "1") // mysql only
                         .putProperties("publication.name", "rw_publication") // pg only
                         .putProperties("publication.create.enable", "true") // pg only
+                        .putProperties("cdc.source.wait.streaming.start.timeout", "30")
                         .build();
         return blockingStub.validateSource(req);
     }
@@ -143,6 +144,7 @@ public class SourceTestClient {
                         .putProperties("schema.name", "public") // pg only
                         .putProperties("slot.name", "orders") // pg only
                         .putProperties("server.id", "1") // mysql only
+                        .putProperties("cdc.source.wait.streaming.start.timeout", "30")
                         .build();
         Iterator<ConnectorServiceProto.GetEventStreamResponse> responses = null;
         try {
