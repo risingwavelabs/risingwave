@@ -81,6 +81,7 @@ pub struct HummockStateStoreMetrics {
 
     // memory
     pub mem_table_spill_counts: RelabeledCounterVec,
+    pub old_value_size: IntGauge,
 
     // block statistics
     pub block_efficiency_histogram: RelabeledHistogramVec,
@@ -404,6 +405,13 @@ impl HummockStateStoreMetrics {
             metric_level,
         );
 
+        let old_value_size = register_int_gauge_with_registry!(
+            "state_store_old_value_size",
+            "The size of old value",
+            registry
+        )
+        .unwrap();
+
         let opts = histogram_opts!(
             "block_efficiency_histogram",
             "Access ratio of in-memory block.",
@@ -462,6 +470,7 @@ impl HummockStateStoreMetrics {
             uploader_syncing_epoch_count,
             uploader_wait_poll_latency,
             mem_table_spill_counts,
+            old_value_size,
 
             block_efficiency_histogram,
             event_handler_pending_event,

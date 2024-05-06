@@ -42,7 +42,8 @@ use crate::hummock::event_handler::uploader::{UploadTaskOutput, UploadTaskPayloa
 use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::iterator::{Forward, HummockIterator, MergeIterator, UserIterator};
 use crate::hummock::shared_buffer::shared_buffer_batch::{
-    SharedBufferBatch, SharedBufferBatchInner, SharedBufferKeyEntry, VersionedSharedBufferValue,
+    SharedBufferBatch, SharedBufferBatchInner, SharedBufferBatchOldValues, SharedBufferKeyEntry,
+    VersionedSharedBufferValue,
 };
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::{
@@ -343,6 +344,23 @@ pub async fn merge_imms_in_memory(
     // If the imm of a table id contains old value, all other imm of the same table id should have old value
     assert!(imms.iter().all(|imm| imm.has_old_value() == has_old_value));
 
+    let (old_value_size, global_old_value_size) = if has_old_value {
+        (
+            imms.iter()
+                .map(|imm| imm.old_values().expect("has old value").size)
+                .sum(),
+            Some(
+                imms[0]
+                    .old_values()
+                    .expect("has old value")
+                    .global_old_value_size
+                    .clone(),
+            ),
+        )
+    } else {
+        (0, None)
+    };
+
     let mut imm_iters = Vec::with_capacity(imms.len());
     let key_count = imms.iter().map(|imm| imm.key_count()).sum();
     let value_count = imms.iter().map(|imm| imm.value_count()).sum();
@@ -427,6 +445,14 @@ pub async fn merge_imms_in_memory(
         // to do cooperative scheduling
         tokio::task::consume_budget().await;
     }
+
+    let old_values = old_values.map(|old_values| {
+        SharedBufferBatchOldValues::new(
+            old_values,
+            old_value_size,
+            global_old_value_size.expect("should exist when has old value"),
+        )
+    });
 
     SharedBufferBatch {
         inner: Arc::new(SharedBufferBatchInner::new_with_multi_epoch_batches(
