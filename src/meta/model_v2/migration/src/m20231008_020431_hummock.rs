@@ -30,7 +30,11 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(CompactionTask::Task).binary().not_null())
+                    .col(
+                        ColumnDef::new(CompactionTask::Task)
+                            .blob(BlobSize::Long)
+                            .not_null(),
+                    )
                     .col(
                         ColumnDef::new(CompactionTask::ContextId)
                             .integer()
@@ -50,7 +54,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(CompactionConfig::Config).binary())
+                    .col(ColumnDef::new(CompactionConfig::Config).blob(BlobSize::Long))
                     .to_owned(),
             )
             .await?;
@@ -65,7 +69,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(CompactionStatus::Status).binary())
+                    .col(ColumnDef::new(CompactionStatus::Status).blob(BlobSize::Long))
                     .to_owned(),
             )
             .await?;
