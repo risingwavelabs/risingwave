@@ -299,7 +299,7 @@ impl MemoryLimiter {
     }
 
     pub fn new_with_blocking_ratio(quota: u64, blocking_ratio: u64) -> Self {
-        let main_quota = quota * blocking_ratio / 100;
+        let main_quota = quota / 100 * blocking_ratio;
         Self {
             inner: Arc::new(MemoryLimiterInner {
                 total_size: AtomicU64::new(0),
