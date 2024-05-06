@@ -121,11 +121,27 @@ pub enum Relation {
         on_update = "NoAction",
         on_delete = "Cascade"
     )]
-    User,
+    Owner,
     #[sea_orm(has_many = "super::user_privilege::Entity")]
     UserPrivilege,
     #[sea_orm(has_many = "super::view::Entity")]
     View,
+    #[sea_orm(
+        belongs_to = "super::database::Entity",
+        from = "Column::DatabaseId",
+        to = "super::database::Column::DatabaseId",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    DatabaseId,
+    #[sea_orm(
+        belongs_to = "super::schema::Entity",
+        from = "Column::SchemaId",
+        to = "super::schema::Column::SchemaId",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    SchemaId,
 }
 
 impl Related<super::connection::Entity> for Entity {
@@ -196,7 +212,7 @@ impl Related<super::streaming_job::Entity> for Entity {
 
 impl Related<super::user::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::User.def()
+        Relation::Owner.def()
     }
 }
 

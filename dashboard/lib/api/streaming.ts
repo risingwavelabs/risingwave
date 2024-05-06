@@ -18,6 +18,7 @@
 import _ from "lodash"
 import sortBy from "lodash/sortBy"
 import { Sink, Source, Table, View } from "../../proto/gen/catalog"
+import { Table as TableV2 } from "../../proto/gen/dashboard"
 import {
   ListObjectDependenciesResponse_ObjectDependencies as ObjectDependencies,
   TableFragments,
@@ -55,6 +56,7 @@ export function relationType(x: Relation) {
     return "UNKNOWN"
   }
 }
+
 export type RelationType = ReturnType<typeof relationType>
 
 export function relationTypeTitleCase(x: Relation) {
@@ -106,7 +108,9 @@ export async function getMaterializedViews() {
 }
 
 export async function getTables() {
-  return await getTableCatalogsInner("tables")
+  let list: TableV2[] = (await api.get(`/v2/tables`)).map(TableV2.fromJSON)
+  list = sortBy(list, (x) => x.id)
+  return list
 }
 
 export async function getIndexes() {
@@ -134,6 +138,12 @@ export async function getViews() {
   views = sortBy(views, (x) => x.id)
   return views
 }
+
+// export async function getDatabases() {
+//   let views: View[] = (await api.get("/views")).map(View.fromJSON)
+//   views = sortBy(views, (x) => x.id)
+//   return views
+// }
 
 export async function getObjectDependencies() {
   let objDependencies: ObjectDependencies[] = (

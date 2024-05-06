@@ -3539,6 +3539,14 @@ impl CatalogManager {
         self.core.lock().await.database.list_databases()
     }
 
+    pub async fn databases(&self) -> BTreeMap<DatabaseId, Database> {
+        self.core.lock().await.database.databases.clone()
+    }
+
+    pub async fn schemas(&self) -> BTreeMap<SchemaId, Schema> {
+        self.core.lock().await.database.schemas.clone()
+    }
+
     pub async fn list_tables(&self) -> Vec<Table> {
         self.core.lock().await.database.list_tables()
     }
@@ -3880,6 +3888,10 @@ impl CatalogManager {
     #[cfg(test)]
     pub async fn list_users(&self) -> Vec<UserInfo> {
         self.core.lock().await.user.list_users()
+    }
+
+    pub async fn users(&self) -> BTreeMap<UserId, UserInfo> {
+        self.core.lock().await.user.user_info.clone()
     }
 
     pub async fn create_user(&self, user: &UserInfo) -> MetaResult<NotificationVersion> {

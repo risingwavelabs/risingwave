@@ -29,10 +29,11 @@ use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::table::TableType;
 use risingwave_meta_model_v2::{
     actor, connection, database, fragment, function, index, object, object_dependency, schema,
-    sink, source, streaming_job, subscription, table, user_privilege, view, ActorId,
-    ActorUpstreamActors, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId,
-    FunctionId, I32Array, IndexId, JobStatus, ObjectId, PrivateLinkService, Property, SchemaId,
-    SinkId, SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, TableId, UserId,
+    sink, source, streaming_job, subscription, table, user, user_privilege, view, ActorId,
+    ActorUpstreamActors, ColumnCatalogArray, ColumnOrderArray, ConnectionId, CreateType,
+    DatabaseId, FragmentId, FunctionId, I32Array, IndexId, JobStatus, ObjectId, PrivateLinkService,
+    Property, SchemaId, SinkId, SourceId, StreamNode, StreamSourceInfo, StreamingParallelism,
+    TableId, UserId,
 };
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
@@ -46,6 +47,7 @@ use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
 use risingwave_pb::meta::{PbRelation, PbRelationGroup};
+use risingwave_pb::plan_common::PbField;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
 use risingwave_pb::user::PbUserInfo;
@@ -53,7 +55,7 @@ use sea_orm::sea_query::{Expr, SimpleExpr};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
-    IntoActiveModel, JoinType, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait,
+    IntoActiveModel, JoinType, PaginatorTrait, QueryFilter, QuerySelect, QueryTrait, RelationTrait,
     TransactionTrait, Value,
 };
 use tokio::sync::{RwLock, RwLockReadGuard};
@@ -2546,6 +2548,75 @@ impl CatalogController {
         Ok(table_objs
             .into_iter()
             .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .collect())
+    }
+
+    pub async fn list_tables_by_type_v2(
+        &self,
+        table_type: TableType,
+    ) -> MetaResult<Vec<risingwave_pb::dashboard::PbTable>> {
+        let inner = self.inner.read().await;
+        let table_objs: Vec<(
+            ObjectId,
+            String,
+            ColumnOrderArray,
+            ColumnCatalogArray,
+            String,
+            String,
+            String,
+            String,
+        )> = Table::find()
+            .select_only()
+            .columns([
+                table::Column::TableId,
+                table::Column::Name,
+                table::Column::Pk,
+                table::Column::Columns,
+                table::Column::Definition,
+            ])
+            .columns([schema::Column::Name])
+            .columns([database::Column::Name])
+            .columns([user::Column::Name])
+            .join(JoinType::InnerJoin, table::Relation::Object1.def())
+            .join(JoinType::InnerJoin, object::Relation::SchemaId.def())
+            .join(JoinType::InnerJoin, object::Relation::DatabaseId.def())
+            .join(JoinType::InnerJoin, object::Relation::Owner.def())
+            .filter(table::Column::TableType.eq(table_type))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        Ok(table_objs
+            .into_iter()
+            .map(
+                |(id, name, pk, columns, definition, schema, database, owner)| {
+                    let pk = pk.to_protobuf();
+                    let columns = columns.to_protobuf();
+                    let fields = columns
+                        .iter()
+                        .map(|c| PbField {
+                            name: c.column_desc.as_ref().unwrap().name.clone(),
+                            data_type: c.column_desc.as_ref().unwrap().column_type.clone(),
+                        })
+                        .collect::<Vec<_>>();
+                    let pk_fields = pk
+                        .iter()
+                        .map(|p| p.column_index as usize)
+                        .map(|i| fields[i].clone())
+                        .collect();
+                    risingwave_pb::dashboard::PbTable {
+                        id: id as u32,
+                        name,
+                        schema,
+                        database,
+                        owner,
+                        source: None,
+                        primary_key: pk_fields,
+                        columns: fields,
+                        definition: definition,
+                    }
+                },
+            )
             .collect())
     }
 

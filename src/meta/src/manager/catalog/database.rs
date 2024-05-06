@@ -330,6 +330,18 @@ impl DatabaseManager {
         self.sinks.get(&sink_id)
     }
 
+    pub fn get_source(&self, source_id: SourceId) -> Option<&Source> {
+        self.sources.get(&source_id)
+    }
+
+    pub fn get_schema(&self, schema_id: SchemaId) -> Option<&Schema> {
+        self.schemas.get(&schema_id)
+    }
+
+    pub fn get_database(&self, database_id: DatabaseId) -> Option<&Database> {
+        self.databases.get(&database_id)
+    }
+
     pub fn get_subscription(&self, subscription_id: SubscriptionId) -> Option<&Subscription> {
         self.subscriptions.get(&subscription_id)
     }

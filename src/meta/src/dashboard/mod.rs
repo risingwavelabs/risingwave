@@ -53,9 +53,11 @@ pub(super) mod handlers {
     use futures::future::join_all;
     use itertools::Itertools;
     use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
+    use risingwave_pb::catalog::table::OptionalAssociatedSourceId::AssociatedSourceId;
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::{Sink, Source, Table, View};
     use risingwave_pb::common::{WorkerNode, WorkerType};
+    use risingwave_pb::dashboard;
     use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
     use risingwave_pb::meta::PbTableFragments;
     use risingwave_pb::monitor_service::{
@@ -66,7 +68,7 @@ pub(super) mod handlers {
     use thiserror_ext::AsReport;
 
     use super::*;
-    use crate::manager::WorkerId;
+    use crate::manager::{SourceId, WorkerId};
     use crate::model::MetadataModel;
 
     pub struct DashboardError(anyhow::Error);
@@ -133,6 +135,61 @@ pub(super) mod handlers {
 
     pub async fn list_tables(Extension(srv): Extension<Service>) -> Result<Json<Vec<Table>>> {
         list_table_catalogs_inner(&srv.metadata_manager, TableType::Table).await
+    }
+
+    pub async fn list_tables_v2(
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<Vec<dashboard::Table>>> {
+        let tables = match &srv.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                let tables = mgr
+                    .catalog_manager
+                    .list_tables_by_type(TableType::Table)
+                    .await;
+                let guard = mgr.catalog_manager.get_catalog_core_guard().await;
+                let database_mgr = &guard.database;
+                let user_mgr = &guard.user;
+                tables
+                    .into_iter()
+                    .map(|t| {
+                        let schema = database_mgr.get_schema(t.schema_id).unwrap();
+                        let database = database_mgr.get_database(schema.database_id).unwrap();
+                        let owner_user = user_mgr.get_user(t.owner).unwrap();
+                        let associated_source = if let Some(AssociatedSourceId(source_id)) =
+                            t.optional_associated_source_id
+                        {
+                            Some(
+                                database_mgr
+                                    .get_source(source_id as SourceId)
+                                    .unwrap()
+                                    .name
+                                    .clone(),
+                            )
+                        } else {
+                            None
+                        };
+
+                        dashboard::Table {
+                            id: t.id,
+                            name: t.name,
+                            schema: schema.name.clone(),
+                            database: database.name.clone(),
+                            owner: owner_user.name.clone(),
+                            source: associated_source,
+                            primary_key: vec![],
+                            columns: vec![],
+                            definition: t.definition.clone(),
+                        }
+                    })
+                    .collect()
+            }
+            MetadataManager::V2(mgr) => mgr
+                .catalog_controller
+                .list_tables_by_type_v2(TableType::Table.into())
+                .await
+                .map_err(err)?,
+        };
+        Ok(Json(tables))
     }
 
     pub async fn list_indexes(Extension(srv): Extension<Service>) -> Result<Json<Vec<Table>>> {
@@ -394,6 +451,7 @@ impl DashboardService {
             .route("/internal_tables", get(list_internal_tables))
             .route("/sources", get(list_sources))
             .route("/sinks", get(list_sinks))
+            .route("/v2/tables", get(list_tables_v2))
             .route("/object_dependencies", get(list_object_dependencies))
             .route("/metrics/cluster", get(prometheus::list_prometheus_cluster))
             .route(

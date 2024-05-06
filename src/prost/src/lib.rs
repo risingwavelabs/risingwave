@@ -157,6 +157,12 @@ pub mod java_binding_serde;
 #[rustfmt::skip]
 #[path = "telemetry.serde.rs"]
 pub mod telemetry_serde;
+#[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/dashboard.rs")]
+pub mod dashboard;
+#[rustfmt::skip]
+#[path = "dashboard.serde.rs"]
+pub mod dashboard_serde;
 
 #[derive(Clone, PartialEq, Eq, Debug, Error)]
 #[error("field `{0}` not found")]

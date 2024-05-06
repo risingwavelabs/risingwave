@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package dashboard;
+
+import "plan_common.proto";
+
+/**
+ * The dashboard service exposes human-readable metadata about the instance.
+ *
+ * NOTE: We don't use Protobuf service here because this service is supposed to
+ * be used by the web dashboard only, which usually use JSON instead of Protobuf.
+ */
+
+message Table {
+  uint32 id = 1;
+  string name = 2;
+  string schema = 3;
+  string database = 4;
+  string owner = 5;
+  optional string source = 6;
+  repeated plan_common.Field primary_key = 7;
+  repeated plan_common.Field columns = 8;
+  string definition = 9;
+}
+
+message Source {
+  uint32 id = 1;
+  string name = 2;
+  string schema = 3;
+  string database = 4;
+  string owner = 5;
+  string connector = 6;
+  string row_format = 7;
+  repeated plan_common.Field columns = 8;
+  string definition = 9;
+}
+
+message Sink {
+  uint32 id = 1;
+  string name = 2;
+  string schema = 3;
+  string database = 4;
+  string owner = 5;
+  string connector = 6;
+  repeated plan_common.Field columns = 8;
+  string definition = 9;
+}
+
+message MaterializedView {
+  uint32 id = 1;
+  string name = 2;
+  string schema = 3;
+  string database = 4;
+  string owner = 5;
+  repeated plan_common.Field primary_key = 7;
+  repeated plan_common.Field columns = 8;
+  string definition = 9;
+}
+
+message Index {
+  uint32 id = 1;
+  string name = 2;
+  string schema = 3;
+  string database = 4;
+  string owner = 5;
+  repeated plan_common.Field primary_key = 7;
+  repeated plan_common.Field columns = 8;
+  string definition = 9;
+}
+
+message View {
+  uint32 id = 1;
+  string name = 2;
+  string schema = 3;
+  string database = 4;
+  string owner = 5;
+  repeated plan_common.Field columns = 8;
+  string definition = 9;
+}

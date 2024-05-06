@@ -40,6 +40,7 @@ import {
   Source as RwSource,
   Table as RwTable,
 } from "../proto/gen/catalog"
+import { Table as TableV2 } from "../proto/gen/dashboard"
 import { CatalogModal, useCatalogModal } from "./CatalogModal"
 
 export const ReactJson = loadable(() => import("react-json-view"))
@@ -84,13 +85,11 @@ export const fragmentsColumn: Column<StreamingJob> = {
   ),
 }
 
-export const primaryKeyColumn: Column<RwTable> = {
+export const primaryKeyColumn: Column<TableV2> = {
   name: "Primary Key",
   width: 1,
-  content: (r) =>
-    r.pk
-      .map((order) => order.columnIndex)
-      .map((i) => r.columns[i])
+  content: (r) => 
+    r.primaryKey
       .map((col) => extractColumnInfo(col))
       .join(", "),
 }

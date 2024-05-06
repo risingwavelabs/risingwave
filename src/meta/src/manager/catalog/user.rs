@@ -80,6 +80,10 @@ impl UserManager {
         self.user_info.values().any(|x| x.name.eq(user))
     }
 
+    pub fn get_user(&self, user_id: UserId) -> Option<&UserInfo> {
+        self.user_info.get(&user_id)
+    }
+
     #[allow(dead_code)]
     pub fn ensure_user_id(&self, user_id: UserId) -> MetaResult<()> {
         if self.user_info.contains_key(&user_id) {

@@ -159,8 +159,14 @@ message Sink {
   optional uint32 connection_id = 14;
   optional uint64 initialized_at_epoch = 15;
   optional uint64 created_at_epoch = 16;
+
+  // Database name (for Debezium sink)
   string db_name = 17;
+
+  // If the sink is from table or mv, this is name of the table/mv.
+  // Otherwise it is the name of the sink itself.
   string sink_from_name = 18;
+
   StreamJobStatus stream_job_status = 19;
   SinkFormatDesc format_desc = 20;
 
