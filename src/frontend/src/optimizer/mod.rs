@@ -121,8 +121,31 @@ pub enum PlanPhase {
 }
 
 impl PlanRoot {
-    pub fn new(
+    pub fn new_with_logical_plan(
         plan: PlanRef,
+        required_dist: RequiredDist,
+        required_order: Order,
+        out_fields: FixedBitSet,
+        out_names: Vec<String>,
+    ) -> Self {
+        assert_eq!(plan.convention(), Convention::Logical);
+        Self::new_inner(plan, PlanPhase::Logical, required_dist, required_order, out_fields, out_names)
+    }
+
+    pub fn new_with_batch_plan(
+        plan: PlanRef,
+        required_dist: RequiredDist,
+        required_order: Order,
+        out_fields: FixedBitSet,
+        out_names: Vec<String>,
+    ) -> Self {
+        assert_eq!(plan.convention(), Convention::Batch);
+        Self::new_inner(plan, PlanPhase::Batch, required_dist, required_order, out_fields, out_names)
+    }
+
+    fn new_inner(
+        plan: PlanRef,
+        phase: PlanPhase,
         required_dist: RequiredDist,
         required_order: Order,
         out_fields: FixedBitSet,
@@ -134,7 +157,7 @@ impl PlanRoot {
 
         Self {
             plan,
-            phase: PlanPhase::Logical,
+            phase,
             required_dist,
             required_order,
             out_fields,
@@ -1122,7 +1145,7 @@ mod tests {
         .into();
         let out_fields = FixedBitSet::with_capacity_and_blocks(2, [1]);
         let out_names = vec!["v1".into()];
-        let root = PlanRoot::new(
+        let root = PlanRoot::new_with_logical_plan(
             values,
             RequiredDist::Any,
             Order::any(),

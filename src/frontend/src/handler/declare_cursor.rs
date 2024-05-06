@@ -166,7 +166,7 @@ pub fn create_batch_plan_for_cursor(
     let out_fields = FixedBitSet::from_iter(0..batch_log_seq_scan.core().schema().len());
     let out_names = batch_log_seq_scan.core().column_names();
     // Here we just need a plan_root to call the method, only out_fields and out_names will be used
-    let mut plan_root = PlanRoot::new(
+    let plan_root = PlanRoot::new_with_batch_plan(
         PlanRef::from(batch_log_seq_scan.clone()),
         RequiredDist::single(),
         Order::default(),
@@ -176,15 +176,15 @@ pub fn create_batch_plan_for_cursor(
     let schema = batch_log_seq_scan.core().schema().clone();
     let (batch_log_seq_scan, query_mode) = match handle_args.session.config().query_mode() {
         QueryMode::Auto => (
-            plan_root.gen_batch_distributed_plan(PlanRef::from(batch_log_seq_scan))?,
+            plan_root.gen_batch_local_plan()?,
             QueryMode::Local,
         ),
         QueryMode::Local => (
-            plan_root.gen_batch_local_plan(PlanRef::from(batch_log_seq_scan))?,
+            plan_root.gen_batch_local_plan()?,
             QueryMode::Local,
         ),
         QueryMode::Distributed => (
-            plan_root.gen_batch_distributed_plan(PlanRef::from(batch_log_seq_scan))?,
+            plan_root.gen_batch_distributed_plan()?,
             QueryMode::Distributed,
         ),
     };
