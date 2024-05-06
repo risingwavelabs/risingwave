@@ -179,6 +179,7 @@ impl StreamSink {
             .into_stream()
             .expect("input should be stream plan")
             .clone_with_new_plan_id();
+
         Self {
             base,
             input,
