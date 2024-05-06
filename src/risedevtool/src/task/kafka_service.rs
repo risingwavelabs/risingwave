@@ -42,7 +42,7 @@ impl KafkaService {
         Ok(Command::new(self.kafka_path()?))
     }
 
-    /// Format KRaft storage. This is a necessary step to start a fresh Kafka service.
+    /// Format kraft storage. This is a necessary step to start a fresh Kafka service.
     fn kafka_storage_format(&self) -> Result<Command> {
         let prefix_bin = env::var("PREFIX_BIN")?;
         let path = Path::new(&prefix_bin)
