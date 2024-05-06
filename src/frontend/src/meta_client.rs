@@ -33,7 +33,7 @@ use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistributi
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::EventLog;
+use risingwave_pb::meta::{EventLog, PbThrottleTarget};
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
@@ -117,6 +117,13 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_all_nodes(&self) -> Result<Vec<WorkerNode>>;
 
     async fn list_compact_task_progress(&self) -> Result<Vec<CompactTaskProgress>>;
+
+    async fn apply_throttle(
+        &self,
+        kind: PbThrottleTarget,
+        id: u32,
+        rate_limit: Option<u32>,
+    ) -> Result<()>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -292,5 +299,17 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_compact_task_progress(&self) -> Result<Vec<CompactTaskProgress>> {
         self.0.list_compact_task_progress().await
+    }
+
+    async fn apply_throttle(
+        &self,
+        kind: PbThrottleTarget,
+        id: u32,
+        rate_limit: Option<u32>,
+    ) -> Result<()> {
+        self.0
+            .apply_throttle(kind, id, rate_limit)
+            .await
+            .map(|_| ())
     }
 }

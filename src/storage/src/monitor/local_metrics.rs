@@ -22,6 +22,7 @@ use std::sync::Arc;
 use prometheus::local::{LocalHistogram, LocalIntCounter};
 use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::LabelGuardedLocalIntCounter;
+use risingwave_hummock_sdk::table_stats::TableStatsMap;
 
 use super::HummockStateStoreMetrics;
 use crate::monitor::CompactorMetrics;
@@ -63,6 +64,11 @@ pub struct StoreLocalStatistic {
     reported: AtomicBool,
     #[cfg(all(debug_assertions, not(any(madsim, test, feature = "test"))))]
     added: AtomicBool,
+
+    /// The stats of key skipped by watermark for each table.
+    /// Used by `SkipWatermarkIterator`.
+    /// Generalize it in the future if there're other iterators that'll also drop keys.
+    pub skipped_by_watermark_table_stats: TableStatsMap,
 }
 
 impl StoreLocalStatistic {
