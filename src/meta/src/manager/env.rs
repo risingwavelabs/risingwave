@@ -271,6 +271,12 @@ pub struct MetaOpts {
     pub enable_check_task_level_overlap: bool,
     pub enable_dropped_column_reclaim: bool,
     pub object_store_config: ObjectStoreConfig,
+
+    /// The maximum number of trivial move tasks to be picked in a single loop
+    pub max_trivial_move_task_count_per_loop: usize,
+
+    /// The maximum number of times to probe for PullTaskEvent
+    pub max_get_task_probe_times: usize,
 }
 
 impl MetaOpts {
@@ -327,6 +333,8 @@ impl MetaOpts {
             enable_check_task_level_overlap: true,
             enable_dropped_column_reclaim: false,
             object_store_config: ObjectStoreConfig::default(),
+            max_trivial_move_task_count_per_loop: 256,
+            max_get_task_probe_times: 5,
         }
     }
 }

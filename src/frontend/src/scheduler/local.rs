@@ -30,7 +30,7 @@ use risingwave_batch::task::{ShutdownToken, TaskId};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
-use risingwave_common::hash::WorkerMapping;
+use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::tracing::{InstrumentStream, TracingContext};
 use risingwave_connector::source::SplitMetaData;
@@ -55,6 +55,7 @@ use crate::scheduler::task_context::FrontendBatchTaskContext;
 use crate::scheduler::{ReadSnapshot, SchedulerError, SchedulerResult};
 use crate::session::{FrontendEnv, SessionImpl};
 
+// TODO(error-handling): use a concrete error type.
 pub type LocalQueryStream = ReceiverStream<Result<DataChunk, BoxedError>>;
 pub struct LocalQueryExecution {
     sql: String,
@@ -312,12 +313,12 @@ impl LocalQueryExecution {
                     // Similar to the distributed case (StageRunner::schedule_tasks).
                     // Set `vnode_ranges` of the scan node in `local_execute_plan` of each
                     // `exchange_source`.
-                    let (worker_ids, vnode_bitmaps): (Vec<_>, Vec<_>) =
+                    let (parallel_unit_ids, vnode_bitmaps): (Vec<_>, Vec<_>) =
                         vnode_bitmaps.clone().into_iter().unzip();
                     let workers = self
                         .worker_node_manager
                         .manager
-                        .get_workers_by_worker_ids(&worker_ids)?;
+                        .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
                     for (idx, (worker_node, partition)) in
                         (workers.into_iter().zip_eq_fast(vnode_bitmaps.into_iter())).enumerate()
                     {
@@ -472,6 +473,26 @@ impl LocalQueryExecution {
                     node_body: Some(node_body),
                 })
             }
+            PlanNodeType::BatchLogSeqScan => {
+                let mut node_body = execution_plan_node.node.clone();
+                match &mut node_body {
+                    NodeBody::LogRowSeqScan(ref mut scan_node) => {
+                        if let Some(partition) = partition {
+                            let partition = partition
+                                .into_table()
+                                .expect("PartitionInfo should be TablePartitionInfo here");
+                            scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+
+                Ok(PlanNodePb {
+                    children: vec![],
+                    identity,
+                    node_body: Some(node_body),
+                })
+            }
             PlanNodeType::BatchSource
             | PlanNodeType::BatchKafkaScan
             | PlanNodeType::BatchIcebergScan => {
@@ -562,7 +583,10 @@ impl LocalQueryExecution {
     }
 
     #[inline(always)]
-    fn get_table_dml_vnode_mapping(&self, table_id: &TableId) -> SchedulerResult<WorkerMapping> {
+    fn get_table_dml_vnode_mapping(
+        &self,
+        table_id: &TableId,
+    ) -> SchedulerResult<ParallelUnitMapping> {
         let guard = self.front_env.catalog_reader().read_guard();
 
         let table = guard
@@ -586,11 +610,11 @@ impl LocalQueryExecution {
             // dml should use streaming vnode mapping
             let vnode_mapping = self.get_table_dml_vnode_mapping(table_id)?;
             let worker_node = {
-                let worker_ids = vnode_mapping.iter_unique().collect_vec();
+                let parallel_unit_ids = vnode_mapping.iter_unique().collect_vec();
                 let candidates = self
                     .worker_node_manager
                     .manager
-                    .get_workers_by_worker_ids(&worker_ids)?;
+                    .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
                 if candidates.is_empty() {
                     return Err(BatchError::EmptyWorkerNodes.into());
                 }

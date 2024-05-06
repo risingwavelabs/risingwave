@@ -386,9 +386,7 @@ async fn execute(
                         "no affected rows in output".to_string(),
                     )))
                 }
-                Some(row) => {
-                    row.map_err(|err| RwError::from(ErrorCode::InternalError(format!("{}", err))))?
-                }
+                Some(row) => row?,
             };
             let affected_rows_str = first_row_set[0].values()[0]
                 .as_ref()

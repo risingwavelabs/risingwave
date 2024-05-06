@@ -30,6 +30,7 @@ use risingwave_pb::connector_service::sink_writer_stream_request::{
 };
 use risingwave_pb::connector_service::sink_writer_stream_response::CommitResponse;
 use risingwave_pb::connector_service::*;
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use thiserror_ext::AsReport;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::{Channel, Endpoint};
@@ -238,6 +239,15 @@ impl ConnectorClient {
         is_source_job: bool,
         is_backfill_table: bool,
     ) -> Result<()> {
+        let table_schema = table_schema.map(|mut table_schema| {
+            table_schema.columns.retain(|c| {
+                !matches!(
+                    c.generated_or_default_column,
+                    Some(GeneratedOrDefaultColumn::GeneratedColumn(_))
+                )
+            });
+            table_schema
+        });
         let response = self
             .rpc_client
             .clone()
