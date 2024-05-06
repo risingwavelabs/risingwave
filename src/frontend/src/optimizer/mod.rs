@@ -129,7 +129,14 @@ impl PlanRoot {
         out_names: Vec<String>,
     ) -> Self {
         assert_eq!(plan.convention(), Convention::Logical);
-        Self::new_inner(plan, PlanPhase::Logical, required_dist, required_order, out_fields, out_names)
+        Self::new_inner(
+            plan,
+            PlanPhase::Logical,
+            required_dist,
+            required_order,
+            out_fields,
+            out_names,
+        )
     }
 
     pub fn new_with_batch_plan(
@@ -140,7 +147,14 @@ impl PlanRoot {
         out_names: Vec<String>,
     ) -> Self {
         assert_eq!(plan.convention(), Convention::Batch);
-        Self::new_inner(plan, PlanPhase::Batch, required_dist, required_order, out_fields, out_names)
+        Self::new_inner(
+            plan,
+            PlanPhase::Batch,
+            required_dist,
+            required_order,
+            out_fields,
+            out_names,
+        )
     }
 
     fn new_inner(

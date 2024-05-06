@@ -68,7 +68,8 @@ impl Planner {
             // Do not output projected_row_id hidden column.
             out_fields.set(0, false);
         }
-        let root = PlanRoot::new_with_logical_plan(plan, RequiredDist::Any, order, out_fields, out_names);
+        let root =
+            PlanRoot::new_with_logical_plan(plan, RequiredDist::Any, order, out_fields, out_names);
         Ok(root)
     }
 }

@@ -175,14 +175,8 @@ pub fn create_batch_plan_for_cursor(
     );
     let schema = batch_log_seq_scan.core().schema().clone();
     let (batch_log_seq_scan, query_mode) = match handle_args.session.config().query_mode() {
-        QueryMode::Auto => (
-            plan_root.gen_batch_local_plan()?,
-            QueryMode::Local,
-        ),
-        QueryMode::Local => (
-            plan_root.gen_batch_local_plan()?,
-            QueryMode::Local,
-        ),
+        QueryMode::Auto => (plan_root.gen_batch_local_plan()?, QueryMode::Local),
+        QueryMode::Local => (plan_root.gen_batch_local_plan()?, QueryMode::Local),
         QueryMode::Distributed => (
             plan_root.gen_batch_distributed_plan()?,
             QueryMode::Distributed,
