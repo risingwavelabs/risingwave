@@ -542,7 +542,11 @@ pub enum SinkError {
     #[error("Starrocks error: {0}")]
     Starrocks(String),
     #[error("Snowflake error: {0}")]
-    Snowflake(String),
+    Snowflake(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Pulsar error: {0}")]
     Pulsar(
         #[source]

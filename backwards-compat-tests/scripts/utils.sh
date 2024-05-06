@@ -89,9 +89,6 @@ kill_cluster() {
 
     echo "kill zookeeper"
     kill_zookeeper
-
-    # Kill their tmux sessions
-    $TMUX list-windows -t risedev -F "#{pane_id}" | xargs -I {} $TMUX send-keys -t {} C-c C-d
   fi
   set -e
 

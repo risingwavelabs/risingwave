@@ -130,31 +130,36 @@ impl PostgresExternalTableReader {
         )
         .context("failed to extract postgres connector properties")?;
 
-        let database_url = format!(
-            "postgresql://{}:{}@{}:{}/{}?sslmode={}",
-            config.username,
-            config.password,
-            config.host,
-            config.port,
-            config.database,
-            config.sslmode
-        );
+        let mut pg_config = tokio_postgres::Config::new();
+        pg_config
+            .user(&config.username)
+            .password(&config.password)
+            .host(&config.host)
+            .port(config.port.parse::<u16>().unwrap())
+            .dbname(&config.database);
 
         #[cfg(not(madsim))]
         let connector = match config.sslmode {
-            SslMode::Disable => MaybeMakeTlsConnector::NoTls(NoTls),
-            SslMode::Prefer => match SslConnector::builder(SslMethod::tls()) {
-                Ok(mut builder) => {
-                    // disable certificate verification for `prefer`
-                    builder.set_verify(SslVerifyMode::NONE);
-                    MaybeMakeTlsConnector::Tls(MakeTlsConnector::new(builder.build()))
+            SslMode::Disabled => {
+                pg_config.ssl_mode(tokio_postgres::config::SslMode::Disable);
+                MaybeMakeTlsConnector::NoTls(NoTls)
+            }
+            SslMode::Preferred => {
+                pg_config.ssl_mode(tokio_postgres::config::SslMode::Prefer);
+                match SslConnector::builder(SslMethod::tls()) {
+                    Ok(mut builder) => {
+                        // disable certificate verification for `prefer`
+                        builder.set_verify(SslVerifyMode::NONE);
+                        MaybeMakeTlsConnector::Tls(MakeTlsConnector::new(builder.build()))
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e.as_report(), "SSL connector error");
+                        MaybeMakeTlsConnector::NoTls(NoTls)
+                    }
                 }
-                Err(e) => {
-                    tracing::warn!(error = %e.as_report(), "SSL connector error");
-                    MaybeMakeTlsConnector::NoTls(NoTls)
-                }
-            },
-            SslMode::Require => {
+            }
+            SslMode::Required => {
+                pg_config.ssl_mode(tokio_postgres::config::SslMode::Require);
                 let mut builder = SslConnector::builder(SslMethod::tls())?;
                 // disable certificate verification for `require`
                 builder.set_verify(SslVerifyMode::NONE);
@@ -164,7 +169,7 @@ impl PostgresExternalTableReader {
         #[cfg(madsim)]
         let connector = NoTls;
 
-        let (client, connection) = tokio_postgres::connect(&database_url, connector).await?;
+        let (client, connection) = pg_config.connect(connector).await?;
 
         tokio::spawn(async move {
             if let Err(e) = connection.await {
