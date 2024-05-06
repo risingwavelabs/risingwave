@@ -32,15 +32,10 @@ pub fn create_subscription_catalog(
     stmt: CreateSubscriptionStatement,
 ) -> Result<SubscriptionCatalog> {
     let db_name = session.database();
-    let (schema_name, subscription_name) =
+    let (_, subscription_name) =
         Binder::resolve_schema_qualified_name(db_name, stmt.subscription_name.clone())?;
-    let subscription_from_table_name = stmt
-        .subscription_from
-        .0
-        .last()
-        .unwrap()
-        .real_value()
-        .clone();
+    let (schema_name, subscription_from_table_name) =
+        Binder::resolve_schema_qualified_name(db_name, stmt.subscription_from.clone())?;
     let (database_id, schema_id) =
         session.get_database_and_schema_id_for_create(schema_name.clone())?;
     let definition = context.normalized_sql().to_owned();

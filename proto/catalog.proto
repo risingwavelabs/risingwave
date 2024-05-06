@@ -176,7 +176,7 @@ message Sink {
 }
 
 message Subscription {
-  enum SubscriptionState{
+  enum SubscriptionState {
     INIT = 0;
     CREATE = 1;
   }
