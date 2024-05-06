@@ -14,9 +14,11 @@
 
 use std::collections::{HashMap, HashSet};
 
+use risingwave_common::catalog::TableId;
 use risingwave_pb::common::PbWorkerNode;
 use tracing::warn;
 
+use crate::barrier::Command;
 use crate::manager::{ActiveStreamingWorkerNodes, ActorInfos, WorkerId};
 use crate::model::ActorId;
 
@@ -48,11 +50,18 @@ pub struct InflightActorInfo {
 
     /// `actor_id` => `WorkerId`
     pub actor_location_map: HashMap<ActorId, WorkerId>,
+
+    /// mv_table_id => subscription_id => retention seconds
+    pub mv_depended_subscriptions: HashMap<TableId, HashMap<u32, u64>>,
 }
 
 impl InflightActorInfo {
     /// Resolve inflight actor info from given nodes and actors that are loaded from meta store. It will be used during recovery to rebuild all streaming actors.
-    pub fn resolve(active_nodes: &ActiveStreamingWorkerNodes, actor_infos: ActorInfos) -> Self {
+    pub fn resolve(
+        active_nodes: &ActiveStreamingWorkerNodes,
+        actor_infos: ActorInfos,
+        mv_depended_subscriptions: HashMap<TableId, HashMap<u32, u64>>,
+    ) -> Self {
         let node_map = active_nodes.current().clone();
 
         let actor_map = actor_infos
@@ -77,6 +86,7 @@ impl InflightActorInfo {
             actor_map,
             actor_map_to_send,
             actor_location_map,
+            mv_depended_subscriptions,
         }
     }
 
@@ -96,8 +106,8 @@ impl InflightActorInfo {
 
     /// Apply some actor changes before issuing a barrier command, if the command contains any new added actors, we should update
     /// the info correspondingly.
-    pub fn pre_apply(&mut self, changes: Option<CommandActorChanges>) {
-        if let Some(CommandActorChanges { to_add, .. }) = changes {
+    pub fn pre_apply(&mut self, command: &Command) {
+        if let Some(CommandActorChanges { to_add, .. }) = command.actor_changes() {
             for actor_desc in to_add {
                 assert!(self.node_map.contains_key(&actor_desc.node_id));
                 assert!(
@@ -124,12 +134,27 @@ impl InflightActorInfo {
                 );
             }
         };
+        if let Command::CreateSubscription {
+            subscription_id,
+            upstream_mv_table_id,
+            retention_second,
+        } = command
+        {
+            if let Some(prev_retiontion) = self
+                .mv_depended_subscriptions
+                .entry(*upstream_mv_table_id)
+                .or_default()
+                .insert(*subscription_id, *retention_second)
+            {
+                warn!(subscription_id, ?upstream_mv_table_id, mv_depended_subscriptions = ?self.mv_depended_subscriptions, prev_retiontion, "add an existing subscription id");
+            }
+        }
     }
 
     /// Apply some actor changes after the barrier command is collected, if the command contains any actors that are dropped, we should
     /// remove that from the snapshot correspondingly.
-    pub fn post_apply(&mut self, changes: Option<CommandActorChanges>) {
-        if let Some(CommandActorChanges { to_remove, .. }) = changes {
+    pub fn post_apply(&mut self, command: &Command) {
+        if let Some(CommandActorChanges { to_remove, .. }) = command.actor_changes() {
             for actor_id in to_remove {
                 let node_id = self
                     .actor_location_map
@@ -144,6 +169,25 @@ impl InflightActorInfo {
             self.actor_map.retain(|_, actor_ids| !actor_ids.is_empty());
             self.actor_map_to_send
                 .retain(|_, actor_ids| !actor_ids.is_empty());
+        }
+        if let Command::DropSubscription {
+            subscription_id,
+            upstream_mv_table_id,
+        } = command
+        {
+            let removed = match self.mv_depended_subscriptions.get_mut(upstream_mv_table_id) {
+                Some(subscriptions) => {
+                    let removed = subscriptions.remove(subscription_id).is_some();
+                    if removed && subscriptions.is_empty() {
+                        self.mv_depended_subscriptions.remove(upstream_mv_table_id);
+                    }
+                    removed
+                }
+                None => false,
+            };
+            if !removed {
+                warn!(subscription_id, ?upstream_mv_table_id, mv_depended_subscriptions = ?self.mv_depended_subscriptions, "remove a non-existing subscription id");
+            }
         }
     }
 

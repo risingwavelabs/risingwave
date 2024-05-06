@@ -34,7 +34,8 @@ use crate::hummock::iterator::{
     ConcatIteratorInner, Forward, HummockIteratorUnion, MergeIterator, UserIterator,
 };
 use crate::hummock::shared_buffer::shared_buffer_batch::{
-    SharedBufferBatch, SharedBufferBatchIterator, SharedBufferItem, SharedBufferValue,
+    SharedBufferBatch, SharedBufferBatchIterator, SharedBufferBatchOldValues, SharedBufferItem,
+    SharedBufferValue,
 };
 use crate::hummock::store::version::{read_filter_for_version, HummockVersionReader};
 use crate::hummock::utils::{
@@ -496,7 +497,8 @@ impl LocalHummockStorage {
             .start_timer();
 
         let imm_size = if !sorted_items.is_empty() {
-            let size = SharedBufferBatch::measure_batch_size(&sorted_items, old_values.as_deref());
+            let (size, old_value_size) =
+                SharedBufferBatch::measure_batch_size(&sorted_items, old_values.as_deref());
 
             self.write_limiter.wait_permission(self.table_id).await;
             let limiter = self.memory_limiter.as_ref();
@@ -522,6 +524,14 @@ impl LocalHummockStorage {
                 );
                 tracker
             };
+
+            let old_values = old_values.map(|old_values| {
+                SharedBufferBatchOldValues::new(
+                    old_values,
+                    old_value_size,
+                    self.stats.old_value_size.clone(),
+                )
+            });
 
             let instance_id = self.instance_guard.instance_id;
             let imm = SharedBufferBatch::build_shared_buffer_batch(
