@@ -92,16 +92,16 @@ impl<'a> FromSql<'a> for ScalarAdapter<'_> {
         ty: &Type,
         raw: &'a [u8],
     ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
-        match ty {
-            &Type::UUID => {
+        match *ty {
+            Type::UUID => {
                 let uuid = uuid::Uuid::from_sql(ty, raw)?;
                 Ok(ScalarAdapter::Uuid(uuid))
             }
-            &Type::NUMERIC => {
+            Type::NUMERIC => {
                 let numeric = PgNumeric::from_sql(ty, raw)?;
                 Ok(ScalarAdapter::Numeric(numeric))
             }
-            &Type::ANYENUM => {
+            Type::ANYENUM => {
                 let s = String::from_utf8(raw.to_vec())?;
                 Ok(ScalarAdapter::Enum(EnumString(s)))
             }
@@ -135,7 +135,7 @@ impl ScalarAdapter<'_> {
         })
     }
 
-    pub fn to_scalar(self, ty: DataType) -> ConnectorResult<ScalarImpl> {
+    pub fn into_scalar(self, ty: DataType) -> ConnectorResult<ScalarImpl> {
         match (&self, &ty) {
             (ScalarAdapter::Builtin(scalar), _) => Ok(scalar.into_scalar_impl()),
             (ScalarAdapter::Uuid(uuid), &DataType::Varchar) => {

@@ -125,7 +125,7 @@ pub fn postgres_row_to_owned_row(
                     // Note: It's only used to map the numeric type in upstream Postgres to RisingWave's rw_int256.
                     let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
                     match res {
-                        Ok(val) => val.map(|v| v.to_scalar(DataType::Int256)).transpose()?,
+                        Ok(val) => val.map(|v| v.into_scalar(DataType::Int256)).transpose()?,
                         Err(err) => {
                             log_error!(name, err, "parse numeric column as pg_numeric failed");
                             None
@@ -137,7 +137,7 @@ pub fn postgres_row_to_owned_row(
                         // enum type needs to be handled separately
                         let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
                         match res {
-                            Ok(val) => val.map(|v| v.to_scalar(DataType::Varchar)).transpose()?,
+                            Ok(val) => val.map(|v| v.into_scalar(DataType::Varchar)).transpose()?,
                             Err(err) => {
                                 log_error!(name, err, "parse enum column failed");
                                 None
@@ -150,7 +150,7 @@ pub fn postgres_row_to_owned_row(
                                 let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
                                 match res {
                                     Ok(val) => {
-                                        val.map(|v| v.to_scalar(DataType::Varchar)).transpose()?
+                                        val.map(|v| v.into_scalar(DataType::Varchar)).transpose()?
                                     }
                                     Err(err) => {
                                         log_error!(name, err, "parse uuid column failed");
@@ -166,7 +166,7 @@ pub fn postgres_row_to_owned_row(
                                 let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
                                 match res {
                                     Ok(val) => {
-                                        val.map(|v| v.to_scalar(DataType::Varchar)).transpose()?
+                                        val.map(|v| v.into_scalar(DataType::Varchar)).transpose()?
                                     }
                                     Err(err) => {
                                         log_error!(
@@ -227,7 +227,7 @@ pub fn postgres_row_to_owned_row(
                             Ok(val) => {
                                 if let Some(vec) = val {
                                     for val in vec {
-                                        builder.append(Some(val.to_scalar(DataType::Varchar)?))
+                                        builder.append(Some(val.into_scalar(DataType::Varchar)?))
                                     }
                                 }
                                 Some(ScalarImpl::from(ListValue::new(builder.finish())))
@@ -277,7 +277,7 @@ pub fn postgres_row_to_owned_row(
                                                     for val in vec {
                                                         builder.append(
                                                             val.map(|v| {
-                                                                v.to_scalar(DataType::Varchar)
+                                                                v.into_scalar(DataType::Varchar)
                                                             })
                                                             .transpose()?,
                                                         )
@@ -300,7 +300,7 @@ pub fn postgres_row_to_owned_row(
                                                     for val in vec {
                                                         builder.append(
                                                             val.map(|v| {
-                                                                v.to_scalar(DataType::Varchar)
+                                                                v.into_scalar(DataType::Varchar)
                                                             })
                                                             .transpose()?,
                                                         )
@@ -389,7 +389,7 @@ pub fn postgres_row_to_owned_row(
                                         if let Some(vec) = val {
                                             for val in vec {
                                                 builder.append(
-                                                    val.map(|v| v.to_scalar(DataType::Int256))
+                                                    val.map(|v| v.into_scalar(DataType::Int256))
                                                         .transpose()?,
                                                 )
                                             }
