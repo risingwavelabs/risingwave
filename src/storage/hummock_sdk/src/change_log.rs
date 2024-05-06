@@ -39,6 +39,7 @@ impl TableChangeLog {
             .filter_epoch((min_epoch, u64::MAX))
             .iter()
             .flat_map(|epoch_change_log| epoch_change_log.epochs.clone())
+            .filter(|a| a >= &min_epoch)
             .clone()
             .collect();
         let end = min(max_count, epochs.len());

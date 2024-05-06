@@ -482,16 +482,19 @@ impl CatalogController {
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("subscription", job_id))?;
+        txn.commit().await?;
 
-        let relations = vec![PbRelation {
-            relation_info: Some(PbRelationInfo::Subscription(
-                ObjectModel(subscription, obj.unwrap()).into(),
-            )),
-        }];
         let version = self
             .notify_frontend(
-                NotificationOperation::Add,
-                NotificationInfo::RelationGroup(PbRelationGroup { relations }),
+                Operation::Add,
+                Info::RelationGroup(PbRelationGroup {
+                    relations: vec![PbRelation {
+                        relation_info: PbRelationInfo::Subscription(
+                            ObjectModel(subscription, obj.unwrap()).into(),
+                        )
+                        .into(),
+                    }],
+                }),
             )
             .await;
         Ok(version)
