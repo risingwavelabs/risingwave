@@ -35,15 +35,12 @@ impl TableChangeLog {
     }
 
     pub fn get_epochs(&self, min_epoch: u64, max_count: usize) -> Vec<u64> {
-        let start = self.0.partition_point(|epoch_change_log| {
-            epoch_change_log.epochs.last().expect("non-empty") < &min_epoch
-        });
-
-        let epochs = self.0[start..]
+        let epochs: Vec<u64> = self
+            .filter_epoch((min_epoch, u64::MAX))
             .iter()
-            .flat_map(|a| a.epochs.clone())
-            .filter(|a| a >= &min_epoch)
-            .collect::<Vec<_>>();
+            .flat_map(|epoch_change_log| epoch_change_log.epochs.clone())
+            .clone()
+            .collect();
         let end = min(max_count, epochs.len());
         epochs[..end].into()
     }

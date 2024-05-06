@@ -10,6 +10,30 @@ impl MigrationTrait for Migration {
             .alter_table(
                 MigrationTable::alter()
                     .table(Subscription::Table)
+                    .add_column(ColumnDef::new(Subscription::RetentionSeconds).big_integer())
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                MigrationTable::alter()
+                    .table(Subscription::Table)
+                    .add_column(ColumnDef::new(Subscription::SubscriptionState).integer())
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                MigrationTable::alter()
+                    .table(Subscription::Table)
+                    .add_column(ColumnDef::new(Subscription::DependentTableId).integer())
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                MigrationTable::alter()
+                    .table(Subscription::Table)
                     .drop_column(Alias::new(Subscription::Columns.to_string()))
                     .to_owned(),
             )
@@ -56,43 +80,6 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await?;
-        manager
-            .alter_table(
-                MigrationTable::alter()
-                    .table(Subscription::Table)
-                    .add_column(
-                        ColumnDef::new(Subscription::RetentionSeconds)
-                            .big_integer()
-                            .not_null(),
-                    )
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .alter_table(
-                MigrationTable::alter()
-                    .table(Subscription::Table)
-                    .add_column(
-                        ColumnDef::new(Subscription::SubscriptionState)
-                            .integer()
-                            .not_null(),
-                    )
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .alter_table(
-                MigrationTable::alter()
-                    .table(Subscription::Table)
-                    .add_column(
-                        ColumnDef::new(Subscription::DependentTableId)
-                            .integer()
-                            .not_null(),
-                    )
-                    .to_owned(),
-            )
-            .await?;
-
         Ok(())
     }
 
@@ -102,33 +89,6 @@ impl MigrationTrait for Migration {
                 MigrationTable::alter()
                     .table(Subscription::Table)
                     .add_column(ColumnDef::new(Subscription::Columns).binary().not_null())
-                    .add_column(ColumnDef::new(Subscription::PlanPk).binary().not_null())
-                    .add_column(
-                        ColumnDef::new(Subscription::DistributionKey)
-                            .json_binary()
-                            .not_null(),
-                    )
-                    .add_column(
-                        ColumnDef::new(Subscription::Properties)
-                            .json_binary()
-                            .not_null(),
-                    )
-                    .add_column(
-                        ColumnDef::new(Subscription::SubscriptionFromName)
-                            .string()
-                            .not_null(),
-                    )
-                    .add_column(
-                        ColumnDef::new(Subscription::SubscriptionInternalTableName).string(),
-                    )
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .alter_table(
-                MigrationTable::alter()
-                    .table(Subscription::Table)
-                    .add_column(ColumnDef::new(Subscription::Columns).binary().not_null())
                     .to_owned(),
             )
             .await?;
@@ -144,11 +104,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 MigrationTable::alter()
                     .table(Subscription::Table)
-                    .add_column(
-                        ColumnDef::new(Subscription::DistributionKey)
-                            .json_binary()
-                            .not_null(),
-                    )
+                    .add_column(ColumnDef::new(Subscription::DistributionKey).json_binary())
                     .to_owned(),
             )
             .await?;
@@ -156,11 +112,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 MigrationTable::alter()
                     .table(Subscription::Table)
-                    .add_column(
-                        ColumnDef::new(Subscription::Properties)
-                            .json_binary()
-                            .not_null(),
-                    )
+                    .add_column(ColumnDef::new(Subscription::Properties).json_binary())
                     .to_owned(),
             )
             .await?;
@@ -168,11 +120,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 MigrationTable::alter()
                     .table(Subscription::Table)
-                    .add_column(
-                        ColumnDef::new(Subscription::SubscriptionFromName)
-                            .string()
-                            .not_null(),
-                    )
+                    .add_column(ColumnDef::new(Subscription::SubscriptionFromName).string())
                     .to_owned(),
             )
             .await?;
