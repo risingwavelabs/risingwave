@@ -344,7 +344,10 @@ impl LocalBarrierWorker {
                 }
             }
         };
-        let actor_ids = actors.iter().map(|actor| actor.actor_id).collect();
+        let actor_ids = actors
+            .iter()
+            .map(|actor| actor.actor.as_ref().unwrap().actor_id)
+            .collect();
         let actor_manager = self.actor_manager.clone();
         let create_actors_fut = crate::CONFIG.scope(
             self.actor_manager.env.config().clone(),
