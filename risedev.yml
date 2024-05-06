@@ -1386,12 +1386,6 @@ template:
 
     persist-data: true
 
-  # **DUMMY** Apache ZooKeeper service
-  # We use KRaft for Kafka, so ZooKeeper is not needed. Keep it here for compatibility.
-  zookeeper:
-    # Id to be picked-up by services
-    id: zookeeper
-
   # Only supported in RiseDev compose
   redpanda:
     # Id to be picked-up by services

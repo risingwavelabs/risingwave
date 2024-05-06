@@ -271,13 +271,6 @@ fn task_main(
                 ctx.pb
                     .set_message(format!("using Opendal, namenode =  {}", c.namenode));
             }
-            ServiceConfig::DummyZooKeeper(c) => {
-                let mut ctx =
-                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-                DummyService::new(&c.id).execute(&mut ctx)?;
-                ctx.pb
-                    .set_message("dummy service for compatibility, not actually started");
-            }
             ServiceConfig::Kafka(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
