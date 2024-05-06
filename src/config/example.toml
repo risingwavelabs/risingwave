@@ -188,13 +188,9 @@ recent_filter_rotate_interval_ms = 10000
 object_store_set_atomic_write_dir = false
 
 [storage.object_store.retry]
-streaming_read_timeout_ms = 604800000
-streaming_upload_timeout_ms = 604800000
-upload_timeout_ms = 604800000
-read_timeout_ms = 604800000
-req_retry_interval_ms = 1000
-req_retry_max_delay_ms = 10000
-req_retry_factor = 2
+req_backoff_interval_ms = 1000
+req_backoff_max_delay_ms = 10000
+req_backoff_factor = 2
 upload_attempt_timeout_ms = 8000
 upload_retry_attempts = 3
 streaming_upload_attempt_timeout_ms = 5000

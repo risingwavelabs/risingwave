@@ -1035,12 +1035,12 @@ pub struct S3ObjectStoreDeveloperConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct ObjectStoreRetryConfig {
-    #[serde(default = "default::object_store_config::object_store_req_retry_interval_ms")]
-    pub req_retry_interval_ms: u64,
-    #[serde(default = "default::object_store_config::object_store_req_retry_max_delay_ms")]
-    pub req_retry_max_delay_ms: u64,
-    #[serde(default = "default::object_store_config::object_store_req_retry_factor")]
-    pub req_retry_factor: u64,
+    #[serde(default = "default::object_store_config::object_store_req_backoff_interval_ms")]
+    pub req_backoff_interval_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_req_backoff_max_delay_ms")]
+    pub req_backoff_max_delay_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_req_backoff_factor")]
+    pub req_backoff_factor: u64,
 
     // upload
     #[serde(default = "default::object_store_config::object_store_upload_attempt_timeout_ms")]
@@ -1752,15 +1752,15 @@ pub mod default {
             false
         }
 
-        pub fn object_store_req_retry_interval_ms() -> u64 {
+        pub fn object_store_req_backoff_interval_ms() -> u64 {
             DEFAULT_RETRY_INTERVAL_MS
         }
 
-        pub fn object_store_req_retry_max_delay_ms() -> u64 {
+        pub fn object_store_req_backoff_max_delay_ms() -> u64 {
             DEFAULT_RETRY_MAX_DELAY_MS // 10s
         }
 
-        pub fn object_store_req_retry_factor() -> u64 {
+        pub fn object_store_req_backoff_factor() -> u64 {
             2
         }
 

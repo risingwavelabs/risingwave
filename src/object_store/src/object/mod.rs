@@ -337,19 +337,12 @@ impl MonitoredStreamingUploader {
         let operation_type = OperationType::StreamingUpload;
         let operation_type_str = operation_type.as_str();
         let data_len = data.len();
-        self.object_store_metrics
-            .write_bytes
-            .inc_by(data.len() as u64);
-        self.object_store_metrics
-            .operation_size
-            .with_label_values(&[operation_type_str])
-            .observe(data_len as f64);
+
         let _timer = self
             .object_store_metrics
             .operation_latency
             .with_label_values(&[self.media_type, operation_type_str])
             .start_timer();
-        self.operation_size += data_len;
 
         let future = async {
             self.inner
@@ -363,23 +356,29 @@ impl MonitoredStreamingUploader {
                 .await
                 .unwrap_or_else(|_| {
                     Err(ObjectError::timeout(format!(
-                        "{} timeout",
-                        operation_type_str
+                        "{} timeout data_len {} timeout {:?}",
+                        operation_type_str, data_len, timeout
                     )))
                 }),
         };
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
+
+        self.object_store_metrics
+            .write_bytes
+            .inc_by(data_len as u64);
+        self.object_store_metrics
+            .operation_size
+            .with_label_values(&[operation_type_str])
+            .observe(data_len as f64);
+        self.operation_size += data_len;
+
         res
     }
 
     pub async fn finish(self) -> ObjectResult<()> {
         let operation_type = OperationType::StreamingUploadFinish;
         let operation_type_str = operation_type.as_str();
-        self.object_store_metrics
-            .operation_size
-            .with_label_values(&[operation_type_str])
-            .observe(self.operation_size as f64);
         let _timer = self
             .object_store_metrics
             .operation_latency
@@ -405,6 +404,10 @@ impl MonitoredStreamingUploader {
         };
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
+        self.object_store_metrics
+            .operation_size
+            .with_label_values(&[operation_type_str])
+            .observe(self.operation_size as f64);
         res
     }
 
@@ -457,8 +460,8 @@ impl MonitoredStreamingReader {
                 .await
                 .unwrap_or_else(|_| {
                     Some(Err(ObjectError::timeout(format!(
-                        "{} timeout",
-                        self.operation_type_str
+                        "{} timeout {:?}",
+                        self.operation_type_str, timeout
                     ))))
                 }),
         };
@@ -993,9 +996,9 @@ fn get_retry_strategy(
     operation_type: OperationType,
 ) -> impl Iterator<Item = Duration> {
     let attempts = get_retry_attempts_by_type(config, operation_type);
-    ExponentialBackoff::from_millis(config.retry.req_retry_interval_ms)
-        .max_delay(Duration::from_millis(config.retry.req_retry_max_delay_ms))
-        .factor(config.retry.req_retry_factor)
+    ExponentialBackoff::from_millis(config.retry.req_backoff_interval_ms)
+        .max_delay(Duration::from_millis(config.retry.req_backoff_max_delay_ms))
+        .factor(config.retry.req_backoff_factor)
         .take(attempts)
         .map(jitter)
 }
@@ -1141,8 +1144,9 @@ where
                 .await
                 .unwrap_or_else(|_| {
                     Err(ObjectError::timeout(format!(
-                        "{} timeout",
-                        operation_type.as_str()
+                        "{} timeout {:?}",
+                        operation_type.as_str(),
+                        timeout_duration
                     )))
                 })
         }

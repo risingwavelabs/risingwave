@@ -994,6 +994,11 @@ where
     E: ProvideErrorMetadata + Into<BoxError> + Sync + Send + std::error::Error + 'static,
 {
     let not_found = object_err.is_object_not_found_error();
+
+    if not_found {
+        return object_err;
+    }
+
     let mut inner = object_err.into_inner();
     match inner.borrow_mut() {
         ObjectErrorInner::S3 {
@@ -1014,7 +1019,7 @@ where
                     }
                 }
                 SdkError::ServiceError(e) => {
-                    let mut retry = match e.err().code() {
+                    let retry = match e.err().code() {
                         None => {
                             if config.s3.developer.object_store_retry_unknown_service_error
                                 || config.s3.retry_unknown_service_error
@@ -1041,22 +1046,15 @@ where
                         }
                     };
 
-                    if !retry && e.raw().status().is_client_error() {
-                        // if this response code is a client error (4xx)
-                        retry = true
-                    }
-
                     retry
                 }
 
                 SdkError::TimeoutError(_err) => true,
 
-                SdkError::ResponseError(err) => err.raw().status().is_client_error(),
-
                 _ => false,
             };
 
-            *should_retry = err_should_retry && !not_found;
+            *should_retry = err_should_retry;
         }
 
         _ => unreachable!(),

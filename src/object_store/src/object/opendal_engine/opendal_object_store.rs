@@ -144,13 +144,13 @@ impl ObjectStore for OpendalObjectStore {
             .layer(
                 RetryLayer::new()
                     .with_min_delay(Duration::from_millis(
-                        self.config.retry.req_retry_interval_ms,
+                        self.config.retry.req_backoff_interval_ms,
                     ))
                     .with_max_delay(Duration::from_millis(
-                        self.config.retry.req_retry_max_delay_ms,
+                        self.config.retry.req_backoff_max_delay_ms,
                     ))
                     .with_max_times(self.config.retry.streaming_read_retry_attempts)
-                    .with_factor(2.0)
+                    .with_factor(self.config.retry.req_backoff_factor as f32)
                     .with_jitter(),
             )
             .layer(TimeoutLayer::new().with_io_timeout(Duration::from_millis(
@@ -259,10 +259,10 @@ impl OpendalStreamingUploader {
             .clone()
             .layer(
                 RetryLayer::new()
-                    .with_min_delay(Duration::from_millis(config.retry.req_retry_interval_ms))
-                    .with_max_delay(Duration::from_millis(config.retry.req_retry_max_delay_ms))
+                    .with_min_delay(Duration::from_millis(config.retry.req_backoff_interval_ms))
+                    .with_max_delay(Duration::from_millis(config.retry.req_backoff_max_delay_ms))
                     .with_max_times(config.retry.streaming_upload_retry_attempts)
-                    .with_factor(2.0)
+                    .with_factor(config.retry.req_backoff_factor as f32)
                     .with_jitter(),
             )
             .layer(TimeoutLayer::new().with_io_timeout(Duration::from_millis(
