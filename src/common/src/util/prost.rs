@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 
 use risingwave_pb::batch_plan;
@@ -38,7 +38,7 @@ impl<'a> Deref for StackTraceResponseOutput<'a> {
     }
 }
 
-impl<'a> Debug for StackTraceResponseOutput<'a> {
+impl<'a> Display for StackTraceResponseOutput<'a> {
     fn fmt(&self, s: &mut Formatter<'_>) -> std::fmt::Result {
         if !self.actor_traces.is_empty() {
             writeln!(s, "--- Actor Traces ---")?;

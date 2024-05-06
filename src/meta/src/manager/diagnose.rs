@@ -676,7 +676,7 @@ impl DiagnoseCommand {
             }
         }
 
-        write!(s, "{:?}", all.output()).unwrap();
+        write!(s, "{}", all.output()).unwrap();
     }
 }
 
