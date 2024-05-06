@@ -138,7 +138,7 @@ impl MigrationTrait for Migration {
                             .boolean()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(HummockVersionDelta::FullVersionDelta).binary())
+                    .col(ColumnDef::new(HummockVersionDelta::FullVersionDelta).blob(BlobSize::Long))
                     .to_owned(),
             )
             .await?;
