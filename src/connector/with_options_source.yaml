@@ -681,3 +681,16 @@ TestSourceProperties:
   - name: properties
     field_type: HashMap<String,String>
     required: false
+UdfProperties:
+  fields:
+  - name: operation.field
+    field_type: String
+    comments: The field used to specify the operation to be performed, should have any of the following values (insert, delete, update_delete, update_insert)
+    required: false
+  - name: offset.field
+    field_type: String
+    comments: The field used to specify the operation to be performed
+    required: false
+  - name: expr
+    field_type: ExprNode
+    required: false

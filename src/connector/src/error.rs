@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::error::def_anyhow_newtype;
+use risingwave_expr::ExprError;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::RpcError;
 
@@ -26,6 +27,9 @@ def_anyhow_newtype! {
 
     // Common errors
     std::io::Error => transparent,
+
+    // Expression errors
+    ExprError => transparent,
 
     // Fine-grained connector errors
     AccessError => transparent,

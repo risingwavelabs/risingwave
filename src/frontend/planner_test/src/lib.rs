@@ -453,6 +453,7 @@ impl TestCase {
                         with_version_column,
                         cdc_table_info,
                         include_column_options,
+                        None,
                     )
                     .await?;
                 }

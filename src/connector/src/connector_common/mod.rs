@@ -14,6 +14,7 @@
 
 pub mod mqtt_common;
 pub use mqtt_common::{MqttCommon, QualityOfService as MqttQualityOfService};
+pub(crate) mod nested_fields;
 
 pub mod common;
 pub use common::{

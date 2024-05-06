@@ -1,0 +1,112 @@
+system ok
+python3 e2e_test/udf/mock_server.py &
+
+statement ok
+CREATE FUNCTION fetch_api() RETURNS TABLE ( data struct< idx int>) LANGUAGE javascript RUNTIME deno AS $$
+    const response = await fetch('http://127.0.0.1:4200');
+    const resp = await response.json();
+    for (const r of resp.results) {
+        yield r;
+    }
+$$ ASYNC GENERATOR;
+
+statement ok
+CREATE SOURCE fetch_source as fetch_api();
+
+statement ok
+CREATE MATERIALIZED VIEW fetch_view as SELECT * from fetch_source;
+
+statement ok
+flush;
+
+# Wait enough time to ensure SourceExecutor consumes all source data.
+sleep 10s
+
+query I
+select * FROM fetch_view;
+----
+1
+2
+
+statement ok
+DROP MATERIALIZED VIEW fetch_view;
+
+statement ok
+DROP SOURCE fetch_source;
+
+statement ok
+drop function fetch_api;
+
+statement ok
+CREATE FUNCTION call_sse() RETURNS TABLE ( data struct<data struct<greetings string>>) LANGUAGE javascript RUNTIME deno USING LINK 'fs://e2e_test/udf/sse/bundled.table.js' SYNC;
+
+statement ok
+CREATE SOURCE sse_source ( data struct<greetings string> ) AS  call_sse();
+
+statement ok
+CREATE MATERIALIZED VIEW sse_view as SELECT * from sse_source;
+
+# Wait enough time to ensure SourceExecutor consumes all source data.
+sleep 2s
+
+query I
+select * FROM sse_view;
+----
+(Hi)
+(Bonjour)
+(Hola)
+(Ciao)
+(Zdravo)
+
+statement ok
+DROP MATERIALIZED VIEW sse_view;
+
+statement ok
+DROP SOURCE sse_source;
+
+statement ok
+drop function call_sse;
+
+statement ok
+CREATE FUNCTION long_pooling() RETURNS TABLE ( data struct< idx int, data string, operation string>) LANGUAGE javascript RUNTIME deno AS $$
+    function delay(ms) {
+      return new Promise( resolve => setTimeout(resolve, ms) );
+    }
+    let it = 0;
+    while(true) {
+        const response = await fetch('http://127.0.0.1:4200/updates?it=' + it);
+        const resp = await response.json();
+        for (const r of resp.results) {
+            if (r.event === 'create') {
+                yield { idx: r.idx, data: r.data, operation: 'insert' };
+            } else if (r.event === 'update') {
+                yield { idx: r.idx, operation: 'update_delete' };
+                yield { idx: r.idx, data: r.data, operation: 'update_insert' };
+            }
+        }
+        await delay(200);
+        it++;
+    }
+$$ ASYNC GENERATOR;
+
+statement ok
+CREATE TABLE long_pooling_table (idx int PRIMARY KEY, data string, operation string) WITH (operation.field = 'operation') as long_pooling();
+
+# Wait enough time to ensure SourceExecutor consumes all source data.
+sleep 2s
+
+query IIT
+SELECT * FROM long_pooling_table ORDER BY idx;
+----
+1 0 update_insert
+2 2 insert
+3 3 insert
+
+statement ok
+DROP TABLE long_pooling_table;
+
+statement ok
+drop function long_pooling;
+
+system ok
+pkill -9 python3

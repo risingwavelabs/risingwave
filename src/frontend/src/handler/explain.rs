@@ -65,6 +65,7 @@ async fn do_handle_explain(
                 cdc_table_info,
                 include_column_options,
                 wildcard_idx,
+                udf,
                 ..
             } => {
                 let col_id_gen = ColumnIdGenerator::new_initial();
@@ -86,6 +87,7 @@ async fn do_handle_explain(
                     on_conflict,
                     with_version_column,
                     include_column_options,
+                    udf,
                 )
                 .await?;
                 let context = plan.ctx();

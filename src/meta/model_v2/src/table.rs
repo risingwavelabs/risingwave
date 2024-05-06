@@ -21,8 +21,8 @@ use sea_orm::NotSet;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Cardinality, ColumnCatalogArray, ColumnOrderArray, FragmentId, I32Array, ObjectId, SourceId,
-    TableId, TableVersion,
+    Cardinality, ColumnCatalogArray, ColumnOrderArray, ExprNode, FragmentId, I32Array, ObjectId,
+    SourceId, TableId, TableVersion,
 };
 
 #[derive(
@@ -132,6 +132,7 @@ pub struct Model {
     pub version: Option<TableVersion>,
     pub retention_seconds: Option<i32>,
     pub incoming_sinks: I32Array,
+    pub udf_expr: Option<ExprNode>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -243,6 +244,7 @@ impl From<PbTable> for ActiveModel {
             version: Set(pb_table.version.as_ref().map(|v| v.into())),
             retention_seconds: Set(pb_table.retention_seconds.map(|i| i as _)),
             incoming_sinks: Set(pb_table.incoming_sinks.into()),
+            udf_expr: Set(pb_table.udf_expr.as_ref().map(ExprNode::from)),
         }
     }
 }

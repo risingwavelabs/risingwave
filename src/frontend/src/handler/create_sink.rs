@@ -587,6 +587,7 @@ pub(crate) async fn reparse_table_for_sink(
         append_only,
         on_conflict,
         with_version_column,
+        udf,
         ..
     } = definition
     else {
@@ -607,6 +608,7 @@ pub(crate) async fn reparse_table_for_sink(
         append_only,
         on_conflict,
         with_version_column,
+        udf,
     )
     .await?;
 

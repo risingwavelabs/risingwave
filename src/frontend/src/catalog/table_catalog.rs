@@ -168,6 +168,8 @@ pub struct TableCatalog {
     pub created_at_cluster_version: Option<String>,
 
     pub initialized_at_cluster_version: Option<String>,
+
+    pub udf_expr: Option<risingwave_pb::expr::ExprNode>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -425,6 +427,7 @@ impl TableCatalog {
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             retention_seconds: self.retention_seconds,
+            udf_expr: self.udf_expr.clone(),
         }
     }
 
@@ -562,6 +565,7 @@ impl From<PbTable> for TableCatalog {
                 .into_iter()
                 .map(TableId::from)
                 .collect_vec(),
+            udf_expr: tb.udf_expr.clone(),
         }
     }
 }
@@ -655,6 +659,7 @@ mod tests {
             created_at_cluster_version: None,
             initialized_at_cluster_version: None,
             version_column_index: None,
+            udf_expr: None,
         }
         .into();
 
@@ -717,6 +722,7 @@ mod tests {
                 initialized_at_cluster_version: None,
                 dependent_relations: vec![],
                 version_column_index: None,
+                udf_expr: None,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

@@ -26,10 +26,12 @@ use cfg_or_panic::cfg_or_panic;
 use futures_util::stream;
 use risingwave_common::array::{ArrayError, DataChunk, I32Array};
 use risingwave_common::bail;
+use risingwave_pb::expr::ExprNode;
 use thiserror_ext::AsReport;
 
 use super::*;
 use crate::expr::expr_udf::UdfImpl;
+use crate::expr::BoxedExpression;
 
 #[derive(Debug)]
 pub struct UserDefinedTableFunction {
@@ -170,6 +172,131 @@ impl UserDefinedTableFunction {
             );
         }
         Ok(())
+    }
+
+    pub fn build_from_prost(prost: ExprNode, chunk_size: usize) -> Result<Self> {
+        let udtf = prost.get_rex_node().unwrap().as_udf().unwrap();
+
+        let arg_schema = Arc::new(Schema::new(
+            udtf.arg_types
+                .iter()
+                .map::<Result<_>, _>(|t| {
+                    Ok(Field::new(
+                        "",
+                        DataType::from(t).try_into().map_err(|e: ArrayError| {
+                            risingwave_udf::Error::unsupported(e.to_report_string())
+                        })?,
+                        true,
+                    ))
+                })
+                .try_collect::<_, Fields, _>()?,
+        ));
+
+        let identifier = udtf.get_identifier()?;
+        let return_type = DataType::from(prost.get_return_type()?);
+
+        #[cfg(not(feature = "embedded-deno-udf"))]
+        let runtime = "quickjs";
+
+        #[cfg(feature = "embedded-deno-udf")]
+        let runtime = match udtf.runtime.as_deref() {
+            Some("deno") => "deno",
+            _ => "quickjs",
+        };
+
+        let client = match udtf.language.as_str() {
+            "wasm" | "rust" => {
+                let compressed_wasm_binary = udtf.get_compressed_binary()?;
+                let wasm_binary = zstd::stream::decode_all(compressed_wasm_binary.as_slice())
+                    .context("failed to decompress wasm binary")?;
+                let runtime = crate::expr::expr_udf::get_or_create_wasm_runtime(&wasm_binary)?;
+                UdfImpl::Wasm(runtime)
+            }
+            "javascript" if runtime != "deno" => {
+                let mut rt = JsRuntime::new()?;
+                let body = format!(
+                    "export function* {}({}) {{ {} }}",
+                    identifier,
+                    udtf.arg_names.join(","),
+                    udtf.get_body()?
+                );
+                rt.add_function(
+                    identifier,
+                    arrow_schema::DataType::try_from(&return_type)?,
+                    JsCallMode::CalledOnNullInput,
+                    &body,
+                )?;
+                UdfImpl::JavaScript(rt)
+            }
+            #[cfg(feature = "embedded-deno-udf")]
+            "javascript" if runtime == "deno" => {
+                let rt = DenoRuntime::new();
+                let body = match udtf.get_body() {
+                    Ok(body) => body.clone(),
+                    Err(_) => match udtf.get_compressed_binary() {
+                        Ok(compressed_binary) => {
+                            let binary = zstd::stream::decode_all(compressed_binary.as_slice())
+                                .context("failed to decompress binary")?;
+                            String::from_utf8(binary).context("failed to decode binary")?
+                        }
+                        Err(_) => {
+                            bail!("UDF body or compressed binary is required for deno UDF");
+                        }
+                    },
+                };
+
+                let body = format!(
+                    "export {} {}({}) {{ {} }}",
+                    match udtf.function_type.as_deref() {
+                        Some("async") => "async function",
+                        Some("async_generator") => "async function*",
+                        Some("sync") => "function",
+                        _ => "function*",
+                    },
+                    identifier,
+                    udtf.arg_names.join(","),
+                    body
+                );
+
+                futures::executor::block_on(rt.add_function(
+                    identifier,
+                    arrow_schema::DataType::try_from(&return_type)?,
+                    DenoCallMode::CalledOnNullInput,
+                    &body,
+                ))?;
+                UdfImpl::Deno(rt)
+            }
+            #[cfg(feature = "embedded-python-udf")]
+            "python" if udtf.body.is_some() => {
+                let mut rt = PythonRuntime::builder().sandboxed(true).build()?;
+                let body = udtf.get_body()?;
+                rt.add_function(
+                    identifier,
+                    arrow_schema::DataType::try_from(&return_type)?,
+                    PythonCallMode::CalledOnNullInput,
+                    body,
+                )?;
+                UdfImpl::Python(rt)
+            }
+            // connect to UDF service
+            _ => {
+                let link = udtf.get_link()?;
+                UdfImpl::External(crate::expr::expr_udf::get_or_create_flight_client(link)?)
+            }
+        };
+
+        Ok(UserDefinedTableFunction {
+            children: udtf
+                .children
+                .iter()
+                .map(expr_build_from_prost)
+                .try_collect()?,
+            return_type,
+            arg_schema,
+            client,
+            identifier: identifier.clone(),
+            chunk_size,
+        })
     }
 }
 

@@ -10529,6 +10529,7 @@ dependencies = [
  "reqwest 0.12.2",
  "risingwave_common",
  "risingwave_common_estimate_size",
+ "risingwave_expr",
  "risingwave_jni_core",
  "risingwave_object_store",
  "risingwave_pb",
