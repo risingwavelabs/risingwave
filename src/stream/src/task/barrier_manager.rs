@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::future::pending;
 use std::sync::Arc;
 use std::time::Duration;
@@ -263,7 +263,7 @@ pub(crate) struct StreamActorManagerState {
     pub(super) creating_actors: FuturesUnordered<
         AttachedFuture<
             JoinHandle<StreamResult<CreateActorOutput>>,
-            (HashSet<ActorId>, oneshot::Sender<StreamResult<()>>),
+            (BTreeSet<ActorId>, oneshot::Sender<StreamResult<()>>),
         >,
     >,
 }
@@ -309,9 +309,9 @@ pub(crate) struct StreamActorManager {
 #[derive(Debug)]
 #[expect(dead_code)]
 pub(super) struct LocalBarrierWorkerDebugInfo<'a> {
-    actor_to_send: HashSet<ActorId>,
-    running_actors: HashSet<ActorId>,
-    creating_actors: Vec<HashSet<ActorId>>,
+    actor_to_send: BTreeSet<ActorId>,
+    running_actors: BTreeSet<ActorId>,
+    creating_actors: Vec<BTreeSet<ActorId>>,
     managed_barrier_state: ManagedBarrierStateDebugInfo<'a>,
     has_control_stream_connected: bool,
 }

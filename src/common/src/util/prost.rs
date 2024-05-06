@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::btree_map::Entry;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 
 use risingwave_pb::batch_plan;
 use risingwave_pb::monitor_service::StackTraceResponse;
+use tracing::warn;
 
 pub trait TypeUrl {
     fn type_url() -> &'static str;
@@ -71,7 +73,8 @@ impl<'a> Display for StackTraceResponseOutput<'a> {
         }
 
         writeln!(s, "\n\n--- Barrier Worker States ---")?;
-        for state in &self.barrier_worker_state {
+        for (worker_id, state) in &self.barrier_worker_state {
+            writeln!(s, ">> Worker {worker_id}")?;
             writeln!(s, "{state}\n")?;
         }
         Ok(())
@@ -86,7 +89,19 @@ impl StackTraceResponse {
         self.compaction_task_traces.extend(b.compaction_task_traces);
         self.inflight_barrier_traces
             .extend(b.inflight_barrier_traces);
-        self.barrier_worker_state.extend(b.barrier_worker_state);
+        for (worker_id, worker_state) in b.barrier_worker_state {
+            match self.barrier_worker_state.entry(worker_id) {
+                Entry::Occupied(_entry) => {
+                    warn!(
+                        worker_id,
+                        worker_state, "duplicate barrier worker state. skipped"
+                    );
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(worker_state);
+                }
+            }
+        }
     }
 
     pub fn output(&self) -> StackTraceResponseOutput<'_> {

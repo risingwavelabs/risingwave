@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 use std::ffi::CString;
 use std::fs;
 use std::path::Path;
@@ -106,7 +107,10 @@ impl MonitorService for MonitorServiceImpl {
             rpc_traces,
             compaction_task_traces,
             inflight_barrier_traces: barrier_traces,
-            barrier_worker_state: vec![barrier_worker_state],
+            barrier_worker_state: BTreeMap::from_iter([(
+                self.stream_mgr.env.worker_id(),
+                barrier_worker_state,
+            )]),
         }))
     }
 

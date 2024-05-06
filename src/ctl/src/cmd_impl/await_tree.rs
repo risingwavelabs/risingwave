@@ -55,9 +55,8 @@ pub async fn dump(context: &CtlContext) -> anyhow::Result<()> {
         && all.inflight_barrier_traces.is_empty()
     {
         println!("No traces found. No actors are running, or `--async-stack-trace` not set?");
-    } else {
-        println!("{}", all.output());
     }
+    println!("{}", all.output());
 
     Ok(())
 }

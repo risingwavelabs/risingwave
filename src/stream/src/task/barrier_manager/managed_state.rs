@@ -14,7 +14,7 @@
 
 use std::assert_matches::assert_matches;
 use std::collections::btree_map::Entry;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::mem::replace;
@@ -44,7 +44,7 @@ use crate::task::{await_tree_key, ActorId};
 struct IssuedState {
     pub mutation: Option<Arc<Mutation>>,
     /// Actor ids remaining to be collected.
-    pub remaining_actors: HashSet<ActorId>,
+    pub remaining_actors: BTreeSet<ActorId>,
 
     pub barrier_inflight_latency: HistogramTimer,
 }
@@ -444,7 +444,7 @@ impl ManagedBarrierState {
             BarrierState {
                 curr_epoch: barrier.epoch.curr,
                 inner: ManagedBarrierStateInner::Issued(IssuedState {
-                    remaining_actors: actor_ids_to_collect,
+                    remaining_actors: BTreeSet::from_iter(actor_ids_to_collect),
                     mutation: barrier.mutation.clone(),
                     barrier_inflight_latency: timer,
                 }),
