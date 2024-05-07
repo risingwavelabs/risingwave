@@ -330,7 +330,7 @@ impl LogSinker for RemoteLogSinker {
         };
 
         let poll_consume_log_and_sink = async move {
-            async fn truncate_matched_offset(
+            fn truncate_matched_offset(
                 queue: &mut VecDeque<(TruncateOffset, Option<Instant>)>,
                 persisted_offset: TruncateOffset,
                 log_reader: &mut impl SinkLogReader,
@@ -361,7 +361,7 @@ impl LogSinker for RemoteLogSinker {
                         .observe(start_time.elapsed().as_millis() as f64);
                 }
 
-                log_reader.truncate(persisted_offset).await?;
+                log_reader.truncate(persisted_offset)?;
                 Ok(())
             }
 
@@ -406,8 +406,7 @@ impl LogSinker for RemoteLogSinker {
                                     },
                                     log_reader,
                                     &sink_metrics,
-                                )
-                                .await?;
+                                )?;
                             }
                             SinkWriterStreamResponse {
                                 response:
@@ -426,8 +425,7 @@ impl LogSinker for RemoteLogSinker {
                                     TruncateOffset::Barrier { epoch },
                                     log_reader,
                                     &sink_metrics,
-                                )
-                                .await?;
+                                )?;
                             }
                             response => {
                                 return Err(SinkError::Remote(anyhow!(
