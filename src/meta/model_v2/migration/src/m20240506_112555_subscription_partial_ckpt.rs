@@ -1,82 +1,52 @@
 use sea_orm_migration::prelude::{Table as MigrationTable, *};
 
+use crate::drop_tables;
+
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        // drop tables cascade.
+        drop_tables!(manager, Subscription);
         manager
-            .alter_table(
-                MigrationTable::alter()
+            .create_table(
+                MigrationTable::create()
                     .table(Subscription::Table)
-                    .add_column(ColumnDef::new(Subscription::RetentionSeconds).big_integer())
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .alter_table(
-                MigrationTable::alter()
-                    .table(Subscription::Table)
-                    .add_column(ColumnDef::new(Subscription::SubscriptionState).integer())
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .alter_table(
-                MigrationTable::alter()
-                    .table(Subscription::Table)
-                    .add_column(ColumnDef::new(Subscription::DependentTableId).integer())
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .alter_table(
-                MigrationTable::alter()
-                    .table(Subscription::Table)
-                    .drop_column(Alias::new(Subscription::Columns.to_string()))
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .alter_table(
-                MigrationTable::alter()
-                    .table(Subscription::Table)
-                    .drop_column(Alias::new(Subscription::PlanPk.to_string()))
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .alter_table(
-                MigrationTable::alter()
-                    .table(Subscription::Table)
-                    .drop_column(Alias::new(Subscription::DistributionKey.to_string()))
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .alter_table(
-                MigrationTable::alter()
-                    .table(Subscription::Table)
-                    .drop_column(Alias::new(Subscription::Properties.to_string()))
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .alter_table(
-                MigrationTable::alter()
-                    .table(Subscription::Table)
-                    .drop_column(Alias::new(Subscription::SubscriptionFromName.to_string()))
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .alter_table(
-                MigrationTable::alter()
-                    .table(Subscription::Table)
-                    .drop_column(Alias::new(
-                        Subscription::SubscriptionInternalTableName.to_string(),
-                    ))
+                    .col(
+                        ColumnDef::new(Subscription::SubscriptionId)
+                            .integer()
+                            .primary_key(),
+                    )
+                    .col(ColumnDef::new(Subscription::Name).string().not_null())
+                    .col(ColumnDef::new(Subscription::Definition).string().not_null())
+                    .col(
+                        ColumnDef::new(Subscription::RetentionSeconds)
+                            .string()
+                            .big_integer(),
+                    )
+                    .col(
+                        ColumnDef::new(Subscription::SubscriptionState)
+                            .string()
+                            .integer(),
+                    )
+                    .col(
+                        ColumnDef::new(Subscription::DependentTableId)
+                            .integer()
+                            .not_null(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_subscription_object_id")
+                            .from(Subscription::Table, Subscription::SubscriptionId)
+                            .to(
+                                crate::m20230908_072257_init::Object::Table,
+                                crate::m20230908_072257_init::Object::Oid,
+                            )
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
+                    )
                     .to_owned(),
             )
             .await?;
@@ -84,78 +54,48 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        // drop tables cascade.
+        drop_tables!(manager, Subscription);
         manager
-            .alter_table(
-                MigrationTable::alter()
+            .create_table(
+                MigrationTable::create()
                     .table(Subscription::Table)
-                    .add_column(ColumnDef::new(Subscription::Columns).binary().not_null())
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .alter_table(
-                MigrationTable::alter()
-                    .table(Subscription::Table)
-                    .add_column(ColumnDef::new(Subscription::PlanPk).binary().not_null())
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .alter_table(
-                MigrationTable::alter()
-                    .table(Subscription::Table)
-                    .add_column(ColumnDef::new(Subscription::DistributionKey).json_binary())
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .alter_table(
-                MigrationTable::alter()
-                    .table(Subscription::Table)
-                    .add_column(ColumnDef::new(Subscription::Properties).json_binary())
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .alter_table(
-                MigrationTable::alter()
-                    .table(Subscription::Table)
-                    .add_column(ColumnDef::new(Subscription::SubscriptionFromName).string())
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .alter_table(
-                MigrationTable::alter()
-                    .table(Subscription::Table)
-                    .add_column(
-                        ColumnDef::new(Subscription::SubscriptionInternalTableName).string(),
+                    .col(
+                        ColumnDef::new(Subscription::SubscriptionId)
+                            .integer()
+                            .primary_key(),
                     )
-                    .to_owned(),
-            )
-            .await?;
-
-        manager
-            .alter_table(
-                MigrationTable::alter()
-                    .table(Subscription::Table)
-                    .drop_column(Alias::new(Subscription::RetentionSeconds.to_string()))
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .alter_table(
-                MigrationTable::alter()
-                    .table(Subscription::Table)
-                    .drop_column(Alias::new(Subscription::SubscriptionState.to_string()))
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .alter_table(
-                MigrationTable::alter()
-                    .table(Subscription::Table)
-                    .drop_column(Alias::new(Subscription::DependentTableId.to_string()))
+                    .col(ColumnDef::new(Subscription::Name).string().not_null())
+                    .col(ColumnDef::new(Subscription::Definition).string().not_null())
+                    .col(ColumnDef::new(Subscription::Columns).binary().not_null())
+                    .col(ColumnDef::new(Subscription::PlanPk).binary().not_null())
+                    .col(
+                        ColumnDef::new(Subscription::DistributionKey)
+                            .json_binary()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(Subscription::Properties)
+                            .json_binary()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(Subscription::SubscriptionFromName)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(Subscription::SubscriptionInternalTableName).string())
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_subscription_object_id")
+                            .from(Subscription::Table, Subscription::SubscriptionId)
+                            .to(
+                                crate::m20230908_072257_init::Object::Table,
+                                crate::m20230908_072257_init::Object::Oid,
+                            )
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
+                    )
                     .to_owned(),
             )
             .await?;
@@ -166,14 +106,18 @@ impl MigrationTrait for Migration {
 #[derive(DeriveIden)]
 enum Subscription {
     Table,
-    // delete
+    // common
+    SubscriptionId,
+    Name,
+    Definition,
+    // before
     Columns,
     PlanPk,
     DistributionKey,
     Properties,
     SubscriptionFromName,
     SubscriptionInternalTableName,
-    // add
+    // after
     RetentionSeconds,
     SubscriptionState,
     DependentTableId,
