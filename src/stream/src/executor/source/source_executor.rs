@@ -428,6 +428,15 @@ impl<S: StateStore> SourceExecutor<S> {
                 .await?
             {
                 *ele = recover_state;
+            } else if self.is_shared {
+                // For shared source, we start from latest (if nothing in state table) and let the downstream SourceBackfillExecutors to read historical data.
+                // For more details, see https://github.com/risingwavelabs/risingwave/issues/16576#issuecomment-2095413297
+                match ele {
+                    SplitImpl::Kafka(split) => {
+                        split.seek_to_latest_offset();
+                    }
+                    _ => unreachable!("only kafka source can be shared"),
+                }
             }
         }
 
