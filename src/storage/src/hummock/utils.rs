@@ -31,7 +31,7 @@ use risingwave_hummock_sdk::key::{
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{can_concat, HummockEpoch};
 use risingwave_pb::hummock::SstableInfo;
-use tokio::sync::oneshot::{channel, Sender};
+use tokio::sync::oneshot::{channel, Receiver, Sender};
 
 use super::{HummockError, HummockResult};
 use crate::error::StorageResult;
@@ -168,11 +168,27 @@ pub fn prune_nonoverlapping_ssts<'a>(
 }
 
 type RequestQueue = VecDeque<(Sender<MemoryTrackerImpl>, u64)>;
+enum MemoryRequest {
+    Ready(MemoryTrackerImpl),
+    Pending(Receiver<MemoryTrackerImpl>),
+}
+
+pub struct PendingRequestCancelGuard {
+    inner: Option<Arc<MemoryLimiterInner>>,
+}
+
+impl Drop for PendingRequestCancelGuard {
+    fn drop(&mut self) {
+        if let Some(limiter) = self.inner.take() {
+            limiter.may_notify_waiters();
+        }
+    }
+}
 
 struct MemoryLimiterInner {
     total_size: AtomicU64,
     controller: Mutex<RequestQueue>,
-    pending_request_count: Arc<AtomicU64>,
+    pending_request_count: AtomicU64,
     quota: u64,
     fast_quota: u64,
 }
@@ -225,28 +241,26 @@ impl MemoryLimiterInner {
         false
     }
 
-    async fn require_memory(self: &Arc<Self>, quota: u64) -> MemoryTrackerImpl {
-        let waiter = {
-            let mut waiters = self.controller.lock();
-            let first_req = waiters.is_empty() ;
+    fn require_memory(self: &Arc<Self>, quota: u64) -> MemoryRequest {
+        let mut waiters = self.controller.lock();
+        let first_req = waiters.is_empty();
+        if first_req {
+            // When this request is the first waiter but the previous `MemoryTracker` is just release a large quota, it may skip notifying this waiter because it has checked `inflight_barrier` and found it was zero. So we must set it one and retry `try_require_memory_in_capacity` again to avoid deadlock.
+            self.pending_request_count.store(1, AtomicOrdering::Release);
+        }
+        // We must require again with lock because some other MemoryTracker may drop just after this thread gets mutex but before it enters queue.
+        if self.try_require_memory_in_capacity(quota, self.quota) {
             if first_req {
-                // When this request is the first waiter but the previous `MemoryTracker` is just release a large quota, it may skip notifying this waiter because it has checked `inflight_barrier` and found it was zero. So we must set it one and retry `try_require_memory_in_capacity` again to avoid deadlock.
-                self.pending_request_count.store(1, AtomicOrdering::Release);
+                self.pending_request_count.store(0, AtomicOrdering::Release);
             }
-            if self.try_require_memory_in_capacity(quota, self.quota) {
-                if first_req {
-                    self.pending_request_count.store(0, AtomicOrdering::Release);
-                }
-                return MemoryTrackerImpl::new(self.clone(), quota);
-            }
-            let (tx, rc) = channel();
-            waiters.push_back((tx, quota));
-            // This variable can only update within lock.
-            self.pending_request_count
-                .store(waiters.len() as u64, AtomicOrdering::Release);
-            rc
-        };
-        waiter.await.unwrap()
+            return MemoryRequest::Ready(MemoryTrackerImpl::new(self.clone(), quota));
+        }
+        let (tx, rc) = channel();
+        waiters.push_back((tx, quota));
+        // This variable can only update within lock.
+        self.pending_request_count
+            .store(waiters.len() as u64, AtomicOrdering::Release);
+        MemoryRequest::Pending(rc)
     }
 
     fn permit_quota(&self, current_quota: u64, capacity: u64) -> bool {
@@ -307,7 +321,7 @@ impl MemoryLimiter {
             inner: Arc::new(MemoryLimiterInner {
                 total_size: AtomicU64::new(0),
                 controller: Mutex::new(VecDeque::default()),
-                pending_request_count: Arc::new(AtomicU64::new(0)),
+                pending_request_count: AtomicU64::new(0),
                 fast_quota: main_quota,
                 quota,
             }),
@@ -348,8 +362,17 @@ impl MemoryLimiter {
 
 impl MemoryLimiter {
     pub async fn require_memory(&self, quota: u64) -> MemoryTracker {
-        let inner = self.inner.require_memory(quota).await;
-        MemoryTracker { inner }
+        match self.inner.require_memory(quota) {
+            MemoryRequest::Ready(inner) => MemoryTracker { inner },
+            MemoryRequest::Pending(rc) => {
+                let mut guard = PendingRequestCancelGuard {
+                    inner: Some(self.inner.clone()),
+                };
+                let inner = rc.await.unwrap();
+                guard.inner.take();
+                MemoryTracker { inner }
+            }
+        }
     }
 }
 
@@ -381,16 +404,16 @@ impl Drop for MemoryTracker {
     fn drop(&mut self) {
         if let Some(quota) = self.inner.quota.take() {
             self.inner.limiter.release_quota(quota);
-        }
-        // check `inflight_barrier` to avoid access lock every times drop `MemoryTracker`.
-        if self
-            .inner
-            .limiter
-            .pending_request_count
-            .load(AtomicOrdering::Acquire)
-            > 0
-        {
-            self.inner.limiter.may_notify_waiters();
+            // check `inflight_barrier` to avoid access lock every times drop `MemoryTracker`.
+            if self
+                .inner
+                .limiter
+                .pending_request_count
+                .load(AtomicOrdering::Acquire)
+                > 0
+            {
+                self.inner.limiter.may_notify_waiters();
+            }
         }
     }
 }
