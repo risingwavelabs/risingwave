@@ -45,8 +45,7 @@ use risingwave_hummock_sdk::version::{CompactTask, HummockVersionDelta, SstableI
 use risingwave_hummock_sdk::{
     version_archive_dir, version_checkpoint_path, CompactionGroupId, ExtendedSstableInfo,
     HummockCompactionTaskId, HummockContextId, HummockEpoch, HummockSstableId,
-    HummockSstableObjectId, HummockVersionId, ProtoSerializeExt, ProtoSerializeOwnExt,
-    SstObjectIdRange, INVALID_VERSION_ID,
+    HummockSstableObjectId, HummockVersionId, SstObjectIdRange, INVALID_VERSION_ID,
 };
 use risingwave_meta_model_v2::{
     compaction_status, compaction_task, hummock_pinned_snapshot, hummock_pinned_version,
@@ -63,7 +62,7 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
 };
 use risingwave_pb::hummock::{
     CompactTaskAssignment, CompactionConfig, GroupDelta, HummockPinnedSnapshot,
-    HummockPinnedVersion, HummockSnapshot, HummockVersionStats, IntraLevelDelta,
+    HummockPinnedVersion, HummockSnapshot, HummockVersionStats, IntraLevelDelta, PbCompactTask,
     PbCompactionGroupInfo, SubscribeCompactionEventRequest, TableOption, TableSchema,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -1078,7 +1077,7 @@ impl HummockManager {
             compact_task_assignment.insert(
                 compact_task.task_id,
                 CompactTaskAssignment {
-                    compact_task: Some(compact_task.to_protobuf()),
+                    compact_task: Some(PbCompactTask::from(&compact_task)),
                     context_id: META_NODE_ID, // deprecated
                 },
             );
@@ -1347,9 +1346,7 @@ impl HummockManager {
             input_task
         } else {
             match compact_task_assignment.remove(task_id) {
-                Some(compact_task) => {
-                    CompactTask::from_protobuf(&compact_task.compact_task.unwrap())
-                }
+                Some(compact_task) => CompactTask::from(&compact_task.compact_task.unwrap()),
                 None => {
                     tracing::warn!("{}", format!("compact task {} not found", task_id));
                     return Ok(false);
@@ -1721,7 +1718,7 @@ impl HummockManager {
                     level_idx: 0,
                     inserted_table_infos: group_sstables
                         .into_iter()
-                        .map(|sst| sst.to_protobuf_own())
+                        .map(|sst| sst.into())
                         .collect_vec(),
                     l0_sub_level_id,
                     ..Default::default()
@@ -2119,7 +2116,7 @@ impl HummockManager {
         let compact_task_string = compact_task_to_string(&compact_task);
         // TODO: shall we need to cancel on meta ?
         compactor
-            .send_event(ResponseEvent::CompactTask(compact_task.to_protobuf_own()))
+            .send_event(ResponseEvent::CompactTask(compact_task.into()))
             .with_context(|| {
                 format!(
                     "Failed to trigger compaction task for compaction_group {}",
@@ -2192,7 +2189,7 @@ impl HummockManager {
                         .last_key_value()
                         .unwrap()
                         .1
-                        .to_protobuf()],
+                        .into()],
                 }),
             );
     }
@@ -3182,7 +3179,7 @@ impl HummockManager {
                                             Ok(Some(compact_task)) => {
                                                 let task_id = compact_task.task_id;
                                                 if let Err(e) = compactor.send_event(
-                                                    ResponseEvent::CompactTask(compact_task.to_protobuf_own()),
+                                                    ResponseEvent::CompactTask(compact_task.into()),
                                                 ) {
                                                     tracing::warn!(
                                                         error = %e.as_report(),
@@ -3234,7 +3231,7 @@ impl HummockManager {
                                 .report_compact_task(
                                     task_id,
                                     TaskStatus::try_from(task_status).unwrap(),
-                                    sorted_output_ssts.into_iter().map(SstableInfo::from_protobuf_own).collect_vec(),
+                                    sorted_output_ssts.into_iter().map(SstableInfo::from).collect_vec(),
                                     Some(table_stats_change),
                                 )
                                 .await
@@ -3356,7 +3353,7 @@ fn gen_version_delta<'a>(
             inserted_table_infos: compact_task
                 .sorted_output_ssts
                 .iter()
-                .map(|sst| sst.to_protobuf())
+                .map(|sst| sst.into())
                 .collect_vec(),
             l0_sub_level_id: compact_task.target_sub_level_id,
             vnode_partition_count: compact_task.split_weight_by_vnode,

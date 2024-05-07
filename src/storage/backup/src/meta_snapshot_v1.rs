@@ -19,11 +19,10 @@ use bytes::{Buf, BufMut};
 use itertools::Itertools;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::ProtoSerializeExt;
 use risingwave_pb::catalog::{
     Connection, Database, Function, Index, Schema, Sink, Source, Subscription, Table, View,
 };
-use risingwave_pb::hummock::{CompactionGroup, HummockVersionStats};
+use risingwave_pb::hummock::{CompactionGroup, HummockVersionStats, PbHummockVersion};
 use risingwave_pb::meta::{SystemParams, TableFragments};
 use risingwave_pb::user::UserInfo;
 
@@ -130,7 +129,7 @@ impl ClusterMetadata {
         let default_cf_values = self.default_cf.values().collect_vec();
         Self::encode_prost_message_list(&default_cf_keys, buf);
         Self::encode_prost_message_list(&default_cf_values, buf);
-        Self::encode_prost_message(&self.hummock_version.to_protobuf(), buf);
+        Self::encode_prost_message(&PbHummockVersion::from(&self.hummock_version), buf);
         Self::encode_prost_message(&self.version_stats, buf);
         Self::encode_prost_message_list(&self.compaction_groups.iter().collect_vec(), buf);
         Self::encode_prost_message_list(&self.table_fragments.iter().collect_vec(), buf);

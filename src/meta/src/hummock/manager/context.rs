@@ -21,7 +21,6 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
     ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableObjectId,
-    ProtoSerializeOwnExt,
 };
 use risingwave_pb::hummock::ValidationTask;
 
@@ -173,10 +172,7 @@ impl HummockManager {
                 .collect_vec();
             if compactor
                 .send_event(ResponseEvent::ValidationTask(ValidationTask {
-                    sst_infos: sst_infos
-                        .into_iter()
-                        .map(|sst| sst.to_protobuf_own())
-                        .collect_vec(),
+                    sst_infos: sst_infos.into_iter().map(|sst| sst.into()).collect_vec(),
                     sst_id_to_worker_id: sst_to_context.clone(),
                     epoch,
                 }))

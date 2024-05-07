@@ -39,7 +39,7 @@ use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
-    ProtoSerializeExt, SstObjectIdRange,
+    SstObjectIdRange,
 };
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
@@ -929,7 +929,7 @@ impl MetaClient {
         version_delta: HummockVersionDelta,
     ) -> Result<(HummockVersion, Vec<CompactionGroupId>)> {
         let req = ReplayVersionDeltaRequest {
-            version_delta: Some(version_delta.to_protobuf()),
+            version_delta: Some(version_delta.into()),
         };
         let resp = self.inner.replay_version_delta(req).await?;
         Ok((

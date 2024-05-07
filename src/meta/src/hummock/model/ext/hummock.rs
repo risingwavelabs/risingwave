@@ -14,7 +14,6 @@
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::version::HummockVersionDelta;
-use risingwave_hummock_sdk::ProtoSerializeExt;
 use risingwave_meta_model_v2::compaction_config::CompactionConfig;
 use risingwave_meta_model_v2::compaction_status::LevelHandlers;
 use risingwave_meta_model_v2::compaction_task::CompactionTask;
@@ -221,7 +220,7 @@ impl Transactional<Transaction> for HummockVersionDelta {
             max_committed_epoch: Set(self.max_committed_epoch as _),
             safe_epoch: Set(self.safe_epoch as _),
             trivial_move: Set(self.trivial_move),
-            full_version_delta: Set(FullVersionDelta(self.to_protobuf())),
+            full_version_delta: Set(FullVersionDelta(self.into())),
         };
         hummock_version_delta::Entity::insert(m)
             .on_conflict(

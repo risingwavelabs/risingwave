@@ -29,7 +29,7 @@ use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::{CompactTask, HummockVersion, SstableInfo};
 use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
-    ProtoSerializeOwnExt, SstObjectIdRange,
+    SstObjectIdRange,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
@@ -292,7 +292,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                     .unwrap()
                 {
                     let resp = SubscribeCompactionEventResponse {
-                        event: Some(ResponseEvent::CompactTask(task.to_protobuf_own())),
+                        event: Some(ResponseEvent::CompactTask(task.into())),
                         create_at: SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
                             .expect("Clock may have gone backwards")
@@ -324,7 +324,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                                 TaskStatus::try_from(task_status).unwrap(),
                                 sorted_output_ssts
                                     .into_iter()
-                                    .map(SstableInfo::from_protobuf_own)
+                                    .map(SstableInfo::from)
                                     .collect_vec(),
                                 Some(table_stats_change),
                             )

@@ -29,19 +29,13 @@ impl MetadataModel for HummockVersionDelta {
     }
 
     fn to_protobuf(&self) -> Self::PbType {
-        use risingwave_hummock_sdk::ProtoSerializeExt;
-        <risingwave_hummock_sdk::version::HummockVersionDelta as ProtoSerializeExt>::to_protobuf(
-            self,
-        )
+        self.into()
     }
 
     fn to_protobuf_encoded_vec(&self) -> Vec<u8> {
         use prost::Message;
-        use risingwave_hummock_sdk::ProtoSerializeExt;
-        <risingwave_hummock_sdk::version::HummockVersionDelta as ProtoSerializeExt>::to_protobuf(
-            self,
-        )
-        .encode_to_vec()
+        let pb = PbHummockVersionDelta::from(self);
+        pb.encode_to_vec()
     }
 
     fn from_protobuf(prost: Self::PbType) -> Self {

@@ -29,9 +29,7 @@ use risingwave_pb::hummock::{PbTableWatermarks, PbVnodeWatermark};
 use tracing::{debug, warn};
 
 use crate::key::{prefix_slice_with_vnode, vnode, TableKey, TableKeyRange};
-use crate::{
-    HummockEpoch, ProtoSerializeExt, ProtoSerializeOwnExt, ProtoSerializeSizeEstimatedExt,
-};
+use crate::{HummockEpoch, ProtoSerializeSizeEstimatedExt};
 
 #[derive(Clone)]
 pub struct ReadTableWatermark {
@@ -309,17 +307,17 @@ impl VnodeWatermark {
     }
 }
 
-impl ProtoSerializeExt for VnodeWatermark {
-    type PB = PbVnodeWatermark;
-
-    fn to_protobuf(&self) -> Self::PB {
-        Self::PB {
-            watermark: self.watermark.to_vec(),
-            vnode_bitmap: Some(self.vnode_bitmap.to_protobuf()),
+impl From<PbVnodeWatermark> for VnodeWatermark {
+    fn from(pb: PbVnodeWatermark) -> Self {
+        Self {
+            vnode_bitmap: Arc::new(Bitmap::from(pb.vnode_bitmap.as_ref().unwrap())),
+            watermark: Bytes::from(pb.watermark),
         }
     }
+}
 
-    fn from_protobuf(pb: &Self::PB) -> Self {
+impl From<&PbVnodeWatermark> for VnodeWatermark {
+    fn from(pb: &PbVnodeWatermark) -> Self {
         Self {
             vnode_bitmap: Arc::new(Bitmap::from(pb.vnode_bitmap.as_ref().unwrap())),
             watermark: Bytes::from(pb.watermark.clone()),
@@ -327,20 +325,20 @@ impl ProtoSerializeExt for VnodeWatermark {
     }
 }
 
-impl ProtoSerializeOwnExt for VnodeWatermark {
-    type PB = PbVnodeWatermark;
-
-    fn to_protobuf_own(self) -> Self::PB {
-        Self::PB {
-            watermark: self.watermark.into(),
-            vnode_bitmap: Some(self.vnode_bitmap.to_protobuf()), // TODO: make Bitmao without copy
+impl From<VnodeWatermark> for PbVnodeWatermark {
+    fn from(watermark: VnodeWatermark) -> Self {
+        Self {
+            watermark: watermark.watermark.into(),
+            vnode_bitmap: Some(watermark.vnode_bitmap.to_protobuf()),
         }
     }
+}
 
-    fn from_protobuf_own(pb: Self::PB) -> Self {
+impl From<&VnodeWatermark> for PbVnodeWatermark {
+    fn from(watermark: &VnodeWatermark) -> Self {
         Self {
-            vnode_bitmap: Arc::new(Bitmap::from(pb.vnode_bitmap.as_ref().unwrap())),
-            watermark: Bytes::from(pb.watermark),
+            watermark: watermark.watermark.to_vec(),
+            vnode_bitmap: Some(watermark.vnode_bitmap.to_protobuf()),
         }
     }
 }
@@ -554,27 +552,8 @@ impl ProtoSerializeSizeEstimatedExt for TableWatermarks {
     }
 }
 
-impl ProtoSerializeExt for TableWatermarks {
-    type PB = PbTableWatermarks;
-
-    fn to_protobuf(&self) -> Self::PB {
-        Self::PB {
-            epoch_watermarks: self
-                .watermarks
-                .iter()
-                .map(|(epoch, watermarks)| PbEpochNewWatermarks {
-                    watermarks: watermarks.iter().map(VnodeWatermark::to_protobuf).collect(),
-                    epoch: *epoch,
-                })
-                .collect(),
-            is_ascending: match self.direction {
-                WatermarkDirection::Ascending => true,
-                WatermarkDirection::Descending => false,
-            },
-        }
-    }
-
-    fn from_protobuf(pb: &Self::PB) -> Self {
+impl From<&PbTableWatermarks> for TableWatermarks {
+    fn from(pb: &PbTableWatermarks) -> Self {
         Self {
             watermarks: pb
                 .epoch_watermarks
@@ -584,7 +563,7 @@ impl ProtoSerializeExt for TableWatermarks {
                     let watermarks = epoch_watermark
                         .watermarks
                         .iter()
-                        .map(VnodeWatermark::from_protobuf)
+                        .map(VnodeWatermark::from)
                         .collect();
                     (epoch, watermarks)
                 })
@@ -598,30 +577,27 @@ impl ProtoSerializeExt for TableWatermarks {
     }
 }
 
-impl ProtoSerializeOwnExt for TableWatermarks {
-    type PB = PbTableWatermarks;
-
-    fn to_protobuf_own(self) -> Self::PB {
-        Self::PB {
-            epoch_watermarks: self
+impl From<&TableWatermarks> for PbTableWatermarks {
+    fn from(table_watermarks: &TableWatermarks) -> Self {
+        Self {
+            epoch_watermarks: table_watermarks
                 .watermarks
-                .into_iter()
+                .iter()
                 .map(|(epoch, watermarks)| PbEpochNewWatermarks {
-                    watermarks: watermarks
-                        .into_iter()
-                        .map(VnodeWatermark::to_protobuf_own)
-                        .collect(),
-                    epoch,
+                    watermarks: watermarks.iter().map(|wm| wm.into()).collect(),
+                    epoch: *epoch,
                 })
                 .collect(),
-            is_ascending: match self.direction {
+            is_ascending: match table_watermarks.direction {
                 WatermarkDirection::Ascending => true,
                 WatermarkDirection::Descending => false,
             },
         }
     }
+}
 
-    fn from_protobuf_own(pb: Self::PB) -> Self {
+impl From<PbTableWatermarks> for TableWatermarks {
+    fn from(pb: PbTableWatermarks) -> Self {
         Self {
             watermarks: pb
                 .epoch_watermarks
@@ -631,7 +607,7 @@ impl ProtoSerializeOwnExt for TableWatermarks {
                     let watermarks = epoch_watermark
                         .watermarks
                         .into_iter()
-                        .map(VnodeWatermark::from_protobuf_own)
+                        .map(VnodeWatermark::from)
                         .collect();
                     (epoch, watermarks)
                 })
@@ -640,6 +616,25 @@ impl ProtoSerializeOwnExt for TableWatermarks {
                 WatermarkDirection::Ascending
             } else {
                 WatermarkDirection::Descending
+            },
+        }
+    }
+}
+
+impl From<TableWatermarks> for PbTableWatermarks {
+    fn from(table_watermarks: TableWatermarks) -> Self {
+        Self {
+            epoch_watermarks: table_watermarks
+                .watermarks
+                .into_iter()
+                .map(|(epoch, watermarks)| PbEpochNewWatermarks {
+                    watermarks: watermarks.into_iter().map(VnodeWatermark::into).collect(),
+                    epoch,
+                })
+                .collect(),
+            is_ascending: match table_watermarks.direction {
+                WatermarkDirection::Ascending => true,
+                WatermarkDirection::Descending => false,
             },
         }
     }

@@ -30,10 +30,7 @@ use serde::Serialize;
 
 use crate::key_range::KeyRange;
 use crate::table_watermark::TableWatermarks;
-use crate::{
-    CompactionGroupId, HummockSstableObjectId, ProtoSerializeExt, ProtoSerializeOwnExt,
-    ProtoSerializeSizeEstimatedExt,
-};
+use crate::{CompactionGroupId, HummockSstableObjectId, ProtoSerializeSizeEstimatedExt};
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
 pub struct OverlappingLevel {
@@ -42,30 +39,58 @@ pub struct OverlappingLevel {
     pub uncompressed_file_size: u64,
 }
 
-impl ProtoSerializeExt for OverlappingLevel {
-    type PB = PbOverlappingLevel;
-
-    fn from_protobuf(pb_overlapping_level: &Self::PB) -> Self {
+impl From<&PbOverlappingLevel> for OverlappingLevel {
+    fn from(pb_overlapping_level: &PbOverlappingLevel) -> Self {
         Self {
             sub_levels: pb_overlapping_level
                 .sub_levels
                 .iter()
-                .map(Level::from_protobuf)
+                .map(Level::from)
                 .collect_vec(),
             total_file_size: pb_overlapping_level.total_file_size,
             uncompressed_file_size: pb_overlapping_level.uncompressed_file_size,
         }
     }
+}
 
-    fn to_protobuf(&self) -> Self::PB {
-        Self::PB {
-            sub_levels: self
+impl From<&OverlappingLevel> for PbOverlappingLevel {
+    fn from(overlapping_level: &OverlappingLevel) -> Self {
+        Self {
+            sub_levels: overlapping_level
                 .sub_levels
                 .iter()
-                .map(|pb_level| pb_level.to_protobuf())
+                .map(|pb_level| pb_level.into())
                 .collect_vec(),
-            total_file_size: self.total_file_size,
-            uncompressed_file_size: self.uncompressed_file_size,
+            total_file_size: overlapping_level.total_file_size,
+            uncompressed_file_size: overlapping_level.uncompressed_file_size,
+        }
+    }
+}
+
+impl From<OverlappingLevel> for PbOverlappingLevel {
+    fn from(overlapping_level: OverlappingLevel) -> Self {
+        Self {
+            sub_levels: overlapping_level
+                .sub_levels
+                .into_iter()
+                .map(|pb_level| pb_level.into())
+                .collect_vec(),
+            total_file_size: overlapping_level.total_file_size,
+            uncompressed_file_size: overlapping_level.uncompressed_file_size,
+        }
+    }
+}
+
+impl From<PbOverlappingLevel> for OverlappingLevel {
+    fn from(pb_overlapping_level: PbOverlappingLevel) -> Self {
+        Self {
+            sub_levels: pb_overlapping_level
+                .sub_levels
+                .into_iter()
+                .map(Level::from)
+                .collect_vec(),
+            total_file_size: pb_overlapping_level.total_file_size,
+            uncompressed_file_size: pb_overlapping_level.uncompressed_file_size,
         }
     }
 }
@@ -98,17 +123,15 @@ pub struct Level {
     pub vnode_partition_count: u32,
 }
 
-impl ProtoSerializeExt for Level {
-    type PB = PbLevel;
-
-    fn from_protobuf(pb_level: &Self::PB) -> Self {
+impl From<&PbLevel> for Level {
+    fn from(pb_level: &PbLevel) -> Self {
         Self {
             level_idx: pb_level.level_idx,
             level_type: LevelType::try_from(pb_level.level_type).unwrap(),
             table_infos: pb_level
                 .table_infos
                 .iter()
-                .map(SstableInfo::from_protobuf)
+                .map(SstableInfo::from)
                 .collect_vec(),
             total_file_size: pb_level.total_file_size,
             sub_level_id: pb_level.sub_level_id,
@@ -116,20 +139,58 @@ impl ProtoSerializeExt for Level {
             vnode_partition_count: pb_level.vnode_partition_count,
         }
     }
+}
 
-    fn to_protobuf(&self) -> Self::PB {
-        Self::PB {
-            level_idx: self.level_idx,
-            level_type: self.level_type.into(),
-            table_infos: self
+impl From<&Level> for PbLevel {
+    fn from(level: &Level) -> Self {
+        Self {
+            level_idx: level.level_idx,
+            level_type: level.level_type.into(),
+            table_infos: level
                 .table_infos
                 .iter()
-                .map(|sst| sst.to_protobuf())
+                .map(PbSstableInfo::from)
                 .collect_vec(),
-            total_file_size: self.total_file_size,
-            sub_level_id: self.sub_level_id,
-            uncompressed_file_size: self.uncompressed_file_size,
-            vnode_partition_count: self.vnode_partition_count,
+            total_file_size: level.total_file_size,
+            sub_level_id: level.sub_level_id,
+            uncompressed_file_size: level.uncompressed_file_size,
+            vnode_partition_count: level.vnode_partition_count,
+        }
+    }
+}
+
+impl From<Level> for PbLevel {
+    fn from(level: Level) -> Self {
+        Self {
+            level_idx: level.level_idx,
+            level_type: level.level_type.into(),
+            table_infos: level
+                .table_infos
+                .into_iter()
+                .map(PbSstableInfo::from)
+                .collect_vec(),
+            total_file_size: level.total_file_size,
+            sub_level_id: level.sub_level_id,
+            uncompressed_file_size: level.uncompressed_file_size,
+            vnode_partition_count: level.vnode_partition_count,
+        }
+    }
+}
+
+impl From<PbLevel> for Level {
+    fn from(pb_level: PbLevel) -> Self {
+        Self {
+            level_idx: pb_level.level_idx,
+            level_type: LevelType::try_from(pb_level.level_type).unwrap(),
+            table_infos: pb_level
+                .table_infos
+                .into_iter()
+                .map(SstableInfo::from)
+                .collect_vec(),
+            total_file_size: pb_level.total_file_size,
+            sub_level_id: pb_level.sub_level_id,
+            uncompressed_file_size: pb_level.uncompressed_file_size,
+            vnode_partition_count: pb_level.vnode_partition_count,
         }
     }
 }
@@ -209,44 +270,66 @@ impl ProtoSerializeSizeEstimatedExt for Levels {
     }
 }
 
-impl ProtoSerializeExt for Levels {
-    type PB = PbLevels;
-
-    fn from_protobuf(pb_levels: &Self::PB) -> Self {
+impl From<&PbLevels> for Levels {
+    fn from(pb_levels: &PbLevels) -> Self {
         Self {
             l0: if pb_levels.l0.is_some() {
-                Some(OverlappingLevel::from_protobuf(
-                    pb_levels.l0.as_ref().unwrap(),
-                ))
+                Some(OverlappingLevel::from(pb_levels.l0.as_ref().unwrap()))
             } else {
                 None
             },
-            levels: pb_levels
-                .levels
-                .iter()
-                .map(Level::from_protobuf)
-                .collect_vec(),
+            levels: pb_levels.levels.iter().map(Level::from).collect_vec(),
             group_id: pb_levels.group_id,
             parent_group_id: pb_levels.parent_group_id,
             member_table_ids: pb_levels.member_table_ids.clone(),
         }
     }
+}
 
-    fn to_protobuf(&self) -> Self::PB {
-        Self::PB {
-            l0: if self.l0.is_some() {
-                Some(self.l0.as_ref().unwrap().to_protobuf())
+impl From<&Levels> for PbLevels {
+    fn from(levels: &Levels) -> Self {
+        Self {
+            l0: if levels.l0.is_some() {
+                Some(levels.l0.as_ref().unwrap().into())
             } else {
                 None
             },
-            levels: self
-                .levels
-                .iter()
-                .map(|level| level.to_protobuf())
-                .collect_vec(),
-            group_id: self.group_id,
-            parent_group_id: self.parent_group_id,
-            member_table_ids: self.member_table_ids.clone(),
+            levels: levels.levels.iter().map(PbLevel::from).collect_vec(),
+            group_id: levels.group_id,
+            parent_group_id: levels.parent_group_id,
+            member_table_ids: levels.member_table_ids.clone(),
+        }
+    }
+}
+
+impl From<PbLevels> for Levels {
+    fn from(pb_levels: PbLevels) -> Self {
+        Self {
+            l0: if pb_levels.l0.is_some() {
+                Some(OverlappingLevel::from(pb_levels.l0.unwrap()))
+            } else {
+                None
+            },
+            levels: pb_levels.levels.into_iter().map(Level::from).collect_vec(),
+            group_id: pb_levels.group_id,
+            parent_group_id: pb_levels.parent_group_id,
+            member_table_ids: pb_levels.member_table_ids.clone(),
+        }
+    }
+}
+
+impl From<Levels> for PbLevels {
+    fn from(levels: Levels) -> Self {
+        Self {
+            l0: if levels.l0.is_some() {
+                Some(levels.l0.unwrap().into())
+            } else {
+                None
+            },
+            levels: levels.levels.into_iter().map(PbLevel::from).collect_vec(),
+            group_id: levels.group_id,
+            parent_group_id: levels.parent_group_id,
+            member_table_ids: levels.member_table_ids,
         }
     }
 }
@@ -262,7 +345,7 @@ pub struct HummockVersion {
 
 impl Default for HummockVersion {
     fn default() -> Self {
-        HummockVersion::from_protobuf(&PbHummockVersion::default())
+        HummockVersion::from(&PbHummockVersion::default())
     }
 }
 
@@ -270,13 +353,13 @@ impl HummockVersion {
     /// Convert the `PbHummockVersion` received from rpc to `HummockVersion`. No need to
     /// maintain backward compatibility.
     pub fn from_rpc_protobuf(pb_version: &PbHummockVersion) -> Self {
-        Self::from_protobuf(pb_version)
+        HummockVersion::from(pb_version)
     }
 
     /// Convert the `PbHummockVersion` deserialized from persisted state to `HummockVersion`.
     /// We should maintain backward compatibility.
     pub fn from_persisted_protobuf(pb_version: &PbHummockVersion) -> Self {
-        Self::from_protobuf(pb_version)
+        HummockVersion::from(pb_version)
     }
 }
 
@@ -297,21 +380,14 @@ impl ProtoSerializeSizeEstimatedExt for HummockVersion {
     }
 }
 
-impl ProtoSerializeExt for HummockVersion {
-    type PB = PbHummockVersion;
-
-    fn from_protobuf(pb_version: &Self::PB) -> Self {
+impl From<&PbHummockVersion> for HummockVersion {
+    fn from(pb_version: &PbHummockVersion) -> Self {
         Self {
             id: pb_version.id,
             levels: pb_version
                 .levels
                 .iter()
-                .map(|(group_id, levels)| {
-                    (
-                        *group_id as CompactionGroupId,
-                        Levels::from_protobuf(levels),
-                    )
-                })
+                .map(|(group_id, levels)| (*group_id as CompactionGroupId, Levels::from(levels)))
                 .collect(),
             max_committed_epoch: pb_version.max_committed_epoch,
             safe_epoch: pb_version.safe_epoch,
@@ -321,27 +397,49 @@ impl ProtoSerializeExt for HummockVersion {
                 .map(|(table_id, table_watermark)| {
                     (
                         TableId::new(*table_id),
-                        TableWatermarks::from_protobuf(table_watermark),
+                        TableWatermarks::from(table_watermark),
                     )
                 })
                 .collect(),
         }
     }
+}
 
-    fn to_protobuf(&self) -> Self::PB {
-        Self::PB {
-            id: self.id,
-            levels: self
+impl From<&HummockVersion> for PbHummockVersion {
+    fn from(version: &HummockVersion) -> Self {
+        Self {
+            id: version.id,
+            levels: version
                 .levels
                 .iter()
-                .map(|(group_id, levels)| (*group_id as _, levels.to_protobuf()))
+                .map(|(group_id, levels)| (*group_id as _, levels.into()))
                 .collect(),
-            max_committed_epoch: self.max_committed_epoch,
-            safe_epoch: self.safe_epoch,
-            table_watermarks: self
+            max_committed_epoch: version.max_committed_epoch,
+            safe_epoch: version.safe_epoch,
+            table_watermarks: version
                 .table_watermarks
                 .iter()
-                .map(|(table_id, watermark)| (table_id.table_id, watermark.to_protobuf()))
+                .map(|(table_id, watermark)| (table_id.table_id, watermark.into()))
+                .collect(),
+        }
+    }
+}
+
+impl From<HummockVersion> for PbHummockVersion {
+    fn from(version: HummockVersion) -> Self {
+        Self {
+            id: version.id,
+            levels: version
+                .levels
+                .into_iter()
+                .map(|(group_id, levels)| (group_id as _, levels.into()))
+                .collect(),
+            max_committed_epoch: version.max_committed_epoch,
+            safe_epoch: version.safe_epoch,
+            table_watermarks: version
+                .table_watermarks
+                .into_iter()
+                .map(|(table_id, watermark)| (table_id.table_id, watermark.into()))
                 .collect(),
         }
     }
@@ -362,7 +460,7 @@ pub struct HummockVersionDelta {
 
 impl Default for HummockVersionDelta {
     fn default() -> Self {
-        HummockVersionDelta::from_protobuf(&PbHummockVersionDelta::default())
+        HummockVersionDelta::from(&PbHummockVersionDelta::default())
     }
 }
 
@@ -370,64 +468,109 @@ impl HummockVersionDelta {
     /// Convert the `PbHummockVersionDelta` deserialized from persisted state to `HummockVersionDelta`.
     /// We should maintain backward compatibility.
     pub fn from_persisted_protobuf(delta: &PbHummockVersionDelta) -> Self {
-        Self::from_protobuf(delta)
+        Self::from(delta)
     }
 
     /// Convert the `PbHummockVersionDelta` received from rpc to `HummockVersionDelta`. No need to
     /// maintain backward compatibility.
     pub fn from_rpc_protobuf(delta: &PbHummockVersionDelta) -> Self {
-        Self::from_protobuf(delta)
+        Self::from(delta)
     }
 }
 
-impl ProtoSerializeExt for HummockVersionDelta {
-    type PB = PbHummockVersionDelta;
-
-    fn from_protobuf(delta: &Self::PB) -> Self {
+impl From<&PbHummockVersionDelta> for HummockVersionDelta {
+    fn from(pb_version_delta: &PbHummockVersionDelta) -> Self {
         Self {
-            id: delta.id,
-            prev_id: delta.prev_id,
-            group_deltas: delta.group_deltas.clone(),
-            max_committed_epoch: delta.max_committed_epoch,
-            safe_epoch: delta.safe_epoch,
-            trivial_move: delta.trivial_move,
-            gc_object_ids: delta.gc_object_ids.clone(),
-            new_table_watermarks: delta
+            id: pb_version_delta.id,
+            prev_id: pb_version_delta.prev_id,
+            group_deltas: pb_version_delta.group_deltas.clone(),
+            max_committed_epoch: pb_version_delta.max_committed_epoch,
+            safe_epoch: pb_version_delta.safe_epoch,
+            trivial_move: pb_version_delta.trivial_move,
+            gc_object_ids: pb_version_delta.gc_object_ids.clone(),
+            new_table_watermarks: pb_version_delta
                 .new_table_watermarks
                 .iter()
                 .map(|(table_id, watermarks)| {
-                    (
-                        TableId::new(*table_id),
-                        TableWatermarks::from_protobuf(watermarks),
-                    )
+                    (TableId::new(*table_id), TableWatermarks::from(watermarks))
                 })
                 .collect(),
-            removed_table_ids: delta
+            removed_table_ids: pb_version_delta
                 .removed_table_ids
                 .iter()
                 .map(|table_id| TableId::new(*table_id))
                 .collect(),
         }
     }
+}
 
-    fn to_protobuf(&self) -> Self::PB {
-        Self::PB {
-            id: self.id,
-            prev_id: self.prev_id,
-            group_deltas: self.group_deltas.clone(),
-            max_committed_epoch: self.max_committed_epoch,
-            safe_epoch: self.safe_epoch,
-            trivial_move: self.trivial_move,
-            gc_object_ids: self.gc_object_ids.clone(),
-            new_table_watermarks: self
+impl From<&HummockVersionDelta> for PbHummockVersionDelta {
+    fn from(version_delta: &HummockVersionDelta) -> Self {
+        Self {
+            id: version_delta.id,
+            prev_id: version_delta.prev_id,
+            group_deltas: version_delta.group_deltas.clone(),
+            max_committed_epoch: version_delta.max_committed_epoch,
+            safe_epoch: version_delta.safe_epoch,
+            trivial_move: version_delta.trivial_move,
+            gc_object_ids: version_delta.gc_object_ids.clone(),
+            new_table_watermarks: version_delta
                 .new_table_watermarks
                 .iter()
-                .map(|(table_id, watermarks)| (table_id.table_id, watermarks.to_protobuf()))
+                .map(|(table_id, watermarks)| (table_id.table_id, watermarks.into()))
                 .collect(),
-            removed_table_ids: self
+            removed_table_ids: version_delta
                 .removed_table_ids
                 .iter()
                 .map(|table_id| table_id.table_id)
+                .collect(),
+        }
+    }
+}
+
+impl From<HummockVersionDelta> for PbHummockVersionDelta {
+    fn from(version_delta: HummockVersionDelta) -> Self {
+        Self {
+            id: version_delta.id,
+            prev_id: version_delta.prev_id,
+            group_deltas: version_delta.group_deltas,
+            max_committed_epoch: version_delta.max_committed_epoch,
+            safe_epoch: version_delta.safe_epoch,
+            trivial_move: version_delta.trivial_move,
+            gc_object_ids: version_delta.gc_object_ids,
+            new_table_watermarks: version_delta
+                .new_table_watermarks
+                .into_iter()
+                .map(|(table_id, watermarks)| (table_id.table_id, watermarks.into()))
+                .collect(),
+            removed_table_ids: version_delta
+                .removed_table_ids
+                .into_iter()
+                .map(|table_id| table_id.table_id)
+                .collect(),
+        }
+    }
+}
+
+impl From<PbHummockVersionDelta> for HummockVersionDelta {
+    fn from(pb_version_delta: PbHummockVersionDelta) -> Self {
+        Self {
+            id: pb_version_delta.id,
+            prev_id: pb_version_delta.prev_id,
+            group_deltas: pb_version_delta.group_deltas,
+            max_committed_epoch: pb_version_delta.max_committed_epoch,
+            safe_epoch: pb_version_delta.safe_epoch,
+            trivial_move: pb_version_delta.trivial_move,
+            gc_object_ids: pb_version_delta.gc_object_ids,
+            new_table_watermarks: pb_version_delta
+                .new_table_watermarks
+                .into_iter()
+                .map(|(table_id, watermarks)| (TableId::new(table_id), watermarks.into()))
+                .collect(),
+            removed_table_ids: pb_version_delta
+                .removed_table_ids
+                .into_iter()
+                .map(TableId::new)
                 .collect(),
         }
     }
@@ -473,73 +616,8 @@ impl ProtoSerializeSizeEstimatedExt for SstableInfo {
     }
 }
 
-impl ProtoSerializeExt for SstableInfo {
-    type PB = PbSstableInfo;
-
-    fn from_protobuf(pb_sstable_info: &Self::PB) -> Self {
-        Self {
-            object_id: pb_sstable_info.object_id,
-            sst_id: pb_sstable_info.sst_id,
-            key_range: if pb_sstable_info.key_range.is_some() {
-                let pb_keyrange = pb_sstable_info.key_range.as_ref().unwrap();
-                let key_range = KeyRange {
-                    left: Bytes::from(pb_keyrange.left.clone()),
-                    right: Bytes::from(pb_keyrange.right.clone()),
-                    right_exclusive: pb_keyrange.right_exclusive,
-                };
-                Some(key_range)
-            } else {
-                None
-            },
-
-            file_size: pb_sstable_info.file_size,
-            table_ids: pb_sstable_info.table_ids.clone(),
-            meta_offset: pb_sstable_info.meta_offset,
-            stale_key_count: pb_sstable_info.stale_key_count,
-            total_key_count: pb_sstable_info.total_key_count,
-            min_epoch: pb_sstable_info.min_epoch,
-            max_epoch: pb_sstable_info.max_epoch,
-            uncompressed_file_size: pb_sstable_info.uncompressed_file_size,
-            range_tombstone_count: pb_sstable_info.range_tombstone_count,
-            bloom_filter_kind: BloomFilterType::try_from(pb_sstable_info.bloom_filter_kind)
-                .unwrap(),
-        }
-    }
-
-    fn to_protobuf(&self) -> Self::PB {
-        PbSstableInfo {
-            object_id: self.object_id,
-            sst_id: self.sst_id,
-            key_range: if self.key_range.is_some() {
-                let keyrange = self.key_range.as_ref().unwrap();
-                let pb_key_range = PbKeyRange {
-                    left: keyrange.left.to_vec(),
-                    right: keyrange.right.to_vec(),
-                    right_exclusive: keyrange.right_exclusive,
-                };
-                Some(pb_key_range)
-            } else {
-                None
-            },
-
-            file_size: self.file_size,
-            table_ids: self.table_ids.clone(),
-            meta_offset: self.meta_offset,
-            stale_key_count: self.stale_key_count,
-            total_key_count: self.total_key_count,
-            min_epoch: self.min_epoch,
-            max_epoch: self.max_epoch,
-            uncompressed_file_size: self.uncompressed_file_size,
-            range_tombstone_count: self.range_tombstone_count,
-            bloom_filter_kind: self.bloom_filter_kind.into(),
-        }
-    }
-}
-
-impl ProtoSerializeOwnExt for SstableInfo {
-    type PB = PbSstableInfo;
-
-    fn from_protobuf_own(pb_sstable_info: Self::PB) -> Self {
+impl From<PbSstableInfo> for SstableInfo {
+    fn from(pb_sstable_info: PbSstableInfo) -> Self {
         Self {
             object_id: pb_sstable_info.object_id,
             sst_id: pb_sstable_info.sst_id,
@@ -568,13 +646,47 @@ impl ProtoSerializeOwnExt for SstableInfo {
                 .unwrap(),
         }
     }
+}
 
-    fn to_protobuf_own(self) -> Self::PB {
-        Self::PB {
-            object_id: self.object_id,
-            sst_id: self.sst_id,
-            key_range: if self.key_range.is_some() {
-                let keyrange = self.key_range.unwrap();
+impl From<&PbSstableInfo> for SstableInfo {
+    fn from(pb_sstable_info: &PbSstableInfo) -> Self {
+        Self {
+            object_id: pb_sstable_info.object_id,
+            sst_id: pb_sstable_info.sst_id,
+            key_range: if pb_sstable_info.key_range.is_some() {
+                let pb_keyrange = pb_sstable_info.key_range.as_ref().unwrap();
+                let key_range = KeyRange {
+                    left: Bytes::from(pb_keyrange.left.clone()),
+                    right: Bytes::from(pb_keyrange.right.clone()),
+                    right_exclusive: pb_keyrange.right_exclusive,
+                };
+                Some(key_range)
+            } else {
+                None
+            },
+
+            file_size: pb_sstable_info.file_size,
+            table_ids: pb_sstable_info.table_ids.clone(),
+            meta_offset: pb_sstable_info.meta_offset,
+            stale_key_count: pb_sstable_info.stale_key_count,
+            total_key_count: pb_sstable_info.total_key_count,
+            min_epoch: pb_sstable_info.min_epoch,
+            max_epoch: pb_sstable_info.max_epoch,
+            uncompressed_file_size: pb_sstable_info.uncompressed_file_size,
+            range_tombstone_count: pb_sstable_info.range_tombstone_count,
+            bloom_filter_kind: BloomFilterType::try_from(pb_sstable_info.bloom_filter_kind)
+                .unwrap(),
+        }
+    }
+}
+
+impl From<SstableInfo> for PbSstableInfo {
+    fn from(sstable_info: SstableInfo) -> Self {
+        PbSstableInfo {
+            object_id: sstable_info.object_id,
+            sst_id: sstable_info.sst_id,
+            key_range: if sstable_info.key_range.is_some() {
+                let keyrange = sstable_info.key_range.unwrap();
                 let pb_key_range = PbKeyRange {
                     left: keyrange.left.into(),
                     right: keyrange.right.into(),
@@ -585,16 +697,47 @@ impl ProtoSerializeOwnExt for SstableInfo {
                 None
             },
 
-            file_size: self.file_size,
-            table_ids: self.table_ids.clone(),
-            meta_offset: self.meta_offset,
-            stale_key_count: self.stale_key_count,
-            total_key_count: self.total_key_count,
-            min_epoch: self.min_epoch,
-            max_epoch: self.max_epoch,
-            uncompressed_file_size: self.uncompressed_file_size,
-            range_tombstone_count: self.range_tombstone_count,
-            bloom_filter_kind: self.bloom_filter_kind.into(),
+            file_size: sstable_info.file_size,
+            table_ids: sstable_info.table_ids.clone(),
+            meta_offset: sstable_info.meta_offset,
+            stale_key_count: sstable_info.stale_key_count,
+            total_key_count: sstable_info.total_key_count,
+            min_epoch: sstable_info.min_epoch,
+            max_epoch: sstable_info.max_epoch,
+            uncompressed_file_size: sstable_info.uncompressed_file_size,
+            range_tombstone_count: sstable_info.range_tombstone_count,
+            bloom_filter_kind: sstable_info.bloom_filter_kind.into(),
+        }
+    }
+}
+
+impl From<&SstableInfo> for PbSstableInfo {
+    fn from(sstable_info: &SstableInfo) -> Self {
+        PbSstableInfo {
+            object_id: sstable_info.object_id,
+            sst_id: sstable_info.sst_id,
+            key_range: if sstable_info.key_range.is_some() {
+                let keyrange = sstable_info.key_range.as_ref().unwrap();
+                let pb_key_range = PbKeyRange {
+                    left: keyrange.left.to_vec(),
+                    right: keyrange.right.to_vec(),
+                    right_exclusive: keyrange.right_exclusive,
+                };
+                Some(pb_key_range)
+            } else {
+                None
+            },
+
+            file_size: sstable_info.file_size,
+            table_ids: sstable_info.table_ids.clone(),
+            meta_offset: sstable_info.meta_offset,
+            stale_key_count: sstable_info.stale_key_count,
+            total_key_count: sstable_info.total_key_count,
+            min_epoch: sstable_info.min_epoch,
+            max_epoch: sstable_info.max_epoch,
+            uncompressed_file_size: sstable_info.uncompressed_file_size,
+            range_tombstone_count: sstable_info.range_tombstone_count,
+            bloom_filter_kind: sstable_info.bloom_filter_kind.into(),
         }
     }
 }
@@ -632,57 +775,57 @@ impl ProtoSerializeSizeEstimatedExt for InputLevel {
     }
 }
 
-impl ProtoSerializeExt for InputLevel {
-    type PB = PbInputLevel;
-
-    fn from_protobuf(pb_input_level: &Self::PB) -> Self {
+impl From<PbInputLevel> for InputLevel {
+    fn from(pb_input_level: PbInputLevel) -> Self {
         Self {
             level_idx: pb_input_level.level_idx,
             level_type: LevelType::try_from(pb_input_level.level_type).unwrap(),
             table_infos: pb_input_level
                 .table_infos
-                .iter()
-                .map(SstableInfo::from_protobuf)
-                .collect_vec(),
-        }
-    }
-
-    fn to_protobuf(&self) -> Self::PB {
-        Self::PB {
-            level_idx: self.level_idx,
-            level_type: self.level_type.into(),
-            table_infos: self
-                .table_infos
-                .iter()
-                .map(|sst| sst.to_protobuf())
+                .into_iter()
+                .map(SstableInfo::from)
                 .collect_vec(),
         }
     }
 }
 
-impl ProtoSerializeOwnExt for InputLevel {
-    type PB = PbInputLevel;
-
-    fn from_protobuf_own(pb_input_level: Self::PB) -> Self {
+impl From<&PbInputLevel> for InputLevel {
+    fn from(pb_input_level: &PbInputLevel) -> Self {
         Self {
             level_idx: pb_input_level.level_idx,
             level_type: LevelType::try_from(pb_input_level.level_type).unwrap(),
             table_infos: pb_input_level
                 .table_infos
-                .into_iter()
-                .map(SstableInfo::from_protobuf_own)
+                .iter()
+                .map(SstableInfo::from)
                 .collect_vec(),
         }
     }
+}
 
-    fn to_protobuf_own(self) -> Self::PB {
-        Self::PB {
-            level_idx: self.level_idx,
-            level_type: self.level_type.into(),
-            table_infos: self
+impl From<InputLevel> for PbInputLevel {
+    fn from(input_level: InputLevel) -> Self {
+        Self {
+            level_idx: input_level.level_idx,
+            level_type: input_level.level_type.into(),
+            table_infos: input_level
                 .table_infos
                 .into_iter()
-                .map(|sst| sst.to_protobuf_own())
+                .map(|sst| sst.into())
+                .collect_vec(),
+        }
+    }
+}
+
+impl From<&InputLevel> for PbInputLevel {
+    fn from(input_level: &InputLevel) -> Self {
+        Self {
+            level_idx: input_level.level_idx,
+            level_type: input_level.level_type.into(),
+            table_infos: input_level
+                .table_infos
+                .iter()
+                .map(|sst| sst.into())
                 .collect_vec(),
         }
     }
@@ -788,121 +931,13 @@ impl ProtoSerializeSizeEstimatedExt for CompactTask {
     }
 }
 
-impl ProtoSerializeExt for CompactTask {
-    type PB = PbCompactTask;
-
-    fn from_protobuf(pb_compact_task: &Self::PB) -> Self {
-        Self {
-            input_ssts: pb_compact_task
-                .input_ssts
-                .iter()
-                .map(InputLevel::from_protobuf)
-                .collect_vec(),
-            splits: pb_compact_task
-                .splits
-                .iter()
-                .map(|pb_keyrange| KeyRange {
-                    left: Bytes::from(pb_keyrange.left.clone()),
-                    right: Bytes::from(pb_keyrange.right.clone()),
-                    right_exclusive: pb_keyrange.right_exclusive,
-                })
-                .collect_vec(),
-            watermark: pb_compact_task.watermark,
-            sorted_output_ssts: pb_compact_task
-                .sorted_output_ssts
-                .iter()
-                .map(SstableInfo::from_protobuf)
-                .collect_vec(),
-            task_id: pb_compact_task.task_id,
-            target_level: pb_compact_task.target_level,
-            gc_delete_keys: pb_compact_task.gc_delete_keys,
-            base_level: pb_compact_task.base_level,
-            task_status: TaskStatus::try_from(pb_compact_task.task_status).unwrap(),
-            compaction_group_id: pb_compact_task.compaction_group_id,
-            existing_table_ids: pb_compact_task.existing_table_ids.clone(),
-            compression_algorithm: pb_compact_task.compression_algorithm,
-            target_file_size: pb_compact_task.target_file_size,
-            compaction_filter_mask: pb_compact_task.compaction_filter_mask,
-            table_options: pb_compact_task.table_options.clone(),
-            current_epoch_time: pb_compact_task.current_epoch_time,
-            target_sub_level_id: pb_compact_task.target_sub_level_id,
-            task_type: TaskType::try_from(pb_compact_task.task_type).unwrap(),
-            #[allow(deprecated)]
-            split_by_state_table: pb_compact_task.split_by_state_table,
-            split_weight_by_vnode: pb_compact_task.split_weight_by_vnode,
-            table_vnode_partition: pb_compact_task.table_vnode_partition.clone(),
-            table_watermarks: pb_compact_task
-                .table_watermarks
-                .iter()
-                .map(|(table_id, pb_table_watermark)| {
-                    (
-                        *table_id,
-                        TableWatermarks::from_protobuf(pb_table_watermark),
-                    )
-                })
-                .collect(),
-            table_schemas: pb_compact_task.table_schemas.clone(),
-        }
-    }
-
-    fn to_protobuf(&self) -> Self::PB {
-        Self::PB {
-            input_ssts: self
-                .input_ssts
-                .iter()
-                .map(|input_level| input_level.to_protobuf())
-                .collect_vec(),
-            splits: self
-                .splits
-                .iter()
-                .map(|keyrange| PbKeyRange {
-                    left: keyrange.left.to_vec(),
-                    right: keyrange.right.to_vec(),
-                    right_exclusive: keyrange.right_exclusive,
-                })
-                .collect_vec(),
-            watermark: self.watermark,
-            sorted_output_ssts: self
-                .sorted_output_ssts
-                .iter()
-                .map(|sst| sst.to_protobuf())
-                .collect_vec(),
-            task_id: self.task_id,
-            target_level: self.target_level,
-            gc_delete_keys: self.gc_delete_keys,
-            base_level: self.base_level,
-            task_status: self.task_status.into(),
-            compaction_group_id: self.compaction_group_id,
-            existing_table_ids: self.existing_table_ids.clone(),
-            compression_algorithm: self.compression_algorithm,
-            target_file_size: self.target_file_size,
-            compaction_filter_mask: self.compaction_filter_mask,
-            table_options: self.table_options.clone(),
-            current_epoch_time: self.current_epoch_time,
-            target_sub_level_id: self.target_sub_level_id,
-            task_type: self.task_type.into(),
-            //#[allow(deprecated)] split_by_state_table: self.split_by_state_table,
-            split_weight_by_vnode: self.split_weight_by_vnode,
-            table_vnode_partition: self.table_vnode_partition.clone(),
-            table_watermarks: self
-                .table_watermarks
-                .iter()
-                .map(|(table_id, table_watermark)| (*table_id, table_watermark.to_protobuf()))
-                .collect(),
-            ..Default::default()
-        }
-    }
-}
-
-impl ProtoSerializeOwnExt for CompactTask {
-    type PB = PbCompactTask;
-
-    fn from_protobuf_own(pb_compact_task: Self::PB) -> Self {
+impl From<PbCompactTask> for CompactTask {
+    fn from(pb_compact_task: PbCompactTask) -> Self {
         Self {
             input_ssts: pb_compact_task
                 .input_ssts
                 .into_iter()
-                .map(InputLevel::from_protobuf_own)
+                .map(InputLevel::from)
                 .collect_vec(),
             splits: pb_compact_task
                 .splits
@@ -917,7 +952,7 @@ impl ProtoSerializeOwnExt for CompactTask {
             sorted_output_ssts: pb_compact_task
                 .sorted_output_ssts
                 .into_iter()
-                .map(SstableInfo::from_protobuf_own)
+                .map(SstableInfo::from)
                 .collect_vec(),
             task_id: pb_compact_task.task_id,
             target_level: pb_compact_task.target_level,
@@ -941,24 +976,76 @@ impl ProtoSerializeOwnExt for CompactTask {
                 .table_watermarks
                 .into_iter()
                 .map(|(table_id, pb_table_watermark)| {
-                    (
-                        table_id,
-                        TableWatermarks::from_protobuf_own(pb_table_watermark),
-                    )
+                    (table_id, TableWatermarks::from(pb_table_watermark))
                 })
                 .collect(),
             table_schemas: pb_compact_task.table_schemas,
         }
     }
+}
 
-    fn to_protobuf_own(self) -> Self::PB {
-        Self::PB {
-            input_ssts: self
+impl From<&PbCompactTask> for CompactTask {
+    fn from(pb_compact_task: &PbCompactTask) -> Self {
+        Self {
+            input_ssts: pb_compact_task
+                .input_ssts
+                .iter()
+                .map(InputLevel::from)
+                .collect_vec(),
+            splits: pb_compact_task
+                .splits
+                .iter()
+                .map(|pb_keyrange| KeyRange {
+                    left: Bytes::from(pb_keyrange.left.clone()),
+                    right: Bytes::from(pb_keyrange.right.clone()),
+                    right_exclusive: pb_keyrange.right_exclusive,
+                })
+                .collect_vec(),
+            watermark: pb_compact_task.watermark,
+            sorted_output_ssts: pb_compact_task
+                .sorted_output_ssts
+                .iter()
+                .map(SstableInfo::from)
+                .collect_vec(),
+            task_id: pb_compact_task.task_id,
+            target_level: pb_compact_task.target_level,
+            gc_delete_keys: pb_compact_task.gc_delete_keys,
+            base_level: pb_compact_task.base_level,
+            task_status: TaskStatus::try_from(pb_compact_task.task_status).unwrap(),
+            compaction_group_id: pb_compact_task.compaction_group_id,
+            existing_table_ids: pb_compact_task.existing_table_ids.clone(),
+            compression_algorithm: pb_compact_task.compression_algorithm,
+            target_file_size: pb_compact_task.target_file_size,
+            compaction_filter_mask: pb_compact_task.compaction_filter_mask,
+            table_options: pb_compact_task.table_options.clone(),
+            current_epoch_time: pb_compact_task.current_epoch_time,
+            target_sub_level_id: pb_compact_task.target_sub_level_id,
+            task_type: TaskType::try_from(pb_compact_task.task_type).unwrap(),
+            #[allow(deprecated)]
+            split_by_state_table: pb_compact_task.split_by_state_table,
+            split_weight_by_vnode: pb_compact_task.split_weight_by_vnode,
+            table_vnode_partition: pb_compact_task.table_vnode_partition.clone(),
+            table_watermarks: pb_compact_task
+                .table_watermarks
+                .iter()
+                .map(|(table_id, pb_table_watermark)| {
+                    (*table_id, TableWatermarks::from(pb_table_watermark))
+                })
+                .collect(),
+            table_schemas: pb_compact_task.table_schemas.clone(),
+        }
+    }
+}
+
+impl From<CompactTask> for PbCompactTask {
+    fn from(compact_task: CompactTask) -> Self {
+        Self {
+            input_ssts: compact_task
                 .input_ssts
                 .into_iter()
-                .map(|input_level| input_level.to_protobuf_own())
+                .map(|input_level| input_level.into())
                 .collect_vec(),
-            splits: self
+            splits: compact_task
                 .splits
                 .into_iter()
                 .map(|keyrange| PbKeyRange {
@@ -967,33 +1054,83 @@ impl ProtoSerializeOwnExt for CompactTask {
                     right_exclusive: keyrange.right_exclusive,
                 })
                 .collect_vec(),
-            watermark: self.watermark,
-            sorted_output_ssts: self
+            watermark: compact_task.watermark,
+            sorted_output_ssts: compact_task
                 .sorted_output_ssts
                 .into_iter()
-                .map(|sst| sst.to_protobuf_own())
+                .map(|sst| sst.into())
                 .collect_vec(),
-            task_id: self.task_id,
-            target_level: self.target_level,
-            gc_delete_keys: self.gc_delete_keys,
-            base_level: self.base_level,
-            task_status: self.task_status.into(),
-            compaction_group_id: self.compaction_group_id,
-            existing_table_ids: self.existing_table_ids.clone(),
-            compression_algorithm: self.compression_algorithm,
-            target_file_size: self.target_file_size,
-            compaction_filter_mask: self.compaction_filter_mask,
-            table_options: self.table_options.clone(),
-            current_epoch_time: self.current_epoch_time,
-            target_sub_level_id: self.target_sub_level_id,
-            task_type: self.task_type.into(),
+            task_id: compact_task.task_id,
+            target_level: compact_task.target_level,
+            gc_delete_keys: compact_task.gc_delete_keys,
+            base_level: compact_task.base_level,
+            task_status: compact_task.task_status.into(),
+            compaction_group_id: compact_task.compaction_group_id,
+            existing_table_ids: compact_task.existing_table_ids.clone(),
+            compression_algorithm: compact_task.compression_algorithm,
+            target_file_size: compact_task.target_file_size,
+            compaction_filter_mask: compact_task.compaction_filter_mask,
+            table_options: compact_task.table_options.clone(),
+            current_epoch_time: compact_task.current_epoch_time,
+            target_sub_level_id: compact_task.target_sub_level_id,
+            task_type: compact_task.task_type.into(),
             //#[allow(deprecated)] split_by_state_table: self.split_by_state_table,
-            split_weight_by_vnode: self.split_weight_by_vnode,
-            table_vnode_partition: self.table_vnode_partition.clone(),
-            table_watermarks: self
+            split_weight_by_vnode: compact_task.split_weight_by_vnode,
+            table_vnode_partition: compact_task.table_vnode_partition.clone(),
+            table_watermarks: compact_task
                 .table_watermarks
                 .into_iter()
-                .map(|(table_id, table_watermark)| (table_id, table_watermark.to_protobuf_own()))
+                .map(|(table_id, table_watermark)| (table_id, table_watermark.into()))
+                .collect(),
+            ..Default::default()
+        }
+    }
+}
+
+impl From<&CompactTask> for PbCompactTask {
+    fn from(compact_task: &CompactTask) -> Self {
+        Self {
+            input_ssts: compact_task
+                .input_ssts
+                .iter()
+                .map(|input_level| input_level.into())
+                .collect_vec(),
+            splits: compact_task
+                .splits
+                .iter()
+                .map(|keyrange| PbKeyRange {
+                    left: keyrange.left.to_vec(),
+                    right: keyrange.right.to_vec(),
+                    right_exclusive: keyrange.right_exclusive,
+                })
+                .collect_vec(),
+            watermark: compact_task.watermark,
+            sorted_output_ssts: compact_task
+                .sorted_output_ssts
+                .iter()
+                .map(|sst| sst.into())
+                .collect_vec(),
+            task_id: compact_task.task_id,
+            target_level: compact_task.target_level,
+            gc_delete_keys: compact_task.gc_delete_keys,
+            base_level: compact_task.base_level,
+            task_status: compact_task.task_status.into(),
+            compaction_group_id: compact_task.compaction_group_id,
+            existing_table_ids: compact_task.existing_table_ids.clone(),
+            compression_algorithm: compact_task.compression_algorithm,
+            target_file_size: compact_task.target_file_size,
+            compaction_filter_mask: compact_task.compaction_filter_mask,
+            table_options: compact_task.table_options.clone(),
+            current_epoch_time: compact_task.current_epoch_time,
+            target_sub_level_id: compact_task.target_sub_level_id,
+            task_type: compact_task.task_type.into(),
+            //#[allow(deprecated)] split_by_state_table: self.split_by_state_table,
+            split_weight_by_vnode: compact_task.split_weight_by_vnode,
+            table_vnode_partition: compact_task.table_vnode_partition.clone(),
+            table_watermarks: compact_task
+                .table_watermarks
+                .iter()
+                .map(|(table_id, table_watermark)| (*table_id, table_watermark.into()))
                 .collect(),
             ..Default::default()
         }
@@ -1029,6 +1166,34 @@ pub struct ValidationTask {
     pub epoch: u64,
 }
 
+impl From<PbValidationTask> for ValidationTask {
+    fn from(pb_validation_task: PbValidationTask) -> Self {
+        Self {
+            sst_infos: pb_validation_task
+                .sst_infos
+                .into_iter()
+                .map(SstableInfo::from)
+                .collect_vec(),
+            sst_id_to_worker_id: pb_validation_task.sst_id_to_worker_id.clone(),
+            epoch: pb_validation_task.epoch,
+        }
+    }
+}
+
+impl From<ValidationTask> for PbValidationTask {
+    fn from(validation_task: ValidationTask) -> Self {
+        Self {
+            sst_infos: validation_task
+                .sst_infos
+                .into_iter()
+                .map(|sst| sst.into())
+                .collect_vec(),
+            sst_id_to_worker_id: validation_task.sst_id_to_worker_id.clone(),
+            epoch: validation_task.epoch,
+        }
+    }
+}
+
 impl ProtoSerializeSizeEstimatedExt for ValidationTask {
     fn estimated_encode_len(&self) -> usize {
         self.sst_infos
@@ -1037,33 +1202,5 @@ impl ProtoSerializeSizeEstimatedExt for ValidationTask {
             .sum::<usize>()
             + self.sst_id_to_worker_id.len() * (size_of::<u64>() + size_of::<u32>())
             + size_of::<u64>()
-    }
-}
-
-impl ProtoSerializeOwnExt for ValidationTask {
-    type PB = PbValidationTask;
-
-    fn from_protobuf_own(pb_validation_task: Self::PB) -> Self {
-        Self {
-            sst_infos: pb_validation_task
-                .sst_infos
-                .into_iter()
-                .map(SstableInfo::from_protobuf_own)
-                .collect_vec(),
-            sst_id_to_worker_id: pb_validation_task.sst_id_to_worker_id.clone(),
-            epoch: pb_validation_task.epoch,
-        }
-    }
-
-    fn to_protobuf_own(self) -> Self::PB {
-        Self::PB {
-            sst_infos: self
-                .sst_infos
-                .into_iter()
-                .map(|sst| sst.to_protobuf_own())
-                .collect_vec(),
-            sst_id_to_worker_id: self.sst_id_to_worker_id.clone(),
-            epoch: self.epoch,
-        }
     }
 }

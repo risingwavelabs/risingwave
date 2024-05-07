@@ -33,9 +33,7 @@ use crate::table_watermark::{TableWatermarks, TableWatermarksIndex};
 use crate::version::{
     HummockVersion, HummockVersionDelta, Level, Levels, OverlappingLevel, SstableInfo,
 };
-use crate::{
-    can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId, ProtoSerializeExt,
-};
+use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
 pub struct GroupDeltasSummary {
     pub delete_sst_levels: Vec<u32>,
@@ -76,7 +74,7 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
                         intra_level
                             .inserted_table_infos
                             .iter()
-                            .map(SstableInfo::from_protobuf),
+                            .map(SstableInfo::from),
                     );
                 }
                 new_vnode_partition_count = intra_level.vnode_partition_count;
@@ -431,12 +429,8 @@ impl HummockVersion {
                 if let DeltaType::IntraLevel(delta) = group_delta.get_delta_type().unwrap() {
                     if !delta.inserted_table_infos.is_empty() {
                         info.insert_sst_level = delta.level_idx;
-                        info.insert_sst_infos.extend(
-                            delta
-                                .inserted_table_infos
-                                .iter()
-                                .map(SstableInfo::from_protobuf),
-                        );
+                        info.insert_sst_infos
+                            .extend(delta.inserted_table_infos.iter().map(SstableInfo::from));
                     }
                     if !delta.removed_table_ids.is_empty() {
                         for id in &delta.removed_table_ids {
@@ -1300,7 +1294,6 @@ mod tests {
     use crate::version::{
         HummockVersion, HummockVersionDelta, Level, Levels, OverlappingLevel, SstableInfo,
     };
-    use crate::ProtoSerializeExt;
 
     #[test]
     fn test_get_sst_object_ids() {
@@ -1421,7 +1414,7 @@ mod tests {
                                     sst_id: 1,
                                     ..Default::default()
                                 }
-                                .to_protobuf()],
+                                .into()],
                                 ..Default::default()
                             })),
                         }],

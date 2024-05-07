@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_hummock_sdk::ProtoSerializeExt;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::MetaResult;
 use risingwave_pb::backup_service::MetaBackupManifestId;
@@ -280,7 +279,7 @@ impl NotificationServiceImpl {
 
         Ok(MetaSnapshot {
             tables,
-            hummock_version: Some(hummock_version.to_protobuf()),
+            hummock_version: Some(hummock_version.into()),
             version: Some(SnapshotVersion {
                 catalog_version,
                 ..Default::default()

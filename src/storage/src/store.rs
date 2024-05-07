@@ -31,11 +31,12 @@ use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarks, VnodeWatermark, WatermarkDirection,
 };
-use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo, ProtoSerializeOwnExt};
+use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 use risingwave_hummock_trace::{
     TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel, TracedPrefetchOptions,
     TracedReadOptions, TracedSealCurrentEpochOptions, TracedWriteOptions,
 };
+use risingwave_pb::hummock::PbVnodeWatermark;
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
@@ -588,7 +589,10 @@ impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
                     direction == WatermarkDirection::Ascending,
                     watermarks
                         .into_iter()
-                        .map(|watermark| Message::encode_to_vec(&watermark.to_protobuf_own()))
+                        .map(|watermark| {
+                            let pb_watermark = PbVnodeWatermark::from(watermark);
+                            Message::encode_to_vec(&pb_watermark)
+                        })
                         .collect(),
                 )
             }),
@@ -613,7 +617,7 @@ impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
                         .into_iter()
                         .map(|serialized_watermark| {
                             Message::decode(serialized_watermark.as_slice())
-                                .map(VnodeWatermark::from_protobuf_own)
+                                .map(|pb: PbVnodeWatermark| VnodeWatermark::from(pb))
                                 .expect("should not failed")
                         })
                         .collect(),
