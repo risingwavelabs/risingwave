@@ -72,6 +72,8 @@ impl ToSql for EnumString {
     }
 }
 
+/// Adapter for `ScalarImpl` to Postgres data type,
+/// which can be used to encode/decode to/from Postgres value.
 #[derive(Debug)]
 pub(crate) enum ScalarAdapter<'a> {
     Builtin(ScalarRefImpl<'a>),
