@@ -104,6 +104,13 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         let client: BaseConsumer<RwConsumerContext> =
             config.create_with_context(client_ctx).await?;
 
+        // Note that before any SASL/OAUTHBEARER broker connection can succeed the application must call
+        // rd_kafka_oauthbearer_set_token() once – either directly or, more typically, by invoking either
+        // rd_kafka_poll(), rd_kafka_consumer_poll(), rd_kafka_queue_poll(), etc, in order to cause retrieval
+        // of an initial token to occur.
+        // https://docs.confluent.io/platform/current/clients/librdkafka/html/rdkafka_8h.html#a988395722598f63396d7a1bedb22adaf
+        client.poll(Duration::from_secs(10));
+
         Ok(Self {
             context,
             broker_address,
