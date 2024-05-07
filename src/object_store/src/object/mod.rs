@@ -309,7 +309,6 @@ pub struct MonitoredStreamingUploader {
     /// Length of data uploaded with this uploader.
     operation_size: usize,
     media_type: &'static str,
-    streaming_upload_timeout: Option<Duration>,
 }
 
 impl MonitoredStreamingUploader {
@@ -317,14 +316,12 @@ impl MonitoredStreamingUploader {
         media_type: &'static str,
         handle: BoxedStreamingUploader,
         object_store_metrics: Arc<ObjectStoreMetrics>,
-        streaming_upload_timeout: Option<Duration>,
     ) -> Self {
         Self {
             inner: handle,
             object_store_metrics,
             operation_size: 0,
             media_type,
-            streaming_upload_timeout,
         }
     }
 }
@@ -341,23 +338,11 @@ impl MonitoredStreamingUploader {
             .with_label_values(&[self.media_type, operation_type_str])
             .start_timer();
 
-        let future = async {
-            self.inner
-                .write_bytes(data)
-                .verbose_instrument_await(operation_type_str)
-                .await
-        };
-        let res = match self.streaming_upload_timeout.as_ref() {
-            None => future.await,
-            Some(timeout) => tokio::time::timeout(*timeout, future)
-                .await
-                .unwrap_or_else(|_| {
-                    Err(ObjectError::timeout(format!(
-                        "{} timeout data_len {} timeout {:?}",
-                        operation_type_str, data_len, timeout
-                    )))
-                }),
-        };
+        let res = self
+            .inner
+            .write_bytes(data)
+            .verbose_instrument_await(operation_type_str)
+            .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
 
@@ -580,9 +565,6 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             media_type,
             res?,
             self.object_store_metrics.clone(),
-            Some(Duration::from_millis(
-                self.config.retry.streaming_upload_attempt_timeout_ms,
-            )),
         ))
     }
 

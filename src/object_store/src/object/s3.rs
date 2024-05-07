@@ -63,8 +63,7 @@ use super::{
     ObjectMetadata, ObjectRangeBounds, ObjectResult, ObjectStore, StreamingUploader,
 };
 use crate::object::{
-    get_attempt_timeout_by_type, get_retry_strategy, try_update_failure_metric, ObjectDataStream,
-    ObjectMetadataIter, OperationType, RetryCondition,
+    try_update_failure_metric, ObjectDataStream, ObjectMetadataIter, OperationType,
 };
 
 type PartId = i32;
@@ -139,20 +138,36 @@ impl S3StreamingUploader {
 
         // Lazily create multipart upload.
         if self.upload_id.is_none() {
-            let resp = self
-                .client
-                .create_multipart_upload()
-                .bucket(&self.bucket)
-                .key(&self.key)
-                .send()
-                .await
-                .map_err(|err| {
-                    set_error_should_retry::<CreateMultipartUploadError>(
-                        self.config.clone(),
-                        err.into(),
-                    )
-                })?;
-            self.upload_id = Some(resp.upload_id.unwrap());
+            let builder = || async {
+                self.client
+                    .create_multipart_upload()
+                    .bucket(&self.bucket)
+                    .key(&self.key)
+                    .send()
+                    .await
+                    .map_err(|err| {
+                        set_error_should_retry::<CreateMultipartUploadError>(
+                            self.config.clone(),
+                            err.into(),
+                        )
+                    })
+            };
+
+            let resp = retry_request(
+                builder,
+                &self.config,
+                OperationType::StreamingUploadInit,
+                self.metrics.clone(),
+            )
+            .await;
+
+            try_update_failure_metric(
+                &self.metrics,
+                &resp,
+                OperationType::StreamingUploadInit.as_str(),
+            );
+
+            self.upload_id = Some(resp?.upload_id.unwrap());
         }
 
         // Get the data to upload for the next part.
@@ -178,10 +193,6 @@ impl S3StreamingUploader {
             .operation_size
             .with_label_values(&[operation_type_str])
             .observe(len as f64);
-
-        let backoff = get_retry_strategy(&self.config, operation_type);
-        let timeout_duration =
-            Duration::from_millis(get_attempt_timeout_by_type(&self.config, operation_type));
         let config = self.config.clone();
 
         self.join_handles.push(tokio::spawn(async move {
@@ -190,48 +201,28 @@ impl S3StreamingUploader {
                 .with_label_values(&["s3", operation_type_str])
                 .start_timer();
 
-            let upload_output_res = tokio_retry::RetryIf::spawn(
-                backoff,
-                || async {
-                    let future = async {
-                        client_cloned
-                            .upload_part()
-                            .bucket(bucket.clone())
-                            .key(key.clone())
-                            .upload_id(upload_id.clone())
-                            .part_number(part_id)
-                            .body(get_upload_body(data.clone()))
-                            .content_length(len as i64)
-                            .send()
-                            .await
-                            .map_err(|err| {
-                                set_error_should_retry::<CreateMultipartUploadError>(
-                                    config.clone(),
-                                    err.into(),
-                                )
-                            })
-                    };
+            let builder = || async {
+                client_cloned
+                    .upload_part()
+                    .bucket(bucket.clone())
+                    .key(key.clone())
+                    .upload_id(upload_id.clone())
+                    .part_number(part_id)
+                    .body(get_upload_body(data.clone()))
+                    .content_length(len as i64)
+                    .send()
+                    .await
+                    .map_err(|err| {
+                        set_error_should_retry::<CreateMultipartUploadError>(
+                            config.clone(),
+                            err.into(),
+                        )
+                    })
+            };
 
-                    if timeout_duration.is_zero() {
-                        future.await
-                    } else {
-                        let ret = tokio::time::timeout(timeout_duration, future).await;
-                        match ret {
-                            Ok(Ok(res)) => Ok(res),
-                            Ok(Err(err)) => Err(err),
-                            Err(_) => Err(ObjectError::timeout(format!(
-                                "{} timeout",
-                                operation_type_str
-                            ))),
-                        }
-                    }
-                },
-                RetryCondition::new(operation_type, metrics.clone()),
-            )
-            .await;
-
-            try_update_failure_metric(&metrics, &upload_output_res, operation_type_str);
-            Ok((part_id, upload_output_res?))
+            let res = retry_request(builder, &config, operation_type, metrics.clone()).await;
+            try_update_failure_metric(&metrics, &res, operation_type_str);
+            Ok((part_id, res?))
         }));
 
         Ok(())
@@ -288,7 +279,9 @@ impl S3StreamingUploader {
                 })
         };
 
-        retry_request(builder, &self.config, operation_type, self.metrics.clone()).await?;
+        let res = retry_request(builder, &self.config, operation_type, self.metrics.clone()).await;
+        try_update_failure_metric(&self.metrics, &res, operation_type.as_str());
+        let _res = res?;
 
         Ok(())
     }
