@@ -108,7 +108,7 @@ impl JavaVmWrapper {
             .option(format!("-Djava.class.path={}", class_vec.join(":")))
             .option("-Xms16m")
             .option(format!("-Xmx{}", jvm_heap_size))
-            .option("-Dcdc.source.wait.streaming.before.exit.seconds=30");
+            .option("-Dcdc.source.wait.streaming.before.exit.seconds=180");
 
         tracing::info!("JVM args: {:?}", args_builder);
         let jvm_args = args_builder.build().context("invalid jvm args")?;
