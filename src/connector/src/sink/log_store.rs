@@ -24,6 +24,7 @@ use futures::{TryFuture, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
 
 use crate::sink::SinkMetrics;
@@ -216,32 +217,24 @@ impl<F: Fn(StreamChunk) -> StreamChunk + Send + 'static, R: LogReader> LogReader
 
 pub struct BackpressureMonitoredLogReader<R: LogReader> {
     inner: R,
-    /// Start time of the current measurement.
-    measurement_start_time: Instant,
     /// Start time to wait for new future after poll ready
     wait_new_future_start_time: Option<Instant>,
-    /// Total time to wait for creating new future
-    total_wait_new_future_micro_secs: f64,
-    metrics: SinkMetrics,
+    wait_new_future_duration_ns: LabelGuardedIntCounter<3>,
 }
 
 impl<R: LogReader> BackpressureMonitoredLogReader<R> {
-    fn new(inner: R, metrics: SinkMetrics) -> Self {
+    fn new(inner: R, wait_new_future_duration_ns: LabelGuardedIntCounter<3>) -> Self {
         Self {
             inner,
-            measurement_start_time: Instant::now(),
             wait_new_future_start_time: None,
-            total_wait_new_future_micro_secs: 0.0,
-            metrics,
+            wait_new_future_duration_ns,
         }
     }
 }
 
 impl<R: LogReader> LogReader for BackpressureMonitoredLogReader<R> {
     fn init(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
-        self.measurement_start_time = Instant::now();
         self.wait_new_future_start_time = None;
-        self.total_wait_new_future_micro_secs = 0.0;
         self.inner.init()
     }
 
@@ -249,24 +242,10 @@ impl<R: LogReader> LogReader for BackpressureMonitoredLogReader<R> {
         &mut self,
     ) -> impl Future<Output = LogStoreResult<(u64, LogStoreReadItem)>> + Send + '_ {
         if let Some(start_time) = self.wait_new_future_start_time.take() {
-            self.total_wait_new_future_micro_secs += start_time.elapsed().as_micros() as f64;
+            self.wait_new_future_duration_ns
+                .inc_by(start_time.elapsed().as_nanos() as _);
         }
-        self.inner.next_item().inspect_ok(|(_, item)| {
-            if let LogStoreReadItem::Barrier {
-                is_checkpoint: true,
-            } = item
-            {
-                // On checkpoint barrier, measure backpressure rate and reset timer
-                let total_time = self.measurement_start_time.elapsed().as_micros() as f64;
-                let backpressure_ratio = self.total_wait_new_future_micro_secs / total_time;
-
-                self.metrics
-                    .log_store_reader_backpressure_ratio
-                    .set(backpressure_ratio);
-
-                self.measurement_start_time = Instant::now();
-                self.total_wait_new_future_micro_secs = 0.0;
-            }
+        self.inner.next_item().inspect_ok(|_| {
             // Set start time when return ready
             self.wait_new_future_start_time = Some(Instant::now());
         })
@@ -280,9 +259,7 @@ impl<R: LogReader> LogReader for BackpressureMonitoredLogReader<R> {
         &mut self,
     ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
         self.inner.rewind().inspect_ok(|_| {
-            self.measurement_start_time = Instant::now();
             self.wait_new_future_start_time = None;
-            self.total_wait_new_future_micro_secs = 0.0;
         })
     }
 }
@@ -346,7 +323,11 @@ where
     }
 
     pub fn monitored(self, metrics: SinkMetrics) -> impl LogReader {
-        BackpressureMonitoredLogReader::new(MonitoredLogReader::new(self, metrics.clone()), metrics)
+        let wait_new_future_duration = metrics.log_store_reader_wait_new_future_duration_ns.clone();
+        BackpressureMonitoredLogReader::new(
+            MonitoredLogReader::new(self, metrics),
+            wait_new_future_duration,
+        )
     }
 }
 

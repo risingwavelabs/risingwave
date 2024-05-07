@@ -3850,11 +3850,11 @@ def section_sink_metrics(outer_panels):
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Log Store Backpressure ratio",
+                    "Log Store Backpressure Ratio",
                     "",
                     [
                         panels.target(
-                            f"sum({metric('log_store_reader_backpressure_ratio')}) by (connector, sink_id, executor_id)",
+                            f"avg(rate({metric('log_store_reader_wait_new_future_duration_ns')}[$__rate_interval])) by (connector, sink_id, executor_id) / 1000000000",
                             "Backpressure @ {{connector}} {{sink_id}} {{executor_id}}",
                         ),
                     ],
