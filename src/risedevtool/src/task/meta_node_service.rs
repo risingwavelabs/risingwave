@@ -181,7 +181,9 @@ impl Task for MetaNodeService {
 
         let mut cmd = self.meta_node()?;
 
-        cmd.env("RUST_BACKTRACE", "1");
+        if crate::util::is_enable_backtrace() {
+            cmd.env("RUST_BACKTRACE", "1");
+        }
 
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(

@@ -197,8 +197,8 @@ fn gen_batch_query_plan(
 
     let physical = match query_mode {
         QueryMode::Auto => unreachable!(),
-        QueryMode::Local => logical.gen_batch_local_plan(batch_plan)?,
-        QueryMode::Distributed => logical.gen_batch_distributed_plan(batch_plan)?,
+        QueryMode::Local => logical.gen_batch_local_plan()?,
+        QueryMode::Distributed => logical.gen_batch_distributed_plan()?,
     };
 
     Ok(BatchQueryPlanResult {

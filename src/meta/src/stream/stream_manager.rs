@@ -19,7 +19,7 @@ use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_meta_model_v2::ObjectId;
-use risingwave_pb::catalog::{CreateType, Table};
+use risingwave_pb::catalog::{CreateType, Subscription, Table};
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::Dispatcher;
 use thiserror_ext::AsReport;
@@ -31,7 +31,7 @@ use super::{Locations, RescheduleOptions, ScaleControllerRef, TableResizePolicy}
 use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan, StreamRpcManager};
 use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, StreamingJob};
 use crate::model::{ActorId, MetadataModel, TableFragments, TableParallelism};
-use crate::stream::SourceManagerRef;
+use crate::stream::{to_build_actor_info, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
 pub type GlobalStreamManagerRef = Arc<GlobalStreamManager>;
@@ -346,6 +346,10 @@ impl GlobalStreamManager {
             .chain(existing_locations.actor_infos());
 
         let building_worker_actors = building_locations.worker_actors();
+        let subscriptions = self
+            .metadata_manager
+            .get_mv_depended_subscriptions()
+            .await?;
 
         // We send RPC request in two stages.
         // The first stage does 2 things: broadcast actor info, and send local actor ids to
@@ -359,7 +363,13 @@ impl GlobalStreamManager {
                 building_worker_actors.iter().map(|(worker_id, actors)| {
                     let stream_actors = actors
                         .iter()
-                        .map(|actor_id| actor_map[actor_id].clone())
+                        .map(|actor_id| {
+                            to_build_actor_info(
+                                actor_map[actor_id].clone(),
+                                &subscriptions,
+                                table_fragments.table_id(),
+                            )
+                        })
                         .collect::<Vec<_>>();
                     (*worker_id, stream_actors)
                 }),
@@ -731,6 +741,39 @@ impl GlobalStreamManager {
 
         Ok(())
     }
+
+    // Dont need add actor, just send a command
+    pub async fn create_subscription(
+        self: &Arc<Self>,
+        subscription: &Subscription,
+    ) -> MetaResult<()> {
+        let command = Command::CreateSubscription {
+            subscription_id: subscription.id,
+            upstream_mv_table_id: TableId::new(subscription.dependent_table_id),
+            retention_second: subscription.retention_seconds,
+        };
+
+        tracing::debug!("sending Command::CreateSubscription");
+        self.barrier_scheduler.run_command(command).await?;
+        Ok(())
+    }
+
+    // Dont need add actor, just send a command
+    pub async fn drop_subscription(self: &Arc<Self>, subscription_id: u32, table_id: u32) {
+        let command = Command::DropSubscription {
+            subscription_id,
+            upstream_mv_table_id: TableId::new(table_id),
+        };
+
+        tracing::debug!("sending Command::DropSubscription");
+        let _ = self
+            .barrier_scheduler
+            .run_command(command)
+            .await
+            .inspect_err(|err| {
+                tracing::error!(error = ?err.as_report(), "failed to run drop command");
+            });
+    }
 }
 
 #[cfg(test)]
@@ -804,6 +847,7 @@ mod tests {
             let req = request.into_inner();
             let mut guard = self.inner.actor_streams.lock().unwrap();
             for actor in req.get_actors() {
+                let actor = actor.actor.as_ref().unwrap();
                 guard.insert(actor.get_actor_id(), actor.clone());
             }
 
