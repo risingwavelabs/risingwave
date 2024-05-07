@@ -352,7 +352,9 @@ impl StreamSink {
                     | DataType::Boolean
                     | DataType::Int16
                     | DataType::Int32
-                    | DataType::Int64 => {}
+                    | DataType::Int64
+                    | DataType::Int256
+                    | DataType::Serial => {}
                     _ => {
                         // why we don't allow float as text for key encode: https://github.com/risingwavelabs/risingwave/issues/6412
                         return Err(ErrorCode::SinkError(Box::new(Error::new(

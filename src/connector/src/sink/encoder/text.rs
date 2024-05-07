@@ -20,15 +20,12 @@ use super::RowEncoder;
 pub struct TextEncoder {
     pub schema: Schema,
     // the column must contain only one element
-    pub col_indices: Option<Vec<usize>>,
+    pub col_index: usize,
 }
 
 impl TextEncoder {
-    pub fn new(schema: Schema, col_indices: Option<Vec<usize>>) -> Self {
-        Self {
-            schema,
-            col_indices,
-        }
+    pub fn new(schema: Schema, col_index: usize) -> Self {
+        Self { schema, col_index }
     }
 }
 
@@ -40,7 +37,7 @@ impl RowEncoder for TextEncoder {
     }
 
     fn col_indices(&self) -> Option<&[usize]> {
-        self.col_indices.as_ref().map(Vec::as_ref)
+        Some(std::slice::from_ref(&self.col_index))
     }
 
     fn encode_cols(
@@ -52,7 +49,7 @@ impl RowEncoder for TextEncoder {
         let mut result = String::new();
         for col_index in col_indices {
             let datum = row.datum_at(col_index);
-            result = datum.to_text();
+            result = datum.to_text_with_type(&self.schema.fields[col_index].data_type);
         }
 
         Ok(result)

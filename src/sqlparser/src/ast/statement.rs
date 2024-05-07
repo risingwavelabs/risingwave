@@ -94,19 +94,20 @@ pub struct CreateSourceStatement {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Format {
     Native,
-    None,
     // Keyword::NONE
-    Debezium,
+    None,
     // Keyword::DEBEZIUM
-    DebeziumMongo,
+    Debezium,
     // Keyword::DEBEZIUM_MONGO
-    Maxwell,
+    DebeziumMongo,
     // Keyword::MAXWELL
-    Canal,
+    Maxwell,
     // Keyword::CANAL
-    Upsert,
+    Canal,
     // Keyword::UPSERT
-    Plain, // Keyword::PLAIN
+    Upsert,
+    // Keyword::PLAIN
+    Plain,
 }
 
 // TODO: unify with `from_keyword`

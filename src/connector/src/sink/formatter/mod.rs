@@ -50,7 +50,7 @@ pub trait SinkFormatter {
     fn format_chunk(
         &self,
         chunk: &StreamChunk,
-    ) -> impl Iterator<Item=Result<(Option<Self::K>, Option<Self::V>)>>;
+    ) -> impl Iterator<Item = Result<(Option<Self::K>, Option<Self::V>)>>;
 }
 
 /// `tri!` in generators yield `Err` and return `()`
@@ -162,12 +162,7 @@ impl EncoderBuild for TextEncoder {
         params: EncoderParams<'_>,
         pk_indices: Option<Vec<usize>>,
     ) -> crate::sink::Result<Self> {
-        if pk_indices.is_none() {
-            Err(SinkError::Config(anyhow!(
-                "TextEncoder requires primary key columns to be specified"
-            )))
-        } else {
-            let pk_indices = pk_indices.unwrap();
+        if let Some(pk_indices) = pk_indices {
             if pk_indices.len() != 1 {
                 return Err(SinkError::Config(anyhow!(
                     "TextEncoder requires exactly one primary key column, but got {} columns",
@@ -175,7 +170,11 @@ impl EncoderBuild for TextEncoder {
                 )));
             }
 
-            Ok(Self::new(params.schema, Some(pk_indices)))
+            Ok(Self::new(params.schema, pk_indices[0]))
+        } else {
+            Err(SinkError::Config(anyhow!(
+                "TextEncoder requires primary key columns to be specified"
+            )))
         }
     }
 }
@@ -311,27 +310,23 @@ impl SinkFormatterImpl {
                 (F::AppendOnly, E::Json, Some(E::Text)) => {
                     Impl::AppendOnlyTextJson(build(p).await?)
                 }
-                (F::AppendOnly, E::Json, None | Some(_)) => Impl::AppendOnlyJson(build(p).await?),
+                (F::AppendOnly, E::Json, None) => Impl::AppendOnlyJson(build(p).await?),
                 (F::AppendOnly, E::Protobuf, Some(E::Text)) => {
                     Impl::AppendOnlyTextProto(build(p).await?)
                 }
-                (F::AppendOnly, E::Protobuf, None | Some(_)) => {
-                    Impl::AppendOnlyProto(build(p).await?)
-                }
+                (F::AppendOnly, E::Protobuf, None) => Impl::AppendOnlyProto(build(p).await?),
                 (F::AppendOnly, E::Template, Some(E::Text)) => {
                     Impl::AppendOnlyTextTemplate(build(p).await?)
                 }
-                (F::AppendOnly, E::Template, None | Some(_)) => {
-                    Impl::AppendOnlyTemplate(build(p).await?)
-                }
+                (F::AppendOnly, E::Template, None) => Impl::AppendOnlyTemplate(build(p).await?),
                 (F::Upsert, E::Json, Some(E::Text)) => Impl::UpsertTextJson(build(p).await?),
-                (F::Upsert, E::Json, None | Some(_)) => Impl::UpsertJson(build(p).await?),
+                (F::Upsert, E::Json, None) => Impl::UpsertJson(build(p).await?),
                 (F::Upsert, E::Avro, Some(E::Text)) => Impl::UpsertTextAvro(build(p).await?),
-                (F::Upsert, E::Avro, None | Some(_)) => Impl::UpsertAvro(build(p).await?),
+                (F::Upsert, E::Avro, None) => Impl::UpsertAvro(build(p).await?),
                 (F::Upsert, E::Template, Some(E::Text)) => {
                     Impl::UpsertTextTemplate(build(p).await?)
                 }
-                (F::Upsert, E::Template, None | Some(_)) => Impl::UpsertTemplate(build(p).await?),
+                (F::Upsert, E::Template, None) => Impl::UpsertTemplate(build(p).await?),
                 (F::Debezium, E::Json, None) => Impl::DebeziumJson(build(p).await?),
                 (F::AppendOnly | F::Upsert, E::Text, _) => {
                     return Err(SinkError::Config(anyhow!(
@@ -341,7 +336,9 @@ impl SinkFormatterImpl {
                 (F::AppendOnly, E::Avro, _)
                 | (F::Upsert, E::Protobuf, _)
                 | (F::Debezium, E::Json, Some(_))
-                | (F::Debezium, E::Avro | E::Protobuf | E::Template | E::Text, _) => {
+                | (F::Debezium, E::Avro | E::Protobuf | E::Template | E::Text, _)
+                | (F::AppendOnly | F::Upsert, _, Some(E::Template) | Some(E::Json) | Some(E::Avro) | Some(E::Protobuf)) // reject other encode as key encode
+                => {
                     return Err(SinkError::Config(anyhow!(
                         "sink format/encode/key_encode unsupported: {:?} {:?} {:?}",
                         format_desc.format,
