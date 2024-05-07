@@ -15,6 +15,7 @@
 use std::mem;
 
 use anyhow::anyhow;
+use await_tree::InstrumentAwait;
 use futures::stream::select;
 use futures::{FutureExt, TryFutureExt, TryStreamExt};
 use itertools::Itertools;
@@ -124,6 +125,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     fn execute_inner(self) -> BoxedMessageStream {
         let sink_id = self.sink_param.sink_id;
         let actor_id = self.actor_context.id;
+        let executor_id = self.sink_writer_param.executor_id;
 
         let stream_key = self.info.pk_indices.clone();
 
@@ -220,7 +222,11 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             self.sink_param,
                             self.sink_writer_param,
                             self.actor_context,
-                        );
+                        )
+                        .instrument_await(format!(
+                            "Consume Log: sink_id: {} actor_id: {}, executor_id: {}",
+                            sink_id, actor_id, executor_id,
+                        ));
                         // TODO: may try to remove the boxed
                         select(consume_log_stream.into_stream(), write_log_stream).boxed()
                     })

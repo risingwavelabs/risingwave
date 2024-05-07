@@ -26,10 +26,11 @@ arrow-row = { workspace = true }
 arrow-schema = { workspace = true }
 arrow-select = { workspace = true }
 assert_matches = "1"
-async-nats = "0.34"
+async-nats = "0.35"
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
+await-tree = { workspace = true }
 aws-config = { workspace = true }
 aws-credential-types = { workspace = true }
 aws-sdk-kinesis = { workspace = true }
