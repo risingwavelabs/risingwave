@@ -24,6 +24,7 @@ mod upsert;
 pub use append_only::AppendOnlyFormatter;
 pub use debezium_json::{DebeziumAdapterOpts, DebeziumJsonFormatter};
 use risingwave_common::catalog::Schema;
+use risingwave_common::types::DataType;
 pub use upsert::UpsertFormatter;
 
 use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
@@ -158,16 +159,40 @@ impl EncoderBuild for ProtoEncoder {
 }
 
 impl EncoderBuild for TextEncoder {
-    async fn build(
-        params: EncoderParams<'_>,
-        pk_indices: Option<Vec<usize>>,
-    ) -> crate::sink::Result<Self> {
+    async fn build(params: EncoderParams<'_>, pk_indices: Option<Vec<usize>>) -> Result<Self> {
         if let Some(pk_indices) = pk_indices {
             if pk_indices.len() != 1 {
                 return Err(SinkError::Config(anyhow!(
-                    "TextEncoder requires exactly one primary key column, but got {} columns",
+                    "The key encode is TEXT, but the primary key has {} columns. The key encode TEXT requires the primary key to be a single column",
                     pk_indices.len()
                 )));
+            }
+
+            let schema_ref = params.schema.fields().get(pk_indices[0]).ok_or_else(|| {
+                SinkError::Config(anyhow!(
+                    "The primary key column index {} is out of bounds in schema {:?}",
+                    pk_indices[0],
+                    params.schema
+                ))
+            })?;
+            match &schema_ref.data_type() {
+                DataType::Varchar
+                | DataType::Boolean
+                | DataType::Int16
+                | DataType::Int32
+                | DataType::Int64
+                | DataType::Int256
+                | DataType::Serial => {}
+                _ => {
+                    // why we don't allow float as text for key encode: https://github.com/risingwavelabs/risingwave/issues/6412
+                    return Err(SinkError::Config(
+                        anyhow!(
+                            "The key encode is TEXT, but the primary key column {} has type {}. The key encode TEXT requires the primary key column to be of type varchar, bool, small int, int, big int, serial or rw_int256.",
+                            schema_ref.name,
+                            schema_ref.data_type
+                        ),
+                    ));
+                }
             }
 
             Ok(Self::new(params.schema, pk_indices[0]))
