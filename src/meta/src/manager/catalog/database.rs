@@ -296,6 +296,10 @@ impl DatabaseManager {
         self.databases.values().cloned().collect_vec()
     }
 
+    pub fn list_schemas(&self) -> Vec<Schema> {
+        self.schemas.values().cloned().collect_vec()
+    }
+
     pub fn list_creating_background_mvs(&self) -> Vec<Table> {
         self.tables
             .values()
