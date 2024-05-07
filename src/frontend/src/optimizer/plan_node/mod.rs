@@ -899,7 +899,6 @@ mod stream_sort;
 mod stream_source;
 mod stream_source_scan;
 mod stream_stateless_simple_agg;
-mod stream_subscription;
 mod stream_table_scan;
 mod stream_topn;
 mod stream_values;
@@ -1002,7 +1001,6 @@ pub use stream_sort::StreamEowcSort;
 pub use stream_source::StreamSource;
 pub use stream_source_scan::StreamSourceScan;
 pub use stream_stateless_simple_agg::StreamStatelessSimpleAgg;
-pub use stream_subscription::StreamSubscription;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_temporal_join::StreamTemporalJoin;
 pub use stream_topn::StreamTopN;
@@ -1100,7 +1098,6 @@ macro_rules! for_all_plan_nodes {
             , { Stream, TableScan }
             , { Stream, CdcTableScan }
             , { Stream, Sink }
-            , { Stream, Subscription }
             , { Stream, Source }
             , { Stream, SourceScan }
             , { Stream, HashJoin }
@@ -1223,7 +1220,6 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, TableScan }
             , { Stream, CdcTableScan }
             , { Stream, Sink }
-            , { Stream, Subscription }
             , { Stream, Source }
             , { Stream, SourceScan }
             , { Stream, HashAgg }

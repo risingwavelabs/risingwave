@@ -14,7 +14,8 @@
 
 use std::assert_matches::assert_matches;
 use std::collections::btree_map::Entry;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::mem::replace;
 use std::sync::Arc;
@@ -40,6 +41,23 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, Mutation};
 use crate::task::{await_tree_key, ActorId};
 
+struct IssuedState {
+    pub mutation: Option<Arc<Mutation>>,
+    /// Actor ids remaining to be collected.
+    pub remaining_actors: BTreeSet<ActorId>,
+
+    pub barrier_inflight_latency: HistogramTimer,
+}
+
+impl Debug for IssuedState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IssuedState")
+            .field("mutation", &self.mutation)
+            .field("remaining_actors", &self.remaining_actors)
+            .finish()
+    }
+}
+
 /// The state machine of local barrier manager.
 #[derive(Debug)]
 enum ManagedBarrierStateInner {
@@ -51,13 +69,7 @@ enum ManagedBarrierStateInner {
     },
 
     /// Meta service has issued a `send_barrier` request. We're collecting barriers now.
-    Issued {
-        mutation: Option<Arc<Mutation>>,
-        /// Actor ids remaining to be collected.
-        remaining_actors: HashSet<ActorId>,
-
-        barrier_inflight_latency: HistogramTimer,
-    },
+    Issued(IssuedState),
 
     /// The barrier has been collected by all remaining actors
     AllCollected,
@@ -124,6 +136,15 @@ fn sync_epoch(
     }
 }
 
+#[derive(Debug)]
+pub(super) struct ManagedBarrierStateDebugInfo<'a> {
+    #[expect(dead_code)]
+    epoch_barrier_state_map: &'a BTreeMap<u64, BarrierState>,
+
+    #[expect(dead_code)]
+    create_mview_progress: &'a HashMap<u64, HashMap<ActorId, BackfillState>>,
+}
+
 pub(super) struct ManagedBarrierState {
     /// Record barrier state for each epoch of concurrent checkpoints.
     ///
@@ -170,6 +191,13 @@ impl ManagedBarrierState {
         }
     }
 
+    pub(super) fn to_debug_info(&self) -> ManagedBarrierStateDebugInfo<'_> {
+        ManagedBarrierStateDebugInfo {
+            epoch_barrier_state_map: &self.epoch_barrier_state_map,
+            create_mview_progress: &self.create_mview_progress,
+        }
+    }
+
     pub fn read_barrier_mutation(
         &mut self,
         barrier: &Barrier,
@@ -193,7 +221,7 @@ impl ManagedBarrierState {
                     } => {
                         mutation_senders.push(sender);
                     }
-                    ManagedBarrierStateInner::Issued { mutation, .. } => {
+                    ManagedBarrierStateInner::Issued(IssuedState { mutation, .. }) => {
                         let _ = sender.send(mutation.clone());
                     }
                     _ => {
@@ -219,14 +247,13 @@ impl ManagedBarrierState {
         for (prev_epoch, barrier_state) in &mut self.epoch_barrier_state_map {
             let prev_epoch = *prev_epoch;
             match &barrier_state.inner {
-                ManagedBarrierStateInner::Issued {
+                ManagedBarrierStateInner::Issued(IssuedState {
                     remaining_actors, ..
-                } if remaining_actors.is_empty() => {}
+                }) if remaining_actors.is_empty() => {}
                 ManagedBarrierStateInner::AllCollected | ManagedBarrierStateInner::Completed(_) => {
                     continue;
                 }
-                ManagedBarrierStateInner::Stashed { .. }
-                | ManagedBarrierStateInner::Issued { .. } => {
+                ManagedBarrierStateInner::Stashed { .. } | ManagedBarrierStateInner::Issued(_) => {
                     break;
                 }
             }
@@ -236,10 +263,10 @@ impl ManagedBarrierState {
                 ManagedBarrierStateInner::AllCollected,
             );
 
-            must_match!(prev_state, ManagedBarrierStateInner::Issued {
+            must_match!(prev_state, ManagedBarrierStateInner::Issued(IssuedState {
                 barrier_inflight_latency: timer,
                 ..
-            } => {
+            }) => {
                 timer.observe_duration();
             });
 
@@ -317,10 +344,10 @@ impl ManagedBarrierState {
             .filter_map(move |(prev_epoch, barrier_state)| {
                 #[allow(clippy::single_match)]
                 match barrier_state.inner {
-                    ManagedBarrierStateInner::Issued {
+                    ManagedBarrierStateInner::Issued(IssuedState {
                         ref remaining_actors,
                         ..
-                    } => {
+                    }) => {
                         if remaining_actors.contains(&actor_id) {
                             Some(*prev_epoch)
                         } else {
@@ -357,10 +384,10 @@ impl ManagedBarrierState {
             Some(&mut BarrierState {
                 curr_epoch,
                 inner:
-                    ManagedBarrierStateInner::Issued {
+                    ManagedBarrierStateInner::Issued(IssuedState {
                         ref mut remaining_actors,
                         ..
-                    },
+                    }),
                 ..
             }) => {
                 let exist = remaining_actors.remove(&actor_id);
@@ -416,11 +443,11 @@ impl ManagedBarrierState {
             barrier.epoch.prev,
             BarrierState {
                 curr_epoch: barrier.epoch.curr,
-                inner: ManagedBarrierStateInner::Issued {
-                    remaining_actors: actor_ids_to_collect,
+                inner: ManagedBarrierStateInner::Issued(IssuedState {
+                    remaining_actors: BTreeSet::from_iter(actor_ids_to_collect),
                     mutation: barrier.mutation.clone(),
                     barrier_inflight_latency: timer,
-                },
+                }),
                 kind: barrier.kind,
             },
         );

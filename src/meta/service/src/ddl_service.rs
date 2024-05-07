@@ -320,16 +320,7 @@ impl DdlService for DdlServiceImpl {
         let req = request.into_inner();
 
         let subscription = req.get_subscription()?.clone();
-        let fragment_graph = req.get_fragment_graph()?.clone();
-
-        let stream_job = StreamingJob::Subscription(subscription);
-
-        let command = DdlCommand::CreateStreamingJob(
-            stream_job,
-            fragment_graph,
-            CreateType::Foreground,
-            None,
-        );
+        let command = DdlCommand::CreateSubscription(subscription);
 
         let version = self.ddl_controller.run_command(command).await?;
 
@@ -347,11 +338,7 @@ impl DdlService for DdlServiceImpl {
         let subscription_id = request.subscription_id;
         let drop_mode = DropMode::from_request_setting(request.cascade);
 
-        let command = DdlCommand::DropStreamingJob(
-            StreamingJobId::Subscription(subscription_id),
-            drop_mode,
-            None,
-        );
+        let command = DdlCommand::DropSubscription(subscription_id, drop_mode);
 
         let version = self.ddl_controller.run_command(command).await?;
 
