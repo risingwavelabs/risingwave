@@ -200,12 +200,6 @@ pub fn visit_stream_node_tables_inner<F>(
                 optional!(node.table, "Sink")
             }
 
-            // Subscription
-            NodeBody::Subscription(node) => {
-                // A Subscription should have a log store
-                optional!(node.log_store_table, "Subscription")
-            }
-
             // Now
             NodeBody::Now(node) => {
                 always!(node.state_table, "Now");

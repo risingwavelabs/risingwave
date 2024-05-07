@@ -215,7 +215,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             SinkLogStoreType::KvLogStore => {
                 let metrics = KvLogStoreMetrics::new(
                     &params.executor_stats,
-                    &sink_write_param,
+                    &params.info.identity,
                     &sink_param,
                     connector,
                 );

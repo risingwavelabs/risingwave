@@ -24,16 +24,16 @@ use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping}
 use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_cont};
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model_v2::SourceId;
-use risingwave_pb::common::{PbParallelUnitMapping, PbWorkerMapping};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
-use risingwave_pb::meta::FragmentWorkerMapping;
+use risingwave_pb::meta::FragmentParallelUnitMapping;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, DispatcherType, FragmentTypeFlag, StreamActor, StreamNode,
 };
+use risingwave_pb::stream_service::BuildActorInfo;
 use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::barrier::Reschedule;
@@ -44,7 +44,7 @@ use crate::model::{
     TableParallelism, ValTransaction,
 };
 use crate::storage::Transaction;
-use crate::stream::{SplitAssignment, TableRevision};
+use crate::stream::{to_build_actor_info, SplitAssignment, TableRevision};
 use crate::{MetaError, MetaResult};
 
 pub struct FragmentManagerCore {
@@ -56,21 +56,18 @@ impl FragmentManagerCore {
     /// List all fragment vnode mapping info that not in `State::Initial`.
     pub fn all_running_fragment_mappings(
         &self,
-    ) -> impl Iterator<Item = FragmentWorkerMapping> + '_ {
+    ) -> impl Iterator<Item = FragmentParallelUnitMapping> + '_ {
         self.table_fragments
             .values()
             .filter(|tf| tf.state() != State::Initial)
             .flat_map(|table_fragments| {
-                table_fragments
-                    .fragments
-                    .values()
-                    .map(move |fragment| FragmentWorkerMapping {
+                table_fragments.fragments.values().map(|fragment| {
+                    let parallel_unit_mapping = fragment.vnode_mapping.clone().unwrap();
+                    FragmentParallelUnitMapping {
                         fragment_id: fragment.fragment_id,
-                        mapping: Some(FragmentManager::convert_mapping(
-                            &table_fragments.actor_status,
-                            fragment.vnode_mapping.as_ref().unwrap(),
-                        )),
-                    })
+                        mapping: Some(parallel_unit_mapping),
+                    }
+                })
             })
     }
 
@@ -195,20 +192,18 @@ impl FragmentManager {
     async fn notify_fragment_mapping(&self, table_fragment: &TableFragments, operation: Operation) {
         // Notify all fragment mapping to frontend nodes
         for fragment in table_fragment.fragments.values() {
-            let fragment_mapping = FragmentWorkerMapping {
+            let mapping = fragment
+                .vnode_mapping
+                .clone()
+                .expect("no data distribution found");
+            let fragment_mapping = FragmentParallelUnitMapping {
                 fragment_id: fragment.fragment_id,
-                mapping: Some(Self::convert_mapping(
-                    &table_fragment.actor_status,
-                    fragment
-                        .vnode_mapping
-                        .as_ref()
-                        .expect("no data distribution found"),
-                )),
+                mapping: Some(mapping),
             };
 
             self.env
                 .notification_manager()
-                .notify_frontend(operation, Info::StreamingWorkerMapping(fragment_mapping))
+                .notify_frontend(operation, Info::ParallelUnitMapping(fragment_mapping))
                 .await;
         }
 
@@ -855,14 +850,20 @@ impl FragmentManager {
     pub async fn all_node_actors(
         &self,
         include_inactive: bool,
-    ) -> HashMap<WorkerId, Vec<StreamActor>> {
+        subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
+    ) -> HashMap<WorkerId, Vec<BuildActorInfo>> {
         let mut actor_maps = HashMap::new();
 
         let map = &self.core.read().await.table_fragments;
         for fragments in map.values() {
+            let table_id = fragments.table_id();
             for (node_id, actors) in fragments.worker_actors(include_inactive) {
                 let node_actors = actor_maps.entry(node_id).or_insert_with(Vec::new);
-                node_actors.extend(actors);
+                node_actors.extend(
+                    actors
+                        .into_iter()
+                        .map(|actor| to_build_actor_info(actor, subscriptions, table_id)),
+                );
             }
         }
 
@@ -1276,14 +1277,11 @@ impl FragmentManager {
 
                 *fragment.vnode_mapping.as_mut().unwrap() = vnode_mapping.clone();
 
-                let worker_mapping = Self::convert_mapping(&actor_status, &vnode_mapping);
-
                 // Notify fragment mapping to frontend nodes.
-                let fragment_mapping = FragmentWorkerMapping {
+                let fragment_mapping = FragmentParallelUnitMapping {
                     fragment_id: *fragment_id as FragmentId,
-                    mapping: Some(worker_mapping),
+                    mapping: Some(vnode_mapping),
                 };
-
                 fragment_mapping_to_notify.push(fragment_mapping);
             }
 
@@ -1403,28 +1401,11 @@ impl FragmentManager {
         for mapping in fragment_mapping_to_notify {
             self.env
                 .notification_manager()
-                .notify_frontend(Operation::Update, Info::StreamingWorkerMapping(mapping))
+                .notify_frontend(Operation::Update, Info::ParallelUnitMapping(mapping))
                 .await;
         }
 
         Ok(())
-    }
-
-    fn convert_mapping(
-        actor_status: &BTreeMap<ActorId, ActorStatus>,
-        vnode_mapping: &PbParallelUnitMapping,
-    ) -> PbWorkerMapping {
-        let parallel_unit_to_worker = actor_status
-            .values()
-            .map(|actor_status| {
-                let parallel_unit = actor_status.get_parallel_unit().unwrap();
-                (parallel_unit.id, parallel_unit.worker_node_id)
-            })
-            .collect();
-
-        ParallelUnitMapping::from_protobuf(vnode_mapping)
-            .to_worker(&parallel_unit_to_worker)
-            .to_protobuf()
     }
 
     pub async fn table_node_actors(

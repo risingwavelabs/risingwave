@@ -43,13 +43,6 @@ pub fn valid_table_name(table_name: &str) -> bool {
     !INTERNAL_TABLE_NAME.is_match(table_name)
 }
 
-pub fn is_subscription_internal_table(subscription_name: &str, table_name: &str) -> bool {
-    let regex =
-        Regex::new(format!(r"__internal_{}_(\d+)_subscription_(\d+)", subscription_name).as_str())
-            .unwrap();
-    regex.is_match(table_name)
-}
-
 pub fn get_dist_key_in_pk_indices<I: Eq + Copy + Debug, O: TryFrom<usize>>(
     dist_key_indices: &[I],
     pk_indices: &[I],

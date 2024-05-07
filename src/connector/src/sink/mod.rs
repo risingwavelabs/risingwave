@@ -254,6 +254,8 @@ pub struct SinkMetrics {
     pub log_store_latest_read_epoch: LabelGuardedIntGauge<3>,
     pub log_store_read_rows: LabelGuardedIntCounter<3>,
 
+    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter<3>,
+
     pub iceberg_write_qps: LabelGuardedIntCounter<2>,
     pub iceberg_write_latency: LabelGuardedHistogram<2>,
     pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge<2>,
@@ -271,6 +273,8 @@ impl SinkMetrics {
             log_store_latest_read_epoch: LabelGuardedIntGauge::test_int_gauge(),
             log_store_write_rows: LabelGuardedIntCounter::test_int_counter(),
             log_store_read_rows: LabelGuardedIntCounter::test_int_counter(),
+            log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter::test_int_counter(
+            ),
             iceberg_write_qps: LabelGuardedIntCounter::test_int_counter(),
             iceberg_write_latency: LabelGuardedHistogram::test_histogram(),
             iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge::test_int_gauge(),
@@ -361,10 +365,7 @@ pub trait SinkLogReader: Send + Sized + 'static {
 
     /// Mark that all items emitted so far have been consumed and it is safe to truncate the log
     /// from the current offset.
-    fn truncate(
-        &mut self,
-        offset: TruncateOffset,
-    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
+    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()>;
 }
 
 impl<R: LogReader> SinkLogReader for R {
@@ -374,10 +375,7 @@ impl<R: LogReader> SinkLogReader for R {
         <Self as LogReader>::next_item(self)
     }
 
-    fn truncate(
-        &mut self,
-        offset: TruncateOffset,
-    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
         <Self as LogReader>::truncate(self, offset)
     }
 }
@@ -542,7 +540,11 @@ pub enum SinkError {
     #[error("Starrocks error: {0}")]
     Starrocks(String),
     #[error("Snowflake error: {0}")]
-    Snowflake(String),
+    Snowflake(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Pulsar error: {0}")]
     Pulsar(
         #[source]

@@ -30,9 +30,9 @@ use risingwave_meta_model_v2::prelude::{
 };
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, fragment, index, object, object_dependency, sink, source,
-    streaming_job, subscription, table, ActorId, ActorUpstreamActors, CreateType, DatabaseId,
-    ExprNodeArray, FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SourceId,
-    StreamNode, StreamingParallelism, TableId, TableVersion, UserId,
+    streaming_job, table, ActorId, ActorUpstreamActors, CreateType, DatabaseId, ExprNodeArray,
+    FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SourceId, StreamNode,
+    StreamingParallelism, TableId, TableVersion, UserId,
 };
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableVersion};
@@ -42,7 +42,9 @@ use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation, Operation,
 };
 use risingwave_pb::meta::table_fragments::PbActorStatus;
-use risingwave_pb::meta::{FragmentWorkerMapping, PbRelation, PbRelationGroup, PbTableFragments};
+use risingwave_pb::meta::{
+    FragmentParallelUnitMapping, PbRelation, PbRelationGroup, PbTableFragments,
+};
 use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -63,7 +65,7 @@ use crate::controller::catalog::CatalogController;
 use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
     check_relation_name_duplicate, check_sink_into_table_cycle, ensure_object_id, ensure_user_id,
-    get_fragment_actor_ids, get_fragment_mappings, get_parallel_unit_to_worker_map,
+    get_fragment_actor_ids, get_fragment_mappings,
 };
 use crate::controller::ObjectModel;
 use crate::manager::{NotificationVersion, SinkId, StreamingJob};
@@ -168,22 +170,6 @@ impl CatalogController {
                 sink.id = job_id as _;
                 let sink: sink::ActiveModel = sink.clone().into();
                 Sink::insert(sink).exec(&txn).await?;
-            }
-            StreamingJob::Subscription(subscription) => {
-                let job_id = Self::create_streaming_job_obj(
-                    &txn,
-                    ObjectType::Subscription,
-                    subscription.owner as _,
-                    Some(subscription.database_id as _),
-                    Some(subscription.schema_id as _),
-                    create_type,
-                    ctx,
-                    streaming_parallelism,
-                )
-                .await?;
-                subscription.id = job_id as _;
-                let subscription: subscription::ActiveModel = subscription.clone().into();
-                subscription.insert(&txn).await?;
             }
             StreamingJob::Table(src, table, _) => {
                 let job_id = Self::create_streaming_job_obj(
@@ -1031,8 +1017,6 @@ impl CatalogController {
 
         let txn = inner.db.begin().await?;
 
-        let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
-
         let mut fragment_mapping_to_notify = vec![];
 
         // for assert only
@@ -1214,13 +1198,9 @@ impl CatalogController {
             fragment.vnode_mapping = Set((&vnode_mapping).into());
             fragment.update(&txn).await?;
 
-            let worker_mapping = ParallelUnitMapping::from_protobuf(&vnode_mapping)
-                .to_worker(&parallel_unit_to_worker)
-                .to_protobuf();
-
-            fragment_mapping_to_notify.push(FragmentWorkerMapping {
+            fragment_mapping_to_notify.push(FragmentParallelUnitMapping {
                 fragment_id: fragment_id as u32,
-                mapping: Some(worker_mapping),
+                mapping: Some(vnode_mapping),
             });
 
             // for downstream and upstream

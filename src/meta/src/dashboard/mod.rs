@@ -24,6 +24,7 @@ use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
+use risingwave_common::util::StackTraceResponseExt;
 use risingwave_rpc_client::ComputeClientPool;
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
@@ -213,20 +214,13 @@ pub(super) mod handlers {
         worker_nodes: impl IntoIterator<Item = &WorkerNode>,
         compute_clients: &ComputeClientPool,
     ) -> Result<Json<StackTraceResponse>> {
-        let mut all = Default::default();
-
-        fn merge(a: &mut StackTraceResponse, b: StackTraceResponse) {
-            a.actor_traces.extend(b.actor_traces);
-            a.rpc_traces.extend(b.rpc_traces);
-            a.compaction_task_traces.extend(b.compaction_task_traces);
-            a.inflight_barrier_traces.extend(b.inflight_barrier_traces);
-        }
+        let mut all = StackTraceResponse::default();
 
         for worker_node in worker_nodes {
             let client = compute_clients.get(worker_node).await.map_err(err)?;
             let result = client.stack_trace().await.map_err(err)?;
 
-            merge(&mut all, result);
+            all.merge_other(result);
         }
 
         Ok(all.into())

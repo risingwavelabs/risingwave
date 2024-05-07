@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock};
 
@@ -19,6 +20,7 @@ use anyhow::anyhow;
 use await_tree::InstrumentAwait;
 use futures::future::join_all;
 use hytra::TrAdder;
+use risingwave_common::catalog::TableId;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::util::epoch::EpochPair;
@@ -51,6 +53,8 @@ pub struct ActorContext {
 
     /// This is the number of dispatchers when the actor is created. It will not be updated during runtime when new downstreams are added.
     pub initial_dispatch_num: usize,
+    // mv_table_id to subscription id
+    pub related_subscriptions: HashMap<TableId, HashSet<u32>>,
 }
 
 pub type ActorContextRef = Arc<ActorContext>;
@@ -67,6 +71,7 @@ impl ActorContext {
             streaming_metrics: Arc::new(StreamingMetrics::unused()),
             // Set 1 for test to enable sanity check on table
             initial_dispatch_num: 1,
+            related_subscriptions: HashMap::new(),
         })
     }
 
@@ -75,6 +80,7 @@ impl ActorContext {
         total_mem_val: Arc<TrAdder<i64>>,
         streaming_metrics: Arc<StreamingMetrics>,
         initial_dispatch_num: usize,
+        related_subscriptions: HashMap<TableId, HashSet<u32>>,
     ) -> ActorContextRef {
         Arc::new(Self {
             id: stream_actor.actor_id,
@@ -85,6 +91,7 @@ impl ActorContext {
             total_mem_val,
             streaming_metrics,
             initial_dispatch_num,
+            related_subscriptions,
         })
     }
 
