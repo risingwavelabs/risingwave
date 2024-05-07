@@ -40,7 +40,7 @@ mod plan_expr_visitor;
 mod rule;
 
 use std::assert_matches::assert_matches;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
@@ -50,7 +50,7 @@ use plan_expr_rewriter::ConstEvalRewriter;
 use property::Order;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId, UserId,
+    ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId,
 };
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -64,7 +64,7 @@ use self::plan_node::generic::{self, PhysicalPlanRef};
 use self::plan_node::{
     stream_enforce_eowc_requirement, BatchProject, Convention, LogicalProject, LogicalSource,
     PartitionComputeInfo, StreamDml, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink,
-    StreamSubscription, StreamWatermarkFilter, ToStreamContext,
+    StreamWatermarkFilter, ToStreamContext,
 };
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
@@ -963,45 +963,6 @@ impl PlanRoot {
             properties,
             format_desc,
             partition_info,
-        )
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    /// Optimize and generate a create subscription plan.
-    pub fn gen_subscription_plan(
-        mut self,
-        database_id: u32,
-        schema_id: u32,
-        dependent_relations: HashSet<TableId>,
-        subscription_name: String,
-        definition: String,
-        properties: WithOptions,
-        emit_on_window_close: bool,
-        subscription_from_table_name: String,
-        user_id: UserId,
-    ) -> Result<StreamSubscription> {
-        let stream_scan_type = StreamScanType::UpstreamOnly;
-        assert_eq!(self.phase, PlanPhase::Logical);
-        assert_eq!(self.plan.convention(), Convention::Logical);
-        let stream_plan =
-            self.gen_optimized_stream_plan_inner(emit_on_window_close, stream_scan_type)?;
-        assert_eq!(self.phase, PlanPhase::Stream);
-        assert_eq!(stream_plan.convention(), Convention::Stream);
-
-        StreamSubscription::create(
-            database_id,
-            schema_id,
-            dependent_relations,
-            stream_plan,
-            subscription_name,
-            subscription_from_table_name,
-            self.required_dist.clone(),
-            self.required_order.clone(),
-            self.out_fields.clone(),
-            self.out_names.clone(),
-            definition,
-            properties,
-            user_id,
         )
     }
 

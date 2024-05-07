@@ -85,7 +85,7 @@ use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::{
-    check_schema_writable, CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId,
+    check_schema_writable, CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId, TableId,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::describe::infer_describe;
@@ -111,7 +111,7 @@ use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
-use crate::{FrontendOpts, PgResponseStream};
+use crate::{FrontendOpts, PgResponseStream, TableCatalog};
 
 pub(crate) mod current;
 pub(crate) mod cursor_manager;
@@ -903,6 +903,42 @@ impl SessionImpl {
                 )))
             })?;
         Ok(subscription.clone())
+    }
+
+    pub fn get_table_by_id(&self, table_id: &TableId) -> Result<Arc<TableCatalog>> {
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        Ok(catalog_reader.get_table_by_id(table_id)?.clone())
+    }
+
+    pub fn get_table_by_name(
+        &self,
+        table_name: &str,
+        db_id: u32,
+        schema_id: u32,
+    ) -> Result<Arc<TableCatalog>> {
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        let table = catalog_reader
+            .get_schema_by_id(&DatabaseId::from(db_id), &SchemaId::from(schema_id))?
+            .get_table_by_name(table_name)
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("table \"{}\" does not exist", table_name),
+                )
+            })?;
+        Ok(table.clone())
+    }
+
+    pub async fn list_change_log_epochs(
+        &self,
+        table_id: u32,
+        min_epoch: u64,
+        max_count: u32,
+    ) -> Result<Vec<u64>> {
+        self.env
+            .catalog_writer
+            .list_change_log_epochs(table_id, min_epoch, max_count)
+            .await
     }
 
     pub fn clear_cancel_query_flag(&self) {
