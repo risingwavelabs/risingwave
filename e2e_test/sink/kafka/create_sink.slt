@@ -195,7 +195,8 @@ format plain encode json (
   force_append_only='true'
 ) key encode json ;
 
-statement error The key encode is TEXT, but the primary key has 2 columns. The key encode TEXT requires the primary key to be a single column.
+statement error
+# The key encode is TEXT, but the primary key has 2 columns. The key encode TEXT requires the primary key to be a single column.s
 create sink sink_text_error from t_kafka with (
   connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
@@ -205,7 +206,8 @@ format plain encode json (
   force_append_only='true'
 ) key encode text ;
 
-statement error The key encode is TEXT, but the primary key column v_bytea has type bytea. The key encode TEXT requires the primary key column to be of type varchar, bool, small int, int, or big int.
+statement error
+# The key encode is TEXT, but the primary key column v_bytea has type bytea. The key encode TEXT requires the primary key column to be of type varchar, bool, small int, int, or big int.
 create sink sink_text_error from t_kafka with (
   connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
@@ -224,6 +226,15 @@ create sink sink_text_id from t_kafka with (
 format plain encode json (
   force_append_only='true'
 ) key encode text ;
+
+statement ok
+create table t_sink_text_id (id int)
+include key as rw_key
+with (
+  connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+  topic = 'test-rw-sink-text-key-id',
+) format plain encode json;
 
 #======
 
@@ -259,6 +270,19 @@ create sink si_kafka_without_snapshot from t_kafka with (
     primary_key = 'id',
     snapshot = 'false',
 );
+
+sleep 1s
+
+query T
+select rw_key from t_sink_text_id order by rw_key
+----
+\x31
+\x32
+\x33
+\x34
+\x35
+\x36
+\x37
 
 statement ok
 insert into t_kafka values
