@@ -310,11 +310,19 @@ impl Parser {
         let row_encode = Encode::from_keyword(&s)?;
         let row_options = self.parse_options()?;
 
+        let key_encode = if self.parse_keywords(&[Keyword::KEY, Keyword::ENCODE]) {
+            Some(Encode::from_keyword(
+                self.parse_identifier()?.value.to_ascii_uppercase().as_str(),
+            )?)
+        } else {
+            None
+        };
+
         Ok(Some(ConnectorSchema {
             format,
             row_encode,
             row_options,
-            key_encode: None,
+            key_encode,
         }))
     }
 }
@@ -557,18 +565,7 @@ impl ParseTo for CreateSinkStatement {
             ));
         }
 
-        let mut sink_schema = p.parse_schema()?;
-
-        {
-            // handle key encode clause for sink
-            if let Some(schema_inner) = &mut sink_schema
-                && p.parse_keywords(&[Keyword::KEY, Keyword::ENCODE])
-            {
-                schema_inner.key_encode = Some(Encode::from_keyword(
-                    p.parse_identifier()?.value.to_ascii_uppercase().as_str(),
-                )?);
-            }
-        }
+        let sink_schema = p.parse_schema()?;
 
         Ok(Self {
             if_not_exists,

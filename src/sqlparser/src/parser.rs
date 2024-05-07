@@ -155,17 +155,25 @@ type ColumnsDefTuple = (
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Precedence {
     Zero = 0,
-    LogicalOr, // 5 in upstream
+    LogicalOr,
+    // 5 in upstream
     LogicalXor,
-    LogicalAnd, // 10 in upstream
-    UnaryNot,   // 15 in upstream
-    Is,         // 17 in upstream
+    LogicalAnd,
+    // 10 in upstream
+    UnaryNot,
+    // 15 in upstream
+    Is,
+    // 17 in upstream
     Cmp,
-    Like,    // 19 in upstream
-    Between, // 20 in upstream
+    Like,
+    // 19 in upstream
+    Between,
+    // 20 in upstream
     Other,
-    PlusMinus, // 30 in upstream
-    MulDiv,    // 40 in upstream
+    PlusMinus,
+    // 30 in upstream
+    MulDiv,
+    // 40 in upstream
     Exp,
     UnaryPosNeg,
     PostfixFactorial,
@@ -483,7 +491,7 @@ impl Parser {
                             ObjectName(id_parts),
                             self.parse_except()?,
                         ))
-                    }
+                    };
                 }
                 unexpected => {
                     return self.expected(
@@ -1928,7 +1936,7 @@ impl Parser {
                 _ => {
                     return token
                         .cloned()
-                        .unwrap_or(TokenWithLocation::wrap(Token::EOF))
+                        .unwrap_or(TokenWithLocation::wrap(Token::EOF));
                 }
             }
         }
@@ -3591,6 +3599,11 @@ impl Parser {
             }
         } else if self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
             let connector_schema = self.parse_schema()?.unwrap();
+            if connector_schema.key_encode.is_some() {
+                return Err(ParserError::ParserError(
+                    "key encode clause is not supported in source schema".to_string(),
+                ));
+            }
             AlterSourceOperation::FormatEncode { connector_schema }
         } else if self.parse_keywords(&[Keyword::REFRESH, Keyword::SCHEMA]) {
             AlterSourceOperation::RefreshSchema

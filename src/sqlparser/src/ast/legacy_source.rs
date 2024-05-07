@@ -66,6 +66,11 @@ impl From<ConnectorSchema> for CompatibleSourceSchema {
 
 pub fn parse_source_schema(p: &mut Parser) -> Result<CompatibleSourceSchema, ParserError> {
     if let Some(schema_v2) = p.parse_schema()? {
+        if schema_v2.key_encode.is_some() {
+            return Err(ParserError::ParserError(
+                "key encode clause is not supported in source schema".to_string(),
+            ));
+        }
         Ok(CompatibleSourceSchema::V2(schema_v2))
     } else if p.peek_nth_any_of_keywords(0, &[Keyword::ROW])
         && p.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
@@ -108,7 +113,7 @@ pub fn parse_source_schema(p: &mut Parser) -> Result<CompatibleSourceSchema, Par
                     "expected JSON | UPSERT_JSON | PROTOBUF | DEBEZIUM_JSON | DEBEZIUM_AVRO \
                     | AVRO | UPSERT_AVRO | MAXWELL | CANAL_JSON | BYTES | NATIVE after ROW FORMAT"
                         .to_string(),
-                ))
+                ));
             }
         };
         Ok(CompatibleSourceSchema::RowFormat(schema))
@@ -122,17 +127,26 @@ pub fn parse_source_schema(p: &mut Parser) -> Result<CompatibleSourceSchema, Par
 pub enum SourceSchema {
     Protobuf(ProtobufSchema),
     // Keyword::PROTOBUF ProtobufSchema
-    Json,         // Keyword::JSON
-    DebeziumJson, // Keyword::DEBEZIUM_JSON
+    Json,
+    // Keyword::JSON
+    DebeziumJson,
+    // Keyword::DEBEZIUM_JSON
     DebeziumMongoJson,
-    UpsertJson,             // Keyword::UPSERT_JSON
-    Avro(AvroSchema),       // Keyword::AVRO
-    UpsertAvro(AvroSchema), // Keyword::UpsertAVRO
-    Maxwell,                // Keyword::MAXWELL
-    CanalJson,              // Keyword::CANAL_JSON
-    Csv(CsvInfo),           // Keyword::CSV
+    UpsertJson,
+    // Keyword::UPSERT_JSON
+    Avro(AvroSchema),
+    // Keyword::AVRO
+    UpsertAvro(AvroSchema),
+    // Keyword::UpsertAVRO
+    Maxwell,
+    // Keyword::MAXWELL
+    CanalJson,
+    // Keyword::CANAL_JSON
+    Csv(CsvInfo),
+    // Keyword::CSV
     Native,
-    DebeziumAvro(DebeziumAvroSchema), // Keyword::DEBEZIUM_AVRO
+    DebeziumAvro(DebeziumAvroSchema),
+    // Keyword::DEBEZIUM_AVRO
     Bytes,
 }
 
@@ -318,6 +332,7 @@ pub struct AvroSchema {
     pub row_schema_location: AstString,
     pub use_schema_registry: bool,
 }
+
 impl ParseTo for AvroSchema {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
         impl_parse_to!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], p);
