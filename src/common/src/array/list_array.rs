@@ -239,6 +239,11 @@ impl ListArray {
         }
     }
 
+    /// Return the inner array of the list array.
+    pub fn values(&self) -> &ArrayImpl {
+        &self.value
+    }
+
     pub fn from_protobuf(array: &PbArray) -> ArrayResult<ArrayImpl> {
         ensure!(
             array.values.is_empty(),

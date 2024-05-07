@@ -16,13 +16,14 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use arrow_array::RecordBatch;
-use arrow_schema::{Field, Fields, Schema, SchemaRef};
+use arrow_schema::{Fields, Schema, SchemaRef};
 use arrow_udf_js::{CallMode as JsCallMode, Runtime as JsRuntime};
 #[cfg(feature = "embedded-deno-udf")]
 use arrow_udf_js_deno::{CallMode as DenoCallMode, Runtime as DenoRuntime};
 #[cfg(feature = "embedded-python-udf")]
 use arrow_udf_python::{CallMode as PythonCallMode, Runtime as PythonRuntime};
 use cfg_or_panic::cfg_or_panic;
+use risingwave_common::array::arrow::{FromArrow, ToArrow, UdfArrowConvert};
 use risingwave_common::array::{DataChunk, I32Array};
 use risingwave_common::bail;
 
@@ -32,7 +33,6 @@ use crate::expr::expr_udf::UdfImpl;
 #[derive(Debug)]
 pub struct UserDefinedTableFunction {
     children: Vec<BoxedExpression>,
-    #[allow(dead_code)]
     arg_schema: SchemaRef,
     return_type: DataType,
     client: UdfImpl,
@@ -104,9 +104,10 @@ impl UserDefinedTableFunction {
         let direct_input = DataChunk::new(columns, input.visibility().clone());
 
         // compact the input chunk and record the row mapping
-        let visible_rows = direct_input.visibility().iter_ones().collect_vec();
-        let compacted_input = direct_input.compact_cow();
-        let arrow_input = RecordBatch::try_from(compacted_input.as_ref())?;
+        let visible_rows = direct_input.visibility().iter_ones().collect::<Vec<_>>();
+        // this will drop invisible rows
+        let arrow_input =
+            UdfArrowConvert.to_record_batch(self.arg_schema.clone(), &direct_input)?;
 
         // call UDTF
         #[for_await]
@@ -114,7 +115,7 @@ impl UserDefinedTableFunction {
             .client
             .call_table_function(&self.identifier, arrow_input)
         {
-            let output = DataChunk::try_from(&res?)?;
+            let output = UdfArrowConvert.from_record_batch(&res?)?;
             self.check_output(&output)?;
 
             // we send the compacted input to UDF, so we need to map the row indices back to the
@@ -177,12 +178,17 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
     let arg_schema = Arc::new(Schema::new(
         udtf.arg_types
             .iter()
-            .map::<Result<_>, _>(|t| Ok(Field::new("", DataType::from(t).try_into()?, true)))
-            .try_collect::<_, Fields, _>()?,
+            .map(|t| UdfArrowConvert.to_arrow_field("", &DataType::from(t)))
+            .try_collect::<Fields>()?,
     ));
 
     let identifier = udtf.get_identifier()?;
     let return_type = DataType::from(prost.get_return_type()?);
+
+    let arrow_return_type = UdfArrowConvert
+        .to_arrow_field("", &return_type)?
+        .data_type()
+        .clone();
 
     #[cfg(not(feature = "embedded-deno-udf"))]
     let runtime = "quickjs";
@@ -211,7 +217,7 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
             );
             rt.add_function(
                 identifier,
-                arrow_schema::DataType::try_from(&return_type)?,
+                arrow_return_type,
                 JsCallMode::CalledOnNullInput,
                 &body,
             )?;
@@ -249,7 +255,7 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
 
             futures::executor::block_on(rt.add_function(
                 identifier,
-                arrow_schema::DataType::try_from(&return_type)?,
+                arrow_return_type,
                 DenoCallMode::CalledOnNullInput,
                 &body,
             ))?;
@@ -261,7 +267,7 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
             let body = udtf.get_body()?;
             rt.add_function(
                 identifier,
-                arrow_schema::DataType::try_from(&return_type)?,
+                arrow_return_type,
                 PythonCallMode::CalledOnNullInput,
                 body,
             )?;

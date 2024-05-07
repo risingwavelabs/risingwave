@@ -13,15 +13,14 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, LazyLock, Weak};
 use std::time::Duration;
 
 use anyhow::{Context, Error};
 use arrow_array::RecordBatch;
-use arrow_schema::{Field, Fields, Schema};
 use arrow_udf_flight::Client as FlightClient;
+use arrow_schema::{Fields, Schema, SchemaRef};
 use arrow_udf_js::{CallMode as JsCallMode, Runtime as JsRuntime};
 #[cfg(feature = "embedded-deno-udf")]
 use arrow_udf_js_deno::{CallMode as DenoCallMode, Runtime as DenoRuntime};
@@ -35,6 +34,7 @@ use prometheus::{
     exponential_buckets, register_histogram_vec_with_registry,
     register_int_counter_vec_with_registry, HistogramVec, IntCounter, IntCounterVec, Registry,
 };
+use risingwave_common::array::arrow::{FromArrow, ToArrow, UdfArrowConvert};
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::row::OwnedRow;
@@ -52,8 +52,7 @@ pub struct UserDefinedFunction {
     children: Vec<BoxedExpression>,
     arg_types: Vec<DataType>,
     return_type: DataType,
-    #[expect(dead_code)]
-    arg_schema: Arc<Schema>,
+    arg_schema: SchemaRef,
     imp: UdfImpl,
     identifier: String,
     link: Option<String>,
@@ -123,7 +122,7 @@ impl Expression for UserDefinedFunction {
 impl UserDefinedFunction {
     async fn eval_inner(&self, input: &DataChunk) -> Result<ArrayRef> {
         // this will drop invisible rows
-        let arrow_input = arrow_array::RecordBatch::try_from(input)?;
+        let arrow_input = UdfArrowConvert.to_record_batch(self.arg_schema.clone(), input)?;
 
         // metrics
         let metrics = &*GLOBAL_METRICS;
@@ -231,7 +230,7 @@ impl UserDefinedFunction {
             );
         }
 
-        let output = DataChunk::try_from(&arrow_output)?;
+        let output = UdfArrowConvert.from_record_batch(&arrow_output)?;
         let output = output.uncompact(input.visibility().clone());
 
         let Some(array) = output.columns().first() else {
@@ -303,6 +302,11 @@ impl Build for UserDefinedFunction {
         let return_type = DataType::from(prost.get_return_type().unwrap());
         let udf = prost.get_rex_node().unwrap().as_udf().unwrap();
 
+        let arrow_return_type = UdfArrowConvert
+            .to_arrow_field("", &return_type)?
+            .data_type()
+            .clone();
+
         #[cfg(not(feature = "embedded-deno-udf"))]
         let runtime = "quickjs";
 
@@ -332,7 +336,7 @@ impl Build for UserDefinedFunction {
                 );
                 rt.add_function(
                     identifier,
-                    arrow_schema::DataType::try_from(&return_type)?,
+                    arrow_return_type,
                     JsCallMode::CalledOnNullInput,
                     &body,
                 )?;
@@ -373,7 +377,7 @@ impl Build for UserDefinedFunction {
 
                 futures::executor::block_on(rt.add_function(
                     identifier,
-                    arrow_schema::DataType::try_from(&return_type)?,
+                    arrow_return_type,
                     DenoCallMode::CalledOnNullInput,
                     &body,
                 ))?;
@@ -386,7 +390,7 @@ impl Build for UserDefinedFunction {
                 let body = udf.get_body()?;
                 rt.add_function(
                     identifier,
-                    arrow_schema::DataType::try_from(&return_type)?,
+                    arrow_return_type,
                     PythonCallMode::CalledOnNullInput,
                     body,
                 )?;
@@ -404,7 +408,7 @@ impl Build for UserDefinedFunction {
         let arg_schema = Arc::new(Schema::new(
             udf.arg_types
                 .iter()
-                .map::<Result<_>, _>(|t| Ok(Field::new("", DataType::from(t).try_into()?, true)))
+                .map(|t| UdfArrowConvert.to_arrow_field("", &DataType::from(t)))
                 .try_collect::<Fields>()?,
         ));
 
