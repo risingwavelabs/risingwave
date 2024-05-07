@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use risingwave_common::cache::CachePriority;
+use foyer::memory::CacheContext;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, EmptySliceRef, FullKey, TableKey, UserKey,
@@ -383,7 +383,7 @@ pub(crate) async fn do_insert_sanity_check(
     let read_options = ReadOptions {
         retention_seconds: table_option.retention_seconds,
         table_id,
-        cache_policy: CachePolicy::Fill(CachePriority::High),
+        cache_policy: CachePolicy::Fill(CacheContext::Default),
         ..Default::default()
     };
     let stored_value = inner.get(key.clone(), epoch, read_options).await?;
@@ -409,13 +409,17 @@ pub(crate) async fn do_delete_sanity_check(
     table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
-    let OpConsistencyLevel::ConsistentOldValue(old_value_checker) = op_consistency_level else {
+    let OpConsistencyLevel::ConsistentOldValue {
+        check_old_value: old_value_checker,
+        ..
+    } = op_consistency_level
+    else {
         return Ok(());
     };
     let read_options = ReadOptions {
         retention_seconds: table_option.retention_seconds,
         table_id,
-        cache_policy: CachePolicy::Fill(CachePriority::High),
+        cache_policy: CachePolicy::Fill(CacheContext::Default),
         ..Default::default()
     };
     match inner.get(key.clone(), epoch, read_options).await? {
@@ -451,13 +455,17 @@ pub(crate) async fn do_update_sanity_check(
     table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
-    let OpConsistencyLevel::ConsistentOldValue(old_value_checker) = op_consistency_level else {
+    let OpConsistencyLevel::ConsistentOldValue {
+        check_old_value: old_value_checker,
+        ..
+    } = op_consistency_level
+    else {
         return Ok(());
     };
     let read_options = ReadOptions {
         retention_seconds: table_option.retention_seconds,
         table_id,
-        cache_policy: CachePolicy::Fill(CachePriority::High),
+        cache_policy: CachePolicy::Fill(CacheContext::Default),
         ..Default::default()
     };
 

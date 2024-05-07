@@ -35,6 +35,7 @@
 #![feature(round_ties_even)]
 #![feature(iterator_try_collect)]
 #![feature(used_with_arg)]
+#![feature(entry_insert)]
 #![recursion_limit = "256"]
 
 #[cfg(test)]
@@ -89,19 +90,15 @@ pub struct FrontendOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.
     /// Usually the localhost + desired port.
-    #[clap(long, env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:4566")]
+    #[clap(long, env = "RW_LISTEN_ADDR", default_value = "0.0.0.0:4566")]
     pub listen_addr: String,
 
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
-    /// Optional, we will use listen_addr if not specified.
+    /// Optional, we will use `listen_addr` if not specified.
     #[clap(long, env = "RW_ADVERTISE_ADDR")]
     pub advertise_addr: Option<String>,
-
-    // TODO: This is currently unused.
-    #[clap(long, env = "RW_PORT")]
-    pub port: Option<u16>,
 
     /// The address via which we will attempt to connect to a leader meta node.
     #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
@@ -135,11 +132,11 @@ pub struct FrontendOpts {
     /// Used for control the metrics level, similar to log level.
     /// 0 = disable metrics
     /// >0 = enable metrics
-    #[clap(long, env = "RW_METRICS_LEVEL")]
+    #[clap(long, hide = true, env = "RW_METRICS_LEVEL")]
     #[override_opts(path = server.metrics_level)]
     pub metrics_level: Option<MetricLevel>,
 
-    #[clap(long, env = "RW_ENABLE_BARRIER_READ")]
+    #[clap(long, hide = true, env = "RW_ENABLE_BARRIER_READ")]
     #[override_opts(path = batch.enable_barrier_read)]
     pub enable_barrier_read: Option<bool>,
 }

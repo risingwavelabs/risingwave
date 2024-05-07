@@ -29,10 +29,11 @@ use std::sync::Arc;
 use picker::{LevelCompactionPicker, TierCompactionPicker};
 use risingwave_hummock_sdk::{can_concat, CompactionGroupId, HummockCompactionTaskId};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
-use risingwave_pb::hummock::{CompactionConfig, LevelType};
+use risingwave_pb::hummock::{CompactionConfig, LevelType, PbCompactTask};
 pub use selector::CompactionSelector;
 
-use self::selector::LocalSelectorStatistic;
+use self::selector::{EmergencySelector, LocalSelectorStatistic};
+use super::check_cg_write_limit;
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
 use crate::hummock::compaction::picker::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
@@ -101,15 +102,34 @@ impl CompactStatus {
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
         // layer must be larger.
-        selector.pick_compaction(
+        if let Some(task) = selector.pick_compaction(
             task_id,
             group,
             levels,
             &mut self.level_handlers,
             stats,
-            table_id_to_options,
-            developer_config,
-        )
+            table_id_to_options.clone(),
+            developer_config.clone(),
+        ) {
+            return Some(task);
+        } else {
+            let compaction_group_config = &group.compaction_config;
+            if check_cg_write_limit(levels, compaction_group_config.as_ref()).is_write_stop()
+                && compaction_group_config.enable_emergency_picker
+            {
+                return EmergencySelector::default().pick_compaction(
+                    task_id,
+                    group,
+                    levels,
+                    &mut self.level_handlers,
+                    stats,
+                    table_id_to_options,
+                    developer_config,
+                );
+            }
+        }
+
+        None
     }
 
     pub fn is_trivial_move_task(task: &CompactTask) -> bool {
@@ -154,6 +174,12 @@ impl CompactStatus {
     }
 
     /// Declares a task as either succeeded, failed or canceled.
+    pub fn report_compact_task_pb(&mut self, compact_task: &PbCompactTask) {
+        for level in &compact_task.input_ssts {
+            self.level_handlers[level.level_idx as usize].remove_task(compact_task.task_id);
+        }
+    }
+
     pub fn report_compact_task(&mut self, compact_task: &CompactTask) {
         for level in &compact_task.input_ssts {
             self.level_handlers[level.level_idx as usize].remove_task(compact_task.task_id);

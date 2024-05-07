@@ -51,7 +51,7 @@ impl Transactional<Transaction> for CompactionGroup {
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         let m = compaction_config::ActiveModel {
             compaction_group_id: Set(self.group_id as _),
-            config: Set(CompactionConfig((*self.compaction_config).to_owned())),
+            config: Set(CompactionConfig::from(&(*self.compaction_config))),
         };
         compaction_config::Entity::insert(m)
             .on_conflict(
@@ -77,8 +77,8 @@ impl Transactional<Transaction> for CompactStatus {
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         let m = compaction_status::ActiveModel {
             compaction_group_id: Set(self.compaction_group_id as _),
-            status: Set(LevelHandlers(
-                self.level_handlers.iter().map_into().collect(),
+            status: Set(LevelHandlers::from(
+                self.level_handlers.iter().map_into().collect_vec(),
             )),
         };
         compaction_status::Entity::insert(m)
@@ -107,7 +107,7 @@ impl Transactional<Transaction> for CompactTaskAssignment {
         let m = compaction_task::ActiveModel {
             id: Set(task.task_id as _),
             context_id: Set(self.context_id as _),
-            task: Set(CompactionTask(task)),
+            task: Set(CompactionTask::from(&task)),
         };
         compaction_task::Entity::insert(m)
             .on_conflict(
@@ -220,7 +220,7 @@ impl Transactional<Transaction> for HummockVersionDelta {
             max_committed_epoch: Set(self.max_committed_epoch as _),
             safe_epoch: Set(self.safe_epoch as _),
             trivial_move: Set(self.trivial_move),
-            full_version_delta: Set(FullVersionDelta(self.into())),
+            full_version_delta: Set(FullVersionDelta::from(&self.into())),
         };
         hummock_version_delta::Entity::insert(m)
             .on_conflict(
@@ -249,7 +249,7 @@ impl Transactional<Transaction> for HummockVersionDelta {
 
 impl From<compaction_config::Model> for CompactionGroup {
     fn from(value: compaction_config::Model) -> Self {
-        Self::new(value.compaction_group_id as _, value.config.0)
+        Self::new(value.compaction_group_id as _, value.config.to_protobuf())
     }
 }
 
@@ -257,7 +257,7 @@ impl From<compaction_status::Model> for CompactStatus {
     fn from(value: compaction_status::Model) -> Self {
         Self {
             compaction_group_id: value.compaction_group_id as _,
-            level_handlers: value.status.0.iter().map_into().collect(),
+            level_handlers: value.status.to_protobuf().iter().map_into().collect(),
         }
     }
 }

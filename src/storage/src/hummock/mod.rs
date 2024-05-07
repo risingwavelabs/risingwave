@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKeyRangeRef};
 use risingwave_hummock_sdk::version::SstableInfo;
 use risingwave_hummock_sdk::{HummockEpoch, *};
 
-mod block_cache;
+pub mod block_cache;
 pub use block_cache::*;
 
 pub mod file_cache;

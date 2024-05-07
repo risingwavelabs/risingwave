@@ -8,8 +8,11 @@ nd = "nd"               # N-dimentional / 2nd
 steam = "stream"        # You played with Steam games too much.
 # Some weird short variable names
 ot = "ot"
-bui = "bui"
-
+bui = "bui" # BackwardUserIterator
+mosquitto = "mosquitto" # This is a MQTT broker.
+abd = "abd"
+iy = "iy"
+Pn = "Pn"
 [default.extend-identifiers]
 
 [files]

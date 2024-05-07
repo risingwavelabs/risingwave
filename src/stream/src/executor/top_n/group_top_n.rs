@@ -13,28 +13,21 @@
 // limitations under the License.
 
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
 
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::Op;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_storage::StateStore;
 
 use super::top_n_cache::TopNCacheTrait;
 use super::utils::*;
 use super::{ManagedTopNState, TopNCache};
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
-use crate::common::table::state_table::StateTable;
-use crate::error::StreamResult;
-use crate::executor::error::StreamExecutorResult;
-use crate::executor::{ActorContextRef, Executor, PkIndices, Watermark};
-use crate::task::AtomicU64Ref;
+use crate::executor::prelude::*;
 
 pub type GroupTopNExecutor<K, S, const WITH_TIES: bool> =
     TopNExecutorWrapper<InnerGroupTopNExecutor<K, S, WITH_TIES>>;
@@ -89,7 +82,7 @@ pub struct InnerGroupTopNExecutor<K: HashKey, S: StateStore, const WITH_TIES: bo
     /// group key -> cache for this group
     caches: GroupTopNCache<K, WITH_TIES>,
 
-    /// Used for serializing pk into CacheKey.
+    /// Used for serializing pk into `CacheKey`.
     cache_key_serde: CacheKeySerde,
 
     ctx: ActorContextRef,
@@ -279,6 +272,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::hash::SerializedKey;
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
@@ -355,15 +349,15 @@ mod tests {
         let mut chunks = create_stream_chunks();
         let schema = create_schema();
         MockSource::with_messages(vec![
-            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
             Message::Chunk(std::mem::take(&mut chunks[0])),
-            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
             Message::Chunk(std::mem::take(&mut chunks[1])),
-            Message::Barrier(Barrier::new_test_barrier(3)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
             Message::Chunk(std::mem::take(&mut chunks[2])),
-            Message::Barrier(Barrier::new_test_barrier(4)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
             Message::Chunk(std::mem::take(&mut chunks[3])),
-            Message::Barrier(Barrier::new_test_barrier(5)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(5))),
         ])
         .into_executor(schema, pk_indices())
     }

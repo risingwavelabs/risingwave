@@ -38,10 +38,20 @@ impl MockExternalTableReader {
         }
     }
 
-    pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
-        Box::new(move |_| Ok(CdcOffset::MySql(MySqlOffset::default())))
+    pub fn get_normalized_table_name(_table_name: &SchemaTableName) -> String {
+        "`mock_table`".to_string()
     }
 
+    pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
+        Box::new(move |offset| {
+            Ok(CdcOffset::MySql(MySqlOffset::parse_debezium_offset(
+                offset,
+            )?))
+        })
+    }
+
+    /// The snapshot will emit to downstream all in once, because it is too small.
+    /// After that we will emit the buffered upstream chunks all in one.
     #[try_stream(boxed, ok = OwnedRow, error = ConnectorError)]
     async fn snapshot_read_inner(&self) {
         let snap_idx = self
@@ -49,18 +59,18 @@ impl MockExternalTableReader {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         println!("snapshot read: idx {}", snap_idx);
 
-        let snap0 = vec![OwnedRow::new(vec![
-            Some(ScalarImpl::Int64(1)),
-            Some(ScalarImpl::Float64(1.0001.into())),
-        ])];
-        let snap1 = vec![
+        let snap0 = vec![
             OwnedRow::new(vec![
                 Some(ScalarImpl::Int64(1)),
-                Some(ScalarImpl::Float64(10.01.into())),
+                Some(ScalarImpl::Float64(1.0001.into())),
+            ]),
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(1)),
+                Some(ScalarImpl::Float64(11.00.into())),
             ]),
             OwnedRow::new(vec![
                 Some(ScalarImpl::Int64(2)),
-                Some(ScalarImpl::Float64(2.02.into())),
+                Some(ScalarImpl::Float64(22.00.into())),
             ]),
             OwnedRow::new(vec![
                 Some(ScalarImpl::Int64(5)),
@@ -76,7 +86,7 @@ impl MockExternalTableReader {
             ]),
         ];
 
-        let snapshots = [snap0, snap1];
+        let snapshots = vec![snap0];
         if snap_idx >= snapshots.len() {
             return Ok(());
         }
@@ -88,10 +98,6 @@ impl MockExternalTableReader {
 }
 
 impl ExternalTableReader for MockExternalTableReader {
-    fn get_normalized_table_name(&self, _table_name: &SchemaTableName) -> String {
-        "`mock_table`".to_string()
-    }
-
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
         static IDX: AtomicUsize = AtomicUsize::new(0);
 
@@ -111,6 +117,7 @@ impl ExternalTableReader for MockExternalTableReader {
         _table_name: SchemaTableName,
         _start_pk: Option<OwnedRow>,
         _primary_keys: Vec<String>,
+        _limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
         self.snapshot_read_inner()
     }

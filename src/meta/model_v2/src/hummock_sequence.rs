@@ -13,8 +13,13 @@
 // limitations under the License.
 
 use sea_orm::entity::prelude::*;
+use serde::{Deserialize, Serialize};
+pub const COMPACTION_TASK_ID: &str = "compaction_task";
+pub const COMPACTION_GROUP_ID: &str = "compaction_group";
+pub const SSTABLE_OBJECT_ID: &str = "sstable_object";
+pub const META_BACKUP_ID: &str = "meta_backup";
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Default, Serialize, Deserialize)]
 #[sea_orm(table_name = "hummock_sequence")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]

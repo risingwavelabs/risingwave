@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{TableOption, DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_common::{bail, current_cluster_version};
-use risingwave_meta_model_v2::fragment::StreamNode;
+use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::table::TableType;
@@ -29,15 +29,18 @@ use risingwave_meta_model_v2::{
     actor, connection, database, fragment, function, index, object, object_dependency, schema,
     sink, source, streaming_job, subscription, table, user_privilege, view, ActorId,
     ActorUpstreamActors, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId,
-    FunctionId, I32Array, IndexId, JobStatus, ObjectId, PrivateLinkService, SchemaId, SinkId,
-    SourceId, StreamSourceInfo, StreamingParallelism, TableId, UserId,
+    FunctionId, I32Array, IndexId, JobStatus, ObjectId, PrivateLinkService, Property, SchemaId,
+    SinkId, SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId,
+    UserId,
 };
+use risingwave_pb::catalog::subscription::SubscriptionState;
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
     PbComment, PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
     PbSubscription, PbTable, PbView,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbCreatingJobInfo;
+use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::relation::PbRelationInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
@@ -55,6 +58,7 @@ use sea_orm::{
 };
 use tokio::sync::{RwLock, RwLockReadGuard};
 
+use super::utils::check_subscription_name_duplicate;
 use crate::controller::rename::{alter_relation_rename, alter_relation_rename_refs};
 use crate::controller::utils::{
     check_connection_name_duplicate, check_database_name_duplicate,
@@ -68,6 +72,7 @@ use crate::controller::ObjectModel;
 use crate::manager::{Catalog, MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
 use crate::rpc::ddl_controller::DropMode;
 use crate::stream::SourceManagerRef;
+use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};
 
 pub type CatalogControllerRef = Arc<CatalogController>;
@@ -80,6 +85,7 @@ pub struct CatalogController {
 
 #[derive(Clone, Default)]
 pub struct ReleaseContext {
+    pub(crate) streaming_job_ids: Vec<ObjectId>,
     /// Dropped state table list, need to unregister from hummock.
     pub(crate) state_table_ids: Vec<TableId>,
     /// Dropped source list, need to unregister from source manager.
@@ -94,16 +100,14 @@ pub struct ReleaseContext {
 }
 
 impl CatalogController {
-    pub fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let meta_store = env
-            .sql_meta_store()
-            .expect("sql meta store is not initialized");
-        Ok(Self {
+    pub fn new(env: MetaSrvEnv) -> Self {
+        let meta_store = env.meta_store().as_sql().clone();
+        Self {
             env,
             inner: RwLock::new(CatalogControllerInner {
                 db: meta_store.conn,
             }),
-        })
+        }
     }
 
     /// Used in `NotificationService::subscribe`.
@@ -271,7 +275,7 @@ impl CatalogController {
             .into_tuple()
             .all(&txn)
             .await?;
-        let fragment_mappings = get_fragment_mappings_by_jobs(&txn, streaming_jobs).await?;
+        let fragment_mappings = get_fragment_mappings_by_jobs(&txn, streaming_jobs.clone()).await?;
 
         // The schema and objects in the database will be delete cascade.
         let res = Object::delete_by_id(database_id).exec(&txn).await?;
@@ -296,6 +300,7 @@ impl CatalogController {
             .await;
         Ok((
             ReleaseContext {
+                streaming_job_ids: streaming_jobs,
                 state_table_ids,
                 source_ids,
                 connections,
@@ -398,6 +403,117 @@ impl CatalogController {
         Ok(version)
     }
 
+    pub async fn create_subscription_catalog(
+        &self,
+        pb_subscription: &mut PbSubscription,
+    ) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        ensure_user_id(pb_subscription.owner as _, &txn).await?;
+        ensure_object_id(ObjectType::Database, pb_subscription.database_id as _, &txn).await?;
+        ensure_object_id(ObjectType::Schema, pb_subscription.schema_id as _, &txn).await?;
+        check_subscription_name_duplicate(pb_subscription, &txn).await?;
+
+        let obj = Self::create_object(
+            &txn,
+            ObjectType::Subscription,
+            pb_subscription.owner as _,
+            Some(pb_subscription.database_id as _),
+            Some(pb_subscription.schema_id as _),
+        )
+        .await?;
+        pb_subscription.id = obj.oid as _;
+        let subscription: subscription::ActiveModel = pb_subscription.clone().into();
+        Subscription::insert(subscription).exec(&txn).await?;
+
+        // record object dependency.
+        ObjectDependency::insert(object_dependency::ActiveModel {
+            oid: Set(pb_subscription.dependent_table_id as _),
+            used_by: Set(pb_subscription.id as _),
+            ..Default::default()
+        })
+        .exec(&txn)
+        .await?;
+        txn.commit().await?;
+        Ok(())
+    }
+
+    pub async fn finish_create_subscription_catalog(&self, subscription_id: u32) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let job_id = subscription_id as i32;
+
+        // update `created_at` as now() and `created_at_cluster_version` as current cluster version.
+        let res = Object::update_many()
+            .col_expr(object::Column::CreatedAt, Expr::current_timestamp().into())
+            .col_expr(
+                object::Column::CreatedAtClusterVersion,
+                current_cluster_version().into(),
+            )
+            .filter(object::Column::Oid.eq(job_id))
+            .exec(&txn)
+            .await?;
+        if res.rows_affected == 0 {
+            return Err(MetaError::catalog_id_not_found("subscription", job_id));
+        }
+
+        // mark the target subscription as `Create`.
+        let job = subscription::ActiveModel {
+            subscription_id: Set(job_id),
+            subscription_state: Set(SubscriptionState::Created.into()),
+            ..Default::default()
+        };
+        job.update(&txn).await?;
+        txn.commit().await?;
+
+        Ok(())
+    }
+
+    pub async fn notify_create_subscription(
+        &self,
+        subscription_id: u32,
+    ) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let job_id = subscription_id as i32;
+        let (subscription, obj) = Subscription::find_by_id(job_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("subscription", job_id))?;
+        txn.commit().await?;
+
+        let version = self
+            .notify_frontend(
+                Operation::Add,
+                Info::RelationGroup(PbRelationGroup {
+                    relations: vec![PbRelation {
+                        relation_info: PbRelationInfo::Subscription(
+                            ObjectModel(subscription, obj.unwrap()).into(),
+                        )
+                        .into(),
+                    }],
+                }),
+            )
+            .await;
+        Ok(version)
+    }
+
+    pub async fn clean_dirty_subscription(&self) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let _res = Subscription::delete_many()
+            .filter(
+                subscription::Column::SubscriptionState
+                    .eq(Into::<i32>::into(SubscriptionState::Init)),
+            )
+            .exec(&txn)
+            .await?;
+        txn.commit().await?;
+        Ok(())
+    }
+
     pub async fn list_background_creating_mviews(&self) -> MetaResult<Vec<table::Model>> {
         let inner = self.inner.read().await;
         let tables = Table::find()
@@ -415,6 +531,57 @@ impl CatalogController {
             .all(&inner.db)
             .await?;
         Ok(tables)
+    }
+
+    pub async fn list_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependencies>> {
+        let inner = self.inner.read().await;
+
+        let dependencies: Vec<(ObjectId, ObjectId)> = ObjectDependency::find()
+            .select_only()
+            .columns([
+                object_dependency::Column::Oid,
+                object_dependency::Column::UsedBy,
+            ])
+            .join(
+                JoinType::InnerJoin,
+                object_dependency::Relation::Object1.def(),
+            )
+            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        let mut obj_dependencies = dependencies
+            .into_iter()
+            .map(|(oid, used_by)| PbObjectDependencies {
+                object_id: used_by as _,
+                referenced_object_id: oid as _,
+            })
+            .collect_vec();
+
+        let sink_dependencies: Vec<(SinkId, TableId)> = Sink::find()
+            .select_only()
+            .columns([sink::Column::SinkId, sink::Column::TargetTable])
+            .join(JoinType::InnerJoin, sink::Relation::Object.def())
+            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+            .filter(
+                streaming_job::Column::JobStatus
+                    .eq(JobStatus::Created)
+                    .and(sink::Column::TargetTable.is_not_null()),
+            )
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        obj_dependencies.extend(sink_dependencies.into_iter().map(|(sink_id, table_id)| {
+            PbObjectDependencies {
+                object_id: table_id as _,
+                referenced_object_id: sink_id as _,
+            }
+        }));
+
+        Ok(obj_dependencies)
     }
 
     pub async fn has_any_streaming_jobs(&self) -> MetaResult<bool> {
@@ -709,7 +876,7 @@ impl CatalogController {
                         )
                         .col_expr(
                             fragment::Column::StreamNode,
-                            StreamNode::from_protobuf(&pb_stream_node).into(),
+                            StreamNode::from(&pb_stream_node).into(),
                         )
                         .filter(fragment::Column::FragmentId.eq(fragment_id))
                         .exec(txn)
@@ -801,10 +968,10 @@ impl CatalogController {
             .all(&txn)
             .await?;
         let mut relations = internal_table_objs
-            .into_iter()
+            .iter()
             .map(|(table, obj)| PbRelation {
                 relation_info: Some(PbRelationInfo::Table(
-                    ObjectModel(table, obj.unwrap()).into(),
+                    ObjectModel(table.clone(), obj.clone().unwrap()).into(),
                 )),
             })
             .collect_vec();
@@ -843,18 +1010,6 @@ impl CatalogController {
                 relations.push(PbRelation {
                     relation_info: Some(PbRelationInfo::Sink(
                         ObjectModel(sink, obj.unwrap()).into(),
-                    )),
-                });
-            }
-            ObjectType::Subscription => {
-                let (subscription, obj) = Subscription::find_by_id(job_id)
-                    .find_also_related(Object)
-                    .one(&txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("subscription", job_id))?;
-                relations.push(PbRelation {
-                    relation_info: Some(PbRelationInfo::Subscription(
-                        ObjectModel(subscription, obj.unwrap()).into(),
                     )),
                 });
             }
@@ -1381,35 +1536,6 @@ impl CatalogController {
                 relations.push(PbRelationInfo::Subscription(
                     ObjectModel(subscription, obj).into(),
                 ));
-
-                // internal tables.
-                let internal_tables: Vec<TableId> = Table::find()
-                    .select_only()
-                    .column(table::Column::TableId)
-                    .filter(table::Column::BelongsToJobId.eq(object_id))
-                    .into_tuple()
-                    .all(&txn)
-                    .await?;
-
-                Object::update_many()
-                    .col_expr(
-                        object::Column::OwnerId,
-                        SimpleExpr::Value(Value::Int(Some(new_owner))),
-                    )
-                    .filter(object::Column::Oid.is_in(internal_tables.clone()))
-                    .exec(&txn)
-                    .await?;
-
-                let table_objs = Table::find()
-                    .find_also_related(Object)
-                    .filter(table::Column::TableId.is_in(internal_tables))
-                    .all(&txn)
-                    .await?;
-                for (table, table_obj) in table_objs {
-                    relations.push(PbRelationInfo::Table(
-                        ObjectModel(table, table_obj.unwrap()).into(),
-                    ));
-                }
             }
             ObjectType::View => {
                 let view = View::find_by_id(object_id)
@@ -1634,40 +1760,13 @@ impl CatalogController {
                     .ok_or_else(|| MetaError::catalog_id_not_found("subscription", object_id))?;
                 check_relation_name_duplicate(&subscription.name, database_id, new_schema, &txn)
                     .await?;
+
+                let mut obj = obj.into_active_model();
+                obj.schema_id = Set(Some(new_schema));
+                let obj = obj.update(&txn).await?;
                 relations.push(PbRelationInfo::Subscription(
                     ObjectModel(subscription, obj).into(),
                 ));
-
-                // internal tables.
-                let internal_tables: Vec<TableId> = Table::find()
-                    .select_only()
-                    .column(table::Column::TableId)
-                    .filter(table::Column::BelongsToJobId.eq(object_id))
-                    .into_tuple()
-                    .all(&txn)
-                    .await?;
-
-                if !internal_tables.is_empty() {
-                    Object::update_many()
-                        .col_expr(
-                            object::Column::SchemaId,
-                            SimpleExpr::Value(Value::Int(Some(new_schema))),
-                        )
-                        .filter(object::Column::Oid.is_in(internal_tables.clone()))
-                        .exec(&txn)
-                        .await?;
-
-                    let table_objs = Table::find()
-                        .find_also_related(Object)
-                        .filter(table::Column::TableId.is_in(internal_tables))
-                        .all(&txn)
-                        .await?;
-                    for (table, table_obj) in table_objs {
-                        relations.push(PbRelationInfo::Table(
-                            ObjectModel(table, table_obj.unwrap()).into(),
-                        ));
-                    }
-                }
             }
             ObjectType::View => {
                 let view = View::find_by_id(object_id)
@@ -1766,15 +1865,16 @@ impl CatalogController {
             .ok_or_else(|| MetaError::catalog_id_not_found("table", comment.table_id))?;
 
         let table = if let Some(col_idx) = comment.column_index {
-            let mut columns: ColumnCatalogArray = Table::find_by_id(comment.table_id as TableId)
+            let columns: ColumnCatalogArray = Table::find_by_id(comment.table_id as TableId)
                 .select_only()
                 .column(table::Column::Columns)
                 .into_tuple()
                 .one(&txn)
                 .await?
                 .ok_or_else(|| MetaError::catalog_id_not_found("table", comment.table_id))?;
-            let column = columns
-                .0
+            let mut pb_columns = columns.to_protobuf();
+
+            let column = pb_columns
                 .get_mut(col_idx as usize)
                 .ok_or_else(|| MetaError::catalog_id_not_found("column", col_idx))?;
             let column_desc = column.column_desc.as_mut().ok_or_else(|| {
@@ -1787,7 +1887,7 @@ impl CatalogController {
             column_desc.description = comment.description;
             table::ActiveModel {
                 table_id: Set(comment.table_id as _),
-                columns: Set(columns),
+                columns: Set(pb_columns.into()),
                 ..Default::default()
             }
             .update(&txn)
@@ -1918,7 +2018,7 @@ impl CatalogController {
             .map(|obj| obj.oid)
             .collect_vec();
 
-        // cdc source streaming job.
+        // source streaming job.
         if object_type == ObjectType::Source {
             let source_info: Option<StreamSourceInfo> = Source::find_by_id(object_id)
                 .select_only()
@@ -1928,7 +2028,7 @@ impl CatalogController {
                 .await?
                 .ok_or_else(|| MetaError::catalog_id_not_found("source", object_id))?;
             if let Some(source_info) = source_info
-                && source_info.into_inner().cdc_source_job
+                && source_info.to_protobuf().is_shared()
             {
                 to_drop_streaming_jobs.push(object_id);
             }
@@ -1993,7 +2093,8 @@ impl CatalogController {
 
         let (source_fragments, removed_actors) =
             resolve_source_register_info_for_jobs(&txn, to_drop_streaming_jobs.clone()).await?;
-        let fragment_mappings = get_fragment_mappings_by_jobs(&txn, to_drop_streaming_jobs).await?;
+        let fragment_mappings =
+            get_fragment_mappings_by_jobs(&txn, to_drop_streaming_jobs.clone()).await?;
 
         // Find affect users with privileges on all this objects.
         let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
@@ -2097,6 +2198,7 @@ impl CatalogController {
 
         Ok((
             ReleaseContext {
+                streaming_job_ids: to_drop_streaming_jobs,
                 state_table_ids: to_drop_state_table_ids,
                 source_ids: to_drop_source_ids,
                 connections: vec![],
@@ -2343,6 +2445,44 @@ impl CatalogController {
         Ok(version)
     }
 
+    pub async fn list_stream_job_desc_for_telemetry(
+        &self,
+    ) -> MetaResult<Vec<MetaTelemetryJobDesc>> {
+        let inner = self.inner.read().await;
+        let info: Vec<(TableId, Option<Property>)> = Table::find()
+            .select_only()
+            .column(table::Column::TableId)
+            .column(source::Column::WithProperties)
+            .join(JoinType::LeftJoin, table::Relation::Source.def())
+            .filter(
+                table::Column::TableType
+                    .eq(TableType::Table)
+                    .or(table::Column::TableType.eq(TableType::MaterializedView)),
+            )
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        Ok(info
+            .into_iter()
+            .map(|(table_id, properties)| {
+                let connector_info = if let Some(inner_props) = properties {
+                    inner_props
+                        .inner_ref()
+                        .get(UPSTREAM_SOURCE_KEY)
+                        .map(|v| v.to_lowercase())
+                } else {
+                    None
+                };
+                MetaTelemetryJobDesc {
+                    table_id,
+                    connector: connector_info,
+                    optimization: vec![],
+                }
+            })
+            .collect())
+    }
+
     pub async fn alter_source_column(
         &self,
         pb_source: PbSource,
@@ -2502,6 +2642,25 @@ impl CatalogController {
             .into_iter()
             .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
             .collect())
+    }
+
+    pub async fn get_subscription_by_id(
+        &self,
+        subscription_id: SubscriptionId,
+    ) -> MetaResult<PbSubscription> {
+        let inner = self.inner.read().await;
+        let subscription_objs = Subscription::find()
+            .find_also_related(Object)
+            .filter(subscription::Column::SubscriptionId.eq(subscription_id))
+            .all(&inner.db)
+            .await?;
+        let subscription: PbSubscription = subscription_objs
+            .into_iter()
+            .map(|(subscription, obj)| ObjectModel(subscription, obj.unwrap()).into())
+            .find_or_first(|_| true)
+            .ok_or_else(|| anyhow!("cant find subscription with id {}", subscription_id))?;
+
+        Ok(subscription)
     }
 
     pub async fn find_creating_streaming_job_ids(
@@ -2956,7 +3115,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_database_func() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await);
         let pb_database = PbDatabase {
             name: "db1".to_string(),
             owner: TEST_OWNER_ID as _,
@@ -2988,7 +3147,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_schema_func() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await);
         let pb_schema = PbSchema {
             database_id: TEST_DATABASE_ID as _,
             name: "schema1".to_string(),
@@ -3021,7 +3180,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_view() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await);
         let pb_view = PbView {
             schema_id: TEST_SCHEMA_ID as _,
             database_id: TEST_DATABASE_ID as _,
@@ -3046,7 +3205,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_function() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await);
         let test_data_type = risingwave_pb::data::DataType {
             type_name: risingwave_pb::data::data_type::TypeName::Int32 as _,
             ..Default::default()
@@ -3079,8 +3238,8 @@ mod tests {
             .one(&mgr.inner.read().await.db)
             .await?
             .unwrap();
-        assert_eq!(function.return_type.0, test_data_type);
-        assert_eq!(function.arg_types.into_inner().len(), 1);
+        assert_eq!(function.return_type.to_protobuf(), test_data_type);
+        assert_eq!(function.arg_types.to_protobuf().len(), 1);
         assert_eq!(function.language, "python");
 
         mgr.drop_function(function.function_id).await?;
@@ -3094,7 +3253,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_alter_relation_rename() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await);
         let pb_source = PbSource {
             schema_id: TEST_SCHEMA_ID as _,
             database_id: TEST_DATABASE_ID as _,

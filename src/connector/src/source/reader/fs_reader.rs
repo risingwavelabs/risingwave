@@ -43,13 +43,10 @@ impl FsSourceReader {
     pub fn new(
         properties: HashMap<String, String>,
         columns: Vec<SourceColumnDesc>,
-        connector_node_addr: Option<String>,
         parser_config: SpecificParserConfig,
     ) -> ConnectorResult<Self> {
         // Store the connector node address to properties for later use.
-        let mut source_props: HashMap<String, String> = HashMap::from_iter(properties.clone());
-        connector_node_addr
-            .map(|addr| source_props.insert("connector_node_addr".to_string(), addr));
+        let source_props: HashMap<String, String> = HashMap::from_iter(properties.clone());
         let config = ConnectorProperties::extract(source_props, false)?;
 
         Ok(Self {

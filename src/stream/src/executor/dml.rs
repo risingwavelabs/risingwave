@@ -16,17 +16,13 @@ use std::collections::BTreeMap;
 use std::mem;
 
 use either::Either;
-use futures::{StreamExt, TryStreamExt};
-use futures_async_stream::try_stream;
-use risingwave_common::array::StreamChunk;
+use futures::TryStreamExt;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableVersionId};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;
 use risingwave_dml::dml_manager::DmlManagerRef;
 
-use super::error::StreamExecutorError;
-use super::{expect_first_barrier, BoxedMessageStream, Execute, Executor, Message, Mutation};
-use crate::common::StreamChunkBuilder;
+use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
 
 /// [`DmlExecutor`] accepts both stream data and batch data for data manipulation on a specific
@@ -284,6 +280,7 @@ mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::transaction::transaction_id::TxnId;
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_dml::dml_manager::DmlManager;
 
     use super::*;
@@ -343,7 +340,7 @@ mod tests {
         );
 
         // The first barrier
-        tx.push_barrier(1, false);
+        tx.push_barrier(test_epoch(1), false);
         let msg = dml_executor.next().await.unwrap().unwrap();
         assert!(matches!(msg, Message::Barrier(_)));
 
@@ -367,7 +364,7 @@ mod tests {
         tokio::spawn(async move {
             write_handle.end().await.unwrap();
             // a barrier to trigger batch group flush
-            tx.push_barrier(2, false);
+            tx.push_barrier(test_epoch(2), false);
         });
 
         // Consume the 1st message from upstream executor

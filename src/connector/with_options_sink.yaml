@@ -87,6 +87,9 @@ DeltaLakeConfig:
   - name: s3.endpoint
     field_type: String
     required: false
+  - name: gcs.service.account
+    field_type: String
+    required: false
   - name: r#type
     field_type: String
     required: true
@@ -159,6 +162,10 @@ IcebergConfig:
   - name: java_catalog_props
     field_type: HashMap<String,String>
     required: false
+  - name: commit_checkpoint_interval
+    field_type: u64
+    required: false
+    default: Default::default
 KafkaConfig:
   fields:
   - name: properties.bootstrap.server
@@ -312,6 +319,9 @@ KafkaConfig:
     comments: The maximum number of unacknowledged requests the client will send on a single connection before blocking.
     required: false
     default: '5'
+  - name: properties.request.required.acks
+    field_type: i32
+    required: false
   - name: broker.rewrite.endpoints
     field_type: HashMap<String,String>
     comments: This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
@@ -350,6 +360,64 @@ KinesisSinkConfig:
     field_type: String
     required: false
     alias: kinesis.assumerole.external_id
+MqttConfig:
+  fields:
+  - name: url
+    field_type: String
+    comments: The url of the broker to connect to. e.g. tcp://localhost.  Must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,  to denote the protocol for establishing a connection with the broker.  `mqtts://`, `ssl://` will use the native certificates if no ca is specified
+    required: true
+  - name: qos
+    field_type: QualityOfService
+    comments: The quality of service to use when publishing messages. Defaults to at_most_once.  Could be at_most_once, at_least_once or exactly_once
+    required: false
+  - name: username
+    field_type: String
+    comments: Username for the mqtt broker
+    required: false
+  - name: password
+    field_type: String
+    comments: Password for the mqtt broker
+    required: false
+  - name: client_prefix
+    field_type: String
+    comments: Prefix for the mqtt client id.  The client id will be generated as `client_prefix`_`actor_id`_`(executor_id|source_id)`. Defaults to risingwave
+    required: false
+  - name: clean_start
+    field_type: bool
+    comments: '`clean_start = true` removes all the state from queues & instructs the broker  to clean all the client state when client disconnects.   When set `false`, broker will hold the client state and performs pending  operations on the client when reconnection with same `client_id`  happens. Local queue state is also held to retransmit packets after reconnection.'
+    required: false
+    default: Default::default
+  - name: inflight_messages
+    field_type: usize
+    comments: The maximum number of inflight messages. Defaults to 100
+    required: false
+  - name: tls.client_key
+    field_type: String
+    comments: Path to CA certificate file for verifying the broker's key.
+    required: false
+  - name: tls.client_cert
+    field_type: String
+    comments: Path to client's certificate file (PEM). Required for client authentication.  Can be a file path under fs:// or a string with the certificate content.
+    required: false
+  - name: tls.client_key
+    field_type: String
+    comments: Path to client's private key file (PEM). Required for client authentication.  Can be a file path under fs:// or a string with the private key content.
+    required: false
+  - name: topic
+    field_type: String
+    comments: The topic name to subscribe or publish to. When subscribing, it can be a wildcard topic. e.g /topic/#
+    required: false
+  - name: retain
+    field_type: bool
+    comments: Whether the message should be retained by the broker
+    required: false
+    default: Default::default
+  - name: r#type
+    field_type: String
+    required: true
+  - name: topic.field
+    field_type: String
+    required: false
 NatsConfig:
   fields:
   - name: server_url
@@ -463,25 +531,75 @@ RedisConfig:
   - name: redis.url
     field_type: String
     required: true
+SnowflakeConfig:
+  fields:
+  - name: snowflake.database
+    field_type: String
+    comments: The snowflake database used for sinking
+    required: true
+  - name: snowflake.schema
+    field_type: String
+    comments: The corresponding schema where sink table exists
+    required: true
+  - name: snowflake.pipe
+    field_type: String
+    comments: The created pipe object, will be used as `insertFiles` target
+    required: true
+  - name: snowflake.account_identifier
+    field_type: String
+    comments: 'The unique, snowflake provided `account_identifier`  NOTE: please use the form `<orgname>-<account_name>`  For detailed guidance, reference: <https://docs.snowflake.com/en/user-guide/admin-account-identifier>'
+    required: true
+  - name: snowflake.user
+    field_type: String
+    comments: 'The user that owns the table to be sinked  NOTE: the user should''ve been granted corresponding *role*  reference: <https://docs.snowflake.com/en/sql-reference/sql/grant-role>'
+    required: true
+  - name: snowflake.rsa_public_key_fp
+    field_type: String
+    comments: 'The public key fingerprint used when generating custom `jwt_token`  reference: <https://docs.snowflake.com/en/developer-guide/sql-api/authenticating>'
+    required: true
+  - name: snowflake.private_key
+    field_type: String
+    comments: The rsa pem key *without* encryption
+    required: true
+  - name: snowflake.s3_bucket
+    field_type: String
+    comments: The s3 bucket where intermediate sink files will be stored
+    required: true
+  - name: snowflake.s3_path
+    field_type: String
+    comments: The optional s3 path to be specified  the actual file location would be `s3://<s3_bucket>/<s3_path>/<rw_auto_gen_intermediate_file_name>`  if this field is specified by user(s)  otherwise it would be `s3://<s3_bucket>/<rw_auto_gen_intermediate_file_name>`
+    required: false
+  - name: snowflake.aws_access_key_id
+    field_type: String
+    comments: s3 credentials
+    required: true
+  - name: snowflake.aws_secret_access_key
+    field_type: String
+    comments: s3 credentials
+    required: true
+  - name: snowflake.aws_region
+    field_type: String
+    comments: The s3 region, e.g., us-east-2
+    required: true
 StarrocksConfig:
   fields:
   - name: starrocks.host
     field_type: String
-    comments: The StarRocks host address.
+    comments: The `StarRocks` host address.
     required: true
   - name: starrocks.mysqlport
     field_type: String
-    comments: The port to the MySQL server of StarRocks FE.
+    comments: The port to the MySQL server of `StarRocks` FE.
     required: true
     alias: starrocks.query_port
   - name: starrocks.httpport
     field_type: String
-    comments: The port to the HTTP server of StarRocks FE.
+    comments: The port to the HTTP server of `StarRocks` FE.
     required: true
     alias: starrocks.http_port
   - name: starrocks.user
     field_type: String
-    comments: The user name used to access the StarRocks database.
+    comments: The user name used to access the `StarRocks` database.
     required: true
   - name: starrocks.password
     field_type: String
@@ -489,11 +607,11 @@ StarrocksConfig:
     required: true
   - name: starrocks.database
     field_type: String
-    comments: The StarRocks database where the target table is located
+    comments: The `StarRocks` database where the target table is located
     required: true
   - name: starrocks.table
     field_type: String
-    comments: The StarRocks table you want to sink data to.
+    comments: The `StarRocks` table you want to sink data to.
     required: true
   - name: starrocks.partial_update
     field_type: String

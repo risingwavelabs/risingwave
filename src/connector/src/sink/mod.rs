@@ -28,10 +28,13 @@ pub mod kafka;
 pub mod kinesis;
 pub mod log_store;
 pub mod mock_coordination_client;
+pub mod mqtt;
 pub mod nats;
 pub mod pulsar;
 pub mod redis;
 pub mod remote;
+pub mod snowflake;
+pub mod snowflake_connector;
 pub mod starrocks;
 pub mod test_sink;
 pub mod trivial;
@@ -51,6 +54,7 @@ use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
 };
+use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::error::RpcError;
@@ -81,6 +85,7 @@ macro_rules! for_all_sinks {
                 { Kinesis, $crate::sink::kinesis::KinesisSink },
                 { ClickHouse, $crate::sink::clickhouse::ClickHouseSink },
                 { Iceberg, $crate::sink::iceberg::IcebergSink },
+                { Mqtt, $crate::sink::mqtt::MqttSink },
                 { Nats, $crate::sink::nats::NatsSink },
                 { Jdbc, $crate::sink::remote::JdbcSink },
                 { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
@@ -88,6 +93,7 @@ macro_rules! for_all_sinks {
                 { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },
+                { Snowflake, $crate::sink::snowflake::SnowflakeSink },
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
                 { Test, $crate::sink::test_sink::TestSink },
@@ -146,12 +152,19 @@ pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SinkParam {
     pub sink_id: SinkId,
+    pub sink_name: String,
     pub properties: HashMap<String, String>,
     pub columns: Vec<ColumnDesc>,
     pub downstream_pk: Vec<usize>,
     pub sink_type: SinkType,
     pub format_desc: Option<SinkFormatDesc>,
     pub db_name: String,
+
+    /// - For `CREATE SINK ... FROM ...`, the name of the source table.
+    /// - For `CREATE SINK ... AS <query>`, the name of the sink itself.
+    ///
+    /// See also `gen_sink_plan`.
+    // TODO(eric): Why need these 2 fields (db_name and sink_from_name)?
     pub sink_from_name: String,
 }
 
@@ -171,6 +184,7 @@ impl SinkParam {
         };
         Self {
             sink_id: SinkId::from(pb_param.sink_id),
+            sink_name: pb_param.sink_name,
             properties: pb_param.properties,
             columns: table_schema.columns.iter().map(ColumnDesc::from).collect(),
             downstream_pk: table_schema
@@ -190,6 +204,7 @@ impl SinkParam {
     pub fn to_proto(&self) -> PbSinkParam {
         PbSinkParam {
             sink_id: self.sink_id.sink_id,
+            sink_name: self.sink_name.clone(),
             properties: self.properties.clone(),
             table_schema: Some(TableSchema {
                 columns: self.columns.iter().map(|col| col.to_protobuf()).collect(),
@@ -217,6 +232,7 @@ impl From<SinkCatalog> for SinkParam {
             .collect();
         Self {
             sink_id: sink_catalog.id,
+            sink_name: sink_catalog.name,
             properties: sink_catalog.properties,
             columns,
             downstream_pk: sink_catalog.downstream_pk,
@@ -238,6 +254,8 @@ pub struct SinkMetrics {
     pub log_store_latest_read_epoch: LabelGuardedIntGauge<3>,
     pub log_store_read_rows: LabelGuardedIntCounter<3>,
 
+    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter<3>,
+
     pub iceberg_write_qps: LabelGuardedIntCounter<2>,
     pub iceberg_write_latency: LabelGuardedHistogram<2>,
     pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge<2>,
@@ -255,6 +273,8 @@ impl SinkMetrics {
             log_store_latest_read_epoch: LabelGuardedIntGauge::test_int_gauge(),
             log_store_write_rows: LabelGuardedIntCounter::test_int_counter(),
             log_store_read_rows: LabelGuardedIntCounter::test_int_counter(),
+            log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter::test_int_counter(
+            ),
             iceberg_write_qps: LabelGuardedIntCounter::test_int_counter(),
             iceberg_write_latency: LabelGuardedHistogram::test_histogram(),
             iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge::test_int_gauge(),
@@ -319,8 +339,12 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     type LogSinker: LogSinker;
     type Coordinator: SinkCommitCoordinator;
 
-    fn default_sink_decouple(_desc: &SinkDesc) -> bool {
-        false
+    /// `user_specified` is the value of `sink_decouple` config.
+    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+        match user_specified {
+            SinkDecouple::Disable | SinkDecouple::Default => Ok(false),
+            SinkDecouple::Enable => Ok(true),
+        }
     }
 
     async fn validate(&self) -> Result<()>;
@@ -341,10 +365,7 @@ pub trait SinkLogReader: Send + Sized + 'static {
 
     /// Mark that all items emitted so far have been consumed and it is safe to truncate the log
     /// from the current offset.
-    fn truncate(
-        &mut self,
-        offset: TruncateOffset,
-    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
+    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()>;
 }
 
 impl<R: LogReader> SinkLogReader for R {
@@ -354,10 +375,7 @@ impl<R: LogReader> SinkLogReader for R {
         <Self as LogReader>::next_item(self)
     }
 
-    fn truncate(
-        &mut self,
-        offset: TruncateOffset,
-    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
         <Self as LogReader>::truncate(self, offset)
     }
 }
@@ -493,6 +511,12 @@ pub enum SinkError {
     ClickHouse(String),
     #[error("Redis error: {0}")]
     Redis(String),
+    #[error("Mqtt error: {0}")]
+    Mqtt(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Nats error: {0}")]
     Nats(
         #[source]
@@ -515,6 +539,12 @@ pub enum SinkError {
     ),
     #[error("Starrocks error: {0}")]
     Starrocks(String),
+    #[error("Snowflake error: {0}")]
+    Snowflake(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Pulsar error: {0}")]
     Pulsar(
         #[source]

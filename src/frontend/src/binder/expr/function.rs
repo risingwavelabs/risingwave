@@ -1026,6 +1026,8 @@ impl Binder {
                 ("decrypt", raw_call(ExprType::Decrypt)),
                 ("left", raw_call(ExprType::Left)),
                 ("right", raw_call(ExprType::Right)),
+                ("inet_aton", raw_call(ExprType::InetAton)),
+                ("inet_ntoa", raw_call(ExprType::InetNtoa)),
                 ("int8send", raw_call(ExprType::PgwireSend)),
                 ("int8recv", guard_by_len(1, raw(|_binder, mut inputs| {
                     // Similar to `cast` from string, return type is set explicitly rather than inferred.
@@ -1121,6 +1123,7 @@ impl Binder {
                 ("to_jsonb", raw_call(ExprType::ToJsonb)),
                 ("jsonb_build_array", raw_call(ExprType::JsonbBuildArray)),
                 ("jsonb_build_object", raw_call(ExprType::JsonbBuildObject)),
+                ("jsonb_populate_record", raw_call(ExprType::JsonbPopulateRecord)),
                 ("jsonb_path_match", raw_call(ExprType::JsonbPathMatch)),
                 ("jsonb_path_exists", raw_call(ExprType::JsonbPathExists)),
                 ("jsonb_path_query_array", raw_call(ExprType::JsonbPathQueryArray)),
@@ -1300,6 +1303,7 @@ impl Binder {
                 ("pg_get_partkeydef", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
                 ("pg_encoding_to_char", raw_literal(ExprImpl::literal_varchar("UTF8".into()))),
                 ("has_database_privilege", raw_literal(ExprImpl::literal_bool(true))),
+                ("pg_stat_get_numscans", raw_literal(ExprImpl::literal_bigint(0))),
                 ("pg_backend_pid", raw(|binder, _inputs| {
                     // FIXME: the session id is not global unique in multi-frontend env.
                     Ok(ExprImpl::literal_int(binder.session_id.0))
@@ -1458,6 +1462,7 @@ impl Binder {
                 | Clause::Filter
                 | Clause::GeneratedColumn
                 | Clause::From
+                | Clause::Insert
                 | Clause::JoinOn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "window functions are not allowed in {}",
@@ -1510,6 +1515,7 @@ impl Binder {
                 | Clause::Values
                 | Clause::From
                 | Clause::GeneratedColumn
+                | Clause::Insert
                 | Clause::JoinOn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "aggregate functions are not allowed in {}",
@@ -1531,6 +1537,7 @@ impl Binder {
                 | Clause::Having
                 | Clause::Filter
                 | Clause::Values
+                | Clause::Insert
                 | Clause::GeneratedColumn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "table functions are not allowed in {}",
@@ -1550,8 +1557,11 @@ impl Binder {
     ) -> Result<Vec<ExprImpl>> {
         match arg_expr {
             FunctionArgExpr::Expr(expr) => Ok(vec![self.bind_expr_inner(expr)?]),
-            FunctionArgExpr::QualifiedWildcard(_, _) => todo!(),
-            FunctionArgExpr::ExprQualifiedWildcard(_, _) => todo!(),
+            FunctionArgExpr::QualifiedWildcard(_, _)
+            | FunctionArgExpr::ExprQualifiedWildcard(_, _) => Err(ErrorCode::InvalidInputSyntax(
+                format!("unexpected wildcard {}", arg_expr),
+            )
+            .into()),
             FunctionArgExpr::Wildcard(None) => Ok(vec![]),
             FunctionArgExpr::Wildcard(Some(_)) => unreachable!(),
         }

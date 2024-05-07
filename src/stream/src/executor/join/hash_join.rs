@@ -22,7 +22,6 @@ use futures::StreamExt;
 use futures_async_stream::for_await;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
@@ -30,6 +29,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
@@ -37,6 +37,7 @@ use super::row::{DegreeType, EncodedJoinRow};
 use crate::cache::{new_with_hasher_in, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
+use crate::consistency::{consistency_error, enable_strict_consistency};
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::join::row::JoinRow;
 use crate::executor::monitor::StreamingMetrics;
@@ -627,7 +628,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 }
 
-use risingwave_common::estimate_size::KvSize;
+use risingwave_common_estimate_size::KvSize;
 use thiserror::Error;
 
 use super::*;
@@ -667,10 +668,28 @@ impl JoinEntryState {
         key: PkType,
         value: StateValueType,
     ) -> Result<&mut StateValueType, JoinEntryError> {
+        let mut removed = false;
+        if !enable_strict_consistency() {
+            // strict consistency is off, let's remove existing (if any) first
+            if let Some(old_value) = self.cached.remove(&key) {
+                self.kv_heap_size.sub(&key, &old_value);
+                removed = true;
+            }
+        }
+
         self.kv_heap_size.add(&key, &value);
-        self.cached
-            .try_insert(key, value)
-            .map_err(|_| JoinEntryError::OccupiedError)
+
+        let ret = self.cached.try_insert(key.clone(), value);
+
+        if !enable_strict_consistency() {
+            assert!(ret.is_ok(), "we have removed existing entry, if any");
+            if removed {
+                // if not silent, we should log the error
+                consistency_error!(?key, "double inserting a join state entry");
+            }
+        }
+
+        ret.map_err(|_| JoinEntryError::OccupiedError)
     }
 
     /// Delete from the cache.
@@ -678,8 +697,11 @@ impl JoinEntryState {
         if let Some(value) = self.cached.remove(&pk) {
             self.kv_heap_size.sub(&pk, &value);
             Ok(())
-        } else {
+        } else if enable_strict_consistency() {
             Err(JoinEntryError::RemoveError)
+        } else {
+            consistency_error!(?pk, "removing a join state entry but it's not in the cache");
+            Ok(())
         }
     }
 

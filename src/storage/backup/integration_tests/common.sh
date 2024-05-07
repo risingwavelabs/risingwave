@@ -13,12 +13,52 @@ function clean_all_data {
   cargo make --allow-private clean-data 1>/dev/null 2>&1
 }
 
+function get_meta_store_type() {
+  meta_store_type=${META_STORE_TYPE:-etcd}
+  if [ "${meta_store_type}" = "sql" ]
+  then
+    if ! command -v sqlite3 &> /dev/null;
+    then
+        echo "SQLite3 is not installed."
+        exit 1
+    fi
+  fi
+  echo "${meta_store_type}"
+}
+
+echo "meta store: $(get_meta_store_type)"
+
+function clean_meta_store() {
+  meta_store_type=$(get_meta_store_type)
+  if [ "$(get_meta_store_type)" = "sql" ]; then
+    clean_sqlite_data
+  else
+    clean_etcd_data
+  fi
+}
+
+function clean_sqlite_data() {
+  tables=$(sqlite3 "${RW_SQLITE_DB}" "select name from sqlite_master where type='table';")
+  while IFS= read table
+  do
+    if [ -z "${table}" ]; then
+      break
+    fi
+    sqlite3 "${RW_SQLITE_DB}" "delete from [${table}]"
+  done <<< "${tables}"
+}
+
 function clean_etcd_data() {
   cargo make --allow-private clean-etcd-data 1>/dev/null 2>&1
 }
 
 function start_cluster() {
-  cargo make d ci-meta-backup-test 1>/dev/null 2>&1
+  stop_cluster
+  if [ "$(get_meta_store_type)" = "sql" ]; then
+    cargo make d ci-meta-backup-test-sql 1>/dev/null 2>&1
+  else
+    cargo make d ci-meta-backup-test-etcd 1>/dev/null 2>&1
+  fi
   sleep 5
 }
 
@@ -33,8 +73,20 @@ function manual_compaction() {
   ${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock trigger-manual-compaction "$@" 1>/dev/null 2>&1
 }
 
+function start_meta_store_minio() {
+    if [ "$(get_meta_store_type)" = "sql" ]; then
+      start_sql_minio
+    else
+      start_etcd_minio
+    fi
+}
+
+function start_sql_minio() {
+  cargo make d ci-meta-backup-test-restore-sql 1>/dev/null 2>&1
+}
+
 function start_etcd_minio() {
-  cargo make d ci-meta-backup-test-restore 1>/dev/null 2>&1
+  cargo make d ci-meta-backup-test-restore-etcd 1>/dev/null 2>&1
 }
 
 function create_mvs() {
@@ -65,17 +117,19 @@ function delete_snapshot() {
 function restore() {
   local job_id
   job_id=$1
+  meta_store_type=$(get_meta_store_type)
   echo "try to restore snapshot ${job_id}"
   stop_cluster
-  clean_etcd_data
-  start_etcd_minio
+  clean_meta_store
+  start_meta_store_minio
   ${BACKUP_TEST_RW_ALL_IN_ONE} \
   risectl \
   meta \
   restore-meta \
-  --meta-store-type etcd \
+  --meta-store-type "${meta_store_type}" \
   --meta-snapshot-id "${job_id}" \
   --etcd-endpoints 127.0.0.1:2388 \
+  --sql-endpoint "sqlite://${RW_SQLITE_DB}?mode=rwc" \
   --backup-storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
   --hummock-storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
   1>/dev/null 2>&1
@@ -127,7 +181,7 @@ function get_max_committed_epoch_in_backup() {
 function get_safe_epoch_in_backup() {
   local id
   id=$1
-  sed_str="s/.*{\"id\":${id},\"hummock_version_id\":.*,\"ssts\":\[.*\],\"max_committed_epoch\":.*,\"safe_epoch\":\([[:digit:]]*\)}.*/\1/p"
+  sed_str="s/.*{\"id\":${id},\"hummock_version_id\":.*,\"ssts\":\[.*\],\"max_committed_epoch\":.*,\"safe_epoch\":\([[:digit:]]*\).*}.*/\1/p"
   ${BACKUP_TEST_MCLI} -C "${BACKUP_TEST_MCLI_CONFIG}" \
   cat "hummock-minio/hummock001/backup/manifest.json" | sed -n "${sed_str}"
 }

@@ -123,6 +123,7 @@ fn main() -> Result<()> {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
                 (c.address.clone(), c.compose(&compose_config)?)
             }
+            ServiceConfig::Sqlite(_) => continue,
             ServiceConfig::Prometheus(c) => {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
                 (c.address.clone(), c.compose(&compose_config)?)
@@ -221,7 +222,9 @@ fn main() -> Result<()> {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
                 (c.address.clone(), c.compose(&compose_config)?)
             }
-            ServiceConfig::Redis(_) => return Err(anyhow!("not supported")),
+            ServiceConfig::Redis(_) | ServiceConfig::MySql(_) => {
+                return Err(anyhow!("not supported"))
+            }
         };
         compose.container_name = service.id().to_string();
         if opts.deploy {

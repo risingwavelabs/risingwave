@@ -18,13 +18,16 @@ use risingwave_pb::catalog::{PbHandleConflictBehavior, PbTable};
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::NotSet;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     Cardinality, ColumnCatalogArray, ColumnOrderArray, FragmentId, I32Array, ObjectId, SourceId,
     TableId, TableVersion,
 };
 
-#[derive(Clone, Debug, PartialEq, Hash, Copy, Eq, EnumIter, DeriveActiveEnum)]
+#[derive(
+    Clone, Debug, PartialEq, Hash, Copy, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize,
+)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum TableType {
     #[sea_orm(string_value = "TABLE")]
@@ -60,7 +63,7 @@ impl From<PbTableType> for TableType {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum HandleConflictBehavior {
     #[sea_orm(string_value = "OVERWRITE")]
@@ -69,6 +72,8 @@ pub enum HandleConflictBehavior {
     Ignore,
     #[sea_orm(string_value = "NO_CHECK")]
     NoCheck,
+    #[sea_orm(string_value = "DO_UPDATE_IF_NOT_NULL")]
+    DoUpdateIfNotNull,
 }
 
 impl From<HandleConflictBehavior> for PbHandleConflictBehavior {
@@ -77,6 +82,7 @@ impl From<HandleConflictBehavior> for PbHandleConflictBehavior {
             HandleConflictBehavior::Overwrite => Self::Overwrite,
             HandleConflictBehavior::Ignore => Self::Ignore,
             HandleConflictBehavior::NoCheck => Self::NoCheck,
+            HandleConflictBehavior::DoUpdateIfNotNull => Self::DoUpdateIfNotNull,
         }
     }
 }
@@ -87,6 +93,7 @@ impl From<PbHandleConflictBehavior> for HandleConflictBehavior {
             PbHandleConflictBehavior::Overwrite => Self::Overwrite,
             PbHandleConflictBehavior::Ignore => Self::Ignore,
             PbHandleConflictBehavior::NoCheck => Self::NoCheck,
+            PbHandleConflictBehavior::DoUpdateIfNotNull => Self::DoUpdateIfNotNull,
             PbHandleConflictBehavior::Unspecified => {
                 unreachable!("Unspecified handle conflict behavior")
             }
@@ -94,7 +101,7 @@ impl From<PbHandleConflictBehavior> for HandleConflictBehavior {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "table")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
@@ -114,6 +121,7 @@ pub struct Model {
     pub value_indices: I32Array,
     pub definition: String,
     pub handle_pk_conflict_behavior: HandleConflictBehavior,
+    pub version_column_index: Option<i32>,
     pub read_prefix_len_hint: i32,
     pub watermark_indices: I32Array,
     pub dist_key_in_pk: I32Array,
@@ -224,14 +232,15 @@ impl From<PbTable> for ActiveModel {
             value_indices: Set(pb_table.value_indices.into()),
             definition: Set(pb_table.definition),
             handle_pk_conflict_behavior: Set(handle_pk_conflict_behavior.into()),
+            version_column_index: Set(pb_table.version_column_index.map(|x| x as i32)),
             read_prefix_len_hint: Set(pb_table.read_prefix_len_hint as _),
             watermark_indices: Set(pb_table.watermark_indices.into()),
             dist_key_in_pk: Set(pb_table.dist_key_in_pk.into()),
             dml_fragment_id,
-            cardinality: Set(pb_table.cardinality.map(|x| x.into())),
+            cardinality: Set(pb_table.cardinality.as_ref().map(|x| x.into())),
             cleaned_by_watermark: Set(pb_table.cleaned_by_watermark),
             description: Set(pb_table.description),
-            version: Set(pb_table.version.map(|v| v.into())),
+            version: Set(pb_table.version.as_ref().map(|v| v.into())),
             retention_seconds: Set(pb_table.retention_seconds.map(|i| i as _)),
             incoming_sinks: Set(pb_table.incoming_sinks.into()),
         }

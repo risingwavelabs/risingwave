@@ -17,14 +17,10 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use futures::stream::{FusedStream, FuturesUnordered};
-use futures::{Stream, StreamExt};
-use futures_async_stream::try_stream;
 use pin_project::pin_project;
 
 use super::watermark::BufferedWatermarks;
-use super::{
-    Barrier, BoxedMessageStream, Execute, Executor, Message, MessageStreamItem, StreamExecutorError,
-};
+use crate::executor::prelude::*;
 
 /// `UnionExecutor` merges data from multiple inputs.
 pub struct UnionExecutor {
@@ -151,6 +147,7 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
     use crate::executor::Watermark;
@@ -160,22 +157,22 @@ mod tests {
         let streams = vec![
             try_stream! {
                 yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
-                yield Message::Barrier(Barrier::new_test_barrier(1));
+                yield Message::Barrier(Barrier::new_test_barrier(test_epoch(1)));
                 yield Message::Chunk(StreamChunk::from_pretty("I\n + 2"));
-                yield Message::Barrier(Barrier::new_test_barrier(2));
-                yield Message::Barrier(Barrier::new_test_barrier(3));
+                yield Message::Barrier(Barrier::new_test_barrier(test_epoch(2)));
+                yield Message::Barrier(Barrier::new_test_barrier(test_epoch(3)));
                 yield Message::Watermark(Watermark::new(0, DataType::Int64, ScalarImpl::Int64(4)));
-                yield Message::Barrier(Barrier::new_test_barrier(4));
+                yield Message::Barrier(Barrier::new_test_barrier(test_epoch(4)));
             }
             .boxed(),
             try_stream! {
                 yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
-                yield Message::Barrier(Barrier::new_test_barrier(1));
-                yield Message::Barrier(Barrier::new_test_barrier(2));
+                yield Message::Barrier(Barrier::new_test_barrier(test_epoch(1)));
+                yield Message::Barrier(Barrier::new_test_barrier(test_epoch(2)));
                 yield Message::Chunk(StreamChunk::from_pretty("I\n + 3"));
-                yield Message::Barrier(Barrier::new_test_barrier(3));
+                yield Message::Barrier(Barrier::new_test_barrier(test_epoch(3)));
                 yield Message::Watermark(Watermark::new(0, DataType::Int64, ScalarImpl::Int64(5)));
-                yield Message::Barrier(Barrier::new_test_barrier(4));
+                yield Message::Barrier(Barrier::new_test_barrier(test_epoch(4)));
             }
             .boxed(),
         ];
@@ -185,13 +182,13 @@ mod tests {
         let result = vec![
             Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
             Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
-            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
             Message::Chunk(StreamChunk::from_pretty("I\n + 2")),
-            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
             Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
-            Message::Barrier(Barrier::new_test_barrier(3)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
             Message::Watermark(Watermark::new(0, DataType::Int64, ScalarImpl::Int64(4))),
-            Message::Barrier(Barrier::new_test_barrier(4)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
         ];
         for _ in 0..result.len() {
             output.push(merged.next().await.unwrap().unwrap());

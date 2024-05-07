@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -30,13 +29,14 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Field;
 use risingwave_common::row::Row as _;
 use risingwave_common::types::{write_date_time_tz, DataType, ScalarRefImpl, Timestamptz};
+use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
-use risingwave_connector::source::KAFKA_CONNECTOR;
-use risingwave_sqlparser::ast::{CompatibleSourceSchema, ConnectorSchema};
+use risingwave_sqlparser::ast::{
+    CompatibleSourceSchema, ConnectorSchema, ObjectName, Query, Select, SelectItem, SetExpr,
+    TableFactor, TableWithJoins,
+};
 
 use crate::error::{ErrorCode, Result as RwResult};
-use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
 use crate::session::{current, SessionImpl};
 
 pin_project! {
@@ -180,43 +180,6 @@ pub fn to_pg_field(f: &Field) -> PgFieldDescriptor {
     )
 }
 
-pub fn connector_need_pk(with_properties: &HashMap<String, String>) -> bool {
-    // Currently only iceberg connector doesn't need primary key
-    !is_iceberg_connector(with_properties)
-}
-
-#[inline(always)]
-pub fn get_connector(with_properties: &HashMap<String, String>) -> Option<String> {
-    with_properties
-        .get(UPSTREAM_SOURCE_KEY)
-        .map(|s| s.to_lowercase())
-}
-
-#[inline(always)]
-pub fn is_kafka_connector(with_properties: &HashMap<String, String>) -> bool {
-    let Some(connector) = get_connector(with_properties) else {
-        return false;
-    };
-
-    connector == KAFKA_CONNECTOR
-}
-
-#[inline(always)]
-pub fn is_cdc_connector(with_properties: &HashMap<String, String>) -> bool {
-    let Some(connector) = get_connector(with_properties) else {
-        return false;
-    };
-    connector.contains("-cdc")
-}
-
-#[inline(always)]
-pub fn is_iceberg_connector(with_properties: &HashMap<String, String>) -> bool {
-    let Some(connector) = get_connector(with_properties) else {
-        return false;
-    };
-    connector == ICEBERG_CONNECTOR
-}
-
 #[easy_ext::ext(SourceSchemaCompatExt)]
 impl CompatibleSourceSchema {
     /// Convert `self` to [`ConnectorSchema`] and warn the user if the syntax is deprecated.
@@ -230,6 +193,40 @@ impl CompatibleSourceSchema {
             CompatibleSourceSchema::V2(inner) => inner,
         }
     }
+}
+
+pub fn gen_query_from_table_name(from_name: ObjectName) -> Query {
+    let table_factor = TableFactor::Table {
+        name: from_name,
+        alias: None,
+        as_of: None,
+    };
+    let from = vec![TableWithJoins {
+        relation: table_factor,
+        joins: vec![],
+    }];
+    let select = Select {
+        from,
+        projection: vec![SelectItem::Wildcard(None)],
+        ..Default::default()
+    };
+    let body = SetExpr::Select(Box::new(select));
+    Query {
+        with: None,
+        body,
+        order_by: vec![],
+        limit: None,
+        offset: None,
+        fetch: None,
+    }
+}
+
+pub fn convert_unix_millis_to_logstore_u64(unix_millis: u64) -> u64 {
+    Epoch::from_unix_millis(unix_millis).0
+}
+
+pub fn convert_logstore_u64_to_unix_millis(logstore_u64: u64) -> u64 {
+    Epoch::from(logstore_u64).as_unix_millis()
 }
 
 #[cfg(test)]

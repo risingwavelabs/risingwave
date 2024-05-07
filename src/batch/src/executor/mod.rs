@@ -24,6 +24,7 @@ mod iceberg_scan;
 mod insert;
 mod join;
 mod limit;
+mod log_row_seq_scan;
 mod managed;
 mod max_one_row;
 mod merge_sort_exchange;
@@ -80,6 +81,7 @@ pub use update::*;
 pub use utils::*;
 pub use values::*;
 
+use self::log_row_seq_scan::LogStoreRowSeqScanExecutorBuilder;
 use self::test_utils::{BlockExecutorBuilder, BusyLoopExecutorBuilder};
 use crate::error::Result;
 use crate::executor::sys_row_seq_scan::SysRowSeqScanExecutorBuilder;
@@ -239,6 +241,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             // Follow NodeBody only used for test
             NodeBody::BlockExecutor => BlockExecutorBuilder,
             NodeBody::BusyLoopExecutor => BusyLoopExecutorBuilder,
+            NodeBody::LogRowSeqScan => LogStoreRowSeqScanExecutorBuilder,
         }
         .await?;
 

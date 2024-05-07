@@ -149,10 +149,10 @@ impl SplitReader for DatagenSplitReader {
             &self.parser_config.specific.encoding_config,
         ) {
             (ProtocolProperties::Native, EncodingProperties::Native) => {
-                let actor_id = self.source_ctx.source_info.actor_id.to_string();
-                let fragment_id = self.source_ctx.source_info.fragment_id.to_string();
-                let source_id = self.source_ctx.source_info.source_id.to_string();
-                let source_name = self.source_ctx.source_info.source_name.to_string();
+                let actor_id = self.source_ctx.actor_id.to_string();
+                let fragment_id = self.source_ctx.fragment_id.to_string();
+                let source_id = self.source_ctx.source_id.to_string();
+                let source_name = self.source_ctx.source_name.to_string();
                 let split_id = self.split_id.to_string();
                 let metrics = self.source_ctx.metrics.clone();
                 spawn_data_generation_stream(
@@ -337,6 +337,7 @@ mod tests {
 
     use super::*;
     use crate::parser::SpecificParserConfig;
+    use crate::source::SourceContext;
 
     #[tokio::test]
     async fn test_generator() -> Result<()> {
@@ -403,7 +404,7 @@ mod tests {
                 },
                 ..Default::default()
             },
-            Default::default(),
+            SourceContext::dummy().into(),
             Some(mock_datum),
         )
         .await?
@@ -465,7 +466,7 @@ mod tests {
             properties.clone(),
             state,
             parser_config.clone(),
-            Default::default(),
+            SourceContext::dummy().into(),
             Some(mock_datum.clone()),
         )
         .await?
@@ -482,7 +483,7 @@ mod tests {
             properties,
             state,
             parser_config,
-            Default::default(),
+            SourceContext::dummy().into(),
             Some(mock_datum),
         )
         .await?

@@ -7,8 +7,9 @@ set -euo pipefail
 source ci/scripts/common.sh
 
 RUST_TOOLCHAIN=$(cat rust-toolchain)
-
 QUERY_DIR="/risingwave/ci/scripts/sql/nexmark"
+LATEST_KAFKA_VERSION=$(get_latest_kafka_version)
+KAFKA_DIR="./kafka_2.13-${LATEST_KAFKA_VERSION}"
 
 # TODO(kwannoel): This is a workaround since workdir is `/risingwave` in the docker container.
 # Perhaps we should have a new docker container just for benchmarking?
@@ -123,7 +124,7 @@ AUCTION_TOPIC="nexmark-auction"
 BID_TOPIC="nexmark-bid"
 PERSON_TOPIC="nexmark-person"
 NUM_PARTITIONS=8
-# NOTE: Due to https://github.com/risingwavelabs/risingwave/issues/6747, use `SEPARATE_TOPICS=false`
+# NOTE: Due to https://github.com/risingwavelabs/risingwave/issues/6747, use SEPARATE_TOPICS=false
 SEPARATE_TOPICS=false
 RUST_LOG="nexmark_server=info"
 
@@ -179,12 +180,12 @@ configure_all() {
 # This has minor effect on the flamegraph, so can ignore for now.
 # could it be related to profiling on Docker? Needs further investigation.
 start_nperf() {
-  ./nperf record -p `pidof compute-node` -o perf.data &
+  ./nperf record -p $(pidof compute-node) -o perf.data &
 }
 
 start_kafka() {
-  ./kafka_2.13-3.4.1/bin/zookeeper-server-start.sh ./kafka_2.13-3.4.1/config/zookeeper.properties > zookeeper.log 2>&1 &
-  ./kafka_2.13-3.4.1/bin/kafka-server-start.sh ./kafka_2.13-3.4.1/config/server.properties --override num.partitions=8 > kafka.log 2>&1 &
+  "${KAFKA_DIR}"/bin/zookeeper-server-start.sh "${KAFKA_DIR}"/config/zookeeper.properties > zookeeper.log 2>&1 &
+  "${KAFKA_DIR}"/bin/kafka-server-start.sh "${KAFKA_DIR}"/config/server.properties --override num.partitions=8 > kafka.log 2>&1 &
   sleep 10
   # TODO(kwannoel): `trap ERR` and upload these logs.
   # buildkite-agent artifact upload ./zookeeper.log
@@ -208,7 +209,7 @@ gen_events() {
 }
 
 show_kafka_topics() {
-  ./kafka_2.13-3.4.1/bin/kafka-run-class.sh kafka.tools.GetOffsetShell --topic nexmark --bootstrap-server localhost:9092
+  "${KAFKA_DIR}"/bin/kafka-get-offsets.sh --topic nexmark --bootstrap-server localhost:9092
 }
 
 gen_cpu_flamegraph() {
@@ -230,7 +231,7 @@ gen_heap_flamegraph() {
     JEPROF=$(find . -name 'jeprof' | head -1)
     chmod +x "$JEPROF"
     COMPUTE_NODE=".risingwave/bin/risingwave/compute-node"
-    $JEPROF --collapsed $COMPUTE_NODE $LATEST_HEAP_PROFILE > heap.collapsed
+    $JEPROF --collapsed $COMPUTE_NODE "$LATEST_HEAP_PROFILE" > heap.collapsed
     ../flamegraph.pl --color=mem --countname=bytes heap.collapsed > perf.svg
     mv perf.svg ..
     popd
@@ -249,8 +250,8 @@ monitor() {
 stop_processes() {
   # stop rw
   pushd risingwave
-  ./risedev k
-  ./risedev clean-data
+  risedev k
+  risedev clean-data
   popd
 }
 
@@ -267,7 +268,7 @@ run_heap_flamegraph() {
   echo "--- Running benchmark for $QUERY"
   echo "--- Setting variables"
   QUERY_LABEL="$1"
-  QUERY_FILE_NAME="$(echo $QUERY_LABEL | sed 's/nexmark\-\(.*\)/\1.sql/')"
+  QUERY_FILE_NAME="$(echo "$QUERY_LABEL" | sed 's/nexmark\-\(.*\)/\1.sql/')"
   QUERY_PATH="$QUERY_DIR/$QUERY_FILE_NAME"
   FLAMEGRAPH_PATH="perf-$QUERY_LABEL.svg"
   echo "QUERY_LABEL: $QUERY_LABEL"
@@ -279,7 +280,7 @@ run_heap_flamegraph() {
   # No need for an extra profiling step.
   echo "--- Starting up RW"
   pushd risingwave
-  RISEDEV_ENABLE_HEAP_PROFILE=1 ./risedev d ci-gen-cpu-flamegraph
+  RISEDEV_ENABLE_HEAP_PROFILE=1 risedev d ci-gen-cpu-flamegraph
   popd
 
   echo "--- Machine Debug Info After RW Start"
@@ -327,7 +328,7 @@ run_cpu_flamegraph() {
   echo "--- Running benchmark for $QUERY"
   echo "--- Setting variables"
   QUERY_LABEL="$1"
-  QUERY_FILE_NAME="$(echo $QUERY_LABEL | sed 's/nexmark\-\(.*\)/\1.sql/')"
+  QUERY_FILE_NAME="$(echo "$QUERY_LABEL" | sed 's/nexmark\-\(.*\)/\1.sql/')"
   QUERY_PATH="$QUERY_DIR/$QUERY_FILE_NAME"
   FLAMEGRAPH_PATH="perf-$QUERY_LABEL.svg"
   echo "QUERY_LABEL: $QUERY_LABEL"
@@ -337,7 +338,7 @@ run_cpu_flamegraph() {
 
   echo "--- Starting up RW"
   pushd risingwave
-  ./risedev d ci-gen-cpu-flamegraph
+  risedev d ci-gen-cpu-flamegraph
   popd
 
   echo "--- Machine Debug Info After RW Start"
@@ -366,7 +367,7 @@ run_cpu_flamegraph() {
 
   echo "--- Generate flamegraph"
   gen_cpu_flamegraph
-  mv perf.svg $FLAMEGRAPH_PATH
+  mv perf.svg "$FLAMEGRAPH_PATH"
 
   echo "--- Uploading flamegraph"
   buildkite-agent artifact upload "./$FLAMEGRAPH_PATH"

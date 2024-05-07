@@ -27,10 +27,10 @@
         └─BatchHashJoin { type: Inner, predicate: id = id, output: [] }
           ├─BatchExchange { order: [], dist: HashShard(id) }
           │ └─BatchFilter { predicate: (initial_bid = 1:Int32) }
-          │   └─BatchSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id], filter: (None, None) }
+          │   └─BatchSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id] }
           └─BatchExchange { order: [], dist: HashShard(id) }
             └─BatchFilter { predicate: (initial_bid = 2:Int32) }
-              └─BatchSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id], filter: (None, None) }
+              └─BatchSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [cnt], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [sum0(count)] }
@@ -92,7 +92,7 @@
       │   └─LogicalProject { exprs: [window_start, auction] }
       │     └─LogicalHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: all }
       │       └─LogicalFilter { predicate: IsNotNull(date_time) }
-      │         └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: (Unbounded, Unbounded) }
+      │         └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
       └─LogicalProject { exprs: [max(count), window_start] }
         └─LogicalAgg { group_key: [window_start], aggs: [max(count)] }
           └─LogicalProject { exprs: [window_start, count] }
@@ -101,7 +101,7 @@
                 └─LogicalProject { exprs: [auction, window_start] }
                   └─LogicalHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: all }
                     └─LogicalFilter { predicate: IsNotNull(date_time) }
-                      └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: (Unbounded, Unbounded) }
+                      └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: Inner, predicate: window_start = window_start AND (count >= max(count)), output: [auction, count] }
@@ -111,7 +111,7 @@
       │     └─BatchExchange { order: [], dist: HashShard(auction) }
       │       └─BatchProject { exprs: [auction, date_time] }
       │         └─BatchFilter { predicate: IsNotNull(date_time) }
-      │           └─BatchSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], filter: (None, None) }
+      │           └─BatchSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
       └─BatchHashAgg { group_key: [window_start], aggs: [max(count)] }
         └─BatchExchange { order: [], dist: HashShard(window_start) }
           └─BatchHashAgg { group_key: [auction, window_start], aggs: [count] }
@@ -119,7 +119,7 @@
               └─BatchExchange { order: [], dist: HashShard(auction) }
                 └─BatchProject { exprs: [auction, date_time] }
                   └─BatchFilter { predicate: IsNotNull(date_time) }
-                    └─BatchSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], filter: (None, None) }
+                    └─BatchSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [auction, num, window_start(hidden), window_start#1(hidden)], stream_key: [auction, window_start], pk_columns: [auction, window_start], pk_conflict: NoCheck }
     └─StreamProject { exprs: [auction, count, window_start, window_start] }
@@ -159,7 +159,7 @@
       │       └─StreamSimpleAgg { aggs: [sum0(count), count] }
       │         └─StreamExchange { dist: Single }
       │           └─StreamStatelessSimpleAgg { aggs: [count] }
-      │             └─StreamTableScan { table: t, columns: [t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+      │             └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: HashShard(1:Int32) }
         └─StreamProject { exprs: [sum0(count), 1:Int32] }
           └─StreamShare { id: 5 }
@@ -167,7 +167,7 @@
               └─StreamSimpleAgg { aggs: [sum0(count), count] }
                 └─StreamExchange { dist: Single }
                   └─StreamStatelessSimpleAgg { aggs: [count] }
-                    └─StreamTableScan { table: t, columns: [t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+                    └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     set rw_enable_share_plan=false;
     create table t(a int, b int);
@@ -180,13 +180,13 @@
       │   └─StreamSimpleAgg { aggs: [sum0(count), count] }
       │     └─StreamExchange { dist: Single }
       │       └─StreamStatelessSimpleAgg { aggs: [count] }
-      │         └─StreamTableScan { table: t, columns: [t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+      │         └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: HashShard(1:Int32) }
         └─StreamProject { exprs: [sum0(count), 1:Int32] }
           └─StreamSimpleAgg { aggs: [sum0(count), count] }
             └─StreamExchange { dist: Single }
               └─StreamStatelessSimpleAgg { aggs: [count] }
-                └─StreamTableScan { table: t, columns: [t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+                └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: force_share_source_for_self_join
   before:
   - create_sources
@@ -225,12 +225,12 @@
               │ └─StreamProject { exprs: [t.a] }
               │   └─StreamHashAgg { group_key: [t.a], aggs: [count] }
               │     └─StreamExchange { dist: HashShard(t.a) }
-              │       └─StreamTableScan { table: t, columns: [t.a, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+              │       └─StreamTableScan { table: t, columns: [t.a, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
               └─StreamShare { id: 4 }
                 └─StreamProject { exprs: [t.a] }
                   └─StreamHashAgg { group_key: [t.a], aggs: [count] }
                     └─StreamExchange { dist: HashShard(t.a) }
-                      └─StreamTableScan { table: t, columns: [t.a, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+                      └─StreamTableScan { table: t, columns: [t.a, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [count], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
@@ -256,7 +256,7 @@
         └── StreamExchange Hash([0]) from 3
 
     Fragment 3
-    StreamTableScan { table: t, columns: [t.a, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    StreamTableScan { table: t, columns: [t.a, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
     ├── tables: [ StreamScan: 6 ]
     ├── Upstream
     └── BatchPlanNode
@@ -265,62 +265,27 @@
     StreamNoOp
     └── StreamExchange NoShuffle from 2
 
-    Table 0
-    ├── columns: [ sum0(count), count ]
-    ├── primary key: []
-    ├── value indices: [ 0, 1 ]
-    ├── distribution key: []
-    └── read pk prefix len hint: 0
+    Table 0 { columns: [ sum0(count), count ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 1
-    ├── columns: [ t_a ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0 ]
-    ├── distribution key: [ 0 ]
-    └── read pk prefix len hint: 1
+    Table 1 { columns: [ t_a ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 2
-    ├── columns: [ t_a, _degree ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1 ]
-    ├── distribution key: [ 0 ]
-    └── read pk prefix len hint: 1
+    Table 2 { columns: [ t_a, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 3
-    ├── columns: [ t_a ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0 ]
-    ├── distribution key: [ 0 ]
-    └── read pk prefix len hint: 1
+    Table 3 { columns: [ t_a ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 4
-    ├── columns: [ t_a, _degree ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1 ]
-    ├── distribution key: [ 0 ]
-    └── read pk prefix len hint: 1
+    Table 4 { columns: [ t_a, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 5
-    ├── columns: [ t_a, count ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1 ]
-    ├── distribution key: [ 0 ]
-    └── read pk prefix len hint: 1
+    Table 5 { columns: [ t_a, count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 6
-    ├── columns: [ vnode, _row_id, t_backfill_finished, t_row_count ]
+    ├── columns: [ vnode, _row_id, backfill_finished, row_count ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294
-    ├── columns: [ count ]
-    ├── primary key: []
-    ├── value indices: [ 0 ]
-    ├── distribution key: []
-    └── read pk prefix len hint: 0
+    Table 4294967294 { columns: [ count ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
 - id: self_join_with_temporal_filter_one_side
   before:
@@ -333,11 +298,11 @@
       ├─BatchExchange { order: [], dist: HashShard(id) }
       │ └─BatchFilter { predicate: (initial_bid = 1:Int32) AND (AtTimeZone(date_time, 'UTC':Varchar) > '2021-03-31 23:59:59+00:00':Timestamptz) }
       │   └─BatchProject { exprs: [id, initial_bid, date_time] }
-      │     └─BatchSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id], filter: (None, None) }
+      │     └─BatchSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id] }
       └─BatchExchange { order: [], dist: HashShard(id) }
         └─BatchFilter { predicate: (initial_bid = 2:Int32) }
           └─BatchProject { exprs: [id, initial_bid, date_time] }
-            └─BatchSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id], filter: (None, None) }
+            └─BatchSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [a_id, b_id, a_ts, b_ts, _row_id(hidden), _row_id#1(hidden)], stream_key: [_row_id, _row_id#1, a_id], pk_columns: [_row_id, _row_id#1, a_id], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(id, _row_id, _row_id) }

@@ -12,6 +12,7 @@ CASES_MAP = {
     'schema-registry': ['json'],
     'mysql-cdc': ['json'],
     'postgres-cdc': ['json'],
+    'mongodb-cdc': ['json'],
     'mysql-sink': ['json'],
     'postgres-sink': ['json'],
     'iceberg-cdc': ['json'],
@@ -35,12 +36,14 @@ CASES_MAP = {
     'mindsdb': ['json'],
     'vector': ['json'],
     'nats': ['json', 'protobuf'],
+    'mqtt': ['json'],
     'doris-sink': ['json'],
     'starrocks-sink': ['json'],
     'deltalake-sink': ['json'],
     'pinot-sink': ['json'],
     'presto-trino': ['json'],
     'client-library': ['none'],
+    'kafka-cdc': ['json'],
 }
 
 def gen_pipeline_steps():

@@ -65,10 +65,12 @@ pub struct StreamingMetrics {
     // Source
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
     pub source_split_change_count: GenericCounterVec<AtomicU64>,
+    pub source_backfill_row_count: LabelGuardedIntCounterVec<4>,
 
     // Sink & materialized view
     pub sink_input_row_count: LabelGuardedIntCounterVec<3>,
     pub mview_input_row_count: IntCounterVec,
+    pub sink_chunk_buffer_size: LabelGuardedIntGaugeVec<3>,
 
     // Exchange (see also `compute::ExchangeServiceMetrics`)
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
@@ -118,12 +120,8 @@ pub struct StreamingMetrics {
     pub temporal_join_cached_entry_count: GenericGaugeVec<AtomicI64>,
 
     // Backfill
-    pub backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
-    pub backfill_upstream_output_row_count: GenericCounterVec<AtomicU64>,
-
-    // Arrangement Backfill
-    pub arrangement_backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
-    pub arrangement_backfill_upstream_output_row_count: GenericCounterVec<AtomicU64>,
+    pub backfill_snapshot_read_row_count: LabelGuardedIntCounterVec<2>,
+    pub backfill_upstream_output_row_count: LabelGuardedIntCounterVec<2>,
 
     // CDC Backfill
     pub cdc_backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
@@ -155,12 +153,17 @@ pub struct StreamingMetrics {
     pub log_store_write_rows: LabelGuardedIntCounterVec<3>,
     pub log_store_latest_read_epoch: LabelGuardedIntGaugeVec<3>,
     pub log_store_read_rows: LabelGuardedIntCounterVec<3>,
+    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounterVec<3>,
     pub kv_log_store_storage_write_count: LabelGuardedIntCounterVec<3>,
     pub kv_log_store_storage_write_size: LabelGuardedIntCounterVec<3>,
     pub kv_log_store_rewind_count: LabelGuardedIntCounterVec<3>,
     pub kv_log_store_rewind_delay: LabelGuardedHistogramVec<3>,
     pub kv_log_store_storage_read_count: LabelGuardedIntCounterVec<4>,
     pub kv_log_store_storage_read_size: LabelGuardedIntCounterVec<4>,
+    pub kv_log_store_buffer_unconsumed_item_count: LabelGuardedIntGaugeVec<3>,
+    pub kv_log_store_buffer_unconsumed_row_count: LabelGuardedIntGaugeVec<3>,
+    pub kv_log_store_buffer_unconsumed_epoch_count: LabelGuardedIntGaugeVec<3>,
+    pub kv_log_store_buffer_unconsumed_min_epoch: LabelGuardedIntGaugeVec<3>,
 
     // Sink iceberg metrics
     pub iceberg_write_qps: LabelGuardedIntCounterVec<2>,
@@ -225,6 +228,14 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let source_backfill_row_count = register_guarded_int_counter_vec_with_registry!(
+            "stream_source_backfill_rows_counts",
+            "Total number of rows that have been backfilled for source",
+            &["source_id", "source_name", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
         let sink_input_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_sink_input_row_count",
             "Total number of rows streamed into sink executors",
@@ -237,6 +248,14 @@ impl StreamingMetrics {
             "stream_mview_input_row_count",
             "Total number of rows streamed into materialize executors",
             &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let sink_chunk_buffer_size = register_guarded_int_gauge_vec_with_registry!(
+            "stream_sink_chunk_buffer_size",
+            "Total size of chunks buffered in a barrier",
+            &["sink_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -661,7 +680,7 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let backfill_snapshot_read_row_count = register_int_counter_vec_with_registry!(
+        let backfill_snapshot_read_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_backfill_snapshot_read_row_count",
             "Total number of rows that have been read from the backfill snapshot",
             &["table_id", "actor_id"],
@@ -669,30 +688,13 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let backfill_upstream_output_row_count = register_int_counter_vec_with_registry!(
+        let backfill_upstream_output_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_backfill_upstream_output_row_count",
             "Total number of rows that have been output from the backfill upstream",
             &["table_id", "actor_id"],
             registry
         )
         .unwrap();
-
-        let arrangement_backfill_snapshot_read_row_count = register_int_counter_vec_with_registry!(
-            "stream_arrangement_backfill_snapshot_read_row_count",
-            "Total number of rows that have been read from the arrangement_backfill snapshot",
-            &["table_id", "actor_id"],
-            registry
-        )
-        .unwrap();
-
-        let arrangement_backfill_upstream_output_row_count =
-            register_int_counter_vec_with_registry!(
-                "stream_arrangement_backfill_upstream_output_row_count",
-                "Total number of rows that have been output from the arrangement_backfill upstream",
-                &["table_id", "actor_id"],
-                registry
-            )
-            .unwrap();
 
         let cdc_backfill_snapshot_read_row_count = register_int_counter_vec_with_registry!(
             "stream_cdc_backfill_snapshot_read_row_count",
@@ -776,7 +778,7 @@ impl StreamingMetrics {
         let opts = histogram_opts!(
             "stream_barrier_sync_storage_duration_seconds",
             "barrier_sync_latency",
-            exponential_buckets(0.1, 1.5, 16).unwrap() // max 43s
+            exponential_buckets(0.1, 1.5, 16).unwrap() // max 43
         );
         let barrier_sync_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
@@ -843,6 +845,15 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let log_store_reader_wait_new_future_duration_ns =
+            register_guarded_int_counter_vec_with_registry!(
+                "log_store_reader_wait_new_future_duration_ns",
+                "Accumulated duration of LogReader to wait for next call to create future",
+                &["executor_id", "connector", "sink_id"],
+                registry
+            )
+            .unwrap();
+
         let kv_log_store_storage_write_count = register_guarded_int_counter_vec_with_registry!(
             "kv_log_store_storage_write_count",
             "Write row count throughput of kv log store",
@@ -907,6 +918,42 @@ impl StreamingMetrics {
             registry
         )
         .unwrap();
+
+        let kv_log_store_buffer_unconsumed_item_count =
+            register_guarded_int_gauge_vec_with_registry!(
+                "kv_log_store_buffer_unconsumed_item_count",
+                "Number of Unconsumed Item in buffer",
+                &["executor_id", "connector", "sink_id"],
+                registry
+            )
+            .unwrap();
+
+        let kv_log_store_buffer_unconsumed_row_count =
+            register_guarded_int_gauge_vec_with_registry!(
+                "kv_log_store_buffer_unconsumed_row_count",
+                "Number of Unconsumed Row in buffer",
+                &["executor_id", "connector", "sink_id"],
+                registry
+            )
+            .unwrap();
+
+        let kv_log_store_buffer_unconsumed_epoch_count =
+            register_guarded_int_gauge_vec_with_registry!(
+                "kv_log_store_buffer_unconsumed_epoch_count",
+                "Number of Unconsumed Epoch in buffer",
+                &["executor_id", "connector", "sink_id"],
+                registry
+            )
+            .unwrap();
+
+        let kv_log_store_buffer_unconsumed_min_epoch =
+            register_guarded_int_gauge_vec_with_registry!(
+                "kv_log_store_buffer_unconsumed_min_epoch",
+                "Number of Unconsumed Epoch in buffer",
+                &["executor_id", "connector", "sink_id"],
+                registry
+            )
+            .unwrap();
 
         let lru_current_watermark_time_ms = register_int_gauge_with_registry!(
             "lru_current_watermark_time_ms",
@@ -1069,8 +1116,10 @@ impl StreamingMetrics {
             actor_out_record_cnt,
             source_output_row_count,
             source_split_change_count,
+            source_backfill_row_count,
             sink_input_row_count,
             mview_input_row_count,
+            sink_chunk_buffer_size,
             exchange_frag_recv_size,
             actor_output_buffer_blocking_duration_ns,
             actor_input_buffer_blocking_duration_ns,
@@ -1106,8 +1155,6 @@ impl StreamingMetrics {
             temporal_join_cached_entry_count,
             backfill_snapshot_read_row_count,
             backfill_upstream_output_row_count,
-            arrangement_backfill_snapshot_read_row_count,
-            arrangement_backfill_upstream_output_row_count,
             cdc_backfill_snapshot_read_row_count,
             cdc_backfill_upstream_output_row_count,
             over_window_cached_entry_count,
@@ -1127,12 +1174,17 @@ impl StreamingMetrics {
             log_store_write_rows,
             log_store_latest_read_epoch,
             log_store_read_rows,
+            log_store_reader_wait_new_future_duration_ns,
             kv_log_store_storage_write_count,
             kv_log_store_storage_write_size,
             kv_log_store_rewind_count,
             kv_log_store_rewind_delay,
             kv_log_store_storage_read_count,
             kv_log_store_storage_read_size,
+            kv_log_store_buffer_unconsumed_item_count,
+            kv_log_store_buffer_unconsumed_row_count,
+            kv_log_store_buffer_unconsumed_epoch_count,
+            kv_log_store_buffer_unconsumed_min_epoch,
             iceberg_write_qps,
             iceberg_write_latency,
             iceberg_rolling_unflushed_data_file,
@@ -1192,6 +1244,9 @@ impl StreamingMetrics {
         let log_store_read_rows = self
             .log_store_read_rows
             .with_guarded_label_values(&label_list);
+        let log_store_reader_wait_new_future_duration_ns = self
+            .log_store_reader_wait_new_future_duration_ns
+            .with_guarded_label_values(&label_list);
 
         let label_list = [identity, sink_id_str];
         let iceberg_write_qps = self
@@ -1218,6 +1273,7 @@ impl StreamingMetrics {
             log_store_write_rows,
             log_store_latest_read_epoch,
             log_store_read_rows,
+            log_store_reader_wait_new_future_duration_ns,
             iceberg_write_qps,
             iceberg_write_latency,
             iceberg_rolling_unflushed_data_file,

@@ -64,6 +64,21 @@ pub async fn handle_create_function(
         // correct protocol.
         None => "".to_string(),
     };
+
+    let rt = match params.runtime {
+        Some(runtime) => {
+            if language.as_str() == "javascript" {
+                runtime.to_string()
+            } else {
+                return Err(ErrorCode::InvalidParameterValue(
+                    "runtime is only supported for javascript".to_string(),
+                )
+                .into());
+            }
+        }
+        None => "".to_string(),
+    };
+
     let return_type;
     let kind = match returns {
         Some(CreateFunctionReturns::Value(data_type)) => {
@@ -122,6 +137,8 @@ pub async fn handle_create_function(
     let mut link = None;
     let mut body = None;
     let mut compressed_binary = None;
+    let mut function_type = None;
+    let mut runtime = None;
 
     match language.as_str() {
         "python" if params.using.is_none() => {
@@ -177,7 +194,7 @@ pub async fn handle_create_function(
             }
             link = Some(l);
         }
-        "javascript" => {
+        "javascript" if rt.as_str() != "deno" => {
             identifier = function_name.to_string();
             body = Some(
                 params
@@ -185,45 +202,94 @@ pub async fn handle_create_function(
                     .ok_or_else(|| ErrorCode::InvalidParameterValue("AS must be specified".into()))?
                     .into_string(),
             );
+            runtime = Some("quickjs".to_string());
+        }
+        "javascript" if rt.as_str() == "deno" => {
+            identifier = function_name.to_string();
+            match (params.using, params.as_) {
+                (None, None) => {
+                    return Err(ErrorCode::InvalidParameterValue(
+                        "Either USING or AS must be specified".into(),
+                    )
+                    .into())
+                }
+                (None, Some(_as)) => body = Some(_as.into_string()),
+                (Some(CreateFunctionUsing::Link(link)), None) => {
+                    let bytes = download_code_from_link(&link).await?;
+                    compressed_binary = Some(zstd::stream::encode_all(bytes.as_slice(), 0)?);
+                }
+                (Some(CreateFunctionUsing::Base64(encoded)), None) => {
+                    use base64::prelude::{Engine, BASE64_STANDARD};
+                    let bytes = BASE64_STANDARD
+                        .decode(encoded)
+                        .context("invalid base64 encoding")?;
+                    compressed_binary = Some(zstd::stream::encode_all(bytes.as_slice(), 0)?);
+                }
+                (Some(_), Some(_)) => {
+                    return Err(ErrorCode::InvalidParameterValue(
+                        "Both USING and AS cannot be specified".into(),
+                    )
+                    .into())
+                }
+            };
+
+            function_type = match params.function_type {
+                Some(CreateFunctionType::Sync) => Some("sync".to_string()),
+                Some(CreateFunctionType::Async) => Some("async".to_string()),
+                Some(CreateFunctionType::Generator) => Some("generator".to_string()),
+                Some(CreateFunctionType::AsyncGenerator) => Some("async_generator".to_string()),
+                None => None,
+            };
+
+            runtime = Some("deno".to_string());
         }
         "rust" => {
-            identifier = wasm_identifier(
-                &function_name,
-                &arg_types,
-                &return_type,
-                matches!(kind, Kind::Table(_)),
-            );
             if params.using.is_some() {
                 return Err(ErrorCode::InvalidParameterValue(
                     "USING is not supported for rust function".to_string(),
                 )
                 .into());
             }
-            let function_body = params
-                .as_
-                .ok_or_else(|| ErrorCode::InvalidParameterValue("AS must be specified".into()))?
-                .into_string();
-            let script = format!("#[arrow_udf::function(\"{identifier}\")]\n{function_body}");
-            body = Some(function_body.clone());
-
-            let wasm_binary =
-                tokio::task::spawn_blocking(move || arrow_udf_wasm::build::build("", &script))
-                    .await?
-                    .context("failed to build rust function")?;
-
-            // below is the same as `wasm` language
-            let runtime = get_or_create_wasm_runtime(&wasm_binary)?;
-            check_wasm_function(&runtime, &identifier)?;
-
-            compressed_binary = Some(zstd::stream::encode_all(wasm_binary.as_slice(), 0)?);
-        }
-        "wasm" => {
-            identifier = wasm_identifier(
+            let identifier_v1 = wasm_identifier_v1(
                 &function_name,
                 &arg_types,
                 &return_type,
                 matches!(kind, Kind::Table(_)),
             );
+            // if the function returns a struct, users need to add `#[function]` macro by themselves.
+            // otherwise, we add it automatically. the code should start with `fn ...`.
+            let function_macro = if return_type.is_struct() {
+                String::new()
+            } else {
+                format!("#[function(\"{}\")]", identifier_v1)
+            };
+            let script = params
+                .as_
+                .ok_or_else(|| ErrorCode::InvalidParameterValue("AS must be specified".into()))?
+                .into_string();
+            let script = format!(
+                "use arrow_udf::{{function, types::*}};\n{}\n{}",
+                function_macro, script
+            );
+            body = Some(script.clone());
+
+            let wasm_binary = tokio::task::spawn_blocking(move || {
+                let mut opts = arrow_udf_wasm::build::BuildOpts::default();
+                opts.script = script;
+                // use a fixed tempdir to reuse the build cache
+                opts.tempdir = Some(std::env::temp_dir().join("risingwave-rust-udf"));
+
+                arrow_udf_wasm::build::build_with(&opts)
+            })
+            .await?
+            .context("failed to build rust function")?;
+
+            let runtime = get_or_create_wasm_runtime(&wasm_binary)?;
+            identifier = find_wasm_identifier_v2(&runtime, &identifier_v1)?;
+
+            compressed_binary = Some(zstd::stream::encode_all(wasm_binary.as_slice(), 0)?);
+        }
+        "wasm" => {
             let Some(using) = params.using else {
                 return Err(ErrorCode::InvalidParameterValue(
                     "USING must be specified".to_string(),
@@ -242,7 +308,13 @@ pub async fn handle_create_function(
                 }
             };
             let runtime = get_or_create_wasm_runtime(&wasm_binary)?;
-            check_wasm_function(&runtime, &identifier)?;
+            let identifier_v1 = wasm_identifier_v1(
+                &function_name,
+                &arg_types,
+                &return_type,
+                matches!(kind, Kind::Table(_)),
+            );
+            identifier = find_wasm_identifier_v2(&runtime, &identifier_v1)?;
 
             compressed_binary = Some(zstd::stream::encode_all(wasm_binary.as_ref(), 0)?);
         }
@@ -267,6 +339,8 @@ pub async fn handle_create_function(
         always_retry_on_network_error: with_options
             .always_retry_on_network_error
             .unwrap_or_default(),
+        runtime,
+        function_type,
     };
 
     let catalog_writer = session.catalog_writer()?;
@@ -288,21 +362,87 @@ async fn download_binary_from_link(link: &str) -> Result<Bytes> {
     }
 }
 
-/// Check if the function exists in the wasm binary.
-fn check_wasm_function(runtime: &arrow_udf_wasm::Runtime, identifier: &str) -> Result<()> {
-    if !runtime.functions().contains(&identifier) {
-        return Err(ErrorCode::InvalidParameterValue(format!(
-            "function not found in wasm binary: \"{}\"\nHINT: available functions:\n  {}",
-            identifier,
-            runtime.functions().join("\n  ")
-        ))
-        .into());
-    }
-    Ok(())
+/// Convert a v0.1 function identifier to v0.2 format.
+///
+/// In arrow-udf v0.1 format, struct type is inline in the identifier. e.g.
+///
+/// ```text
+/// keyvalue(varchar,varchar)->struct<key:varchar,value:varchar>
+/// ```
+///
+/// However, since arrow-udf v0.2, struct type is no longer inline.
+/// The above identifier is divided into a function and a type.
+///
+/// ```text
+/// keyvalue(varchar,varchar)->struct KeyValue
+/// KeyValue=key:varchar,value:varchar
+/// ```
+///
+/// For compatibility, we should call `find_wasm_identifier_v2` to
+/// convert v0.1 identifiers to v0.2 format before looking up the function.
+fn find_wasm_identifier_v2(
+    runtime: &arrow_udf_wasm::Runtime,
+    inlined_signature: &str,
+) -> Result<String> {
+    // Inline types in function signature.
+    //
+    // # Example
+    //
+    // ```text
+    // types = { "KeyValue": "key:varchar,value:varchar" }
+    // input = "keyvalue(varchar, varchar) -> struct KeyValue"
+    // output = "keyvalue(varchar, varchar) -> struct<key:varchar,value:varchar>"
+    // ```
+    let inline_types = |s: &str| -> String {
+        let mut inlined = s.to_string();
+        // iteratively replace `struct Xxx` with `struct<...>` until no replacement is made.
+        loop {
+            let replaced = inlined.clone();
+            for (k, v) in runtime.types() {
+                inlined = inlined.replace(&format!("struct {k}"), &format!("struct<{v}>"));
+            }
+            if replaced == inlined {
+                return inlined;
+            }
+        }
+    };
+    // Function signature in arrow-udf is case sensitive.
+    // However, SQL identifiers are usually case insensitive and stored in lowercase.
+    // So we should convert the signature to lowercase before comparison.
+    let identifier = runtime
+        .functions()
+        .find(|f| inline_types(f).to_lowercase() == inlined_signature)
+        .ok_or_else(|| {
+            ErrorCode::InvalidParameterValue(format!(
+                "function not found in wasm binary: \"{}\"\nHINT: available functions:\n  {}\navailable types:\n  {}",
+                inlined_signature,
+                runtime.functions().join("\n  "),
+                runtime.types().map(|(k, v)| format!("{k}: {v}")).join("\n  "),
+            ))
+        })?;
+    Ok(identifier.into())
 }
 
-/// Generate the function identifier in wasm binary.
-fn wasm_identifier(name: &str, args: &[DataType], ret: &DataType, table_function: bool) -> String {
+/// Download wasm binary from a link.
+#[allow(clippy::unused_async)]
+async fn download_code_from_link(link: &str) -> Result<Vec<u8>> {
+    // currently only local file system is supported
+    if let Some(path) = link.strip_prefix("fs://") {
+        let content =
+            std::fs::read(path).context("failed to read the code from local file system")?;
+        Ok(content)
+    } else {
+        Err(ErrorCode::InvalidParameterValue("only 'fs://' is supported".to_string()).into())
+    }
+}
+
+/// Generate a function identifier in v0.1 format from the function signature.
+fn wasm_identifier_v1(
+    name: &str,
+    args: &[DataType],
+    ret: &DataType,
+    table_function: bool,
+) -> String {
     format!(
         "{}({}){}{}",
         name,

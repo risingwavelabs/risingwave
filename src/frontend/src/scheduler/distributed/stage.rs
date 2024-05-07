@@ -27,8 +27,10 @@ use futures::stream::Fuse;
 use futures::{stream, StreamExt, TryStreamExt};
 use futures_async_stream::for_await;
 use itertools::Itertools;
+use risingwave_batch::error::BatchError;
 use risingwave_batch::executor::ExecutorBuilder;
 use risingwave_batch::task::{ShutdownMsg, ShutdownSender, ShutdownToken, TaskId as TaskIdBatch};
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
 use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::addr::HostAddr;
@@ -43,6 +45,7 @@ use risingwave_pb::batch_plan::{
 use risingwave_pb::common::{BatchQueryEpoch, HostAddress, WorkerNode};
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::task_service::{CancelTaskRequest, TaskInfoResponse};
+use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use rw_futures_util::select_all;
 use thiserror_ext::AsReport;
@@ -61,7 +64,6 @@ use crate::scheduler::distributed::QueryMessage;
 use crate::scheduler::plan_fragmenter::{
     ExecutionPlanNode, PartitionInfo, QueryStageRef, StageId, TaskId, ROOT_TASK_ID,
 };
-use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::SchedulerError::{TaskExecutionError, TaskRunningOutOfMemory};
 use crate::scheduler::{ExecutionContextRef, SchedulerError, SchedulerResult};
 
@@ -524,7 +526,7 @@ impl StageRunner {
                         |_| StageState::Failed,
                         QueryMessage::Stage(Failed {
                             id: self.stage.id,
-                            reason: SchedulerError::from(e),
+                            reason: RpcError::from_batch_status(e).into(),
                         }),
                     )
                     .await;
@@ -696,6 +698,7 @@ impl StageRunner {
         self.worker_node_manager
             .manager
             .get_streaming_fragment_mapping(fragment_id)
+            .map_err(|e| e.into())
     }
 
     fn choose_worker(
@@ -714,7 +717,7 @@ impl StageRunner {
                 .manager
                 .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
             if candidates.is_empty() {
-                return Err(SchedulerError::EmptyWorkerNodes);
+                return Err(BatchError::EmptyWorkerNodes.into());
             }
             let candidate = if self.stage.batch_enable_distributed_dml {
                 // If distributed dml is enabled, we need to try our best to distribute dml tasks evenly to each worker.
@@ -750,7 +753,7 @@ impl StageRunner {
                 .manager
                 .get_workers_by_parallel_unit_ids(&[pu])?;
             if candidates.is_empty() {
-                return Err(SchedulerError::EmptyWorkerNodes);
+                return Err(BatchError::EmptyWorkerNodes.into());
             }
             Ok(Some(candidates[0].clone()))
         } else {
@@ -984,7 +987,25 @@ impl StageRunner {
                     node_body: Some(NodeBody::RowSeqScan(scan_node)),
                 }
             }
-            PlanNodeType::BatchSource => {
+            PlanNodeType::BatchLogSeqScan => {
+                let node_body = execution_plan_node.node.clone();
+                let NodeBody::LogRowSeqScan(mut scan_node) = node_body else {
+                    unreachable!();
+                };
+                let partition = partition
+                    .expect("no partition info for seq scan")
+                    .into_table()
+                    .expect("PartitionInfo should be TablePartitionInfo");
+                scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
+                PlanNodePb {
+                    children: vec![],
+                    identity,
+                    node_body: Some(NodeBody::LogRowSeqScan(scan_node)),
+                }
+            }
+            PlanNodeType::BatchSource
+            | PlanNodeType::BatchKafkaScan
+            | PlanNodeType::BatchIcebergScan => {
                 let node_body = execution_plan_node.node.clone();
                 let NodeBody::Source(mut source_node) = node_body else {
                     unreachable!();
@@ -1030,16 +1051,14 @@ impl StageRunner {
         if !worker.property.as_ref().map_or(false, |p| p.is_serving) {
             return;
         }
-        let duration = std::cmp::max(
-            Duration::from_secs(
-                self.ctx
-                    .session
-                    .env()
-                    .meta_config()
-                    .max_heartbeat_interval_secs as _,
-            ) / 10,
-            Duration::from_secs(1),
-        );
+        let duration = Duration::from_secs(std::cmp::max(
+            self.ctx
+                .session
+                .env()
+                .batch_config()
+                .mask_worker_temporary_secs as u64,
+            1,
+        ));
         self.worker_node_manager
             .manager
             .mask_worker_node(worker.id, duration);

@@ -15,7 +15,7 @@
 use std::collections::BTreeMap;
 
 use risingwave_common::array::Op;
-use risingwave_common::estimate_size::{EstimateSize, KvSize};
+use risingwave_common_estimate_size::{EstimateSize, KvSize};
 
 use super::{StateCache, StateCacheFiller};
 

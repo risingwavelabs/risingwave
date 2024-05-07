@@ -15,31 +15,33 @@
 #![deprecated = "will be replaced by new fs source (list + fetch)"]
 #![expect(deprecated)]
 
-use std::fmt::{Debug, Formatter};
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::anyhow;
 use either::Either;
-use futures::{StreamExt, TryStreamExt};
-use futures_async_stream::try_stream;
+use futures::TryStreamExt;
+use itertools::Itertools;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::reader::desc::{FsSourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
     BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
     SplitMetaData,
 };
-use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
-use crate::error::StreamResult;
-use crate::executor::error::StreamExecutorError;
-use crate::executor::monitor::StreamingMetrics;
+use super::{
+    apply_rate_limit, barrier_to_message_stream, get_split_offset_col_idx,
+    get_split_offset_mapping_from_chunk, prune_additional_cols,
+};
+use crate::common::rate_limit::limited_chunk_size;
+use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::executor::*;
+use crate::executor::{AddMutation, UpdateMutation};
 
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
@@ -62,18 +64,18 @@ pub struct FsSourceExecutor<S: StateStore> {
     /// System parameter reader to read barrier interval
     system_params: SystemParamsReaderRef,
 
-    source_ctrl_opts: SourceCtrlOpts,
+    /// Rate limit in rows/s.
+    rate_limit_rps: Option<u32>,
 }
 
 impl<S: StateStore> FsSourceExecutor<S> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
         stream_source_core: StreamSourceCore<S>,
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
         system_params: SystemParamsReaderRef,
-        source_ctrl_opts: SourceCtrlOpts,
+        rate_limit_rps: Option<u32>,
     ) -> StreamResult<Self> {
         Ok(Self {
             actor_ctx,
@@ -81,7 +83,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             metrics,
             barrier_receiver: Some(barrier_receiver),
             system_params,
-            source_ctrl_opts,
+            rate_limit_rps,
         })
     }
 
@@ -95,22 +97,45 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .iter()
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
-        let source_ctx = SourceContext::new_with_suppressor(
+        let source_ctx = SourceContext::new(
             self.actor_ctx.id,
             self.stream_source_core.source_id,
             self.actor_ctx.fragment_id,
-            source_desc.metrics.clone(),
-            self.source_ctrl_opts.clone(),
-            None,
-            self.actor_ctx.error_suppressor.clone(),
-            source_desc.source.config.clone(),
             self.stream_source_core.source_name.clone(),
+            source_desc.metrics.clone(),
+            SourceCtrlOpts {
+                chunk_size: limited_chunk_size(self.rate_limit_rps),
+                rate_limit: self.rate_limit_rps,
+            },
+            source_desc.source.config.clone(),
         );
-        source_desc
+        let stream = source_desc
             .source
             .to_stream(state, column_ids, Arc::new(source_ctx))
             .await
-            .map_err(StreamExecutorError::connector_error)
+            .map_err(StreamExecutorError::connector_error)?;
+
+        Ok(apply_rate_limit(stream, self.rate_limit_rps).boxed())
+    }
+
+    async fn rebuild_stream_reader<const BIASED: bool>(
+        &mut self,
+        source_desc: &FsSourceDesc,
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
+    ) -> StreamExecutorResult<()> {
+        let target_state: Vec<SplitImpl> = self
+            .stream_source_core
+            .latest_split_info
+            .values()
+            .cloned()
+            .collect();
+        let reader = self
+            .build_stream_source_reader(source_desc, Some(target_state))
+            .await?
+            .map_err(StreamExecutorError::connector_error);
+        stream.replace_data_stream(reader);
+
+        Ok(())
     }
 
     async fn apply_split_change<const BIASED: bool>(
@@ -148,7 +173,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         for sc in rhs {
             if let Some(s) = core.updated_splits_in_epoch.get(&sc.id()) {
                 let fs = s
-                    .as_fs()
+                    .as_s3()
                     .unwrap_or_else(|| panic!("split {:?} is not fs", s));
                 // unfinished this epoch
                 if fs.offset < fs.size {
@@ -216,7 +241,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .values()
             .filter(|split| {
                 let fs = split
-                    .as_fs()
+                    .as_s3()
                     .unwrap_or_else(|| panic!("split {:?} is not fs", split));
                 fs.offset < fs.size
             })
@@ -228,7 +253,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .values()
             .filter(|split| {
                 let fs = split
-                    .as_fs()
+                    .as_s3()
                     .unwrap_or_else(|| panic!("split {:?} is not fs", split));
                 fs.offset == fs.size
             })
@@ -236,16 +261,16 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .collect_vec();
 
         if !incompleted.is_empty() {
-            tracing::debug!(actor_id = self.actor_ctx.id, incompleted = ?incompleted, "take snapshot");
+            tracing::debug!(incompleted = ?incompleted, "take snapshot");
             core.split_state_store.set_states(incompleted).await?
         }
 
         if !completed.is_empty() {
-            tracing::debug!(actor_id = self.actor_ctx.id, completed = ?completed, "take snapshot");
+            tracing::debug!(completed = ?completed, "take snapshot");
             core.split_state_store.set_all_complete(completed).await?
         }
         // commit anyway, even if no message saved
-        core.split_state_store.state_store.commit(epoch).await?;
+        core.split_state_store.state_table.commit(epoch).await?;
 
         core.updated_splits_in_epoch.clear();
         Ok(())
@@ -254,7 +279,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
         let core = &mut self.stream_source_core;
 
-        core.split_state_store.state_store.try_flush().await?;
+        core.split_state_store.state_table.try_flush().await?;
 
         Ok(())
     }
@@ -298,7 +323,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                     ..
                 }) => {
                     if let Some(splits) = splits.get(&self.actor_ctx.id) {
-                        boot_state = splits.clone();
+                        boot_state.clone_from(splits);
                     }
                 }
                 _ => {}
@@ -336,7 +361,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         // init in-memory split states with persisted state if any
         self.stream_source_core.init_split_state(boot_state.clone());
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
-        tracing::debug!(actor_id = self.actor_ctx.id, state = ?recover_state, "start with state");
+        tracing::debug!(state = ?recover_state, "start with state");
 
         let source_chunk_reader = self
             .build_stream_source_reader(&source_desc, recover_state)
@@ -388,6 +413,16 @@ impl<S: StateStore> FsSourceExecutor<S> {
                                         actor_splits,
                                     )
                                     .await?;
+                                }
+                                Mutation::Throttle(actor_to_apply) => {
+                                    if let Some(new_rate_limit) =
+                                        actor_to_apply.get(&self.actor_ctx.id)
+                                        && *new_rate_limit != self.rate_limit_rps
+                                    {
+                                        self.rate_limit_rps = *new_rate_limit;
+                                        self.rebuild_stream_reader(&source_desc, &mut stream)
+                                            .await?;
+                                    }
                                 }
                                 _ => {}
                             }

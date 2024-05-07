@@ -20,8 +20,8 @@ use parking_lot::{RawRwLock, RwLock};
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::{
-    PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
-    PbView,
+    PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
+    PbSubscription, PbTable, PbView,
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
@@ -117,6 +117,8 @@ pub trait CatalogWriter: Send + Sync {
         affected_table_change: Option<PbReplaceTablePlan>,
     ) -> Result<()>;
 
+    async fn create_subscription(&self, subscription: PbSubscription) -> Result<()>;
+
     async fn create_function(&self, function: PbFunction) -> Result<()>;
 
     async fn create_connection(
@@ -150,6 +152,8 @@ pub trait CatalogWriter: Send + Sync {
         affected_table_change: Option<PbReplaceTablePlan>,
     ) -> Result<()>;
 
+    async fn drop_subscription(&self, subscription_id: u32, cascade: bool) -> Result<()>;
+
     async fn drop_database(&self, database_id: u32) -> Result<()>;
 
     async fn drop_schema(&self, schema_id: u32) -> Result<()>;
@@ -167,6 +171,12 @@ pub trait CatalogWriter: Send + Sync {
     async fn alter_index_name(&self, index_id: u32, index_name: &str) -> Result<()>;
 
     async fn alter_sink_name(&self, sink_id: u32, sink_name: &str) -> Result<()>;
+
+    async fn alter_subscription_name(
+        &self,
+        subscription_id: u32,
+        subscription_name: &str,
+    ) -> Result<()>;
 
     async fn alter_source_name(&self, source_id: u32, source_name: &str) -> Result<()>;
 
@@ -190,6 +200,13 @@ pub trait CatalogWriter: Send + Sync {
         object: alter_set_schema_request::Object,
         new_schema_id: u32,
     ) -> Result<()>;
+
+    async fn list_change_log_epochs(
+        &self,
+        table_id: u32,
+        min_epoch: u64,
+        max_count: u32,
+    ) -> Result<Vec<u64>>;
 }
 
 #[derive(Clone)]
@@ -325,6 +342,11 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
+    async fn create_subscription(&self, subscription: PbSubscription) -> Result<()> {
+        let version = self.meta_client.create_subscription(subscription).await?;
+        self.wait_version(version).await
+    }
+
     async fn create_function(&self, function: PbFunction) -> Result<()> {
         let version = self.meta_client.create_function(function).await?;
         self.wait_version(version).await
@@ -400,6 +422,14 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
+    async fn drop_subscription(&self, subscription_id: u32, cascade: bool) -> Result<()> {
+        let version = self
+            .meta_client
+            .drop_subscription(subscription_id, cascade)
+            .await?;
+        self.wait_version(version).await
+    }
+
     async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<()> {
         let version = self.meta_client.drop_index(index_id, cascade).await?;
         self.wait_version(version).await
@@ -453,6 +483,21 @@ impl CatalogWriter for CatalogWriterImpl {
         let version = self
             .meta_client
             .alter_name(alter_name_request::Object::SinkId(sink_id), sink_name)
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn alter_subscription_name(
+        &self,
+        subscription_id: u32,
+        subscription_name: &str,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_name(
+                alter_name_request::Object::SubscriptionId(subscription_id),
+                subscription_name,
+            )
             .await?;
         self.wait_version(version).await
     }
@@ -518,6 +563,18 @@ impl CatalogWriter for CatalogWriterImpl {
             .map_err(|e| anyhow!(e))?;
 
         Ok(())
+    }
+
+    async fn list_change_log_epochs(
+        &self,
+        table_id: u32,
+        min_epoch: u64,
+        max_count: u32,
+    ) -> Result<Vec<u64>> {
+        Ok(self
+            .meta_client
+            .list_change_log_epochs(table_id, min_epoch, max_count)
+            .await?)
     }
 }
 

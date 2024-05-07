@@ -12,11 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
-use futures::StreamExt;
-
-use super::{ActorContextRef, BoxedMessageStream, Execute, Executor, ExecutorInfo, MessageStream};
+use crate::executor::prelude::*;
 
 mod epoch_check;
 mod epoch_provide;
@@ -66,7 +62,7 @@ impl WrapperExecutor {
         // -- Shared wrappers --
 
         // Await tree
-        let stream = trace::instrument_await_tree(info.clone(), actor_ctx.id, stream);
+        let stream = trace::instrument_await_tree(info.clone(), stream);
 
         // Schema check
         let stream = schema_check::schema_check(info.clone(), stream);

@@ -18,11 +18,13 @@ use std::fmt::Debug;
 use std::future::{poll_fn, Future};
 use std::sync::Arc;
 use std::task::Poll;
+use std::time::Instant;
 
 use futures::{TryFuture, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
 
 use crate::sink::SinkMetrics;
@@ -161,10 +163,7 @@ pub trait LogReader: Send + Sized + 'static {
 
     /// Mark that all items emitted so far have been consumed and it is safe to truncate the log
     /// from the current offset.
-    fn truncate(
-        &mut self,
-        offset: TruncateOffset,
-    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
+    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()>;
 
     /// Reset the log reader to after the latest truncate offset
     ///
@@ -205,10 +204,7 @@ impl<F: Fn(StreamChunk) -> StreamChunk + Send + 'static, R: LogReader> LogReader
         Ok((epoch, item))
     }
 
-    fn truncate(
-        &mut self,
-        offset: TruncateOffset,
-    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
         self.inner.truncate(offset)
     }
 
@@ -219,10 +215,69 @@ impl<F: Fn(StreamChunk) -> StreamChunk + Send + 'static, R: LogReader> LogReader
     }
 }
 
+pub struct BackpressureMonitoredLogReader<R: LogReader> {
+    inner: R,
+    /// Start time to wait for new future after poll ready
+    wait_new_future_start_time: Option<Instant>,
+    wait_new_future_duration_ns: LabelGuardedIntCounter<3>,
+}
+
+impl<R: LogReader> BackpressureMonitoredLogReader<R> {
+    fn new(inner: R, wait_new_future_duration_ns: LabelGuardedIntCounter<3>) -> Self {
+        Self {
+            inner,
+            wait_new_future_start_time: None,
+            wait_new_future_duration_ns,
+        }
+    }
+}
+
+impl<R: LogReader> LogReader for BackpressureMonitoredLogReader<R> {
+    fn init(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        self.wait_new_future_start_time = None;
+        self.inner.init()
+    }
+
+    fn next_item(
+        &mut self,
+    ) -> impl Future<Output = LogStoreResult<(u64, LogStoreReadItem)>> + Send + '_ {
+        if let Some(start_time) = self.wait_new_future_start_time.take() {
+            self.wait_new_future_duration_ns
+                .inc_by(start_time.elapsed().as_nanos() as _);
+        }
+        self.inner.next_item().inspect_ok(|_| {
+            // Set start time when return ready
+            self.wait_new_future_start_time = Some(Instant::now());
+        })
+    }
+
+    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
+        self.inner.truncate(offset)
+    }
+
+    fn rewind(
+        &mut self,
+    ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
+        self.inner.rewind().inspect_ok(|_| {
+            self.wait_new_future_start_time = None;
+        })
+    }
+}
+
 pub struct MonitoredLogReader<R: LogReader> {
     inner: R,
     read_epoch: u64,
     metrics: SinkMetrics,
+}
+
+impl<R: LogReader> MonitoredLogReader<R> {
+    pub fn new(inner: R, metrics: SinkMetrics) -> Self {
+        Self {
+            inner,
+            read_epoch: INVALID_EPOCH,
+            metrics,
+        }
+    }
 }
 
 impl<R: LogReader> LogReader for MonitoredLogReader<R> {
@@ -244,8 +299,8 @@ impl<R: LogReader> LogReader for MonitoredLogReader<R> {
         })
     }
 
-    async fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
-        self.inner.truncate(offset).await
+    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
+        self.inner.truncate(offset)
     }
 
     fn rewind(
@@ -267,12 +322,12 @@ where
         TransformChunkLogReader { f, inner: self }
     }
 
-    pub fn monitored(self, metrics: SinkMetrics) -> MonitoredLogReader<T> {
-        MonitoredLogReader {
-            read_epoch: INVALID_EPOCH,
-            inner: self,
-            metrics,
-        }
+    pub fn monitored(self, metrics: SinkMetrics) -> impl LogReader {
+        let wait_new_future_duration = metrics.log_store_reader_wait_new_future_duration_ns.clone();
+        BackpressureMonitoredLogReader::new(
+            MonitoredLogReader::new(self, metrics),
+            wait_new_future_duration,
+        )
     }
 }
 
@@ -531,6 +586,7 @@ mod tests {
     use std::task::Poll;
 
     use futures::{FutureExt, TryFuture};
+    use risingwave_common::util::epoch::test_epoch;
     use tokio::sync::oneshot;
     use tokio::sync::oneshot::Receiver;
 
@@ -640,14 +696,14 @@ mod tests {
     #[tokio::test]
     async fn test_future_delivery_manager_compress_chunk() {
         let mut manager = DeliveryFutureManager::new(10);
-        let epoch1 = 233;
+        let epoch1 = test_epoch(233);
         let chunk_id1 = 1;
         let chunk_id2 = chunk_id1 + 1;
         let chunk_id3 = chunk_id2 + 1;
         let (tx1_1, rx1_1) = oneshot::channel();
         let (tx1_2, rx1_2) = oneshot::channel();
         let (tx1_3, rx1_3) = oneshot::channel();
-        let epoch2 = epoch1 + 1;
+        let epoch2 = test_epoch(234);
         let (tx2_1, rx2_1) = oneshot::channel();
         assert!(!manager
             .start_write_chunk(epoch1, chunk_id1)

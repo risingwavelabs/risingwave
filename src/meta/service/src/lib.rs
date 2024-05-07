@@ -32,6 +32,7 @@ pub mod meta_member_service;
 pub mod notification_service;
 pub mod scale_service;
 pub mod serving_service;
+pub mod session_config;
 pub mod sink_coordination_service;
 pub mod stream_service;
 pub mod system_params_service;
@@ -77,7 +78,6 @@ pub struct AddressInfo {
     pub listen_addr: SocketAddr,
     pub prometheus_addr: Option<SocketAddr>,
     pub dashboard_addr: Option<SocketAddr>,
-    pub ui_path: Option<String>,
 }
 impl Default for AddressInfo {
     fn default() -> Self {
@@ -86,7 +86,6 @@ impl Default for AddressInfo {
             listen_addr: SocketAddr::V4("127.0.0.1:0000".parse().unwrap()),
             prometheus_addr: None,
             dashboard_addr: None,
-            ui_path: None,
         }
     }
 }

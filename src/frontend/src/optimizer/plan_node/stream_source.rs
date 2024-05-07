@@ -17,6 +17,8 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_connector::parser::additional_columns::add_partition_offset_cols;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{PbStreamSource, SourceNode};
 
@@ -37,7 +39,23 @@ pub struct StreamSource {
 }
 
 impl StreamSource {
-    pub fn new(core: generic::Source) -> Self {
+    pub fn new(mut core: generic::Source) -> Self {
+        // For shared sources, we will include partition and offset cols in the *output*, to be used by the SourceBackfillExecutor.
+        // XXX: If we don't add here, these cols are also added in source reader, but pruned in the SourceExecutor's output.
+        // Should we simply add them here for all sources for consistency?
+        if let Some(source_catalog) = &core.catalog
+            && source_catalog.info.is_shared()
+        {
+            let (columns_exist, additional_columns) =
+                add_partition_offset_cols(&core.column_catalog, &source_catalog.connector_name());
+            for (existed, mut c) in columns_exist.into_iter().zip_eq_fast(additional_columns) {
+                c.is_hidden = true;
+                if !existed {
+                    core.column_catalog.push(c);
+                }
+            }
+        }
+
         let base = PlanBase::new_stream_with_core(
             &core,
             Distribution::SomeShard,
@@ -75,8 +93,6 @@ impl StreamNode for StreamSource {
             source_id: source_catalog.id,
             source_name: source_catalog.name.clone(),
             state_table: Some(
-                // `StreamSource` can write all data to the same vnode
-                // but it is ok because we only do point get on each key rather than range scan.
                 generic::Source::infer_internal_table_catalog(false)
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),

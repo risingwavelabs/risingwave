@@ -75,7 +75,6 @@ impl Drop for PinnedVersionGuard {
 pub struct PinnedVersion {
     version: Arc<HummockVersion>,
     compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
-    table_watermark_index: Arc<HashMap<TableId, TableWatermarksIndex>>,
     guard: Arc<PinnedVersionGuard>,
 }
 
@@ -86,12 +85,10 @@ impl PinnedVersion {
     ) -> Self {
         let version_id = version.id;
         let compaction_group_index = version.build_compaction_group_info();
-        let table_watermark_index = version.build_table_watermarks_index();
 
         PinnedVersion {
             version: Arc::new(version),
             compaction_group_index: Arc::new(compaction_group_index),
-            table_watermark_index: Arc::new(table_watermark_index),
             guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
                 pinned_version_manager_tx,
@@ -103,11 +100,7 @@ impl PinnedVersion {
         self.compaction_group_index.clone()
     }
 
-    pub fn table_watermark_index(&self) -> &Arc<HashMap<TableId, TableWatermarksIndex>> {
-        &self.table_watermark_index
-    }
-
-    pub(crate) fn new_pin_version(&self, version: HummockVersion) -> Self {
+    pub fn new_pin_version(&self, version: HummockVersion) -> Self {
         assert!(
             version.id >= self.version.id,
             "pinning a older version {}. Current is {}",
@@ -116,12 +109,10 @@ impl PinnedVersion {
         );
         let version_id = version.id;
         let compaction_group_index = version.build_compaction_group_info();
-        let table_watermark_index = version.build_table_watermarks_index();
 
         PinnedVersion {
             version: Arc::new(version),
             compaction_group_index: Arc::new(compaction_group_index),
-            table_watermark_index: Arc::new(table_watermark_index),
             guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
                 self.guard.pinned_version_manager_tx.clone(),

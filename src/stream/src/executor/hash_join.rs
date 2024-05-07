@@ -13,40 +13,27 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashSet};
-use std::sync::Arc;
 use std::time::Duration;
 
-use await_tree::InstrumentAwait;
-use futures::{pin_mut, Stream, StreamExt};
-use futures_async_stream::try_stream;
 use itertools::Itertools;
 use multimap::MultiMap;
-use risingwave_common::array::{Op, RowRef, StreamChunk};
+use risingwave_common::array::{Op, RowRef};
 use risingwave_common::hash::{HashKey, NullBitmap};
-use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{DataType, DefaultOrd, ToOwnedDatum};
+use risingwave_common::types::{DefaultOrd, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_expr::ExprError;
-use risingwave_storage::StateStore;
 use tokio::time::Instant;
 
 use self::builder::JoinChunkBuilder;
 use super::barrier_align::*;
-use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::join::hash_join::*;
 use super::join::row::JoinRow;
 use super::join::{JoinTypePrimitive, SideTypePrimitive, *};
-use super::monitor::StreamingMetrics;
 use super::watermark::*;
-use super::{
-    ActorContextRef, BoxedMessageStream, Execute, Executor, ExecutorInfo, Message, Watermark,
-};
-use crate::common::table::state_table::StateTable;
-use crate::executor::expect_first_barrier_from_aligned_stream;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
-use crate::task::AtomicU64Ref;
+use crate::executor::prelude::*;
 
 /// Evict the cache every n rows.
 const EVICT_EVERY_N_ROWS: u32 = 16;
@@ -755,7 +742,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             new_row[i + update_start_pos] = datum_ref.to_owned_datum();
         }
         for i in 0..row_matched.len() {
-            new_row[i + matched_start_pos] = row_matched[i].clone();
+            new_row[i + matched_start_pos].clone_from(&row_matched[i]);
         }
         OwnedRow::new(new_row)
     }
@@ -1069,6 +1056,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::hash::{Key128, Key64};
     use risingwave_common::types::ScalarImpl;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
@@ -1334,8 +1322,8 @@ mod tests {
         .await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
@@ -1343,8 +1331,8 @@ mod tests {
         hash_join.next_unwrap_pending();
 
         // push the init barrier for left and right
-        tx_l.push_barrier(2, false);
-        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(test_epoch(2), false);
+        tx_r.push_barrier(test_epoch(2), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 2nd left chunk
@@ -1415,8 +1403,8 @@ mod tests {
             create_classical_executor::<{ JoinType::Inner }>(false, false, None).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
@@ -1424,8 +1412,8 @@ mod tests {
         hash_join.next_unwrap_pending();
 
         // push the init barrier for left and right
-        tx_l.push_barrier(2, false);
-        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(test_epoch(2), false);
+        tx_r.push_barrier(test_epoch(2), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 2nd left chunk
@@ -1485,8 +1473,8 @@ mod tests {
             create_classical_executor::<{ JoinType::Inner }>(false, true, None).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
@@ -1494,8 +1482,8 @@ mod tests {
         hash_join.next_unwrap_pending();
 
         // push the init barrier for left and right
-        tx_l.push_barrier(2, false);
-        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(test_epoch(2), false);
+        tx_r.push_barrier(test_epoch(2), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 2nd left chunk
@@ -1567,8 +1555,8 @@ mod tests {
             create_classical_executor::<{ JoinType::LeftSemi }>(false, false, None).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
@@ -1576,8 +1564,8 @@ mod tests {
         hash_join.next_unwrap_pending();
 
         // push the init barrier for left and right
-        tx_l.push_barrier(2, false);
-        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(test_epoch(2), false);
+        tx_r.push_barrier(test_epoch(2), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 2nd left chunk
@@ -1677,8 +1665,8 @@ mod tests {
             create_classical_executor::<{ JoinType::LeftSemi }>(false, true, None).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
@@ -1686,8 +1674,8 @@ mod tests {
         hash_join.next_unwrap_pending();
 
         // push the init barrier for left and right
-        tx_l.push_barrier(2, false);
-        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(test_epoch(2), false);
+        tx_r.push_barrier(test_epoch(2), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 2nd left chunk
@@ -1776,8 +1764,8 @@ mod tests {
             create_append_only_executor::<{ JoinType::Inner }>(false).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
@@ -1785,8 +1773,8 @@ mod tests {
         hash_join.next_unwrap_pending();
 
         // push the init barrier for left and right
-        tx_l.push_barrier(2, false);
-        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(test_epoch(2), false);
+        tx_r.push_barrier(test_epoch(2), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 2nd left chunk
@@ -1849,8 +1837,8 @@ mod tests {
             create_append_only_executor::<{ JoinType::LeftSemi }>(false).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
@@ -1858,8 +1846,8 @@ mod tests {
         hash_join.next_unwrap_pending();
 
         // push the init barrier for left and right
-        tx_l.push_barrier(2, false);
-        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(test_epoch(2), false);
+        tx_r.push_barrier(test_epoch(2), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 2nd left chunk
@@ -1922,8 +1910,8 @@ mod tests {
             create_append_only_executor::<{ JoinType::RightSemi }>(false).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
@@ -1931,8 +1919,8 @@ mod tests {
         hash_join.next_unwrap_pending();
 
         // push the init barrier for left and right
-        tx_l.push_barrier(2, false);
-        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(test_epoch(2), false);
+        tx_r.push_barrier(test_epoch(2), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 2nd left chunk
@@ -2006,8 +1994,8 @@ mod tests {
             create_classical_executor::<{ JoinType::RightSemi }>(false, false, None).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 1st right chunk
@@ -2015,8 +2003,8 @@ mod tests {
         hash_join.next_unwrap_pending();
 
         // push the init barrier for left and right
-        tx_l.push_barrier(2, false);
-        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(test_epoch(2), false);
+        tx_r.push_barrier(test_epoch(2), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 2nd right chunk
@@ -2118,8 +2106,8 @@ mod tests {
             create_classical_executor::<{ JoinType::LeftAnti }>(false, false, None).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
@@ -2136,8 +2124,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        tx_l.push_barrier(2, false);
-        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(test_epoch(2), false);
+        tx_r.push_barrier(test_epoch(2), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 2nd left chunk
@@ -2248,8 +2236,8 @@ mod tests {
             create_classical_executor::<{ JoinType::LeftAnti }>(false, false, None).await;
 
         // push the init barrier for left and right
-        tx_r.push_barrier(1, false);
-        tx_l.push_barrier(1, false);
+        tx_r.push_barrier(test_epoch(1), false);
+        tx_l.push_barrier(test_epoch(1), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 1st right chunk
@@ -2266,8 +2254,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        tx_r.push_barrier(2, false);
-        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(test_epoch(2), false);
+        tx_l.push_barrier(test_epoch(2), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 2nd right chunk
@@ -2364,8 +2352,8 @@ mod tests {
             create_classical_executor::<{ JoinType::Inner }>(false, false, None).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
@@ -2373,7 +2361,7 @@ mod tests {
         hash_join.next_unwrap_pending();
 
         // push a barrier to left side
-        tx_l.push_barrier(2, false);
+        tx_l.push_barrier(test_epoch(2), false);
 
         // push the 2nd left chunk
         tx_l.push_chunk(chunk_l2);
@@ -2392,10 +2380,10 @@ mod tests {
         );
 
         // push a barrier to right side
-        tx_r.push_barrier(2, false);
+        tx_r.push_barrier(test_epoch(2), false);
 
         // get the aligned barrier here
-        let expected_epoch = EpochPair::new_test_epoch(2);
+        let expected_epoch = EpochPair::new_test_epoch(test_epoch(2));
         assert!(matches!(
             hash_join.next_unwrap_ready_barrier()?,
             Barrier {
@@ -2459,8 +2447,8 @@ mod tests {
             create_classical_executor::<{ JoinType::Inner }>(false, false, None).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
@@ -2468,7 +2456,7 @@ mod tests {
         hash_join.next_unwrap_pending();
 
         // push a barrier to left side
-        tx_l.push_barrier(2, false);
+        tx_l.push_barrier(test_epoch(2), false);
 
         // push the 2nd left chunk
         tx_l.push_chunk(chunk_l2);
@@ -2487,10 +2475,10 @@ mod tests {
         );
 
         // push a barrier to right side
-        tx_r.push_barrier(2, false);
+        tx_r.push_barrier(test_epoch(2), false);
 
         // get the aligned barrier here
-        let expected_epoch = EpochPair::new_test_epoch(2);
+        let expected_epoch = EpochPair::new_test_epoch(test_epoch(2));
         assert!(matches!(
             hash_join.next_unwrap_ready_barrier()?,
             Barrier {
@@ -2554,8 +2542,8 @@ mod tests {
             create_classical_executor::<{ JoinType::LeftOuter }>(false, false, None).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
@@ -2638,8 +2626,8 @@ mod tests {
             create_classical_executor::<{ JoinType::LeftOuter }>(false, true, None).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
@@ -2722,8 +2710,8 @@ mod tests {
             create_classical_executor::<{ JoinType::RightOuter }>(false, false, None).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
@@ -2791,8 +2779,8 @@ mod tests {
             create_append_only_executor::<{ JoinType::LeftOuter }>(false).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
@@ -2881,8 +2869,8 @@ mod tests {
             create_append_only_executor::<{ JoinType::RightOuter }>(false).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
@@ -2950,8 +2938,8 @@ mod tests {
             create_classical_executor::<{ JoinType::FullOuter }>(false, false, None).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
@@ -3040,8 +3028,8 @@ mod tests {
             create_classical_executor::<{ JoinType::FullOuter }>(true, false, None).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
@@ -3132,8 +3120,8 @@ mod tests {
             create_classical_executor::<{ JoinType::Inner }>(true, false, None).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
@@ -3168,16 +3156,16 @@ mod tests {
             create_classical_executor::<{ JoinType::Inner }>(true, false, None).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         tx_l.push_int64_watermark(0, 100);
 
         tx_l.push_int64_watermark(0, 200);
 
-        tx_l.push_barrier(2, false);
-        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(test_epoch(2), false);
+        tx_r.push_barrier(test_epoch(2), false);
         hash_join.next_unwrap_ready_barrier()?;
 
         tx_r.push_int64_watermark(0, 50);

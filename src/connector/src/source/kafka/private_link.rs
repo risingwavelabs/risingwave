@@ -27,13 +27,12 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::connection::PrivateLinkService;
 
-use crate::common::{
+use crate::connector_common::{
     AwsPrivateLinkItem, PRIVATE_LINK_BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY,
 };
 use crate::error::ConnectorResult;
 use crate::source::kafka::stats::RdKafkaStats;
 use crate::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
-use crate::source::KAFKA_CONNECTOR;
 
 pub const PRIVATELINK_ENDPOINT_KEY: &str = "privatelink.endpoint";
 pub const CONNECTION_NAME_KEY: &str = "connection.name";
@@ -71,9 +70,9 @@ impl BrokerAddrRewriter {
         role: PrivateLinkContextRole,
         broker_rewrite_map: Option<HashMap<String, String>>,
     ) -> ConnectorResult<Self> {
-        tracing::info!("[{}] rewrite map {:?}", role, broker_rewrite_map);
         let rewrite_map: ConnectorResult<BTreeMap<BrokerAddr, BrokerAddr>> = broker_rewrite_map
             .map_or(Ok(BTreeMap::new()), |addr_map| {
+                tracing::info!("[{}] rewrite map {:?}", role, addr_map);
                 addr_map
                     .into_iter()
                     .map(|(old_addr, new_addr)| {
@@ -203,16 +202,6 @@ fn get_property_required(
         .map(|s| s.to_lowercase())
         .with_context(|| format!("Required property \"{property}\" is not provided"))
         .map_err(Into::into)
-}
-
-#[inline(always)]
-fn is_kafka_connector(with_properties: &BTreeMap<String, String>) -> bool {
-    const UPSTREAM_SOURCE_KEY: &str = "connector";
-    with_properties
-        .get(UPSTREAM_SOURCE_KEY)
-        .unwrap_or(&"".to_string())
-        .to_lowercase()
-        .eq_ignore_ascii_case(KAFKA_CONNECTOR)
 }
 
 pub fn insert_privatelink_broker_rewrite_map(

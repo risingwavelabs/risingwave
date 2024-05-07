@@ -88,7 +88,9 @@ def check_risingwave_iceberg_source(docker):
     config = read_config(f"{docker.case_dir()}/config.ini")
 
     sqls = [
-        "select count(*) from iceberg_source"
+        "select count(*) from iceberg_source",
+        "select count(*) from iceberg_source for system_time as of '2100-01-01 00:00:00+00:00'",
+        "select count(*) from iceberg_source for system_time as of 4102444800"
     ]
 
     rw_config = config['risingwave']
@@ -113,7 +115,7 @@ def run_case(case):
 
 
 if __name__ == "__main__":
-    case_names = ["rest", "storage"]
+    case_names = ["jdbc", "hive", "rest", "storage"]
     for case_name in case_names:
         print(f"Running test case: {case_name}")
         run_case(case_name)

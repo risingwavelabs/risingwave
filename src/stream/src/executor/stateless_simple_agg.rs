@@ -12,19 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::StreamExt;
-use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::Op;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::{
     build_retractable, AggCall, AggregateState, BoxedAggregateFunction,
 };
 
 use super::aggregation::agg_call_filter_res;
-use super::error::StreamExecutorError;
-use super::*;
-use crate::error::StreamResult;
+use crate::executor::prelude::*;
 
 pub struct StatelessSimpleAggExecutor {
     _ctx: ActorContextRef,
@@ -133,6 +129,7 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::schema_test_utils;
+    use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
     use crate::executor::test_utils::agg_executor::generate_agg_schema;
@@ -144,9 +141,9 @@ mod tests {
         let schema = schema_test_utils::ii();
         let (mut tx, source) = MockSource::channel();
         let source = source.into_executor(schema, vec![2]);
-        tx.push_barrier(1, false);
-        tx.push_barrier(2, false);
-        tx.push_barrier(3, false);
+        tx.push_barrier(test_epoch(1), false);
+        tx.push_barrier(test_epoch(2), false);
+        tx.push_barrier(test_epoch(3), false);
 
         let agg_calls = vec![AggCall::from_pretty("(count:int8)")];
         let schema = generate_agg_schema(&source, &agg_calls, None);
@@ -175,14 +172,14 @@ mod tests {
         let schema = schema_test_utils::iii();
         let (mut tx, source) = MockSource::channel();
         let source = source.into_executor(schema, vec![2]);
-        tx.push_barrier(1, false);
+        tx.push_barrier(test_epoch(1), false);
         tx.push_chunk(StreamChunk::from_pretty(
             "   I   I    I
             + 100 200 1001
             +  10  14 1002
             +   4 300 1003",
         ));
-        tx.push_barrier(2, false);
+        tx.push_barrier(test_epoch(2), false);
         tx.push_chunk(StreamChunk::from_pretty(
             "   I   I    I
             - 100 200 1001
@@ -190,7 +187,7 @@ mod tests {
             -   4 300 1003
             + 104 500 1004",
         ));
-        tx.push_barrier(3, false);
+        tx.push_barrier(test_epoch(3), false);
 
         let agg_calls = vec![
             AggCall::from_pretty("(count:int8)"),

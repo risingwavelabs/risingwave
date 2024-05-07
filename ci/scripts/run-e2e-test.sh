@@ -33,19 +33,19 @@ fi
 cluster_start() {
   if [[ $mode == "standalone" ]]; then
     mkdir -p "$PREFIX_LOG"
-    cargo make clean-data
-    cargo make pre-start-dev
+    risedev clean-data
+    risedev pre-start-dev
     start_standalone "$PREFIX_LOG"/standalone.log &
-    cargo make dev standalone-minio-etcd
+    risedev dev standalone-minio-etcd
   elif [[ $mode == "single-node" ]]; then
     mkdir -p "$PREFIX_LOG"
-    cargo make clean-data
-    cargo make pre-start-dev
+    risedev clean-data
+    risedev pre-start-dev
     start_single_node "$PREFIX_LOG"/single-node.log &
     # Give it a while to make sure the single-node is ready.
-    sleep 3
+    sleep 10
   else
-    cargo make ci-start "$mode"
+    risedev ci-start "$mode"
   fi
 }
 
@@ -54,12 +54,12 @@ cluster_stop() {
   then
     stop_standalone
     # Don't check standalone logs, they will exceed the limit.
-    cargo make kill
+    risedev kill
   elif [[ $mode == "single-node" ]]
   then
     stop_single_node
   else
-    cargo make ci-kill
+    risedev ci-kill
   fi
 }
 
@@ -96,6 +96,11 @@ sqllogictest -p 4566 -d dev './e2e_test/ttl/ttl.slt'
 sqllogictest -p 4566 -d dev './e2e_test/database/prepare.slt'
 sqllogictest -p 4566 -d test './e2e_test/database/test.slt'
 
+echo "--- e2e, $mode, subscription"
+python3 -m pip install --break-system-packages psycopg2-binary
+sqllogictest -p 4566 -d dev './e2e_test/subscription/check_sql_statement.slt'
+python3 ./e2e_test/subscription/main.py
+
 echo "--- e2e, $mode, Apache Superset"
 sqllogictest -p 4566 -d dev './e2e_test/superset/*.slt' --junit "batch-${profile}"
 
@@ -118,9 +123,12 @@ sqllogictest -p 4566 -d dev './e2e_test/udf/external_udf.slt'
 pkill java
 
 echo "--- e2e, $mode, embedded udf"
+python3 -m pip install --break-system-packages flask waitress
 sqllogictest -p 4566 -d dev './e2e_test/udf/wasm_udf.slt'
+sqllogictest -p 4566 -d dev './e2e_test/udf/rust_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/js_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/python_udf.slt'
+sqllogictest -p 4566 -d dev './e2e_test/udf/deno_udf.slt'
 
 echo "--- Kill cluster"
 cluster_stop
@@ -133,14 +141,17 @@ sqllogictest -p 4566 -d dev './e2e_test/generated/**/*.slt' --junit "generated-$
 echo "--- Kill cluster"
 cluster_stop
 
-echo "--- e2e, $mode, error ui"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cluster_start
-sqllogictest -p 4566 -d dev './e2e_test/error_ui/simple/**/*.slt'
-sqllogictest -p 4566 -d dev -e postgres-extended './e2e_test/error_ui/extended/**/*.slt'
+# only run if mode is not single-node or standalone
+if [[ "$mode" != "single-node" && "$mode" != "standalone" ]]; then
+  echo "--- e2e, ci-3cn-1fe-with-recovery, error ui"
+  RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+  risedev ci-start ci-3cn-1fe-with-recovery
+  sqllogictest -p 4566 -d dev './e2e_test/error_ui/simple/**/*.slt'
+  sqllogictest -p 4566 -d dev -e postgres-extended './e2e_test/error_ui/extended/**/*.slt'
 
-echo "--- Kill cluster"
-cluster_stop
+  echo "--- Kill cluster"
+  risedev ci-kill
+fi
 
 echo "--- e2e, $mode, extended query"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
@@ -156,7 +167,7 @@ cluster_stop
 if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     echo "--- e2e, ci-compaction-test, nexmark_q7"
     RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-    cargo make ci-start ci-compaction-test
+    risedev ci-start ci-compaction-test
     # Please make sure the regression is expected before increasing the timeout.
     sqllogictest -p 4566 -d dev './e2e_test/compaction/ingest_rows.slt'
 
@@ -168,7 +179,7 @@ if [[ "$RUN_COMPACTION" -eq "1" ]]; then
 
     # Poll the current version id until we have around 100 version deltas
     delta_log_cnt=0
-    while [ $delta_log_cnt -le 90 ]
+    while [ "$delta_log_cnt" -le 90 ]
     do
         delta_log_cnt="$(./target/debug/risingwave risectl hummock list-version --verbose | grep -w '^ *id:' | grep -o '[0-9]\+' | head -n 1)"
         echo "Current version $delta_log_cnt"
@@ -190,20 +201,6 @@ if [[ "$RUN_COMPACTION" -eq "1" ]]; then
 
     echo "--- Kill cluster"
     cluster_stop
-fi
-
-if [[ "$RUN_META_BACKUP" -eq "1" ]]; then
-    echo "--- e2e, ci-meta-backup-test"
-    test_root="src/storage/backup/integration_tests"
-    BACKUP_TEST_MCLI=".risingwave/bin/mcli" \
-    BACKUP_TEST_MCLI_CONFIG=".risingwave/config/mcli" \
-    BACKUP_TEST_RW_ALL_IN_ONE="target/debug/risingwave" \
-    RW_HUMMOCK_URL="hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001" \
-    RW_META_ADDR="http://127.0.0.1:5690" \
-    RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-    bash "${test_root}/run_all.sh"
-    echo "--- Kill cluster"
-    cargo make kill
 fi
 
 if [[ "$mode" == "standalone" ]]; then
@@ -254,10 +251,10 @@ if [[ "$mode" == "standalone" ]]; then
 
   echo "test standalone without compactor"
   mkdir -p "$PREFIX_LOG"
-  cargo make clean-data
-  cargo make pre-start-dev
+  risedev clean-data
+  risedev pre-start-dev
   start_standalone_without_compactor "$PREFIX_LOG"/standalone.log &
-  cargo make dev standalone-minio-etcd-compactor
+  risedev dev standalone-minio-etcd-compactor
   wait_standalone
   if compactor_is_online
   then
@@ -271,10 +268,10 @@ if [[ "$mode" == "standalone" ]]; then
 
   echo "test standalone with compactor"
   mkdir -p "$PREFIX_LOG"
-  cargo make clean-data
-  cargo make pre-start-dev
+  risedev clean-data
+  risedev pre-start-dev
   start_standalone "$PREFIX_LOG"/standalone.log &
-  cargo make dev standalone-minio-etcd
+  risedev dev standalone-minio-etcd
   wait_standalone
   if ! compactor_is_online
   then

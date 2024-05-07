@@ -37,19 +37,21 @@ mod merge_inner;
 pub use forward_user::*;
 pub use merge_inner::MergeIterator;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+use risingwave_hummock_sdk::EpochWithGap;
 
 use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Third};
 
+pub mod change_log;
 mod concat_delete_range_iterator;
 mod delete_range_iterator;
 mod skip_watermark;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
+
 pub use delete_range_iterator::{
     DeleteRangeIterator, ForwardMergeRangeIterator, RangeIteratorTyped,
 };
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::EpochWithGap;
 pub use skip_watermark::*;
 
 use crate::monitor::StoreLocalStatistic;
@@ -66,7 +68,7 @@ pub struct ValueMeta {
 /// After creating the iterator instance,
 /// - if you want to iterate from the beginning, you need to then call its `rewind` method.
 /// - if you want to iterate from some specific position, you need to then call its `seek` method.
-pub trait HummockIterator: Send + Sync {
+pub trait HummockIterator: Send {
     type Direction: HummockIteratorDirection;
     /// Moves a valid iterator to the next key.
     ///

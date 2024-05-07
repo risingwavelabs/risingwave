@@ -19,18 +19,18 @@ pub mod rw_catalog;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
-use async_trait::async_trait;
-use futures::future::BoxFuture;
+use futures::stream::BoxStream;
 use itertools::Itertools;
 use parking_lot::RwLock;
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::acl::AclMode;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, Field, SysCatalogReader, TableDesc, TableId, DEFAULT_SUPER_USER_ID,
-    NON_RESERVED_SYS_CATALOG_ID,
+    MAX_SYS_CATALOG_NUM, SYS_CATALOG_START_ID,
 };
 use risingwave_common::error::BoxedError;
-use risingwave_common::session_config::ConfigMap;
+use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::types::DataType;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
@@ -40,7 +40,6 @@ use risingwave_pb::user::grant_privilege::Object;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::meta_client::FrontendMetaClient;
-use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::session::AuthContext;
 use crate::user::user_catalog::UserCatalog;
 use crate::user::user_privilege::available_prost_privilege;
@@ -110,7 +109,7 @@ pub struct SysCatalogReaderImpl {
     // Read auth context.
     auth_context: Arc<AuthContext>,
     // Read config.
-    config: Arc<RwLock<ConfigMap>>,
+    config: Arc<RwLock<SessionConfig>>,
     // Read system params.
     system_params: SystemParamsReaderRef,
 }
@@ -122,7 +121,7 @@ impl SysCatalogReaderImpl {
         worker_node_manager: WorkerNodeManagerRef,
         meta_client: Arc<dyn FrontendMetaClient>,
         auth_context: Arc<AuthContext>,
-        config: Arc<RwLock<ConfigMap>>,
+        config: Arc<RwLock<SessionConfig>>,
         system_params: SystemParamsReaderRef,
     ) -> Self {
         Self {
@@ -142,7 +141,7 @@ pub struct BuiltinTable {
     schema: &'static str,
     columns: Vec<SystemCatalogColumnsDef<'static>>,
     pk: &'static [usize],
-    function: for<'a> fn(&'a SysCatalogReaderImpl) -> BoxFuture<'a, Result<DataChunk, BoxedError>>,
+    function: for<'a> fn(&'a SysCatalogReaderImpl) -> BoxStream<'a, Result<DataChunk, BoxedError>>,
 }
 
 pub struct BuiltinView {
@@ -292,7 +291,7 @@ fn get_acl_items(
 }
 
 pub struct SystemCatalog {
-    // table id = index + 1
+    // table id = index + SYS_CATALOG_START_ID
     catalogs: Vec<BuiltinCatalog>,
 }
 
@@ -303,7 +302,8 @@ pub fn get_sys_tables_in_schema(schema_name: &str) -> Vec<Arc<SystemTableCatalog
         .enumerate()
         .filter_map(|(idx, c)| match c {
             BuiltinCatalog::Table(t) if t.schema == schema_name => Some(Arc::new(
-                SystemTableCatalog::from(t).with_id((idx as u32 + 1).into()),
+                SystemTableCatalog::from(t)
+                    .with_id((idx as u32 + SYS_CATALOG_START_ID as u32).into()),
             )),
             _ => None,
         })
@@ -316,9 +316,9 @@ pub fn get_sys_views_in_schema(schema_name: &str) -> Vec<Arc<ViewCatalog>> {
         .iter()
         .enumerate()
         .filter_map(|(idx, c)| match c {
-            BuiltinCatalog::View(v) if v.schema == schema_name => {
-                Some(Arc::new(ViewCatalog::from(v).with_id(idx as u32 + 1)))
-            }
+            BuiltinCatalog::View(v) if v.schema == schema_name => Some(Arc::new(
+                ViewCatalog::from(v).with_id(idx as u32 + SYS_CATALOG_START_ID as u32),
+            )),
             _ => None,
         })
         .collect()
@@ -327,7 +327,7 @@ pub fn get_sys_views_in_schema(schema_name: &str) -> Vec<Arc<ViewCatalog>> {
 /// The global registry of all builtin catalogs.
 pub static SYS_CATALOGS: LazyLock<SystemCatalog> = LazyLock::new(|| {
     tracing::info!("found {} catalogs", SYS_CATALOGS_SLICE.len());
-    assert!(SYS_CATALOGS_SLICE.len() + 1 < NON_RESERVED_SYS_CATALOG_ID as usize);
+    assert!(SYS_CATALOGS_SLICE.len() <= MAX_SYS_CATALOG_NUM as usize);
     let catalogs = SYS_CATALOGS_SLICE
         .iter()
         .map(|f| f())
@@ -339,18 +339,15 @@ pub static SYS_CATALOGS: LazyLock<SystemCatalog> = LazyLock::new(|| {
 #[linkme::distributed_slice]
 pub static SYS_CATALOGS_SLICE: [fn() -> BuiltinCatalog];
 
-#[async_trait]
 impl SysCatalogReader for SysCatalogReaderImpl {
-    async fn read_table(&self, table_id: &TableId) -> Result<DataChunk, BoxedError> {
+    fn read_table(&self, table_id: TableId) -> BoxStream<'_, Result<DataChunk, BoxedError>> {
         let table_name = SYS_CATALOGS
             .catalogs
-            .get(table_id.table_id as usize - 1)
+            .get((table_id.table_id - SYS_CATALOG_START_ID as u32) as usize)
             .unwrap();
         match table_name {
-            BuiltinCatalog::Table(t) => (t.function)(self).await,
-            BuiltinCatalog::View(_) => {
-                panic!("read_table should not be called on a view")
-            }
+            BuiltinCatalog::Table(t) => (t.function)(self),
+            BuiltinCatalog::View(_) => panic!("read_table should not be called on a view"),
         }
     }
 }

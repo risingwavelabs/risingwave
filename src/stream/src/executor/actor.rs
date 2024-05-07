@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock};
 
@@ -19,8 +20,7 @@ use anyhow::anyhow;
 use await_tree::InstrumentAwait;
 use futures::future::join_all;
 use hytra::TrAdder;
-use parking_lot::Mutex;
-use risingwave_common::error::ErrorSuppressor;
+use risingwave_common::catalog::TableId;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::util::epoch::EpochPair;
@@ -50,9 +50,11 @@ pub struct ActorContext {
     total_mem_val: Arc<TrAdder<i64>>,
 
     pub streaming_metrics: Arc<StreamingMetrics>,
-    pub error_suppressor: Arc<Mutex<ErrorSuppressor>>,
 
-    pub dispatch_num: usize,
+    /// This is the number of dispatchers when the actor is created. It will not be updated during runtime when new downstreams are added.
+    pub initial_dispatch_num: usize,
+    // mv_table_id to subscription id
+    pub related_subscriptions: HashMap<TableId, HashSet<u32>>,
 }
 
 pub type ActorContextRef = Arc<ActorContext>;
@@ -67,9 +69,9 @@ impl ActorContext {
             last_mem_val: Arc::new(0.into()),
             total_mem_val: Arc::new(TrAdder::new()),
             streaming_metrics: Arc::new(StreamingMetrics::unused()),
-            error_suppressor: Arc::new(Mutex::new(ErrorSuppressor::new(10))),
             // Set 1 for test to enable sanity check on table
-            dispatch_num: 1,
+            initial_dispatch_num: 1,
+            related_subscriptions: HashMap::new(),
         })
     }
 
@@ -77,8 +79,8 @@ impl ActorContext {
         stream_actor: &PbStreamActor,
         total_mem_val: Arc<TrAdder<i64>>,
         streaming_metrics: Arc<StreamingMetrics>,
-        unique_user_errors: usize,
-        dispatch_num: usize,
+        initial_dispatch_num: usize,
+        related_subscriptions: HashMap<TableId, HashSet<u32>>,
     ) -> ActorContextRef {
         Arc::new(Self {
             id: stream_actor.actor_id,
@@ -88,8 +90,8 @@ impl ActorContext {
             last_mem_val: Arc::new(0.into()),
             total_mem_val,
             streaming_metrics,
-            error_suppressor: Arc::new(Mutex::new(ErrorSuppressor::new(unique_user_errors))),
-            dispatch_num,
+            initial_dispatch_num,
+            related_subscriptions,
         })
     }
 
@@ -100,17 +102,8 @@ impl ActorContext {
         }
 
         let executor_name = identity.split(' ').next().unwrap_or("name_not_found");
-        let mut err_str = err.to_report_string();
-
-        if self.error_suppressor.lock().suppress_error(&err_str) {
-            err_str = format!(
-                "error msg suppressed (due to per-actor error limit: {})",
-                self.error_suppressor.lock().max()
-            );
-        }
         GLOBAL_ERROR_METRICS.user_compute_error.report([
             "ExprError".to_owned(),
-            err_str,
             executor_name.to_owned(),
             self.fragment_id.to_string(),
         ]);

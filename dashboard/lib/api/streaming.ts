@@ -18,13 +18,12 @@
 import _ from "lodash"
 import sortBy from "lodash/sortBy"
 import { Sink, Source, Table, View } from "../../proto/gen/catalog"
-import { ActorLocation, TableFragments } from "../../proto/gen/meta"
+import {
+  ListObjectDependenciesResponse_ObjectDependencies as ObjectDependencies,
+  TableFragments,
+} from "../../proto/gen/meta"
 import { ColumnCatalog, Field } from "../../proto/gen/plan_common"
 import api from "./api"
-
-export async function getActors(): Promise<ActorLocation[]> {
-  return (await api.get("/actors")).map(ActorLocation.fromJSON)
-}
 
 export async function getFragments(): Promise<TableFragments[]> {
   let fragmentList: TableFragments[] = (await api.get("/fragments2")).map(
@@ -90,6 +89,10 @@ export async function getRelations() {
   return relations
 }
 
+export async function getRelationDependencies() {
+  return await getObjectDependencies()
+}
+
 async function getTableCatalogsInner(
   path: "tables" | "materialized_views" | "indexes" | "internal_tables"
 ) {
@@ -130,4 +133,19 @@ export async function getViews() {
   let views: View[] = (await api.get("/views")).map(View.fromJSON)
   views = sortBy(views, (x) => x.id)
   return views
+}
+
+export async function getObjectDependencies() {
+  let objDependencies: ObjectDependencies[] = (
+    await api.get("/object_dependencies")
+  ).map(ObjectDependencies.fromJSON)
+  const objDependencyGroup = new Map<number, number[]>()
+  objDependencies.forEach((x) => {
+    if (!objDependencyGroup.has(x.objectId)) {
+      objDependencyGroup.set(x.objectId, new Array<number>())
+    }
+    objDependencyGroup.get(x.objectId)?.push(x.referencedObjectId)
+  })
+
+  return objDependencyGroup
 }

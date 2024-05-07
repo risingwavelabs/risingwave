@@ -31,7 +31,7 @@ use tokio_util::io;
 use tokio_util::io::ReaderStream;
 
 use crate::aws_utils::{default_conn_config, s3_client};
-use crate::common::AwsAuthProps;
+use crate::connector_common::AwsAuthProps;
 use crate::error::ConnectorResult;
 use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
 use crate::source::base::{SplitMetaData, SplitReader};
@@ -62,10 +62,10 @@ impl S3FileReader {
         split: FsSplit,
         source_ctx: SourceContextRef,
     ) {
-        let actor_id = source_ctx.source_info.actor_id.to_string();
-        let fragment_id = source_ctx.source_info.fragment_id.to_string();
-        let source_id = source_ctx.source_info.source_id.to_string();
-        let source_name = source_ctx.source_info.source_name.to_string();
+        let actor_id = source_ctx.actor_id.to_string();
+        let fragment_id = source_ctx.fragment_id.to_string();
+        let source_id = source_ctx.source_id.to_string();
+        let source_name = source_ctx.source_name.to_string();
         let max_chunk_size = source_ctx.source_ctrl_opts.chunk_size;
         let split_id = split.id();
 
@@ -212,10 +212,10 @@ impl S3FileReader {
     #[try_stream(boxed, ok = StreamChunk, error = crate::error::ConnectorError)]
     async fn into_chunk_stream(self) {
         for split in self.splits {
-            let actor_id = self.source_ctx.source_info.actor_id.to_string();
-            let fragment_id = self.source_ctx.source_info.fragment_id.to_string();
-            let source_id = self.source_ctx.source_info.source_id.to_string();
-            let source_name = self.source_ctx.source_info.source_name.to_string();
+            let actor_id = self.source_ctx.actor_id.to_string();
+            let fragment_id = self.source_ctx.fragment_id.to_string();
+            let source_id = self.source_ctx.source_id.to_string();
+            let source_name = self.source_ctx.source_name.to_string();
             let source_ctx = self.source_ctx.clone();
 
             let split_id = split.id();
@@ -266,7 +266,9 @@ mod tests {
     };
     use crate::source::filesystem::s3::S3PropertiesCommon;
     use crate::source::filesystem::S3SplitEnumerator;
-    use crate::source::{SourceColumnDesc, SourceEnumeratorContext, SplitEnumerator};
+    use crate::source::{
+        SourceColumnDesc, SourceContext, SourceEnumeratorContext, SplitEnumerator,
+    };
 
     #[tokio::test]
     #[ignore]
@@ -281,7 +283,7 @@ mod tests {
         }
         .into();
         let mut enumerator =
-            S3SplitEnumerator::new(props.clone(), SourceEnumeratorContext::default().into())
+            S3SplitEnumerator::new(props.clone(), SourceEnumeratorContext::dummy().into())
                 .await
                 .unwrap();
         let splits = enumerator.list_splits().await.unwrap();
@@ -307,7 +309,7 @@ mod tests {
             },
         };
 
-        let reader = S3FileReader::new(props, splits, config, Default::default(), None)
+        let reader = S3FileReader::new(props, splits, config, SourceContext::dummy().into(), None)
             .await
             .unwrap();
 

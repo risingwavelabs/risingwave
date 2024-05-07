@@ -20,10 +20,7 @@ import com.risingwave.proto.Data;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
     private final Map<String, String> userProps;
@@ -32,7 +29,16 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
 
     private final Connection jdbcConnection;
 
-    public MySqlValidator(Map<String, String> userProps, TableSchema tableSchema)
+    // validation is for cdc source job
+    private final boolean isCdcSourceJob;
+    // validation is for backfill table
+    private final boolean isBackfillTable;
+
+    public MySqlValidator(
+            Map<String, String> userProps,
+            TableSchema tableSchema,
+            boolean isCdcSourceJob,
+            boolean isBackfillTable)
             throws SQLException {
         this.userProps = userProps;
         this.tableSchema = tableSchema;
@@ -42,9 +48,16 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         var dbName = userProps.get(DbzConnectorConfig.DB_NAME);
         var jdbcUrl = ValidatorUtils.getJdbcUrl(SourceTypeE.MYSQL, dbHost, dbPort, dbName);
 
-        var user = userProps.get(DbzConnectorConfig.USER);
-        var password = userProps.get(DbzConnectorConfig.PASSWORD);
-        this.jdbcConnection = DriverManager.getConnection(jdbcUrl, user, password);
+        var properties = new Properties();
+        properties.setProperty("user", userProps.get(DbzConnectorConfig.USER));
+        properties.setProperty("password", userProps.get(DbzConnectorConfig.PASSWORD));
+        properties.setProperty(
+                "sslMode", userProps.getOrDefault(DbzConnectorConfig.MYSQL_SSL_MODE, "DISABLED"));
+        properties.setProperty("allowPublicKeyRetrieval", "true");
+
+        this.jdbcConnection = DriverManager.getConnection(jdbcUrl, properties);
+        this.isCdcSourceJob = isCdcSourceJob;
+        this.isBackfillTable = isBackfillTable;
     }
 
     @Override
@@ -95,9 +108,45 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
     @Override
     public void validateUserPrivilege() {
         try {
-            validatePrivileges();
+            String[] privilegesRequired = getRequiredPrivileges();
+            var hashSet = new HashSet<>(List.of(privilegesRequired));
+            try (var stmt = jdbcConnection.createStatement()) {
+                var res = stmt.executeQuery(ValidatorUtils.getSql("mysql.grants"));
+                while (res.next()) {
+                    String granted = res.getString(1).toUpperCase();
+                    // mysql 5.7 root user has all privileges
+                    if (granted.contains("ALL")) {
+                        // all privileges granted, check passed
+                        return;
+                    }
+
+                    // remove granted privilege from the set
+                    hashSet.removeIf(granted::contains);
+                    if (hashSet.isEmpty()) {
+                        break;
+                    }
+                }
+                if (!hashSet.isEmpty()) {
+                    throw ValidatorUtils.invalidArgument(
+                            "MySQL user doesn't have enough privileges: " + hashSet);
+                }
+            }
         } catch (SQLException e) {
             throw ValidatorUtils.internalError(e.getMessage());
+        }
+    }
+
+    private String[] getRequiredPrivileges() {
+        if (isCdcSourceJob) {
+            return new String[] {"SELECT", "REPLICATION SLAVE", "REPLICATION CLIENT"};
+        } else if (isBackfillTable) {
+            // check privilege again to ensure the user has the privilege to backfill
+            return new String[] {"SELECT", "REPLICATION SLAVE", "REPLICATION CLIENT"};
+        } else {
+            // dedicated source needs more privileges to acquire global lock
+            return new String[] {
+                "SELECT", "RELOAD", "SHOW DATABASES", "REPLICATION SLAVE", "REPLICATION CLIENT"
+            };
         }
     }
 
@@ -108,6 +157,11 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         } catch (SQLException e) {
             throw ValidatorUtils.internalError(e.getMessage());
         }
+    }
+
+    @Override
+    boolean isCdcSourceJob() {
+        return isCdcSourceJob;
     }
 
     private void validateTableSchema() throws SQLException {
@@ -167,34 +221,6 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
 
             if (!ValidatorUtils.isPrimaryKeyMatch(tableSchema, pkFields)) {
                 throw ValidatorUtils.invalidArgument("Primary key mismatch");
-            }
-        }
-    }
-
-    private void validatePrivileges() throws SQLException {
-        String[] privilegesRequired = {
-            "SELECT", "RELOAD", "SHOW DATABASES", "REPLICATION SLAVE", "REPLICATION CLIENT",
-        };
-
-        var hashSet = new HashSet<>(List.of(privilegesRequired));
-        try (var stmt = jdbcConnection.createStatement()) {
-            var res = stmt.executeQuery(ValidatorUtils.getSql("mysql.grants"));
-            while (res.next()) {
-                String granted = res.getString(1).toUpperCase();
-                // all privileges granted, check passed
-                if (granted.contains("ALL")) {
-                    break;
-                }
-
-                // remove granted privilege from the set
-                hashSet.removeIf(granted::contains);
-                if (hashSet.isEmpty()) {
-                    break;
-                }
-            }
-            if (!hashSet.isEmpty()) {
-                throw ValidatorUtils.invalidArgument(
-                        "MySQL user doesn't have enough privileges: " + hashSet);
             }
         }
     }

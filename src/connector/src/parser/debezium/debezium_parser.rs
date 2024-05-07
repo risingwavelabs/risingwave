@@ -21,11 +21,11 @@ use super::{DebeziumAvroAccessBuilder, DebeziumAvroParserConfig};
 use crate::error::ConnectorResult;
 use crate::extract_key_config;
 use crate::parser::unified::debezium::DebeziumChangeEvent;
+use crate::parser::unified::json::TimestamptzHandling;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
-    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, JsonProperties,
-    ParseResult, ParserFormat, ProtocolProperties, SourceStreamChunkRowWriter,
-    SpecificParserConfig,
+    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, ParseResult,
+    ParserFormat, ProtocolProperties, SourceStreamChunkRowWriter, SpecificParserConfig,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -69,8 +69,12 @@ async fn build_accessor_builder(
                 DebeziumAvroAccessBuilder::new(config, encoding_type)?,
             ))
         }
-        EncodingProperties::Json(_) => Ok(AccessBuilderImpl::DebeziumJson(
-            DebeziumJsonAccessBuilder::new()?,
+        EncodingProperties::Json(json_config) => Ok(AccessBuilderImpl::DebeziumJson(
+            DebeziumJsonAccessBuilder::new(
+                json_config
+                    .timestamptz_handling
+                    .unwrap_or(TimestamptzHandling::GuessNumberUnit),
+            )?,
         )),
         EncodingProperties::Protobuf(_) => {
             Ok(AccessBuilderImpl::new_default(config, encoding_type).await?)
@@ -107,14 +111,17 @@ impl DebeziumParser {
     }
 
     pub async fn new_for_test(rw_columns: Vec<SourceColumnDesc>) -> ConnectorResult<Self> {
+        use crate::parser::JsonProperties;
+
         let props = SpecificParserConfig {
             key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
+                timestamptz_handling: None,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
-        Self::new(props, rw_columns, Default::default()).await
+        Self::new(props, rw_columns, SourceContext::dummy().into()).await
     }
 
     pub async fn parse_inner(
@@ -193,7 +200,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
 
     use super::*;
-    use crate::parser::{SourceStreamChunkBuilder, TransactionControl};
+    use crate::parser::{JsonProperties, SourceStreamChunkBuilder, TransactionControl};
     use crate::source::{ConnectorProperties, DataType};
 
     #[tokio::test]
@@ -216,11 +223,14 @@ mod tests {
             key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
+                timestamptz_handling: None,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
-        let mut source_ctx = SourceContext::default();
-        source_ctx.connector_props = ConnectorProperties::PostgresCdc(Box::default());
+        let source_ctx = SourceContext {
+            connector_props: ConnectorProperties::PostgresCdc(Box::default()),
+            ..SourceContext::dummy()
+        };
         let mut parser = DebeziumParser::new(props, columns.clone(), Arc::new(source_ctx))
             .await
             .unwrap();

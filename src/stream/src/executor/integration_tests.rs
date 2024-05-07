@@ -19,7 +19,9 @@ use futures_async_stream::try_stream;
 use multimap::MultiMap;
 use risingwave_common::array::*;
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::config;
 use risingwave_common::types::*;
+use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_expr::aggregate::AggCall;
 use risingwave_expr::expr::*;
 use risingwave_pb::plan_common::ExprContext;
@@ -126,6 +128,7 @@ async fn test_merger_sum_aggr() {
         0,
         ctx,
         metrics,
+        config::default::developer::stream_chunk_size(),
     );
     let actor = Actor::new(
         dispatcher,
@@ -196,12 +199,12 @@ async fn test_merger_sum_aggr() {
     );
     handles.push(tokio::spawn(actor.run()));
 
-    let mut epoch = 1;
+    let mut epoch = test_epoch(1);
     input
         .send(Message::Barrier(Barrier::new_test_barrier(epoch)))
         .await
         .unwrap();
-    epoch += 1;
+    epoch.inc_epoch();
     for j in 0..11 {
         let op = if j % 2 == 0 { Op::Insert } else { Op::Delete };
         for i in 0..10 {
@@ -215,7 +218,7 @@ async fn test_merger_sum_aggr() {
             .send(Message::Barrier(Barrier::new_test_barrier(epoch)))
             .await
             .unwrap();
-        epoch += 1;
+        epoch.inc_epoch();
     }
     input
         .send(Message::Barrier(

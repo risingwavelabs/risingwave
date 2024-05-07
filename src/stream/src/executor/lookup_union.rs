@@ -16,11 +16,9 @@ use async_trait::async_trait;
 use futures::channel::mpsc;
 use futures::future::{join_all, select, Either};
 use futures::{FutureExt, SinkExt, StreamExt};
-use futures_async_stream::try_stream;
 use itertools::Itertools;
 
-use super::error::StreamExecutorError;
-use super::{Barrier, BoxedMessageStream, Execute, Executor, Message};
+use crate::executor::prelude::*;
 
 /// Merges data from multiple inputs with order. If `order = [2, 1, 0]`, then
 /// it will first pipe data from the third input; after the third input gets a barrier, it will then
@@ -126,6 +124,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
     use crate::executor::test_utils::MockSource;
@@ -137,27 +136,27 @@ mod tests {
         };
         let source0 = MockSource::with_messages(vec![
             Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
-            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
             Message::Chunk(StreamChunk::from_pretty("I\n + 2")),
-            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
             Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
-            Message::Barrier(Barrier::new_test_barrier(3)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
         ])
         .stop_on_finish(false)
         .into_executor(schema.clone(), vec![0]);
         let source1 = MockSource::with_messages(vec![
             Message::Chunk(StreamChunk::from_pretty("I\n + 11")),
-            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
             Message::Chunk(StreamChunk::from_pretty("I\n + 12")),
-            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
         ])
         .stop_on_finish(false)
         .into_executor(schema.clone(), vec![0]);
         let source2 = MockSource::with_messages(vec![
             Message::Chunk(StreamChunk::from_pretty("I\n + 21")),
-            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
             Message::Chunk(StreamChunk::from_pretty("I\n + 22")),
-            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
         ])
         .stop_on_finish(false)
         .into_executor(schema, vec![0]);
@@ -173,13 +172,13 @@ mod tests {
                 Message::Chunk(StreamChunk::from_pretty("I\n + 21")),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 11")),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
-                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 22")),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 12")),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 2")),
-                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
-                Message::Barrier(Barrier::new_test_barrier(3)),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
             ]
         );
     }

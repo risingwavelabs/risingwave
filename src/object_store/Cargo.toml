@@ -12,6 +12,7 @@ repository = { workspace = true }
 async-trait = "0.1"
 await-tree = { workspace = true }
 aws-config = { workspace = true }
+aws-credential-types = { workspace = true }
 aws-sdk-s3 = { version = "0.5", package = "madsim-aws-sdk-s3" }
 aws-smithy-http = { workspace = true }
 aws-smithy-runtime = { workspace = true }
@@ -22,15 +23,16 @@ crc32fast = "1"
 either = "1"
 fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-hyper = { version = "0.14", features = ["tcp", "client"] }
+hyper = { version = "0.14", features = ["tcp", "client"] } # required by aws sdk
 hyper-rustls = { version = "0.24.2", features = ["webpki-roots"] }
 hyper-tls = "0.5.0"
-itertools = "0.12"
+itertools = { workspace = true }
 madsim = "0.2.22"
-opendal = "0.44.2"
+opendal = "0.45.1"
 prometheus = { version = "0.13", features = ["process"] }
+reqwest = "0.11" # required by opendal
 risingwave_common = { workspace = true }
-rustls = "0.21.8"
+rustls = "0.23.5"
 spin = "0.9"
 thiserror = "1"
 thiserror-ext = { workspace = true }

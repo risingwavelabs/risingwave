@@ -12,21 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::{Debug, Formatter};
-
-use futures::StreamExt;
-use futures_async_stream::try_stream;
 use multimap::MultiMap;
-use risingwave_common::array::StreamChunk;
-use risingwave_common::row::{Row, RowExt};
-use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
+use risingwave_common::row::RowExt;
+use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::NonStrictExpression;
 
-use super::{
-    ActorContextRef, BoxedMessageStream, Execute, Executor, Message, StreamExecutorError,
-    StreamExecutorResult, Watermark,
-};
+use crate::executor::prelude::*;
 
 /// `ProjectExecutor` project data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a new data chunk. And then, `ProjectExecutor` will insert, delete
@@ -41,7 +33,7 @@ struct Inner {
 
     /// Expressions of the current projection.
     exprs: Vec<NonStrictExpression>,
-    /// All the watermark derivations, (input_column_index, output_column_index). And the
+    /// All the watermark derivations, (`input_column_index`, `output_column_index`). And the
     /// derivation expression is the project's expression itself.
     watermark_derivations: MultiMap<usize, usize>,
     /// Indices of nondecreasing expressions in the expression list.
@@ -202,6 +194,7 @@ mod tests {
     use risingwave_common::array::{DataChunk, StreamChunk};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, Datum};
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_expr::expr::{self, Expression, ValueImpl};
 
     use super::super::test_utils::MockSource;
@@ -245,7 +238,7 @@ mod tests {
         );
         let mut project = project.boxed().execute();
 
-        tx.push_barrier(1, false);
+        tx.push_barrier(test_epoch(1), false);
         let barrier = project.next().await.unwrap().unwrap();
         barrier.as_barrier().unwrap();
 
@@ -273,7 +266,7 @@ mod tests {
             )
         );
 
-        tx.push_barrier(2, true);
+        tx.push_barrier(test_epoch(2), true);
         assert!(project.next().await.unwrap().unwrap().is_stop());
     }
 
@@ -327,7 +320,7 @@ mod tests {
         );
         let mut project = project.boxed().execute();
 
-        tx.push_barrier(1, false);
+        tx.push_barrier(test_epoch(1), false);
         tx.push_int64_watermark(0, 100);
 
         project.expect_barrier().await;
@@ -371,7 +364,7 @@ mod tests {
         ));
         project.expect_chunk().await;
 
-        tx.push_barrier(2, false);
+        tx.push_barrier(test_epoch(2), false);
         let w3 = project.expect_watermark().await;
         project.expect_barrier().await;
 
@@ -383,7 +376,7 @@ mod tests {
         ));
         project.expect_chunk().await;
 
-        tx.push_barrier(3, false);
+        tx.push_barrier(test_epoch(3), false);
         let w4 = project.expect_watermark().await;
         project.expect_barrier().await;
 
@@ -391,7 +384,7 @@ mod tests {
         assert!(w3.val.default_cmp(&w4.val).is_le());
 
         tx.push_int64_watermark(1, 100);
-        tx.push_barrier(4, true);
+        tx.push_barrier(test_epoch(4), true);
 
         assert!(project.next().await.unwrap().unwrap().is_stop());
     }

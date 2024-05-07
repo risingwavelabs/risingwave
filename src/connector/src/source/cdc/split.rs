@@ -46,7 +46,33 @@ trait CdcSplitTrait: Send + Sync {
     fn split_id(&self) -> u32;
     fn start_offset(&self) -> &Option<String>;
     fn is_snapshot_done(&self) -> bool;
-    fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()>;
+    fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()>;
+
+    // MySQL and MongoDB shares the same logic to extract the snapshot flag
+    fn extract_snapshot_flag(&self, start_offset: &str) -> ConnectorResult<bool> {
+        // if snapshot_done is already true, it won't be changed
+        let mut snapshot_done = self.is_snapshot_done();
+        if snapshot_done {
+            return Ok(snapshot_done);
+        }
+
+        let dbz_offset: DebeziumOffset = serde_json::from_str(start_offset).with_context(|| {
+            format!(
+                "invalid cdc offset: {}, split: {}",
+                start_offset,
+                self.split_id()
+            )
+        })?;
+
+        // heartbeat event should not update the `snapshot_done` flag
+        if !dbz_offset.is_heartbeat {
+            snapshot_done = match dbz_offset.source_offset.snapshot {
+                Some(val) => !val,
+                None => true,
+            };
+        }
+        Ok(snapshot_done)
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
@@ -90,28 +116,10 @@ impl CdcSplitTrait for MySqlCdcSplit {
         self.inner.snapshot_done
     }
 
-    fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
-        let mut snapshot_done = self.inner.snapshot_done;
-        if !snapshot_done {
-            let dbz_offset: DebeziumOffset =
-                serde_json::from_str(&start_offset).with_context(|| {
-                    format!(
-                        "invalid mysql offset: {}, split: {}",
-                        start_offset, self.inner.split_id
-                    )
-                })?;
-
-            // heartbeat event should not update the `snapshot_done` flag
-            if !dbz_offset.is_heartbeat {
-                snapshot_done = match dbz_offset.source_offset.snapshot {
-                    Some(val) => !val,
-                    None => true,
-                };
-            }
-        }
-        self.inner.start_offset = Some(start_offset);
+    fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
         // if snapshot_done is already true, it won't be updated
-        self.inner.snapshot_done = snapshot_done;
+        self.inner.snapshot_done = self.extract_snapshot_flag(last_seen_offset.as_str())?;
+        self.inner.start_offset = Some(last_seen_offset);
         Ok(())
     }
 }
@@ -143,29 +151,34 @@ impl CdcSplitTrait for PostgresCdcSplit {
         self.inner.snapshot_done
     }
 
-    fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
-        let mut snapshot_done = self.inner.snapshot_done;
-        if !snapshot_done {
-            let dbz_offset: DebeziumOffset =
-                serde_json::from_str(&start_offset).with_context(|| {
-                    format!(
-                        "invalid postgres offset: {}, split: {}",
-                        start_offset, self.inner.split_id
-                    )
-                })?;
-
-            // heartbeat event should not update the `snapshot_done` flag
-            if !dbz_offset.is_heartbeat {
-                snapshot_done = dbz_offset
-                    .source_offset
-                    .last_snapshot_record
-                    .unwrap_or(false);
-            }
-        }
-        self.inner.start_offset = Some(start_offset);
-        // if snapshot_done is already true, it won't be updated
-        self.inner.snapshot_done = snapshot_done;
+    fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
+        self.inner.snapshot_done = self.extract_snapshot_flag(last_seen_offset.as_str())?;
+        self.inner.start_offset = Some(last_seen_offset);
         Ok(())
+    }
+
+    fn extract_snapshot_flag(&self, start_offset: &str) -> ConnectorResult<bool> {
+        // if snapshot_done is already true, it won't be changed
+        let mut snapshot_done = self.is_snapshot_done();
+        if snapshot_done {
+            return Ok(snapshot_done);
+        }
+
+        let dbz_offset: DebeziumOffset = serde_json::from_str(start_offset).with_context(|| {
+            format!(
+                "invalid postgres offset: {}, split: {}",
+                start_offset, self.inner.split_id
+            )
+        })?;
+
+        // heartbeat event should not update the `snapshot_done` flag
+        if !dbz_offset.is_heartbeat {
+            snapshot_done = dbz_offset
+                .source_offset
+                .last_snapshot_record
+                .unwrap_or(false);
+        }
+        Ok(snapshot_done)
     }
 }
 
@@ -193,30 +206,10 @@ impl CdcSplitTrait for MongoDbCdcSplit {
         self.inner.snapshot_done
     }
 
-    fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
-        let mut snapshot_done = self.inner.snapshot_done;
-        // extract snapshot state from debezium offset
-        if !snapshot_done {
-            let dbz_offset: DebeziumOffset =
-                serde_json::from_str(&start_offset).with_context(|| {
-                    format!(
-                        "invalid mongodb offset: {}, split: {}",
-                        start_offset, self.inner.split_id
-                    )
-                })?;
-
-            // heartbeat event should not update the `snapshot_done` flag
-            if !dbz_offset.is_heartbeat {
-                snapshot_done = match dbz_offset.source_offset.snapshot {
-                    Some(val) => !val,
-                    None => true,
-                };
-            }
-        }
-
-        self.inner.start_offset = Some(start_offset);
+    fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
         // if snapshot_done is already true, it will remain true
-        self.inner.snapshot_done = snapshot_done;
+        self.inner.snapshot_done = self.extract_snapshot_flag(last_seen_offset.as_str())?;
+        self.inner.start_offset = Some(last_seen_offset);
         Ok(())
     }
 }
@@ -275,8 +268,8 @@ impl<T: CdcSourceTypeTrait> SplitMetaData for DebeziumCdcSplit<T> {
         serde_json::from_value(value.take()).map_err(Into::into)
     }
 
-    fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
-        self.update_with_offset(start_offset)
+    fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
+        self.update_offset_inner(last_seen_offset)
     }
 }
 
@@ -325,8 +318,8 @@ impl<T: CdcSourceTypeTrait> DebeziumCdcSplit<T> {
         dispatch_cdc_split!(self, ref, is_snapshot_done())
     }
 
-    pub fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
-        dispatch_cdc_split!(self, mut, update_with_offset(start_offset)?);
+    pub fn update_offset_inner(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
+        dispatch_cdc_split!(self, mut, update_offset(last_seen_offset)?);
         Ok(())
     }
 }

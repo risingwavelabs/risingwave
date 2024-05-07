@@ -46,6 +46,17 @@ impl KafkaService {
 impl Task for KafkaService {
     fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
         ctx.service(self);
+
+        if self.config.user_managed {
+            ctx.pb.set_message("user managed");
+            writeln!(
+                &mut ctx.log,
+                "Please start your Kafka at {}:{}\n\n",
+                self.config.address, self.config.port
+            )?;
+            return Ok(());
+        }
+
         ctx.pb.set_message("starting...");
 
         let path = self.kafka_path()?;

@@ -33,6 +33,7 @@ use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, DispatcherType, FragmentTypeFlag, StreamActor, StreamNode,
 };
+use risingwave_pb::stream_service::BuildActorInfo;
 use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::barrier::Reschedule;
@@ -43,7 +44,7 @@ use crate::model::{
     TableParallelism, ValTransaction,
 };
 use crate::storage::Transaction;
-use crate::stream::{SplitAssignment, TableRevision};
+use crate::stream::{to_build_actor_info, SplitAssignment, TableRevision};
 use crate::{MetaError, MetaResult};
 
 pub struct FragmentManagerCore {
@@ -113,7 +114,7 @@ pub struct FragmentManager {
 }
 
 pub struct ActorInfos {
-    /// node_id => actor_ids
+    /// `node_id` => `actor_ids`
     pub actor_maps: HashMap<WorkerId, Vec<ActorId>>,
 
     /// all reachable barrier inject actors
@@ -124,7 +125,7 @@ pub type FragmentManagerRef = Arc<FragmentManager>;
 
 impl FragmentManager {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let table_fragments = TableFragments::list(env.meta_store_checked()).await?;
+        let table_fragments = TableFragments::list(env.meta_store().as_kv()).await?;
 
         // `expr_context` of `StreamActor` is introduced in 1.6.0.
         // To ensure compatibility, we fill it for table fragments that were created with older versions.
@@ -133,7 +134,7 @@ impl FragmentManager {
             .map(|tf| (tf.table_id(), tf.fill_expr_context()))
             .collect();
 
-        let table_revision = TableRevision::get(env.meta_store_checked()).await?;
+        let table_revision = TableRevision::get(env.meta_store().as_kv()).await?;
 
         Ok(Self {
             env,
@@ -439,8 +440,8 @@ impl FragmentManager {
                                 if m.upstream_fragment_id == merge_update.upstream_fragment_id {
                                     m.upstream_fragment_id =
                                         merge_update.new_upstream_fragment_id.unwrap();
-                                    m.upstream_actor_id =
-                                        merge_update.added_upstream_actor_id.clone();
+                                    m.upstream_actor_id
+                                        .clone_from(&merge_update.added_upstream_actor_id);
                                 }
                                 upstream_actor_ids.extend(m.upstream_actor_id.clone());
                             }
@@ -849,14 +850,20 @@ impl FragmentManager {
     pub async fn all_node_actors(
         &self,
         include_inactive: bool,
-    ) -> HashMap<WorkerId, Vec<StreamActor>> {
+        subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
+    ) -> HashMap<WorkerId, Vec<BuildActorInfo>> {
         let mut actor_maps = HashMap::new();
 
         let map = &self.core.read().await.table_fragments;
         for fragments in map.values() {
+            let table_id = fragments.table_id();
             for (node_id, actors) in fragments.worker_actors(include_inactive) {
                 let node_actors = actor_maps.entry(node_id).or_insert_with(Vec::new);
-                node_actors.extend(actors);
+                node_actors.extend(
+                    actors
+                        .into_iter()
+                        .map(|actor| to_build_actor_info(actor, subscriptions, table_id)),
+                );
             }
         }
 
@@ -952,15 +959,24 @@ impl FragmentManager {
         let mut fragment_to_apply = HashMap::new();
 
         for fragment in fragment.fragments.values_mut() {
-            if (fragment.get_fragment_type_mask() & FragmentTypeFlag::StreamScan as u32) != 0 {
+            if (fragment.get_fragment_type_mask() & FragmentTypeFlag::StreamScan as u32) != 0
+                || (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0
+            {
                 let mut actor_to_apply = Vec::new();
                 for actor in &mut fragment.actors {
                     if let Some(node) = actor.nodes.as_mut() {
-                        visit_stream_node(node, |node_body| {
-                            if let NodeBody::StreamScan(ref mut node) = node_body {
+                        visit_stream_node(node, |node_body| match node_body {
+                            NodeBody::StreamScan(ref mut node) => {
                                 node.rate_limit = rate_limit;
                                 actor_to_apply.push(actor.actor_id);
                             }
+                            NodeBody::Source(ref mut node) => {
+                                if let Some(ref mut node_inner) = node.source_inner {
+                                    node_inner.rate_limit = rate_limit;
+                                    actor_to_apply.push(actor.actor_id);
+                                }
+                            }
+                            _ => {}
                         })
                     };
                 }
@@ -1021,6 +1037,30 @@ impl FragmentManager {
                     .filter(|a| table_fragment.actor_status[a].state == ActorState::Running as i32)
                     .collect();
                 return Ok(running_actor_ids);
+            }
+        }
+
+        bail!("fragment not found: {}", fragment_id)
+    }
+
+    /// Get the actor ids, and each actor's upstream actor ids of the fragment with `fragment_id` with `Running` status.
+    pub async fn get_running_actors_and_upstream_of_fragment(
+        &self,
+        fragment_id: FragmentId,
+    ) -> MetaResult<HashSet<(ActorId, Vec<ActorId>)>> {
+        let map = &self.core.read().await.table_fragments;
+
+        for table_fragment in map.values() {
+            if let Some(fragment) = table_fragment.fragments.get(&fragment_id) {
+                let running_actors = fragment
+                    .actors
+                    .iter()
+                    .filter(|a| {
+                        table_fragment.actor_status[&a.actor_id].state == ActorState::Running as i32
+                    })
+                    .map(|a| (a.actor_id, a.upstream_actor_id.clone()))
+                    .collect();
+                return Ok(running_actors);
             }
         }
 

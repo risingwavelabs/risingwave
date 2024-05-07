@@ -15,14 +15,12 @@
 use std::ops::Bound::{self, *};
 use std::sync::Arc;
 
-use futures::{pin_mut, stream, StreamExt};
-use futures_async_stream::try_stream;
-use risingwave_common::array::{Array, ArrayImpl, Op, StreamChunk};
+use futures::stream;
+use risingwave_common::array::{Array, ArrayImpl, Op};
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
-use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::row::{self, once, OwnedRow, OwnedRow as RowData, Row};
+use risingwave_common::row::{self, once, OwnedRow as RowData};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::{
@@ -33,15 +31,11 @@ use risingwave_pb::expr::expr_node::Type::{
     GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual,
 };
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
-use super::error::StreamExecutorError;
-use super::monitor::StreamingMetrics;
-use super::{ActorContextRef, BoxedMessageStream, Execute, Executor, ExecutorInfo, Message};
-use crate::common::table::state_table::{StateTable, WatermarkCacheParameterizedStateTable};
-use crate::common::StreamChunkBuilder;
-use crate::executor::expect_first_barrier_from_aligned_stream;
+use crate::common::table::state_table::WatermarkCacheParameterizedStateTable;
+use crate::consistency::consistency_panic;
+use crate::executor::prelude::*;
 use crate::task::ActorEvalErrorReport;
 
 pub struct DynamicFilterExecutor<S: StateStore, const USE_WATERMARK_CACHE: bool> {
@@ -70,7 +64,8 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        info: &ExecutorInfo,
+        eval_error_report: ActorEvalErrorReport,
+        schema: Schema,
         source_l: Executor,
         source_r: Executor,
         key_l: usize,
@@ -82,14 +77,10 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         condition_always_relax: bool,
         cleaned_by_watermark: bool,
     ) -> Self {
-        let eval_error_report = ActorEvalErrorReport {
-            actor_context: ctx.clone(),
-            identity: Arc::from(info.identity.as_str()),
-        };
         Self {
             ctx,
             eval_error_report,
-            schema: info.schema.clone(),
+            schema,
             source_l: Some(source_l),
             source_r: Some(source_r),
             key_l,
@@ -365,10 +356,10 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                                 if Some(row.datum_at(0))
                                     != current_epoch_value.as_ref().map(ToDatumRef::to_datum_ref)
                                 {
-                                    bail!(
-                                        "Inconsistent Delete - current: {:?}, delete: {:?}",
-                                        current_epoch_value,
-                                        row
+                                    consistency_panic!(
+                                        current = ?current_epoch_value,
+                                        to_delete = ?row,
+                                        "inconsistent delete",
                                     );
                                 }
                                 current_epoch_value = None;
@@ -425,7 +416,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                         for res in stream::select_all(streams) {
                             let row = res?;
                             if self.condition_always_relax && !self.cleaned_by_watermark {
-                                unused_clean_hint = row[self.key_l].clone()
+                                unused_clean_hint.clone_from(&row[self.key_l])
                             }
                             if let Some(chunk) = stream_chunk_builder.append_row(
                                 // All rows have a single identity at this point
@@ -465,7 +456,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                             }
                         }
                         // Update the last committed row since it has changed
-                        last_committed_epoch_row = current_epoch_row.clone();
+                        last_committed_epoch_row.clone_from(&current_epoch_row);
                     }
 
                     self.left_table.commit(barrier.epoch).await?;
@@ -501,6 +492,7 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::*;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_storage::memory::MemoryStateStore;
@@ -555,13 +547,15 @@ mod tests {
         let (tx_r, source_r) = MockSource::channel();
         let source_r = source_r.into_executor(schema, vec![]);
 
+        let ctx = ActorContext::for_test(123);
+        let eval_error_report = ActorEvalErrorReport {
+            actor_context: ctx.clone(),
+            identity: "DynamicFilterExecutor".into(),
+        };
         let executor = DynamicFilterExecutor::<MemoryStateStore, false>::new(
-            ActorContext::for_test(123),
-            &ExecutorInfo {
-                schema: source_l.schema().clone(),
-                pk_indices: vec![0],
-                identity: "DynamicFilterExecutor".to_string(),
-            },
+            ctx,
+            eval_error_report,
+            source_l.schema().clone(),
             source_l,
             source_r,
             0,
@@ -611,15 +605,15 @@ mod tests {
             create_executor_inner(ExprNodeType::GreaterThan, mem_state.clone(), false).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         dynamic_filter.next_unwrap_ready_barrier()?;
 
         // push the 0th right chunk
         tx_r.push_chunk(chunk_r0);
 
-        tx_l.push_barrier(2, false);
-        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(test_epoch(2), false);
+        tx_r.push_barrier(test_epoch(2), false);
 
         // Get the barrier
         dynamic_filter.next_unwrap_ready_barrier()?;
@@ -634,8 +628,8 @@ mod tests {
             create_executor_inner(ExprNodeType::GreaterThan, mem_state.clone(), false).await;
 
         // push the recovery barrier for left and right
-        tx_l.push_barrier(2, false);
-        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(test_epoch(2), false);
+        tx_r.push_barrier(test_epoch(2), false);
 
         // Get recovery barrier
         dynamic_filter.next_unwrap_ready_barrier()?;
@@ -646,8 +640,8 @@ mod tests {
         tx_l.push_chunk(chunk_l1);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(3, false);
-        tx_r.push_barrier(3, false);
+        tx_l.push_barrier(test_epoch(3), false);
+        tx_r.push_barrier(test_epoch(3), false);
 
         let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
@@ -681,8 +675,8 @@ mod tests {
             create_executor_inner(ExprNodeType::GreaterThan, mem_state.clone(), false).await;
 
         // push recovery barrier
-        tx_l.push_barrier(3, false);
-        tx_r.push_barrier(3, false);
+        tx_l.push_barrier(test_epoch(3), false);
+        tx_r.push_barrier(test_epoch(3), false);
 
         // Get the barrier
         dynamic_filter.next_unwrap_ready_barrier()?;
@@ -703,8 +697,8 @@ mod tests {
         tx_r.push_chunk(chunk_r2);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(4, false);
-        tx_r.push_barrier(4, false);
+        tx_l.push_barrier(test_epoch(4), false);
+        tx_r.push_barrier(test_epoch(4), false);
 
         let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
@@ -722,8 +716,8 @@ mod tests {
         tx_r.push_chunk(chunk_r3);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(5, false);
-        tx_r.push_barrier(5, false);
+        tx_l.push_barrier(test_epoch(5), false);
+        tx_r.push_barrier(test_epoch(5), false);
 
         let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
@@ -767,8 +761,8 @@ mod tests {
             create_executor(ExprNodeType::GreaterThan).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         dynamic_filter.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
@@ -778,8 +772,8 @@ mod tests {
         tx_r.push_chunk(chunk_r1);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(2, false);
-        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(test_epoch(2), false);
+        tx_r.push_barrier(test_epoch(2), false);
 
         let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
@@ -809,8 +803,8 @@ mod tests {
         tx_r.push_chunk(chunk_r2);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(3, false);
-        tx_r.push_barrier(3, false);
+        tx_l.push_barrier(test_epoch(3), false);
+        tx_r.push_barrier(test_epoch(3), false);
 
         let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
@@ -828,8 +822,8 @@ mod tests {
         tx_r.push_chunk(chunk_r3);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(4, false);
-        tx_r.push_barrier(4, false);
+        tx_l.push_barrier(test_epoch(4), false);
+        tx_r.push_barrier(test_epoch(4), false);
 
         let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
@@ -873,8 +867,8 @@ mod tests {
             create_executor(ExprNodeType::GreaterThanOrEqual).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         dynamic_filter.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
@@ -884,8 +878,8 @@ mod tests {
         tx_r.push_chunk(chunk_r1);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(2, false);
-        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(test_epoch(2), false);
+        tx_r.push_barrier(test_epoch(2), false);
 
         let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
@@ -915,8 +909,8 @@ mod tests {
         tx_r.push_chunk(chunk_r2);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(3, false);
-        tx_r.push_barrier(3, false);
+        tx_l.push_barrier(test_epoch(3), false);
+        tx_r.push_barrier(test_epoch(3), false);
 
         let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
@@ -934,8 +928,8 @@ mod tests {
         tx_r.push_chunk(chunk_r3);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(4, false);
-        tx_r.push_barrier(4, false);
+        tx_l.push_barrier(test_epoch(4), false);
+        tx_r.push_barrier(test_epoch(4), false);
 
         let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
@@ -979,8 +973,8 @@ mod tests {
             create_executor(ExprNodeType::LessThan).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         dynamic_filter.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
@@ -990,8 +984,8 @@ mod tests {
         tx_r.push_chunk(chunk_r1);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(2, false);
-        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(test_epoch(2), false);
+        tx_r.push_barrier(test_epoch(2), false);
 
         let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
@@ -1021,8 +1015,8 @@ mod tests {
         tx_r.push_chunk(chunk_r2);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(3, false);
-        tx_r.push_barrier(3, false);
+        tx_l.push_barrier(test_epoch(3), false);
+        tx_r.push_barrier(test_epoch(3), false);
 
         let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
@@ -1040,8 +1034,8 @@ mod tests {
         tx_r.push_chunk(chunk_r3);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(4, false);
-        tx_r.push_barrier(4, false);
+        tx_l.push_barrier(test_epoch(4), false);
+        tx_r.push_barrier(test_epoch(4), false);
 
         let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
@@ -1085,8 +1079,8 @@ mod tests {
             create_executor(ExprNodeType::LessThanOrEqual).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         dynamic_filter.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
@@ -1096,8 +1090,8 @@ mod tests {
         tx_r.push_chunk(chunk_r1);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(2, false);
-        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(test_epoch(2), false);
+        tx_r.push_barrier(test_epoch(2), false);
 
         let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
@@ -1127,8 +1121,8 @@ mod tests {
         tx_r.push_chunk(chunk_r2);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(3, false);
-        tx_r.push_barrier(3, false);
+        tx_l.push_barrier(test_epoch(3), false);
+        tx_r.push_barrier(test_epoch(3), false);
 
         let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
@@ -1146,8 +1140,8 @@ mod tests {
         tx_r.push_chunk(chunk_r3);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(4, false);
-        tx_r.push_barrier(4, false);
+        tx_l.push_barrier(test_epoch(4), false);
+        tx_r.push_barrier(test_epoch(4), false);
 
         let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
@@ -1211,16 +1205,16 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
         dynamic_filter.next_unwrap_ready_barrier()?;
 
         // push the 1st right chunk
         tx_r.push_chunk(chunk_r1);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(2, false);
-        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(test_epoch(2), false);
+        tx_r.push_barrier(test_epoch(2), false);
 
         // Get the barrier
         dynamic_filter.next_unwrap_ready_barrier()?;
@@ -1238,8 +1232,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        tx_l.push_barrier(3, false);
-        tx_r.push_barrier(3, false);
+        tx_l.push_barrier(test_epoch(3), false);
+        tx_r.push_barrier(test_epoch(3), false);
 
         // Get the barrier
         dynamic_filter.next_unwrap_ready_barrier()?;
@@ -1260,8 +1254,8 @@ mod tests {
             )
         );
         // push the init barrier for left and right
-        tx_l.push_barrier(4, false);
-        tx_r.push_barrier(4, false);
+        tx_l.push_barrier(test_epoch(4), false);
+        tx_r.push_barrier(test_epoch(4), false);
         // Get the barrier
         dynamic_filter.next_unwrap_ready_barrier()?;
 
@@ -1274,8 +1268,8 @@ mod tests {
         tx_r.push_chunk(chunk_r2);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(5, false);
-        tx_r.push_barrier(5, false);
+        tx_l.push_barrier(test_epoch(5), false);
+        tx_r.push_barrier(test_epoch(5), false);
 
         let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
@@ -1289,8 +1283,8 @@ mod tests {
 
         // Get the barrier
         dynamic_filter.next_unwrap_ready_barrier()?;
-        tx_l.push_barrier(6, false);
-        tx_r.push_barrier(6, false);
+        tx_l.push_barrier(test_epoch(6), false);
+        tx_r.push_barrier(test_epoch(6), false);
         // Get the barrier
         dynamic_filter.next_unwrap_ready_barrier()?;
         // This part test need change the `DefaultWatermarkBufferStrategy` to `super::watermark::WatermarkNoBuffer`

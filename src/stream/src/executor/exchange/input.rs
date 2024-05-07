@@ -21,19 +21,20 @@ use futures_async_stream::try_stream;
 use pin_project::pin_project;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_pb::task_service::{permits, GetStreamResponse};
-use risingwave_rpc_client::error::TonicStatusWrapper;
 use risingwave_rpc_client::ComputeClientPool;
-use thiserror_ext::AsReport;
 
+use super::error::ExchangeChannelClosed;
 use super::permit::Receiver;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::*;
-use crate::task::{FragmentId, SharedContext, UpDownActorIds, UpDownFragmentIds};
+use crate::executor::prelude::*;
+use crate::task::{
+    FragmentId, LocalBarrierManager, SharedContext, UpDownActorIds, UpDownFragmentIds,
+};
 
-/// `Input` provides an interface for [`MergeExecutor`] and [`ReceiverExecutor`] to receive data
-/// from upstream actors.
+/// `Input` provides an interface for [`MergeExecutor`](crate::executor::MergeExecutor) and
+/// [`ReceiverExecutor`](crate::executor::ReceiverExecutor) to receive data from upstream actors.
 pub trait Input: MessageStream {
     /// The upstream actor id.
     fn actor_id(&self) -> ActorId;
@@ -80,6 +81,9 @@ impl LocalInput {
         while let Some(msg) = channel.recv().verbose_instrument_await(span.clone()).await {
             yield msg;
         }
+        // Always emit an error outside the loop. This is because we use barrier as the control
+        // message to stop the stream. Reaching here means the channel is closed unexpectedly.
+        Err(ExchangeChannelClosed::local_input(actor_id))?
     }
 }
 
@@ -112,6 +116,7 @@ impl RemoteInput {
     /// Create a remote input from compute client and related info. Should provide the corresponding
     /// compute client of where the actor is placed.
     pub fn new(
+        local_barrier_manager: LocalBarrierManager,
         client_pool: ComputeClientPool,
         upstream_addr: HostAddr,
         up_down_ids: UpDownActorIds,
@@ -124,6 +129,7 @@ impl RemoteInput {
         Self {
             actor_id,
             inner: Self::run(
+                local_barrier_manager,
                 client_pool,
                 upstream_addr,
                 up_down_ids,
@@ -136,6 +142,7 @@ impl RemoteInput {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn run(
+        local_barrier_manager: LocalBarrierManager,
         client_pool: ComputeClientPool,
         upstream_addr: HostAddr,
         up_down_ids: UpDownActorIds,
@@ -190,18 +197,32 @@ impl RemoteInput {
                             .context("RemoteInput backward permits channel closed.")?;
                     }
 
-                    let msg = msg_res.context("RemoteInput decode message error")?;
+                    let mut msg = msg_res.context("RemoteInput decode message error")?;
+
+                    // Read barrier mutation from local barrier manager and attach it to the barrier message.
+                    if cfg!(not(test)) {
+                        if let Message::Barrier(barrier) = &mut msg {
+                            assert!(
+                                barrier.mutation.is_none(),
+                                "Mutation should be erased in remote side"
+                            );
+                            let mutation = local_barrier_manager
+                                .read_barrier_mutation(barrier)
+                                .await
+                                .context("Read barrier mutation error")?;
+                            barrier.mutation = mutation;
+                        }
+                    }
                     yield msg;
                 }
-                Err(e) => {
-                    // TODO(error-handling): maintain the source chain
-                    return Err(StreamExecutorError::channel_closed(format!(
-                        "RemoteInput tonic error: {}",
-                        TonicStatusWrapper::from(e).as_report()
-                    )));
-                }
+
+                Err(e) => Err(ExchangeChannelClosed::remote_input(up_down_ids.0, Some(e)))?,
             }
         }
+
+        // Always emit an error outside the loop. This is because we use barrier as the control
+        // message to stop the stream. Reaching here means the channel is closed unexpectedly.
+        Err(ExchangeChannelClosed::remote_input(up_down_ids.0, None))?
     }
 }
 
@@ -242,6 +263,7 @@ pub(crate) fn new_input(
         .boxed_input()
     } else {
         RemoteInput::new(
+            context.local_barrier_manager.clone(),
             context.compute_client_pool.clone(),
             upstream_addr,
             (upstream_actor_id, actor_id),

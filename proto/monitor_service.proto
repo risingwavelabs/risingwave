@@ -11,6 +11,8 @@ message StackTraceResponse {
   map<uint32, string> actor_traces = 1;
   map<string, string> rpc_traces = 2;
   map<string, string> compaction_task_traces = 3;
+  map<uint64, string> inflight_barrier_traces = 4;
+  map<uint32, string> barrier_worker_state = 5;
 }
 
 // CPU profiling

@@ -56,6 +56,11 @@ pub struct IcebergProperties {
     pub database_name: Option<String>,
     #[serde(rename = "table.name")]
     pub table_name: String,
+    // For jdbc catalog
+    #[serde(rename = "catalog.jdbc.user")]
+    pub jdbc_user: Option<String>,
+    #[serde(rename = "catalog.jdbc.password")]
+    pub jdbc_password: Option<String>,
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
@@ -63,6 +68,13 @@ pub struct IcebergProperties {
 
 impl IcebergProperties {
     pub fn to_iceberg_config(&self) -> IcebergConfig {
+        let mut java_catalog_props = HashMap::new();
+        if let Some(jdbc_user) = self.jdbc_user.clone() {
+            java_catalog_props.insert("jdbc.user".to_string(), jdbc_user);
+        }
+        if let Some(jdbc_password) = self.jdbc_password.clone() {
+            java_catalog_props.insert("jdbc.password".to_string(), jdbc_password);
+        }
         IcebergConfig {
             catalog_name: self.catalog_name.clone(),
             database_name: self.database_name.clone(),
@@ -74,6 +86,7 @@ impl IcebergProperties {
             access_key: self.s3_access.clone(),
             secret_key: self.s3_secret.clone(),
             region: self.region.clone(),
+            java_catalog_props,
             ..Default::default()
         }
     }
@@ -113,7 +126,7 @@ impl SplitMetaData for IcebergSplit {
         serde_json::to_value(self.clone()).unwrap().into()
     }
 
-    fn update_with_offset(&mut self, _start_offset: String) -> ConnectorResult<()> {
+    fn update_offset(&mut self, _last_seen_offset: String) -> ConnectorResult<()> {
         unimplemented!()
     }
 }
@@ -144,18 +157,68 @@ impl SplitEnumerator for IcebergSplitEnumerator {
     }
 }
 
+pub enum IcebergTimeTravelInfo {
+    Version(i64),
+    TimestampMs(i64),
+}
+
 impl IcebergSplitEnumerator {
     pub async fn list_splits_batch(
         &self,
+        time_traval_info: Option<IcebergTimeTravelInfo>,
         batch_parallelism: usize,
     ) -> ConnectorResult<Vec<IcebergSplit>> {
         if batch_parallelism == 0 {
             bail!("Batch parallelism is 0. Cannot split the iceberg files.");
         }
         let table = self.config.load_table().await?;
-        let snapshot_id = table.current_table_metadata().current_snapshot_id.unwrap();
+        let snapshot_id = match time_traval_info {
+            Some(IcebergTimeTravelInfo::Version(version)) => {
+                let Some(snapshot) = table.current_table_metadata().snapshot(version) else {
+                    bail!("Cannot find the snapshot id in the iceberg table.");
+                };
+                snapshot.snapshot_id
+            }
+            Some(IcebergTimeTravelInfo::TimestampMs(timestamp)) => {
+                match &table.current_table_metadata().snapshots {
+                    Some(snapshots) => {
+                        let snapshot = snapshots
+                            .iter()
+                            .filter(|snapshot| snapshot.timestamp_ms <= timestamp)
+                            .max_by_key(|snapshot| snapshot.timestamp_ms);
+                        match snapshot {
+                            Some(snapshot) => snapshot.snapshot_id,
+                            None => {
+                                // convert unix time to human readable time
+                                let time = chrono::NaiveDateTime::from_timestamp_millis(timestamp);
+                                if time.is_some() {
+                                    bail!("Cannot find a snapshot older than {}", time.unwrap());
+                                } else {
+                                    bail!("Cannot find a snapshot");
+                                }
+                            }
+                        }
+                    }
+                    None => {
+                        bail!("Cannot find the snapshots in the iceberg table.");
+                    }
+                }
+            }
+            None => match table.current_table_metadata().current_snapshot_id {
+                Some(snapshot_id) => snapshot_id,
+                None => bail!("Cannot find the current snapshot id in the iceberg table."),
+            },
+        };
         let mut files = vec![];
-        for file in table.current_data_files().await? {
+        for file in table
+            .data_files_of_snapshot(
+                table
+                    .current_table_metadata()
+                    .snapshot(snapshot_id)
+                    .expect("snapshot must exists"),
+            )
+            .await?
+        {
             if file.content != DataContentType::Data {
                 bail!("Reading iceberg table with delete files is unsupported. Please try to compact the table first.");
             }

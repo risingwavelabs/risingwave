@@ -12,22 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::size_of;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::compact_task::{PbTaskStatus, PbTaskType, TaskStatus, TaskType};
+use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version::PbLevels;
-use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
+use risingwave_pb::hummock::hummock_version_delta::{ChangeLogDelta, PbGroupDeltas};
 use risingwave_pb::hummock::{
-    BloomFilterType, LevelType, PbCompactTask, PbHummockVersion, PbHummockVersionDelta,
-    PbInputLevel, PbKeyRange, PbLevel, PbLevelType, PbOverlappingLevel, PbSstableInfo,
-    PbValidationTask, TableOption, TableSchema,
+    BloomFilterType, LevelType, PbCompactTask, PbCompactTaskAssignment, PbHummockVersion,
+    PbHummockVersionDelta, PbInputLevel, PbKeyRange, PbLevel, PbLevelType, PbOverlappingLevel,
+    PbSstableInfo, PbValidationTask, TableOption, TableSchema,
 };
 use serde::Serialize;
 
+use crate::change_log::TableChangeLog;
 use crate::key_range::KeyRange;
 use crate::table_watermark::TableWatermarks;
 use crate::{CompactionGroupId, HummockSstableObjectId, ProtoSerializeSizeEstimatedExt};
@@ -340,7 +343,8 @@ pub struct HummockVersion {
     pub levels: HashMap<CompactionGroupId, Levels>,
     pub max_committed_epoch: u64,
     pub safe_epoch: u64,
-    pub table_watermarks: HashMap<TableId, TableWatermarks>,
+    pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
+    pub table_change_log: HashMap<TableId, TableChangeLog>,
 }
 
 impl Default for HummockVersion {
@@ -397,7 +401,17 @@ impl From<&PbHummockVersion> for HummockVersion {
                 .map(|(table_id, table_watermark)| {
                     (
                         TableId::new(*table_id),
-                        TableWatermarks::from(table_watermark),
+                        Arc::new(TableWatermarks::from(table_watermark)),
+                    )
+                })
+                .collect(),
+            table_change_log: pb_version
+                .table_change_logs
+                .iter()
+                .map(|(table_id, change_log)| {
+                    (
+                        TableId::new(*table_id),
+                        TableChangeLog::from_protobuf(change_log),
                     )
                 })
                 .collect(),
@@ -419,7 +433,12 @@ impl From<&HummockVersion> for PbHummockVersion {
             table_watermarks: version
                 .table_watermarks
                 .iter()
-                .map(|(table_id, watermark)| (table_id.table_id, watermark.into()))
+                .map(|(table_id, watermark)| (table_id.table_id, watermark.as_ref().into()))
+                .collect(),
+            table_change_logs: version
+                .table_change_log
+                .iter()
+                .map(|(table_id, change_log)| (table_id.table_id, change_log.to_protobuf()))
                 .collect(),
         }
     }
@@ -439,7 +458,13 @@ impl From<HummockVersion> for PbHummockVersion {
             table_watermarks: version
                 .table_watermarks
                 .into_iter()
-                .map(|(table_id, watermark)| (table_id.table_id, watermark.into()))
+                .map(|(table_id, watermark)| (table_id.table_id, watermark.as_ref().into()))
+                .collect(),
+
+            table_change_logs: version
+                .table_change_log
+                .into_iter()
+                .map(|(table_id, change_log)| (table_id.table_id, change_log.to_protobuf()))
                 .collect(),
         }
     }
@@ -453,9 +478,9 @@ pub struct HummockVersionDelta {
     pub max_committed_epoch: u64,
     pub safe_epoch: u64,
     pub trivial_move: bool,
-    pub gc_object_ids: Vec<HummockSstableObjectId>,
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
     pub removed_table_ids: Vec<TableId>,
+    pub change_log_delta: HashMap<TableId, ChangeLogDelta>,
 }
 
 impl Default for HummockVersionDelta {
@@ -478,6 +503,41 @@ impl HummockVersionDelta {
     }
 }
 
+impl HummockVersionDelta {
+    /// Get the newly added object ids from the version delta.
+    ///
+    /// Note: the result can be false positive because we only collect the set of sst object ids in the `inserted_table_infos`,
+    /// but it is possible that the object is moved or split from other compaction groups or levels.
+    pub fn newly_added_object_ids(&self) -> HashSet<HummockSstableObjectId> {
+        self.group_deltas
+            .values()
+            .flat_map(|group_deltas| {
+                group_deltas.group_deltas.iter().flat_map(|group_delta| {
+                    group_delta.delta_type.iter().flat_map(|delta_type| {
+                        static EMPTY_VEC: Vec<PbSstableInfo> = Vec::new();
+                        let sst_slice = match delta_type {
+                            DeltaType::IntraLevel(level_delta) => &level_delta.inserted_table_infos,
+                            DeltaType::GroupConstruct(_)
+                            | DeltaType::GroupDestroy(_)
+                            | DeltaType::GroupMetaChange(_)
+                            | DeltaType::GroupTableChange(_) => &EMPTY_VEC,
+                        };
+                        sst_slice.iter().map(|sst| sst.object_id)
+                    })
+                })
+            })
+            .chain(self.change_log_delta.values().flat_map(|delta| {
+                let new_log = delta.new_log.as_ref().unwrap();
+                new_log
+                    .new_value
+                    .iter()
+                    .map(|sst| sst.object_id)
+                    .chain(new_log.old_value.iter().map(|sst| sst.object_id))
+            }))
+            .collect()
+    }
+}
+
 impl From<&PbHummockVersionDelta> for HummockVersionDelta {
     fn from(pb_version_delta: &PbHummockVersionDelta) -> Self {
         Self {
@@ -487,7 +547,6 @@ impl From<&PbHummockVersionDelta> for HummockVersionDelta {
             max_committed_epoch: pb_version_delta.max_committed_epoch,
             safe_epoch: pb_version_delta.safe_epoch,
             trivial_move: pb_version_delta.trivial_move,
-            gc_object_ids: pb_version_delta.gc_object_ids.clone(),
             new_table_watermarks: pb_version_delta
                 .new_table_watermarks
                 .iter()
@@ -499,6 +558,19 @@ impl From<&PbHummockVersionDelta> for HummockVersionDelta {
                 .removed_table_ids
                 .iter()
                 .map(|table_id| TableId::new(*table_id))
+                .collect(),
+            change_log_delta: pb_version_delta
+                .change_log_delta
+                .iter()
+                .map(|(table_id, log_delta)| {
+                    (
+                        TableId::new(*table_id),
+                        ChangeLogDelta {
+                            new_log: log_delta.new_log.clone(),
+                            truncate_epoch: log_delta.truncate_epoch,
+                        },
+                    )
+                })
                 .collect(),
         }
     }
@@ -513,7 +585,6 @@ impl From<&HummockVersionDelta> for PbHummockVersionDelta {
             max_committed_epoch: version_delta.max_committed_epoch,
             safe_epoch: version_delta.safe_epoch,
             trivial_move: version_delta.trivial_move,
-            gc_object_ids: version_delta.gc_object_ids.clone(),
             new_table_watermarks: version_delta
                 .new_table_watermarks
                 .iter()
@@ -523,6 +594,11 @@ impl From<&HummockVersionDelta> for PbHummockVersionDelta {
                 .removed_table_ids
                 .iter()
                 .map(|table_id| table_id.table_id)
+                .collect(),
+            change_log_delta: version_delta
+                .change_log_delta
+                .iter()
+                .map(|(table_id, log_delta)| (table_id.table_id, log_delta.clone()))
                 .collect(),
         }
     }
@@ -537,7 +613,6 @@ impl From<HummockVersionDelta> for PbHummockVersionDelta {
             max_committed_epoch: version_delta.max_committed_epoch,
             safe_epoch: version_delta.safe_epoch,
             trivial_move: version_delta.trivial_move,
-            gc_object_ids: version_delta.gc_object_ids,
             new_table_watermarks: version_delta
                 .new_table_watermarks
                 .into_iter()
@@ -547,6 +622,12 @@ impl From<HummockVersionDelta> for PbHummockVersionDelta {
                 .removed_table_ids
                 .into_iter()
                 .map(|table_id| table_id.table_id)
+                .collect(),
+
+            change_log_delta: version_delta
+                .change_log_delta
+                .into_iter()
+                .map(|(table_id, log_delta)| (table_id.table_id, log_delta))
                 .collect(),
         }
     }
@@ -561,7 +642,6 @@ impl From<PbHummockVersionDelta> for HummockVersionDelta {
             max_committed_epoch: pb_version_delta.max_committed_epoch,
             safe_epoch: pb_version_delta.safe_epoch,
             trivial_move: pb_version_delta.trivial_move,
-            gc_object_ids: pb_version_delta.gc_object_ids,
             new_table_watermarks: pb_version_delta
                 .new_table_watermarks
                 .into_iter()
@@ -571,6 +651,19 @@ impl From<PbHummockVersionDelta> for HummockVersionDelta {
                 .removed_table_ids
                 .into_iter()
                 .map(TableId::new)
+                .collect(),
+            change_log_delta: pb_version_delta
+                .change_log_delta
+                .iter()
+                .map(|(table_id, log_delta)| {
+                    (
+                        TableId::new(*table_id),
+                        ChangeLogDelta {
+                            new_log: log_delta.new_log.clone(),
+                            truncate_epoch: log_delta.truncate_epoch,
+                        },
+                    )
+                })
                 .collect(),
         }
     }
@@ -754,6 +847,10 @@ impl SstableInfo {
     pub fn get_file_size(&self) -> u64 {
         self.file_size
     }
+
+    pub fn get_table_ids(&self) -> &Vec<u32> {
+        &self.table_ids
+    }
 }
 
 #[derive(Clone, PartialEq, Default, Debug, Serialize)]
@@ -845,7 +942,7 @@ impl InputLevel {
     }
 }
 
-#[derive(Clone, PartialEq, Default)]
+#[derive(Clone, PartialEq, Default, Debug)]
 pub struct CompactTask {
     /// SSTs to be compacted, which will be removed from LSM after compaction
     pub input_ssts: Vec<InputLevel>,
@@ -1204,3 +1301,48 @@ impl ProtoSerializeSizeEstimatedExt for ValidationTask {
             + size_of::<u64>()
     }
 }
+
+// #[derive(Clone, PartialEq, Default, Debug)]
+// pub struct CompactTaskAssignment {
+//     pub compact_task: Option<CompactTask>,
+//     pub context_id: u32,
+// }
+
+// impl From<PbCompactTaskAssignment> for CompactTaskAssignment {
+//     fn from(pb_compact_task_assignment: PbCompactTaskAssignment) -> Self {
+//         Self {
+//             compact_task: if pb_compact_task_assignment.compact_task.is_some() {
+//                 Some(CompactTask::from(
+//                     pb_compact_task_assignment.compact_task.unwrap(),
+//                 ))
+//             } else {
+//                 None
+//             },
+//             context_id: pb_compact_task_assignment.context_id,
+//         }
+//     }
+// }
+
+// impl From<&PbCompactTaskAssignment> for CompactTaskAssignment {
+//     fn from(pb_compact_task_assignment: &PbCompactTaskAssignment) -> Self {
+//         Self {
+//             compact_task: if pb_compact_task_assignment.compact_task.is_some() {
+//                 Some(CompactTask::from(
+//                     pb_compact_task_assignment.compact_task.as_ref().unwrap(),
+//                 ))
+//             } else {
+//                 None
+//             },
+//             context_id: pb_compact_task_assignment.context_id,
+//         }
+//     }
+// }
+
+// impl From<CompactTaskAssignment> for PbCompactTaskAssignment {
+//     fn from(compact_task_assignment: CompactTaskAssignment) -> Self {
+//         Self {
+//             compact_task: compact_task_assignment.compact_task.map(|task| task.into()),
+//             context_id: compact_task_assignment.context_id,
+//         }
+//     }
+// }

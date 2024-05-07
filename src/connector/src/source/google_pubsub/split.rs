@@ -24,14 +24,14 @@ pub struct PubsubSplit {
     pub(crate) subscription: String,
 
     /// `start_offset` is a numeric timestamp.
-    /// When not `None`, the PubsubReader seeks to the timestamp described by the start_offset.
-    /// These offsets are taken from the `offset` property of the SourceMessage yielded by the
+    /// When not `None`, the `PubsubReader` seeks to the timestamp described by the `start_offset`.
+    /// These offsets are taken from the `offset` property of the `SourceMessage` yielded by the
     /// pubsub reader.
     pub(crate) start_offset: Option<String>,
 
     /// `stop_offset` is a numeric timestamp.
-    /// When not `None`, the PubsubReader stops reading messages when the `offset` property of
-    /// the SourceMessage is greater than or equal to the stop_offset.
+    /// When not `None`, the `PubsubReader` stops reading messages when the `offset` property of
+    /// the `SourceMessage` is greater than or equal to the `stop_offset`.
     pub(crate) stop_offset: Option<String>,
 }
 
@@ -48,8 +48,8 @@ impl SplitMetaData for PubsubSplit {
         format!("{}-{}", self.subscription, self.index).into()
     }
 
-    fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
-        self.start_offset = Some(start_offset);
+    fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
+        self.start_offset = Some(last_seen_offset);
         Ok(())
     }
 }

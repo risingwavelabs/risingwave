@@ -19,6 +19,7 @@ use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
+use itertools::Itertools;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::backup_restore::RestoreOpts;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
@@ -27,6 +28,7 @@ use thiserror_ext::AsReport;
 use crate::cmd_impl::hummock::{
     build_compaction_config_vec, list_pinned_snapshots, list_pinned_versions,
 };
+use crate::cmd_impl::meta::EtcdBackend;
 use crate::cmd_impl::throttle::apply_throttle;
 use crate::common::CtlContext;
 
@@ -139,6 +141,18 @@ pub enum DebugCommands {
         #[command(flatten)]
         common: DebugCommon,
     },
+    /// Fix table fragments by cleaning up some un-exist fragments, which happens when the upstream
+    /// streaming job is failed to create and the fragments are not cleaned up due to some unidentified issues.
+    FixDirtyUpstreams {
+        #[command(flatten)]
+        common: DebugCommon,
+
+        #[clap(long)]
+        table_id: u32,
+
+        #[clap(long, value_delimiter = ',')]
+        dirty_fragment_ids: Vec<u32>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -180,7 +194,7 @@ enum HummockCommands {
         data_dir: Option<String>,
     },
     SstDump(SstDumpArgs),
-    /// trigger a targeted compaction through compaction_group_id
+    /// trigger a targeted compaction through `compaction_group_id`
     TriggerManualCompaction {
         #[clap(short, long = "compaction-group-id", default_value_t = 2)]
         compaction_group_id: u64,
@@ -195,7 +209,7 @@ enum HummockCommands {
         sst_ids: Vec<u64>,
     },
     /// trigger a full GC for SSTs that is not in version and with timestamp <= now -
-    /// sst_retention_time_sec.
+    /// `sst_retention_time_sec`.
     TriggerFullGc {
         #[clap(short, long = "sst_retention_time_sec", default_value_t = 259200)]
         sst_retention_time_sec: u64,
@@ -263,7 +277,7 @@ enum HummockCommands {
         #[clap(long)]
         compaction_group_id: u64,
     },
-    /// Validate the current HummockVersion.
+    /// Validate the current `HummockVersion`.
     ValidateVersion,
     /// Rebuild table stats
     RebuildTableStats,
@@ -275,7 +289,7 @@ enum HummockCommands {
         /// The ident of the archive file in object store. It's also the first Hummock version id of this archive.
         #[clap(long, value_delimiter = ',')]
         archive_ids: Vec<u64>,
-        /// The data directory of Hummock storage, where SSTable objects can be found.
+        /// The data directory of Hummock storage, where `SSTable` objects can be found.
         #[clap(long)]
         data_dir: String,
         /// KVs that are matched with the user key are printed.
@@ -286,7 +300,7 @@ enum HummockCommands {
         /// The ident of the archive file in object store. It's also the first Hummock version id of this archive.
         #[clap(long, value_delimiter = ',')]
         archive_ids: Vec<u64>,
-        /// The data directory of Hummock storage, where SSTable objects can be found.
+        /// The data directory of Hummock storage, where `SSTable` objects can be found.
         #[clap(long)]
         data_dir: String,
         /// Version deltas that are related to the SST id are printed.
@@ -317,7 +331,7 @@ enum TableCommands {
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct ScaleHorizonCommands {
-    /// The worker that needs to be excluded during scheduling, worker_id and worker_host:worker_port are both
+    /// The worker that needs to be excluded during scheduling, `worker_id` and `worker_host:worker_port` are both
     /// supported
     #[clap(
         long,
@@ -326,7 +340,7 @@ pub struct ScaleHorizonCommands {
     )]
     exclude_workers: Option<Vec<String>>,
 
-    /// The worker that needs to be included during scheduling, worker_id and worker_host:worker_port are both
+    /// The worker that needs to be included during scheduling, `worker_id` and `worker_host:worker_port` are both
     /// supported
     #[clap(
         long,
@@ -337,7 +351,7 @@ pub struct ScaleHorizonCommands {
 
     /// The target parallelism, currently, it is used to limit the target parallelism and only
     /// takes effect when the actual parallelism exceeds this value. Can be used in conjunction
-    /// with exclude/include_workers.
+    /// with `exclude/include_workers`.
     #[clap(long)]
     target_parallelism: Option<u32>,
 
@@ -371,7 +385,7 @@ pub struct ScaleVerticalCommands {
     #[command(flatten)]
     common: ScaleCommon,
 
-    /// The worker that needs to be scheduled, worker_id and worker_host:worker_port are both
+    /// The worker that needs to be scheduled, `worker_id` and `worker_host:worker_port` are both
     /// supported
     #[clap(
         long,
@@ -467,7 +481,7 @@ enum MetaCommands {
         /// Show the plan only, no actual operation
         #[clap(long, default_value = "false")]
         dry_run: bool,
-        /// Resolve NO_SHUFFLE upstream
+        /// Resolve `NO_SHUFFLE` upstream
         #[clap(long, default_value = "false")]
         resolve_no_shuffle: bool,
     },
@@ -492,7 +506,7 @@ enum MetaCommands {
 
     /// Unregister workers from the cluster
     UnregisterWorkers {
-        /// The workers that needs to be unregistered, worker_id and worker_host:worker_port are both supported
+        /// The workers that needs to be unregistered, `worker_id` and `worker_host:worker_port` are both supported
         #[clap(
             long,
             required = true,
@@ -520,6 +534,29 @@ enum MetaCommands {
         /// If privatelink is used, specify `connection.id` instead of `connection.name`
         #[clap(long)]
         props: String,
+    },
+
+    /// Migration from etcd meta store to sql backend
+    Migration {
+        #[clap(
+            long,
+            required = true,
+            value_delimiter = ',',
+            value_name = "host:port, ..."
+        )]
+        etcd_endpoints: String,
+        #[clap(long, value_name = "username:password")]
+        etcd_user_password: Option<String>,
+
+        #[clap(
+            long,
+            required = true,
+            value_name = "postgres://user:password@host:port/dbname or mysql://user:password@host:port/dbname or sqlite://path?mode=rwc"
+        )]
+        sql_endpoint: String,
+
+        #[clap(short = 'f', long, default_value_t = false)]
+        force_clean: bool,
     },
 }
 
@@ -781,6 +818,30 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::ValidateSource { props }) => {
             cmd_impl::meta::validate_source(context, props).await?
         }
+        Commands::Meta(MetaCommands::Migration {
+            etcd_endpoints,
+            etcd_user_password,
+            sql_endpoint,
+            force_clean,
+        }) => {
+            let credentials = match etcd_user_password {
+                Some(user_pwd) => {
+                    let user_pwd_vec = user_pwd.splitn(2, ':').collect_vec();
+                    if user_pwd_vec.len() != 2 {
+                        return Err(anyhow::Error::msg(format!(
+                            "invalid etcd user password: {user_pwd}"
+                        )));
+                    }
+                    Some((user_pwd_vec[0].to_string(), user_pwd_vec[1].to_string()))
+                }
+                None => None,
+            };
+            let etcd_backend = EtcdBackend {
+                endpoints: etcd_endpoints.split(',').map(|s| s.to_string()).collect(),
+                credentials,
+            };
+            cmd_impl::meta::migrate(etcd_backend, sql_endpoint, force_clean).await?
+        }
         Commands::AwaitTree => cmd_impl::await_tree::dump(context).await?,
         Commands::Profile(ProfileCommands::Cpu { sleep }) => {
             cmd_impl::profile::cpu_profile(context, sleep).await?
@@ -804,6 +865,11 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 .await?
         }
         Commands::Debug(DebugCommands::Dump { common }) => cmd_impl::debug::dump(common).await?,
+        Commands::Debug(DebugCommands::FixDirtyUpstreams {
+            common,
+            table_id,
+            dirty_fragment_ids,
+        }) => cmd_impl::debug::fix_table_fragments(common, table_id, dirty_fragment_ids).await?,
         Commands::Throttle(ThrottleCommands::Source(args)) => {
             apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Source, args).await?
         }

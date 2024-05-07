@@ -21,13 +21,16 @@ pub mod test_utils;
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 pub use column::*;
 pub use external_table::*;
+use futures::stream::BoxStream;
 pub use internal_table::*;
 use parse_display::Display;
 pub use physical_table::*;
-use risingwave_pb::catalog::HandleConflictBehavior as PbHandleConflictBehavior;
+use risingwave_pb::catalog::{
+    CreateType as PbCreateType, HandleConflictBehavior as PbHandleConflictBehavior,
+    StreamJobStatus as PbStreamJobStatus,
+};
 use risingwave_pb::plan_common::ColumnDescVersion;
 pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
 
@@ -61,7 +64,9 @@ pub const DEFAULT_SUPER_USER_FOR_PG: &str = "postgres";
 pub const DEFAULT_SUPER_USER_FOR_PG_ID: u32 = 2;
 
 pub const NON_RESERVED_USER_ID: i32 = 11;
-pub const NON_RESERVED_SYS_CATALOG_ID: i32 = 1001;
+
+pub const MAX_SYS_CATALOG_NUM: i32 = 5000;
+pub const SYS_CATALOG_START_ID: i32 = i32::MAX - MAX_SYS_CATALOG_NUM;
 
 pub const OBJECT_ID_PLACEHOLDER: u32 = u32::MAX - 1;
 
@@ -144,9 +149,9 @@ pub fn cdc_table_name_column_desc() -> ColumnDesc {
 }
 
 /// The local system catalog reader in the frontend node.
-#[async_trait]
 pub trait SysCatalogReader: Sync + Send + 'static {
-    async fn read_table(&self, table_id: &TableId) -> Result<DataChunk, BoxedError>;
+    /// Reads the data of the system catalog table.
+    fn read_table(&self, table_id: TableId) -> BoxStream<'_, Result<DataChunk, BoxedError>>;
 }
 
 pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;
@@ -438,6 +443,7 @@ pub enum ConflictBehavior {
     NoCheck,
     Overwrite,
     IgnoreConflict,
+    DoUpdateIfNotNull,
 }
 
 impl ConflictBehavior {
@@ -445,6 +451,7 @@ impl ConflictBehavior {
         match tb_conflict_behavior {
             PbHandleConflictBehavior::Overwrite => ConflictBehavior::Overwrite,
             PbHandleConflictBehavior::Ignore => ConflictBehavior::IgnoreConflict,
+            PbHandleConflictBehavior::DoUpdateIfNotNull => ConflictBehavior::DoUpdateIfNotNull,
             // This is for backward compatibility, in the previous version
             // `HandleConflictBehavior::Unspecified` represented `NoCheck`, so just treat it as `NoCheck`.
             PbHandleConflictBehavior::NoCheck | PbHandleConflictBehavior::Unspecified => {
@@ -458,6 +465,7 @@ impl ConflictBehavior {
             ConflictBehavior::NoCheck => PbHandleConflictBehavior::NoCheck,
             ConflictBehavior::Overwrite => PbHandleConflictBehavior::Overwrite,
             ConflictBehavior::IgnoreConflict => PbHandleConflictBehavior::Ignore,
+            ConflictBehavior::DoUpdateIfNotNull => PbHandleConflictBehavior::DoUpdateIfNotNull,
         }
     }
 
@@ -466,6 +474,58 @@ impl ConflictBehavior {
             ConflictBehavior::NoCheck => "NoCheck".to_string(),
             ConflictBehavior::Overwrite => "Overwrite".to_string(),
             ConflictBehavior::IgnoreConflict => "IgnoreConflict".to_string(),
+            ConflictBehavior::DoUpdateIfNotNull => "DoUpdateIfNotNull".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Display, Hash, PartialOrd, PartialEq, Eq, Ord)]
+pub enum StreamJobStatus {
+    #[default]
+    Creating,
+    Created,
+}
+
+impl StreamJobStatus {
+    pub fn from_proto(stream_job_status: PbStreamJobStatus) -> Self {
+        match stream_job_status {
+            PbStreamJobStatus::Creating => StreamJobStatus::Creating,
+            PbStreamJobStatus::Created | PbStreamJobStatus::Unspecified => StreamJobStatus::Created,
+        }
+    }
+
+    pub fn to_proto(self) -> PbStreamJobStatus {
+        match self {
+            StreamJobStatus::Creating => PbStreamJobStatus::Creating,
+            StreamJobStatus::Created => PbStreamJobStatus::Created,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Display, Hash, PartialOrd, PartialEq, Eq, Ord)]
+pub enum CreateType {
+    Foreground,
+    Background,
+}
+
+impl Default for CreateType {
+    fn default() -> Self {
+        Self::Foreground
+    }
+}
+
+impl CreateType {
+    pub fn from_proto(pb_create_type: PbCreateType) -> Self {
+        match pb_create_type {
+            PbCreateType::Foreground | PbCreateType::Unspecified => CreateType::Foreground,
+            PbCreateType::Background => CreateType::Background,
+        }
+    }
+
+    pub fn to_proto(self) -> PbCreateType {
+        match self {
+            CreateType::Foreground => PbCreateType::Foreground,
+            CreateType::Background => PbCreateType::Background,
         }
     }
 }

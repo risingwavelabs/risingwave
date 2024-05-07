@@ -19,15 +19,13 @@ use risingwave_connector::source::filesystem::opendal_source::{
     OpendalGcs, OpendalPosixFs, OpendalS3,
 };
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
-use risingwave_connector::source::{ConnectorProperties, SourceCtrlOpts};
+use risingwave_connector::source::ConnectorProperties;
 use risingwave_pb::stream_plan::StreamFsFetchNode;
 use risingwave_storage::StateStore;
 
 use crate::error::StreamResult;
-use crate::executor::{
-    Execute, Executor, FlowControlExecutor, FsFetchExecutor, SourceStateTableHandler,
-    StreamSourceCore,
-};
+use crate::executor::source::{FsFetchExecutor, SourceStateTableHandler, StreamSourceCore};
+use crate::executor::{Execute, Executor};
 use crate::from_proto::ExecutorBuilder;
 use crate::task::ExecutorParams;
 
@@ -59,10 +57,6 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             params.env.config().developer.connector_message_buffer_size,
             params.info.pk_indices.clone(),
         );
-        let source_ctrl_opts = SourceCtrlOpts {
-            chunk_size: params.env.config().developer.chunk_size,
-            rate_limit: source.rate_limit.map(|x| x as _),
-        };
 
         let source_column_ids: Vec<_> = source_desc_builder
             .column_catalogs_to_source_column_descs()
@@ -95,8 +89,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                     params.actor_context.clone(),
                     stream_source_core,
                     upstream,
-                    source_ctrl_opts,
-                    params.env.connector_params(),
+                    source.rate_limit,
                 )
                 .boxed()
             }
@@ -105,8 +98,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                     params.actor_context.clone(),
                     stream_source_core,
                     upstream,
-                    source_ctrl_opts,
-                    params.env.connector_params(),
+                    source.rate_limit,
                 )
                 .boxed()
             }
@@ -115,18 +107,12 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                     params.actor_context.clone(),
                     stream_source_core,
                     upstream,
-                    source_ctrl_opts,
-                    params.env.connector_params(),
+                    source.rate_limit,
                 )
                 .boxed()
             }
             _ => unreachable!(),
         };
-        let mut info = params.info.clone();
-        info.identity = format!("{} (flow controlled)", info.identity);
-
-        let rate_limit = source.rate_limit.map(|x| x as _);
-        let exec = FlowControlExecutor::new((info, exec).into(), params.actor_context, rate_limit);
         Ok((params.info, exec).into())
     }
 }

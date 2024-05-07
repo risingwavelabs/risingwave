@@ -18,7 +18,6 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use bytes::Bytes;
-use itertools::Itertools;
 use mysql_async::prelude::Queryable;
 use mysql_async::Opts;
 use risingwave_common::array::{Op, StreamChunk};
@@ -48,25 +47,25 @@ const STARROCK_MYSQL_WAIT_TIMEOUT: usize = 28800;
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct StarrocksCommon {
-    /// The StarRocks host address.
+    /// The `StarRocks` host address.
     #[serde(rename = "starrocks.host")]
     pub host: String,
-    /// The port to the MySQL server of StarRocks FE.
+    /// The port to the MySQL server of `StarRocks` FE.
     #[serde(rename = "starrocks.mysqlport", alias = "starrocks.query_port")]
     pub mysql_port: String,
-    /// The port to the HTTP server of StarRocks FE.
+    /// The port to the HTTP server of `StarRocks` FE.
     #[serde(rename = "starrocks.httpport", alias = "starrocks.http_port")]
     pub http_port: String,
-    /// The user name used to access the StarRocks database.
+    /// The user name used to access the `StarRocks` database.
     #[serde(rename = "starrocks.user")]
     pub user: String,
     /// The password associated with the user.
     #[serde(rename = "starrocks.password")]
     pub password: String,
-    /// The StarRocks database where the target table is located
+    /// The `StarRocks` database where the target table is located
     #[serde(rename = "starrocks.database")]
     pub database: String,
-    /// The StarRocks table you want to sink data to.
+    /// The `StarRocks` table you want to sink data to.
     #[serde(rename = "starrocks.table")]
     pub table: String,
     #[serde(rename = "starrocks.partial_update")]
@@ -154,7 +153,7 @@ impl StarrocksSink {
     ) -> Result<bool> {
         match rw_data_type {
             risingwave_common::types::DataType::Boolean => {
-                Ok(starrocks_data_type.contains("tinyint"))
+                Ok(starrocks_data_type.contains("tinyint") | starrocks_data_type.contains("boolean"))
             }
             risingwave_common::types::DataType::Int16 => {
                 Ok(starrocks_data_type.contains("smallint"))
@@ -223,8 +222,7 @@ impl Sink for StarrocksSink {
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
-        )
-        .await?
+        )?
         .into_log_sinker(writer_param.sink_metrics))
     }
 
@@ -293,54 +291,12 @@ impl TryFrom<SinkParam> for StarrocksSink {
 }
 
 impl StarrocksSinkWriter {
-    pub async fn new(
+    pub fn new(
         config: StarrocksConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
-        let mut decimal_map = HashMap::default();
-        let starrocks_columns = StarrocksSchemaClient::new(
-            config.common.host.clone(),
-            config.common.mysql_port.clone(),
-            config.common.table.clone(),
-            config.common.database.clone(),
-            config.common.user.clone(),
-            config.common.password.clone(),
-        )
-        .await?
-        .get_columns_from_starrocks()
-        .await?;
-
-        for (name, column_type) in &starrocks_columns {
-            if column_type.contains("decimal") {
-                let decimal_all = column_type
-                    .split("decimal(")
-                    .last()
-                    .ok_or_else(|| SinkError::Starrocks("must have last".to_string()))?
-                    .split(')')
-                    .next()
-                    .ok_or_else(|| SinkError::Starrocks("must have next".to_string()))?
-                    .split(',')
-                    .collect_vec();
-                let length = decimal_all
-                    .first()
-                    .ok_or_else(|| SinkError::Starrocks("must have next".to_string()))?
-                    .parse::<u8>()
-                    .map_err(|e| {
-                        SinkError::Starrocks(format!("starrocks sink error: {}", e.as_report()))
-                    })?;
-
-                let scale = decimal_all
-                    .last()
-                    .ok_or_else(|| SinkError::Starrocks("must have next".to_string()))?
-                    .parse::<u8>()
-                    .map_err(|e| {
-                        SinkError::Starrocks(format!("starrocks sink error: {}", e.as_report()))
-                    })?;
-                decimal_map.insert(name.to_string(), (length, scale));
-            }
-        }
         let mut fields_name = schema.names_str();
         if !is_append_only {
             fields_name.push(STARROCKS_DELETE_SIGN);
@@ -359,7 +315,7 @@ impl StarrocksSinkWriter {
             config.common.database.clone(),
             config.common.table.clone(),
             header,
-        );
+        )?;
         Ok(Self {
             config,
             schema: schema.clone(),
@@ -367,7 +323,7 @@ impl StarrocksSinkWriter {
             inserter_innet_builder: starrocks_insert_builder,
             is_append_only,
             client: None,
-            row_encoder: JsonEncoder::new_with_starrocks(schema, None, decimal_map),
+            row_encoder: JsonEncoder::new_with_starrocks(schema, None),
         })
     }
 

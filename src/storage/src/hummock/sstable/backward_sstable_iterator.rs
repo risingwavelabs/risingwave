@@ -15,7 +15,7 @@
 use std::cmp::Ordering::{Equal, Less};
 use std::sync::Arc;
 
-use risingwave_common::cache::CachePriority;
+use foyer::memory::CacheContext;
 use risingwave_hummock_sdk::key::FullKey;
 
 use crate::hummock::iterator::{Backward, HummockIterator, ValueMeta};
@@ -67,7 +67,7 @@ impl BackwardSstableIterator {
                 .get(
                     &self.sst,
                     idx as usize,
-                    crate::hummock::CachePolicy::Fill(CachePriority::High),
+                    crate::hummock::CachePolicy::Fill(CacheContext::Default),
                     &mut self.stats,
                 )
                 .await?;
@@ -174,6 +174,7 @@ mod tests {
     use rand::prelude::*;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
     use crate::assert_bytes_eq;
@@ -250,7 +251,7 @@ mod tests {
                 format!("key_zzzz_{:05}", 0).as_bytes(),
             ]
             .concat(),
-            233,
+            test_epoch(1),
         );
         sstable_iter.seek(largest_key.to_ref()).await.unwrap();
         let key = sstable_iter.key();
@@ -264,7 +265,7 @@ mod tests {
                 format!("key_aaaa_{:05}", 0).as_bytes(),
             ]
             .concat(),
-            233,
+            test_epoch(1),
         );
         sstable_iter.seek(smallest_key.to_ref()).await.unwrap();
         assert!(!sstable_iter.is_valid());

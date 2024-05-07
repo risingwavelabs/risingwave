@@ -18,7 +18,9 @@ use std::num::NonZeroU32;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, TableId, OBJECT_ID_PLACEHOLDER};
+use risingwave_common::catalog::{
+    ColumnCatalog, ConflictBehavior, CreateType, StreamJobStatus, TableId, OBJECT_ID_PLACEHOLDER,
+};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -28,7 +30,7 @@ use super::stream::prelude::*;
 use super::stream::StreamPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{reorganize_elements_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::catalog::table_catalog::{CreateType, TableCatalog, TableType, TableVersion};
+use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::error::Result;
 use crate::optimizer::plan_node::derive::derive_pk;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -93,6 +95,7 @@ impl StreamMaterialize {
             ConflictBehavior::NoCheck,
             None,
             None,
+            None,
             table_type,
             None,
             cardinality,
@@ -116,6 +119,7 @@ impl StreamMaterialize {
         columns: Vec<ColumnCatalog>,
         definition: String,
         conflict_behavior: ConflictBehavior,
+        version_column_index: Option<usize>,
         pk_column_indices: Vec<usize>,
         row_id_index: Option<usize>,
         version: Option<TableVersion>,
@@ -130,6 +134,7 @@ impl StreamMaterialize {
             columns,
             definition,
             conflict_behavior,
+            version_column_index,
             Some(pk_column_indices),
             row_id_index,
             TableType::Table,
@@ -200,6 +205,7 @@ impl StreamMaterialize {
         columns: Vec<ColumnCatalog>,
         definition: String,
         conflict_behavior: ConflictBehavior,
+        version_column_index: Option<usize>,
         pk_column_indices: Option<Vec<usize>>, // Is some when create table
         row_id_index: Option<usize>,
         table_type: TableType,
@@ -246,6 +252,7 @@ impl StreamMaterialize {
             value_indices,
             definition,
             conflict_behavior,
+            version_column_index,
             read_prefix_len_hint,
             version,
             watermark_columns,
@@ -255,6 +262,7 @@ impl StreamMaterialize {
             initialized_at_epoch: None,
             cleaned_by_watermark: false,
             create_type: CreateType::Foreground, // Will be updated in the handler itself.
+            stream_job_status: StreamJobStatus::Creating,
             description: None,
             incoming_sinks: vec![],
             initialized_at_cluster_version: None,

@@ -49,8 +49,15 @@ VALUES (1,1,'no'),
        (3,3,'no'),
        (4,4,'no');
 
+-- This user is for non-shared CDC
 CREATE USER 'dbz'@'%' IDENTIFIED BY '123456';
 GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'dbz'@'%';
+
+-- This user is for shared CDC
+CREATE USER 'rwcdc'@'%' IDENTIFIED BY '123456';
+GRANT SELECT, RELOAD, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'rwcdc'@'%';
+
+FLUSH PRIVILEGES;
 
 CREATE TABLE tt3 (v1 int primary key, v2 timestamp);
 INSERT INTO tt3 VALUES (1, '2020-07-30 10:08:22');

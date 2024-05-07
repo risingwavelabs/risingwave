@@ -1,5 +1,5 @@
 statement ok
-CREATE TABLE t6 (v1 int primary key, v2 smallint, v3 bigint, v4 real, v5 float, v6 varchar, v7 date, v8 timestamptz, v9 boolean);
+CREATE TABLE t6 (v1 int primary key, v2 smallint, v3 bigint, v4 real, v5 float, v6 varchar, v7 date, v8 timestamptz, v9 boolean, v10 decimal, v11 decimal[]);
 
 statement ok
 CREATE MATERIALIZED VIEW mv6 AS SELECT * FROM t6;
@@ -17,7 +17,7 @@ with (
 );
 
 statement ok
-INSERT INTO t6 VALUES (1, 1, 1, 1.1, 1.2, 'test', '2013-01-01', '2013-01-01 01:01:01+00:00' , false);
+INSERT INTO t6 VALUES (1, 1, 1, 1.1, 1.2, 'test', '2013-01-01', '2013-01-01 01:01:01+00:00' , false, 1, array[1]::decimal[]);
 
 statement ok
 FLUSH;

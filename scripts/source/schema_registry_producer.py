@@ -24,6 +24,20 @@ def delivery_report(err, msg):
         return
 
 
+def load_avro_json(encoded, schema):
+    """Unlike `json.loads`, this decodes a json according to given avro schema.
+
+    https://avro.apache.org/docs/1.11.1/specification/#json-encoding
+    Specially, it handles `union` variants, and differentiates `bytes` from `string`.
+    """
+    from fastavro import json_reader
+    from io import StringIO
+
+    with StringIO(encoded) as buf:
+        reader = json_reader(buf, schema)
+        return next(reader)
+
+
 if __name__ == '__main__':
     if len(sys.argv) < 5:
         print("datagen.py <brokerlist> <schema-registry-url> <file> <name-strategy> <json/avro>")
@@ -59,6 +73,8 @@ if __name__ == '__main__':
     producer = Producer(kafka_conf)
     key_serializer = None
     value_serializer = None
+    key_schema = None
+    value_schema = None
     with open(file) as file:
         for (i, line) in enumerate(file):
             if i == 0:
@@ -71,6 +87,8 @@ if __name__ == '__main__':
                         value_serializer = AvroSerializer(schema_registry_client=schema_registry_client,
                                                           schema_str=parts[1],
                                                           conf=avro_ser_conf)
+                        key_schema = json.loads(parts[0])
+                        value_schema = json.loads(parts[1])
                     else:
                         key_serializer = JSONSerializer(schema_registry_client=schema_registry_client,
                                                         schema_str=parts[0])
@@ -80,28 +98,47 @@ if __name__ == '__main__':
                     if type == 'avro':
                         value_serializer = AvroSerializer(schema_registry_client=schema_registry_client,
                                                           schema_str=parts[0])
+                        value_schema = json.loads(parts[0])
                     else:
                         value_serializer = JSONSerializer(schema_registry_client=schema_registry_client,
                                                           schema_str=parts[0])
             else:
                 parts = line.split("^")
+                key_idx = None
+                value_idx = None
+                if len(parts) > 1:
+                    key_idx = 0
+                    if len(parts[1].strip()) > 0:
+                        value_idx = 1
+                else:
+                    value_idx = 0
+                if type == 'avro':
+                    if key_idx is not None:
+                        key_json = load_avro_json(parts[key_idx], key_schema)
+                    if value_idx is not None:
+                        value_json = load_avro_json(parts[value_idx], value_schema)
+                else:
+                    if key_idx is not None:
+                        key_json = json.loads(parts[key_idx])
+                    if value_idx is not None:
+                        value_json = json.loads(parts[value_idx])
                 if len(parts) > 1:
                     if len(parts[1].strip()) > 0:
                         producer.produce(topic=topic, partition=0,
-                                         key=key_serializer(json.loads(parts[0]),
+                                         key=key_serializer(key_json,
                                                             SerializationContext(topic, MessageField.KEY)),
                                          value=value_serializer(
-                                             json.loads(parts[1]), SerializationContext(topic, MessageField.VALUE)),
+                                             value_json, SerializationContext(topic, MessageField.VALUE)),
                                          on_delivery=delivery_report)
                     else:
                         producer.produce(topic=topic, partition=0,
-                                         key=key_serializer(json.loads(parts[0]),
+                                         key=key_serializer(key_json,
                                                             SerializationContext(topic, MessageField.KEY)),
                                          on_delivery=delivery_report)
                 else:
                     producer.produce(topic=topic, partition=0,
                                      value=value_serializer(
-                                         json.loads(parts[0]), SerializationContext(topic, MessageField.VALUE)),
+                                         value_json, SerializationContext(topic, MessageField.VALUE)),
                                      on_delivery=delivery_report)
 
     producer.flush()

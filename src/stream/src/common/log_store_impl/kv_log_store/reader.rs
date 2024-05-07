@@ -18,15 +18,16 @@ use std::pin::Pin;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use await_tree::InstrumentAwait;
+use foyer::memory::CacheContext;
 use futures::future::{try_join_all, BoxFuture};
-use futures::stream::select_all;
 use futures::{FutureExt, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
+use risingwave_common::util::epoch::EpochExt;
 use risingwave_connector::sink::log_store::{
     ChunkId, LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset,
 };
@@ -112,7 +113,7 @@ pub struct KvLogStoreReader<S: StateStore> {
     first_write_epoch: Option<u64>,
 
     /// `Some` means consuming historical log data
-    state_store_stream: Option<Pin<Box<LogStoreItemMergeStream<S::IterStream>>>>,
+    state_store_stream: Option<Pin<Box<LogStoreItemMergeStream<S::Iter>>>>,
 
     /// Store the future that attempts to read a flushed stream chunk.
     /// This is for cancellation safety. Since it is possible that the future of `next_item`
@@ -167,7 +168,7 @@ impl<S: StateStore> KvLogStoreReader<S> {
         &mut self,
     ) -> LogStoreResult<Option<(ChunkId, StreamChunk, u64)>> {
         if let Some(future) = self.read_flushed_chunk_future.as_mut() {
-            let result = future.await;
+            let result = future.instrument_await("Read Flushed Chunk").await;
             let _fut = self
                 .read_flushed_chunk_future
                 .take()
@@ -183,13 +184,13 @@ impl<S: StateStore> KvLogStoreReader<S> {
     fn read_persisted_log_store(
         &self,
         last_persisted_epoch: Option<u64>,
-    ) -> impl Future<Output = LogStoreResult<Pin<Box<LogStoreItemMergeStream<S::IterStream>>>>> + Send
+    ) -> impl Future<Output = LogStoreResult<Pin<Box<LogStoreItemMergeStream<S::Iter>>>>> + Send
     {
         let range_start = if let Some(last_persisted_epoch) = last_persisted_epoch {
             // start from the next epoch of last_persisted_epoch
             Included(
                 self.serde
-                    .serialize_pk_epoch_prefix(last_persisted_epoch + 1),
+                    .serialize_pk_epoch_prefix(last_persisted_epoch.next_epoch()),
             )
         } else {
             Unbounded
@@ -216,7 +217,7 @@ impl<S: StateStore> KvLogStoreReader<S> {
                         ReadOptions {
                             // This stream lives too long, the connection of prefetch object may break. So use a short connection prefetch.
                             prefetch_options: PrefetchOptions::prefetch_for_small_range_scan(),
-                            cache_policy: CachePolicy::Fill(CachePriority::Low),
+                            cache_policy: CachePolicy::Fill(CacheContext::LruPriorityLow),
                             table_id,
                             ..Default::default()
                         },
@@ -256,11 +257,16 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
             info!("next_item of {} get blocked by is_pause", self.identity);
             self.is_paused
                 .changed()
+                .instrument_await("Wait for Pause Resume")
                 .await
                 .map_err(|_| anyhow!("unable to subscribe resume"))?;
         }
         if let Some(state_store_stream) = &mut self.state_store_stream {
-            match state_store_stream.try_next().await? {
+            match state_store_stream
+                .try_next()
+                .instrument_await("Try Next for Historical Stream")
+                .await?
+            {
                 Some((epoch, item)) => {
                     if let Some(latest_offset) = &self.latest_offset {
                         latest_offset.check_next_item_epoch(epoch)?;
@@ -307,7 +313,11 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
         }
 
         // Now the historical state store has been consumed.
-        let (item_epoch, item) = self.rx.next_item().await;
+        let (item_epoch, item) = self
+            .rx
+            .next_item()
+            .instrument_await("Wait Next Item from Buffer")
+            .await;
         if let Some(latest_offset) = &self.latest_offset {
             latest_offset.check_next_item_epoch(item_epoch)?;
         }
@@ -340,7 +350,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                     let table_id = self.table_id;
                     let read_metrics = self.metrics.flushed_buffer_read_metrics.clone();
                     async move {
-                        let streams = try_join_all(vnode_bitmap.iter_vnodes().map(|vnode| {
+                        let iters = try_join_all(vnode_bitmap.iter_vnodes().map(|vnode| {
                             let range_start =
                                 serde.serialize_log_store_pk(vnode, item_epoch, Some(start_seq_id));
                             let range_end =
@@ -350,7 +360,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                             // Use MAX EPOCH here because the epoch to consume may be below the safe
                             // epoch
                             async move {
-                                Ok::<_, anyhow::Error>(Box::pin(
+                                Ok::<_, anyhow::Error>(
                                     state_store
                                         .iter(
                                             (Included(range_start), Included(range_end)),
@@ -358,26 +368,27 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                                             ReadOptions {
                                                 prefetch_options:
                                                     PrefetchOptions::prefetch_for_large_range_scan(),
-                                                cache_policy: CachePolicy::Fill(CachePriority::Low),
+                                                cache_policy: CachePolicy::Fill(CacheContext::LruPriorityLow),
                                                 table_id,
                                                 ..Default::default()
                                             },
                                         )
                                         .await?,
-                                ))
+                                )
                             }
                         }))
+                            .instrument_await("Wait Create Iter Stream")
                         .await?;
-                        let combined_stream = select_all(streams);
 
                         let chunk = serde
                             .deserialize_stream_chunk(
-                                combined_stream,
+                                iters,
                                 start_seq_id,
                                 end_seq_id,
                                 item_epoch,
                                 &read_metrics,
                             )
+                            .instrument_await("Deserialize Stream Chunk")
                             .await?;
 
                         Ok((chunk_id, chunk, item_epoch))
@@ -436,7 +447,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
         })
     }
 
-    async fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
+    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
         if offset > self.latest_offset.expect("should exist before truncation") {
             return Err(anyhow!(
                 "truncate at a later offset {:?} than the current latest offset {:?}",
@@ -477,7 +488,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
             let persisted_epoch =
                 self.truncate_offset
                     .map(|truncate_offset| match truncate_offset {
-                        TruncateOffset::Chunk { epoch, .. } => epoch - 1,
+                        TruncateOffset::Chunk { epoch, .. } => epoch.prev_epoch(),
                         TruncateOffset::Barrier { epoch } => epoch,
                     });
             self.state_store_stream = Some(self.read_persisted_log_store(persisted_epoch).await?);

@@ -20,17 +20,20 @@ use std::task::{Context, Poll};
 
 use futures::Stream;
 use pgwire::pg_server::{BoxedError, Session, SessionId};
+use risingwave_batch::worker_manager::worker_node_manager::{
+    WorkerNodeManagerRef, WorkerNodeSelector,
+};
 use risingwave_common::array::DataChunk;
 use risingwave_common::session_config::QueryMode;
 use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
+use tokio::sync::OwnedSemaphorePermit;
 
 use super::stats::DistributedQueryMetrics;
 use super::QueryExecution;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
-use crate::scheduler::worker_node_manager::{WorkerNodeManagerRef, WorkerNodeSelector};
 use crate::scheduler::{ExecutionContextRef, SchedulerResult};
 
 pub struct DistributedQueryStream {
@@ -47,6 +50,7 @@ impl DistributedQueryStream {
 }
 
 impl Stream for DistributedQueryStream {
+    // TODO(error-handling): use a concrete error type.
     type Item = Result<DataChunk, BoxedError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -131,7 +135,12 @@ pub struct QueryManager {
     catalog_reader: CatalogReader,
     query_execution_info: QueryExecutionInfoRef,
     pub query_metrics: Arc<DistributedQueryMetrics>,
+    /// Limit per session.
     disrtibuted_query_limit: Option<u64>,
+    /// Limits the number of concurrent distributed queries.
+    distributed_query_semaphore: Option<Arc<tokio::sync::Semaphore>>,
+    /// Total permitted distributed query number.
+    pub total_distributed_query_limit: Option<u64>,
 }
 
 impl QueryManager {
@@ -141,7 +150,10 @@ impl QueryManager {
         catalog_reader: CatalogReader,
         query_metrics: Arc<DistributedQueryMetrics>,
         disrtibuted_query_limit: Option<u64>,
+        total_distributed_query_limit: Option<u64>,
     ) -> Self {
+        let distributed_query_semaphore = total_distributed_query_limit
+            .map(|limit| Arc::new(tokio::sync::Semaphore::new(limit as usize)));
         Self {
             worker_node_manager,
             compute_client_pool,
@@ -149,6 +161,28 @@ impl QueryManager {
             query_execution_info: Arc::new(RwLock::new(QueryExecutionInfo::default())),
             query_metrics,
             disrtibuted_query_limit,
+            distributed_query_semaphore,
+            total_distributed_query_limit,
+        }
+    }
+
+    async fn get_permit(&self) -> SchedulerResult<Option<OwnedSemaphorePermit>> {
+        match self.distributed_query_semaphore {
+            Some(ref semaphore) => {
+                let permit = semaphore.clone().acquire_owned().await;
+                match permit {
+                    Ok(permit) => Ok(Some(permit)),
+                    Err(_) => {
+                        self.query_metrics.rejected_query_counter.inc();
+                        Err(crate::scheduler::SchedulerError::QueryReachLimit(
+                            QueryMode::Distributed,
+                            self.total_distributed_query_limit
+                                .expect("should have distributed query limit"),
+                        ))
+                    }
+                }
+            }
+            None => Ok(None),
         }
     }
 
@@ -167,7 +201,8 @@ impl QueryManager {
             ));
         }
         let query_id = query.query_id.clone();
-        let query_execution = Arc::new(QueryExecution::new(query, context.session().id()));
+        let permit = self.get_permit().await?;
+        let query_execution = Arc::new(QueryExecution::new(query, context.session().id(), permit));
 
         // Add queries status when begin.
         context

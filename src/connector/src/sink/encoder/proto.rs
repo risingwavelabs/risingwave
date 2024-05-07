@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes};
 use prost::Message;
 use prost_reflect::{
     DynamicMessage, FieldDescriptor, Kind, MessageDescriptor, ReflectMessage, Value,
@@ -30,6 +30,17 @@ pub struct ProtoEncoder {
     schema: Schema,
     col_indices: Option<Vec<usize>>,
     descriptor: MessageDescriptor,
+    header: ProtoHeader,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ProtoHeader {
+    None,
+    /// <https://docs.confluent.io/platform/7.5/schema-registry/fundamentals/serdes-develop/index.html#messages-wire-format>
+    ///
+    /// * 00
+    /// * 4-byte big-endian schema ID
+    ConfluentSchemaRegistry(i32),
 }
 
 impl ProtoEncoder {
@@ -37,6 +48,7 @@ impl ProtoEncoder {
         schema: Schema,
         col_indices: Option<Vec<usize>>,
         descriptor: MessageDescriptor,
+        header: ProtoHeader,
     ) -> SinkResult<Self> {
         match &col_indices {
             Some(col_indices) => validate_fields(
@@ -59,12 +71,18 @@ impl ProtoEncoder {
             schema,
             col_indices,
             descriptor,
+            header,
         })
     }
 }
 
+pub struct ProtoEncoded {
+    pub message: DynamicMessage,
+    header: ProtoHeader,
+}
+
 impl RowEncoder for ProtoEncoder {
-    type Output = DynamicMessage;
+    type Output = ProtoEncoded;
 
     fn schema(&self) -> &Schema {
         &self.schema
@@ -87,12 +105,68 @@ impl RowEncoder for ProtoEncoder {
             &self.descriptor,
         )
         .map_err(Into::into)
+        .map(|m| ProtoEncoded {
+            message: m,
+            header: self.header,
+        })
     }
 }
 
-impl SerTo<Vec<u8>> for DynamicMessage {
+impl SerTo<Vec<u8>> for ProtoEncoded {
     fn ser_to(self) -> SinkResult<Vec<u8>> {
-        Ok(self.encode_to_vec())
+        let mut buf = Vec::new();
+        match self.header {
+            ProtoHeader::None => { /* noop */ }
+            ProtoHeader::ConfluentSchemaRegistry(schema_id) => {
+                buf.reserve(1 + 4);
+                buf.put_u8(0);
+                buf.put_i32(schema_id);
+                MessageIndexes::from(self.message.descriptor()).encode(&mut buf);
+            }
+        }
+        self.message.encode(&mut buf).unwrap();
+        Ok(buf)
+    }
+}
+
+struct MessageIndexes(Vec<i32>);
+
+impl MessageIndexes {
+    fn from(desc: MessageDescriptor) -> Self {
+        // https://github.com/protocolbuffers/protobuf/blob/v25.1/src/google/protobuf/descriptor.proto
+        // https://docs.rs/prost-reflect/0.12.0/src/prost_reflect/descriptor/tag.rs.html
+        // https://docs.rs/prost-reflect/0.12.0/src/prost_reflect/descriptor/build/visit.rs.html#125
+        // `FileDescriptorProto` field #4 is `repeated DescriptorProto message_type`
+        const TAG_FILE_MESSAGE: i32 = 4;
+        // `DescriptorProto` field #3 is `repeated DescriptorProto nested_type`
+        const TAG_MESSAGE_NESTED: i32 = 3;
+
+        let mut indexes = vec![];
+        let mut path = desc.path().array_chunks();
+        let &[tag, idx] = path.next().unwrap();
+        assert_eq!(tag, TAG_FILE_MESSAGE);
+        indexes.push(idx);
+        for &[tag, idx] in path {
+            assert_eq!(tag, TAG_MESSAGE_NESTED);
+            indexes.push(idx);
+        }
+        Self(indexes)
+    }
+
+    fn zig_i32(value: i32, buf: &mut impl BufMut) {
+        let unsigned = ((value << 1) ^ (value >> 31)) as u32 as u64;
+        prost::encoding::encode_varint(unsigned, buf);
+    }
+
+    fn encode(&self, buf: &mut impl BufMut) {
+        if self.0 == [0] {
+            buf.put_u8(0);
+            return;
+        }
+        Self::zig_i32(self.0.len().try_into().unwrap(), buf);
+        for &idx in &self.0 {
+            Self::zig_i32(idx, buf);
+        }
     }
 }
 
@@ -233,7 +307,6 @@ fn encode_field<D: MaybeData>(
             proto_field.kind()
         )))
     };
-
     let value = match &data_type {
         // Group A: perfect match between RisingWave types and ProtoBuf types
         DataType::Boolean => match (expect_list, proto_field.kind()) {
@@ -290,18 +363,59 @@ fn encode_field<D: MaybeData>(
                     Ok(Value::Message(message.transcode_to_dynamic()))
                 })?
             }
+            (false, Kind::String) => {
+                maybe.on_base(|s| Ok(Value::String(s.into_timestamptz().to_string())))?
+            }
             _ => return no_match_err(),
         },
-        DataType::Jsonb => return no_match_err(), // Value, NullValue, Struct (map), ListValue
-        // Group C: experimental
-        DataType::Int16 => return no_match_err(),
-        DataType::Date => return no_match_err(), // google.type.Date
-        DataType::Time => return no_match_err(), // google.type.TimeOfDay
-        DataType::Timestamp => return no_match_err(), // google.type.DateTime
-        DataType::Decimal => return no_match_err(), // google.type.Decimal
-        DataType::Interval => return no_match_err(),
-        // Group D: unsupported
-        DataType::Serial | DataType::Int256 => {
+        DataType::Jsonb => match (expect_list, proto_field.kind()) {
+            (false, Kind::String) => {
+                maybe.on_base(|s| Ok(Value::String(s.into_jsonb().to_string())))?
+            }
+            _ => return no_match_err(), /* Value, NullValue, Struct (map), ListValue
+                                         * Group C: experimental */
+        },
+        DataType::Int16 => match (expect_list, proto_field.kind()) {
+            (false, Kind::Int64) => maybe.on_base(|s| Ok(Value::I64(s.into_int16() as i64)))?,
+            _ => return no_match_err(),
+        },
+        DataType::Date => match (expect_list, proto_field.kind()) {
+            (false, Kind::Int32) => {
+                maybe.on_base(|s| Ok(Value::I32(s.into_date().get_nums_days_unix_epoch())))?
+            }
+            _ => return no_match_err(), // google.type.Date
+        },
+        DataType::Time => match (expect_list, proto_field.kind()) {
+            (false, Kind::String) => {
+                maybe.on_base(|s| Ok(Value::String(s.into_time().to_string())))?
+            }
+            _ => return no_match_err(), // google.type.TimeOfDay
+        },
+        DataType::Timestamp => match (expect_list, proto_field.kind()) {
+            (false, Kind::String) => {
+                maybe.on_base(|s| Ok(Value::String(s.into_timestamp().to_string())))?
+            }
+            _ => return no_match_err(), // google.type.DateTime
+        },
+        DataType::Decimal => match (expect_list, proto_field.kind()) {
+            (false, Kind::String) => {
+                maybe.on_base(|s| Ok(Value::String(s.into_decimal().to_string())))?
+            }
+            _ => return no_match_err(), // google.type.Decimal
+        },
+        DataType::Interval => match (expect_list, proto_field.kind()) {
+            (false, Kind::String) => {
+                maybe.on_base(|s| Ok(Value::String(s.into_interval().as_iso_8601())))?
+            }
+            _ => return no_match_err(), // Group D: unsupported
+        },
+        DataType::Serial => match (expect_list, proto_field.kind()) {
+            (false, Kind::Int64) => {
+                maybe.on_base(|s| Ok(Value::I64(s.into_serial().as_row_id())))?
+            }
+            _ => return no_match_err(), // Group D: unsupported
+        },
+        DataType::Int256 => {
             return no_match_err();
         }
     };
@@ -324,7 +438,6 @@ mod tests {
         let pool_bytes = std::fs::read(pool_path).unwrap();
         let pool = prost_reflect::DescriptorPool::decode(pool_bytes.as_ref()).unwrap();
         let descriptor = pool.get_message_by_name("recursive.AllTypes").unwrap();
-
         let schema = Schema::new(vec![
             Field::with_name(DataType::Boolean, "bool_field"),
             Field::with_name(DataType::Varchar, "string_field"),
@@ -367,7 +480,8 @@ mod tests {
             Some(ScalarImpl::Timestamptz(Timestamptz::from_micros(3))),
         ]);
 
-        let encoder = ProtoEncoder::new(schema, None, descriptor.clone()).unwrap();
+        let encoder =
+            ProtoEncoder::new(schema, None, descriptor.clone(), ProtoHeader::None).unwrap();
         let m = encoder.encode(row).unwrap();
         let encoded: Vec<u8> = m.ser_to().unwrap();
         assert_eq!(

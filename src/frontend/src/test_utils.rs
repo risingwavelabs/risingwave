@@ -28,13 +28,15 @@ use risingwave_common::catalog::{
     FunctionId, IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
     DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME,
 };
+use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
-    PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
+    PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbSubscription,
+    PbTable, PbView, Table,
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
@@ -50,9 +52,10 @@ use risingwave_pb::hummock::{
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
+use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::{EventLog, PbTableParallelism, SystemParams};
+use risingwave_pb::meta::{EventLog, PbTableParallelism, PbThrottleTarget, SystemParams};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
@@ -192,6 +195,7 @@ impl LocalFrontend {
                 6666,
             ))
             .into(),
+            Default::default(),
         ))
     }
 }
@@ -236,6 +240,15 @@ impl CatalogWriter for MockCatalogWriter {
         self.create_schema(database_id, RW_CATALOG_SCHEMA_NAME, owner)
             .await?;
         Ok(())
+    }
+
+    async fn list_change_log_epochs(
+        &self,
+        _table_id: u32,
+        _min_epoch: u64,
+        _max_count: u32,
+    ) -> Result<Vec<u64>> {
+        unreachable!()
     }
 
     async fn create_schema(
@@ -319,6 +332,10 @@ impl CatalogWriter for MockCatalogWriter {
         _affected_table_change: Option<ReplaceTablePlan>,
     ) -> Result<()> {
         self.create_sink_inner(sink, graph)
+    }
+
+    async fn create_subscription(&self, subscription: PbSubscription) -> Result<()> {
+        self.create_subscription_inner(subscription)
     }
 
     async fn create_index(
@@ -456,6 +473,21 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn drop_subscription(&self, subscription_id: u32, cascade: bool) -> Result<()> {
+        if cascade {
+            return Err(ErrorCode::NotSupported(
+                "drop cascade in MockCatalogWriter is unsupported".to_string(),
+                "use drop instead".to_string(),
+            )
+            .into());
+        }
+        let (database_id, schema_id) = self.drop_table_or_subscription_id(subscription_id);
+        self.catalog
+            .write()
+            .drop_subscription(database_id, schema_id, subscription_id);
+        Ok(())
+    }
+
     async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<()> {
         if cascade {
             return Err(ErrorCode::NotSupported(
@@ -582,6 +614,14 @@ impl CatalogWriter for MockCatalogWriter {
         unreachable!()
     }
 
+    async fn alter_subscription_name(
+        &self,
+        _subscription_id: u32,
+        _subscription_name: &str,
+    ) -> Result<()> {
+        unreachable!()
+    }
+
     async fn alter_source_name(&self, _source_id: u32, _source_name: &str) -> Result<()> {
         unreachable!()
     }
@@ -667,6 +707,17 @@ impl MockCatalogWriter {
             .insert(table_id, schema_id);
     }
 
+    fn add_table_or_subscription_id(
+        &self,
+        table_id: u32,
+        schema_id: SchemaId,
+        _database_id: DatabaseId,
+    ) {
+        self.table_id_to_schema_id
+            .write()
+            .insert(table_id, schema_id);
+    }
+
     fn add_table_or_index_id(&self, table_id: u32, schema_id: SchemaId, _database_id: DatabaseId) {
         self.table_id_to_schema_id
             .write()
@@ -674,6 +725,15 @@ impl MockCatalogWriter {
     }
 
     fn drop_table_or_sink_id(&self, table_id: u32) -> (DatabaseId, SchemaId) {
+        let schema_id = self
+            .table_id_to_schema_id
+            .write()
+            .remove(&table_id)
+            .unwrap();
+        (self.get_database_id_by_schema(schema_id), schema_id)
+    }
+
+    fn drop_table_or_subscription_id(&self, table_id: u32) -> (DatabaseId, SchemaId) {
         let schema_id = self
             .table_id_to_schema_id
             .write()
@@ -715,6 +775,17 @@ impl MockCatalogWriter {
         sink.id = self.gen_id();
         self.catalog.write().create_sink(&sink);
         self.add_table_or_sink_id(sink.id, sink.schema_id, sink.database_id);
+        Ok(())
+    }
+
+    fn create_subscription_inner(&self, mut subscription: PbSubscription) -> Result<()> {
+        subscription.id = self.gen_id();
+        self.catalog.write().create_subscription(&subscription);
+        self.add_table_or_subscription_id(
+            subscription.id,
+            subscription.schema_id,
+            subscription.database_id,
+        );
         Ok(())
     }
 
@@ -762,8 +833,8 @@ impl UserInfoWriter for MockUserInfoWriter {
             UpdateField::Login => user_info.can_login = update_user.can_login,
             UpdateField::CreateDb => user_info.can_create_db = update_user.can_create_db,
             UpdateField::CreateUser => user_info.can_create_user = update_user.can_create_user,
-            UpdateField::AuthInfo => user_info.auth_info = update_user.auth_info.clone(),
-            UpdateField::Rename => user_info.name = update_user.name.clone(),
+            UpdateField::AuthInfo => user_info.auth_info.clone_from(&update_user.auth_info),
+            UpdateField::Rename => user_info.name.clone_from(&update_user.name),
             UpdateField::Unspecified => unreachable!(),
         });
         lock.update_user(update_user);
@@ -890,6 +961,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(vec![])
     }
 
+    async fn list_object_dependencies(&self) -> RpcResult<Vec<PbObjectDependencies>> {
+        Ok(vec![])
+    }
+
     async fn unpin_snapshot(&self) -> RpcResult<()> {
         Ok(())
     }
@@ -912,6 +987,14 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         _value: Option<String>,
     ) -> RpcResult<Option<SystemParamsReader>> {
         Ok(Some(SystemParams::default().into()))
+    }
+
+    async fn get_session_params(&self) -> RpcResult<SessionConfig> {
+        Ok(Default::default())
+    }
+
+    async fn set_session_param(&self, _param: String, _value: Option<String>) -> RpcResult<String> {
+        Ok("".to_string())
     }
 
     async fn list_ddl_progress(&self) -> RpcResult<Vec<DdlProgress>> {
@@ -971,6 +1054,19 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn list_compact_task_progress(&self) -> RpcResult<Vec<CompactTaskProgress>> {
+        unimplemented!()
+    }
+
+    async fn recover(&self) -> RpcResult<()> {
+        unimplemented!()
+    }
+
+    async fn apply_throttle(
+        &self,
+        _kind: PbThrottleTarget,
+        _id: u32,
+        _rate_limit: Option<u32>,
+    ) -> RpcResult<()> {
         unimplemented!()
     }
 }

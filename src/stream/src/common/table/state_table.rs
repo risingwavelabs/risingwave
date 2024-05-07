@@ -20,13 +20,13 @@ use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use either::Either;
-use futures::{pin_mut, FutureExt, Stream, StreamExt};
+use foyer::memory::CacheContext;
+use futures::{pin_mut, FutureExt, Stream, StreamExt, TryStreamExt};
 use futures_async_stream::for_await;
 use itertools::{izip, Itertools};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{ArrayImplBuilder, ArrayRef, DataChunk, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{
     get_dist_key_in_pk_indices, ColumnDesc, ColumnId, TableId, TableOption,
 };
@@ -55,10 +55,10 @@ use risingwave_storage::row_serde::row_serde_util::{
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
     InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel, PrefetchOptions,
-    ReadOptions, SealCurrentEpochOptions, StateStoreIterItemStream,
+    ReadLogOptions, ReadOptions, SealCurrentEpochOptions, StateStoreIter, StateStoreIterExt,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
-use risingwave_storage::table::{KeyedRow, TableDistribution};
+use risingwave_storage::table::{deserialize_log_stream, KeyedRow, TableDistribution};
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 use tracing::{trace, Instrument};
@@ -77,6 +77,17 @@ const STATE_CLEANING_PERIOD_EPOCH: usize = 300;
 const WATERMARK_CACHE_ENTRIES: usize = 16;
 
 type DefaultWatermarkBufferStrategy = WatermarkBufferByEpoch<STATE_CLEANING_PERIOD_EPOCH>;
+
+/// This macro is used to mark a point where we want to randomly discard the operation and early
+/// return, only in insane mode.
+macro_rules! insane_mode_discard_point {
+    () => {{
+        use rand::Rng;
+        if crate::consistency::insane() && rand::thread_rng().gen_bool(0.3) {
+            return;
+        }
+    }};
+}
 
 /// `StateTableInner` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
@@ -98,6 +109,9 @@ pub struct StateTableInner<
     /// State store backend.
     local_store: S::Local,
 
+    /// State store for accessing snapshot data
+    store: S,
+
     /// Used for serializing and deserializing the primary key.
     pk_serde: OrderedRowSerde,
 
@@ -118,7 +132,7 @@ pub struct StateTableInner<
 
     prefix_hint_len: usize,
 
-    /// Used for catalog table_properties
+    /// Used for catalog `table_properties`
     table_option: TableOption,
 
     value_indices: Option<Vec<usize>>,
@@ -138,7 +152,7 @@ pub struct StateTableInner<
     /// We will need to use to build data chunks from state table rows.
     data_types: Vec<DataType>,
 
-    /// "i" here refers to the base state_table's actual schema.
+    /// "i" here refers to the base `state_table`'s actual schema.
     /// "o" here refers to the replicated state table's output schema.
     /// This mapping is used to reconstruct a row being written from replicated state table.
     /// Such that the schema of this row will match the full schema of the base state table.
@@ -147,11 +161,11 @@ pub struct StateTableInner<
 
     /// Output indices
     /// Used for:
-    /// 1. Computing output_value_indices to ser/de replicated rows.
+    /// 1. Computing `output_value_indices` to ser/de replicated rows.
     /// 2. Computing output pk indices to used them for backfill state.
     output_indices: Vec<usize>,
 
-    is_consistent_op: bool,
+    op_consistency_level: StateTableOpConsistencyLevel,
 }
 
 /// `StateTable` will use `BasicSerde` as default
@@ -198,34 +212,57 @@ where
             .expect("non-replicated state store should start immediately.")
             .expect("non-replicated state store should not wait_for_epoch, and fail because of it.")
     }
+
+    pub fn state_store(&self) -> &S {
+        &self.store
+    }
 }
 
-fn consistent_old_value_op(row_serde: impl ValueRowSerde) -> OpConsistencyLevel {
-    OpConsistencyLevel::ConsistentOldValue(Arc::new(move |first: &Bytes, second: &Bytes| {
-        if first == second {
-            return true;
-        }
-        let first = match row_serde.deserialize(first) {
-            Ok(rows) => rows,
-            Err(e) => {
-                error!(error = %e.as_report(), value = ?first, "fail to deserialize serialized value");
-                return false;
+fn consistent_old_value_op(
+    row_serde: impl ValueRowSerde,
+    is_log_store: bool,
+) -> OpConsistencyLevel {
+    OpConsistencyLevel::ConsistentOldValue {
+        check_old_value: Arc::new(move |first: &Bytes, second: &Bytes| {
+            if first == second {
+                return true;
             }
-        };
-        let second = match row_serde.deserialize(second) {
-            Ok(rows) => rows,
-            Err(e) => {
-                error!(error = %e.as_report(), value = ?second, "fail to deserialize serialized value");
-                return false;
+            let first = match row_serde.deserialize(first) {
+                Ok(rows) => rows,
+                Err(e) => {
+                    error!(error = %e.as_report(), value = ?first, "fail to deserialize serialized value");
+                    return false;
+                }
+            };
+            let second = match row_serde.deserialize(second) {
+                Ok(rows) => rows,
+                Err(e) => {
+                    error!(error = %e.as_report(), value = ?second, "fail to deserialize serialized value");
+                    return false;
+                }
+            };
+            if first != second {
+                error!(first = ?first, second = ?second, "sanity check fail");
+                false
+            } else {
+                true
             }
-        };
-        if first != second {
-            error!(first = ?first, second = ?second, "sanity check fail");
-            false
-        } else {
-            true
-        }
-    }))
+        }),
+        is_log_store,
+    }
+}
+
+#[derive(Eq, PartialEq, Copy, Clone, Debug)]
+pub enum StateTableOpConsistencyLevel {
+    /// Op is inconsistent
+    Inconsistent,
+    /// Op is consistent.
+    /// - Insert op should ensure that the key does not exist previously
+    /// - Delete and Update op should ensure that the key exists and the previous value matches the passed old value
+    ConsistentOldValue,
+    /// The requirement on operation consistency is the same as `ConsistentOldValue`.
+    /// The difference is that in the `LogStoreEnabled`, the state table should also flush and store and old value.
+    LogStoreEnabled,
 }
 
 // initialize
@@ -240,12 +277,20 @@ where
     W: WatermarkBufferStrategy,
 {
     /// Create state table from table catalog and store.
+    ///
+    /// If `vnodes` is `None`, [`TableDistribution::singleton()`] will be used.
     pub async fn from_table_catalog(
         table_catalog: &Table,
         store: S,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
-        Self::from_table_catalog_inner(table_catalog, store, vnodes, true, vec![]).await
+        Self::from_table_catalog_with_consistency_level(
+            table_catalog,
+            store,
+            vnodes,
+            StateTableOpConsistencyLevel::ConsistentOldValue,
+        )
+        .await
     }
 
     /// Create state table from table catalog and store with sanity check disabled.
@@ -254,7 +299,23 @@ where
         store: S,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
-        Self::from_table_catalog_inner(table_catalog, store, vnodes, false, vec![]).await
+        Self::from_table_catalog_with_consistency_level(
+            table_catalog,
+            store,
+            vnodes,
+            StateTableOpConsistencyLevel::Inconsistent,
+        )
+        .await
+    }
+
+    pub async fn from_table_catalog_with_consistency_level(
+        table_catalog: &Table,
+        store: S,
+        vnodes: Option<Arc<Bitmap>>,
+        consistency_level: StateTableOpConsistencyLevel,
+    ) -> Self {
+        Self::from_table_catalog_inner(table_catalog, store, vnodes, consistency_level, vec![])
+            .await
     }
 
     /// Create state table from table catalog and store.
@@ -262,7 +323,7 @@ where
         table_catalog: &Table,
         store: S,
         vnodes: Option<Arc<Bitmap>>,
-        is_consistent_op: bool,
+        op_consistency_level: StateTableOpConsistencyLevel,
         output_column_ids: Vec<ColumnId>,
     ) -> Self {
         let table_id = TableId::new(table_catalog.id);
@@ -348,11 +409,23 @@ where
             )
         };
 
-        let op_consistency_level = if is_consistent_op {
-            let row_serde = make_row_serde();
-            consistent_old_value_op(row_serde)
+        let state_table_op_consistency_level = if crate::consistency::insane() {
+            // In insane mode, we will have inconsistent operations applied on the table, even if
+            // our executor code do not expect that.
+            StateTableOpConsistencyLevel::Inconsistent
         } else {
-            OpConsistencyLevel::Inconsistent
+            op_consistency_level
+        };
+        let op_consistency_level = match state_table_op_consistency_level {
+            StateTableOpConsistencyLevel::Inconsistent => OpConsistencyLevel::Inconsistent,
+            StateTableOpConsistencyLevel::ConsistentOldValue => {
+                let row_serde = make_row_serde();
+                consistent_old_value_op(row_serde, false)
+            }
+            StateTableOpConsistencyLevel::LogStoreEnabled => {
+                let row_serde = make_row_serde();
+                consistent_old_value_op(row_serde, true)
+            }
         };
 
         let table_option = TableOption::new(table_catalog.retention_seconds);
@@ -406,15 +479,16 @@ where
             .collect_vec();
 
         // Compute i2o mapping
+        // Note that this can be a partial mapping, since we use the i2o mapping to get
+        // any 1 of the output columns, and use that to fill the input column.
         let mut i2o_mapping = vec![None; columns.len()];
-        let mut output_column_indices = vec![];
         for (i, column) in columns.iter().enumerate() {
             if let Some(pos) = output_column_ids_to_input_idx.get(&column.column_id) {
                 i2o_mapping[i] = Some(*pos);
-                output_column_indices.push(i);
             }
         }
-        let i2o_mapping = ColIndexMapping::new(i2o_mapping, output_column_indices.len());
+        // We can prune any duplicate column indices
+        let i2o_mapping = ColIndexMapping::new(i2o_mapping, output_column_ids.len());
 
         // Compute output indices
         let (_, output_indices) = find_columns_by_ids(&columns[..], &output_column_ids);
@@ -422,6 +496,7 @@ where
         Self {
             table_id,
             local_store: local_state_store,
+            store,
             pk_serde,
             row_serde,
             pk_indices,
@@ -436,7 +511,7 @@ where
             data_types,
             output_indices,
             i2o_mapping,
-            is_consistent_op,
+            op_consistency_level: state_table_op_consistency_level,
         }
     }
 
@@ -572,7 +647,7 @@ where
         };
         let op_consistency_level = if is_consistent_op {
             let row_serde = make_row_serde();
-            consistent_old_value_op(row_serde)
+            consistent_old_value_op(row_serde, false)
         } else {
             OpConsistencyLevel::Inconsistent
         };
@@ -603,6 +678,7 @@ where
         Self {
             table_id,
             local_store: local_state_store,
+            store,
             pk_serde,
             row_serde,
             pk_indices,
@@ -617,7 +693,11 @@ where
             data_types,
             output_indices: vec![],
             i2o_mapping: ColIndexMapping::new(vec![], 0),
-            is_consistent_op,
+            op_consistency_level: if is_consistent_op {
+                StateTableOpConsistencyLevel::ConsistentOldValue
+            } else {
+                StateTableOpConsistencyLevel::Inconsistent
+            },
         }
     }
 
@@ -680,7 +760,11 @@ where
     }
 
     pub fn is_consistent_op(&self) -> bool {
-        self.is_consistent_op
+        matches!(
+            self.op_consistency_level,
+            StateTableOpConsistencyLevel::ConsistentOldValue
+                | StateTableOpConsistencyLevel::LogStoreEnabled
+        )
     }
 }
 
@@ -697,7 +781,14 @@ where
         vnodes: Option<Arc<Bitmap>>,
         output_column_ids: Vec<ColumnId>,
     ) -> Self {
-        Self::from_table_catalog_inner(table_catalog, store, vnodes, false, output_column_ids).await
+        Self::from_table_catalog_inner(
+            table_catalog,
+            store,
+            vnodes,
+            StateTableOpConsistencyLevel::Inconsistent,
+            output_column_ids,
+        )
+        .await
     }
 }
 
@@ -753,7 +844,7 @@ where
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
-            cache_policy: CachePolicy::Fill(CachePriority::High),
+            cache_policy: CachePolicy::Fill(CacheContext::Default),
             ..Default::default()
         };
 
@@ -864,12 +955,14 @@ where
     }
 
     fn insert_inner(&mut self, key: TableKey<Bytes>, value_bytes: Bytes) {
+        insane_mode_discard_point!();
         self.local_store
             .insert(key, value_bytes, None)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
     }
 
     fn delete_inner(&mut self, key: TableKey<Bytes>, value_bytes: Bytes) {
+        insane_mode_discard_point!();
         self.local_store
             .delete(key, value_bytes)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
@@ -881,6 +974,7 @@ where
         old_value_bytes: Option<Bytes>,
         new_value_bytes: Bytes,
     ) {
+        insane_mode_discard_point!();
         self.local_store
             .insert(key_bytes, new_value_bytes, old_value_bytes)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
@@ -1050,22 +1144,39 @@ where
     }
 
     pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.commit_with_switch_consistent_op(new_epoch, None).await
+        self.commit_inner(new_epoch, None).await
     }
 
-    pub async fn commit_with_switch_consistent_op(
+    pub async fn commit_may_switch_consistent_op(
         &mut self,
         new_epoch: EpochPair,
-        switch_consistent_op: Option<bool>,
+        op_consistency_level: StateTableOpConsistencyLevel,
+    ) -> StreamExecutorResult<()> {
+        if self.op_consistency_level != op_consistency_level {
+            self.commit_inner(new_epoch, Some(op_consistency_level))
+                .await
+        } else {
+            self.commit_inner(new_epoch, None).await
+        }
+    }
+
+    async fn commit_inner(
+        &mut self,
+        new_epoch: EpochPair,
+        switch_consistent_op: Option<StateTableOpConsistencyLevel>,
     ) -> StreamExecutorResult<()> {
         assert_eq!(self.epoch(), new_epoch.prev);
-        let switch_op_consistency_level = switch_consistent_op.map(|enable_consistent_op| {
-            assert_ne!(self.is_consistent_op, enable_consistent_op);
-            self.is_consistent_op = enable_consistent_op;
-            if enable_consistent_op {
-                consistent_old_value_op(self.row_serde.clone())
-            } else {
-                OpConsistencyLevel::Inconsistent
+        let switch_op_consistency_level = switch_consistent_op.map(|new_consistency_level| {
+            assert_ne!(self.op_consistency_level, new_consistency_level);
+            self.op_consistency_level = new_consistency_level;
+            match new_consistency_level {
+                StateTableOpConsistencyLevel::Inconsistent => OpConsistencyLevel::Inconsistent,
+                StateTableOpConsistencyLevel::ConsistentOldValue => {
+                    consistent_old_value_op(self.row_serde.clone(), false)
+                }
+                StateTableOpConsistencyLevel::LogStoreEnabled => {
+                    consistent_old_value_op(self.row_serde.clone(), true)
+                }
             }
         });
         trace!(
@@ -1309,13 +1420,13 @@ where
         table_key_range: TableKeyRange,
         prefix_hint: Option<Bytes>,
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
+    ) -> StreamExecutorResult<<S::Local as LocalStateStore>::Iter<'_>> {
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
             prefetch_options,
-            cache_policy: CachePolicy::Fill(CachePriority::High),
+            cache_policy: CachePolicy::Fill(CacheContext::Default),
             ..Default::default()
         };
 
@@ -1325,9 +1436,6 @@ where
     /// This function scans rows from the relational table with specific `prefix` and `sub_range` under the same
     /// `vnode`. If `sub_range` is (Unbounded, Unbounded), it scans rows from the relational table with specific `pk_prefix`.
     /// `pk_prefix` is used to identify the exact vnode the scan should perform on.
-
-    /// This function scans rows from the relational table with specific `prefix` and `pk_sub_range` under the same
-    /// `vnode`.
     pub async fn iter_with_prefix(
         &self,
         pk_prefix: impl Row,
@@ -1394,7 +1502,7 @@ where
         // iterate over each vnode that the `StateTableInner` owns.
         vnode: VirtualNode,
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
+    ) -> StreamExecutorResult<<S::Local as LocalStateStore>::Iter<'_>> {
         let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
         let memcomparable_range_with_vnode = prefixed_range_with_vnode(memcomparable_range, vnode);
 
@@ -1439,7 +1547,7 @@ where
         let read_options = ReadOptions {
             prefix_hint,
             table_id: self.table_id,
-            cache_policy: CachePolicy::Fill(CachePriority::High),
+            cache_policy: CachePolicy::Fill(CacheContext::Default),
             ..Default::default()
         };
 
@@ -1455,23 +1563,56 @@ where
     }
 }
 
+impl<
+        S,
+        SD,
+        const IS_REPLICATED: bool,
+        W: WatermarkBufferStrategy,
+        const USE_WATERMARK_CACHE: bool,
+    > StateTableInner<S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>
+where
+    S: StateStore,
+    SD: ValueRowSerde,
+{
+    pub async fn iter_log_with_vnode(
+        &self,
+        vnode: VirtualNode,
+        epoch_range: (u64, u64),
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
+    ) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<(Op, OwnedRow)>> + '_> {
+        let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
+        let memcomparable_range_with_vnode = prefixed_range_with_vnode(memcomparable_range, vnode);
+        Ok(deserialize_log_stream(
+            self.store
+                .iter_log(
+                    epoch_range,
+                    memcomparable_range_with_vnode,
+                    ReadLogOptions {
+                        table_id: self.table_id,
+                    },
+                )
+                .await?,
+            &self.row_serde,
+        )
+        .map_err(Into::into))
+    }
+}
+
 pub type KeyedRowStream<'a, S: StateStore, SD: ValueRowSerde + 'a> =
     impl Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a;
 
 fn deserialize_keyed_row_stream<'a>(
-    stream: impl StateStoreIterItemStream + 'a,
+    iter: impl StateStoreIter + 'a,
     deserializer: &'a impl ValueRowSerde,
 ) -> impl Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a {
-    stream.map(move |result| {
-        result
-            .map_err(StreamExecutorError::from)
-            .and_then(|(key, value)| {
-                Ok(KeyedRow::new(
-                    key.user_key.table_key,
-                    deserializer.deserialize(&value).map(OwnedRow::new)?,
-                ))
-            })
+    iter.into_stream(move |(key, value)| {
+        Ok(KeyedRow::new(
+            // TODO: may avoid clone the key when key is not needed
+            key.user_key.table_key.copy_into(),
+            deserializer.deserialize(value).map(OwnedRow::new)?,
+        ))
     })
+    .map_err(Into::into)
 }
 
 pub fn prefix_range_to_memcomparable(

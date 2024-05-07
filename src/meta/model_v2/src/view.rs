@@ -15,10 +15,11 @@
 use risingwave_pb::catalog::PbView;
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
+use serde::{Deserialize, Serialize};
 
 use crate::{FieldArray, Property, ViewId};
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "view")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
@@ -56,7 +57,7 @@ impl From<PbView> for ActiveModel {
             name: Set(view.name),
             properties: Set(Property(view.properties)),
             definition: Set(view.sql),
-            columns: Set(FieldArray(view.columns)),
+            columns: Set(view.columns.into()),
         }
     }
 }
