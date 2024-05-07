@@ -33,6 +33,7 @@ auto_impl = "1"
 await-tree = { workspace = true }
 aws-config = { workspace = true }
 aws-credential-types = { workspace = true }
+aws-msk-iam-sasl-signer = { git = "https://github.com/yuhao-su/aws-msk-iam-sasl-signer-rs.git", rev = "3ba61ec667483f987706d84072d08393d94fabde" }
 aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-smithy-http = { workspace = true }

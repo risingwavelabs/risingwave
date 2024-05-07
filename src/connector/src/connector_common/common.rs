@@ -44,6 +44,8 @@ use crate::source::nats::source::NatsOffset;
 pub const PRIVATE_LINK_BROKER_REWRITE_MAP_KEY: &str = "broker.rewrite.endpoints";
 pub const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
 
+const AWS_MSK_IAM_AUTH: &str = "AWS_MSK_IAM";
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct AwsPrivateLinkItem {
     pub az_id: Option<String>,
@@ -65,9 +67,10 @@ pub struct AwsAuthProps {
     pub access_key: Option<String>,
     pub secret_key: Option<String>,
     pub session_token: Option<String>,
+    /// IAM role
     pub arn: Option<String>,
-    /// This field was added for kinesis. Not sure if it's useful for other connectors.
-    /// Please ignore it in the documentation for now.
+    /// external ID in IAM role trust policy
+    /// https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-user_externalid.html
     pub external_id: Option<String>,
     pub profile: Option<String>,
 }
@@ -286,6 +289,15 @@ impl RdKafkaPropertiesCommon {
 
 impl KafkaCommon {
     pub(crate) fn set_security_properties(&self, config: &mut ClientConfig) {
+        // AWS_MSK_IAM
+        if let Some(sasl_mechanism) = self.sasl_mechanism.as_ref()
+            && sasl_mechanism == AWS_MSK_IAM_AUTH
+        {
+            config.set("security.protocol", "SASL_SSL");
+            config.set("sasl.mechanism", "OAUTHBEARER");
+            return;
+        }
+
         // Security protocol
         if let Some(security_protocol) = self.security_protocol.as_ref() {
             config.set("security.protocol", security_protocol);
@@ -355,6 +367,16 @@ impl KafkaCommon {
         }
         // Currently, we only support unsecured OAUTH.
         config.set("enable.sasl.oauthbearer.unsecure.jwt", "true");
+    }
+
+    pub(crate) fn is_aws_msk_iam(&self) -> bool {
+        if let Some(sasl_mechanism) = self.sasl_mechanism.as_ref()
+            && sasl_mechanism == AWS_MSK_IAM_AUTH
+        {
+            true
+        } else {
+            false
+        }
     }
 }
 

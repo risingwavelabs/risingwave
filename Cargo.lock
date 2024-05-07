@@ -1198,6 +1198,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-msk-iam-sasl-signer"
+version = "0.1.0"
+source = "git+https://github.com/yuhao-su/aws-msk-iam-sasl-signer-rs.git?rev=3ba61ec667483f987706d84072d08393d94fabde#3ba61ec667483f987706d84072d08393d94fabde"
+dependencies = [
+ "aws-config",
+ "aws-credential-types",
+ "aws-sdk-sts",
+ "aws-sigv4",
+ "aws-types",
+ "base64 0.22.0",
+ "chrono",
+ "futures",
+ "thiserror",
+ "url",
+]
+
+[[package]]
 name = "aws-runtime"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7055,9 +7072,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-rdkafka"
-version = "0.3.4+0.34.0"
+version = "0.4.0+0.34.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0992d46c19414bda24bad935ea223ad025dcd7e64f38f0acee388efa8ff5319b"
+checksum = "56d57cc4f1f9adda54d1d0ea354ecea604a44116c95af0362d14e6f1569b9777"
 dependencies = [
  "async-channel",
  "async-trait",
@@ -10464,6 +10481,7 @@ dependencies = [
  "await-tree",
  "aws-config",
  "aws-credential-types",
+ "aws-msk-iam-sasl-signer",
  "aws-sdk-kinesis",
  "aws-sdk-s3",
  "aws-smithy-http",
