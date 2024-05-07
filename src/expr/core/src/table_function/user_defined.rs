@@ -110,7 +110,8 @@ impl UserDefinedTableFunction {
         // compact the input chunk and record the row mapping
         let visible_rows = direct_input.visibility().iter_ones().collect::<Vec<_>>();
         // this will drop invisible rows
-        let arrow_input = UdfArrowConvert.to_record_batch(self.arg_schema.clone(), input)?;
+        let arrow_input =
+            UdfArrowConvert.to_record_batch(self.arg_schema.clone(), &direct_input)?;
 
         // call UDTF
         #[for_await]
