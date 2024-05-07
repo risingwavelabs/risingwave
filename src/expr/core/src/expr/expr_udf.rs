@@ -29,6 +29,7 @@ use arrow_udf_python::{CallMode as PythonCallMode, Runtime as PythonRuntime};
 use arrow_udf_wasm::Runtime as WasmRuntime;
 use await_tree::InstrumentAwait;
 use cfg_or_panic::cfg_or_panic;
+use ginepro::{LoadBalancedChannel, ResolutionStrategy};
 use moka::sync::Cache;
 use prometheus::{
     exponential_buckets, register_histogram_vec_with_registry,
@@ -39,6 +40,7 @@ use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
+use risingwave_common::util::addr::HostAddr;
 use risingwave_expr::expr_context::FRAGMENT_ID;
 use risingwave_pb::expr::ExprNode;
 use thiserror_ext::AsReport;
@@ -461,11 +463,55 @@ pub(crate) fn get_or_create_flight_client(link: &str) -> Result<Arc<FlightClient
     } else {
         // create new client
         let client = Arc::new(tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(FlightClient::connect(link.to_owned()))
+            tokio::runtime::Handle::current().block_on(async {
+                let channel = connect_tonic(link).await?;
+                Ok(FlightClient::new(channel).await?) as Result<_>
+            })
         })?);
         clients.insert(link.to_owned(), Arc::downgrade(&client));
         Ok(client)
     }
+}
+
+/// Connect to a UDF service and return a tonic `Channel`.
+async fn connect_tonic(mut addr: &str) -> Result<tonic::transport::Channel> {
+    // Interval between two successive probes of the UDF DNS.
+    const DNS_PROBE_INTERVAL_SECS: u64 = 5;
+    // Timeout duration for performing an eager DNS resolution.
+    const EAGER_DNS_RESOLVE_TIMEOUT_SECS: u64 = 5;
+    const REQUEST_TIMEOUT_SECS: u64 = 5;
+    const CONNECT_TIMEOUT_SECS: u64 = 5;
+
+    if addr.starts_with("http://") {
+        addr = addr.strip_prefix("http://").unwrap();
+    }
+    if addr.starts_with("https://") {
+        addr = addr.strip_prefix("https://").unwrap();
+    }
+    let host_addr = addr.parse::<HostAddr>().map_err(|e| {
+        arrow_udf_flight::Error::Service(format!(
+            "invalid address: {}, err: {}",
+            addr,
+            e.as_report()
+        ))
+    })?;
+    let channel = LoadBalancedChannel::builder((host_addr.host.clone(), host_addr.port))
+        .dns_probe_interval(std::time::Duration::from_secs(DNS_PROBE_INTERVAL_SECS))
+        .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+        .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
+        .resolution_strategy(ResolutionStrategy::Eager {
+            timeout: tokio::time::Duration::from_secs(EAGER_DNS_RESOLVE_TIMEOUT_SECS),
+        })
+        .channel()
+        .await
+        .map_err(|e| {
+            arrow_udf_flight::Error::Service(format!(
+                "failed to create LoadBalancedChannel, address: {}, err: {}",
+                host_addr,
+                e.as_report()
+            ))
+        })?;
+    Ok(channel.into())
 }
 
 /// Get or create a wasm runtime.
