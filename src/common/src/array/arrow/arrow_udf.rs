@@ -18,17 +18,78 @@
 //!
 //! The corresponding version of arrow is currently used by `udf` and `iceberg` sink.
 
+use std::sync::Arc;
+
 pub use arrow_impl::{FromArrow, ToArrow};
 use {arrow_array, arrow_buffer, arrow_cast, arrow_schema};
+
+use crate::array::{ArrayError, ArrayImpl, DataType, DecimalArray, JsonbArray};
 
 #[expect(clippy::duplicate_mod)]
 #[path = "./arrow_impl.rs"]
 mod arrow_impl;
 
+/// Arrow conversion for the current version of UDF. This is in use but will be deprecated soon.
+///
+/// In the current version of UDF protocol, decimal and jsonb types are mapped to Arrow `LargeBinary` and `LargeUtf8` types.
 pub struct UdfArrowConvert;
 
-impl ToArrow for UdfArrowConvert {}
-impl FromArrow for UdfArrowConvert {}
+impl ToArrow for UdfArrowConvert {
+    // Decimal values are stored as ASCII text representation in a large binary array.
+    fn decimal_to_arrow(
+        &self,
+        _data_type: &arrow_schema::DataType,
+        array: &DecimalArray,
+    ) -> Result<arrow_array::ArrayRef, ArrayError> {
+        Ok(Arc::new(arrow_array::LargeBinaryArray::from(array)))
+    }
+
+    // JSON values are stored as text representation in a large string array.
+    fn jsonb_to_arrow(&self, array: &JsonbArray) -> Result<arrow_array::ArrayRef, ArrayError> {
+        Ok(Arc::new(arrow_array::LargeStringArray::from(array)))
+    }
+
+    fn jsonb_type_to_arrow(&self, name: &str) -> arrow_schema::Field {
+        arrow_schema::Field::new(name, arrow_schema::DataType::LargeUtf8, true)
+    }
+
+    fn decimal_type_to_arrow(&self, name: &str) -> arrow_schema::Field {
+        arrow_schema::Field::new(name, arrow_schema::DataType::LargeBinary, true)
+    }
+}
+
+impl FromArrow for UdfArrowConvert {
+    fn from_large_utf8(&self) -> Result<DataType, ArrayError> {
+        Ok(DataType::Jsonb)
+    }
+
+    fn from_large_binary(&self) -> Result<DataType, ArrayError> {
+        Ok(DataType::Decimal)
+    }
+
+    fn from_large_utf8_array(
+        &self,
+        array: &arrow_array::LargeStringArray,
+    ) -> Result<ArrayImpl, ArrayError> {
+        Ok(ArrayImpl::Jsonb(array.try_into()?))
+    }
+
+    fn from_large_binary_array(
+        &self,
+        array: &arrow_array::LargeBinaryArray,
+    ) -> Result<ArrayImpl, ArrayError> {
+        Ok(ArrayImpl::Decimal(array.try_into()?))
+    }
+}
+
+/// Arrow conversion for the next version of UDF. This is unused for now.
+///
+/// In the next version of UDF protocol, decimal and jsonb types will be mapped to Arrow extension types.
+/// See <https://github.com/risingwavelabs/arrow-udf/tree/main#extension-types>.
+pub struct NewUdfArrowConvert;
+
+impl ToArrow for NewUdfArrowConvert {}
+impl FromArrow for NewUdfArrowConvert {}
 
 #[cfg(test)]
 mod tests {
@@ -108,7 +169,9 @@ mod tests {
         let array = ListArray::from_iter([None, Some(vec![0, -127, 127, 50]), Some(vec![0; 0])]);
         let data_type = arrow_schema::DataType::new_list(arrow_schema::DataType::Int32, true);
         let arrow = UdfArrowConvert.list_to_arrow(&data_type, &array).unwrap();
-        let rw_array = UdfArrowConvert.from_array(&arrow).unwrap();
+        let rw_array = UdfArrowConvert
+            .from_list_array(arrow.as_any().downcast_ref().unwrap())
+            .unwrap();
         assert_eq!(rw_array.as_list(), &array);
     }
 }

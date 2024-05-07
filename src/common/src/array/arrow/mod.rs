@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod arrow_default;
 mod arrow_deltalake;
 mod arrow_iceberg;
+mod arrow_udf;
 
-pub use arrow_default::{FromArrow, ToArrow, UdfArrowConvert};
 pub use arrow_deltalake::DeltaLakeConvert;
 pub use arrow_iceberg::IcebergArrowConvert;
+pub use arrow_udf::{FromArrow, ToArrow, UdfArrowConvert};

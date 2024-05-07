@@ -201,20 +201,20 @@ pub trait ToArrow {
         Ok(Arc::new(arrow_array::BinaryArray::from(array)))
     }
 
-    // Decimal values are stored as ASCII text representation in a large binary array.
+    // Decimal values are stored as ASCII text representation in a string array.
     #[inline]
     fn decimal_to_arrow(
         &self,
         _data_type: &arrow_schema::DataType,
         array: &DecimalArray,
     ) -> Result<arrow_array::ArrayRef, ArrayError> {
-        Ok(Arc::new(arrow_array::LargeBinaryArray::from(array)))
+        Ok(Arc::new(arrow_array::StringArray::from(array)))
     }
 
-    // JSON values are stored as text representation in a large string array.
+    // JSON values are stored as text representation in a string array.
     #[inline]
     fn jsonb_to_arrow(&self, array: &JsonbArray) -> Result<arrow_array::ArrayRef, ArrayError> {
-        Ok(Arc::new(arrow_array::LargeStringArray::from(array)))
+        Ok(Arc::new(arrow_array::StringArray::from(array)))
     }
 
     #[inline]
@@ -366,7 +366,8 @@ pub trait ToArrow {
 
     #[inline]
     fn jsonb_type_to_arrow(&self, name: &str) -> arrow_schema::Field {
-        arrow_schema::Field::new(name, arrow_schema::DataType::LargeUtf8, true)
+        arrow_schema::Field::new(name, arrow_schema::DataType::Utf8, true)
+            .with_metadata([("ARROW:extension:name".into(), "arrowudf.json".into())].into())
     }
 
     #[inline]
@@ -376,7 +377,8 @@ pub trait ToArrow {
 
     #[inline]
     fn decimal_type_to_arrow(&self, name: &str) -> arrow_schema::Field {
-        arrow_schema::Field::new(name, arrow_schema::DataType::LargeBinary, true)
+        arrow_schema::Field::new(name, arrow_schema::DataType::Utf8, true)
+            .with_metadata([("ARROW:extension:name".into(), "arrowudf.decimal".into())].into())
     }
 
     #[inline]
@@ -414,8 +416,8 @@ pub trait FromArrow {
     /// Converts Arrow `RecordBatch` to RisingWave `DataChunk`.
     fn from_record_batch(&self, batch: &arrow_array::RecordBatch) -> Result<DataChunk, ArrayError> {
         let mut columns = Vec::with_capacity(batch.num_columns());
-        for array in batch.columns() {
-            let column = Arc::new(self.from_array(array)?);
+        for (array, field) in batch.columns().iter().zip_eq_fast(batch.schema().fields()) {
+            let column = Arc::new(self.from_array(field, array)?);
             columns.push(column);
         }
         Ok(DataChunk::new(columns, batch.num_rows()))
@@ -472,30 +474,44 @@ pub trait FromArrow {
 
     /// Converts Arrow `LargeUtf8` type to RisingWave data type.
     fn from_large_utf8(&self) -> Result<DataType, ArrayError> {
-        Ok(DataType::Jsonb)
+        Ok(DataType::Varchar)
     }
 
     /// Converts Arrow `LargeBinary` type to RisingWave data type.
     fn from_large_binary(&self) -> Result<DataType, ArrayError> {
-        Ok(DataType::Decimal)
+        Ok(DataType::Bytea)
     }
 
     /// Converts Arrow extension type to RisingWave `DataType`.
     fn from_extension_type(
         &self,
         type_name: &str,
-        _physical_type: &arrow_schema::DataType,
+        physical_type: &arrow_schema::DataType,
     ) -> Result<DataType, ArrayError> {
-        Err(ArrayError::from_arrow(format!(
-            "unsupported extension type: {type_name:?}"
-        )))
+        match (type_name, physical_type) {
+            ("arrowudf.decimal", arrow_schema::DataType::Utf8) => Ok(DataType::Decimal),
+            ("arrowudf.json", arrow_schema::DataType::Utf8) => Ok(DataType::Jsonb),
+            _ => Err(ArrayError::from_arrow(format!(
+                "unsupported extension type: {type_name:?}"
+            ))),
+        }
     }
 
     /// Converts Arrow `Array` to RisingWave `ArrayImpl`.
-    fn from_array(&self, array: &arrow_array::ArrayRef) -> Result<ArrayImpl, ArrayError> {
+    fn from_array(
+        &self,
+        field: &arrow_schema::Field,
+        array: &arrow_array::ArrayRef,
+    ) -> Result<ArrayImpl, ArrayError> {
         use arrow_schema::DataType::*;
         use arrow_schema::IntervalUnit::*;
         use arrow_schema::TimeUnit::*;
+
+        // extension type
+        if let Some(type_name) = field.metadata().get("ARROW:extension:name") {
+            return self.from_extension_array(type_name, array);
+        }
+
         match array.data_type() {
             Boolean => self.from_bool_array(array.as_any().downcast_ref().unwrap()),
             Int16 => self.from_int16_array(array.as_any().downcast_ref().unwrap()),
@@ -520,6 +536,37 @@ pub trait FromArrow {
             Struct(_) => self.from_struct_array(array.as_any().downcast_ref().unwrap()),
             t => Err(ArrayError::from_arrow(format!(
                 "unsupported arrow data type: {t:?}",
+            ))),
+        }
+    }
+
+    /// Converts Arrow extension array to RisingWave `ArrayImpl`.
+    fn from_extension_array(
+        &self,
+        type_name: &str,
+        array: &arrow_array::ArrayRef,
+    ) -> Result<ArrayImpl, ArrayError> {
+        match type_name {
+            "arrowudf.decimal" => {
+                let array: &arrow_array::StringArray =
+                    array.as_any().downcast_ref().ok_or_else(|| {
+                        ArrayError::from_arrow(
+                            "expected string array for `arrowudf.decimal`".to_string(),
+                        )
+                    })?;
+                Ok(ArrayImpl::Decimal(array.try_into()?))
+            }
+            "arrowudf.json" => {
+                let array: &arrow_array::StringArray =
+                    array.as_any().downcast_ref().ok_or_else(|| {
+                        ArrayError::from_arrow(
+                            "expected string array for `arrowudf.json`".to_string(),
+                        )
+                    })?;
+                Ok(ArrayImpl::Jsonb(array.try_into()?))
+            }
+            _ => Err(ArrayError::from_arrow(format!(
+                "unsupported extension type: {type_name:?}"
             ))),
         }
     }
@@ -598,20 +645,23 @@ pub trait FromArrow {
         &self,
         array: &arrow_array::LargeStringArray,
     ) -> Result<ArrayImpl, ArrayError> {
-        Ok(ArrayImpl::Jsonb(array.try_into()?))
+        Ok(ArrayImpl::Utf8(array.into()))
     }
 
     fn from_large_binary_array(
         &self,
         array: &arrow_array::LargeBinaryArray,
     ) -> Result<ArrayImpl, ArrayError> {
-        Ok(ArrayImpl::Decimal(array.try_into()?))
+        Ok(ArrayImpl::Bytea(array.into()))
     }
 
     fn from_list_array(&self, array: &arrow_array::ListArray) -> Result<ArrayImpl, ArrayError> {
         use arrow_array::Array;
+        let arrow_schema::DataType::List(field) = array.data_type() else {
+            panic!("nested field types cannot be determined.");
+        };
         Ok(ArrayImpl::List(ListArray {
-            value: Box::new(self.from_array(array.values())?),
+            value: Box::new(self.from_array(field, array.values())?),
             bitmap: match array.nulls() {
                 Some(nulls) => nulls.iter().collect(),
                 None => Bitmap::ones(array.len()),
@@ -630,7 +680,8 @@ pub trait FromArrow {
             array
                 .columns()
                 .iter()
-                .map(|a| self.from_array(a).map(Arc::new))
+                .zip_eq_fast(fields)
+                .map(|(array, field)| self.from_array(field, array).map(Arc::new))
                 .try_collect()?,
             (0..array.len()).map(|i| array.is_valid(i)).collect(),
         )))
@@ -703,7 +754,9 @@ converts!(I64Array, arrow_array::Int64Array);
 converts!(F32Array, arrow_array::Float32Array, @map);
 converts!(F64Array, arrow_array::Float64Array, @map);
 converts!(BytesArray, arrow_array::BinaryArray);
+converts!(BytesArray, arrow_array::LargeBinaryArray);
 converts!(Utf8Array, arrow_array::StringArray);
+converts!(Utf8Array, arrow_array::LargeStringArray);
 converts!(DateArray, arrow_array::Date32Array, @map);
 converts!(TimeArray, arrow_array::Time64MicrosecondArray, @map);
 converts!(TimestampArray, arrow_array::TimestampMicrosecondArray, @map);

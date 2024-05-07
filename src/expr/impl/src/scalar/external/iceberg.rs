@@ -35,6 +35,7 @@ pub struct IcebergTransform {
     child: BoxedExpression,
     transform: BoxedTransformFunction,
     input_arrow_type: arrow_schema::DataType,
+    output_arrow_field: arrow_schema::Field,
     return_type: DataType,
 }
 
@@ -61,7 +62,9 @@ impl risingwave_expr::expr::Expression for IcebergTransform {
         // Transform
         let res_array = self.transform.transform(arrow_array).unwrap();
         // Convert back to array ref and return it
-        Ok(Arc::new(IcebergArrowConvert.from_array(&res_array)?))
+        Ok(Arc::new(
+            IcebergArrowConvert.from_array(&self.output_arrow_field, &res_array)?,
+        ))
     }
 
     async fn eval_row(&self, _row: &OwnedRow) -> Result<Datum> {
@@ -96,6 +99,7 @@ fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<Bo
         .to_arrow_field("", &children[1].return_type())?
         .data_type()
         .clone();
+    let output_arrow_field = IcebergArrowConvert.to_arrow_field("", &return_type)?;
     let input_type = IcelakeDataType::try_from(input_arrow_type.clone()).map_err(|err| {
         ExprError::InvalidParam {
             name: "input type in iceberg_transform",
@@ -146,6 +150,7 @@ fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<Bo
         transform: create_transform_function(&transform_type)
             .map_err(|err| ExprError::Internal(err.into()))?,
         input_arrow_type,
+        output_arrow_field,
         return_type,
     }))
 }
