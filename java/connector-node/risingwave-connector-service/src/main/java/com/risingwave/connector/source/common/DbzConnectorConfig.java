@@ -31,8 +31,8 @@ import org.slf4j.LoggerFactory;
 public class DbzConnectorConfig {
     private static final Logger LOG = LoggerFactory.getLogger(DbzConnectorConfig.class);
 
-    public static final String WAIT_FOR_STREAMING_START_BEFORE_EXIT_SECS =
-            "cdc.source.wait.streaming.before.exit.seconds";
+    private static final String WAIT_FOR_STREAMING_START_TIMEOUT_SECS =
+            "cdc.source.wait.streaming.start.timeout";
 
     /* Common configs */
     public static final String HOST = "hostname";
@@ -89,6 +89,7 @@ public class DbzConnectorConfig {
     private final SourceTypeE sourceType;
     private final Properties resolvedDbzProps;
     private final boolean isBackfillSource;
+    private final int waitStreamingStartTimeout;
 
     public long getSourceId() {
         return sourceId;
@@ -106,6 +107,10 @@ public class DbzConnectorConfig {
         return isBackfillSource;
     }
 
+    public int getWaitStreamingStartTimeout() {
+        return waitStreamingStartTimeout;
+    }
+
     public DbzConnectorConfig(
             SourceTypeE source,
             long sourceId,
@@ -119,6 +124,9 @@ public class DbzConnectorConfig {
         var isCdcBackfill =
                 null != userProps.get(SNAPSHOT_MODE_KEY)
                         && userProps.get(SNAPSHOT_MODE_KEY).equals(SNAPSHOT_MODE_BACKFILL);
+        var waitStreamingStartTimeout =
+                Integer.parseInt(
+                        userProps.getOrDefault(WAIT_FOR_STREAMING_START_TIMEOUT_SECS, "30"));
 
         LOG.info(
                 "DbzConnectorConfig: source={}, sourceId={}, startOffset={}, snapshotDone={}, isCdcBackfill={}, isCdcSourceJob={}",
@@ -255,6 +263,7 @@ public class DbzConnectorConfig {
         this.sourceType = source;
         this.resolvedDbzProps = dbzProps;
         this.isBackfillSource = isCdcBackfill;
+        this.waitStreamingStartTimeout = waitStreamingStartTimeout;
     }
 
     private Properties initiateDbConfig(String fileName, StringSubstitutor substitutor) {
