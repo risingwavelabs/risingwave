@@ -721,9 +721,6 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::mem_table_spill_threshold")]
     pub mem_table_spill_threshold: usize,
 
-    #[serde(default = "default::storage::memory_limit_for_behind_barrier_ratio")]
-    pub memory_limit_for_behind_barrier_ratio: u64,
-
     #[serde(default)]
     pub object_store: ObjectStoreConfig,
 }
@@ -1369,11 +1366,6 @@ pub mod default {
         pub fn mem_table_spill_threshold() -> usize {
             4 << 20
         }
-
-        pub fn memory_limit_for_behind_barrier_ratio() -> u64 {
-            70
-        }
-
         pub fn compactor_fast_max_compact_delete_ratio() -> u32 {
             40
         }

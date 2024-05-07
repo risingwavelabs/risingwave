@@ -190,7 +190,6 @@ struct MemoryLimiterInner {
     controller: Mutex<RequestQueue>,
     pending_request_count: AtomicU64,
     quota: u64,
-    fast_quota: u64,
 }
 
 impl MemoryLimiterInner {
@@ -205,7 +204,7 @@ impl MemoryLimiterInner {
     fn may_notify_waiters(self: &Arc<Self>) {
         let mut waiters = self.controller.lock();
         while let Some((tx, quota)) = waiters.pop_front() {
-            if !self.try_require_memory_in_capacity(quota, self.quota) {
+            if !self.try_require_memory(quota) {
                 waiters.push_front((tx, quota));
                 break;
             }
@@ -217,13 +216,8 @@ impl MemoryLimiterInner {
     }
 
     fn try_require_memory(&self, quota: u64) -> bool {
-        self.try_require_memory_in_capacity(quota, self.quota)
-    }
-
-    #[inline(always)]
-    fn try_require_memory_in_capacity(&self, quota: u64, capacity: u64) -> bool {
         let mut current_quota = self.total_size.load(AtomicOrdering::Acquire);
-        while self.permit_quota(current_quota, capacity) {
+        while self.permit_quota(current_quota, quota) {
             match self.total_size.compare_exchange(
                 current_quota,
                 current_quota + quota,
@@ -245,11 +239,11 @@ impl MemoryLimiterInner {
         let mut waiters = self.controller.lock();
         let first_req = waiters.is_empty();
         if first_req {
-            // When this request is the first waiter but the previous `MemoryTracker` is just release a large quota, it may skip notifying this waiter because it has checked `inflight_barrier` and found it was zero. So we must set it one and retry `try_require_memory_in_capacity` again to avoid deadlock.
+            // When this request is the first waiter but the previous `MemoryTracker` is just release a large quota, it may skip notifying this waiter because it has checked `inflight_barrier` and found it was zero. So we must set it one and retry `try_require_memory` again to avoid deadlock.
             self.pending_request_count.store(1, AtomicOrdering::Release);
         }
         // We must require again with lock because some other MemoryTracker may drop just after this thread gets mutex but before it enters queue.
-        if self.try_require_memory_in_capacity(quota, self.quota) {
+        if self.try_require_memory(quota) {
             if first_req {
                 self.pending_request_count.store(0, AtomicOrdering::Release);
             }
@@ -263,8 +257,8 @@ impl MemoryLimiterInner {
         MemoryRequest::Pending(rc)
     }
 
-    fn permit_quota(&self, current_quota: u64, capacity: u64) -> bool {
-        current_quota <= capacity
+    fn permit_quota(&self, current_quota: u64, _request_quota: u64) -> bool {
+        current_quota <= self.quota
     }
 }
 
@@ -308,31 +302,22 @@ impl Debug for MemoryTracker {
 
 impl MemoryLimiter {
     pub fn unlimit() -> Arc<Self> {
-        Arc::new(Self::new_with_blocking_ratio(u64::MAX, 100))
+        Arc::new(Self::new(u64::MAX))
     }
 
     pub fn new(quota: u64) -> Self {
-        Self::new_with_blocking_ratio(quota, 100)
-    }
-
-    pub fn new_with_blocking_ratio(quota: u64, blocking_ratio: u64) -> Self {
-        let main_quota = quota / 100 * blocking_ratio;
         Self {
             inner: Arc::new(MemoryLimiterInner {
                 total_size: AtomicU64::new(0),
                 controller: Mutex::new(VecDeque::default()),
                 pending_request_count: AtomicU64::new(0),
-                fast_quota: main_quota,
                 quota,
             }),
         }
     }
 
     pub fn try_require_memory(&self, quota: u64) -> Option<MemoryTracker> {
-        if self
-            .inner
-            .try_require_memory_in_capacity(quota, self.inner.fast_quota)
-        {
+        if self.inner.try_require_memory(quota) {
             Some(MemoryTracker {
                 inner: MemoryTrackerImpl::new(self.inner.clone(), quota),
             })

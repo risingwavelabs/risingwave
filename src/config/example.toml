@@ -136,7 +136,6 @@ compactor_fast_max_compact_delete_ratio = 40
 compactor_fast_max_compact_task_size = 2147483648
 compactor_iter_max_io_retry_times = 8
 mem_table_spill_threshold = 4194304
-memory_limit_for_behind_barrier_ratio = 70
 
 [storage.cache.block_cache_eviction]
 algorithm = "Lru"

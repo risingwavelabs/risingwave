@@ -78,7 +78,6 @@ pub struct StorageOpts {
     pub max_sub_compaction: u32,
     pub max_concurrent_compaction_task_number: u64,
     pub max_version_pinning_duration_sec: u64,
-    pub memory_limit_for_behind_barrier_ratio: u64,
     pub compactor_iter_max_io_retry_times: usize,
 
     pub data_file_cache_dir: String,
@@ -262,7 +261,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .storage
                 .compactor_fast_max_compact_delete_ratio,
             compactor_fast_max_compact_task_size: c.storage.compactor_fast_max_compact_task_size,
-            memory_limit_for_behind_barrier_ratio: c.storage.memory_limit_for_behind_barrier_ratio,
             compactor_iter_max_io_retry_times: c.storage.compactor_iter_max_io_retry_times,
         }
     }
