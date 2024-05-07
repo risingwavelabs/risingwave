@@ -23,14 +23,14 @@ use regex::Regex;
 pub const RW_INTERNAL_TABLE_FUNCTION_NAME: &str = "rw_table";
 
 pub fn generate_internal_table_name_with_type(
-    mview_name: &str,
+    job_name: &str,
     fragment_id: u32,
     table_id: u32,
     table_type: &str,
 ) -> String {
     format!(
         "__internal_{}_{}_{}_{}",
-        mview_name,
+        job_name,
         fragment_id,
         table_type.to_lowercase(),
         table_id
@@ -41,13 +41,6 @@ pub fn valid_table_name(table_name: &str) -> bool {
     static INTERNAL_TABLE_NAME: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"__internal_.*_\d+").unwrap());
     !INTERNAL_TABLE_NAME.is_match(table_name)
-}
-
-pub fn is_subscription_internal_table(subscription_name: &str, table_name: &str) -> bool {
-    let regex =
-        Regex::new(format!(r"__internal_{}_(\d+)_subscription_(\d+)", subscription_name).as_str())
-            .unwrap();
-    regex.is_match(table_name)
 }
 
 pub fn get_dist_key_in_pk_indices<I: Eq + Copy + Debug, O: TryFrom<usize>>(

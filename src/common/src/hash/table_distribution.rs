@@ -87,7 +87,7 @@ impl TableDistribution {
 
         let vnodes = vnodes.unwrap_or_else(Self::singleton_vnode_bitmap);
         if let ComputeVnode::Singleton = &compute_vnode {
-            if &vnodes != Self::singleton_vnode_bitmap_ref() {
+            if &vnodes != Self::singleton_vnode_bitmap_ref() && &vnodes != Self::all_vnodes_ref() {
                 warn!(
                     ?vnodes,
                     "singleton distribution get non-singleton vnode bitmap"

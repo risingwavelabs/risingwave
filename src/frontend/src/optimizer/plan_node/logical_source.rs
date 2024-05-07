@@ -347,8 +347,9 @@ impl ToStream for LogicalSource {
             }
             SourceNodeKind::CreateMViewOrBatch => {
                 // Create MV on source.
-                let use_shared_source = self.source_catalog().is_some_and(|c| c.info.is_shared())
-                    && self.ctx().session_ctx().config().rw_enable_shared_source();
+                // We only check rw_enable_shared_source is true when `CREATE SOURCE`.
+                // The value does not affect the behavior of `CREATE MATERIALIZED VIEW` here.
+                let use_shared_source = self.source_catalog().is_some_and(|c| c.info.is_shared());
                 if use_shared_source {
                     plan = StreamSourceScan::new(self.core.clone()).into();
                 } else {

@@ -921,7 +921,6 @@ impl HummockManager {
         let developer_config = Arc::new(CompactionDeveloperConfig::new_from_meta_opts(
             &self.env.opts,
         ));
-        const MAX_TRIVIAL_MOVE_TASK_COUNT: usize = 256;
         'outside: for compaction_group_id in compaction_groups {
             if pick_tasks.len() >= max_select_count {
                 break;
@@ -1080,7 +1079,7 @@ impl HummockManager {
                     );
                     current_version.apply_version_delta(&version_delta);
                     trivial_tasks.push(compact_task);
-                    if trivial_tasks.len() >= MAX_TRIVIAL_MOVE_TASK_COUNT {
+                    if trivial_tasks.len() >= self.env.opts.max_trivial_move_task_count_per_loop {
                         break 'outside;
                     }
                 } else {
@@ -3308,6 +3307,26 @@ impl HummockManager {
         }
 
         Ok(())
+    }
+
+    #[named]
+    pub async fn list_change_log_epochs(
+        &self,
+        table_id: u32,
+        min_epoch: u64,
+        max_count: u32,
+    ) -> Vec<u64> {
+        let versioning = read_lock!(self, versioning).await;
+        if let Some(table_change_log) = versioning
+            .current_version
+            .table_change_log
+            .get(&TableId::new(table_id))
+        {
+            let table_change_log = table_change_log.clone();
+            table_change_log.get_epochs(min_epoch, max_count as usize)
+        } else {
+            vec![]
+        }
     }
 }
 
