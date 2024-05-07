@@ -178,7 +178,7 @@ impl UserDefinedFunction {
                 let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
                 let result = if self.always_retry_on_network_error {
                     call_with_always_retry_on_network_error(
-                        &client,
+                        client,
                         &self.identifier,
                         &arrow_input,
                         &metrics.udf_retry_count.with_label_values(labels),
@@ -192,7 +192,7 @@ impl UserDefinedFunction {
                             .instrument_await(self.span.clone())
                             .await
                     } else {
-                        call_with_retry(&client, &self.identifier, &arrow_input)
+                        call_with_retry(client, &self.identifier, &arrow_input)
                             .instrument_await(self.span.clone())
                             .await
                     };
@@ -546,11 +546,11 @@ fn is_connection_error(err: &arrow_udf_flight::Error) -> bool {
 }
 
 fn is_tonic_error(err: &arrow_udf_flight::Error) -> bool {
-    match err {
+    matches!(
+        err,
         arrow_udf_flight::Error::Tonic(_)
-        | arrow_udf_flight::Error::Flight(arrow_flight::error::FlightError::Tonic(_)) => true,
-        _ => false,
-    }
+            | arrow_udf_flight::Error::Flight(arrow_flight::error::FlightError::Tonic(_))
+    )
 }
 
 /// Monitor metrics for UDF.
