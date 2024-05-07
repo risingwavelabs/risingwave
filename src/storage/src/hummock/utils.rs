@@ -228,13 +228,16 @@ impl MemoryLimiterInner {
     async fn require_memory(self: &Arc<Self>, quota: u64) -> MemoryTrackerImpl {
         let waiter = {
             let mut waiters = self.controller.lock();
-            if waiters.is_empty() {
+            let first_req = waiters.is_empty() ;
+            if first_req {
                 // When this request is the first waiter but the previous `MemoryTracker` is just release a large quota, it may skip notifying this waiter because it has checked `inflight_barrier` and found it was zero. So we must set it one and retry `try_require_memory_in_capacity` again to avoid deadlock.
                 self.pending_request_count.store(1, AtomicOrdering::Release);
-                if self.try_require_memory_in_capacity(quota, self.fast_quota) {
+            }
+            if self.try_require_memory_in_capacity(quota, self.quota) {
+                if first_req {
                     self.pending_request_count.store(0, AtomicOrdering::Release);
-                    return MemoryTrackerImpl::new(self.clone(), quota);
                 }
+                return MemoryTrackerImpl::new(self.clone(), quota);
             }
             let (tx, rc) = channel();
             waiters.push_back((tx, quota));
@@ -291,7 +294,7 @@ impl Debug for MemoryTracker {
 
 impl MemoryLimiter {
     pub fn unlimit() -> Arc<Self> {
-        Arc::new(Self::new_with_blocking_ratio(u64::MAX / 100, 100))
+        Arc::new(Self::new_with_blocking_ratio(u64::MAX, 100))
     }
 
     pub fn new(quota: u64) -> Self {
