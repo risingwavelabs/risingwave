@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::future::IntoFuture;
+use std::io;
 use std::pin::Pin;
 
 use async_compression::tokio::bufread::GzipDecoder;
@@ -149,7 +150,8 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 Box::pin(BufReader::new(gzip_decoder)) as Pin<Box<dyn AsyncRead + Send>>
             }
             None => {
-                if object_name.ends_with(".gz") || object_name.ends_with(".gzip"){
+                // todo: support automatic decompression of more compression types.
+                if object_name.ends_with(".gz") || object_name.ends_with(".gzip") {
                     let gzip_decoder = GzipDecoder::new(stream_reader);
                     Box::pin(BufReader::new(gzip_decoder)) as Pin<Box<dyn AsyncRead + Send>>
                 } else {
@@ -157,9 +159,8 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 }
             }
             Some(format) => {
-                tracing::error!("The input decompression format {format} is not supported. Currently, only gzip format decompression is supported.");
-                // todo: handle error
-                todo!()
+                let error_message = format!("The input decompression format '{}' is not supported. Currently, only gzip format decompression is supported.", format);
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, error_message).into());
             }
         };
 
