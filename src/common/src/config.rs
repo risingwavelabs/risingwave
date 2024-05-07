@@ -1366,6 +1366,7 @@ pub mod default {
         pub fn mem_table_spill_threshold() -> usize {
             4 << 20
         }
+
         pub fn compactor_fast_max_compact_delete_ratio() -> u32 {
             40
         }

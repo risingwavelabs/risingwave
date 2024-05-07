@@ -1817,12 +1817,8 @@ mod tests {
         impl Fn(Vec<ImmId>) -> (BoxFuture<'static, ()>, oneshot::Sender<()>),
     ) {
         // flush threshold is 0. Flush anyway
-        let buffer_tracker = BufferTracker::new(
-            usize::MAX,
-            0,
-            100,
-            GenericGauge::new("test", "test").unwrap(),
-        );
+        let buffer_tracker =
+            BufferTracker::new(usize::MAX, 0, GenericGauge::new("test", "test").unwrap());
         // (the started task send the imm ids of payload, the started task wait for finish notify)
         #[allow(clippy::type_complexity)]
         let task_notifier_holder: Arc<
