@@ -107,43 +107,25 @@ impl<'a> FromSql<'a> for ScalarAdapter<'_> {
         ty: &Type,
         raw: &'a [u8],
     ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
-        match *ty {
-            Type::UUID => {
-                let uuid = uuid::Uuid::from_sql(ty, raw)?;
-                Ok(ScalarAdapter::Uuid(uuid))
-            }
-            Type::NUMERIC => {
-                let numeric = PgNumeric::from_sql(ty, raw)?;
-                Ok(ScalarAdapter::Numeric(numeric))
-            }
-            Type::ANYENUM => Ok(ScalarAdapter::Enum(EnumString(
-                String::from_utf8_lossy(raw).into_owned(),
-            ))),
-
+        match ty.kind() {
+            Kind::Simple => match *ty {
+                Type::UUID => {
+                    let uuid = uuid::Uuid::from_sql(ty, raw)?;
+                    Ok(ScalarAdapter::Uuid(uuid))
+                }
+                Type::NUMERIC => {
+                    let numeric = PgNumeric::from_sql(ty, raw)?;
+                    Ok(ScalarAdapter::Numeric(numeric))
+                }
+                _ => Err(anyhow!("failed to convert type {:?} to ScalarAdapter", ty).into()),
+            },
+            Kind::Enum(_) => Ok(ScalarAdapter::Enum(EnumString::from_sql(ty, raw)?)),
             _ => Err(anyhow!("failed to convert type {:?} to ScalarAdapter", ty).into()),
         }
-
-        // match ty.kind() {
-        //     Kind::Simple => match *ty {
-        //         Type::UUID => {
-        //             let uuid = uuid::Uuid::from_sql(ty, raw)?;
-        //             Ok(ScalarAdapter::Uuid(uuid))
-        //         }
-        //         Type::NUMERIC => {
-        //             let numeric = PgNumeric::from_sql(ty, raw)?;
-        //             Ok(ScalarAdapter::Numeric(numeric))
-        //         }
-        //         _ => Err(anyhow!("failed to convert type {:?} to ScalarAdapter", ty).into()),
-        //     },
-        //     Kind::Enum(_) => Ok(ScalarAdapter::Enum(EnumString(
-        //         String::from_utf8_lossy(raw).into_owned(),
-        //     ))),
-        //     _ => Err(anyhow!("failed to convert type {:?} to ScalarAdapter", ty).into()),
-        // }
     }
 
     fn accepts(ty: &Type) -> bool {
-        matches!(ty, &Type::UUID | &Type::NUMERIC | &Type::ANYENUM)
+        matches!(ty, &Type::UUID | &Type::NUMERIC) || <EnumString as FromSql>::accepts(ty)
     }
 }
 
