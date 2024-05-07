@@ -67,6 +67,7 @@ cluster_stop() {
 
 download_and_prepare_rw "$profile" common
 
+sudo apt install sqlite3 -y
 for meta_store_type in "etcd" "sql"; do
   echo "--- e2e, ci-meta-backup-test-${meta_store_type}"
   test_root="src/storage/backup/integration_tests"

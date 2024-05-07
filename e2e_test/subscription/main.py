@@ -35,13 +35,14 @@ def execute_insert(sql,conn):
 
 def check_rows_data(expect_vec,rows,status):
     row = rows[0]
+    value_len  = len(row)
     for index, value in enumerate(row):
-        if index == 0:
+        if index == value_len  - 1:
             continue
-        if index == 1:
+        if index == value_len  - 2:
             assert value == status,f"expect {value} but got {status}"
             continue
-        assert value == expect_vec[index-2],f"expect {expect_vec[index-2]} but got {value}"
+        assert value == expect_vec[index],f"expect {expect_vec[index]} but got {value}"
 
 def test_cursor_snapshot():
     print(f"test_cursor_snapshot")
@@ -161,13 +162,16 @@ def test_cursor_since_rw_timestamp():
     execute_insert("insert into t1 values(6,6)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
-    rw_timestamp_1 = row[0][0]
+    valuelen = len(row[0])
+    rw_timestamp_1 = row[0][valuelen - 1]
     check_rows_data([4,4],row,1)
     row = execute_query("fetch next from cur",conn)
-    rw_timestamp_2 = row[0][0] - 1
+    valuelen = len(row[0])
+    rw_timestamp_2 = row[0][valuelen - 1] - 1
     check_rows_data([5,5],row,1)
     row = execute_query("fetch next from cur",conn)
-    rw_timestamp_3 = row[0][0] + 1
+    valuelen = len(row[0])
+    rw_timestamp_3 = row[0][valuelen - 1] + 1
     check_rows_data([6,6],row,1)
     row = execute_query("fetch next from cur",conn)
     assert row == []

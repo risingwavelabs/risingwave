@@ -436,7 +436,7 @@ fn pg_numeric_to_string(val: Option<PgNumeric>) -> Option<String> {
 }
 
 #[derive(Clone, Debug)]
-struct EnumString(String);
+pub struct EnumString(pub String);
 
 impl<'a> FromSql<'a> for EnumString {
     fn from_sql(

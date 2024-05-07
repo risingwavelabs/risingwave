@@ -117,11 +117,7 @@ pub trait CatalogWriter: Send + Sync {
         affected_table_change: Option<PbReplaceTablePlan>,
     ) -> Result<()>;
 
-    async fn create_subscription(
-        &self,
-        subscription: PbSubscription,
-        graph: StreamFragmentGraph,
-    ) -> Result<()>;
+    async fn create_subscription(&self, subscription: PbSubscription) -> Result<()>;
 
     async fn create_function(&self, function: PbFunction) -> Result<()>;
 
@@ -204,6 +200,13 @@ pub trait CatalogWriter: Send + Sync {
         object: alter_set_schema_request::Object,
         new_schema_id: u32,
     ) -> Result<()>;
+
+    async fn list_change_log_epochs(
+        &self,
+        table_id: u32,
+        min_epoch: u64,
+        max_count: u32,
+    ) -> Result<Vec<u64>>;
 }
 
 #[derive(Clone)]
@@ -339,15 +342,8 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn create_subscription(
-        &self,
-        subscription: PbSubscription,
-        graph: StreamFragmentGraph,
-    ) -> Result<()> {
-        let version = self
-            .meta_client
-            .create_subscription(subscription, graph)
-            .await?;
+    async fn create_subscription(&self, subscription: PbSubscription) -> Result<()> {
+        let version = self.meta_client.create_subscription(subscription).await?;
         self.wait_version(version).await
     }
 
@@ -567,6 +563,18 @@ impl CatalogWriter for CatalogWriterImpl {
             .map_err(|e| anyhow!(e))?;
 
         Ok(())
+    }
+
+    async fn list_change_log_epochs(
+        &self,
+        table_id: u32,
+        min_epoch: u64,
+        max_count: u32,
+    ) -> Result<Vec<u64>> {
+        Ok(self
+            .meta_client
+            .list_change_log_epochs(table_id, min_epoch, max_count)
+            .await?)
     }
 }
 

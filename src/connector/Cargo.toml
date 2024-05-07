@@ -26,7 +26,7 @@ arrow-row = { workspace = true }
 arrow-schema = { workspace = true }
 arrow-select = { workspace = true }
 assert_matches = "1"
-async-nats = "0.34"
+async-nats = "0.35"
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
