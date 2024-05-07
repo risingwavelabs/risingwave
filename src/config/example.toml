@@ -204,9 +204,9 @@ metadata_retry_attempts = 3
 delete_attempt_timeout_ms = 5000
 delete_retry_attempts = 3
 delete_objects_attempt_timeout_ms = 5000
-delete_objects_retry_attempts = 5
+delete_objects_retry_attempts = 3
 list_attempt_timeout_ms = 600000
-list_retry_attempts = 5
+list_retry_attempts = 3
 
 [storage.object_store.s3]
 object_store_keepalive_ms = 600000
