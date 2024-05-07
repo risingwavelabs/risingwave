@@ -447,7 +447,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
         })
     }
 
-    async fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
+    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
         if offset > self.latest_offset.expect("should exist before truncation") {
             return Err(anyhow!(
                 "truncate at a later offset {:?} than the current latest offset {:?}",
