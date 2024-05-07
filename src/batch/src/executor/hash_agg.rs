@@ -250,7 +250,9 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 }
             }
             // update memory usage
-            self.mem_context.add(memory_usage_diff);
+            if !self.mem_context.add(memory_usage_diff) {
+                Err(BatchError::OutOfMemory(self.mem_context.mem_limit()))?;
+            }
         }
 
         // Don't use `into_iter` here, it may cause memory leak.

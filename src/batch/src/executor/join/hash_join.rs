@@ -234,7 +234,9 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let build_chunk = build_chunk?;
             if build_chunk.cardinality() > 0 {
                 build_row_count += build_chunk.cardinality();
-                self.mem_ctx.add(build_chunk.estimated_heap_size() as i64);
+                if !self.mem_ctx.add(build_chunk.estimated_heap_size() as i64) {
+                    Err(BatchError::OutOfMemory(self.mem_ctx.mem_limit()))?;
+                }
                 build_side.push(build_chunk);
             }
         }
@@ -264,7 +266,9 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 // Only insert key to hash map if it is consistent with the null safe restriction.
                 if build_key.null_bitmap().is_subset(&null_matched) {
                     let row_id = RowId::new(build_chunk_id, build_row_id);
-                    self.mem_ctx.add(build_key.estimated_heap_size() as i64);
+                    if !self.mem_ctx.add(build_key.estimated_heap_size() as i64) {
+                        Err(BatchError::OutOfMemory(self.mem_ctx.mem_limit()))?;
+                    }
                     next_build_row_with_same_key[row_id] = hash_map.insert(build_key, row_id);
                 }
             }

@@ -81,6 +81,10 @@ impl<T: Ord + EstimateSize> MemMonitoredHeap<T> {
         self.mem_ctx.add(-((old_cap * size_of::<T>()) as i64));
         ret
     }
+
+    pub fn mem_context(&self) -> &MemoryContext {
+        &self.mem_ctx
+    }
 }
 
 impl<T> Extend<T> for MemMonitoredHeap<T>
