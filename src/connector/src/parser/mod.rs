@@ -768,6 +768,11 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                         current_transaction = None;
 
                         if last_batch_not_yielded {
+                            // Have to yield heartbeats before data.
+                            if !heartbeat_builder.is_empty() {
+                                yield heartbeat_builder.take(0);
+                            }
+
                             yield builder.take(batch_len - (i + 1));
                             last_batch_not_yielded = false;
                         }
