@@ -37,6 +37,7 @@ pub struct UserDefinedTableFunction {
     return_type: DataType,
     client: UdfImpl,
     identifier: String,
+    arrow_convert: UdfArrowConvert,
     #[allow(dead_code)]
     chunk_size: usize,
 }
@@ -106,8 +107,9 @@ impl UserDefinedTableFunction {
         // compact the input chunk and record the row mapping
         let visible_rows = direct_input.visibility().iter_ones().collect::<Vec<_>>();
         // this will drop invisible rows
-        let arrow_input =
-            UdfArrowConvert.to_record_batch(self.arg_schema.clone(), &direct_input)?;
+        let arrow_input = self
+            .arrow_convert
+            .to_record_batch(self.arg_schema.clone(), &direct_input)?;
 
         // call UDTF
         #[for_await]
@@ -115,7 +117,7 @@ impl UserDefinedTableFunction {
             .client
             .call_table_function(&self.identifier, arrow_input)
         {
-            let output = UdfArrowConvert.from_record_batch(&res?)?;
+            let output = self.arrow_convert.from_record_batch(&res?)?;
             self.check_output(&output)?;
 
             // we send the compacted input to UDF, so we need to map the row indices back to the
@@ -175,20 +177,8 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
         bail!("expect UDTF");
     };
 
-    let arg_schema = Arc::new(Schema::new(
-        udtf.arg_types
-            .iter()
-            .map(|t| UdfArrowConvert.to_arrow_field("", &DataType::from(t)))
-            .try_collect::<Fields>()?,
-    ));
-
     let identifier = udtf.get_identifier()?;
     let return_type = DataType::from(prost.get_return_type()?);
-
-    let arrow_return_type = UdfArrowConvert
-        .to_arrow_field("", &return_type)?
-        .data_type()
-        .clone();
 
     #[cfg(not(feature = "embedded-deno-udf"))]
     let runtime = "quickjs";
@@ -199,12 +189,18 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
         _ => "quickjs",
     };
 
+    let mut arrow_convert = UdfArrowConvert::default();
+
     let client = match udtf.language.as_str() {
         "wasm" | "rust" => {
             let compressed_wasm_binary = udtf.get_compressed_binary()?;
             let wasm_binary = zstd::stream::decode_all(compressed_wasm_binary.as_slice())
                 .context("failed to decompress wasm binary")?;
             let runtime = crate::expr::expr_udf::get_or_create_wasm_runtime(&wasm_binary)?;
+            // backward compatibility
+            if runtime.abi_version().0 <= 2 {
+                arrow_convert = UdfArrowConvert { legacy: true };
+            }
             UdfImpl::Wasm(runtime)
         }
         "javascript" if runtime != "deno" => {
@@ -217,7 +213,10 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
             );
             rt.add_function(
                 identifier,
-                arrow_return_type,
+                arrow_convert
+                    .to_arrow_field("", &return_type)?
+                    .data_type()
+                    .clone(),
                 JsCallMode::CalledOnNullInput,
                 &body,
             )?;
@@ -253,12 +252,17 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
                 body
             );
 
-            futures::executor::block_on(rt.add_function(
-                identifier,
-                arrow_return_type,
-                DenoCallMode::CalledOnNullInput,
-                &body,
-            ))?;
+            futures::executor::block_on(
+                rt.add_function(
+                    identifier,
+                    arrow_convert
+                        .to_arrow_field("", &return_type)?
+                        .data_type()
+                        .clone(),
+                    DenoCallMode::CalledOnNullInput,
+                    &body,
+                ),
+            )?;
             UdfImpl::Deno(rt)
         }
         #[cfg(feature = "embedded-python-udf")]
@@ -267,7 +271,10 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
             let body = udtf.get_body()?;
             rt.add_function(
                 identifier,
-                arrow_return_type,
+                arrow_convert
+                    .to_arrow_field("", &return_type)?
+                    .data_type()
+                    .clone(),
                 PythonCallMode::CalledOnNullInput,
                 body,
             )?;
@@ -276,9 +283,21 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
         // connect to UDF service
         _ => {
             let link = udtf.get_link()?;
-            UdfImpl::External(crate::expr::expr_udf::get_or_create_flight_client(link)?)
+            let client = crate::expr::expr_udf::get_or_create_flight_client(link)?;
+            // backward compatibility
+            if client.protocol_version() == 1 {
+                arrow_convert = UdfArrowConvert { legacy: true };
+            }
+            UdfImpl::External(client)
         }
     };
+
+    let arg_schema = Arc::new(Schema::new(
+        udtf.arg_types
+            .iter()
+            .map(|t| arrow_convert.to_arrow_field("", &DataType::from(t)))
+            .try_collect::<Fields>()?,
+    ));
 
     Ok(UserDefinedTableFunction {
         children: prost.args.iter().map(expr_build_from_prost).try_collect()?,
@@ -286,6 +305,7 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
         arg_schema,
         client,
         identifier: identifier.clone(),
+        arrow_convert,
         chunk_size,
     }
     .boxed())

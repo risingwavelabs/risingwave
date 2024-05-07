@@ -168,10 +168,11 @@ pub async fn handle_create_function(
             // check UDF server
             {
                 let client = FlightClient::connect(&l).await.map_err(|e| anyhow!(e))?;
-                /// A helper function to create a unnamed field from data type.
-                fn to_field(data_type: &DataType) -> Result<arrow_schema::Field> {
-                    Ok(UdfArrowConvert.to_arrow_field("", data_type)?)
-                }
+                let convert = UdfArrowConvert {
+                    legacy: client.protocol_version() == 1,
+                };
+                // A helper function to create a unnamed field from data type.
+                let to_field = |data_type| convert.to_arrow_field("", data_type);
                 let args = arrow_schema::Schema::new(
                     arg_types
                         .iter()
@@ -288,6 +289,7 @@ pub async fn handle_create_function(
 
             let wasm_binary = tokio::task::spawn_blocking(move || {
                 let mut opts = arrow_udf_wasm::build::BuildOpts::default();
+                opts.arrow_udf_version = Some("0.3".to_string());
                 opts.script = script;
                 // use a fixed tempdir to reuse the build cache
                 opts.tempdir = Some(std::env::temp_dir().join("risingwave-rust-udf"));
@@ -321,6 +323,13 @@ pub async fn handle_create_function(
                 }
             };
             let runtime = get_or_create_wasm_runtime(&wasm_binary)?;
+            if runtime.abi_version().0 <= 2 {
+                return Err(ErrorCode::InvalidParameterValue(
+                    "legacy arrow-udf is no longer supported. please update arrow-udf to 0.3+"
+                        .to_string(),
+                )
+                .into());
+            }
             let identifier_v1 = wasm_identifier_v1(
                 &function_name,
                 &arg_types,
@@ -469,13 +478,13 @@ fn wasm_identifier_v1(
 fn datatype_name(ty: &DataType) -> String {
     match ty {
         DataType::Boolean => "boolean".to_string(),
-        DataType::Int16 => "int2".to_string(),
-        DataType::Int32 => "int4".to_string(),
-        DataType::Int64 => "int8".to_string(),
-        DataType::Float32 => "float4".to_string(),
-        DataType::Float64 => "float8".to_string(),
-        DataType::Date => "date".to_string(),
-        DataType::Time => "time".to_string(),
+        DataType::Int16 => "int16".to_string(),
+        DataType::Int32 => "int32".to_string(),
+        DataType::Int64 => "int64".to_string(),
+        DataType::Float32 => "float32".to_string(),
+        DataType::Float64 => "float64".to_string(),
+        DataType::Date => "date32".to_string(),
+        DataType::Time => "time64".to_string(),
         DataType::Timestamp => "timestamp".to_string(),
         DataType::Timestamptz => "timestamptz".to_string(),
         DataType::Interval => "interval".to_string(),
@@ -483,8 +492,8 @@ fn datatype_name(ty: &DataType) -> String {
         DataType::Jsonb => "json".to_string(),
         DataType::Serial => "serial".to_string(),
         DataType::Int256 => "int256".to_string(),
-        DataType::Bytea => "bytea".to_string(),
-        DataType::Varchar => "varchar".to_string(),
+        DataType::Bytea => "binary".to_string(),
+        DataType::Varchar => "string".to_string(),
         DataType::List(inner) => format!("{}[]", datatype_name(inner)),
         DataType::Struct(s) => format!(
             "struct<{}>",

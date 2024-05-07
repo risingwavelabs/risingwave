@@ -19,8 +19,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Error};
 use arrow_array::RecordBatch;
-use arrow_udf_flight::Client as FlightClient;
 use arrow_schema::{Fields, Schema, SchemaRef};
+use arrow_udf_flight::Client as FlightClient;
 use arrow_udf_js::{CallMode as JsCallMode, Runtime as JsRuntime};
 #[cfg(feature = "embedded-deno-udf")]
 use arrow_udf_js_deno::{CallMode as DenoCallMode, Runtime as DenoRuntime};
@@ -56,6 +56,7 @@ pub struct UserDefinedFunction {
     imp: UdfImpl,
     identifier: String,
     link: Option<String>,
+    arrow_convert: UdfArrowConvert,
     span: await_tree::Span,
     /// Number of remaining successful calls until retry is enabled.
     /// This parameter is designed to prevent continuous retry on every call, which would increase delay.
@@ -122,7 +123,9 @@ impl Expression for UserDefinedFunction {
 impl UserDefinedFunction {
     async fn eval_inner(&self, input: &DataChunk) -> Result<ArrayRef> {
         // this will drop invisible rows
-        let arrow_input = UdfArrowConvert.to_record_batch(self.arg_schema.clone(), input)?;
+        let arrow_input = self
+            .arrow_convert
+            .to_record_batch(self.arg_schema.clone(), input)?;
 
         // metrics
         let metrics = &*GLOBAL_METRICS;
@@ -230,7 +233,7 @@ impl UserDefinedFunction {
             );
         }
 
-        let output = UdfArrowConvert.from_record_batch(&arrow_output)?;
+        let output = self.arrow_convert.from_record_batch(&arrow_output)?;
         let output = output.uncompact(input.visibility().clone());
 
         let Some(array) = output.columns().first() else {
@@ -301,11 +304,7 @@ impl Build for UserDefinedFunction {
     ) -> Result<Self> {
         let return_type = DataType::from(prost.get_return_type().unwrap());
         let udf = prost.get_rex_node().unwrap().as_udf().unwrap();
-
-        let arrow_return_type = UdfArrowConvert
-            .to_arrow_field("", &return_type)?
-            .data_type()
-            .clone();
+        let mut arrow_convert = UdfArrowConvert::default();
 
         #[cfg(not(feature = "embedded-deno-udf"))]
         let runtime = "quickjs";
@@ -324,6 +323,10 @@ impl Build for UserDefinedFunction {
                 let wasm_binary = zstd::stream::decode_all(compressed_wasm_binary.as_slice())
                     .context("failed to decompress wasm binary")?;
                 let runtime = get_or_create_wasm_runtime(&wasm_binary)?;
+                // backward compatibility
+                if runtime.abi_version().0 <= 2 {
+                    arrow_convert = UdfArrowConvert { legacy: true };
+                }
                 UdfImpl::Wasm(runtime)
             }
             "javascript" if runtime != "deno" => {
@@ -336,7 +339,10 @@ impl Build for UserDefinedFunction {
                 );
                 rt.add_function(
                     identifier,
-                    arrow_return_type,
+                    arrow_convert
+                        .to_arrow_field("", &return_type)?
+                        .data_type()
+                        .clone(),
                     JsCallMode::CalledOnNullInput,
                     &body,
                 )?;
@@ -375,12 +381,17 @@ impl Build for UserDefinedFunction {
                     )
                 };
 
-                futures::executor::block_on(rt.add_function(
-                    identifier,
-                    arrow_return_type,
-                    DenoCallMode::CalledOnNullInput,
-                    &body,
-                ))?;
+                futures::executor::block_on(
+                    rt.add_function(
+                        identifier,
+                        arrow_convert
+                            .to_arrow_field("", &return_type)?
+                            .data_type()
+                            .clone(),
+                        DenoCallMode::CalledOnNullInput,
+                        &body,
+                    ),
+                )?;
 
                 UdfImpl::Deno(rt)
             }
@@ -390,7 +401,10 @@ impl Build for UserDefinedFunction {
                 let body = udf.get_body()?;
                 rt.add_function(
                     identifier,
-                    arrow_return_type,
+                    arrow_convert
+                        .to_arrow_field("", &return_type)?
+                        .data_type()
+                        .clone(),
                     PythonCallMode::CalledOnNullInput,
                     body,
                 )?;
@@ -399,7 +413,12 @@ impl Build for UserDefinedFunction {
             #[cfg(not(madsim))]
             _ => {
                 let link = udf.get_link()?;
-                UdfImpl::External(get_or_create_flight_client(link)?)
+                let client = crate::expr::expr_udf::get_or_create_flight_client(link)?;
+                // backward compatibility
+                if client.protocol_version() == 1 {
+                    arrow_convert = UdfArrowConvert { legacy: true };
+                }
+                UdfImpl::External(client)
             }
             #[cfg(madsim)]
             l => panic!("UDF language {l:?} is not supported on madsim"),
@@ -408,7 +427,7 @@ impl Build for UserDefinedFunction {
         let arg_schema = Arc::new(Schema::new(
             udf.arg_types
                 .iter()
-                .map(|t| UdfArrowConvert.to_arrow_field("", &DataType::from(t)))
+                .map(|t| arrow_convert.to_arrow_field("", &DataType::from(t)))
                 .try_collect::<Fields>()?,
         ));
 
@@ -420,6 +439,7 @@ impl Build for UserDefinedFunction {
             imp,
             identifier: identifier.clone(),
             link: udf.link.clone(),
+            arrow_convert,
             span: format!("udf_call({})", identifier).into(),
             disable_retry_count: AtomicU8::new(0),
             always_retry_on_network_error: udf.always_retry_on_network_error,
