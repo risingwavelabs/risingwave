@@ -211,8 +211,9 @@ pub fn gen_sink_plan(
                 if !target_table_columns.contains(c.as_str()) {
                     return Err(RwError::from(ErrorCode::BindError(format!(
                         "Column {} not found in table {}",
-                        c, target_table_catalog.name()
-                    ))));    
+                        c,
+                        target_table_catalog.name()
+                    ))));
                 }
             }
         }
@@ -714,6 +715,7 @@ fn derive_default_column_project_for_sink(
             derive_sink_to_table_expr(sink_schema, sink_col_idx, table_column.data_type())
         };
 
+        #[allow(clippy::collapsible_else_if)]
         if user_specified_columns {
             if let Some(idx) = sink_visible_col_idxes_by_name.get(table_column.name()) {
                 exprs.push(sink_col_expr(*idx)?);
