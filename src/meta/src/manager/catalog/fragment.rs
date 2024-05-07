@@ -33,6 +33,7 @@ use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, DispatcherType, FragmentTypeFlag, StreamActor, StreamNode,
 };
+use risingwave_pb::stream_service::BuildActorInfo;
 use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::barrier::Reschedule;
@@ -43,7 +44,7 @@ use crate::model::{
     TableParallelism, ValTransaction,
 };
 use crate::storage::Transaction;
-use crate::stream::{SplitAssignment, TableRevision};
+use crate::stream::{to_build_actor_info, SplitAssignment, TableRevision};
 use crate::{MetaError, MetaResult};
 
 pub struct FragmentManagerCore {
@@ -849,14 +850,20 @@ impl FragmentManager {
     pub async fn all_node_actors(
         &self,
         include_inactive: bool,
-    ) -> HashMap<WorkerId, Vec<StreamActor>> {
+        subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
+    ) -> HashMap<WorkerId, Vec<BuildActorInfo>> {
         let mut actor_maps = HashMap::new();
 
         let map = &self.core.read().await.table_fragments;
         for fragments in map.values() {
+            let table_id = fragments.table_id();
             for (node_id, actors) in fragments.worker_actors(include_inactive) {
                 let node_actors = actor_maps.entry(node_id).or_insert_with(Vec::new);
-                node_actors.extend(actors);
+                node_actors.extend(
+                    actors
+                        .into_iter()
+                        .map(|actor| to_build_actor_info(actor, subscriptions, table_id)),
+                );
             }
         }
 
@@ -952,15 +959,24 @@ impl FragmentManager {
         let mut fragment_to_apply = HashMap::new();
 
         for fragment in fragment.fragments.values_mut() {
-            if (fragment.get_fragment_type_mask() & FragmentTypeFlag::StreamScan as u32) != 0 {
+            if (fragment.get_fragment_type_mask() & FragmentTypeFlag::StreamScan as u32) != 0
+                || (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0
+            {
                 let mut actor_to_apply = Vec::new();
                 for actor in &mut fragment.actors {
                     if let Some(node) = actor.nodes.as_mut() {
-                        visit_stream_node(node, |node_body| {
-                            if let NodeBody::StreamScan(ref mut node) = node_body {
+                        visit_stream_node(node, |node_body| match node_body {
+                            NodeBody::StreamScan(ref mut node) => {
                                 node.rate_limit = rate_limit;
                                 actor_to_apply.push(actor.actor_id);
                             }
+                            NodeBody::Source(ref mut node) => {
+                                if let Some(ref mut node_inner) = node.source_inner {
+                                    node_inner.rate_limit = rate_limit;
+                                    actor_to_apply.push(actor.actor_id);
+                                }
+                            }
+                            _ => {}
                         })
                     };
                 }

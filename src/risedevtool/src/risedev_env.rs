@@ -25,50 +25,73 @@ use crate::{add_hummock_backend, HummockInMemoryStrategy, ServiceConfig};
 pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
     let mut env = String::new();
     for item in services {
-        if let ServiceConfig::ComputeNode(c) = item {
-            // RW_HUMMOCK_URL
-            // If the cluster is launched without a shared storage, we will skip this.
-            {
-                let mut cmd = Command::new("compute-node");
-                if add_hummock_backend(
-                    "dummy",
-                    c.provide_opendal.as_ref().unwrap(),
-                    c.provide_minio.as_ref().unwrap(),
-                    c.provide_aws_s3.as_ref().unwrap(),
-                    HummockInMemoryStrategy::Disallowed,
-                    &mut cmd,
-                )
-                .is_ok()
+        match item {
+            ServiceConfig::ComputeNode(c) => {
+                // RW_HUMMOCK_URL
+                // If the cluster is launched without a shared storage, we will skip this.
                 {
+                    let mut cmd = Command::new("compute-node");
+                    if add_hummock_backend(
+                        "dummy",
+                        c.provide_opendal.as_ref().unwrap(),
+                        c.provide_minio.as_ref().unwrap(),
+                        c.provide_aws_s3.as_ref().unwrap(),
+                        HummockInMemoryStrategy::Disallowed,
+                        &mut cmd,
+                    )
+                    .is_ok()
+                    {
+                        writeln!(
+                            env,
+                            "RW_HUMMOCK_URL=\"{}\"",
+                            cmd.get_args().nth(1).unwrap().to_str().unwrap()
+                        )
+                        .unwrap();
+                    }
+                }
+
+                // RW_META_ADDR
+                {
+                    let meta_node = &c.provide_meta_node.as_ref().unwrap()[0];
                     writeln!(
                         env,
-                        "RW_HUMMOCK_URL=\"{}\"",
-                        cmd.get_args().nth(1).unwrap().to_str().unwrap()
+                        "RW_META_ADDR=\"http://{}:{}\"",
+                        meta_node.address, meta_node.port
                     )
                     .unwrap();
                 }
             }
-
-            // RW_META_ADDR
-            {
-                let meta_node = &c.provide_meta_node.as_ref().unwrap()[0];
+            ServiceConfig::Frontend(c) => {
+                let listen_address = &c.listen_address;
                 writeln!(
                     env,
-                    "RW_META_ADDR=\"http://{}:{}\"",
-                    meta_node.address, meta_node.port
+                    "RISEDEV_RW_FRONTEND_LISTEN_ADDRESS=\"{listen_address}\"",
                 )
                 .unwrap();
+                let port = &c.port;
+                writeln!(env, "RISEDEV_RW_FRONTEND_PORT=\"{port}\"",).unwrap();
             }
-            break;
-        }
-    }
-    for item in services {
-        if let ServiceConfig::Frontend(c) = item {
-            let listen_address = &c.listen_address;
-            writeln!(env, "RW_FRONTEND_LISTEN_ADDRESS=\"{listen_address}\"",).unwrap();
-            let port = &c.port;
-            writeln!(env, "RW_FRONTEND_PORT=\"{port}\"",).unwrap();
-            break;
+            ServiceConfig::Kafka(c) => {
+                let brokers = format!("{}:{}", c.address, c.port);
+                writeln!(env, r#"RISEDEV_KAFKA_BOOTSTRAP_SERVERS="{brokers}""#,).unwrap();
+                writeln!(env, r#"RISEDEV_KAFKA_WITH_OPTIONS_COMMON="connector='kafka',properties.bootstrap.server='{brokers}'""#).unwrap();
+                writeln!(env, r#"RPK_BROKERS="{brokers}""#).unwrap();
+            }
+            ServiceConfig::MySql(c) => {
+                let host = &c.address;
+                let port = &c.port;
+                let user = &c.user;
+                let password = &c.password;
+                // These envs are used by `mysql` cli.
+                writeln!(env, r#"MYSQL_HOST="{host}""#,).unwrap();
+                writeln!(env, r#"MYSQL_TCP_PORT="{port}""#,).unwrap();
+                writeln!(env, r#"MYSQL_USER="{user}""#,).unwrap();
+                writeln!(env, r#"MYSQL_PWD="{password}""#,).unwrap();
+                // Note: user and password are not included in the common WITH options.
+                // It's expected to create another dedicated user for the source.
+                writeln!(env, r#"RISEDEV_MYSQL_WITH_OPTIONS_COMMON="connector='mysql-cdc',hostname='{host}',port='{port}'""#,).unwrap();
+            }
+            _ => {}
         }
     }
     env

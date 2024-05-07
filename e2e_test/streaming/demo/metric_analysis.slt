@@ -39,6 +39,9 @@ INSERT INTO tcp_metrics VALUES
 ('812b4ba287f5ee0bc9d43bbf5bbe87fb', '3', '2022-06-08 09:39:54', 'download_speed', 'all', '149.7339243859982');
 
 statement ok
+FLUSH;
+
+statement ok
 CREATE MATERIALIZED VIEW high_util_tcp_metrics AS
 SELECT
     tcp.device_id AS device_id,

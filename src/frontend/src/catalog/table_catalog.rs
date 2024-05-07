@@ -17,7 +17,8 @@ use std::collections::{HashMap, HashSet};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ConflictBehavior, CreateType, Field, Schema, TableDesc, TableId, TableVersionId,
+    ColumnCatalog, ConflictBehavior, CreateType, Field, Schema, StreamJobStatus, TableDesc,
+    TableId, TableVersionId,
 };
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -130,6 +131,8 @@ pub struct TableCatalog {
     /// `No Check`.
     pub conflict_behavior: ConflictBehavior,
 
+    pub version_column_index: Option<usize>,
+
     pub read_prefix_len_hint: usize,
 
     /// Per-table catalog version, used by schema change. `None` for internal tables and tests.
@@ -151,6 +154,10 @@ pub struct TableCatalog {
 
     /// Indicate whether to create table in background or foreground.
     pub create_type: CreateType,
+
+    /// Indicate the stream job status, whether it is created or creating.
+    /// If it is creating, we should hide it.
+    pub stream_job_status: StreamJobStatus,
 
     /// description of table, set by `comment on`.
     pub description: Option<String>,
@@ -406,11 +413,12 @@ impl TableCatalog {
             watermark_indices: self.watermark_columns.ones().map(|x| x as _).collect_vec(),
             dist_key_in_pk: self.dist_key_in_pk.iter().map(|x| *x as _).collect(),
             handle_pk_conflict_behavior: self.conflict_behavior.to_protobuf().into(),
+            version_column_index: self.version_column_index.map(|value| value as u32),
             cardinality: Some(self.cardinality.to_protobuf()),
             initialized_at_epoch: self.initialized_at_epoch.map(|epoch| epoch.0),
             created_at_epoch: self.created_at_epoch.map(|epoch| epoch.0),
             cleaned_by_watermark: self.cleaned_by_watermark,
-            stream_job_status: PbStreamJobStatus::Creating.into(),
+            stream_job_status: self.stream_job_status.to_proto().into(),
             create_type: self.create_type.to_proto().into(),
             description: self.description.clone(),
             incoming_sinks: self.incoming_sinks.clone(),
@@ -478,6 +486,9 @@ impl From<PbTable> for TableCatalog {
         let id = tb.id;
         let tb_conflict_behavior = tb.handle_pk_conflict_behavior();
         let table_type = tb.get_table_type().unwrap();
+        let stream_job_status = tb
+            .get_stream_job_status()
+            .unwrap_or(PbStreamJobStatus::Created);
         let create_type = tb.get_create_type().unwrap_or(PbCreateType::Foreground);
         let associated_source_id = tb.optional_associated_source_id.map(|id| match id {
             OptionalAssociatedSourceId::AssociatedSourceId(id) => id,
@@ -487,6 +498,7 @@ impl From<PbTable> for TableCatalog {
         let mut col_index: HashMap<i32, usize> = HashMap::new();
 
         let conflict_behavior = ConflictBehavior::from_protobuf(&tb_conflict_behavior);
+        let version_column_index = tb.version_column_index.map(|value| value as usize);
         let columns: Vec<ColumnCatalog> = tb.columns.into_iter().map(ColumnCatalog::from).collect();
         for (idx, catalog) in columns.clone().into_iter().enumerate() {
             let col_name = catalog.name();
@@ -526,6 +538,7 @@ impl From<PbTable> for TableCatalog {
             value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
             definition: tb.definition,
             conflict_behavior,
+            version_column_index,
             read_prefix_len_hint: tb.read_prefix_len_hint as usize,
             version: tb.version.map(TableVersion::from_prost),
             watermark_columns,
@@ -538,6 +551,7 @@ impl From<PbTable> for TableCatalog {
             initialized_at_epoch: tb.initialized_at_epoch.map(Epoch::from),
             cleaned_by_watermark: tb.cleaned_by_watermark,
             create_type: CreateType::from_proto(create_type),
+            stream_job_status: StreamJobStatus::from_proto(stream_job_status),
             description: tb.description,
             incoming_sinks: tb.incoming_sinks.clone(),
             created_at_cluster_version: tb.created_at_cluster_version.clone(),
@@ -634,12 +648,13 @@ mod tests {
             cardinality: None,
             created_at_epoch: None,
             cleaned_by_watermark: false,
-            stream_job_status: PbStreamJobStatus::Creating.into(),
+            stream_job_status: PbStreamJobStatus::Created.into(),
             create_type: PbCreateType::Foreground.into(),
             description: Some("description".to_string()),
             incoming_sinks: vec![],
             created_at_cluster_version: None,
             initialized_at_cluster_version: None,
+            version_column_index: None,
         }
         .into();
 
@@ -694,12 +709,14 @@ mod tests {
                 created_at_epoch: None,
                 initialized_at_epoch: None,
                 cleaned_by_watermark: false,
+                stream_job_status: StreamJobStatus::Created,
                 create_type: CreateType::Foreground,
                 description: Some("description".to_string()),
                 incoming_sinks: vec![],
                 created_at_cluster_version: None,
                 initialized_at_cluster_version: None,
                 dependent_relations: vec![],
+                version_column_index: None,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

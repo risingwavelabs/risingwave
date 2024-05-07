@@ -18,16 +18,16 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_meta_model_v2::actor::ActorStatus;
-use risingwave_meta_model_v2::fragment::{DistributionType, StreamNode};
+use risingwave_meta_model_v2::fragment::DistributionType;
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
-    object_dependency, schema, sink, source, table, user, user_privilege, view, ActorId,
-    DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId, PrivilegeId,
-    SchemaId, SourceId, UserId,
+    object_dependency, schema, sink, source, subscription, table, user, user_privilege, view,
+    ActorId, DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId,
+    PrivilegeId, SchemaId, SourceId, StreamNode, UserId,
 };
-use risingwave_pb::catalog::{PbConnection, PbFunction};
+use risingwave_pb::catalog::{PbConnection, PbFunction, PbSubscription};
 use risingwave_pb::meta::PbFragmentParallelUnitMapping;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode, StreamSource};
@@ -368,7 +368,10 @@ where
                 .eq(pb_function.database_id as DatabaseId)
                 .and(object::Column::SchemaId.eq(pb_function.schema_id as SchemaId))
                 .and(function::Column::Name.eq(&pb_function.name))
-                .and(function::Column::ArgTypes.eq(DataTypeArray(pb_function.arg_types.clone()))),
+                .and(
+                    function::Column::ArgTypes
+                        .eq(DataTypeArray::from(pb_function.arg_types.clone())),
+                ),
         )
         .count(db)
         .await?;
@@ -402,6 +405,33 @@ where
         return Err(MetaError::catalog_duplicated(
             "connection",
             &pb_connection.name,
+        ));
+    }
+    Ok(())
+}
+
+pub async fn check_subscription_name_duplicate<C>(
+    pb_subscription: &PbSubscription,
+    db: &C,
+) -> MetaResult<()>
+where
+    C: ConnectionTrait,
+{
+    let count = Subscription::find()
+        .inner_join(Object)
+        .filter(
+            object::Column::DatabaseId
+                .eq(pb_subscription.database_id as DatabaseId)
+                .and(object::Column::SchemaId.eq(pb_subscription.schema_id as SchemaId))
+                .and(subscription::Column::Name.eq(&pb_subscription.name)),
+        )
+        .count(db)
+        .await?;
+    if count > 0 {
+        assert_eq!(count, 1);
+        return Err(MetaError::catalog_duplicated(
+            "subscription",
+            &pb_subscription.name,
         ));
     }
     Ok(())
@@ -802,7 +832,7 @@ where
         .into_iter()
         .map(|(fragment_id, mapping)| PbFragmentParallelUnitMapping {
             fragment_id: fragment_id as _,
-            mapping: Some(mapping.into_inner()),
+            mapping: Some(mapping.to_protobuf()),
         })
         .collect())
 }
@@ -831,7 +861,7 @@ where
         .into_iter()
         .map(|(fragment_id, mapping)| PbFragmentParallelUnitMapping {
             fragment_id: fragment_id as _,
-            mapping: Some(mapping.into_inner()),
+            mapping: Some(mapping.to_protobuf()),
         })
         .collect())
 }

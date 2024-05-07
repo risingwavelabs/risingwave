@@ -32,7 +32,9 @@
 #![feature(iterator_try_collect)]
 #![feature(try_blocks)]
 #![feature(error_generic_member_access)]
+#![feature(negative_impls)]
 #![feature(register_tool)]
+#![feature(assert_matches)]
 #![register_tool(rw)]
 #![recursion_limit = "256"]
 
@@ -54,6 +56,7 @@ pub mod source;
 pub mod connector_common;
 
 pub use paste::paste;
+pub use risingwave_jni_core::{call_method, call_static_method, jvm_runtime};
 
 mod with_options;
 pub use with_options::WithPropertiesExt;

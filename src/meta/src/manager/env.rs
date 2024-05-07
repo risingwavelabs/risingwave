@@ -18,16 +18,20 @@ use std::sync::Arc;
 use risingwave_common::config::{
     CompactionConfig, DefaultParallelism, MetaBackend, ObjectStoreConfig,
 };
+use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_meta_model_v2::prelude::Cluster;
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
 use sea_orm::EntityTrait;
 
-use super::{SystemParamsManager, SystemParamsManagerRef};
+use super::{
+    SessionParamsManager, SessionParamsManagerRef, SystemParamsManager, SystemParamsManagerRef,
+};
 use crate::controller::id::{
     IdGeneratorManager as SqlIdGeneratorManager, IdGeneratorManagerRef as SqlIdGeneratorManagerRef,
 };
+use crate::controller::session_params::{SessionParamsController, SessionParamsControllerRef};
 use crate::controller::system_param::{SystemParamsController, SystemParamsControllerRef};
 use crate::controller::SqlMetaStore;
 use crate::hummock::sequence::SequenceGenerator;
@@ -37,7 +41,7 @@ use crate::manager::{
     NotificationManagerRef,
 };
 use crate::model::ClusterId;
-use crate::storage::{MemStore, MetaStore, MetaStoreBoxExt, MetaStoreRef};
+use crate::storage::{MetaStore, MetaStoreRef};
 use crate::MetaResult;
 
 #[derive(Clone)]
@@ -90,6 +94,12 @@ pub enum SystemParamsManagerImpl {
     Sql(SystemParamsControllerRef),
 }
 
+#[derive(Clone)]
+pub enum SessionParamsManagerImpl {
+    Kv(SessionParamsManagerRef),
+    Sql(SessionParamsControllerRef),
+}
+
 /// [`MetaSrvEnv`] is the global environment in Meta service. The instance will be shared by all
 /// kind of managers inside Meta.
 #[derive(Clone)]
@@ -99,6 +109,9 @@ pub struct MetaSrvEnv {
 
     /// system param manager.
     system_param_manager_impl: SystemParamsManagerImpl,
+
+    /// session param manager.
+    session_param_manager_impl: SessionParamsManagerImpl,
 
     /// meta store.
     meta_store_impl: MetaStoreImpl,
@@ -175,7 +188,11 @@ pub struct MetaOpts {
     /// Interval of reporting the number of nodes in the cluster.
     pub node_num_monitor_interval_sec: u64,
 
-    /// The Prometheus endpoint for dashboard service.
+    /// The Prometheus endpoint for Meta Dashboard Service.
+    /// The Dashboard service uses this in the following ways:
+    /// 1. Query Prometheus for relevant metrics to find Stream Graph Bottleneck, and display it.
+    /// 2. Provide cluster diagnostics, at `/api/monitor/diagnose` to troubleshoot cluster.
+    /// These are just examples which show how the Meta Dashboard Service queries Prometheus.
     pub prometheus_endpoint: Option<String>,
 
     /// The additional selector used when querying Prometheus.
@@ -254,6 +271,12 @@ pub struct MetaOpts {
     pub enable_check_task_level_overlap: bool,
     pub enable_dropped_column_reclaim: bool,
     pub object_store_config: ObjectStoreConfig,
+
+    /// The maximum number of trivial move tasks to be picked in a single loop
+    pub max_trivial_move_task_count_per_loop: usize,
+
+    /// The maximum number of times to probe for PullTaskEvent
+    pub max_get_task_probe_times: usize,
 }
 
 impl MetaOpts {
@@ -310,6 +333,8 @@ impl MetaOpts {
             enable_check_task_level_overlap: true,
             enable_dropped_column_reclaim: false,
             object_store_config: ObjectStoreConfig::default(),
+            max_trivial_move_task_count_per_loop: 256,
+            max_get_task_probe_times: 5,
         }
     }
 }
@@ -318,6 +343,7 @@ impl MetaSrvEnv {
     pub async fn new(
         opts: MetaOpts,
         init_system_params: SystemParams,
+        init_session_config: SessionConfig,
         meta_store_impl: MetaStoreImpl,
     ) -> MetaResult<Self> {
         let notification_manager =
@@ -347,15 +373,28 @@ impl MetaSrvEnv {
                     )
                     .await?,
                 );
+                let session_params_manager = Arc::new(
+                    SessionParamsManager::new(
+                        meta_store.clone(),
+                        init_session_config.clone(),
+                        notification_manager.clone(),
+                        cluster_first_launch,
+                    )
+                    .await?,
+                );
 
                 // Persist params before starting services so that invalid params that cause meta node
                 // to crash will not be persisted.
                 system_params_manager.flush_params().await?;
+                session_params_manager.flush_params().await?;
                 cluster_id.put_at_meta_store(meta_store).await?;
 
                 Self {
                     id_gen_manager_impl: IdGenManagerImpl::Kv(id_gen_manager),
                     system_param_manager_impl: SystemParamsManagerImpl::Kv(system_params_manager),
+                    session_param_manager_impl: SessionParamsManagerImpl::Kv(
+                        session_params_manager,
+                    ),
                     meta_store_impl: meta_store_impl.clone(),
                     notification_manager,
                     stream_client_pool,
@@ -380,13 +419,23 @@ impl MetaSrvEnv {
                     )
                     .await?,
                 );
-
+                let session_param_controller = Arc::new(
+                    SessionParamsController::new(
+                        sql_meta_store.clone(),
+                        notification_manager.clone(),
+                        init_session_config,
+                    )
+                    .await?,
+                );
                 Self {
                     id_gen_manager_impl: IdGenManagerImpl::Sql(Arc::new(
                         SqlIdGeneratorManager::new(&sql_meta_store.conn).await?,
                     )),
                     system_param_manager_impl: SystemParamsManagerImpl::Sql(
                         system_param_controller,
+                    ),
+                    session_param_manager_impl: SessionParamsManagerImpl::Sql(
+                        session_param_controller,
                     ),
                     meta_store_impl: meta_store_impl.clone(),
                     notification_manager,
@@ -443,6 +492,10 @@ impl MetaSrvEnv {
         self.system_param_manager_impl.clone()
     }
 
+    pub fn session_params_manager_impl_ref(&self) -> SessionParamsManagerImpl {
+        self.session_param_manager_impl.clone()
+    }
+
     pub fn stream_client_pool_ref(&self) -> StreamClientPoolRef {
         self.stream_client_pool.clone()
     }
@@ -473,6 +526,7 @@ impl MetaSrvEnv {
         Self::new(
             MetaOpts::test(false),
             risingwave_common::system_param::system_params_for_test(),
+            Default::default(),
             MetaStoreImpl::Sql(SqlMetaStore::for_test().await),
         )
         .await
@@ -480,9 +534,12 @@ impl MetaSrvEnv {
     }
 
     pub async fn for_test_opts(opts: MetaOpts) -> Self {
+        use crate::storage::{MemStore, MetaStoreBoxExt};
+
         Self::new(
             opts,
             risingwave_common::system_param::system_params_for_test(),
+            Default::default(),
             MetaStoreImpl::Kv(MemStore::default().into_ref()),
         )
         .await

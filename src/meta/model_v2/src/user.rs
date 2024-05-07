@@ -16,10 +16,11 @@ use risingwave_pb::user::PbUserInfo;
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::NotSet;
+use serde::{Deserialize, Serialize};
 
 use crate::{AuthInfo, UserId};
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "user")]
 pub struct Model {
     #[sea_orm(primary_key)]
@@ -61,7 +62,7 @@ impl From<PbUserInfo> for ActiveModel {
             can_create_db: Set(user.can_create_db),
             can_create_user: Set(user.can_create_user),
             can_login: Set(user.can_login),
-            auth_info: Set(user.auth_info.map(AuthInfo)),
+            auth_info: Set(user.auth_info.as_ref().map(AuthInfo::from)),
         }
     }
 }
@@ -75,7 +76,7 @@ impl From<Model> for PbUserInfo {
             can_create_db: val.can_create_db,
             can_create_user: val.can_create_user,
             can_login: val.can_login,
-            auth_info: val.auth_info.map(|x| x.into_inner()),
+            auth_info: val.auth_info.map(|x| x.to_protobuf()),
             grant_privileges: vec![], // fill in later
         }
     }

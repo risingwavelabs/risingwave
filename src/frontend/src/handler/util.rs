@@ -29,8 +29,12 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Field;
 use risingwave_common::row::Row as _;
 use risingwave_common::types::{write_date_time_tz, DataType, ScalarRefImpl, Timestamptz};
+use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_sqlparser::ast::{CompatibleSourceSchema, ConnectorSchema};
+use risingwave_sqlparser::ast::{
+    CompatibleSourceSchema, ConnectorSchema, ObjectName, Query, Select, SelectItem, SetExpr,
+    TableFactor, TableWithJoins,
+};
 
 use crate::error::{ErrorCode, Result as RwResult};
 use crate::session::{current, SessionImpl};
@@ -189,6 +193,40 @@ impl CompatibleSourceSchema {
             CompatibleSourceSchema::V2(inner) => inner,
         }
     }
+}
+
+pub fn gen_query_from_table_name(from_name: ObjectName) -> Query {
+    let table_factor = TableFactor::Table {
+        name: from_name,
+        alias: None,
+        as_of: None,
+    };
+    let from = vec![TableWithJoins {
+        relation: table_factor,
+        joins: vec![],
+    }];
+    let select = Select {
+        from,
+        projection: vec![SelectItem::Wildcard(None)],
+        ..Default::default()
+    };
+    let body = SetExpr::Select(Box::new(select));
+    Query {
+        with: None,
+        body,
+        order_by: vec![],
+        limit: None,
+        offset: None,
+        fetch: None,
+    }
+}
+
+pub fn convert_unix_millis_to_logstore_u64(unix_millis: u64) -> u64 {
+    Epoch::from_unix_millis(unix_millis).0
+}
+
+pub fn convert_logstore_u64_to_unix_millis(logstore_u64: u64) -> u64 {
+    Epoch::from(logstore_u64).as_unix_millis()
 }
 
 #[cfg(test)]

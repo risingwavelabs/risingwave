@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches::assert_matches;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -26,12 +25,8 @@ use risingwave_pb::common::ActorInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::meta::{PausedReason, Recovery};
-use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
-use risingwave_pb::stream_service::{
-    streaming_control_stream_response, StreamingControlStreamResponse,
-};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -45,7 +40,7 @@ use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::schedule::ScheduledBarriers;
 use crate::barrier::state::BarrierManagerState;
-use crate::barrier::{Command, GlobalBarrierManager, GlobalBarrierManagerContext};
+use crate::barrier::{BarrierKind, Command, GlobalBarrierManager, GlobalBarrierManagerContext};
 use crate::controller::catalog::ReleaseContext;
 use crate::manager::{ActiveStreamingWorkerNodes, MetadataManager, WorkerId};
 use crate::model::{MetadataModel, MigrationPlan, TableFragments, TableParallelism};
@@ -72,6 +67,7 @@ impl GlobalBarrierManagerContext {
     async fn clean_dirty_streaming_jobs(&self) -> MetaResult<()> {
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
+                mgr.catalog_manager.clean_dirty_subscription().await?;
                 // Please look at `CatalogManager::clean_dirty_tables` for more details.
                 mgr.catalog_manager
                     .clean_dirty_tables(mgr.fragment_manager.clone())
@@ -102,6 +98,7 @@ impl GlobalBarrierManagerContext {
                     .await;
             }
             MetadataManager::V2(mgr) => {
+                mgr.catalog_controller.clean_dirty_subscription().await?;
                 let ReleaseContext { source_ids, .. } =
                     mgr.catalog_controller.clean_dirty_creating_jobs().await?;
 
@@ -491,15 +488,10 @@ impl GlobalBarrierManager {
                     let mut node_to_collect =
                         control_stream_manager.inject_barrier(command_ctx.clone())?;
                     while !node_to_collect.is_empty() {
-                        let (worker_id, _, resp) = control_stream_manager.next_response().await?;
-                        assert_matches!(
-                            resp,
-                            StreamingControlStreamResponse {
-                                response: Some(
-                                    streaming_control_stream_response::Response::CompleteBarrier(_)
-                                )
-                            }
-                        );
+                        let (worker_id, prev_epoch, _) = control_stream_manager
+                            .next_complete_barrier_response()
+                            .await?;
+                        assert_eq!(prev_epoch, command_ctx.prev_epoch.value().0);
                         assert!(node_to_collect.remove(&worker_id));
                     }
 

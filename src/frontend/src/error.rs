@@ -23,7 +23,6 @@ use risingwave_expr::ExprError;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::{RpcError, TonicStatusWrapper};
 use thiserror::Error;
-use thiserror_ext::Box;
 use tokio::task::JoinError;
 
 /// The error type for the frontend crate, acting as the top-level error type for the
@@ -33,8 +32,8 @@ use tokio::task::JoinError;
 // - Some variants are never constructed.
 // - Some variants store a type-erased `BoxedError` to resolve the reverse dependency.
 //   It's not necessary anymore as the error type is now defined at the top-level.
-#[derive(Error, Debug, Box)]
-#[thiserror_ext(newtype(name = RwError, backtrace, report_debug))]
+#[derive(Error, thiserror_ext::ReportDebug, thiserror_ext::Box)]
+#[thiserror_ext(newtype(name = RwError, backtrace))]
 pub enum ErrorCode {
     #[error("internal error: {0}")]
     InternalError(String),
@@ -165,6 +164,8 @@ pub enum ErrorCode {
         #[backtrace]
         SessionConfigError,
     ),
+    #[error("{0} has been deprecated, please use {1} instead.")]
+    Deprecated(String, String),
 }
 
 /// The result type for the frontend crate.
@@ -234,5 +235,15 @@ impl From<BatchError> for RwError {
 impl From<JoinError> for RwError {
     fn from(join_error: JoinError) -> Self {
         ErrorCode::Uncategorized(join_error.into()).into()
+    }
+}
+
+// For errors without a concrete type, put them into `Uncategorized`.
+impl From<BoxedError> for RwError {
+    fn from(e: BoxedError) -> Self {
+        // Show that the error is of `BoxedKind`, instead of `AdhocKind` which loses the sources.
+        // This is essentially expanded from `anyhow::anyhow!(e)`.
+        let e = anyhow::__private::kind::BoxedKind::anyhow_kind(&e).new(e);
+        ErrorCode::Uncategorized(e).into()
     }
 }

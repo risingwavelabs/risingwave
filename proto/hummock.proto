@@ -163,6 +163,18 @@ message SnapshotGroupDelta {
   }
 }
 
+message EpochNewChangeLog {
+  repeated SstableInfo old_value = 1;
+  repeated SstableInfo new_value = 2;
+  // Epochs should be sorted in ascending order, which means earlier epoch at the front
+  repeated uint64 epochs = 3;
+}
+
+message TableChangeLog {
+  // Epochs should be sorted in ascending order, which means earlier epoch at the front.
+  repeated EpochNewChangeLog change_logs = 1;
+}
+
 message HummockVersion {
   message Levels {
     repeated Level levels = 1;
@@ -179,7 +191,8 @@ message HummockVersion {
   // Reads against such an epoch will fail.
   uint64 safe_epoch = 4;
   map<uint32, TableWatermarks> table_watermarks = 5;
-  map<uint32, SnapshotGroup> snapshot_groups = 6;
+  map<uint32, TableChangeLog> table_change_logs = 6;
+  map<uint32, SnapshotGroup> snapshot_groups = 7;
 }
 
 message HummockVersionDelta {
@@ -195,10 +208,17 @@ message HummockVersionDelta {
   // Reads against such an epoch will fail.
   uint64 safe_epoch = 5;
   bool trivial_move = 6;
-  repeated uint64 gc_object_ids = 7;
+  reserved 7;
+  reserved "gc_object_ids";
   map<uint32, TableWatermarks> new_table_watermarks = 8;
   repeated uint32 removed_table_ids = 9;
-  map<uint32, SnapshotGroupDelta> snapshot_group_delta = 10;
+  message ChangeLogDelta {
+    EpochNewChangeLog new_log = 1;
+    // only logs in epoch later than truncate_epoch will be preserved
+    uint64 truncate_epoch = 2;
+  }
+  map<uint32, ChangeLogDelta> change_log_delta = 10;
+  map<uint32, SnapshotGroupDelta> snapshot_group_delta = 11;
 }
 
 message HummockVersionDeltas {
@@ -841,6 +861,7 @@ service HummockManagerService {
   rpc ListCompactTaskAssignment(ListCompactTaskAssignmentRequest) returns (ListCompactTaskAssignmentResponse);
   rpc ListCompactTaskProgress(ListCompactTaskProgressRequest) returns (ListCompactTaskProgressResponse);
   rpc CancelCompactTask(CancelCompactTaskRequest) returns (CancelCompactTaskResponse);
+  rpc ListChangeLogEpochs(ListChangeLogEpochsRequest) returns (ListChangeLogEpochsResponse);
 }
 
 message CompactionConfig {
@@ -899,4 +920,14 @@ message BranchedObject {
   uint64 sst_id = 2;
   // Compaction group id the SST belongs to.
   uint64 compaction_group_id = 3;
+}
+
+message ListChangeLogEpochsRequest {
+  uint32 table_id = 1;
+  uint64 min_epoch = 2;
+  uint32 max_count = 3;
+}
+
+message ListChangeLogEpochsResponse {
+  repeated uint64 epochs = 1;
 }

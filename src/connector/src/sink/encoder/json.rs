@@ -24,7 +24,7 @@ use itertools::Itertools;
 use risingwave_common::array::{ArrayError, ArrayResult};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, DatumRef, Decimal, JsonbVal, ScalarRefImpl, ToText};
+use risingwave_common::types::{DataType, DatumRef, JsonbVal, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use serde_json::{json, Map, Value};
 use thiserror_ext::AsReport;
@@ -83,7 +83,7 @@ impl JsonEncoder {
     pub fn new_with_doris(
         schema: Schema,
         col_indices: Option<Vec<usize>>,
-        map: HashMap<String, (u8, u8)>,
+        map: HashMap<String, u8>,
     ) -> Self {
         Self {
             schema,
@@ -97,11 +97,7 @@ impl JsonEncoder {
         }
     }
 
-    pub fn new_with_starrocks(
-        schema: Schema,
-        col_indices: Option<Vec<usize>>,
-        map: HashMap<String, (u8, u8)>,
-    ) -> Self {
+    pub fn new_with_starrocks(schema: Schema, col_indices: Option<Vec<usize>>) -> Self {
         Self {
             schema,
             col_indices,
@@ -109,20 +105,7 @@ impl JsonEncoder {
             date_handling_mode: DateHandlingMode::String,
             timestamp_handling_mode: TimestampHandlingMode::String,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcWithoutSuffix,
-            custom_json_type: CustomJsonType::StarRocks(map),
-            kafka_connect: None,
-        }
-    }
-
-    pub fn new_with_bigquery(schema: Schema, col_indices: Option<Vec<usize>>) -> Self {
-        Self {
-            schema,
-            col_indices,
-            time_handling_mode: TimeHandlingMode::Milli,
-            date_handling_mode: DateHandlingMode::String,
-            timestamp_handling_mode: TimestampHandlingMode::String,
-            timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
-            custom_json_type: CustomJsonType::BigQuery,
+            custom_json_type: CustomJsonType::StarRocks,
             kafka_connect: None,
         }
     }
@@ -204,14 +187,7 @@ fn datum_to_json_object(
 ) -> ArrayResult<Value> {
     let scalar_ref = match datum {
         None => {
-            if let CustomJsonType::BigQuery = custom_json_type
-                && matches!(field.data_type(), DataType::List(_))
-            {
-                // Bigquery need to convert null of array to empty array https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types
-                return Ok(Value::Array(vec![]));
-            } else {
-                return Ok(Value::Null);
-            }
+            return Ok(Value::Null);
         }
         Some(datum) => datum,
     };
@@ -242,24 +218,14 @@ fn datum_to_json_object(
         (DataType::Varchar, ScalarRefImpl::Utf8(v)) => {
             json!(v)
         }
+        // Doris/Starrocks will convert out-of-bounds decimal and -INF, INF, NAN to NULL
         (DataType::Decimal, ScalarRefImpl::Decimal(mut v)) => match custom_json_type {
-            CustomJsonType::Doris(map) | CustomJsonType::StarRocks(map) => {
-                if !matches!(v, Decimal::Normalized(_)) {
-                    return Err(ArrayError::internal(
-                        "doris/starrocks can't support decimal Inf, -Inf, Nan".to_string(),
-                    ));
-                }
-                let (p, s) = map.get(&field.name).unwrap();
+            CustomJsonType::Doris(map) => {
+                let s = map.get(&field.name).unwrap();
                 v.rescale(*s as u32);
-                let v_string = v.to_text();
-                let len = v_string.clone().replace(['.', '-'], "").len();
-                if len > *p as usize {
-                    return Err(ArrayError::internal(
-                        format!("rw Decimal's precision is large than doris/starrocks max decimal len is {:?}, doris max is {:?}",v_string.len(),p)));
-                }
-                json!(v_string)
+                json!(v.to_text())
             }
-            CustomJsonType::Es | CustomJsonType::None | CustomJsonType::BigQuery => {
+            CustomJsonType::Es | CustomJsonType::None | CustomJsonType::StarRocks => {
                 json!(v.to_text())
             }
         },
@@ -310,8 +276,8 @@ fn datum_to_json_object(
             json!(v.as_iso_8601())
         }
         (DataType::Jsonb, ScalarRefImpl::Jsonb(jsonb_ref)) => match custom_json_type {
-            CustomJsonType::Es | CustomJsonType::StarRocks(_) => JsonbVal::from(jsonb_ref).take(),
-            CustomJsonType::Doris(_) | CustomJsonType::None | CustomJsonType::BigQuery => {
+            CustomJsonType::Es | CustomJsonType::StarRocks => JsonbVal::from(jsonb_ref).take(),
+            CustomJsonType::Doris(_) | CustomJsonType::None => {
                 json!(jsonb_ref.to_string())
             }
         },
@@ -357,12 +323,12 @@ fn datum_to_json_object(
                         serde_json::to_string(&map).context("failed to serialize into JSON")?,
                     )
                 }
-                CustomJsonType::StarRocks(_) => {
+                CustomJsonType::StarRocks => {
                     return Err(ArrayError::internal(
                         "starrocks can't support struct".to_string(),
                     ));
                 }
-                CustomJsonType::Es | CustomJsonType::None | CustomJsonType::BigQuery => {
+                CustomJsonType::Es | CustomJsonType::None => {
                     let mut map = Map::with_capacity(st.len());
                     for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
                         st.iter()
@@ -470,8 +436,8 @@ fn type_as_json_schema(rw_type: &DataType) -> Map<String, Value> {
 mod tests {
 
     use risingwave_common::types::{
-        DataType, Date, Interval, Scalar, ScalarImpl, StructRef, StructType, StructValue, Time,
-        Timestamp,
+        DataType, Date, Decimal, Interval, Scalar, ScalarImpl, StructRef, StructType, StructValue,
+        Time, Timestamp,
     };
 
     use super::*;
@@ -639,7 +605,7 @@ mod tests {
         assert_eq!(interval_value, json!("P1Y1M2DT0H0M1S"));
 
         let mut map = HashMap::default();
-        map.insert("aaa".to_string(), (10_u8, 5_u8));
+        map.insert("aaa".to_string(), 5_u8);
         let decimal = datum_to_json_object(
             &Field {
                 data_type: DataType::Decimal,

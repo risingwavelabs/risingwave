@@ -56,8 +56,10 @@ use crate::opts::StorageOpts;
 
 pub type UploadTaskPayload = Vec<ImmutableMemtable>;
 
+#[derive(Debug)]
 pub struct UploadTaskOutput {
-    pub ssts: Vec<LocalSstableInfo>,
+    pub new_value_ssts: Vec<LocalSstableInfo>,
+    pub old_value_ssts: Vec<LocalSstableInfo>,
     pub wait_poll_timer: Option<HistogramTimer>,
 }
 pub type SpawnUploadTask = Arc<
@@ -296,7 +298,8 @@ impl UploadingTask {
                 .inspect_err(|e| error!(task_info = ?self.task_info, err = ?e.as_report(), "upload task failed"))
                 .map(|output| {
                     StagingSstableInfo::new(
-                        output.ssts,
+                        output.new_value_ssts,
+                        output.old_value_ssts,
                         self.task_info.epochs.clone(),
                         self.task_info.imm_ids.clone(),
                         self.task_info.task_size,
@@ -478,16 +481,11 @@ struct SealedData {
 
 impl SealedData {
     fn clear(&mut self) {
-        self.epochs.clear();
-
         self.spilled_data.clear();
-        self.imms_by_table_shard.clear();
-        self.merged_imms.clear();
         self.merging_tasks
-            .iter()
+            .drain(..)
             .for_each(|task| task.join_handle.abort());
-        self.merging_tasks.clear();
-        self.table_watermarks.clear();
+        *self = Self::default();
     }
 
     /// Add the data of a newly sealed epoch.
@@ -842,11 +840,8 @@ impl HummockUploader {
             epoch,
             self.max_sealed_epoch
         );
-        self.unsealed_data
-            .entry(epoch)
-            .or_default()
-            .imms
-            .push_front(imm);
+        let unsealed_data = self.unsealed_data.entry(epoch).or_default();
+        unsealed_data.imms.push_front(imm);
     }
 
     pub(crate) fn add_table_watermarks(
@@ -1265,13 +1260,13 @@ mod tests {
         iterator_test_table_key_of, transform_shared_buffer,
     };
     use crate::hummock::local_version::pinned_version::PinnedVersion;
-    use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-    use crate::hummock::value::HummockValue;
+    use crate::hummock::shared_buffer::shared_buffer_batch::{
+        SharedBufferBatch, SharedBufferValue,
+    };
     use crate::hummock::{HummockError, HummockResult, MemoryLimiter};
     use crate::mem_table::{ImmId, ImmutableMemtable};
     use crate::monitor::HummockStateStoreMetrics;
     use crate::opts::StorageOpts;
-    use crate::storage_value::StorageValue;
 
     const INITIAL_EPOCH: HummockEpoch = test_epoch(5);
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
@@ -1301,11 +1296,11 @@ mod tests {
         epoch: HummockEpoch,
         limiter: Option<&MemoryLimiter>,
     ) -> ImmutableMemtable {
-        let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(vec![(
+        let sorted_items = vec![(
             TableKey(Bytes::from(dummy_table_key())),
-            StorageValue::new_delete(),
-        )]);
-        let size = SharedBufferBatch::measure_batch_size(&sorted_items);
+            SharedBufferValue::Delete,
+        )];
+        let size = SharedBufferBatch::measure_batch_size(&sorted_items, None).0;
         let tracker = match limiter {
             Some(limiter) => Some(limiter.require_memory(size as u64).await),
             None => None,
@@ -1314,6 +1309,7 @@ mod tests {
             epoch,
             0,
             sorted_items,
+            None,
             size,
             TEST_TABLE_ID,
             LocalInstanceId::default(),
@@ -1382,8 +1378,12 @@ mod tests {
         )
     }
 
-    fn dummy_success_upload_output() -> Vec<LocalSstableInfo> {
-        gen_sstable_info(INITIAL_EPOCH, INITIAL_EPOCH)
+    fn dummy_success_upload_output() -> UploadTaskOutput {
+        UploadTaskOutput {
+            new_value_ssts: gen_sstable_info(INITIAL_EPOCH, INITIAL_EPOCH),
+            old_value_ssts: vec![],
+            wait_poll_timer: None,
+        }
     }
 
     #[allow(clippy::unused_async)]
@@ -1391,10 +1391,7 @@ mod tests {
         _: UploadTaskPayload,
         _: UploadTaskInfo,
     ) -> HummockResult<UploadTaskOutput> {
-        Ok(UploadTaskOutput {
-            ssts: dummy_success_upload_output(),
-            wait_poll_timer: None,
-        })
+        Ok(dummy_success_upload_output())
     }
 
     #[allow(clippy::unused_async)]
@@ -1417,7 +1414,10 @@ mod tests {
         assert_eq!(vec![imm_id], task.task_info.imm_ids);
         assert_eq!(vec![INITIAL_EPOCH], task.task_info.epochs);
         let output = task.await.unwrap();
-        assert_eq!(output.sstable_infos(), &dummy_success_upload_output());
+        assert_eq!(
+            output.sstable_infos(),
+            &dummy_success_upload_output().new_value_ssts
+        );
         assert_eq!(imm_size, output.imm_size());
         assert_eq!(&vec![imm_id], output.imm_ids());
         assert_eq!(&vec![INITIAL_EPOCH], output.epochs());
@@ -1432,7 +1432,10 @@ mod tests {
         let uploader_context = test_uploader_context(dummy_success_upload_future);
         let mut task = UploadingTask::new(vec![gen_imm(INITIAL_EPOCH).await], &uploader_context);
         let output = poll_fn(|cx| task.poll_result(cx)).await.unwrap();
-        assert_eq!(output.sstable_infos(), &dummy_success_upload_output());
+        assert_eq!(
+            output.sstable_infos(),
+            &dummy_success_upload_output().new_value_ssts
+        );
 
         let uploader_context = test_uploader_context(dummy_fail_upload_future);
         let mut task = UploadingTask::new(vec![gen_imm(INITIAL_EPOCH).await], &uploader_context);
@@ -1460,7 +1463,10 @@ mod tests {
         let mut task = UploadingTask::new(vec![gen_imm(INITIAL_EPOCH).await], &uploader_context);
         let output = poll_fn(|cx| task.poll_ok_with_retry(cx)).await;
         assert_eq!(fail_num + 1, run_count_clone.load(SeqCst));
-        assert_eq!(output.sstable_infos(), &dummy_success_upload_output());
+        assert_eq!(
+            output.sstable_infos(),
+            &dummy_success_upload_output().new_value_ssts
+        );
     }
 
     #[tokio::test]
@@ -1506,7 +1512,10 @@ mod tests {
                 let staging_sst = ssts.first().unwrap();
                 assert_eq!(&vec![epoch1], staging_sst.epochs());
                 assert_eq!(&vec![imm.batch_id()], staging_sst.imm_ids());
-                assert_eq!(&dummy_success_upload_output(), staging_sst.sstable_infos());
+                assert_eq!(
+                    &dummy_success_upload_output().new_value_ssts,
+                    staging_sst.sstable_infos()
+                );
             }
             _ => unreachable!(),
         };
@@ -1517,7 +1526,10 @@ mod tests {
         let staging_sst = ssts.first().unwrap();
         assert_eq!(&vec![epoch1], staging_sst.epochs());
         assert_eq!(&vec![imm.batch_id()], staging_sst.imm_ids());
-        assert_eq!(&dummy_success_upload_output(), staging_sst.sstable_infos());
+        assert_eq!(
+            &dummy_success_upload_output().new_value_ssts,
+            staging_sst.sstable_infos()
+        );
 
         let new_pinned_version = uploader
             .context
@@ -1663,18 +1675,18 @@ mod tests {
     #[tokio::test]
     async fn test_drop_success_merging_task() {
         let table_id = TableId { table_id: 1004 };
-        let shared_buffer_items1: Vec<(Vec<u8>, HummockValue<Bytes>)> = vec![
+        let shared_buffer_items1: Vec<(Vec<u8>, SharedBufferValue<Bytes>)> = vec![
             (
                 iterator_test_table_key_of(1),
-                HummockValue::put(Bytes::from("value1")),
+                SharedBufferValue::Insert(Bytes::from("value1")),
             ),
             (
                 iterator_test_table_key_of(2),
-                HummockValue::put(Bytes::from("value2")),
+                SharedBufferValue::Insert(Bytes::from("value2")),
             ),
             (
                 iterator_test_table_key_of(3),
-                HummockValue::put(Bytes::from("value3")),
+                SharedBufferValue::Insert(Bytes::from("value3")),
             ),
         ];
         let epoch = test_epoch(1);
@@ -1683,18 +1695,18 @@ mod tests {
             epoch,
             table_id,
         );
-        let shared_buffer_items2: Vec<(Vec<u8>, HummockValue<Bytes>)> = vec![
+        let shared_buffer_items2: Vec<(Vec<u8>, SharedBufferValue<Bytes>)> = vec![
             (
                 iterator_test_table_key_of(1),
-                HummockValue::put(Bytes::from("value12")),
+                SharedBufferValue::Insert(Bytes::from("value12")),
             ),
             (
                 iterator_test_table_key_of(2),
-                HummockValue::put(Bytes::from("value22")),
+                SharedBufferValue::Insert(Bytes::from("value22")),
             ),
             (
                 iterator_test_table_key_of(3),
-                HummockValue::put(Bytes::from("value32")),
+                SharedBufferValue::Insert(Bytes::from("value32")),
             ),
         ];
         let epoch = test_epoch(2);
@@ -1704,18 +1716,18 @@ mod tests {
             table_id,
         );
 
-        let shared_buffer_items3: Vec<(Vec<u8>, HummockValue<Bytes>)> = vec![
+        let shared_buffer_items3: Vec<(Vec<u8>, SharedBufferValue<Bytes>)> = vec![
             (
                 iterator_test_table_key_of(1),
-                HummockValue::put(Bytes::from("value13")),
+                SharedBufferValue::Insert(Bytes::from("value13")),
             ),
             (
                 iterator_test_table_key_of(2),
-                HummockValue::put(Bytes::from("value23")),
+                SharedBufferValue::Insert(Bytes::from("value23")),
             ),
             (
                 iterator_test_table_key_of(3),
-                HummockValue::put(Bytes::from("value33")),
+                SharedBufferValue::Insert(Bytes::from("value33")),
             ),
         ];
         let epoch = test_epoch(3);
@@ -1857,7 +1869,8 @@ mod tests {
                         start_tx.send(task_info).unwrap();
                         finish_rx.await.unwrap();
                         Ok(UploadTaskOutput {
-                            ssts,
+                            new_value_ssts: ssts,
+                            old_value_ssts: vec![],
                             wait_poll_timer: None,
                         })
                     })
