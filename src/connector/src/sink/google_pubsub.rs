@@ -182,19 +182,19 @@ impl GooglePubSubSinkWriter {
                 sub: None,
             };
             let cred_file = CredentialsFile::new_from_str(cred).await.map_err(|e| {
-                SinkError::GooglePubSub(anyhow!(
-                    "Failed to create Google Cloud Pub/Sub credentials file: {}",
-                    e
-                ))
+                SinkError::GooglePubSub(
+                    anyhow!(e).context("Failed to create Google Cloud Pub/Sub credentials file"),
+                )
             })?;
             let provider =
                 DefaultTokenSourceProvider::new_with_credentials(auth_config, Box::new(cred_file))
                     .await
                     .map_err(|e| {
-                        SinkError::GooglePubSub(anyhow!(
-                            "Failed to create Google Cloud Pub/Sub token source provider: {}",
-                            e
-                        ))
+                        SinkError::GooglePubSub(
+                            anyhow!(e).context(
+                                "Failed to create Google Cloud Pub/Sub token source provider",
+                            ),
+                        )
                     })?;
             Environment::GoogleCloud(Box::new(provider))
         } else if let Some(emu_host) = config.emulator_host {
