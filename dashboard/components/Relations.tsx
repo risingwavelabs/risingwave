@@ -128,6 +128,8 @@ export function Relations<R extends Relation>(
           <Thead>
             <Tr>
               <Th width={3}>Id</Th>
+              <Th width={5}>Database</Th>
+              <Th width={5}>Schema</Th>
               <Th width={5}>Name</Th>
               <Th width={3}>Owner</Th>
               {extraColumns.map((c) => (
@@ -152,6 +154,8 @@ export function Relations<R extends Relation>(
                     {r.id}
                   </Button>
                 </Td>
+                <Td>{r.database}</Td>
+                <Td>{r.schema}</Td>
                 <Td>{r.name}</Td>
                 <Td>{r.owner}</Td>
                 {extraColumns.map((c) => (

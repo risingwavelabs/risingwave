@@ -38,6 +38,8 @@ export interface Relation {
   id: number
   name: string
   owner: number
+  database?: string // TODO: remove the question mark
+  schema?: string
   columns: (ColumnCatalog | Field)[]
 }
 
