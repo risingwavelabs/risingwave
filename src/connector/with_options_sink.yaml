@@ -113,6 +113,31 @@ DorisConfig:
   - name: r#type
     field_type: String
     required: true
+GooglePubSubConfig:
+  fields:
+  - name: pubsub.project_id
+    field_type: String
+    comments: The Google Pub/Sub Project ID
+    required: true
+  - name: pubsub.topic
+    field_type: String
+    comments: Specifies the Pub/Sub topic to publish messages
+    required: true
+  - name: pubsub.endpoint
+    field_type: String
+    comments: The Google Pub/Sub endpoint URL
+    required: true
+  - name: pubsub.emulator_host
+    field_type: String
+    comments: use the connector with a pubsub emulator  <https://cloud.google.com/pubsub/docs/emulator>
+    required: false
+  - name: pubsub.credentials
+    field_type: String
+    comments: A JSON string containing the service account credentials for authorization,  see the [service-account](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account) credentials guide.  The provided account credential must have the  `pubsub.publisher` [role](https://cloud.google.com/pubsub/docs/access-control#roles)
+    required: false
+  - name: r#type
+    field_type: String
+    required: true
 IcebergConfig:
   fields:
   - name: connector
