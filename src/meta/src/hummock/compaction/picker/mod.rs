@@ -53,7 +53,7 @@ pub struct LocalPickerStatistic {
     pub skip_by_overlapping: u64,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct CompactionInput {
     pub input_levels: Vec<InputLevel>,
     pub target_level: usize,

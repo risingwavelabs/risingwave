@@ -268,3 +268,53 @@ impl Default for CompactionDeveloperConfig {
         }
     }
 }
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+    use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
+
+    #[test]
+    fn test_create_compaction_task() {
+        let config = CompactionConfigBuilder::new().build();
+        let mut input = CompactionInput {
+            input_levels: vec![],
+            target_level: 0,
+            select_input_size: 256 * 1024 * 1024,
+            target_input_size: 128 * 1024 * 1024,
+            total_file_count: 3,
+            target_sub_level_id: 0,
+            vnode_partition_count: 0,
+        };
+        let task =
+            create_compaction_task(&config, input.clone(), 3, compact_task::TaskType::Dynamic);
+        assert_eq!(task.target_file_size, config.target_file_size_base);
+        input.target_level = 3;
+        let task = create_compaction_task(&config, input, 3, compact_task::TaskType::Dynamic);
+        assert_eq!(task.target_file_size, config.target_file_size_base / 4);
+        let input = CompactionInput {
+            input_levels: vec![],
+            target_level: 3,
+            select_input_size: 512 * 1024 * 1024,
+            target_input_size: 512 * 1024 * 1024,
+            total_file_count: 3,
+            target_sub_level_id: 0,
+            vnode_partition_count: 0,
+        };
+
+        let task = create_compaction_task(&config, input, 3, compact_task::TaskType::Dynamic);
+        assert_eq!(task.target_file_size, config.target_file_size_base);
+
+        let input = CompactionInput {
+            input_levels: vec![],
+            target_level: 3,
+            select_input_size: 8 * 1024 * 1024 * 1024,
+            target_input_size: 8 * 1024 * 1024 * 1024,
+            total_file_count: 3,
+            target_sub_level_id: 0,
+            vnode_partition_count: 0,
+        };
+        let task = create_compaction_task(&config, input, 3, compact_task::TaskType::Dynamic);
+        assert_eq!(task.target_file_size, 64 * 1024 * 1024);
+    }
+}
