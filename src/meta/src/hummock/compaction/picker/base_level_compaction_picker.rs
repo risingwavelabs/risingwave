@@ -265,7 +265,7 @@ impl LevelCompactionPicker {
 
                     // reduce log
                     if log_counter % 2 == 0 && result.input_levels.len() > 0 {
-                        tracing::warn!("skip task with level count: {}, file count: {}, first level size: {}, select size, target size: {}, target level size: {}",
+                        tracing::warn!("skip task with level count: {}, file count: {}, first level size: {}, select size: {}, target size: {}, target level size: {}",
                             result.input_levels.len(),
                             result.total_file_count,
                             result.input_levels[0].table_infos.iter().map(|sst|sst.file_size).sum::<u64>(),
