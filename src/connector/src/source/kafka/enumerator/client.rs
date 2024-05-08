@@ -109,7 +109,10 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         // rd_kafka_poll(), rd_kafka_consumer_poll(), rd_kafka_queue_poll(), etc, in order to cause retrieval
         // of an initial token to occur.
         // https://docs.confluent.io/platform/current/clients/librdkafka/html/rdkafka_8h.html#a988395722598f63396d7a1bedb22adaf
-        client.poll(Duration::from_secs(10));
+        #[cfg(not(madsim))]
+        client.poll(Duration::from_secs(10)); // note: this is a blocking call
+        #[cfg(madsim)]
+        client.poll(Duration::from_secs(10)).await;
 
         Ok(Self {
             context,

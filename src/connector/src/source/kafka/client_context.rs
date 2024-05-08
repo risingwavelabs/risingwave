@@ -24,7 +24,6 @@ use rdkafka::consumer::ConsumerContext;
 use rdkafka::message::DeliveryResult;
 use rdkafka::producer::ProducerContext;
 use rdkafka::{ClientContext, Statistics};
-use tokio::runtime::Handle;
 
 use super::private_link::{BrokerAddrRewriter, PrivateLinkContextRole};
 use super::stats::RdKafkaStats;
@@ -34,7 +33,9 @@ use crate::error::ConnectorResult;
 struct IamAuthEnv {
     credentials_provider: SharedCredentialsProvider,
     region: Region,
-    rt: Handle,
+    // XXX(runji): madsim does not support `Handle` for now
+    #[cfg(not(madsim))]
+    rt: tokio::runtime::Handle,
 }
 
 pub struct KafkaContextCommon {
@@ -73,7 +74,8 @@ impl KafkaContextCommon {
             Some(IamAuthEnv {
                 credentials_provider,
                 region,
-                rt: Handle::current(),
+                #[cfg(not(madsim))]
+                rt: tokio::runtime::Handle::current(),
             })
         } else {
             None
@@ -100,6 +102,8 @@ impl KafkaContextCommon {
         self.addr_rewriter.rewrite_broker_addr(addr)
     }
 
+    // XXX(runji): oauth is ignored in simulation
+    #[cfg_or_panic::cfg_or_panic(not(madsim))]
     fn generate_oauth_token(
         &self,
         _oauthbearer_config: Option<&str>,
