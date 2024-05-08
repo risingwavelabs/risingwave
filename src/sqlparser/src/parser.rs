@@ -1238,6 +1238,12 @@ impl Parser {
         expected_depth: &mut Option<usize>,
     ) -> Result<Expr, ParserError> {
         Ok(if self.consume_token(&Token::LBracket) {
+            if self.consume_token(&Token::RBracket) {
+                return Ok(Expr::Array(Array {
+                    elem: vec![],
+                    named: false,
+                }));
+            }
             let exprs = self.parse_comma_separated(|parser| {
                 parser.parse_array_inner(depth + 1, expected_depth)
             })?;
@@ -1245,11 +1251,6 @@ impl Parser {
             Expr::Array(Array {
                 elem: exprs,
                 // Only top-level array is named.
-                named: false,
-            })
-        } else if self.peek_token() == Token::RBracket {
-            Expr::Array(Array {
-                elem: vec![],
                 named: false,
             })
         } else {

@@ -29,6 +29,8 @@
   formatted_sql: SELECT ARRAY[[1, 2], [3, 4]]
 - input: SELECT ARRAY[ARRAY[1,2],ARRAY[3,4]]
   formatted_sql: SELECT ARRAY[ARRAY[1, 2], ARRAY[3, 4]]
+- input: SELECT ARRAY[[],[]]
+  formatted_sql: SELECT ARRAY[[], []]
 - input: SELECT ARRAY[[1,2],3]
   error_msg: |-
     sql parser error: Expected ], found: 3 at line:1, column:21
