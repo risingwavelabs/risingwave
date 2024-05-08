@@ -1247,7 +1247,7 @@ impl Parser {
                 // Only top-level array is named.
                 named: false,
             })
-        } else if self.peek_token() == Token::LBracket {
+        } else if self.peek_token() == Token::RBracket {
             Expr::Array(Array {
                 elem: vec![],
                 named: false,
