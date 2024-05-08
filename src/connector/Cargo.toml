@@ -44,6 +44,7 @@ aws-types = { workspace = true }
 base64 = "0.22"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
+cfg-or-panic = "0.2"
 chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",
