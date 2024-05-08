@@ -286,7 +286,7 @@ impl HummockManager {
                     existing_table_ids.extend(sst.table_ids.iter());
                     if sst.table_ids.len() > 0 {
                         *table_size_info.entry(sst.table_ids[0]).or_default() +=
-                            sst.file_size / sst.table_ids.len();
+                            sst.file_size / (sst.table_ids.len() as u64);
                     }
                 }
             }
