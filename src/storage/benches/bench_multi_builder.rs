@@ -131,14 +131,11 @@ fn bench_builder(
         .unwrap();
 
     let metrics = Arc::new(ObjectStoreMetrics::unused());
+    let default_config = Arc::new(ObjectStoreConfig::default());
     let object_store = runtime.block_on(async {
-        S3ObjectStore::new_with_config(
-            bucket.to_string(),
-            metrics.clone(),
-            ObjectStoreConfig::default(),
-        )
-        .await
-        .monitored(metrics, ObjectStoreConfig::default())
+        S3ObjectStore::new_with_config(bucket.to_string(), metrics.clone(), default_config.clone())
+            .await
+            .monitored(metrics, default_config)
     });
     let object_store = Arc::new(ObjectStoreImpl::S3(object_store));
     let sstable_store = Arc::new(SstableStore::new(SstableStoreConfig {
