@@ -242,6 +242,15 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn list_change_log_epochs(
+        &self,
+        _table_id: u32,
+        _min_epoch: u64,
+        _max_count: u32,
+    ) -> Result<Vec<u64>> {
+        unreachable!()
+    }
+
     async fn create_schema(
         &self,
         db_id: DatabaseId,
@@ -325,12 +334,8 @@ impl CatalogWriter for MockCatalogWriter {
         self.create_sink_inner(sink, graph)
     }
 
-    async fn create_subscription(
-        &self,
-        subscription: PbSubscription,
-        graph: StreamFragmentGraph,
-    ) -> Result<()> {
-        self.create_subscription_inner(subscription, graph)
+    async fn create_subscription(&self, subscription: PbSubscription) -> Result<()> {
+        self.create_subscription_inner(subscription)
     }
 
     async fn create_index(
@@ -773,11 +778,7 @@ impl MockCatalogWriter {
         Ok(())
     }
 
-    fn create_subscription_inner(
-        &self,
-        mut subscription: PbSubscription,
-        _graph: StreamFragmentGraph,
-    ) -> Result<()> {
+    fn create_subscription_inner(&self, mut subscription: PbSubscription) -> Result<()> {
         subscription.id = self.gen_id();
         self.catalog.write().create_subscription(&subscription);
         self.add_table_or_subscription_id(

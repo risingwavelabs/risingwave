@@ -38,6 +38,7 @@ source backwards-compat-tests/scripts/utils.sh
 
 configure_rw() {
 VERSION="$1"
+ENABLE_BUILD="$2"
 
 echo "--- Setting up cluster config"
 cat <<EOF > risedev-profiles.user.yml
@@ -49,8 +50,6 @@ full-without-monitoring:
     - use: compute-node
     - use: frontend
     - use: compactor
-    - use: zookeeper
-    - use: kafka
 EOF
 
 cat <<EOF > risedev-components.user.env
@@ -58,10 +57,9 @@ RISEDEV_CONFIGURED=true
 
 ENABLE_MINIO=true
 ENABLE_ETCD=true
-ENABLE_KAFKA=true
 
-# Fetch risingwave binary from release.
-ENABLE_BUILD_RUST=false
+# Whether to build or directly fetch binary from release.
+ENABLE_BUILD_RUST=$ENABLE_BUILD
 
 # Use target/debug for simplicity.
 ENABLE_RELEASE_PROFILE=false
@@ -71,36 +69,6 @@ EOF
 if version_le "${VERSION:-}" "1.8.0" ; then
   echo "ENABLE_ALL_IN_ONE=true" >> risedev-components.user.env
 fi
-}
-
-configure_rw_build() {
-echo "--- Setting up cluster config"
-cat <<EOF > risedev-profiles.user.yml
-full-without-monitoring:
-  steps:
-    - use: minio
-    - use: etcd
-    - use: meta-node
-    - use: compute-node
-    - use: frontend
-    - use: compactor
-    - use: zookeeper
-    - use: kafka
-EOF
-
-cat <<EOF > risedev-components.user.env
-RISEDEV_CONFIGURED=true
-
-ENABLE_MINIO=true
-ENABLE_ETCD=true
-ENABLE_KAFKA=true
-
-# Make sure that it builds
-ENABLE_BUILD_RUST=true
-
-# Use target/debug for simplicity.
-ENABLE_RELEASE_PROFILE=false
-EOF
 }
 
 setup_old_cluster() {
@@ -115,7 +83,7 @@ setup_old_cluster() {
   if [[ "$?" -ne 0 ]]; then
     set -e
     echo "Failed to download ${OLD_VERSION} from github releases, build from source later during \`risedev d\`"
-    configure_rw_build
+    configure_rw "$OLD_VERSION" true
   else
     set -e
     tar -xvf risingwave-v"${OLD_VERSION}"-x86_64-unknown-linux.tar.gz
@@ -123,7 +91,7 @@ setup_old_cluster() {
 
     echo "--- Start cluster on tag $OLD_VERSION"
     git config --global --add safe.directory /risingwave
-    configure_rw "$OLD_VERSION"
+    configure_rw "$OLD_VERSION" false
   fi
 }
 
@@ -148,7 +116,7 @@ main() {
   # Assume we use the latest version, so we just set to some large number.
   # The current $NEW_VERSION as of this change is 1.7.0, so we can't use that.
   # See: https://github.com/risingwavelabs/risingwave/pull/15448
-  configure_rw "99.99.99"
+  configure_rw "99.99.99" false
   validate_new_cluster "$NEW_VERSION"
 }
 

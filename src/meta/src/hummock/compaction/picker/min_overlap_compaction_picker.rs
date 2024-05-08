@@ -182,18 +182,18 @@ pub struct SubLevelSstables {
 pub struct NonOverlapSubLevelPicker {
     min_compaction_bytes: u64,
     max_compaction_bytes: u64,
-    min_depth: usize,
+    min_expected_level_count: usize,
     max_file_count: u64,
     overlap_strategy: Arc<dyn OverlapStrategy>,
-
     enable_check_task_level_overlap: bool,
+    max_expected_level_count: usize,
 }
 
 impl NonOverlapSubLevelPicker {
     pub fn new(
         min_compaction_bytes: u64,
         max_compaction_bytes: u64,
-        min_depth: usize,
+        min_expected_level_count: usize,
         max_file_count: u64,
         overlap_strategy: Arc<dyn OverlapStrategy>,
         enable_check_task_level_overlap: bool,
@@ -201,10 +201,32 @@ impl NonOverlapSubLevelPicker {
         Self {
             min_compaction_bytes,
             max_compaction_bytes,
-            min_depth,
+            min_expected_level_count,
             max_file_count,
             overlap_strategy,
             enable_check_task_level_overlap,
+            max_expected_level_count: MAX_COMPACT_LEVEL_COUNT,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn for_test(
+        min_compaction_bytes: u64,
+        max_compaction_bytes: u64,
+        min_expected_level_count: usize,
+        max_file_count: u64,
+        overlap_strategy: Arc<dyn OverlapStrategy>,
+        enable_check_task_level_overlap: bool,
+        max_expected_level_count: usize,
+    ) -> Self {
+        Self {
+            min_compaction_bytes,
+            max_compaction_bytes,
+            min_expected_level_count,
+            max_file_count,
+            overlap_strategy,
+            enable_check_task_level_overlap,
+            max_expected_level_count,
         }
     }
 
@@ -220,11 +242,9 @@ impl NonOverlapSubLevelPicker {
         sst: &SstableInfo,
     ) -> SubLevelSstables {
         let mut ret = SubLevelSstables {
-            total_file_count: 1,
-            total_file_size: sst.file_size,
             sstable_infos: vec![vec![]; levels.len()],
+            ..Default::default()
         };
-        ret.sstable_infos[0].extend(vec![sst.clone()]);
 
         let mut pick_levels_range = Vec::default();
         let mut max_select_level_count = 0;
@@ -241,7 +261,7 @@ impl NonOverlapSubLevelPicker {
                 .iter()
                 .filter(|ssts| !ssts.is_empty())
                 .count()
-                > MAX_COMPACT_LEVEL_COUNT
+                > self.max_expected_level_count
             {
                 break;
             }
@@ -293,13 +313,6 @@ impl NonOverlapSubLevelPicker {
                     add_files_count += 1;
                 }
 
-                // When size / file count has exceeded the limit, we need to abandon this plan, it cannot be expanded to the last sub_level
-                if max_select_level_count >= self.min_depth
-                    && (add_files_size >= self.max_compaction_bytes
-                        || add_files_count >= self.max_file_count as usize)
-                {
-                    break 'expand_new_level;
-                }
 
                 overlap_levels.push((reverse_index, overlap_files_range.clone()));
                 select_level_count += 1;
@@ -309,32 +322,75 @@ impl NonOverlapSubLevelPicker {
                 max_select_level_count = select_level_count;
                 pick_levels_range = overlap_levels;
             }
+
+            // When size / file count has exceeded the limit, we need to abandon this plan, it cannot be expanded to the last sub_level
+            if max_select_level_count >= self.min_expected_level_count
+                && (add_files_size >= self.max_compaction_bytes
+                    || add_files_count >= self.max_file_count as usize)
+            {
+                break 'expand_new_level;
+            }
         }
 
-        for (reverse_index, sst_range) in pick_levels_range {
-            let level_ssts = &levels[reverse_index].table_infos;
-            ret.sstable_infos[reverse_index] = level_ssts[sst_range].to_vec();
-            ret.total_file_count += ret.sstable_infos[reverse_index].len();
-            ret.total_file_size += ret.sstable_infos[reverse_index]
-                .iter()
-                .map(|sst| sst.file_size)
-                .sum::<u64>();
-        }
+        if !pick_levels_range.is_empty() {
+            for (reverse_index, sst_range) in pick_levels_range {
+                let level_ssts = &levels[reverse_index].table_infos;
+                ret.sstable_infos[reverse_index] = level_ssts[sst_range].to_vec();
+                ret.total_file_count += ret.sstable_infos[reverse_index].len();
+                ret.total_file_size += ret.sstable_infos[reverse_index]
+                    .iter()
+                    .map(|sst| sst.file_size)
+                    .sum::<u64>();
+            }
 
-        // sort sst per level due to reverse expand
-        ret.sstable_infos.iter_mut().for_each(|level_ssts| {
-            level_ssts.sort_by(|sst1, sst2| {
-                let a = sst1.key_range.as_ref().unwrap();
-                let b = sst2.key_range.as_ref().unwrap();
-                a.compare(b)
+            // sort sst per level due to reverse expand
+            ret.sstable_infos.iter_mut().for_each(|level_ssts| {
+                level_ssts.sort_by(|sst1, sst2| {
+                    let a = sst1.key_range.as_ref().unwrap();
+                    let b = sst2.key_range.as_ref().unwrap();
+                    a.compare(b)
+                });
             });
-        });
+        } else {
+            ret.total_file_count = 1;
+            ret.total_file_size = sst.file_size;
+            ret.sstable_infos[0].extend(vec![sst.clone()]);
+        }
+
+        ret.sstable_infos.retain(|ssts| !ssts.is_empty());
+
+        // To check whether the task is expected
+        if ret.total_file_size > self.max_compaction_bytes
+            || ret.total_file_count as u64 > self.max_file_count
+            || ret.sstable_infos.len() > self.max_expected_level_count
+        {
+            // rotate the sstables to meet the `max_file_count` and `max_compaction_bytes` and `max_expected_level_count`
+            let mut total_file_count = 0;
+            let mut total_file_size = 0;
+            let mut total_level_count = 0;
+            for (index, sstables) in ret.sstable_infos.iter().enumerate() {
+                total_file_count += sstables.len();
+                total_file_size += sstables.iter().map(|sst| sst.file_size).sum::<u64>();
+                total_level_count += 1;
+
+                // Atleast `min_expected_level_count`` level should be selected
+                if total_level_count >= self.min_expected_level_count
+                    && (total_file_count as u64 >= self.max_file_count
+                        || total_file_size >= self.max_compaction_bytes
+                        || total_level_count >= self.max_expected_level_count)
+                {
+                    ret.total_file_count = total_file_count;
+                    ret.total_file_size = total_file_size;
+                    ret.sstable_infos.truncate(index + 1);
+                    break;
+                }
+            }
+        }
 
         if self.enable_check_task_level_overlap {
             self.verify_task_level_overlap(&ret, levels);
         }
 
-        ret.sstable_infos.retain(|ssts| !ssts.is_empty());
         ret
     }
 
@@ -343,7 +399,7 @@ impl NonOverlapSubLevelPicker {
         l0: &[Level],
         level_handler: &LevelHandler,
     ) -> Vec<SubLevelSstables> {
-        if l0.len() < self.min_depth {
+        if l0.len() < self.min_expected_level_count {
             return vec![];
         }
 
@@ -354,7 +410,7 @@ impl NonOverlapSubLevelPicker {
             }
 
             let ret = self.pick_sub_level(l0, level_handler, sst);
-            if ret.sstable_infos.len() < self.min_depth
+            if ret.sstable_infos.len() < self.min_expected_level_count
                 && ret.total_file_size < self.min_compaction_bytes
             {
                 continue;
@@ -370,7 +426,7 @@ impl NonOverlapSubLevelPicker {
         let mut unexpected = vec![];
 
         for selected_task in scores {
-            if selected_task.sstable_infos.len() > MAX_COMPACT_LEVEL_COUNT {
+            if selected_task.sstable_infos.len() > self.max_expected_level_count {
                 unexpected.push(selected_task);
             } else {
                 expected.push(selected_task);
@@ -388,10 +444,11 @@ impl NonOverlapSubLevelPicker {
                 .then_with(|| a.total_file_size.cmp(&b.total_file_size))
         });
 
+        // For unexpected task the number of levels is as small as possible
         unexpected.sort_by(|a, b| {
-            b.sstable_infos
+            a.sstable_infos
                 .len()
-                .cmp(&a.sstable_infos.len())
+                .cmp(&b.sstable_infos.len())
                 .then_with(|| a.total_file_count.cmp(&b.total_file_count))
                 .then_with(|| a.total_file_size.cmp(&b.total_file_size))
         });
@@ -907,5 +964,127 @@ pub mod tests {
         assert!(range.is_empty());
         assert_eq!(select_files.len(), 1);
         assert_eq!(target_files.len(), 1);
+    }
+
+    #[test]
+    fn test_pick_unexpected_task() {
+        let levels = vec![
+            Level {
+                level_idx: 1,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![generate_table(0, 1, 50, 100, 2)], // 50
+                total_file_size: 50,
+                ..Default::default()
+            },
+            Level {
+                level_idx: 2,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![
+                    generate_table(1, 1, 101, 150, 1), // 50
+                ],
+                total_file_size: 50,
+                ..Default::default()
+            },
+            Level {
+                level_idx: 3,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![
+                    generate_table(2, 1, 151, 200, 2), // 50
+                ],
+                total_file_size: 50,
+                ..Default::default()
+            },
+            Level {
+                level_idx: 4,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![
+                    generate_table(3, 1, 50, 300, 2), // 250
+                ],
+                total_file_size: 250,
+                ..Default::default()
+            },
+        ];
+
+        let levels_handlers = vec![
+            LevelHandler::new(0),
+            LevelHandler::new(1),
+            LevelHandler::new(2),
+            LevelHandler::new(3),
+            LevelHandler::new(4),
+        ];
+
+        {
+            // no limit
+            let picker = NonOverlapSubLevelPicker::new(
+                0,
+                10000,
+                1,
+                10000,
+                Arc::new(RangeOverlapStrategy::default()),
+                true,
+            );
+            let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
+            {
+                let plan = &ret[0];
+                assert_eq!(4, plan.sstable_infos.len());
+            }
+        }
+
+        {
+            // limit size
+            let picker = NonOverlapSubLevelPicker::new(
+                0,
+                150,
+                1,
+                10000,
+                Arc::new(RangeOverlapStrategy::default()),
+                true,
+            );
+            let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
+            {
+                let plan = &ret[0];
+                assert_eq!(3, plan.sstable_infos.len());
+            }
+        }
+
+        {
+            // limit count
+            let picker = NonOverlapSubLevelPicker::new(
+                0,
+                10000,
+                1,
+                3,
+                Arc::new(RangeOverlapStrategy::default()),
+                true,
+            );
+            let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
+            {
+                let plan = &ret[0];
+                assert_eq!(3, plan.sstable_infos.len());
+            }
+        }
+
+        {
+            // limit expected level count
+            let max_expected_level_count = 3;
+            let picker = NonOverlapSubLevelPicker::for_test(
+                0,
+                10000,
+                1,
+                3,
+                Arc::new(RangeOverlapStrategy::default()),
+                true,
+                max_expected_level_count,
+            );
+            let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
+            {
+                let plan = &ret[0];
+                assert_eq!(max_expected_level_count, plan.sstable_infos.len());
+
+                assert_eq!(0, plan.sstable_infos[0][0].sst_id);
+                assert_eq!(1, plan.sstable_infos[1][0].sst_id);
+                assert_eq!(2, plan.sstable_infos[2][0].sst_id);
+            }
+        }
     }
 }
