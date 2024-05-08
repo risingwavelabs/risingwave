@@ -20,6 +20,7 @@ use alloc::{
     vec,
     vec::Vec,
 };
+use core::cmp::Ordering;
 use core::fmt;
 
 use itertools::Itertools;
@@ -1210,7 +1211,6 @@ impl Parser {
     }
 
     /// Parses an array expression `[ex1, ex2, ..]`
-    /// if `named` is `true`, came from an expression like  `ARRAY[ex1, ex2]`
     pub fn parse_array_expr(&mut self) -> Result<Expr, ParserError> {
         self.expect_token(&Token::LBracket)?;
 
@@ -1254,13 +1254,17 @@ impl Parser {
             })
         } else {
             if let Some(expected_depth) = *expected_depth {
-                if depth < expected_depth {
-                    return self.expected("[", self.peek_token());
-                } else if depth > expected_depth {
-                    return parser_err!(format!(
-                        "dimension mismatch, expected {}, actual {}",
-                        expected_depth, depth
-                    ));
+                match depth.cmp(&expected_depth) {
+                    Ordering::Less => {
+                        return self.expected("]", self.peek_token());
+                    }
+                    Ordering::Greater => {
+                        return parser_err!(format!(
+                            "dimension mismatch, expected {}, actual {}",
+                            expected_depth, depth
+                        ));
+                    }
+                    _ => {}
                 }
             } else {
                 *expected_depth = Some(depth);
