@@ -190,7 +190,7 @@ impl CompactionTaskValidationRule for BaseCompactionTaskValidationRule {
             return false;
         }
 
-        if input.select_input_size < 2 * input.target_input_size {
+        if input.select_input_size < input.target_input_size {
             stats.skip_by_write_amp_limit += 1;
             return false;
         }

@@ -313,7 +313,6 @@ impl NonOverlapSubLevelPicker {
                     add_files_count += 1;
                 }
 
-
                 overlap_levels.push((reverse_index, overlap_files_range.clone()));
                 select_level_count += 1;
             }

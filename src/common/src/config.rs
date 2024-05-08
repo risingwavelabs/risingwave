@@ -1156,7 +1156,7 @@ pub mod default {
         }
 
         pub fn move_table_size_limit() -> u64 {
-            100 * 1024 * 1024 * 1024 // 100GB
+            10 * 1024 * 1024 * 1024 // 10GB
         }
 
         pub fn split_group_size_limit() -> u64 {
@@ -1168,8 +1168,7 @@ pub mod default {
         }
 
         pub fn table_write_throughput_threshold() -> u64 {
-            // tmp change for test
-            160 * 1024 * 1024 // 160MB
+            16 * 1024 * 1024 // 16MB
         }
 
         pub fn min_table_split_write_throughput() -> u64 {
@@ -1617,7 +1616,7 @@ pub mod default {
 
     pub mod compaction_config {
         const DEFAULT_MAX_COMPACTION_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2GB
-        const DEFAULT_MIN_COMPACTION_BYTES: u64 = 256 * 1024 * 1024; // 256MB
+        const DEFAULT_MIN_COMPACTION_BYTES: u64 = 128 * 1024 * 1024; // 128MB
         const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 512 * 1024 * 1024; // 512MB
 
         // decrease this configure when the generation of checkpoint barrier is not frequent.
@@ -1628,7 +1627,7 @@ pub mod default {
         const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 300;
         const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 100;
-        const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 6;
+        const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 5;
         const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 12;
         const DEFAULT_TOMBSTONE_RATIO_PERCENT: u32 = 40;
         const DEFAULT_EMERGENCY_PICKER: bool = true;
