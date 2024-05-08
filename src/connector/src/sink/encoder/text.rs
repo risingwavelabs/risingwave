@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::ToText;
+use risingwave_common::types::{DataType, ScalarRefImpl, ToText};
 
 use super::RowEncoder;
 
@@ -49,9 +49,59 @@ impl RowEncoder for TextEncoder {
         let mut result = String::new();
         for col_index in col_indices {
             let datum = row.datum_at(col_index);
-            result = datum.to_text_with_type(&self.schema.fields[col_index].data_type);
+            let data_type = &self.schema.fields[col_index].data_type;
+            if data_type == &DataType::Boolean {
+                result = datum
+                    .unwrap_or(ScalarRefImpl::Bool(false))
+                    .into_bool()
+                    .to_string();
+            } else {
+                result = datum.to_text_with_type(data_type);
+            }
         }
 
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use risingwave_common::catalog::Field;
+    use risingwave_common::row::OwnedRow;
+    use risingwave_common::types::ScalarImpl;
+
+    use super::*;
+
+    #[test]
+    fn test_text_encoder_ser_bool() {
+        let schema = Schema::new(vec![Field::with_name(DataType::Boolean, "col1")]);
+        let encoder = TextEncoder::new(schema, 0);
+
+        let row = OwnedRow::new(vec![Some(ScalarImpl::Bool(true))]);
+        assert_eq!(
+            encoder
+                .encode_cols(&row, std::iter::once(0))
+                .unwrap()
+                .as_str(),
+            "true"
+        );
+
+        let row = OwnedRow::new(vec![Some(ScalarImpl::Bool(false))]);
+        assert_eq!(
+            encoder
+                .encode_cols(&row, std::iter::once(0))
+                .unwrap()
+                .as_str(),
+            "false"
+        );
+
+        let row = OwnedRow::new(vec![None]);
+        assert_eq!(
+            encoder
+                .encode_cols(&row, std::iter::once(0))
+                .unwrap()
+                .as_str(),
+            "false"
+        );
     }
 }
