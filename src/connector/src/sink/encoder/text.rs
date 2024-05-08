@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::{DataType, ScalarRefImpl, ToText};
+use risingwave_common::types::{DataType, ToText};
 
 use super::RowEncoder;
 
@@ -51,10 +51,11 @@ impl RowEncoder for TextEncoder {
             let datum = row.datum_at(col_index);
             let data_type = &self.schema.fields[col_index].data_type;
             if data_type == &DataType::Boolean {
-                result = datum
-                    .unwrap_or(ScalarRefImpl::Bool(false))
-                    .into_bool()
-                    .to_string();
+                result = if let Some(scalar_impl) = datum {
+                    scalar_impl.into_bool().to_string()
+                } else {
+                    "NULL".to_string()
+                }
             } else {
                 result = datum.to_text_with_type(data_type);
             }
@@ -101,7 +102,7 @@ mod test {
                 .encode_cols(&row, std::iter::once(0))
                 .unwrap()
                 .as_str(),
-            "false"
+            "NULL"
         );
     }
 }
