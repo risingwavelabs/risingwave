@@ -154,20 +154,13 @@ impl Format {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Encode {
-    // Keyword::Avro
-    Avro,
-    // Keyword::CSV
-    Csv,
-    // Keyword::PROTOBUF
-    Protobuf,
-    // Keyword::JSON
-    Json,
-    // Keyword::BYTES
-    Bytes,
-    // Keyword::None
-    None,
-    // Keyword::TEXT
-    Text,
+    Avro,     // Keyword::Avro
+    Csv,      // Keyword::CSV
+    Protobuf, // Keyword::PROTOBUF
+    Json,     // Keyword::JSON
+    Bytes,    // Keyword::BYTES
+    None,     // Keyword::None
+    Text,     // Keyword::TEXT
     Native,
     Template,
 }

@@ -51,7 +51,7 @@ pub trait SinkFormatter {
     fn format_chunk(
         &self,
         chunk: &StreamChunk,
-    ) -> impl Iterator<Item=Result<(Option<Self::K>, Option<Self::V>)>>;
+    ) -> impl Iterator<Item = Result<(Option<Self::K>, Option<Self::V>)>>;
 }
 
 /// `tri!` in generators yield `Err` and return `()`
