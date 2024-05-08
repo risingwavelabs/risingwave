@@ -70,7 +70,7 @@ download-and-decompress-artifact e2e_test_generated ./
 download-and-decompress-artifact risingwave_e2e_extended_mode_test-"$profile" target/debug/
 mkdir -p e2e_test/udf/wasm/target/wasm32-wasi/release/
 buildkite-agent artifact download udf.wasm e2e_test/udf/wasm/target/wasm32-wasi/release/
-buildkite-agent artifact download risingwave-udf-example.jar ./
+buildkite-agent artifact download udf.jar ./
 mv target/debug/risingwave_e2e_extended_mode_test-"$profile" target/debug/risingwave_e2e_extended_mode_test
 
 chmod +x ./target/debug/risingwave_e2e_extended_mode_test
@@ -117,13 +117,13 @@ sqllogictest -p 4566 -d dev './e2e_test/udf/always_retry_python.slt'
 # sqllogictest -p 4566 -d dev './e2e_test/udf/retry_python.slt'
 
 echo "--- e2e, $mode, external java udf"
-java -jar risingwave-udf-example.jar &
+java -jar udf.jar &
 sleep 1
 sqllogictest -p 4566 -d dev './e2e_test/udf/external_udf.slt'
 pkill java
 
 echo "--- e2e, $mode, embedded udf"
-python3 -m pip install --break-system-packages flask waitress
+python3 -m pip install --break-system-packages flask waitress arrow-udf==0.2.1
 sqllogictest -p 4566 -d dev './e2e_test/udf/wasm_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/rust_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/js_udf.slt'
