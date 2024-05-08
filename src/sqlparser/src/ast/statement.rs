@@ -377,12 +377,10 @@ impl ParseTo for CreateSourceStatement {
             .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
         let connector: String = option.map(|opt| opt.value.to_string()).unwrap_or_default();
         let cdc_source_job = connector.contains("-cdc");
-        if cdc_source_job {
-            if !columns.is_empty() || !constraints.is_empty() {
-                return Err(ParserError::ParserError(
-                    "CDC source cannot define columns and constraints".to_string(),
-                ));
-            }
+        if cdc_source_job && (!columns.is_empty() || !constraints.is_empty()) {
+            return Err(ParserError::ParserError(
+                "CDC source cannot define columns and constraints".to_string(),
+            ));
         }
 
         // row format for nexmark source must be native
