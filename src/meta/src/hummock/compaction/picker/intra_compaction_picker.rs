@@ -229,7 +229,7 @@ impl IntraCompactionPicker {
                 continue;
             }
 
-            if level_handlers[0].is_level_all_pending_compact(level) {
+            if level_handlers[0].is_level_pending_compact(level) {
                 continue;
             }
 
