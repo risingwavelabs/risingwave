@@ -184,7 +184,7 @@ pub struct KafkaCommon {
     #[serde(rename = "properties.ssl.key.password")]
     ssl_key_password: Option<String>,
 
-    /// SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM and GSSAPI.
+    /// SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and AWS_MSK_IAM.
     #[serde(rename = "properties.sasl.mechanism")]
     sasl_mechanism: Option<String>,
 
@@ -290,9 +290,7 @@ impl RdKafkaPropertiesCommon {
 impl KafkaCommon {
     pub(crate) fn set_security_properties(&self, config: &mut ClientConfig) {
         // AWS_MSK_IAM
-        if let Some(sasl_mechanism) = self.sasl_mechanism.as_ref()
-            && sasl_mechanism == AWS_MSK_IAM_AUTH
-        {
+        if self.is_aws_msk_iam() {
             config.set("security.protocol", "SASL_SSL");
             config.set("sasl.mechanism", "OAUTHBEARER");
             return;

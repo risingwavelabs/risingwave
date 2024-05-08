@@ -37,7 +37,6 @@ struct IamAuthEnv {
     rt: Handle,
 }
 
-#[derive()]
 pub struct KafkaContextCommon {
     addr_rewriter: BrokerAddrRewriter,
 
