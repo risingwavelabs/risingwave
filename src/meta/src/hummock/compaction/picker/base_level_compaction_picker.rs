@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -29,9 +28,9 @@ use crate::hummock::compaction::picker::TrivialMovePicker;
 use crate::hummock::compaction::{create_overlap_strategy, CompactionDeveloperConfig};
 use crate::hummock::level_handler::LevelHandler;
 
-std::thread_local! {
-    static LOG_COUNTER: RefCell<usize> = RefCell::new(0);
-}
+// std::thread_local! {
+//     static LOG_COUNTER: RefCell<usize> = RefCell::new(0);
+// }
 
 pub struct LevelCompactionPicker {
     target_level: usize,
@@ -258,17 +257,17 @@ impl LevelCompactionPicker {
                 stats,
             ) {
                 if l0.total_file_size > target_level.total_file_size * 4 {
-                    let log_counter = LOG_COUNTER.with_borrow_mut(|counter| {
-                        *counter += 1;
-                        *counter
-                    });
+                    // let log_counter = LOG_COUNTER.with_borrow_mut(|counter| {
+                    //     *counter += 1;
+                    //     *counter
+                    // });
 
                     // reduce log
-                    if log_counter % 2 == 0 && result.input_levels.len() > 0 {
+                    if result.input_levels.len() > 0 {
                         tracing::warn!("skip task with level count: {}, file count: {}, first level size: {}, select size: {}, target size: {}, target level size: {}",
                             result.input_levels.len(),
                             result.total_file_count,
-                            result.input_levels[0].table_infos.iter().map(|sst|sst.file_size).sum::<u64>(),
+                            l0.sub_levels[0].total_file_size,
                             result.select_input_size,
                             result.target_input_size,
                             target_level.total_file_size,
@@ -279,6 +278,19 @@ impl LevelCompactionPicker {
             }
 
             return Some(result);
+        }
+        if l0.total_file_size > target_level.total_file_size * 4 {
+            tracing::warn!(
+                "failed to select task. l0 sub levels info: {:?}",
+                l0.sub_levels
+                    .iter()
+                    .map(|level| (
+                        level.level_type(),
+                        level.table_infos.len(),
+                        level.total_file_size
+                    ))
+                    .collect_vec()
+            );
         }
         None
     }
