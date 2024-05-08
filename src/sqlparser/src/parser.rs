@@ -155,25 +155,17 @@ type ColumnsDefTuple = (
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Precedence {
     Zero = 0,
-    LogicalOr,
-    // 5 in upstream
+    LogicalOr, // 5 in upstream
     LogicalXor,
-    LogicalAnd,
-    // 10 in upstream
-    UnaryNot,
-    // 15 in upstream
-    Is,
-    // 17 in upstream
+    LogicalAnd, // 10 in upstream
+    UnaryNot,   // 15 in upstream
+    Is,         // 17 in upstream
     Cmp,
-    Like,
-    // 19 in upstream
-    Between,
-    // 20 in upstream
+    Like,    // 19 in upstream
+    Between, // 20 in upstream
     Other,
-    PlusMinus,
-    // 30 in upstream
-    MulDiv,
-    // 40 in upstream
+    PlusMinus, // 30 in upstream
+    MulDiv,    // 40 in upstream
     Exp,
     UnaryPosNeg,
     PostfixFactorial,

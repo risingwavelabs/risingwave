@@ -125,28 +125,28 @@ pub fn parse_source_schema(p: &mut Parser) -> Result<CompatibleSourceSchema, Par
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SourceSchema {
-    Protobuf(ProtobufSchema),
     // Keyword::PROTOBUF ProtobufSchema
-    Json,
+    Protobuf(ProtobufSchema),
     // Keyword::JSON
-    DebeziumJson,
+    Json,
     // Keyword::DEBEZIUM_JSON
+    DebeziumJson,
     DebeziumMongoJson,
-    UpsertJson,
     // Keyword::UPSERT_JSON
-    Avro(AvroSchema),
+    UpsertJson,
     // Keyword::AVRO
-    UpsertAvro(AvroSchema),
+    Avro(AvroSchema),
     // Keyword::UpsertAVRO
-    Maxwell,
+    UpsertAvro(AvroSchema),
     // Keyword::MAXWELL
-    CanalJson,
+    Maxwell,
     // Keyword::CANAL_JSON
-    Csv(CsvInfo),
+    CanalJson,
     // Keyword::CSV
+    Csv(CsvInfo),
     Native,
-    DebeziumAvro(DebeziumAvroSchema),
     // Keyword::DEBEZIUM_AVRO
+    DebeziumAvro(DebeziumAvroSchema),
     Bytes,
 }
 
