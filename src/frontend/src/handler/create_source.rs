@@ -41,7 +41,8 @@ use risingwave_connector::schema::schema_registry::{
 use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::cdc::{
     CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY,
-    CITUS_CDC_CONNECTOR, MONGODB_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
+    CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CITUS_CDC_CONNECTOR, MONGODB_CDC_CONNECTOR,
+    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
@@ -1367,6 +1368,13 @@ pub async fn handle_create_source(
         with_properties.insert(CDC_SHARING_MODE_KEY.into(), "true".into());
         // enable transactional cdc
         with_properties.insert(CDC_TRANSACTIONAL_KEY.into(), "true".into());
+        with_properties.insert(
+            CDC_WAIT_FOR_STREAMING_START_TIMEOUT.into(),
+            session
+                .config()
+                .cdc_source_wait_streaming_start_timeout()
+                .to_string(),
+        );
     }
 
     // must behind `handle_addition_columns`

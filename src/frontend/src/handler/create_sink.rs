@@ -737,6 +737,7 @@ fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
 
 static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, Vec<Encode>>>> =
     LazyLock::new(|| {
+        use risingwave_connector::sink::google_pubsub::GooglePubSubSink;
         use risingwave_connector::sink::kafka::KafkaSink;
         use risingwave_connector::sink::kinesis::KinesisSink;
         use risingwave_connector::sink::mqtt::MqttSink;
@@ -745,6 +746,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
         use risingwave_connector::sink::Sink as _;
 
         convert_args!(hashmap!(
+                GooglePubSubSink::SINK_NAME => hashmap!(
+                    Format::Plain => vec![Encode::Json],
+                ),
                 KafkaSink::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Protobuf],
                     Format::Upsert => vec![Encode::Json, Encode::Avro],
@@ -764,8 +768,8 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Debezium => vec![Encode::Json],
                 ),
                 RedisSink::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Json,Encode::Template],
-                    Format::Upsert => vec![Encode::Json,Encode::Template],
+                    Format::Plain => vec![Encode::Json, Encode::Template],
+                    Format::Upsert => vec![Encode::Json, Encode::Template],
                 ),
         ))
     });

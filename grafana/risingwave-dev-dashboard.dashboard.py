@@ -1930,6 +1930,11 @@ def section_hummock_read(outer_panels):
                             "data cache - {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
+                        panels.target(
+                            f"avg({metric('state_store_prefetch_memory_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "prefetch cache - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
                     ],
                 ),
                 panels.timeseries_percentage(
@@ -3846,6 +3851,16 @@ def section_sink_metrics(outer_panels):
                             f"(max({metric('log_store_latest_write_epoch')}) by (connector, sink_id, executor_id)"
                             + f"- max({metric('log_store_latest_read_epoch')}) by (connector, sink_id, executor_id)) / (2^16) / 1000",
                             "Consume lag @ {{connector}} {{sink_id}} {{executor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Log Store Backpressure Ratio",
+                    "",
+                    [
+                        panels.target(
+                            f"avg(rate({metric('log_store_reader_wait_new_future_duration_ns')}[$__rate_interval])) by (connector, sink_id, executor_id) / 1000000000",
+                            "Backpressure @ {{connector}} {{sink_id}} {{executor_id}}",
                         ),
                     ],
                 ),

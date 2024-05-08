@@ -27,8 +27,7 @@ use risedev::{
     generate_risedev_env, preflight_check, CompactorService, ComputeNodeService, ConfigExpander,
     ConfigureTmuxTask, DummyService, EnsureStopService, ExecuteContext, FrontendService,
     GrafanaService, KafkaService, MetaNodeService, MinioService, MySqlService, PrometheusService,
-    PubsubService, RedisService, ServiceConfig, SqliteConfig, Task, TempoService, ZooKeeperService,
-    RISEDEV_NAME,
+    PubsubService, RedisService, ServiceConfig, SqliteConfig, Task, TempoService, RISEDEV_NAME,
 };
 use tempfile::tempdir;
 use thiserror_ext::AsReport;
@@ -271,17 +270,6 @@ fn task_main(
                 DummyService::new(&c.id).execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("using Opendal, namenode =  {}", c.namenode));
-            }
-            ServiceConfig::ZooKeeper(c) => {
-                let mut ctx =
-                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-                let mut service = ZooKeeperService::new(c.clone())?;
-                service.execute(&mut ctx)?;
-                let mut task =
-                    risedev::ConfigureTcpNodeTask::new(c.address.clone(), c.port, false)?;
-                task.execute(&mut ctx)?;
-                ctx.pb
-                    .set_message(format!("zookeeper {}:{}", c.address, c.port));
             }
             ServiceConfig::Kafka(c) => {
                 let mut ctx =
