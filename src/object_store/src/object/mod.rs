@@ -430,8 +430,8 @@ impl MonitoredStreamingReader {
                 .await
                 .unwrap_or_else(|_| {
                     Some(Err(ObjectError::timeout(format!(
-                        "{}_attempt_timeout_ms {:?}",
-                        self.operation_type_str, timeout_duration
+                        "Retry attempts exhausted for {}. Please modify {}_attempt_timeout_ms (current={:?}) under [storage.object_store.retry] in the config accordingly if needed.",
+                        self.operation_type_str, self.operation_type_str, timeout_duration.as_millis()
                     ))))
                 }),
         };
@@ -1097,11 +1097,8 @@ where
                 .await
                 .unwrap_or_else(|_| {
                     Err(ObjectError::timeout(format!(
-                        "{}_attempt_timeout_ms {:?} {}_retry_attempts {:?}",
-                        operation_type_str,
-                        timeout_duration,
-                        operation_type_str,
-                        get_retry_attempts_by_type(config, operation_type),
+                        "Retry attempts exhausted for {}. Please modify {}_attempt_timeout_ms (current={:?}) and {}_retry_attempts (current={}) under [storage.object_store.retry] in the config accordingly if needed.",
+                        operation_type_str, operation_type_str, timeout_duration.as_millis(), operation_type_str, get_retry_attempts_by_type(config, operation_type)
                     )))
                 })
         }
