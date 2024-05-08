@@ -2522,6 +2522,11 @@ impl CatalogController {
         inner.list_databases().await
     }
 
+    pub async fn list_schemas(&self) -> MetaResult<Vec<PbSchema>> {
+        let inner = self.inner.read().await;
+        inner.list_schemas().await
+    }
+
     pub async fn list_all_state_tables(&self) -> MetaResult<Vec<PbTable>> {
         let inner = self.inner.read().await;
         inner.list_all_state_tables().await
@@ -2610,6 +2615,11 @@ impl CatalogController {
     pub async fn list_views(&self) -> MetaResult<Vec<PbView>> {
         let inner = self.inner.read().await;
         inner.list_views().await
+    }
+
+    pub async fn list_users(&self) -> MetaResult<Vec<PbUserInfo>> {
+        let inner = self.inner.read().await;
+        inner.list_users().await
     }
 
     pub async fn get_table_by_name(
