@@ -107,7 +107,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         &args.object_storage,
         object_store_metrics,
         "Hummock",
-        ObjectStoreConfig::default(),
+        Arc::new(ObjectStoreConfig::default()),
     )
     .await;
 
