@@ -1498,6 +1498,7 @@ fn row_encode_to_prost(row_encode: &Encode) -> EncodeType {
         Encode::Bytes => EncodeType::Bytes,
         Encode::Template => EncodeType::Template,
         Encode::None => EncodeType::None,
+        Encode::Text => EncodeType::Text,
     }
 }
 
