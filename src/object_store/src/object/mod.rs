@@ -426,12 +426,12 @@ impl MonitoredStreamingReader {
         };
         let res = match self.streaming_read_timeout.as_ref() {
             None => future.await,
-            Some(timeout) => tokio::time::timeout(*timeout, future)
+            Some(timeout_duration) => tokio::time::timeout(*timeout_duration, future)
                 .await
                 .unwrap_or_else(|_| {
                     Some(Err(ObjectError::timeout(format!(
-                        "{} timeout {:?}",
-                        self.operation_type_str, timeout
+                        "{}_attempt_timeout_ms {:?}",
+                        self.operation_type_str, timeout_duration
                     ))))
                 }),
         };
@@ -1084,6 +1084,7 @@ where
     let backoff = get_retry_strategy(config, operation_type);
     let timeout_duration =
         Duration::from_millis(get_attempt_timeout_by_type(config, operation_type));
+    let operation_type_str = operation_type.as_str();
 
     let retry_condition = RetryCondition::new(operation_type, object_store_metrics);
 
@@ -1096,9 +1097,11 @@ where
                 .await
                 .unwrap_or_else(|_| {
                     Err(ObjectError::timeout(format!(
-                        "{} timeout {:?}",
-                        operation_type.as_str(),
-                        timeout_duration
+                        "{}_attempt_timeout_ms {:?} {}_retry_attempts {:?}",
+                        operation_type_str,
+                        timeout_duration,
+                        operation_type_str,
+                        get_retry_attempts_by_type(config, operation_type),
                     )))
                 })
         }
