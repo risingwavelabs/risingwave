@@ -129,7 +129,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
                 partition,
                 start_offset: start_offsets.remove(&partition).unwrap(),
                 stop_offset: stop_offsets.remove(&partition).unwrap(),
-                hack_seek_to_latest:false
+                hack_seek_to_latest: false,
             })
             .collect();
 

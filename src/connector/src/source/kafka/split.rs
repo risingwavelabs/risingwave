@@ -28,7 +28,7 @@ pub struct KafkaSplit {
     /// Used by shared source to hackily seek to the latest offset without fetching start offset first.
     /// XXX: But why do we fetch low watermark for latest start offset..?
     ///
-    /// When this is `ture`, `start_offset` will be ignored.
+    /// When this is `true`, `start_offset` will be ignored.
     pub(crate) hack_seek_to_latest: bool,
 }
 
