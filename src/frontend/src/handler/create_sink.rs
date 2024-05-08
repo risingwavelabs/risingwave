@@ -22,8 +22,9 @@ use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::array::arrow::{FromArrow, IcebergArrowConvert};
 use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, TableId, UserId};
-use risingwave_common::types::{DataType, Datum};
+use risingwave_common::types::Datum;
 use risingwave_common::util::value_encoding::DatumFromProtoExt;
 use risingwave_common::{bail, catalog};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
@@ -351,14 +352,14 @@ async fn get_partition_compute_info_for_iceberg(
         })
         .collect::<Result<Vec<_>>>()?;
 
-    let DataType::Struct(partition_type) = arrow_type.into() else {
+    let ArrowDataType::Struct(partition_type) = arrow_type else {
         return Err(RwError::from(ErrorCode::SinkError(
             "Partition type of iceberg should be a struct type".into(),
         )));
     };
 
     Ok(Some(PartitionComputeInfo::Iceberg(IcebergPartitionInfo {
-        partition_type,
+        partition_type: IcebergArrowConvert.from_fields(&partition_type)?,
         partition_fields,
     })))
 }
