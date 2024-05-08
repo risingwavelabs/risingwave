@@ -325,7 +325,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_int32_grouped() {
-        let parent_mem = MemoryContext::root(LabelGuardedIntGauge::<4>::test_int_gauge());
+        let parent_mem = MemoryContext::root(LabelGuardedIntGauge::<4>::test_int_gauge(), u64::MAX);
         {
             let src_exec = Box::new(MockExecutor::with_chunk(
                 DataChunk::from_pretty(

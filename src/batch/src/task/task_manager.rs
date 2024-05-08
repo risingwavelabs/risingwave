@@ -348,6 +348,7 @@ mod tests {
         let manager = Arc::new(BatchManager::new(
             BatchConfig::default(),
             BatchManagerMetrics::for_test(),
+            u64::MAX,
         ));
         let task_id = TaskId {
             task_id: 0,
@@ -375,6 +376,7 @@ mod tests {
         let manager = Arc::new(BatchManager::new(
             BatchConfig::default(),
             BatchManagerMetrics::for_test(),
+            u64::MAX,
         ));
         let plan = PlanFragment {
             root: Some(PlanNode {
@@ -415,6 +417,7 @@ mod tests {
         let manager = Arc::new(BatchManager::new(
             BatchConfig::default(),
             BatchManagerMetrics::for_test(),
+            u64::MAX,
         ));
         let plan = PlanFragment {
             root: Some(PlanNode {
@@ -445,6 +448,7 @@ mod tests {
         let manager = Arc::new(BatchManager::new(
             BatchConfig::default(),
             BatchManagerMetrics::for_test(),
+            u64::MAX,
         ));
         let plan = PlanFragment {
             root: Some(PlanNode {

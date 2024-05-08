@@ -2208,7 +2208,7 @@ mod tests {
             right_executor: BoxedExecutor,
         ) {
             let parent_mem_context =
-                MemoryContext::root(LabelGuardedIntGauge::<4>::test_int_gauge());
+                MemoryContext::root(LabelGuardedIntGauge::<4>::test_int_gauge(), u64::MAX);
 
             {
                 let join_executor = self.create_join_executor_with_chunk_size_and_executors(
