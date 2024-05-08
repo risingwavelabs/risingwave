@@ -23,6 +23,7 @@ use crate::ServiceConfig;
 
 mod dollar_expander;
 mod id_expander;
+mod inherit_expander;
 mod provide_expander;
 mod use_expander;
 use dollar_expander::DollarExpander;

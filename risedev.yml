@@ -822,9 +822,8 @@ profile:
         user-managed: true
         address: message_queue
         port: 29092
-
-  ci-inline-source-test:
-    config-path: src/config/ci.toml
+  
+  inline-source-test:
     steps:
       - use: minio
       - use: etcd
@@ -837,15 +836,29 @@ profile:
       - use: pubsub
         persist-data: true
       - use: kafka
-        user-managed: true
-        address: message_queue
+        address: 127.0.0.1
         port: 29092
-      - use: mysql
-        port: 3306
-        address: mysql
-        user: root
-        password: 123456
-        user-managed: true
+      - use:
+          port: 3306
+          address: mysql
+          user: root
+          password: 123456
+
+  ci-inline-source-test:
+    config-path: src/config/ci.toml
+    steps:
+      - inherit: inline-source-test
+        overrides:
+        - use: pubsub
+          user-managed: true
+          address: message_queue
+          port: 29092
+        - use: mysql
+          port: 3306
+          address: mysql
+          user: root
+          password: 123456
+          user-managed: true
 
   ci-redis:
     config-path: src/config/ci.toml
