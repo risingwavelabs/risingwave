@@ -1199,8 +1199,9 @@ dependencies = [
 
 [[package]]
 name = "aws-msk-iam-sasl-signer"
-version = "0.1.0"
-source = "git+https://github.com/yuhao-su/aws-msk-iam-sasl-signer-rs.git?rev=3ba61ec667483f987706d84072d08393d94fabde#3ba61ec667483f987706d84072d08393d94fabde"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7036b8409ffe698dfdc5ae08722999d960092aeb738026ea99c3071c94831668"
 dependencies = [
  "aws-config",
  "aws-credential-types",
@@ -9348,7 +9349,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.11.2",
+ "parking_lot 0.12.1",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
