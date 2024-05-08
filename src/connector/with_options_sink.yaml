@@ -43,7 +43,7 @@ BigQueryConfig:
     required: false
   - name: external_id
     field_type: String
-    comments: external ID in IAM role trust policy  https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-user_externalid.html
+    comments: external ID in IAM role trust policy  <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-user_externalid.html>
     required: false
   - name: profile
     field_type: String
@@ -349,7 +349,7 @@ KafkaConfig:
     required: false
   - name: external_id
     field_type: String
-    comments: external ID in IAM role trust policy  https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-user_externalid.html
+    comments: external ID in IAM role trust policy  <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-user_externalid.html>
     required: false
   - name: profile
     field_type: String
@@ -542,7 +542,7 @@ PulsarConfig:
     required: false
   - name: external_id
     field_type: String
-    comments: external ID in IAM role trust policy  https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-user_externalid.html
+    comments: external ID in IAM role trust policy  <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-user_externalid.html>
     required: false
   - name: profile
     field_type: String

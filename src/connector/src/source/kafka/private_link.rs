@@ -33,7 +33,7 @@ pub const PRIVATELINK_ENDPOINT_KEY: &str = "privatelink.endpoint";
 pub const CONNECTION_NAME_KEY: &str = "connection.name";
 
 #[derive(Debug)]
-pub(crate) enum PrivateLinkContextRole {
+pub(super) enum PrivateLinkContextRole {
     Consumer,
     Producer,
 }
@@ -47,13 +47,13 @@ impl std::fmt::Display for PrivateLinkContextRole {
     }
 }
 
-pub(crate) struct BrokerAddrRewriter {
+pub(super) struct BrokerAddrRewriter {
     role: PrivateLinkContextRole,
     rewrite_map: BTreeMap<BrokerAddr, BrokerAddr>,
 }
 
 impl BrokerAddrRewriter {
-    pub(crate) fn rewrite_broker_addr(&self, addr: BrokerAddr) -> BrokerAddr {
+    pub(super) fn rewrite_broker_addr(&self, addr: BrokerAddr) -> BrokerAddr {
         let rewrote_addr = match self.rewrite_map.get(&addr) {
             None => addr,
             Some(new_addr) => new_addr.clone(),

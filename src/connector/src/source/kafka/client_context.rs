@@ -38,6 +38,7 @@ struct IamAuthEnv {
 }
 
 pub struct KafkaContextCommon {
+    // For VPC PrivateLink support
     addr_rewriter: BrokerAddrRewriter,
 
     // identifier is required when reporting metrics as a label, usually it is compose by connector

@@ -70,7 +70,6 @@ pub struct AwsAuthProps {
     /// IAM role
     pub arn: Option<String>,
     /// external ID in IAM role trust policy
-    /// https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-user_externalid.html
     pub external_id: Option<String>,
     pub profile: Option<String>,
 }
