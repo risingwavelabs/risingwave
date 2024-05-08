@@ -43,9 +43,6 @@ profile:
       # - use: compactor
 
       # If you want to create source from Kafka, uncomment the following lines
-      # Note that kafka depends on zookeeper, so zookeeper must be started beforehand.
-      # - use: zookeeper
-      #   persist-data: true
       # - use: kafka
       #   persist-data: true
 
@@ -113,8 +110,6 @@ profile:
       - use: compactor
       - use: prometheus
       - use: grafana
-      - use: zookeeper
-        persist-data: true
       - use: kafka
         persist-data: true
 
@@ -132,8 +127,6 @@ profile:
         user-managed: true
       - use: prometheus
       - use: grafana
-      - use: zookeeper
-        persist-data: true
       - use: kafka
         persist-data: true
 
@@ -268,8 +261,6 @@ profile:
         remote-write-region: "ap-southeast-1"
         remote-write-url: "https://aps-workspaces.ap-southeast-1.amazonaws.com/workspaces/ws-f3841dad-6a5c-420f-8f62-8f66487f512a/api/v1/remote_write"
       - use: grafana
-      - use: zookeeper
-        persist-data: true
       - use: kafka
         persist-data: true
 
@@ -407,10 +398,8 @@ profile:
       - use: compactor
       - use: prometheus
       - use: grafana
-      # Do not use kafka and zookeeper here, we will spawn it separately,
+      # Do not use kafka here, we will spawn it separately,
       # so we don't have to re-generate data each time.
-      # - use: zookeeper
-      #   persist-data: true
       # RW will still be ale to talk to it.
       # - use: kafka
       #   port: 9092
@@ -916,8 +905,6 @@ profile:
         enable-tiered-cache: true
       - use: frontend
       - use: compactor
-      - use: zookeeper
-        persist-data: true
       - use: kafka
         persist-data: true
 
@@ -1375,17 +1362,17 @@ template:
     # Listen port of Kafka
     port: 29092
 
+    # Listen port of KRaft controller
+    controller-port: 29093
+
     # Listen address
     listen-address: ${address}
-
-    # ZooKeeper used by this Kafka instance
-    provide-zookeeper: "zookeeper*"
 
     # If set to true, data will be persisted at data/{id}.
     persist-data: true
 
-    # Kafka broker id. If there are multiple instances of Kafka, we will need to set.
-    broker-id: 0
+    # Kafka node id. If there are multiple instances of Kafka, we will need to set.
+    node-id: 0
 
     user-managed: false
 
@@ -1397,23 +1384,6 @@ template:
 
     port: 5980
 
-    persist-data: true
-
-  # Apache ZooKeeper service
-  zookeeper:
-    # Id to be picked-up by services
-    id: zookeeper-${port}
-
-    # Advertise address of ZooKeeper
-    address: "127.0.0.1"
-
-    # Listen address
-    listen-address: ${address}
-
-    # Listen port of ZooKeeper
-    port: 2181
-
-    # If set to true, data will be persisted at data/{id}.
     persist-data: true
 
   # Only supported in RiseDev compose

@@ -108,12 +108,6 @@ impl Array for BytesArray {
     }
 }
 
-impl BytesArray {
-    pub(super) fn data(&self) -> &[u8] {
-        &self.data
-    }
-}
-
 impl<'a> FromIterator<Option<&'a [u8]>> for BytesArray {
     fn from_iter<I: IntoIterator<Item = Option<&'a [u8]>>>(iter: I) -> Self {
         let iter = iter.into_iter();

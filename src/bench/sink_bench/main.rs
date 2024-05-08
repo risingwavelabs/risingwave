@@ -116,7 +116,7 @@ impl LogReader for MockRangeLogReader {
         }
     }
 
-    async fn truncate(&mut self, _offset: TruncateOffset) -> LogStoreResult<()> {
+    fn truncate(&mut self, _offset: TruncateOffset) -> LogStoreResult<()> {
         Ok(())
     }
 

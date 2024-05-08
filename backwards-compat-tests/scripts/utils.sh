@@ -19,35 +19,8 @@ RECOVERY_DURATION=20
 
 # Setup test directory
 TEST_DIR=.risingwave/backwards-compat-tests/
-KAFKA_PATH=.risingwave/bin/kafka
 mkdir -p $TEST_DIR
 cp -r backwards-compat-tests/slt/* $TEST_DIR
-
-wait_kafka_exit() {
-  # Follow kafka-server-stop.sh
-  while [[ -n "$(ps ax | grep ' kafka\.Kafka ' | grep java | grep -v grep | awk '{print $1}')" ]]; do
-    echo "Waiting for kafka to exit"
-    sleep 1
-  done
-}
-
-wait_zookeeper_exit() {
-  # Follow zookeeper-server-stop.sh
-  while [[ -n "$(ps ax | grep java | grep -i QuorumPeerMain | grep -v grep | awk '{print $1}')" ]]; do
-    echo "Waiting for zookeeper to exit"
-    sleep 1
-  done
-}
-
-kill_kafka() {
-  $KAFKA_PATH/bin/kafka-server-stop.sh
-  wait_kafka_exit
-}
-
-kill_zookeeper() {
-  $KAFKA_PATH/bin/zookeeper-server-stop.sh
-  wait_zookeeper_exit
-}
 
 wait_for_process() {
   process_name="$1"
@@ -77,20 +50,8 @@ kill_cluster() {
 
   # Kill other components
   $TMUX list-windows -t risedev -F "#{window_name} #{pane_id}" |
-    grep -v 'kafka' |
-    grep -v 'zookeeper' |
     awk '{ print $2 }' |
     xargs -I {} $TMUX send-keys -t {} C-c C-d
-
-  set +e
-  if [[ -n $($TMUX list-windows -t risedev | grep kafka) ]]; then
-    echo "kill kafka"
-    kill_kafka
-
-    echo "kill zookeeper"
-    kill_zookeeper
-  fi
-  set -e
 
   $TMUX kill-server
   test $? -eq 0 || {
@@ -117,18 +78,16 @@ check_version() {
 }
 
 create_kafka_topic() {
-  "$KAFKA_PATH"/bin/kafka-topics.sh \
-    --create \
-    --topic backwards_compat_test_kafka_source --bootstrap-server localhost:29092
+  RPK_BROKERS=message_queue:29092 \
+  rpk topic create backwards_compat_test_kafka_source
 }
 
 insert_json_kafka() {
   local JSON=$1
-  echo "$JSON" | "$KAFKA_PATH"/bin/kafka-console-producer.sh \
-    --topic backwards_compat_test_kafka_source \
-    --bootstrap-server localhost:29092 \
-    --property "parse.key=true" \
-    --property "key.separator=,"
+
+  echo "$JSON" | \
+  RPK_BROKERS=message_queue:29092 \
+  rpk topic produce backwards_compat_test_kafka_source -f "%k,%v"
 }
 
 seed_json_kafka() {

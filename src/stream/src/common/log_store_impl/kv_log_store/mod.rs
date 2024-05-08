@@ -656,7 +656,6 @@ mod tests {
         // The truncate does not work because it is after the sync
         reader
             .truncate(TruncateOffset::Barrier { epoch: epoch2 })
-            .await
             .unwrap();
         test_env
             .storage
@@ -848,7 +847,6 @@ mod tests {
                 epoch: epoch1,
                 chunk_id: chunk_id1,
             })
-            .await
             .unwrap();
         let epoch3 = epoch2.next_epoch();
         writer.flush_current_epoch(epoch3, true).await.unwrap();
@@ -1049,7 +1047,6 @@ mod tests {
         // Only reader1 will truncate
         reader1
             .truncate(TruncateOffset::Barrier { epoch: epoch1 })
-            .await
             .unwrap();
 
         match reader1.next_item().await.unwrap() {
@@ -1360,7 +1357,6 @@ mod tests {
                 epoch: epoch1,
                 chunk_id: chunk_ids[0],
             })
-            .await
             .unwrap();
         reader.rewind().await.unwrap();
         let chunk_ids = check_reader(
@@ -1377,7 +1373,6 @@ mod tests {
 
         reader
             .truncate(TruncateOffset::Barrier { epoch: epoch1 })
-            .await
             .unwrap();
         reader.rewind().await.unwrap();
         let chunk_ids = check_reader(
@@ -1396,7 +1391,6 @@ mod tests {
                 epoch: epoch3,
                 chunk_id: chunk_ids[1],
             })
-            .await
             .unwrap();
         reader.rewind().await.unwrap();
         let chunk_ids = check_reader(&mut reader, [(epoch3, None)].iter()).await;
@@ -1435,7 +1429,6 @@ mod tests {
 
         reader
             .truncate(TruncateOffset::Barrier { epoch: epoch1 })
-            .await
             .unwrap();
         reader.rewind().await.unwrap();
         let chunk_ids = check_reader(&mut reader, data[1..].iter()).await;
@@ -1446,7 +1439,6 @@ mod tests {
                 epoch: epoch2,
                 chunk_id: chunk_ids[0],
             })
-            .await
             .unwrap();
         reader.rewind().await.unwrap();
         let chunk_ids = check_reader(&mut reader, data[1..].iter()).await;
@@ -1454,7 +1446,6 @@ mod tests {
 
         reader
             .truncate(TruncateOffset::Barrier { epoch: epoch2 })
-            .await
             .unwrap();
         reader.rewind().await.unwrap();
         let chunk_ids = check_reader(&mut reader, data[2..].iter()).await;
@@ -1503,7 +1494,6 @@ mod tests {
 
         reader
             .truncate(TruncateOffset::Barrier { epoch: epoch1 })
-            .await
             .unwrap();
         reader.rewind().await.unwrap();
         let chunk_ids = check_reader_last_unsealed(&mut reader, data[1..].iter()).await;
@@ -1514,7 +1504,6 @@ mod tests {
                 epoch: epoch2,
                 chunk_id: chunk_ids[0],
             })
-            .await
             .unwrap();
         reader.rewind().await.unwrap();
         let chunk_ids = check_reader_last_unsealed(&mut reader, data[1..].iter()).await;
@@ -1522,7 +1511,6 @@ mod tests {
 
         reader
             .truncate(TruncateOffset::Barrier { epoch: epoch2 })
-            .await
             .unwrap();
         reader.rewind().await.unwrap();
         let chunk_ids = check_reader_last_unsealed(&mut reader, data[2..].iter()).await;
@@ -1530,7 +1518,6 @@ mod tests {
 
         reader
             .truncate(TruncateOffset::Barrier { epoch: epoch3 })
-            .await
             .unwrap();
         reader.rewind().await.unwrap();
         let chunk_ids = check_reader_last_unsealed(&mut reader, data[3..].iter()).await;
@@ -1541,7 +1528,6 @@ mod tests {
                 epoch: epoch4,
                 chunk_id: chunk_ids[0],
             })
-            .await
             .unwrap();
         reader.rewind().await.unwrap();
         let chunk_ids = check_reader_last_unsealed(
@@ -1553,7 +1539,6 @@ mod tests {
 
         reader
             .truncate(TruncateOffset::Barrier { epoch: epoch4 })
-            .await
             .unwrap();
         reader.rewind().await.unwrap();
         let chunk_ids =
@@ -1565,7 +1550,6 @@ mod tests {
                 epoch: epoch5,
                 chunk_id: chunk_ids[0],
             })
-            .await
             .unwrap();
         reader.rewind().await.unwrap();
         let chunk_ids = check_reader_last_unsealed(&mut reader, empty()).await;

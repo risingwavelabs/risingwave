@@ -112,10 +112,6 @@ impl Utf8Array {
         }
         builder.finish()
     }
-
-    pub(super) fn data(&self) -> &[u8] {
-        self.bytes.data()
-    }
 }
 
 /// `Utf8ArrayBuilder` use `&str` to build an `Utf8Array`.
@@ -297,12 +293,6 @@ mod tests {
 
         let array = Utf8Array::from_iter(&input);
         assert_eq!(array.len(), input.len());
-
-        assert_eq!(
-            array.bytes.data().len(),
-            input.iter().map(|s| s.unwrap_or("").len()).sum::<usize>()
-        );
-
         assert_eq!(input, array.iter().collect_vec());
     }
 
