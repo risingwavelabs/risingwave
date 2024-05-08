@@ -63,7 +63,7 @@ pub struct BatchManager {
 }
 
 impl BatchManager {
-    pub fn new(config: BatchConfig, metrics: Arc<BatchManagerMetrics>) -> Self {
+    pub fn new(config: BatchConfig, metrics: Arc<BatchManagerMetrics>, mem_limit: u64) -> Self {
         let runtime = {
             let mut builder = tokio::runtime::Builder::new_multi_thread();
             if let Some(worker_threads_num) = config.worker_threads_num {
@@ -76,7 +76,7 @@ impl BatchManager {
                 .unwrap()
         };
 
-        let mem_context = MemoryContext::root(metrics.batch_total_mem.clone());
+        let mem_context = MemoryContext::root(metrics.batch_total_mem.clone(), mem_limit);
         BatchManager {
             tasks: Arc::new(Mutex::new(HashMap::new())),
             runtime: Arc::new(runtime.into()),
@@ -348,6 +348,7 @@ mod tests {
         let manager = Arc::new(BatchManager::new(
             BatchConfig::default(),
             BatchManagerMetrics::for_test(),
+            u64::MAX,
         ));
         let task_id = TaskId {
             task_id: 0,
@@ -375,6 +376,7 @@ mod tests {
         let manager = Arc::new(BatchManager::new(
             BatchConfig::default(),
             BatchManagerMetrics::for_test(),
+            u64::MAX,
         ));
         let plan = PlanFragment {
             root: Some(PlanNode {
@@ -415,6 +417,7 @@ mod tests {
         let manager = Arc::new(BatchManager::new(
             BatchConfig::default(),
             BatchManagerMetrics::for_test(),
+            u64::MAX,
         ));
         let plan = PlanFragment {
             root: Some(PlanNode {
@@ -445,6 +448,7 @@ mod tests {
         let manager = Arc::new(BatchManager::new(
             BatchConfig::default(),
             BatchManagerMetrics::for_test(),
+            u64::MAX,
         ));
         let plan = PlanFragment {
             root: Some(PlanNode {
