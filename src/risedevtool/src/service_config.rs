@@ -263,7 +263,6 @@ pub struct KafkaConfig {
 
     pub address: String,
     pub port: u16,
-    #[serde(with = "string")]
     pub controller_port: u16,
     pub listen_address: String,
 
