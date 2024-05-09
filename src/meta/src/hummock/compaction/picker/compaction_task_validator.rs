@@ -101,19 +101,14 @@ impl CompactionTaskValidationRule for TierCompactionTaskValidationRule {
             return true;
         }
 
-        // so the design here wants to merge multiple overlapping-levels in one compaction
-        let max_compaction_bytes = std::cmp::min(
-            self.config.max_compaction_bytes,
-            self.config.sub_level_max_compaction_bytes
-                * self.config.level0_overlapping_sub_level_compact_level_count as u64,
-        );
-
         // If waiting_enough_files is not satisfied, we will raise the priority of the number of
         // levels to ensure that we can merge as many sub_levels as possible
         let tier_sub_level_compact_level_count =
             self.config.level0_overlapping_sub_level_compact_level_count as usize;
-        if input.input_levels.len() < tier_sub_level_compact_level_count
-            && input.select_input_size < max_compaction_bytes
+        let min_sub_level_compact_level_count = tier_sub_level_compact_level_count / 2;
+        if input.input_levels.len() < min_sub_level_compact_level_count
+            || (input.input_levels.len() < tier_sub_level_compact_level_count
+                && input.select_input_size < self.config.max_bytes_for_level_base)
         {
             stats.skip_by_count_limit += 1;
             return false;

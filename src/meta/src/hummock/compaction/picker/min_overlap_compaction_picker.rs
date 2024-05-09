@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::append_sstable_info_to_string;
@@ -382,11 +381,6 @@ impl NonOverlapSubLevelPicker {
                     ret.total_file_count = total_file_count;
                     ret.total_file_size = total_file_size;
                     ret.sstable_infos.truncate(index + 1);
-                    tracing::warn!(
-                        "truncate files to meet: total_file_count: {}, total_file_size: {}",
-                        total_file_count,
-                        total_file_size
-                    );
                     break;
                 }
             }
@@ -409,13 +403,8 @@ impl NonOverlapSubLevelPicker {
         }
 
         let mut scores = vec![];
-        let mut select_files: HashSet<u64> = HashSet::default();
         for sst in &l0[0].table_infos {
             if level_handler.is_pending_compact(&sst.sst_id) {
-                continue;
-            }
-
-            if select_files.contains(&sst.sst_id) {
                 continue;
             }
 
@@ -425,11 +414,6 @@ impl NonOverlapSubLevelPicker {
             {
                 continue;
             }
-
-            for sst in &ret.sstable_infos[0] {
-                select_files.insert(sst.sst_id);
-            }
-
             scores.push(ret);
         }
 
