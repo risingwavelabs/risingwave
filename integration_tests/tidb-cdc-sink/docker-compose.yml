@@ -367,7 +367,7 @@ services:
       # Exposes 9092 for external connections to the broker
       # Use kafka:29092 for connections internal on the docker network
       # See https://rmoff.net/2018/08/02/kafka-listeners-explained/ for details
-      - 9092:9092
+      - 29092:29092
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
