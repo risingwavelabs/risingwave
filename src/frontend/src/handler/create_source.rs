@@ -1294,6 +1294,33 @@ pub async fn check_iceberg_source(
     Ok(())
 }
 
+pub fn bind_connector_props(
+    handler_args: &HandlerArgs,
+    source_schema: &ConnectorSchema,
+    is_create_source: bool,
+) -> Result<HashMap<String, String>> {
+    let mut with_properties = handler_args.with_options.clone().into_connector_props();
+    validate_compatibility(source_schema, &mut with_properties)?;
+    let create_cdc_source_job = with_properties.is_shareable_cdc_connector();
+    if is_create_source && create_cdc_source_job {
+        // set connector to backfill mode
+        with_properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_SNAPSHOT_BACKFILL.into());
+        // enable cdc sharing mode, which will capture all tables in the given `database.name`
+        with_properties.insert(CDC_SHARING_MODE_KEY.into(), "true".into());
+        // enable transactional cdc
+        with_properties.insert(CDC_TRANSACTIONAL_KEY.into(), "true".into());
+        with_properties.insert(
+            CDC_WAIT_FOR_STREAMING_START_TIMEOUT.into(),
+            handler_args
+                .session
+                .config()
+                .cdc_source_wait_streaming_start_timeout()
+                .to_string(),
+        );
+    }
+    Ok(with_properties)
+}
+
 pub async fn handle_create_source(
     handler_args: HandlerArgs,
     stmt: CreateSourceStatement,
@@ -1321,9 +1348,7 @@ pub async fn handle_create_source(
 
     let source_schema = stmt.source_schema.into_v2_with_warning();
 
-    let mut with_properties = handler_args.with_options.clone().into_connector_props();
-    validate_compatibility(&source_schema, &mut with_properties)?;
-
+    let with_properties = bind_connector_props(&handler_args, &source_schema, true)?;
     ensure_table_constraints_supported(&stmt.constraints)?;
     let sql_pk_names = bind_sql_pk_names(&stmt.columns, &stmt.constraints)?;
 
@@ -1360,22 +1385,6 @@ pub async fn handle_create_source(
         &with_properties,
     )
     .await?;
-
-    if create_cdc_source_job {
-        // set connector to backfill mode
-        with_properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_SNAPSHOT_BACKFILL.into());
-        // enable cdc sharing mode, which will capture all tables in the given `database.name`
-        with_properties.insert(CDC_SHARING_MODE_KEY.into(), "true".into());
-        // enable transactional cdc
-        with_properties.insert(CDC_TRANSACTIONAL_KEY.into(), "true".into());
-        with_properties.insert(
-            CDC_WAIT_FOR_STREAMING_START_TIMEOUT.into(),
-            session
-                .config()
-                .cdc_source_wait_streaming_start_timeout()
-                .to_string(),
-        );
-    }
 
     // must behind `handle_addition_columns`
     check_and_add_timestamp_column(&with_properties, &mut columns);
