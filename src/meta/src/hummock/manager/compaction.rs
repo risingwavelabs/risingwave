@@ -28,7 +28,7 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
     Event as ResponseEvent, PullTaskAck,
 };
 use risingwave_pb::hummock::{
-    CompactStatus as PbCompactStatus, CompactTaskAssignment, CompactionConfig,
+    CompactStatus as PbCompactStatus, CompactionConfig, PbCompactTaskAssignment,
 };
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -46,7 +46,7 @@ const MAX_REPORT_COUNT: usize = 16;
 #[derive(Default)]
 pub struct Compaction {
     /// Compaction task that is already assigned to a compactor
-    pub compact_task_assignment: BTreeMap<HummockCompactionTaskId, CompactTaskAssignment>,
+    pub compact_task_assignment: BTreeMap<HummockCompactionTaskId, PbCompactTaskAssignment>,
     /// `CompactStatus` of each compaction group
     pub compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus>,
 
@@ -80,7 +80,7 @@ impl HummockManager {
     #[named]
     pub async fn list_compaction_status(
         &self,
-    ) -> (Vec<PbCompactStatus>, Vec<CompactTaskAssignment>) {
+    ) -> (Vec<PbCompactStatus>, Vec<PbCompactTaskAssignment>) {
         let compaction = read_lock!(self, compaction).await;
         (
             compaction.compaction_statuses.values().map_into().collect(),
@@ -229,7 +229,7 @@ impl HummockManager {
                         }
 
                         RequestEvent::ReportTask(task) => {
-                           report_events.push(task);
+                           report_events.push(task.into());
                         }
 
                         _ => unreachable!(),
@@ -247,7 +247,7 @@ impl HummockManager {
                             }
 
                             RequestEvent::ReportTask(task) => {
-                                report_events.push(task);
+                                report_events.push(task.into());
                                 if report_events.len() >= MAX_REPORT_COUNT {
                                     break;
                                 }

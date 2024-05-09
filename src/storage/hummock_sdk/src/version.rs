@@ -23,10 +23,11 @@ use risingwave_pb::hummock::compact_task::{PbTaskStatus, PbTaskType, TaskStatus,
 use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version::PbLevels;
 use risingwave_pb::hummock::hummock_version_delta::{ChangeLogDelta, PbGroupDeltas};
+use risingwave_pb::hummock::subscribe_compaction_event_request::PbReportTask;
 use risingwave_pb::hummock::{
-    BloomFilterType, LevelType, PbCompactTask, PbCompactTaskAssignment, PbHummockVersion,
-    PbHummockVersionDelta, PbInputLevel, PbKeyRange, PbLevel, PbLevelType, PbOverlappingLevel,
-    PbSstableInfo, PbValidationTask, TableOption, TableSchema,
+    BloomFilterType, LevelType, PbCompactTask, PbHummockVersion, PbHummockVersionDelta,
+    PbInputLevel, PbKeyRange, PbLevel, PbLevelType, PbOverlappingLevel, PbSstableInfo,
+    PbTableStats, PbValidationTask, TableOption, TableSchema,
 };
 use serde::Serialize;
 
@@ -1302,47 +1303,40 @@ impl ProtoSerializeSizeEstimatedExt for ValidationTask {
     }
 }
 
-// #[derive(Clone, PartialEq, Default, Debug)]
-// pub struct CompactTaskAssignment {
-//     pub compact_task: Option<CompactTask>,
-//     pub context_id: u32,
-// }
+#[derive(Clone, PartialEq, Default, Debug)]
+pub struct ReportTask {
+    pub table_stats_change: HashMap<u32, PbTableStats>,
+    pub task_id: u64,
+    pub task_status: TaskStatus,
+    pub sorted_output_ssts: Vec<SstableInfo>,
+}
 
-// impl From<PbCompactTaskAssignment> for CompactTaskAssignment {
-//     fn from(pb_compact_task_assignment: PbCompactTaskAssignment) -> Self {
-//         Self {
-//             compact_task: if pb_compact_task_assignment.compact_task.is_some() {
-//                 Some(CompactTask::from(
-//                     pb_compact_task_assignment.compact_task.unwrap(),
-//                 ))
-//             } else {
-//                 None
-//             },
-//             context_id: pb_compact_task_assignment.context_id,
-//         }
-//     }
-// }
+impl From<PbReportTask> for ReportTask {
+    fn from(value: PbReportTask) -> Self {
+        Self {
+            table_stats_change: value.table_stats_change.clone(),
+            task_id: value.task_id,
+            task_status: TaskStatus::try_from(value.task_status).unwrap(),
+            sorted_output_ssts: value
+                .sorted_output_ssts
+                .into_iter()
+                .map(SstableInfo::from)
+                .collect_vec(),
+        }
+    }
+}
 
-// impl From<&PbCompactTaskAssignment> for CompactTaskAssignment {
-//     fn from(pb_compact_task_assignment: &PbCompactTaskAssignment) -> Self {
-//         Self {
-//             compact_task: if pb_compact_task_assignment.compact_task.is_some() {
-//                 Some(CompactTask::from(
-//                     pb_compact_task_assignment.compact_task.as_ref().unwrap(),
-//                 ))
-//             } else {
-//                 None
-//             },
-//             context_id: pb_compact_task_assignment.context_id,
-//         }
-//     }
-// }
-
-// impl From<CompactTaskAssignment> for PbCompactTaskAssignment {
-//     fn from(compact_task_assignment: CompactTaskAssignment) -> Self {
-//         Self {
-//             compact_task: compact_task_assignment.compact_task.map(|task| task.into()),
-//             context_id: compact_task_assignment.context_id,
-//         }
-//     }
-// }
+impl From<ReportTask> for PbCompactTask {
+    fn from(value: ReportTask) -> Self {
+        Self {
+            task_id: value.task_id,
+            task_status: value.task_status.into(),
+            sorted_output_ssts: value
+                .sorted_output_ssts
+                .into_iter()
+                .map(SstableInfo::into)
+                .collect_vec(),
+            ..Default::default()
+        }
+    }
+}

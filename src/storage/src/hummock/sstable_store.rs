@@ -28,9 +28,6 @@ use foyer::memory::{
 };
 use futures::{future, StreamExt};
 use itertools::Itertools;
-use risingwave_common::cache::{
-    CachePriority, LookupResponse, LruCacheEventListener, LruKey, LruValue,
-};
 use risingwave_common::config::{EvictionConfig, StorageMemoryConfig};
 use risingwave_hummock_sdk::version::SstableInfo;
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};

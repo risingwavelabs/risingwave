@@ -19,7 +19,6 @@ use std::time::{Duration, Instant};
 
 use auto_enums::auto_enum;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
 use risingwave_hummock_sdk::version::{HummockVersion, Level, Levels};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId, INVALID_VERSION_ID};
 use risingwave_rpc_client::HummockMetaClient;

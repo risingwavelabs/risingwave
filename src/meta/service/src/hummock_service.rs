@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use itertools::Itertools;
-use risingwave_common::catalog::{TableId, NON_RESERVED_SYS_CATALOG_ID, SYS_CATALOG_START_ID};
+use risingwave_common::catalog::{TableId, SYS_CATALOG_START_ID};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_meta::manager::MetadataManager;

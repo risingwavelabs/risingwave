@@ -23,10 +23,9 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
 };
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::HummockVersionId;
-use risingwave_pb::hummock::hummock_version_checkpoint::PbStaleObjects;
+use risingwave_pb::hummock::hummock_version_checkpoint::{PbStaleObjects, StaleObjects};
 use risingwave_pb::hummock::{
-    PbHummockVersion, PbHummockVersionArchive, PbHummockVersionArchive, PbHummockVersionCheckpoint,
-    PbHummockVersionCheckpoint,
+    PbHummockVersion, PbHummockVersionArchive, PbHummockVersionCheckpoint,
 };
 use thiserror_ext::AsReport;
 use tracing::warn;

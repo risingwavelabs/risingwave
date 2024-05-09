@@ -21,9 +21,10 @@ use async_trait::async_trait;
 use fail::fail_point;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
+use itertools::Itertools;
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::version::{CompactTask, HummockVersion, SstableInfo};
 use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
     SstObjectIdRange, SyncResult,
