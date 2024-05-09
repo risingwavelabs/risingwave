@@ -1,55 +1,37 @@
-version: "2.1"
-
+version: '2'
 services:
-  pd:
-    image: pingcap/pd:latest
+  zookeeper:
+    image: quay.io/debezium/zookeeper:latest
     ports:
-      - "2379:2379"
-    volumes:
-      - ./config/pd.toml:/pd.toml
-      - ./logs:/logs
-    command:
-      - --client-urls=http://0.0.0.0:2379
-      - --peer-urls=http://0.0.0.0:2380
-      - --advertise-client-urls=http://pd:2379
-      - --advertise-peer-urls=http://pd:2380
-      - --initial-cluster=pd=http://pd:2380
-      - --data-dir=/data/pd
-      - --config=/pd.toml
-      - --log-file=/logs/pd.log
-    restart: on-failure
-
-  tikv:
-    image: pingcap/tikv:latest
+     - 2182:2181
+     - 2888:2888
+     - 3888:3888
+  kafka:
+    image: quay.io/debezium/kafka:latest
     ports:
-      - "20160:20160"
-    volumes:
-      - ./config/tikv.toml:/tikv.toml 
-      - ./logs:/logs           
-    command:
-      - --addr=0.0.0.0:20160
-      - --advertise-addr=tikv:20160
-      - --data-dir=/data/tikv
-      - --pd=pd:2379
-      - --config=/tikv.toml
-      - --log-file=/logs/tikv.log
-    depends_on:
-      - "pd"
-    restart: on-failure
-
-  tidb:
-    image: pingcap/tidb:latest
+     - 9093:9092  
+    links:
+     - zookeeper
+    environment:
+     - ZOOKEEPER_CONNECT=zookeeper:2181
+  mysql:
+    image: quay.io/debezium/example-mysql:latest
     ports:
-      - "4000:4000"
-    volumes:
-      - ./config/tidb.toml:/tidb.toml
-      - ./logs:/logs
-    command:
-      - --store=tikv
-      - --path=pd:2379
-      - --config=/tidb.toml
-      - --log-file=/logs/tidb.log
-      - --advertise-address=tidb
-    depends_on:
-      - "tikv"
-    restart: on-failure
+     - 3306:3306
+    environment:
+     - MYSQL_ROOT_PASSWORD=debezium
+     - MYSQL_USER=mysqluser
+     - MYSQL_PASSWORD=mysqlpw
+  connect:
+    image: quay.io/debezium/connect:latest
+    ports:
+     - 8083:8083
+    links:
+     - kafka
+     - mysql
+    environment:
+     - BOOTSTRAP_SERVERS=kafka:9092
+     - GROUP_ID=1
+     - CONFIG_STORAGE_TOPIC=my_connect_configs
+     - OFFSET_STORAGE_TOPIC=my_connect_offsets
+     - STATUS_STORAGE_TOPIC=my_connect_statuses
