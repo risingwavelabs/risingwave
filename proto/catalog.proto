@@ -134,6 +134,7 @@ message SinkFormatDesc {
   plan_common.FormatType format = 1;
   plan_common.EncodeType encode = 2;
   map<string, string> options = 3;
+  optional plan_common.EncodeType key_encode = 4;
 }
 
 // the catalog of the sink. There are two kind of schema here. The full schema is all columns

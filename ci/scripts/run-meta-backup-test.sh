@@ -78,6 +78,7 @@ for meta_store_type in "etcd" "sql"; do
   RW_META_ADDR="http://127.0.0.1:5690" \
   RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
   META_STORE_TYPE="${meta_store_type}" \
+  RW_SQLITE_DB=".risingwave/data/sqlite/metadata.db" \
   bash "${test_root}/run_all.sh"
   echo "--- Kill cluster"
   risedev kill

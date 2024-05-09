@@ -487,6 +487,7 @@ impl HummockVersion {
         &mut self,
         version_delta: &HummockVersionDelta,
     ) -> Vec<SstSplitInfo> {
+        let new_committed_epoch = version_delta.max_committed_epoch > self.max_committed_epoch;
         let mut sst_split_info = vec![];
         for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
             let summary = summarize_group_deltas(group_deltas);
@@ -646,8 +647,19 @@ impl HummockVersion {
 
         // If a table has no new change log entry (even an empty one), it means we have stopped maintained
         // the change log for the table
-        self.table_change_log
-            .retain(|table_id, _| version_delta.change_log_delta.contains_key(table_id));
+        if new_committed_epoch {
+            self.table_change_log.retain(|table_id, _| {
+                let contains = version_delta.change_log_delta.contains_key(table_id);
+                if !contains {
+                    warn!(
+                        ?table_id,
+                        max_committed_epoch = version_delta.max_committed_epoch,
+                        "table change log dropped due to no further change log at newly committed epoch",
+                    );
+                }
+                contains
+            });
+        }
 
         for (table_id, change_log_delta) in &version_delta.change_log_delta {
             if let Some(change_log) = self.table_change_log.get_mut(table_id) {

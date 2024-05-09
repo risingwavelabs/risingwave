@@ -41,6 +41,19 @@ impl KafkaService {
     fn kafka(&self) -> Result<Command> {
         Ok(Command::new(self.kafka_path()?))
     }
+
+    /// Format kraft storage. This is a necessary step to start a fresh Kafka service.
+    fn kafka_storage_format(&self) -> Result<Command> {
+        let prefix_bin = env::var("PREFIX_BIN")?;
+        let path = Path::new(&prefix_bin)
+            .join("kafka")
+            .join("bin")
+            .join("kafka-storage.sh");
+
+        let mut cmd = Command::new(path);
+        cmd.arg("format").arg("-t").arg("risedev-kafka").arg("-c"); // the remaining arg is the path to the config file
+        Ok(cmd)
+    }
 }
 
 impl Task for KafkaService {
@@ -81,10 +94,18 @@ impl Task for KafkaService {
             KafkaGen.gen_server_properties(&self.config, &path.to_string_lossy()),
         )?;
 
+        // Format storage if empty.
+        if path.read_dir()?.next().is_none() {
+            let mut cmd = self.kafka_storage_format()?;
+            cmd.arg(&config_path);
+
+            ctx.pb.set_message("formatting storage...");
+            ctx.run_command(cmd)?;
+        }
+
         let mut cmd = self.kafka()?;
-
         cmd.arg(config_path);
-
+        ctx.pb.set_message("starting kafka...");
         ctx.run_command(ctx.tmux_run(cmd)?)?;
 
         ctx.pb.set_message("started");

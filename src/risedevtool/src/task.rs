@@ -36,7 +36,6 @@ mod task_pubsub_emu_ready_check;
 mod task_redis_ready_check;
 mod tempo_service;
 mod utils;
-mod zookeeper_service;
 
 use std::env;
 use std::net::{TcpStream, ToSocketAddrs};
@@ -73,7 +72,6 @@ pub use self::task_kafka_ready_check::*;
 pub use self::task_pubsub_emu_ready_check::*;
 pub use self::task_redis_ready_check::*;
 pub use self::tempo_service::*;
-pub use self::zookeeper_service::*;
 use crate::util::{complete_spin, get_program_args, get_program_name};
 use crate::wait::{wait, wait_tcp_available};
 

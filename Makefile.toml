@@ -697,22 +697,9 @@ wait_kafka_exit() {
   done
 }
 
-wait_zookeeper_exit() {
-  # Follow zookeeper-server-stop.sh
-  while [[ -n "$(ps ax | grep java | grep -i QuorumPeerMain | grep -v grep | awk '{print $1}')" ]]; do
-    echo "Waiting for zookeeper to exit"
-    sleep 1
-  done
-}
-
 kill_kafka() {
   ${PREFIX_BIN}/kafka/bin/kafka-server-stop.sh
   wait_kafka_exit
-}
-
-kill_zookeeper() {
-  ${PREFIX_BIN}/kafka/bin/zookeeper-server-stop.sh
-  wait_zookeeper_exit
 }
 
 if ! ${TMUX} ls &>/dev/null ; then
@@ -722,7 +709,7 @@ fi
 
 # Kill other components with Ctrl+C/Ctrl+D
 ${TMUX} list-windows -F "#{window_name} #{pane_id}" \
-| grep --invert-match --extended-regexp '(kafka|zookeeper)' \
+| grep --invert-match --extended-regexp '(kafka)' \
 | awk '{ print $2 }' \
 | xargs -I {} ${TMUX} send-keys -t {} C-c C-d
 
@@ -738,9 +725,6 @@ if [[ -n $(${TMUX} list-windows | grep kafka) ]];
 then
   echo "kill kafka"
   kill_kafka || true
-
-  echo "kill zookeeper"
-  kill_zookeeper || true
 fi
 
 ${TMUX} kill-server
