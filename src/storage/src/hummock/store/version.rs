@@ -41,11 +41,10 @@ use risingwave_pb::hummock::{EpochNewChangeLog, LevelType, SstableInfo};
 use sync_point::sync_point;
 
 use crate::error::StorageResult;
-use crate::hummock::iterator::{
-    BackwardUserIterator, ConcatIteratorInner, IteratorFactory, UserIterator,
-};
 use crate::hummock::iterator::change_log::ChangeLogIterator;
-use crate::hummock::iterator::{ConcatIterator, HummockIteratorUnion, MergeIterator};
+use crate::hummock::iterator::{
+    BackwardUserIterator, ConcatIteratorInner, IteratorFactory, MergeIterator, UserIterator,
+};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::sstable::{SstableIteratorReadOptions, SstableIteratorType};
 use crate::hummock::sstable_store::SstableStoreRef;
@@ -53,11 +52,15 @@ use crate::hummock::utils::{
     check_subset_preserve_order, filter_single_sst, prune_nonoverlapping_ssts,
     prune_overlapping_ssts, range_overlap, search_sst_idx,
 };
+use crate::hummock::{
+    get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, BackwardIteratorFactory,
+    ForwardIteratorFactory, HummockError, HummockResult, HummockStorageIterator,
+    HummockStorageIteratorInner, HummockStorageRevIterator, HummockStorageRevIteratorInner,
+    LocalHummockStorageIterator, LocalHummockStorageRevIterator, ReadVersionTuple, Sstable,
+    SstableIterator,
+};
 use crate::mem_table::{
     ImmId, ImmutableMemtable, MemTableHummockIterator, MemTableHummockRevIterator,
-    get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, HummockError, HummockResult,
-    HummockStorageIterator, HummockStorageIteratorInner, LocalHummockStorageIterator,
-    ReadVersionTuple, Sstable, SstableIterator,
 };
 use crate::monitor::{
     GetLocalMetricsGuard, HummockStateStoreMetrics, MayExistLocalMetricsGuard, StoreLocalStatistic,
@@ -897,7 +900,7 @@ impl HummockVersionReader {
             Some(committed),
         );
         user_iter.rewind().await?;
-        Ok(HummockStorageRevIterator::new(
+        Ok(HummockStorageRevIteratorInner::new(
             user_iter,
             self.state_store_metrics.clone(),
             table_id,
@@ -1290,12 +1293,18 @@ impl HummockVersionReader {
             .await?;
             Ok::<_, HummockError>(MergeIterator::new(iters))
         }
+        let user_key_range = bound_table_key_range(options.table_id, &key_range);
+
+        let user_key_range_ref = (
+            user_key_range.0.as_ref().map(|key| key.as_ref()),
+            user_key_range.1.as_ref().map(|key| key.as_ref()),
+        );
 
         let new_value_iter = make_iter(
             change_log
                 .iter()
                 .flat_map(|log| log.new_value.iter())
-                .filter(|sst| filter_single_sst(sst, options.table_id, &key_range)),
+                .filter(|sst| filter_single_sst(sst, options.table_id, &user_key_range_ref)),
             &self.sstable_store,
             read_options.clone(),
         )
@@ -1304,7 +1313,7 @@ impl HummockVersionReader {
             change_log
                 .iter()
                 .flat_map(|log| log.old_value.iter())
-                .filter(|sst| filter_single_sst(sst, options.table_id, &key_range)),
+                .filter(|sst| filter_single_sst(sst, options.table_id, &user_key_range_ref)),
             &self.sstable_store,
             read_options.clone(),
         )
