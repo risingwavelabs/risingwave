@@ -56,7 +56,7 @@ sqllogictest -p 4566 -d dev './e2e_test/sink/redis_cluster_sink.slt'
 redis-cli -c --cluster call 127.0.0.1:7000 keys \* >> ./query_result_1.txt
 
 line_count=$(wc -l < query_result_1.txt)
-if [ "$line_count" -eq 4 ]; then
+if [ "$line_count" -eq 16 ]; then
     echo "Redis sink check passed"
 else
     cat ./query_result_1.txt

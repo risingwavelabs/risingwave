@@ -27,7 +27,8 @@ use itertools::Itertools;
 use pulsar::consumer::InitialPosition;
 use pulsar::message::proto::MessageIdData;
 use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
-use risingwave_common::array::{DataChunk, StreamChunk};
+use risingwave_common::array::arrow::{FromArrow, IcebergArrowConvert};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ROWID_PREFIX;
 use risingwave_common::{bail, ensure};
 use thiserror_ext::AsReport;
@@ -508,7 +509,8 @@ impl PulsarIcebergReader {
             offsets.push(offset);
         }
 
-        let data_chunk = DataChunk::try_from(&record_batch.project(&field_indices)?)
+        let data_chunk = IcebergArrowConvert
+            .from_record_batch(&record_batch.project(&field_indices)?)
             .context("failed to convert arrow record batch to data chunk")?;
 
         let stream_chunk = StreamChunk::from(data_chunk);

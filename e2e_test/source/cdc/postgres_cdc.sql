@@ -96,3 +96,6 @@ CREATE TABLE enum_table (
     current_mood mood
 );
 INSERT INTO enum_table VALUES (1, 'happy');
+
+CREATE TABLE list_with_null(id int primary key, my_int int[], my_num numeric[], my_mood mood[], my_uuid uuid[], my_bytea bytea[]);
+INSERT INTO list_with_null VALUES (1, '{1,2,NULL}', '{1.1,inf,NULL}', '{happy,ok,NULL}', '{bb488f9b-330d-4012-b849-12adeb49e57e,bb488f9b-330d-4012-b849-12adeb49e57f, NULL}', '{\\x00,\\x01,NULL}');

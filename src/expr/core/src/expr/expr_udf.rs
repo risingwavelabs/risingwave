@@ -13,13 +13,12 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, LazyLock, Weak};
 use std::time::Duration;
 
 use anyhow::{Context, Error};
-use arrow_schema::{Field, Fields, Schema};
+use arrow_schema::{Fields, Schema, SchemaRef};
 use arrow_udf_js::{CallMode as JsCallMode, Runtime as JsRuntime};
 #[cfg(feature = "embedded-deno-udf")]
 use arrow_udf_js_deno::{CallMode as DenoCallMode, Runtime as DenoRuntime};
@@ -29,14 +28,14 @@ use arrow_udf_wasm::Runtime as WasmRuntime;
 use await_tree::InstrumentAwait;
 use cfg_or_panic::cfg_or_panic;
 use moka::sync::Cache;
-use risingwave_common::array::{ArrayError, ArrayRef, DataChunk};
+use risingwave_common::array::arrow::{FromArrow, ToArrow, UdfArrowConvert};
+use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::expr_context::FRAGMENT_ID;
 use risingwave_pb::expr::ExprNode;
 use risingwave_udf::metrics::GLOBAL_METRICS;
 use risingwave_udf::ArrowFlightUdfClient;
-use thiserror_ext::AsReport;
 
 use super::{BoxedExpression, Build};
 use crate::expr::Expression;
@@ -47,8 +46,7 @@ pub struct UserDefinedFunction {
     children: Vec<BoxedExpression>,
     arg_types: Vec<DataType>,
     return_type: DataType,
-    #[expect(dead_code)]
-    arg_schema: Arc<Schema>,
+    arg_schema: SchemaRef,
     imp: UdfImpl,
     identifier: String,
     span: await_tree::Span,
@@ -117,7 +115,7 @@ impl Expression for UserDefinedFunction {
 impl UserDefinedFunction {
     async fn eval_inner(&self, input: &DataChunk) -> Result<ArrayRef> {
         // this will drop invisible rows
-        let arrow_input = arrow_array::RecordBatch::try_from(input)?;
+        let arrow_input = UdfArrowConvert.to_record_batch(self.arg_schema.clone(), input)?;
 
         // metrics
         let metrics = &*GLOBAL_METRICS;
@@ -225,7 +223,7 @@ impl UserDefinedFunction {
             );
         }
 
-        let output = DataChunk::try_from(&arrow_output)?;
+        let output = UdfArrowConvert.from_record_batch(&arrow_output)?;
         let output = output.uncompact(input.visibility().clone());
 
         let Some(array) = output.columns().first() else {
@@ -250,6 +248,11 @@ impl Build for UserDefinedFunction {
     ) -> Result<Self> {
         let return_type = DataType::from(prost.get_return_type().unwrap());
         let udf = prost.get_rex_node().unwrap().as_udf().unwrap();
+
+        let arrow_return_type = UdfArrowConvert
+            .to_arrow_field("", &return_type)?
+            .data_type()
+            .clone();
 
         #[cfg(not(feature = "embedded-deno-udf"))]
         let runtime = "quickjs";
@@ -280,7 +283,7 @@ impl Build for UserDefinedFunction {
                 );
                 rt.add_function(
                     identifier,
-                    arrow_schema::DataType::try_from(&return_type)?,
+                    arrow_return_type,
                     JsCallMode::CalledOnNullInput,
                     &body,
                 )?;
@@ -321,7 +324,7 @@ impl Build for UserDefinedFunction {
 
                 futures::executor::block_on(rt.add_function(
                     identifier,
-                    arrow_schema::DataType::try_from(&return_type)?,
+                    arrow_return_type,
                     DenoCallMode::CalledOnNullInput,
                     &body,
                 ))?;
@@ -334,7 +337,7 @@ impl Build for UserDefinedFunction {
                 let body = udf.get_body()?;
                 rt.add_function(
                     identifier,
-                    arrow_schema::DataType::try_from(&return_type)?,
+                    arrow_return_type,
                     PythonCallMode::CalledOnNullInput,
                     body,
                 )?;
@@ -352,15 +355,7 @@ impl Build for UserDefinedFunction {
         let arg_schema = Arc::new(Schema::new(
             udf.arg_types
                 .iter()
-                .map::<Result<_>, _>(|t| {
-                    Ok(Field::new(
-                        "",
-                        DataType::from(t).try_into().map_err(|e: ArrayError| {
-                            risingwave_udf::Error::unsupported(e.to_report_string())
-                        })?,
-                        true,
-                    ))
-                })
+                .map(|t| UdfArrowConvert.to_arrow_field("", &DataType::from(t)))
                 .try_collect::<Fields>()?,
         ));
 

@@ -827,6 +827,7 @@ mod batch_hash_join;
 mod batch_hop_window;
 mod batch_insert;
 mod batch_limit;
+mod batch_log_seq_scan;
 mod batch_lookup_join;
 mod batch_max_one_row;
 mod batch_nested_loop_join;
@@ -900,7 +901,6 @@ mod stream_sort;
 mod stream_source;
 mod stream_source_scan;
 mod stream_stateless_simple_agg;
-mod stream_subscription;
 mod stream_table_scan;
 mod stream_topn;
 mod stream_values;
@@ -928,6 +928,7 @@ pub use batch_iceberg_scan::BatchIcebergScan;
 pub use batch_insert::BatchInsert;
 pub use batch_kafka_scan::BatchKafkaScan;
 pub use batch_limit::BatchLimit;
+pub use batch_log_seq_scan::BatchLogSeqScan;
 pub use batch_lookup_join::BatchLookupJoin;
 pub use batch_max_one_row::BatchMaxOneRow;
 pub use batch_nested_loop_join::BatchNestedLoopJoin;
@@ -1004,7 +1005,6 @@ pub use stream_sort::StreamEowcSort;
 pub use stream_source::StreamSource;
 pub use stream_source_scan::StreamSourceScan;
 pub use stream_stateless_simple_agg::StreamStatelessSimpleAgg;
-pub use stream_subscription::StreamSubscription;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_temporal_join::StreamTemporalJoin;
 pub use stream_topn::StreamTopN;
@@ -1079,6 +1079,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, Update }
             , { Batch, SeqScan }
             , { Batch, SysSeqScan }
+            , { Batch, LogSeqScan }
             , { Batch, HashJoin }
             , { Batch, NestedLoopJoin }
             , { Batch, Values }
@@ -1103,7 +1104,6 @@ macro_rules! for_all_plan_nodes {
             , { Stream, TableScan }
             , { Stream, CdcTableScan }
             , { Stream, Sink }
-            , { Stream, Subscription }
             , { Stream, Source }
             , { Stream, SourceScan }
             , { Stream, HashJoin }
@@ -1189,6 +1189,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, Filter }
             , { Batch, SeqScan }
             , { Batch, SysSeqScan }
+            , { Batch, LogSeqScan }
             , { Batch, HashJoin }
             , { Batch, NestedLoopJoin }
             , { Batch, Values }
@@ -1227,7 +1228,6 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, TableScan }
             , { Stream, CdcTableScan }
             , { Stream, Sink }
-            , { Stream, Subscription }
             , { Stream, Source }
             , { Stream, SourceScan }
             , { Stream, HashAgg }

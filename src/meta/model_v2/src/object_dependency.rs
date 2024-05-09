@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use sea_orm::entity::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::{ObjectId, UserId};
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "object_dependency")]
 pub struct Model {
     #[sea_orm(primary_key)]
