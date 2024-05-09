@@ -13,13 +13,13 @@
 // limitations under the License.
 
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::sync::Arc;
 
 use anyhow::anyhow;
 use arrow_array::RecordBatch;
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
 use icelake::io::{FileScan, TableScan};
+use risingwave_common::array::arrow::{FromArrow, IcebergArrowConvert};
 use risingwave_common::catalog::Schema;
 use risingwave_connector::sink::iceberg::IcebergConfig;
 
@@ -150,12 +150,7 @@ impl IcebergScanExecutor {
     }
 
     fn record_batch_to_chunk(record_batch: RecordBatch) -> Result<DataChunk, BatchError> {
-        let mut columns = Vec::with_capacity(record_batch.num_columns());
-        for array in record_batch.columns() {
-            let column = Arc::new(array.try_into()?);
-            columns.push(column);
-        }
-        Ok(DataChunk::new(columns, record_batch.num_rows()))
+        Ok(IcebergArrowConvert.from_record_batch(&record_batch)?)
     }
 }
 

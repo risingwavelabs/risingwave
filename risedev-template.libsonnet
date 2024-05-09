@@ -259,8 +259,6 @@
     port: 29092,
     // Listen address
     listenAddress: self.address,
-    // ZooKeeper used by this Kafka instance
-    provideZookeeper: 'zookeeper*',
     // If set to true, data will be persisted at data/{id}.
     persistData: true,
     // Kafka broker id. If there are multiple instances of Kafka, we will need to set.
@@ -273,20 +271,6 @@
     id: 'pubsub-' + self.port,
     address: '127.0.0.1',
     port: 5980,
-    persistData: true,
-  },
-
-  // Apache ZooKeeper service
-  zookeeper: {
-    // Id to be picked-up by services
-    id: 'zookeeper-' + self.port,
-    // Advertise address of ZooKeeper
-    address: '127.0.0.1',
-    // Listen address
-    listenAddress: self.address,
-    // Listen port of ZooKeeper
-    port: 2181,
-    // If set to true, data will be persisted at data/{id}.
     persistData: true,
   },
 

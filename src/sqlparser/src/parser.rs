@@ -483,7 +483,7 @@ impl Parser {
                             ObjectName(id_parts),
                             self.parse_except()?,
                         ))
-                    }
+                    };
                 }
                 unexpected => {
                     return self.expected(
@@ -1928,7 +1928,7 @@ impl Parser {
                 _ => {
                     return token
                         .cloned()
-                        .unwrap_or(TokenWithLocation::wrap(Token::EOF))
+                        .unwrap_or(TokenWithLocation::wrap(Token::EOF));
                 }
             }
         }
@@ -3575,6 +3575,11 @@ impl Parser {
             }
         } else if self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
             let connector_schema = self.parse_schema()?.unwrap();
+            if connector_schema.key_encode.is_some() {
+                return Err(ParserError::ParserError(
+                    "key encode clause is not supported in source schema".to_string(),
+                ));
+            }
             AlterSourceOperation::FormatEncode { connector_schema }
         } else if self.parse_keywords(&[Keyword::REFRESH, Keyword::SCHEMA]) {
             AlterSourceOperation::RefreshSchema

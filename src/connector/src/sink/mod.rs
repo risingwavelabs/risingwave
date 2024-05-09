@@ -23,6 +23,7 @@ pub mod doris_starrocks_connector;
 pub mod elasticsearch;
 pub mod encoder;
 pub mod formatter;
+pub mod google_pubsub;
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
@@ -86,6 +87,7 @@ macro_rules! for_all_sinks {
                 { ClickHouse, $crate::sink::clickhouse::ClickHouseSink },
                 { Iceberg, $crate::sink::iceberg::IcebergSink },
                 { Mqtt, $crate::sink::mqtt::MqttSink },
+                { GooglePubSub, $crate::sink::google_pubsub::GooglePubSubSink },
                 { Nats, $crate::sink::nats::NatsSink },
                 { Jdbc, $crate::sink::remote::JdbcSink },
                 { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
@@ -519,6 +521,12 @@ pub enum SinkError {
     ),
     #[error("Nats error: {0}")]
     Nats(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("Google Pub/Sub error: {0}")]
+    GooglePubSub(
         #[source]
         #[backtrace]
         anyhow::Error,
