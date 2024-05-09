@@ -14,8 +14,6 @@
 
 use risingwave_pb::hummock::{CompactTask as PbCompactTask, CompactTaskAssignment};
 use sea_orm::entity::prelude::*;
-use sea_orm::FromJsonQueryResult;
-use serde::{Deserialize, Serialize};
 
 use crate::{CompactionTaskId, WorkerId};
 
@@ -33,12 +31,12 @@ pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
 
-crate::derive_from_json_struct!(CompactionTask, PbCompactTask);
+crate::derive_from_blob!(CompactionTask, PbCompactTask);
 
 impl From<Model> for CompactTaskAssignment {
     fn from(value: Model) -> Self {
         Self {
-            compact_task: Some(value.task.0),
+            compact_task: Some(value.task.to_protobuf()),
             context_id: value.context_id as _,
         }
     }

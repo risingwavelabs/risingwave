@@ -26,8 +26,8 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::estimate_size::{EstimateSize, KvSize};
 use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common_estimate_size::{EstimateSize, KvSize};
 use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, FullKey, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::table_watermark::WatermarkDirection;
 use thiserror::Error;
@@ -156,30 +156,29 @@ impl MemTable {
     pub fn insert(&mut self, pk: TableKey<Bytes>, value: Bytes) -> Result<()> {
         if let OpConsistencyLevel::Inconsistent = &self.op_consistency_level {
             let key_len = std::mem::size_of::<Bytes>() + pk.len();
-            let insert_value = KeyOp::Insert(value);
-            self.kv_size.add(&pk, &insert_value);
-            let origin_value = self.buffer.insert(pk, insert_value);
-            self.sub_origin_size(origin_value, key_len);
+            let op = KeyOp::Insert(value);
+            self.kv_size.add(&pk, &op);
+            let old_op = self.buffer.insert(pk, op);
+            self.sub_old_op_size(old_op, key_len);
 
             return Ok(());
         };
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
-                let insert_value = KeyOp::Insert(value);
-                self.kv_size.add(e.key(), &insert_value);
-                e.insert(insert_value);
+                let op = KeyOp::Insert(value);
+                self.kv_size.add(e.key(), &op);
+                e.insert(op);
                 Ok(())
             }
             Entry::Occupied(mut e) => {
-                let origin_value = e.get_mut();
-                self.kv_size.sub_val(origin_value);
-                match origin_value {
-                    KeyOp::Delete(ref mut old_value) => {
-                        let old_val = std::mem::take(old_value);
-                        let update_value = KeyOp::Update((old_val, value));
-                        self.kv_size.add_val(&update_value);
-                        e.insert(update_value);
+                let old_op = e.get_mut();
+                self.kv_size.sub_val(old_op);
+                match old_op {
+                    KeyOp::Delete(ref mut old_op_old_value) => {
+                        let new_op = KeyOp::Update((std::mem::take(old_op_old_value), value));
+                        self.kv_size.add_val(&new_op);
+                        e.insert(new_op);
                         Ok(())
                     }
                     KeyOp::Insert(_) | KeyOp::Update(_) => {
@@ -197,28 +196,31 @@ impl MemTable {
 
     pub fn delete(&mut self, pk: TableKey<Bytes>, old_value: Bytes) -> Result<()> {
         let key_len = std::mem::size_of::<Bytes>() + pk.len();
-        let OpConsistencyLevel::ConsistentOldValue(value_checker) = &self.op_consistency_level
+        let OpConsistencyLevel::ConsistentOldValue {
+            check_old_value: value_checker,
+            ..
+        } = &self.op_consistency_level
         else {
-            let delete_value = KeyOp::Delete(old_value);
-            self.kv_size.add(&pk, &delete_value);
-            let origin_value = self.buffer.insert(pk, delete_value);
-            self.sub_origin_size(origin_value, key_len);
+            let op = KeyOp::Delete(old_value);
+            self.kv_size.add(&pk, &op);
+            let old_op = self.buffer.insert(pk, op);
+            self.sub_old_op_size(old_op, key_len);
             return Ok(());
         };
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
-                let delete_value = KeyOp::Delete(old_value);
-                self.kv_size.add(e.key(), &delete_value);
-                e.insert(delete_value);
+                let op = KeyOp::Delete(old_value);
+                self.kv_size.add(e.key(), &op);
+                e.insert(op);
                 Ok(())
             }
             Entry::Occupied(mut e) => {
-                let origin_value = e.get_mut();
-                self.kv_size.sub_val(origin_value);
-                match origin_value {
-                    KeyOp::Insert(original_value) => {
-                        if ENABLE_SANITY_CHECK && !value_checker(original_value, &old_value) {
+                let old_op = e.get_mut();
+                self.kv_size.sub_val(old_op);
+                match old_op {
+                    KeyOp::Insert(old_op_new_value) => {
+                        if ENABLE_SANITY_CHECK && !value_checker(old_op_new_value, &old_value) {
                             return Err(Box::new(MemTableError::InconsistentOperation {
                                 key: e.key().clone(),
                                 prev: e.get().clone(),
@@ -237,18 +239,17 @@ impl MemTable {
                         new: KeyOp::Delete(old_value),
                     }
                     .into()),
-                    KeyOp::Update(value) => {
-                        let (original_old_value, original_new_value) = std::mem::take(value);
-                        if ENABLE_SANITY_CHECK && original_new_value != old_value {
+                    KeyOp::Update((old_op_old_value, old_op_new_value)) => {
+                        if ENABLE_SANITY_CHECK && !value_checker(old_op_new_value, &old_value) {
                             return Err(Box::new(MemTableError::InconsistentOperation {
                                 key: e.key().clone(),
                                 prev: e.get().clone(),
                                 new: KeyOp::Delete(old_value),
                             }));
                         }
-                        let delete_value = KeyOp::Delete(original_old_value);
-                        self.kv_size.add_val(&delete_value);
-                        e.insert(delete_value);
+                        let new_op = KeyOp::Delete(std::mem::take(old_op_old_value));
+                        self.kv_size.add_val(&new_op);
+                        e.insert(new_op);
                         Ok(())
                     }
                 }
@@ -262,53 +263,55 @@ impl MemTable {
         old_value: Bytes,
         new_value: Bytes,
     ) -> Result<()> {
-        let OpConsistencyLevel::ConsistentOldValue(value_checker) = &self.op_consistency_level
+        let OpConsistencyLevel::ConsistentOldValue {
+            check_old_value: value_checker,
+            ..
+        } = &self.op_consistency_level
         else {
             let key_len = std::mem::size_of::<Bytes>() + pk.len();
 
-            let update_value = KeyOp::Update((old_value, new_value));
-            self.kv_size.add(&pk, &update_value);
-            let origin_value = self.buffer.insert(pk, update_value);
-            self.sub_origin_size(origin_value, key_len);
+            let op = KeyOp::Update((old_value, new_value));
+            self.kv_size.add(&pk, &op);
+            let old_op = self.buffer.insert(pk, op);
+            self.sub_old_op_size(old_op, key_len);
             return Ok(());
         };
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
-                let update_value = KeyOp::Update((old_value, new_value));
-                self.kv_size.add(e.key(), &update_value);
-                e.insert(update_value);
+                let op = KeyOp::Update((old_value, new_value));
+                self.kv_size.add(e.key(), &op);
+                e.insert(op);
                 Ok(())
             }
             Entry::Occupied(mut e) => {
-                let origin_value = e.get_mut();
-                self.kv_size.sub_val(origin_value);
-                match origin_value {
-                    KeyOp::Insert(original_new_value) => {
-                        if ENABLE_SANITY_CHECK && !value_checker(original_new_value, &old_value) {
+                let old_op = e.get_mut();
+                self.kv_size.sub_val(old_op);
+                match old_op {
+                    KeyOp::Insert(old_op_new_value) => {
+                        if ENABLE_SANITY_CHECK && !value_checker(old_op_new_value, &old_value) {
                             return Err(Box::new(MemTableError::InconsistentOperation {
                                 key: e.key().clone(),
                                 prev: e.get().clone(),
                                 new: KeyOp::Update((old_value, new_value)),
                             }));
                         }
-                        let new_key_op = KeyOp::Insert(new_value);
-                        self.kv_size.add_val(&new_key_op);
-                        e.insert(new_key_op);
+                        let new_op = KeyOp::Insert(new_value);
+                        self.kv_size.add_val(&new_op);
+                        e.insert(new_op);
                         Ok(())
                     }
-                    KeyOp::Update((origin_old_value, original_new_value)) => {
-                        if ENABLE_SANITY_CHECK && !value_checker(original_new_value, &old_value) {
+                    KeyOp::Update((old_op_old_value, old_op_new_value)) => {
+                        if ENABLE_SANITY_CHECK && !value_checker(old_op_new_value, &old_value) {
                             return Err(Box::new(MemTableError::InconsistentOperation {
                                 key: e.key().clone(),
                                 prev: e.get().clone(),
                                 new: KeyOp::Update((old_value, new_value)),
                             }));
                         }
-                        let old_value = std::mem::take(origin_old_value);
-                        let new_key_op = KeyOp::Update((old_value, new_value));
-                        self.kv_size.add_val(&new_key_op);
-                        e.insert(new_key_op);
+                        let new_op = KeyOp::Update((std::mem::take(old_op_old_value), new_value));
+                        self.kv_size.add_val(&new_op);
+                        e.insert(new_op);
                         Ok(())
                     }
                     KeyOp::Delete(_) => Err(MemTableError::InconsistentOperation {
@@ -346,9 +349,9 @@ impl MemTable {
         self.buffer.range(key_range).rev()
     }
 
-    fn sub_origin_size(&mut self, origin_value: Option<KeyOp>, key_len: usize) {
-        if let Some(origin_value) = origin_value {
-            self.kv_size.sub_val(&origin_value);
+    fn sub_old_op_size(&mut self, old_op: Option<KeyOp>, key_len: usize) {
+        if let Some(op) = old_op {
+            self.kv_size.sub_val(&op);
             self.kv_size.sub_size(key_len);
         }
     }
@@ -736,9 +739,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_mem_table_memory_size() {
-        let mut mem_table = MemTable::new(OpConsistencyLevel::ConsistentOldValue(
-            CHECK_BYTES_EQUAL.clone(),
-        ));
+        let mut mem_table = MemTable::new(OpConsistencyLevel::ConsistentOldValue {
+            check_old_value: CHECK_BYTES_EQUAL.clone(),
+            is_log_store: false,
+        });
         assert_eq!(mem_table.kv_size.size(), 0);
 
         mem_table
@@ -931,9 +935,10 @@ mod tests {
         let mut test_data = ordered_test_data.clone();
 
         test_data.shuffle(&mut rng);
-        let mut mem_table = MemTable::new(OpConsistencyLevel::ConsistentOldValue(
-            CHECK_BYTES_EQUAL.clone(),
-        ));
+        let mut mem_table = MemTable::new(OpConsistencyLevel::ConsistentOldValue {
+            check_old_value: CHECK_BYTES_EQUAL.clone(),
+            is_log_store: false,
+        });
         for (key, op) in test_data {
             match op {
                 KeyOp::Insert(value) => {

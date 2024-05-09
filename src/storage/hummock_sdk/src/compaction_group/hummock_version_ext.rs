@@ -15,6 +15,7 @@
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
@@ -30,10 +31,11 @@ use risingwave_pb::hummock::{
 use tracing::warn;
 
 use super::StateTableId;
+use crate::change_log::TableChangeLog;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
 use crate::prost_key_range::KeyRangeExt;
-use crate::table_watermark::{TableWatermarks, TableWatermarksIndex, VnodeWatermark};
+use crate::table_watermark::{TableWatermarks, VnodeWatermark};
 use crate::version::{HummockVersion, HummockVersionDelta};
 use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
@@ -156,8 +158,7 @@ impl HummockVersion {
         })
     }
 
-    /// This function does NOT dedup.
-    pub fn get_object_ids(&self) -> Vec<u64> {
+    pub fn get_object_ids(&self) -> HashSet<HummockSstableObjectId> {
         self.get_combined_levels()
             .flat_map(|level| {
                 level
@@ -165,7 +166,16 @@ impl HummockVersion {
                     .iter()
                     .map(|table_info| table_info.get_object_id())
             })
-            .collect_vec()
+            .chain(self.table_change_log.values().flat_map(|change_log| {
+                change_log.0.iter().flat_map(|epoch_change_log| {
+                    epoch_change_log
+                        .old_value
+                        .iter()
+                        .map(|sst| sst.object_id)
+                        .chain(epoch_change_log.new_value.iter().map(|sst| sst.object_id))
+                })
+            }))
+            .collect()
     }
 
     pub fn level_iter<F: FnMut(&Level) -> bool>(
@@ -193,18 +203,6 @@ impl HummockVersion {
             .get(&compaction_group_id)
             .map(|group| group.levels.len() + 1)
             .unwrap_or(0)
-    }
-
-    pub fn build_table_watermarks_index(&self) -> HashMap<TableId, TableWatermarksIndex> {
-        self.table_watermarks
-            .iter()
-            .map(|(table_id, table_watermarks)| {
-                (
-                    *table_id,
-                    table_watermarks.build_index(self.max_committed_epoch),
-                )
-            })
-            .collect()
     }
 
     pub fn safe_epoch_table_watermarks(
@@ -492,6 +490,7 @@ impl HummockVersion {
         &mut self,
         version_delta: &HummockVersionDelta,
     ) -> Vec<SstSplitInfo> {
+        let new_committed_epoch = version_delta.max_committed_epoch > self.max_committed_epoch;
         let mut sst_split_info = vec![];
         for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
             let summary = summarize_group_deltas(group_deltas);
@@ -597,28 +596,80 @@ impl HummockVersion {
         }
         self.id = version_delta.id;
         self.max_committed_epoch = version_delta.max_committed_epoch;
-        for table_id in &version_delta.removed_table_ids {
-            let _ = self.table_watermarks.remove(table_id);
-        }
+
+        let mut modified_table_watermarks: HashMap<TableId, TableWatermarks> = HashMap::new();
+
         for (table_id, table_watermarks) in &version_delta.new_table_watermarks {
-            match self.table_watermarks.entry(*table_id) {
-                Entry::Occupied(mut entry) => {
-                    entry.get_mut().apply_new_table_watermarks(table_watermarks);
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(table_watermarks.clone());
-                }
+            if let Some(current_table_watermarks) = self.table_watermarks.get(table_id) {
+                let mut current_table_watermarks = (**current_table_watermarks).clone();
+                current_table_watermarks.apply_new_table_watermarks(table_watermarks);
+                modified_table_watermarks.insert(*table_id, current_table_watermarks);
+            } else {
+                modified_table_watermarks.insert(*table_id, table_watermarks.clone());
             }
         }
         if version_delta.safe_epoch != self.safe_epoch {
             assert!(version_delta.safe_epoch > self.safe_epoch);
-            self.table_watermarks
-                .values_mut()
-                .for_each(|table_watermarks| {
-                    table_watermarks.clear_stale_epoch_watermark(version_delta.safe_epoch)
-                });
+            for (table_id, table_watermarks) in &self.table_watermarks {
+                let table_watermarks = modified_table_watermarks
+                    .entry(*table_id)
+                    .or_insert_with(|| (**table_watermarks).clone());
+                table_watermarks.clear_stale_epoch_watermark(version_delta.safe_epoch);
+            }
             self.safe_epoch = version_delta.safe_epoch;
         }
+
+        for (table_id, table_watermarks) in modified_table_watermarks {
+            self.table_watermarks
+                .insert(table_id, Arc::new(table_watermarks));
+        }
+
+        for (table_id, change_log_delta) in &version_delta.change_log_delta {
+            let new_change_log = change_log_delta.new_log.as_ref().unwrap();
+            match self.table_change_log.entry(*table_id) {
+                Entry::Occupied(entry) => {
+                    let change_log = entry.into_mut();
+                    if let Some(prev_log) = change_log.0.last() {
+                        assert!(
+                            prev_log.epochs.last().expect("non-empty")
+                                < new_change_log.epochs.first().expect("non-empty")
+                        );
+                    }
+                    change_log.0.push(new_change_log.clone());
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(TableChangeLog(vec![new_change_log.clone()]));
+                }
+            };
+        }
+
+        for table_id in &version_delta.removed_table_ids {
+            let _ = self.table_watermarks.remove(table_id);
+            let _ = self.table_change_log.remove(table_id);
+        }
+
+        // If a table has no new change log entry (even an empty one), it means we have stopped maintained
+        // the change log for the table
+        if new_committed_epoch {
+            self.table_change_log.retain(|table_id, _| {
+                let contains = version_delta.change_log_delta.contains_key(table_id);
+                if !contains {
+                    warn!(
+                        ?table_id,
+                        max_committed_epoch = version_delta.max_committed_epoch,
+                        "table change log dropped due to no further change log at newly committed epoch",
+                    );
+                }
+                contains
+            });
+        }
+
+        for (table_id, change_log_delta) in &version_delta.change_log_delta {
+            if let Some(change_log) = self.table_change_log.get_mut(table_id) {
+                change_log.truncate(change_log_delta.truncate_epoch);
+            }
+        }
+
         sst_split_info
     }
 
@@ -1068,9 +1119,9 @@ pub fn build_version_delta_after_version(version: &HummockVersion) -> HummockVer
         trivial_move: false,
         max_committed_epoch: version.max_committed_epoch,
         group_deltas: Default::default(),
-        gc_object_ids: vec![],
         new_table_watermarks: HashMap::new(),
         removed_table_ids: vec![],
+        change_log_delta: HashMap::new(),
     }
 }
 
@@ -1319,6 +1370,7 @@ mod tests {
             max_committed_epoch: 0,
             safe_epoch: 0,
             table_watermarks: HashMap::new(),
+            table_change_log: HashMap::new(),
         };
         assert_eq!(version.get_object_ids().len(), 0);
 
@@ -1382,6 +1434,7 @@ mod tests {
             max_committed_epoch: 0,
             safe_epoch: 0,
             table_watermarks: HashMap::new(),
+            table_change_log: HashMap::new(),
         };
         let version_delta = HummockVersionDelta {
             id: 1,
@@ -1465,6 +1518,7 @@ mod tests {
                 max_committed_epoch: 0,
                 safe_epoch: 0,
                 table_watermarks: HashMap::new(),
+                table_change_log: HashMap::new(),
             }
         );
     }

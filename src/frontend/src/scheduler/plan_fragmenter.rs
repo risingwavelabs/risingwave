@@ -24,6 +24,9 @@ use enum_as_inner::EnumAsInner;
 use futures::TryStreamExt;
 use itertools::Itertools;
 use pgwire::pg_server::SessionId;
+use risingwave_batch::error::BatchError;
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
+use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableDesc;
 use risingwave_common::hash::table_distribution::TableDistribution;
@@ -31,7 +34,7 @@ use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode};
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use risingwave_connector::source::filesystem::opendal_source::{OpendalGcs, OpendalS3};
-use risingwave_connector::source::iceberg::IcebergSplitEnumerator;
+use risingwave_connector::source::iceberg::{IcebergSplitEnumerator, IcebergTimeTravelInfo};
 use risingwave_connector::source::kafka::KafkaSplitEnumerator;
 use risingwave_connector::source::reader::reader::build_opendal_fs_list_for_batch;
 use risingwave_connector::source::{
@@ -41,6 +44,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
 use risingwave_pb::common::Buffer;
 use risingwave_pb::plan_common::Field as FieldPb;
+use risingwave_sqlparser::ast::AsOf;
 use serde::ser::SerializeStruct;
 use serde::Serialize;
 use uuid::Uuid;
@@ -50,10 +54,11 @@ use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::TableId;
 use crate::error::RwError;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
-use crate::optimizer::plan_node::{PlanNodeId, PlanNodeType};
+use crate::optimizer::plan_node::{
+    BatchIcebergScan, BatchKafkaScan, BatchSource, PlanNodeId, PlanNodeType,
+};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
-use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::SchedulerResult;
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
@@ -266,6 +271,7 @@ impl Query {
 pub struct SourceFetchInfo {
     pub connector: ConnectorProperties,
     pub timebound: (Option<i64>, Option<i64>),
+    pub as_of: Option<AsOf>,
 }
 
 #[derive(Clone, Debug)]
@@ -290,7 +296,7 @@ impl SourceScanInfo {
         match fetch_info.connector {
             ConnectorProperties::Kafka(prop) => {
                 let mut kafka_enumerator =
-                    KafkaSplitEnumerator::new(*prop, SourceEnumeratorContext::default().into())
+                    KafkaSplitEnumerator::new(*prop, SourceEnumeratorContext::dummy().into())
                         .await?;
                 let split_info = kafka_enumerator
                     .list_splits_batch(fetch_info.timebound.0, fetch_info.timebound.1)
@@ -325,11 +331,32 @@ impl SourceScanInfo {
             }
             ConnectorProperties::Iceberg(prop) => {
                 let iceberg_enumerator =
-                    IcebergSplitEnumerator::new(*prop, SourceEnumeratorContext::default().into())
+                    IcebergSplitEnumerator::new(*prop, SourceEnumeratorContext::dummy().into())
                         .await?;
 
+                let time_travel_info = match fetch_info.as_of {
+                    Some(AsOf::VersionNum(v)) => Some(IcebergTimeTravelInfo::Version(v)),
+                    Some(AsOf::TimestampNum(ts)) => {
+                        Some(IcebergTimeTravelInfo::TimestampMs(ts * 1000))
+                    }
+                    Some(AsOf::VersionString(_)) => {
+                        bail!("Unsupported version string in iceberg time travel")
+                    }
+                    Some(AsOf::TimestampString(ts)) => Some(
+                        speedate::DateTime::parse_str_rfc3339(&ts)
+                            .map(|t| {
+                                IcebergTimeTravelInfo::TimestampMs(
+                                    t.timestamp_tz() * 1000 + t.time.microsecond as i64 / 1000,
+                                )
+                            })
+                            .map_err(|_e| anyhow!("fail to parse timestamp"))?,
+                    ),
+                    Some(AsOf::ProcessTime) => unreachable!(),
+                    None => None,
+                };
+
                 let split_info = iceberg_enumerator
-                    .list_splits_batch(batch_parallelism)
+                    .list_splits_batch(time_travel_info, batch_parallelism)
                     .await?
                     .into_iter()
                     .map(SplitImpl::Iceberg)
@@ -878,7 +905,7 @@ impl BatchPlanFragmenter {
             }
         };
         if source_info.is_none() && parallelism == 0 {
-            return Err(SchedulerError::EmptyWorkerNodes);
+            return Err(BatchError::EmptyWorkerNodes.into());
         }
         let parallelism = if parallelism == 0 {
             None
@@ -978,17 +1005,50 @@ impl BatchPlanFragmenter {
             return Ok(None);
         }
 
-        if let Some(source_node) = node.as_batch_source() {
+        if let Some(batch_kafka_node) = node.as_batch_kafka_scan() {
+            let batch_kafka_scan: &BatchKafkaScan = batch_kafka_node;
+            let source_catalog = batch_kafka_scan.source_catalog();
+            if let Some(source_catalog) = source_catalog {
+                let property = ConnectorProperties::extract(
+                    source_catalog.with_properties.clone().into_iter().collect(),
+                    false,
+                )?;
+                let timestamp_bound = batch_kafka_scan.kafka_timestamp_range_value();
+                return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
+                    connector: property,
+                    timebound: timestamp_bound,
+                    as_of: None,
+                })));
+            }
+        } else if let Some(batch_iceberg_scan) = node.as_batch_iceberg_scan() {
+            let batch_iceberg_scan: &BatchIcebergScan = batch_iceberg_scan;
+            let source_catalog = batch_iceberg_scan.source_catalog();
+            if let Some(source_catalog) = source_catalog {
+                let property = ConnectorProperties::extract(
+                    source_catalog.with_properties.clone().into_iter().collect(),
+                    false,
+                )?;
+                let as_of = batch_iceberg_scan.as_of();
+                return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
+                    connector: property,
+                    timebound: (None, None),
+                    as_of,
+                })));
+            }
+        } else if let Some(source_node) = node.as_batch_source() {
+            // TODO: use specific batch operator instead of batch source.
+            let source_node: &BatchSource = source_node;
             let source_catalog = source_node.source_catalog();
             if let Some(source_catalog) = source_catalog {
                 let property = ConnectorProperties::extract(
                     source_catalog.with_properties.clone().into_iter().collect(),
                     false,
                 )?;
-                let timestamp_bound = source_node.kafka_timestamp_range_value();
+                let as_of = source_node.as_of();
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
                     connector: property,
-                    timebound: timestamp_bound,
+                    timebound: (None, None),
+                    as_of,
                 })));
             }
         }
@@ -1004,18 +1064,7 @@ impl BatchPlanFragmenter {
     /// If there are multiple scan nodes in this stage, they must have the same distribution, but
     /// maybe different vnodes partition. We just use the same partition for all the scan nodes.
     fn collect_stage_table_scan(&self, node: PlanRef) -> SchedulerResult<Option<TableScanInfo>> {
-        if node.node_type() == PlanNodeType::BatchExchange {
-            // Do not visit next stage.
-            return Ok(None);
-        }
-        if let Some(scan_node) = node.as_batch_sys_seq_scan() {
-            let name = scan_node.core().table_name.to_owned();
-            return Ok(Some(TableScanInfo::system_table(name)));
-        }
-
-        if let Some(scan_node) = node.as_batch_seq_scan() {
-            let name = scan_node.core().table_name.to_owned();
-            let table_desc = &*scan_node.core().table_desc;
+        let build_table_scan_info = |name, table_desc: &TableDesc, scan_range| {
             let table_catalog = self
                 .catalog_reader
                 .read_guard()
@@ -1025,10 +1074,29 @@ impl BatchPlanFragmenter {
             let vnode_mapping = self
                 .worker_node_manager
                 .fragment_mapping(table_catalog.fragment_id)?;
-            let partitions =
-                derive_partitions(scan_node.scan_ranges(), table_desc, &vnode_mapping)?;
+            let partitions = derive_partitions(scan_range, table_desc, &vnode_mapping)?;
             let info = TableScanInfo::new(name, partitions);
             Ok(Some(info))
+        };
+        if node.node_type() == PlanNodeType::BatchExchange {
+            // Do not visit next stage.
+            return Ok(None);
+        }
+        if let Some(scan_node) = node.as_batch_sys_seq_scan() {
+            let name = scan_node.core().table_name.to_owned();
+            Ok(Some(TableScanInfo::system_table(name)))
+        } else if let Some(scan_node) = node.as_batch_log_seq_scan() {
+            build_table_scan_info(
+                scan_node.core().table_name.to_owned(),
+                &scan_node.core().table_desc,
+                &[],
+            )
+        } else if let Some(scan_node) = node.as_batch_seq_scan() {
+            build_table_scan_info(
+                scan_node.core().table_name.to_owned(),
+                &scan_node.core().table_desc,
+                scan_node.scan_ranges(),
+            )
         } else {
             node.inputs()
                 .into_iter()

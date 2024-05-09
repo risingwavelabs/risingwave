@@ -23,7 +23,6 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::actor_dispatcher::DispatcherType;
-use risingwave_meta_model_v2::fragment::StreamNode;
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::{
     Actor, ActorDispatcher, Fragment, Index, Object, ObjectDependency, Sink, Source,
@@ -31,8 +30,8 @@ use risingwave_meta_model_v2::prelude::{
 };
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, fragment, index, object, object_dependency, sink, source,
-    streaming_job, subscription, table, ActorId, ActorUpstreamActors, CreateType, DatabaseId,
-    ExprNodeArray, FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SourceId,
+    streaming_job, table, ActorId, ActorUpstreamActors, CreateType, DatabaseId, ExprNodeArray,
+    FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SourceId, StreamNode,
     StreamingParallelism, TableId, TableVersion, UserId,
 };
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
@@ -171,22 +170,6 @@ impl CatalogController {
                 sink.id = job_id as _;
                 let sink: sink::ActiveModel = sink.clone().into();
                 Sink::insert(sink).exec(&txn).await?;
-            }
-            StreamingJob::Subscription(subscription) => {
-                let job_id = Self::create_streaming_job_obj(
-                    &txn,
-                    ObjectType::Subscription,
-                    subscription.owner as _,
-                    Some(subscription.database_id as _),
-                    Some(subscription.schema_id as _),
-                    create_type,
-                    ctx,
-                    streaming_parallelism,
-                )
-                .await?;
-                subscription.id = job_id as _;
-                let subscription: subscription::ActiveModel = subscription.clone().into();
-                subscription.insert(&txn).await?;
             }
             StreamingJob::Table(src, table, _) => {
                 let job_id = Self::create_streaming_job_obj(
@@ -395,7 +378,7 @@ impl CatalogController {
         &self,
         job_id: ObjectId,
         is_cancelled: bool,
-    ) -> MetaResult<bool> {
+    ) -> MetaResult<(bool, Vec<TableId>)> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
@@ -405,7 +388,7 @@ impl CatalogController {
                 id = job_id,
                 "streaming job not found when aborting creating, might be cleaned by recovery"
             );
-            return Ok(true);
+            return Ok((true, Vec::new()));
         }
 
         if !is_cancelled {
@@ -420,7 +403,7 @@ impl CatalogController {
                         id = job_id,
                         "streaming job is created in background and still in creating status"
                     );
-                    return Ok(false);
+                    return Ok((false, Vec::new()));
                 }
             }
         }
@@ -431,6 +414,13 @@ impl CatalogController {
             .filter(table::Column::BelongsToJobId.eq(job_id))
             .into_tuple()
             .all(&txn)
+            .await?;
+
+        let mv_table_id: Option<TableId> = Table::find_by_id(job_id)
+            .select_only()
+            .column(table::Column::TableId)
+            .into_tuple()
+            .one(&txn)
             .await?;
 
         let associated_source_id: Option<SourceId> = Table::find_by_id(job_id)
@@ -444,7 +434,7 @@ impl CatalogController {
         Object::delete_by_id(job_id).exec(&txn).await?;
         if !internal_table_ids.is_empty() {
             Object::delete_many()
-                .filter(object::Column::Oid.is_in(internal_table_ids))
+                .filter(object::Column::Oid.is_in(internal_table_ids.iter().cloned()))
                 .exec(&txn)
                 .await?;
         }
@@ -453,7 +443,11 @@ impl CatalogController {
         }
         txn.commit().await?;
 
-        Ok(true)
+        let mut state_table_ids = internal_table_ids;
+
+        state_table_ids.extend(mv_table_id.into_iter());
+
+        Ok((true, state_table_ids))
     }
 
     pub async fn post_collect_table_fragments(
@@ -481,7 +475,7 @@ impl CatalogController {
         for splits in split_assignment.values() {
             for (actor_id, splits) in splits {
                 let splits = splits.iter().map(PbConnectorSplit::from).collect_vec();
-                let connector_splits = PbConnectorSplits { splits };
+                let connector_splits = &PbConnectorSplits { splits };
                 actor::ActiveModel {
                     actor_id: Set(*actor_id as _),
                     splits: Set(Some(connector_splits.into())),
@@ -527,7 +521,7 @@ impl CatalogController {
         streaming_job: &StreamingJob,
         ctx: &StreamContext,
         version: &PbTableVersion,
-        default_parallelism: &Option<NonZeroUsize>,
+        specified_parallelism: &Option<NonZeroUsize>,
     ) -> MetaResult<ObjectId> {
         let id = streaming_job.id();
         let inner = self.inner.write().await;
@@ -542,11 +536,11 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Table.as_str(), id))?;
         let original_version = original_version.expect("version for table should exist");
-        if version.version != original_version.inner_ref().version + 1 {
+        if version.version != original_version.to_protobuf().version + 1 {
             return Err(MetaError::permission_denied("table version is stale"));
         }
 
-        let parallelism = match default_parallelism {
+        let parallelism = match specified_parallelism {
             None => StreamingParallelism::Adaptive,
             Some(n) => StreamingParallelism::Fixed(n.get() as _),
         };
@@ -612,6 +606,29 @@ impl CatalogController {
 
         table.incoming_sinks = Set(incoming_sinks.into());
         let table = table.update(&txn).await?;
+
+        // Update state table fragment id.
+        let fragment_table_ids: Vec<(FragmentId, I32Array)> = Fragment::find()
+            .select_only()
+            .columns([
+                fragment::Column::FragmentId,
+                fragment::Column::StateTableIds,
+            ])
+            .filter(fragment::Column::JobId.eq(dummy_id))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+        for (fragment_id, state_table_ids) in fragment_table_ids {
+            for state_table_id in state_table_ids.into_inner() {
+                table::ActiveModel {
+                    table_id: Set(state_table_id as _),
+                    fragment_id: Set(Some(fragment_id)),
+                    ..Default::default()
+                }
+                .update(&txn)
+                .await?;
+            }
+        }
 
         // let old_fragment_mappings = get_fragment_mappings(&txn, job_id).await?;
         // 1. replace old fragments/actors with new ones.
@@ -711,7 +728,7 @@ impl CatalogController {
             }
             fragment::ActiveModel {
                 fragment_id: Set(fragment_id),
-                stream_node: Set(StreamNode::from_protobuf(&stream_node)),
+                stream_node: Set(StreamNode::from(&stream_node)),
                 upstream_fragment_id: Set(upstream_fragment_id),
                 ..Default::default()
             }
@@ -744,14 +761,14 @@ impl CatalogController {
                 .into_tuple()
                 .all(&txn)
                 .await?;
-            for (index_id, mut nodes) in index_items {
-                nodes
-                    .0
+            for (index_id, nodes) in index_items {
+                let mut pb_nodes = nodes.to_protobuf();
+                pb_nodes
                     .iter_mut()
                     .for_each(|x| expr_rewriter.rewrite_expr(x));
                 let index = index::ActiveModel {
                     index_id: Set(index_id),
-                    index_items: Set(nodes),
+                    index_items: Set(pb_nodes.into()),
                     ..Default::default()
                 }
                 .update(&txn)
@@ -816,7 +833,7 @@ impl CatalogController {
             if let Some(table_id) = source.optional_associated_table_id {
                 vec![table_id]
             } else if let Some(source_info) = &source.source_info
-                && source_info.inner_ref().cdc_source_job
+                && source_info.to_protobuf().is_shared()
             {
                 vec![source_id]
             } else {
@@ -851,6 +868,7 @@ impl CatalogController {
             .map(|(id, mask, stream_node)| (id, mask, stream_node.to_protobuf()))
             .collect_vec();
 
+        // TODO: limit source backfill?
         fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
             let mut found = false;
             if *fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0 {
@@ -876,7 +894,7 @@ impl CatalogController {
         for (id, _, stream_node) in fragments {
             fragment::ActiveModel {
                 fragment_id: Set(id),
-                stream_node: Set(StreamNode::from_protobuf(&stream_node)),
+                stream_node: Set(StreamNode::from(&stream_node)),
                 ..Default::default()
             }
             .update(&txn)
@@ -917,12 +935,21 @@ impl CatalogController {
 
         fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
             let mut found = false;
-            if *fragment_type_mask & PbFragmentTypeFlag::StreamScan as i32 != 0 {
-                visit_stream_node(stream_node, |node| {
-                    if let PbNodeBody::StreamScan(node) = node {
+            if (*fragment_type_mask & PbFragmentTypeFlag::StreamScan as i32 != 0)
+                || (*fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0)
+            {
+                visit_stream_node(stream_node, |node| match node {
+                    PbNodeBody::StreamScan(node) => {
                         node.rate_limit = rate_limit;
                         found = true;
                     }
+                    PbNodeBody::Source(node) => {
+                        if let Some(inner) = node.source_inner.as_mut() {
+                            inner.rate_limit = rate_limit;
+                            found = true;
+                        }
+                    }
+                    _ => {}
                 });
             }
             found
@@ -930,14 +957,14 @@ impl CatalogController {
 
         if fragments.is_empty() {
             return Err(MetaError::invalid_parameter(format!(
-                "stream scan node not found in job id {job_id}"
+                "stream scan node or source node not found in job id {job_id}"
             )));
         }
         let fragment_ids = fragments.iter().map(|(id, _, _)| *id).collect_vec();
         for (id, _, stream_node) in fragments {
             fragment::ActiveModel {
                 fragment_id: Set(id),
-                stream_node: Set(StreamNode::from_protobuf(&stream_node)),
+                stream_node: Set(StreamNode::from(&stream_node)),
                 ..Default::default()
             }
             .update(&txn)
@@ -1084,12 +1111,12 @@ impl CatalogController {
                     actor_id: Set(actor_id as _),
                     fragment_id: Set(fragment_id as _),
                     status: Set(ActorStatus::Running),
-                    splits: Set(splits.map(|splits| PbConnectorSplits { splits }.into())),
+                    splits: Set(splits.map(|splits| (&PbConnectorSplits { splits }).into())),
                     parallel_unit_id: Set(parallel_unit.id as _),
                     worker_id: Set(parallel_unit.worker_node_id as _),
                     upstream_actor_ids: Set(actor_upstreams),
-                    vnode_bitmap: Set(vnode_bitmap.map(|bitmap| bitmap.into())),
-                    expr_context: Set(expr_context.unwrap().into()),
+                    vnode_bitmap: Set(vnode_bitmap.as_ref().map(|bitmap| bitmap.into())),
+                    expr_context: Set(expr_context.as_ref().unwrap().into()),
                 });
 
                 for PbDispatcher {
@@ -1109,7 +1136,7 @@ impl CatalogController {
                             .into()),
                         dist_key_indices: Set(dist_key_indices.into()),
                         output_indices: Set(output_indices.into()),
-                        hash_mapping: Set(hash_mapping.map(|mapping| mapping.into())),
+                        hash_mapping: Set(hash_mapping.as_ref().map(|mapping| mapping.into())),
                         dispatcher_id: Set(dispatcher_id as _),
                         downstream_actor_ids: Set(downstream_actor_id.into()),
                     })
@@ -1134,7 +1161,7 @@ impl CatalogController {
                     .ok_or_else(|| MetaError::catalog_id_not_found("actor", actor_id))?;
 
                 let mut actor = actor.into_active_model();
-                actor.vnode_bitmap = Set(Some(bitmap.to_protobuf().into()));
+                actor.vnode_bitmap = Set(Some((&bitmap.to_protobuf()).into()));
                 actor.update(&txn).await?;
             }
 
@@ -1151,7 +1178,7 @@ impl CatalogController {
             for actor in &fragment_actors {
                 actor_to_parallel_unit.insert(actor.actor_id as u32, actor.parallel_unit_id as _);
                 if let Some(vnode_bitmap) = &actor.vnode_bitmap {
-                    let bitmap = Bitmap::from(vnode_bitmap.inner_ref());
+                    let bitmap = Bitmap::from(&vnode_bitmap.to_protobuf());
                     actor_to_vnode_bitmap.insert(actor.actor_id as u32, bitmap);
                 }
             }
@@ -1168,7 +1195,7 @@ impl CatalogController {
             .to_protobuf();
 
             let mut fragment = fragment.into_active_model();
-            fragment.vnode_mapping = Set(vnode_mapping.clone().into());
+            fragment.vnode_mapping = Set((&vnode_mapping).into());
             fragment.update(&txn).await?;
 
             fragment_mapping_to_notify.push(FragmentParallelUnitMapping {
@@ -1213,7 +1240,7 @@ impl CatalogController {
                     if dispatcher.dispatcher_type.as_ref() == &DispatcherType::Hash {
                         dispatcher.hash_mapping =
                             Set(upstream_dispatcher_mapping.as_ref().map(|m| {
-                                risingwave_meta_model_v2::ActorMapping::from(m.to_protobuf())
+                                risingwave_meta_model_v2::ActorMapping::from(&m.to_protobuf())
                             }));
                     } else {
                         debug_assert!(upstream_dispatcher_mapping.is_none());
@@ -1273,9 +1300,7 @@ impl CatalogController {
             streaming_job.parallelism = Set(match parallelism {
                 TableParallelism::Adaptive => StreamingParallelism::Adaptive,
                 TableParallelism::Fixed(n) => StreamingParallelism::Fixed(n as _),
-                TableParallelism::Custom => {
-                    unreachable!("sql backend doesn't support custom parallelism")
-                }
+                TableParallelism::Custom => StreamingParallelism::Custom,
             });
 
             streaming_job.update(&txn).await?;

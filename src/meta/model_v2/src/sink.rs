@@ -15,13 +15,14 @@
 use risingwave_pb::catalog::{PbSink, PbSinkType};
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     ColumnCatalogArray, ColumnOrderArray, ConnectionId, I32Array, Property, SinkFormatDesc, SinkId,
     TableId,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum SinkType {
     #[sea_orm(string_value = "APPEND_ONLY")]
@@ -53,7 +54,7 @@ impl From<PbSinkType> for SinkType {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "sink")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
@@ -124,7 +125,7 @@ impl From<PbSink> for ActiveModel {
             connection_id: Set(pb_sink.connection_id.map(|x| x as _)),
             db_name: Set(pb_sink.db_name),
             sink_from_name: Set(pb_sink.sink_from_name),
-            sink_format_desc: Set(pb_sink.format_desc.map(|x| x.into())),
+            sink_format_desc: Set(pb_sink.format_desc.as_ref().map(|x| x.into())),
             target_table: Set(pb_sink.target_table.map(|x| x as _)),
         }
     }

@@ -19,12 +19,14 @@ use std::collections::{BTreeMap, HashMap};
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ConnectionId, DatabaseId, Field, Schema, SchemaId, TableId, UserId,
+    ColumnCatalog, ConnectionId, CreateType, DatabaseId, Field, Schema, SchemaId, TableId, UserId,
     OBJECT_ID_PLACEHOLDER,
 };
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::{PbSink, PbSinkFormatDesc, PbSinkType, PbStreamJobStatus};
+use risingwave_pb::catalog::{
+    PbCreateType, PbSink, PbSinkFormatDesc, PbSinkType, PbStreamJobStatus,
+};
 
 use super::{
     SinkError, CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
@@ -117,6 +119,8 @@ pub struct SinkFormatDesc {
     pub format: SinkFormat,
     pub encode: SinkEncode,
     pub options: BTreeMap<String, String>,
+
+    pub key_encode: Option<SinkEncode>,
 }
 
 /// TODO: consolidate with [`crate::source::SourceFormat`] and [`crate::parser::ProtocolProperties`].
@@ -134,6 +138,7 @@ pub enum SinkEncode {
     Protobuf,
     Avro,
     Template,
+    Text,
 }
 
 impl SinkFormatDesc {
@@ -164,6 +169,7 @@ impl SinkFormatDesc {
             format,
             encode,
             options: Default::default(),
+            key_encode: None,
         }))
     }
 
@@ -175,12 +181,16 @@ impl SinkFormatDesc {
             SinkFormat::Upsert => F::Upsert,
             SinkFormat::Debezium => F::Debezium,
         };
-        let encode = match self.encode {
+        let mapping_encode = |sink_encode: &SinkEncode| match sink_encode {
             SinkEncode::Json => E::Json,
             SinkEncode::Protobuf => E::Protobuf,
             SinkEncode::Avro => E::Avro,
             SinkEncode::Template => E::Template,
+            SinkEncode::Text => E::Text,
         };
+
+        let encode = mapping_encode(&self.encode);
+        let key_encode = self.key_encode.as_ref().map(|e| mapping_encode(e).into());
         let options = self
             .options
             .iter()
@@ -191,6 +201,7 @@ impl SinkFormatDesc {
             format: format.into(),
             encode: encode.into(),
             options,
+            key_encode,
         }
     }
 }
@@ -222,10 +233,27 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             E::Protobuf => SinkEncode::Protobuf,
             E::Template => SinkEncode::Template,
             E::Avro => SinkEncode::Avro,
-            e @ (E::Unspecified | E::Native | E::Csv | E::Bytes | E::None) => {
+            e @ (E::Unspecified | E::Native | E::Csv | E::Bytes | E::None | E::Text) => {
                 return Err(SinkError::Config(anyhow!(
                     "sink encode unsupported: {}",
                     e.as_str_name()
+                )))
+            }
+        };
+        let key_encode = match &value.key_encode() {
+            E::Text => Some(SinkEncode::Text),
+            E::Unspecified => None,
+            encode @ (E::Avro
+            | E::Bytes
+            | E::Csv
+            | E::Json
+            | E::Protobuf
+            | E::Template
+            | E::Native
+            | E::None) => {
+                return Err(SinkError::Config(anyhow!(
+                    "unsupported {} as sink key encode",
+                    encode.as_str_name()
                 )))
             }
         };
@@ -235,6 +263,7 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             format,
             encode,
             options,
+            key_encode,
         })
     }
 }
@@ -307,6 +336,7 @@ pub struct SinkCatalog {
 
     pub created_at_cluster_version: Option<String>,
     pub initialized_at_cluster_version: Option<String>,
+    pub create_type: CreateType,
 }
 
 impl SinkCatalog {
@@ -347,6 +377,7 @@ impl SinkCatalog {
             target_table: self.target_table.map(|table_id| table_id.table_id()),
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
+            create_type: self.create_type.to_proto() as i32,
         }
     }
 
@@ -388,6 +419,7 @@ impl SinkCatalog {
 impl From<PbSink> for SinkCatalog {
     fn from(pb: PbSink) -> Self {
         let sink_type = pb.get_sink_type().unwrap();
+        let create_type = pb.get_create_type().unwrap_or(PbCreateType::Foreground);
         let format_desc = match pb.format_desc {
             Some(f) => f.try_into().ok(),
             None => {
@@ -438,6 +470,7 @@ impl From<PbSink> for SinkCatalog {
             target_table: pb.target_table.map(TableId::new),
             initialized_at_cluster_version: pb.initialized_at_cluster_version,
             created_at_cluster_version: pb.created_at_cluster_version,
+            create_type: CreateType::from_proto(create_type),
         }
     }
 }

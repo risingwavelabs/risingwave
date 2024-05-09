@@ -49,7 +49,7 @@ pub struct SourceExecutor {
     schema: Schema,
     identity: String,
 
-    source_ctrl_opts: SourceCtrlOpts,
+    chunk_size: usize,
 }
 
 #[async_trait::async_trait]
@@ -78,11 +78,6 @@ impl BoxedExecutorBuilder for SourceExecutor {
             .iter()
             .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
             .collect();
-
-        let source_ctrl_opts = SourceCtrlOpts {
-            chunk_size: source.context().get_config().developer.chunk_size,
-            rate_limit: None,
-        };
 
         let column_ids: Vec<_> = source_node
             .columns
@@ -144,7 +139,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
                 split_list,
                 schema,
                 identity: source.plan_node().get_identity().clone(),
-                source_ctrl_opts,
+                chunk_size: source.context().get_config().developer.chunk_size,
             }))
         }
     }
@@ -171,11 +166,13 @@ impl SourceExecutor {
             u32::MAX,
             self.source_id,
             u32::MAX,
-            self.metrics,
-            self.source_ctrl_opts.clone(),
-            None,
-            ConnectorProperties::default(),
             "NA".to_owned(), // source name was not passed in batch plan
+            self.metrics,
+            SourceCtrlOpts {
+                chunk_size: self.chunk_size,
+                rate_limit: None,
+            },
+            ConnectorProperties::default(),
         ));
         let stream = self
             .source

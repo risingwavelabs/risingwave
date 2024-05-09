@@ -18,6 +18,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableOption;
+use risingwave_pb::catalog::subscription::PbSubscriptionState;
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::{
     Connection, CreateType, Database, Function, Index, PbStreamJobStatus, Schema, Sink, Source,
@@ -90,16 +91,16 @@ pub struct DatabaseManager {
 
 impl DatabaseManager {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let databases = Database::list(env.meta_store_checked()).await?;
-        let schemas = Schema::list(env.meta_store_checked()).await?;
-        let sources = Source::list(env.meta_store_checked()).await?;
-        let sinks = Sink::list(env.meta_store_checked()).await?;
-        let tables = Table::list(env.meta_store_checked()).await?;
-        let indexes = Index::list(env.meta_store_checked()).await?;
-        let views = View::list(env.meta_store_checked()).await?;
-        let functions = Function::list(env.meta_store_checked()).await?;
-        let connections = Connection::list(env.meta_store_checked()).await?;
-        let subscriptions = Subscription::list(env.meta_store_checked()).await?;
+        let databases = Database::list(env.meta_store().as_kv()).await?;
+        let schemas = Schema::list(env.meta_store().as_kv()).await?;
+        let sources = Source::list(env.meta_store().as_kv()).await?;
+        let sinks = Sink::list(env.meta_store().as_kv()).await?;
+        let tables = Table::list(env.meta_store().as_kv()).await?;
+        let indexes = Index::list(env.meta_store().as_kv()).await?;
+        let views = View::list(env.meta_store().as_kv()).await?;
+        let functions = Function::list(env.meta_store().as_kv()).await?;
+        let connections = Connection::list(env.meta_store().as_kv()).await?;
+        let subscriptions = Subscription::list(env.meta_store().as_kv()).await?;
 
         let mut relation_ref_count = HashMap::new();
 
@@ -123,9 +124,9 @@ impl DatabaseManager {
             (sink.id, sink)
         }));
         let subscriptions = BTreeMap::from_iter(subscriptions.into_iter().map(|subscription| {
-            for depend_relation_id in &subscription.dependent_relations {
-                *relation_ref_count.entry(*depend_relation_id).or_default() += 1;
-            }
+            *relation_ref_count
+                .entry(subscription.dependent_table_id)
+                .or_default() += 1;
             (subscription.id, subscription)
         }));
         let indexes = BTreeMap::from_iter(indexes.into_iter().map(|index| (index.id, index)));
@@ -185,10 +186,7 @@ impl DatabaseManager {
                 .collect_vec(),
             self.subscriptions
                 .values()
-                .filter(|t| {
-                    t.stream_job_status == PbStreamJobStatus::Unspecified as i32
-                        || t.stream_job_status == PbStreamJobStatus::Created as i32
-                })
+                .filter(|t| t.subscription_state == PbSubscriptionState::Created as i32)
                 .cloned()
                 .collect_vec(),
             self.indexes
@@ -227,7 +225,7 @@ impl DatabaseManager {
                 && x.name.eq(&relation_key.2)
         }) {
             if t.stream_job_status == StreamJobStatus::Creating as i32 {
-                bail!("table is in creating procedure: {}", t.id);
+                bail!("table is in creating procedure, table id: {}", t.id);
             } else {
                 Err(MetaError::catalog_duplicated("table", &relation_key.2))
             }
@@ -296,6 +294,10 @@ impl DatabaseManager {
 
     pub fn list_databases(&self) -> Vec<Database> {
         self.databases.values().cloned().collect_vec()
+    }
+
+    pub fn list_schemas(&self) -> Vec<Schema> {
+        self.schemas.values().cloned().collect_vec()
     }
 
     pub fn list_creating_background_mvs(&self) -> Vec<Table> {
@@ -398,16 +400,12 @@ impl DatabaseManager {
             .keys()
             .copied()
             .chain(self.sinks.keys().copied())
-            .chain(self.subscriptions.keys().copied())
             .chain(self.indexes.keys().copied())
             .chain(self.sources.keys().copied())
             .chain(
-                // filter cdc source jobs
                 self.sources
                     .iter()
-                    .filter(|(_, source)| {
-                        source.info.as_ref().is_some_and(|info| info.cdc_source_job)
-                    })
+                    .filter(|(_, source)| source.info.as_ref().is_some_and(|info| info.is_shared()))
                     .map(|(id, _)| id)
                     .copied(),
             )

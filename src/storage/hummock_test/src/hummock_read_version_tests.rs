@@ -52,9 +52,8 @@ async fn test_read_version_basic() {
 
     {
         // single imm
-        let kv_pairs = gen_dummy_batch(1);
-        let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
-        let size = SharedBufferBatch::measure_batch_size(&sorted_items);
+        let sorted_items = gen_dummy_batch(1);
+        let size = SharedBufferBatch::measure_batch_size(&sorted_items, None).0;
         let imm = SharedBufferBatch::build_shared_buffer_batch_for_test(
             epoch,
             0,
@@ -87,9 +86,8 @@ async fn test_read_version_basic() {
         // several epoch
         for i in 0..5 {
             epoch.inc_epoch();
-            let kv_pairs = gen_dummy_batch(i + 2);
-            let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
-            let size = SharedBufferBatch::measure_batch_size(&sorted_items);
+            let sorted_items = gen_dummy_batch(i + 2);
+            let size = SharedBufferBatch::measure_batch_size(&sorted_items, None).0;
             let imm = SharedBufferBatch::build_shared_buffer_batch_for_test(
                 epoch,
                 0,
@@ -143,7 +141,7 @@ async fn test_read_version_basic() {
             .rev()
             .collect::<Vec<_>>();
 
-        let dummy_sst = StagingSstableInfo::new(
+        let dummy_sst = Arc::new(StagingSstableInfo::new(
             vec![
                 LocalSstableInfo::for_test(SstableInfo {
                     object_id: 1,
@@ -178,10 +176,11 @@ async fn test_read_version_basic() {
                     ..Default::default()
                 }),
             ],
+            vec![],
             epoch_id_vec_for_clear,
             batch_id_vec_for_clear,
             1,
-        );
+        ));
 
         {
             read_version.update(VersionUpdate::Staging(StagingData::Sst(dummy_sst)));
@@ -275,9 +274,8 @@ async fn test_read_filter_basic() {
 
     {
         // single imm
-        let kv_pairs = gen_dummy_batch(epoch);
-        let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
-        let size = SharedBufferBatch::measure_batch_size(&sorted_items);
+        let sorted_items = gen_dummy_batch(epoch);
+        let size = SharedBufferBatch::measure_batch_size(&sorted_items, None).0;
         let imm = SharedBufferBatch::build_shared_buffer_batch_for_test(
             epoch,
             0,
@@ -374,7 +372,7 @@ async fn test_read_filter_basic() {
 
 //     // Update read version via staging SSTs
 //     let sst_id = 233;
-//     let staging_sst = gen_dummy_sst_info(sst_id, imms.clone(), table_id, epoch);
+//     let staging_sst = Arc::new(gen_dummy_sst_info(sst_id, imms.clone(), table_id, epoch));
 //     read_version_vec.iter().for_each(|v| {
 //         v.write().update(VersionUpdate::Staging(StagingData::Sst(
 //             StagingSstableInfo::new(

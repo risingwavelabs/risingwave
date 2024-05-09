@@ -17,7 +17,6 @@ use std::fmt::Debug;
 use bytes::{Buf, BufMut, Bytes};
 
 use super::{HummockError, HummockResult};
-use crate::storage_value::StorageValue;
 
 pub const VALUE_DELETE: u8 = 1 << 0;
 pub const VALUE_PUT: u8 = 0;
@@ -45,6 +44,7 @@ impl<T: AsRef<[u8]>> Debug for HummockValue<T> {
 
 impl<T> Copy for HummockValue<T> where T: Copy {}
 
+#[cfg(any(test, feature = "test"))]
 impl<T: PartialEq> PartialEq for HummockValue<T> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -55,11 +55,12 @@ impl<T: PartialEq> PartialEq for HummockValue<T> {
     }
 }
 
+#[cfg(any(test, feature = "test"))]
 impl<T: Eq> Eq for HummockValue<T> {}
 
 impl<T> HummockValue<T>
 where
-    T: PartialEq + Eq + AsRef<[u8]>,
+    T: AsRef<[u8]>,
 {
     pub fn encoded_len(&self) -> usize {
         match self {
@@ -164,16 +165,6 @@ impl From<HummockValue<Vec<u8>>> for HummockValue<Bytes> {
         match data {
             HummockValue::Put(data) => HummockValue::Put(data.into()),
             HummockValue::Delete => HummockValue::Delete,
-        }
-    }
-}
-
-impl From<StorageValue> for HummockValue<Bytes> {
-    fn from(data: StorageValue) -> Self {
-        if data.is_some() {
-            HummockValue::Put(data.user_value.unwrap_or_default())
-        } else {
-            HummockValue::Delete
         }
     }
 }

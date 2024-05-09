@@ -142,6 +142,7 @@ async fn compaction_test(
         value_indices: vec![],
         definition: "".to_string(),
         handle_pk_conflict_behavior: 0,
+        version_column_index: None,
         read_prefix_len_hint: 0,
         optional_associated_source_id: None,
         table_type: 0,
@@ -206,7 +207,7 @@ async fn compaction_test(
         state_store_type.strip_prefix("hummock+").unwrap(),
         object_store_metrics.clone(),
         "Hummock",
-        ObjectStoreConfig::default(),
+        Arc::new(ObjectStoreConfig::default()),
     )
     .await;
     let sstable_store = Arc::new(SstableStore::new(SstableStoreConfig {
@@ -376,7 +377,7 @@ async fn run_compare_result(
         // let checkpoint = epoch % 10 == 0;
         let ret = hummock.seal_and_sync_epoch(epoch).await.unwrap();
         meta_client
-            .commit_epoch(epoch, ret.uncommitted_ssts)
+            .commit_epoch(epoch, ret)
             .await
             .map_err(|e| format!("{:?}", e))?;
         if (epoch / test_epoch(1)) % 200 == 0 {

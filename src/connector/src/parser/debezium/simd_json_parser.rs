@@ -20,18 +20,22 @@ use simd_json::BorrowedValue;
 
 use crate::error::ConnectorResult;
 use crate::parser::unified::debezium::MongoJsonAccess;
-use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
+use crate::parser::unified::json::{JsonAccess, JsonParseOptions, TimestamptzHandling};
 use crate::parser::unified::AccessImpl;
 use crate::parser::AccessBuilder;
 
 #[derive(Debug)]
 pub struct DebeziumJsonAccessBuilder {
     value: Option<Vec<u8>>,
+    json_parse_options: JsonParseOptions,
 }
 
 impl DebeziumJsonAccessBuilder {
-    pub fn new() -> ConnectorResult<Self> {
-        Ok(Self { value: None })
+    pub fn new(timestamptz_handling: TimestamptzHandling) -> ConnectorResult<Self> {
+        Ok(Self {
+            value: None,
+            json_parse_options: JsonParseOptions::new_for_debezium(timestamptz_handling),
+        })
     }
 }
 
@@ -51,7 +55,7 @@ impl AccessBuilder for DebeziumJsonAccessBuilder {
 
         Ok(AccessImpl::Json(JsonAccess::new_with_options(
             payload,
-            &JsonParseOptions::DEBEZIUM,
+            &self.json_parse_options,
         )))
     }
 }
@@ -59,11 +63,17 @@ impl AccessBuilder for DebeziumJsonAccessBuilder {
 #[derive(Debug)]
 pub struct DebeziumMongoJsonAccessBuilder {
     value: Option<Vec<u8>>,
+    json_parse_options: JsonParseOptions,
 }
 
 impl DebeziumMongoJsonAccessBuilder {
     pub fn new() -> anyhow::Result<Self> {
-        Ok(Self { value: None })
+        Ok(Self {
+            value: None,
+            json_parse_options: JsonParseOptions::new_for_debezium(
+                TimestamptzHandling::GuessNumberUnit,
+            ),
+        })
     }
 }
 
@@ -82,7 +92,7 @@ impl AccessBuilder for DebeziumMongoJsonAccessBuilder {
         };
 
         Ok(AccessImpl::MongoJson(MongoJsonAccess::new(
-            JsonAccess::new_with_options(payload, &JsonParseOptions::DEBEZIUM),
+            JsonAccess::new_with_options(payload, &self.json_parse_options),
         )))
     }
 }
@@ -105,7 +115,7 @@ mod tests {
         DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties, ProtocolProperties,
         SourceColumnDesc, SourceStreamChunkBuilder, SpecificParserConfig,
     };
-    use crate::source::SourceContextRef;
+    use crate::source::SourceContext;
 
     fn assert_json_eq(parse_result: &Option<ScalarImpl>, json_str: &str) {
         if let Some(ScalarImpl::Jsonb(json_val)) = parse_result {
@@ -120,18 +130,16 @@ mod tests {
         }
     }
 
-    async fn build_parser(
-        rw_columns: Vec<SourceColumnDesc>,
-        source_ctx: SourceContextRef,
-    ) -> DebeziumParser {
+    async fn build_parser(rw_columns: Vec<SourceColumnDesc>) -> DebeziumParser {
         let props = SpecificParserConfig {
             key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
+                timestamptz_handling: None,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
-        DebeziumParser::new(props, rw_columns, source_ctx)
+        DebeziumParser::new(props, rw_columns, SourceContext::dummy().into())
             .await
             .unwrap()
     }
@@ -186,7 +194,7 @@ mod tests {
             let columns = get_test1_columns();
 
             for data in input {
-                let parser = build_parser(columns.clone(), Default::default()).await;
+                let parser = build_parser(columns.clone()).await;
                 let [(_op, row)]: [_; 1] = parse_one(parser, columns.clone(), data)
                     .await
                     .try_into()
@@ -217,7 +225,7 @@ mod tests {
             let columns = get_test1_columns();
 
             for data in input {
-                let parser = build_parser(columns.clone(), Default::default()).await;
+                let parser = build_parser(columns.clone()).await;
                 let [(op, row)]: [_; 1] = parse_one(parser, columns.clone(), data)
                     .await
                     .try_into()
@@ -248,7 +256,7 @@ mod tests {
 
             for data in input {
                 let columns = get_test1_columns();
-                let parser = build_parser(columns.clone(), Default::default()).await;
+                let parser = build_parser(columns.clone()).await;
                 let [(op, row)]: [_; 1] = parse_one(parser, columns.clone(), data)
                     .await
                     .try_into()
@@ -286,7 +294,7 @@ mod tests {
             let columns = get_test1_columns();
 
             for data in input {
-                let parser = build_parser(columns.clone(), Default::default()).await;
+                let parser = build_parser(columns.clone()).await;
                 let [(op, row)]: [_; 1] = parse_one(parser, columns.clone(), data)
                     .await
                     .try_into()
@@ -345,7 +353,7 @@ mod tests {
 
             let columns = get_test2_columns();
 
-            let parser = build_parser(columns.clone(), Default::default()).await;
+            let parser = build_parser(columns.clone()).await;
 
             let [(_op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
                 .await
@@ -380,7 +388,7 @@ mod tests {
             let data = br#"{"payload":{"before":null,"after":{"O_KEY":111,"O_BOOL":1,"O_TINY":-1,"O_INT":-1111,"O_REAL":-11.11,"O_DOUBLE":-111.11111,"O_DECIMAL":-111.11,"O_CHAR":"yes please","O_DATE":"1000-01-01","O_TIME":0,"O_DATETIME":0,"O_TIMESTAMP":"1970-01-01T00:00:01Z","O_JSON":"{\"k1\": \"v1\", \"k2\": 11}"},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678088861000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":789,"row":0,"thread":4,"query":null},"op":"c","ts_ms":1678088861249,"transaction":null}}"#;
 
             let columns = get_test2_columns();
-            let parser = build_parser(columns.clone(), Default::default()).await;
+            let parser = build_parser(columns.clone()).await;
             let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
                 .await
                 .try_into()
@@ -415,7 +423,7 @@ mod tests {
             let data = br#"{"payload":{"before":{"O_KEY":111,"O_BOOL":0,"O_TINY":3,"O_INT":3333,"O_REAL":33.33,"O_DOUBLE":333.33333,"O_DECIMAL":333.33,"O_CHAR":"no thanks","O_DATE":"9999-12-31","O_TIME":86399000000,"O_DATETIME":99999999999000,"O_TIMESTAMP":"2038-01-09T03:14:07Z","O_JSON":"{\"k1\":\"v1_updated\",\"k2\":33}"},"after":null,"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678090653000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":1643,"row":0,"thread":4,"query":null},"op":"d","ts_ms":1678090653611,"transaction":null}}"#;
 
             let columns = get_test2_columns();
-            let parser = build_parser(columns.clone(), Default::default()).await;
+            let parser = build_parser(columns.clone()).await;
             let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
                 .await
                 .try_into()
@@ -452,7 +460,7 @@ mod tests {
 
             let columns = get_test2_columns();
 
-            let parser = build_parser(columns.clone(), Default::default()).await;
+            let parser = build_parser(columns.clone()).await;
             let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
                 .await
                 .try_into()
@@ -495,7 +503,7 @@ mod tests {
                 SourceColumnDesc::simple("O_REAL", DataType::Float32, ColumnId::from(4)),
                 SourceColumnDesc::simple("O_DOUBLE", DataType::Float64, ColumnId::from(5)),
             ];
-            let mut parser = build_parser(columns.clone(), Default::default()).await;
+            let mut parser = build_parser(columns.clone()).await;
 
             let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
 
@@ -636,7 +644,7 @@ mod tests {
             // this test covers an insert event on the table above
             let data = br#"{"payload":{"before":null,"after":{"o_key":0,"o_time_0":40271000000,"o_time_6":40271000010,"o_timez_0":"11:11:11Z","o_timez_6":"11:11:11.00001Z","o_timestamp_0":1321009871000,"o_timestamp_6":1321009871123456,"o_timestampz_0":"2011-11-11T03:11:11Z","o_timestampz_6":"2011-11-11T03:11:11.123456Z","o_interval":"P1Y2M3DT4H5M6.78S","o_date":"1999-09-09"},"source":{"version":"1.9.7.Final","connector":"postgresql","name":"RW_CDC_localhost.test.orders","ts_ms":1684733351963,"snapshot":"last","db":"test","sequence":"[null,\"26505352\"]","schema":"public","table":"orders","txId":729,"lsn":26505352,"xmin":null},"op":"r","ts_ms":1684733352110,"transaction":null}}"#;
             let columns = get_temporal_test_columns();
-            let parser = build_parser(columns.clone(), Default::default()).await;
+            let parser = build_parser(columns.clone()).await;
             let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
                 .await
                 .try_into()
@@ -691,7 +699,7 @@ mod tests {
             // this test covers an insert event on the table above
             let data = br#"{"payload":{"before":null,"after":{"o_key":0,"o_smallint":32767,"o_integer":2147483647,"o_bigint":9223372036854775807,"o_real":9.999,"o_double":9.999999,"o_numeric":123456.789,"o_numeric_6_3":123.456,"o_money":123.12},"source":{"version":"1.9.7.Final","connector":"postgresql","name":"RW_CDC_localhost.test.orders","ts_ms":1684404343201,"snapshot":"last","db":"test","sequence":"[null,\"26519216\"]","schema":"public","table":"orders","txId":729,"lsn":26519216,"xmin":null},"op":"r","ts_ms":1684404343349,"transaction":null}}"#;
             let columns = get_numeric_test_columns();
-            let parser = build_parser(columns.clone(), Default::default()).await;
+            let parser = build_parser(columns.clone()).await;
             let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
                 .await
                 .try_into()
@@ -730,7 +738,7 @@ mod tests {
             // this test covers an insert event on the table above
             let data = br#"{"payload":{"before":null,"after":{"o_key":1,"o_boolean":false,"o_bit":true,"o_bytea":"ASNFZ4mrze8=","o_json":"{\"k1\": \"v1\", \"k2\": 11}","o_xml":"<!--hahaha-->","o_uuid":"60f14fe2-f857-404a-b586-3b5375b3259f","o_point":{"x":1.0,"y":2.0,"wkb":"AQEAAAAAAAAAAADwPwAAAAAAAABA","srid":null},"o_enum":"polar","o_char":"h","o_varchar":"ha","o_character":"h","o_character_varying":"hahaha"},"source":{"version":"1.9.7.Final","connector":"postgresql","name":"RW_CDC_localhost.test.orders","ts_ms":1684743927178,"snapshot":"last","db":"test","sequence":"[null,\"26524528\"]","schema":"public","table":"orders","txId":730,"lsn":26524528,"xmin":null},"op":"r","ts_ms":1684743927343,"transaction":null}}"#;
             let columns = get_other_types_test_columns();
-            let parser = build_parser(columns.clone(), Default::default()).await;
+            let parser = build_parser(columns.clone()).await;
             let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
                 .await
                 .try_into()

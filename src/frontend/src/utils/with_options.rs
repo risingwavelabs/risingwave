@@ -21,10 +21,11 @@ use risingwave_connector::source::kafka::{
 };
 use risingwave_connector::WithPropertiesExt;
 use risingwave_sqlparser::ast::{
-    CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement, SqlOption, Statement,
-    Value,
+    CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement,
+    CreateSubscriptionStatement, SqlOption, Statement, Value,
 };
 
+use super::OverwriteOptions;
 use crate::catalog::connection_catalog::resolve_private_link_connection;
 use crate::catalog::ConnectionId;
 use crate::error::{ErrorCode, Result as RwResult, RwError};
@@ -79,6 +80,14 @@ impl WithOptions {
     /// Take the value of the inner map.
     pub fn into_inner(self) -> BTreeMap<String, String> {
         self.inner
+    }
+
+    /// Convert to connector props, remove the key-value pairs used in the top-level.
+    pub fn into_connector_props(self) -> HashMap<String, String> {
+        self.inner
+            .into_iter()
+            .filter(|(key, _)| key != OverwriteOptions::STREAMING_RATE_LIMIT_KEY)
+            .collect()
     }
 
     /// Parse the retention seconds from the options.
@@ -212,6 +221,13 @@ impl TryFrom<&Statement> for WithOptions {
             Statement::CreateSource {
                 stmt:
                     CreateSourceStatement {
+                        with_properties, ..
+                    },
+                ..
+            } => Self::try_from(with_properties.0.as_slice()),
+            Statement::CreateSubscription {
+                stmt:
+                    CreateSubscriptionStatement {
                         with_properties, ..
                     },
                 ..

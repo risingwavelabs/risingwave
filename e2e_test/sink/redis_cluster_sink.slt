@@ -1,0 +1,29 @@
+statement ok
+CREATE TABLE t6 (v1 int primary key, v2 int);
+
+statement ok
+CREATE MATERIALIZED VIEW mv6 AS SELECT * FROM t6;
+
+statement ok
+CREATE SINK s61
+FROM
+    mv6 WITH (
+    primary_key = 'v1',
+    connector = 'redis',
+    redis.url= '["redis://127.0.0.1:7000/","redis://127.0.0.1:7001/","redis://127.0.0.1:7002/"]',
+)FORMAT PLAIN ENCODE JSON(force_append_only='true');
+
+statement ok
+INSERT INTO t6 VALUES (1, 1),(2, 2),(3, 3),(4, 4),(5, 5),(6, 6),(7, 7),(8, 8),(9, 9),(10, 10),(11, 11),(12, 12),(13, 13),(14, 14),(15, 15);
+
+statement ok
+FLUSH;
+
+statement ok
+DROP SINK s61;
+
+statement ok
+DROP MATERIALIZED VIEW mv6;
+
+statement ok
+DROP TABLE t6;

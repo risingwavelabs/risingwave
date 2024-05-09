@@ -68,6 +68,7 @@ pub struct StorageOpts {
     /// Capacity of sstable meta cache.
     pub compactor_memory_limit_mb: usize,
     /// compactor streaming iterator recreate timeout.
+    /// deprecated
     pub compact_iter_recreate_timeout_ms: u64,
     /// Number of SST ids fetched from meta per RPC
     pub sstable_id_remote_fetch_number: u32,
@@ -77,6 +78,7 @@ pub struct StorageOpts {
     pub max_sub_compaction: u32,
     pub max_concurrent_compaction_task_number: u64,
     pub max_version_pinning_duration_sec: u64,
+    pub compactor_iter_max_io_retry_times: usize,
 
     pub data_file_cache_dir: String,
     pub data_file_cache_capacity_mb: usize,
@@ -89,7 +91,6 @@ pub struct StorageOpts {
     pub data_file_cache_lfu_window_to_cache_size_ratio: usize,
     pub data_file_cache_lfu_tiny_lru_capacity_ratio: f64,
     pub data_file_cache_insert_rate_limit_mb: usize,
-    pub data_file_cache_ring_buffer_capacity_mb: usize,
     pub data_file_cache_catalog_bits: usize,
     pub data_file_cache_compression: String,
 
@@ -112,7 +113,6 @@ pub struct StorageOpts {
     pub meta_file_cache_lfu_window_to_cache_size_ratio: usize,
     pub meta_file_cache_lfu_tiny_lru_capacity_ratio: f64,
     pub meta_file_cache_insert_rate_limit_mb: usize,
-    pub meta_file_cache_ring_buffer_capacity_mb: usize,
     pub meta_file_cache_catalog_bits: usize,
     pub meta_file_cache_compression: String,
 
@@ -122,14 +122,6 @@ pub struct StorageOpts {
     pub backup_storage_directory: String,
     /// max time which wait for preload. 0 represent do not do any preload.
     pub max_preload_wait_time_mill: u64,
-    /// object store streaming read timeout.
-    pub object_store_streaming_read_timeout_ms: u64,
-    /// object store streaming upload timeout.
-    pub object_store_streaming_upload_timeout_ms: u64,
-    /// object store upload timeout.
-    pub object_store_upload_timeout_ms: u64,
-    /// object store read timeout.
-    pub object_store_read_timeout_ms: u64,
 
     pub compactor_max_sst_key_count: u64,
     pub compactor_max_task_multiplier: f32,
@@ -204,10 +196,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .data_file_cache
                 .lfu_tiny_lru_capacity_ratio,
             data_file_cache_insert_rate_limit_mb: c.storage.data_file_cache.insert_rate_limit_mb,
-            data_file_cache_ring_buffer_capacity_mb: c
-                .storage
-                .data_file_cache
-                .ring_buffer_capacity_mb,
             data_file_cache_catalog_bits: c.storage.data_file_cache.catalog_bits,
             data_file_cache_compression: c.storage.data_file_cache.compression.clone(),
             meta_file_cache_dir: c.storage.meta_file_cache.dir.clone(),
@@ -227,10 +215,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .meta_file_cache
                 .lfu_tiny_lru_capacity_ratio,
             meta_file_cache_insert_rate_limit_mb: c.storage.meta_file_cache.insert_rate_limit_mb,
-            meta_file_cache_ring_buffer_capacity_mb: c
-                .storage
-                .meta_file_cache
-                .ring_buffer_capacity_mb,
             meta_file_cache_catalog_bits: c.storage.meta_file_cache.catalog_bits,
             meta_file_cache_compression: c.storage.meta_file_cache.compression.clone(),
             cache_refill_data_refill_levels: c.storage.cache_refill.data_refill_levels.clone(),
@@ -244,17 +228,8 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             cache_refill_unit: c.storage.cache_refill.unit,
             cache_refill_threshold: c.storage.cache_refill.threshold,
             max_preload_wait_time_mill: c.storage.max_preload_wait_time_mill,
-            object_store_streaming_read_timeout_ms: c
-                .storage
-                .object_store
-                .object_store_streaming_read_timeout_ms,
             compact_iter_recreate_timeout_ms: c.storage.compact_iter_recreate_timeout_ms,
-            object_store_streaming_upload_timeout_ms: c
-                .storage
-                .object_store
-                .object_store_streaming_upload_timeout_ms,
-            object_store_read_timeout_ms: c.storage.object_store.object_store_read_timeout_ms,
-            object_store_upload_timeout_ms: c.storage.object_store.object_store_upload_timeout_ms,
+
             max_preload_io_retry_times: c.storage.max_preload_io_retry_times,
             backup_storage_url: p.backup_storage_url().to_string(),
             backup_storage_directory: p.backup_storage_directory().to_string(),
@@ -269,6 +244,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .storage
                 .compactor_fast_max_compact_delete_ratio,
             compactor_fast_max_compact_task_size: c.storage.compactor_fast_max_compact_task_size,
+            compactor_iter_max_io_retry_times: c.storage.compactor_iter_max_io_retry_times,
         }
     }
 }

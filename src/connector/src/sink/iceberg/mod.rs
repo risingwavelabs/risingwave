@@ -13,11 +13,13 @@
 // limitations under the License.
 
 mod jni_catalog;
+mod log_sink;
 mod mock_catalog;
 mod prometheus;
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::num::NonZeroU64;
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -39,30 +41,35 @@ use icelake::transaction::Transaction;
 use icelake::types::{data_file_from_json, data_file_to_json, Any, DataFile};
 use icelake::{Table, TableIdentifier};
 use itertools::Itertools;
-use risingwave_common::array::{to_iceberg_record_batch_with_schema, Op, StreamChunk};
+use risingwave_common::array::arrow::{IcebergArrowConvert, ToArrow};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::SinkMetadata;
-use serde::de;
 use serde_derive::Deserialize;
 use thiserror_ext::AsReport;
 use url::Url;
 use with_options::WithOptions;
 
+use self::log_sink::IcebergLogSinkerOf;
 use self::mock_catalog::MockCatalog;
 use self::prometheus::monitored_base_file_writer::MonitoredBaseFileWriterBuilder;
 use self::prometheus::monitored_position_delete_writer::MonitoredPositionDeleteWriterBuilder;
+use super::catalog::desc::SinkDesc;
 use super::{
     Sink, SinkError, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
-use crate::deserialize_bool_from_string;
 use crate::error::ConnectorResult;
 use crate::sink::coordinate::CoordinatedSinkWriter;
-use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
-use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
+use crate::sink::writer::SinkWriter;
+use crate::sink::{Result, SinkCommitCoordinator, SinkDecouple, SinkParam};
+use crate::{
+    deserialize_bool_from_string, deserialize_optional_string_seq_from_string,
+    deserialize_optional_u64_from_string,
+};
 
 /// This iceberg sink is WIP. When it ready, we will change this name to "iceberg".
 pub const ICEBERG_SINK: &str = "iceberg";
@@ -114,29 +121,17 @@ pub struct IcebergConfig {
     #[serde(
         rename = "primary_key",
         default,
-        deserialize_with = "deserialize_string_seq_from_string"
+        deserialize_with = "deserialize_optional_string_seq_from_string"
     )]
     pub primary_key: Option<Vec<String>>,
 
     // Props for java catalog props.
     #[serde(skip)]
     pub java_catalog_props: HashMap<String, String>,
-}
 
-pub(crate) fn deserialize_string_seq_from_string<'de, D>(
-    deserializer: D,
-) -> std::result::Result<Option<Vec<String>>, D::Error>
-where
-    D: de::Deserializer<'de>,
-{
-    let s: Option<String> = de::Deserialize::deserialize(deserializer)?;
-    if let Some(s) = s {
-        let s = s.to_ascii_lowercase();
-        let s = s.split(',').map(|s| s.trim().to_owned()).collect();
-        Ok(Some(s))
-    } else {
-        Ok(None)
-    }
+    // Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
+    #[serde(default, deserialize_with = "deserialize_optional_u64_from_string")]
+    pub commit_checkpoint_interval: Option<u64>,
 }
 
 impl IcebergConfig {
@@ -187,6 +182,12 @@ impl IcebergConfig {
             })
             .map(|(k, v)| (k[8..].to_string(), v.to_string()))
             .collect();
+
+        if config.commit_checkpoint_interval == Some(0) {
+            return Err(SinkError::Config(anyhow!(
+                "commit_checkpoint_interval must be greater than 0"
+            )));
+        }
 
         Ok(config)
     }
@@ -473,7 +474,7 @@ impl IcebergSink {
             .try_into()
             .map_err(|err: icelake::Error| SinkError::Iceberg(anyhow!(err)))?;
 
-        try_matches_arrow_schema(&sink_schema, &iceberg_schema, false)
+        try_matches_arrow_schema(&sink_schema, &iceberg_schema)
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
         Ok(table)
@@ -515,9 +516,33 @@ impl IcebergSink {
 
 impl Sink for IcebergSink {
     type Coordinator = IcebergSinkCommitter;
-    type LogSinker = LogSinkerOf<CoordinatedSinkWriter<IcebergWriter>>;
+    type LogSinker = IcebergLogSinkerOf<CoordinatedSinkWriter<IcebergWriter>>;
 
     const SINK_NAME: &'static str = ICEBERG_SINK;
+
+    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+        let config_decouple = if let Some(interval) =
+            desc.properties.get("commit_checkpoint_interval")
+            && interval.parse::<u64>().unwrap_or(0) > 1
+        {
+            true
+        } else {
+            false
+        };
+
+        match user_specified {
+            SinkDecouple::Default => Ok(config_decouple),
+            SinkDecouple::Disable => {
+                if config_decouple {
+                    return Err(SinkError::Config(anyhow!(
+                        "config conflict: Iceberg config `commit_checkpoint_interval` bigger than 1 which means that must enable sink decouple, but session config sink decouple is disabled"
+                    )));
+                }
+                Ok(false)
+            }
+            SinkDecouple::Enable => Ok(true),
+        }
+    }
 
     async fn validate(&self) -> Result<()> {
         let _ = self.create_and_validate_table().await?;
@@ -531,7 +556,7 @@ impl Sink for IcebergSink {
         } else {
             IcebergWriter::new_append_only(table, &writer_param).await?
         };
-        Ok(CoordinatedSinkWriter::new(
+        let writer = CoordinatedSinkWriter::new(
             writer_param
                 .meta_client
                 .expect("should have meta client")
@@ -545,8 +570,18 @@ impl Sink for IcebergSink {
             })?,
             inner,
         )
-        .await?
-        .into_log_sinker(writer_param.sink_metrics))
+        .await?;
+
+        let commit_checkpoint_interval =
+            NonZeroU64::new(self.config.commit_checkpoint_interval.unwrap_or(1)).expect(
+                "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
+            );
+
+        Ok(IcebergLogSinkerOf::new(
+            writer,
+            writer_param.sink_metrics,
+            commit_checkpoint_interval,
+        ))
     }
 
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
@@ -761,14 +796,15 @@ impl SinkWriter for IcebergWriter {
                 let filters =
                     chunk.visibility() & ops.iter().map(|op| *op == Op::Insert).collect::<Bitmap>();
                 chunk.set_visibility(filters);
-                let chunk =
-                    to_iceberg_record_batch_with_schema(self.schema.clone(), &chunk.compact())
-                        .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+                let chunk = IcebergArrowConvert
+                    .to_record_batch(self.schema.clone(), &chunk.compact())
+                    .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
                 writer.write(chunk).await?;
             }
             IcebergWriterEnum::Upsert(writer) => {
-                let chunk = to_iceberg_record_batch_with_schema(self.schema.clone(), &chunk)
+                let chunk = IcebergArrowConvert
+                    .to_record_batch(self.schema.clone(), &chunk)
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
                 writer
@@ -942,7 +978,11 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             .iter()
             .map(|meta| WriteResult::try_from(meta, &self.partition_type))
             .collect::<Result<Vec<WriteResult>>>()?;
-        if write_results.is_empty() || write_results.iter().all(|r| r.data_files.is_empty()) {
+        if write_results.is_empty()
+            || write_results
+                .iter()
+                .all(|r| r.data_files.is_empty() && r.delete_files.is_empty())
+        {
             tracing::debug!(?epoch, "no data to commit");
             return Ok(());
         }
@@ -962,11 +1002,9 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
 }
 
 /// Try to match our schema with iceberg schema.
-/// `for_source` = true means the schema is used for source, otherwise it's used for sink.
 pub fn try_matches_arrow_schema(
     rw_schema: &Schema,
     arrow_schema: &ArrowSchema,
-    for_source: bool,
 ) -> anyhow::Result<()> {
     if rw_schema.fields.len() != arrow_schema.fields().len() {
         bail!(
@@ -989,26 +1027,14 @@ pub fn try_matches_arrow_schema(
             .ok_or_else(|| anyhow!("Field {} not found in our schema", arrow_field.name()))?;
 
         // Iceberg source should be able to read iceberg decimal type.
-        // Since the arrow type default conversion is used by udf, in udf, decimal is converted to
-        // large binary type which is not compatible with iceberg decimal type,
-        // so we need to convert it to decimal type manually.
-        let converted_arrow_data_type = if for_source
-            && matches!(our_field_type, risingwave_common::types::DataType::Decimal)
-        {
-            // RisingWave decimal type cannot specify precision and scale, so we use the default value.
-            ArrowDataType::Decimal128(38, 0)
-        } else {
-            ArrowDataType::try_from(*our_field_type).map_err(|e| anyhow!(e))?
-        };
+        let converted_arrow_data_type = IcebergArrowConvert
+            .to_arrow_field("", our_field_type)
+            .map_err(|e| anyhow!(e))?
+            .data_type()
+            .clone();
 
         let compatible = match (&converted_arrow_data_type, arrow_field.data_type()) {
-            (ArrowDataType::Decimal128(p1, s1), ArrowDataType::Decimal128(p2, s2)) => {
-                if for_source {
-                    true
-                } else {
-                    *p1 >= *p2 && *s1 >= *s2
-                }
-            }
+            (ArrowDataType::Decimal128(_, _), ArrowDataType::Decimal128(_, _)) => true,
             (left, right) => left == right,
         };
         if !compatible {
@@ -1046,7 +1072,7 @@ mod test {
             ArrowField::new("c", ArrowDataType::Int32, false),
         ]);
 
-        try_matches_arrow_schema(&risingwave_schema, &arrow_schema, false).unwrap();
+        try_matches_arrow_schema(&risingwave_schema, &arrow_schema).unwrap();
 
         let risingwave_schema = Schema::new(vec![
             Field::with_name(DataType::Int32, "d"),
@@ -1060,7 +1086,7 @@ mod test {
             ArrowField::new("d", ArrowDataType::Int32, false),
             ArrowField::new("c", ArrowDataType::Int32, false),
         ]);
-        try_matches_arrow_schema(&risingwave_schema, &arrow_schema, false).unwrap();
+        try_matches_arrow_schema(&risingwave_schema, &arrow_schema).unwrap();
     }
 
     #[test]
@@ -1107,6 +1133,7 @@ mod test {
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
+            commit_checkpoint_interval: None,
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);

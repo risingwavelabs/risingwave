@@ -123,7 +123,7 @@ fn version_to_sstable_rows(version: HummockVersion) -> Vec<RwHummockSstable> {
                     object_id: sst.object_id as _,
                     compaction_group_id: cg.group_id as _,
                     level_id: level.level_idx as _,
-                    sub_level_id: (level.level_idx > 0).then_some(level.sub_level_id as _),
+                    sub_level_id: (level.level_idx == 0).then_some(level.sub_level_id as _),
                     level_type: level.level_type as _,
                     key_range_left: key_range.left,
                     key_range_right: key_range.right,
@@ -169,14 +169,14 @@ async fn read_hummock_table_watermarks(
             for (vnode, epoch, watermark) in
                 table_watermarks
                     .watermarks
-                    .into_iter()
+                    .iter()
                     .flat_map(move |(epoch, watermarks)| {
-                        watermarks.into_iter().flat_map(move |vnode_watermark| {
+                        watermarks.iter().flat_map(move |vnode_watermark| {
                             let watermark = vnode_watermark.watermark().clone();
                             let vnodes = vnode_watermark.vnode_bitmap().iter_ones().collect_vec();
                             vnodes
                                 .into_iter()
-                                .map(move |vnode| (vnode, epoch, Vec::from(watermark.as_ref())))
+                                .map(move |vnode| (vnode, *epoch, Vec::from(watermark.as_ref())))
                         })
                     })
             {

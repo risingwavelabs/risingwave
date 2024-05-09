@@ -405,7 +405,11 @@ pub(crate) async fn do_delete_sanity_check(
     table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
-    let OpConsistencyLevel::ConsistentOldValue(old_value_checker) = op_consistency_level else {
+    let OpConsistencyLevel::ConsistentOldValue {
+        check_old_value: old_value_checker,
+        ..
+    } = op_consistency_level
+    else {
         return Ok(());
     };
     let read_options = ReadOptions {
@@ -447,7 +451,11 @@ pub(crate) async fn do_update_sanity_check(
     table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
-    let OpConsistencyLevel::ConsistentOldValue(old_value_checker) = op_consistency_level else {
+    let OpConsistencyLevel::ConsistentOldValue {
+        check_old_value: old_value_checker,
+        ..
+    } = op_consistency_level
+    else {
         return Ok(());
     };
     let read_options = ReadOptions {

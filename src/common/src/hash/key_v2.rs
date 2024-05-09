@@ -20,11 +20,11 @@ use bytes::BufMut;
 use educe::Educe;
 use either::{for_both, Either};
 use itertools::Itertools;
+use risingwave_common_estimate_size::EstimateSize;
 use tinyvec::ArrayVec;
 
 use super::{HeapNullBitmap, NullBitmap, XxHash64HashCode};
 use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayResult, DataChunk};
-use crate::estimate_size::EstimateSize;
 use crate::hash::{HashKeyDe, HashKeySer};
 use crate::row::OwnedRow;
 use crate::types::{DataType, Datum, ScalarImpl};

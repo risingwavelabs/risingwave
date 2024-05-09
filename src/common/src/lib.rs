@@ -43,7 +43,8 @@
 #![feature(negative_impls)]
 #![feature(bound_map)]
 #![feature(array_methods)]
-#![feature(btree_cursors)]
+#![feature(register_tool)]
+#![register_tool(rw)]
 
 #[cfg_attr(not(test), allow(unused_extern_crates))]
 extern crate self as risingwave_common;
@@ -72,7 +73,6 @@ pub mod cast;
 pub mod catalog;
 pub mod config;
 pub mod constants;
-pub mod estimate_size;
 pub mod field_generator;
 pub mod hash;
 pub mod log;
@@ -103,7 +103,7 @@ pub const RW_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Placeholder for unknown git sha.
 pub const UNKNOWN_GIT_SHA: &str = "unknown";
 
-// The single source of truth of the pg parameters, Used in ConfigMap and current_cluster_version.
+// The single source of truth of the pg parameters, Used in SessionConfig and current_cluster_version.
 // The version of PostgreSQL that Risingwave claims to be.
 pub const PG_VERSION: &str = "13.14.0";
 /// The version of PostgreSQL that Risingwave claims to be.

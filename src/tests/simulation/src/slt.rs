@@ -20,7 +20,7 @@ use anyhow::{bail, Result};
 use itertools::Itertools;
 use rand::{thread_rng, Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
-use sqllogictest::{ParallelTestError, Record};
+use sqllogictest::{ParallelTestError, QueryExpect, Record, StatementExpect};
 
 use crate::client::RisingWave;
 use crate::cluster::{Cluster, KillOpts};
@@ -35,11 +35,21 @@ fn is_create_table_as(sql: &str) -> bool {
     parts.len() >= 4 && parts[0] == "create" && parts[1] == "table" && parts[3] == "as"
 }
 
+fn is_sink_into_table(sql: &str) -> bool {
+    let parts: Vec<String> = sql.split_whitespace().map(|s| s.to_lowercase()).collect();
+
+    parts.len() >= 4 && parts[0] == "create" && parts[1] == "sink" && parts[3] == "into"
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum SqlCmd {
     /// Other create statements.
     Create {
         is_create_table_as: bool,
+    },
+    /// Create sink.
+    CreateSink {
+        is_sink_into_table: bool,
     },
     /// Create Materialized views
     CreateMaterializedView {
@@ -57,21 +67,22 @@ enum SqlCmd {
 }
 
 impl SqlCmd {
-    // We won't kill during insert/update/delete/alter since the atomicity is not guaranteed.
-    // Notice that `create table as` is also not atomic in our system.
-    // TODO: For `SqlCmd::Alter`, since table fragment and catalog commit for table schema change
-    // are not transactional, we can't kill during `alter table add/drop columns` for now, will
-    // remove it until transactional commit of table fragment and catalog is supported.
-    fn ignore_kill(&self) -> bool {
+    fn allow_kill(&self) -> bool {
         matches!(
             self,
-            SqlCmd::Dml
-                | SqlCmd::Flush
-                | SqlCmd::Alter
-                | SqlCmd::Create {
-                    is_create_table_as: true
-                }
+            SqlCmd::Create {
+                // `create table as` is also not atomic in our system.
+                is_create_table_as: false,
+                ..
+            } | SqlCmd::CreateSink {
+                is_sink_into_table: false,
+            } | SqlCmd::CreateMaterializedView { .. }
+                | SqlCmd::Drop
         )
+        // We won't kill during insert/update/delete/alter since the atomicity is not guaranteed.
+        // TODO: For `SqlCmd::Alter`, since table fragment and catalog commit for table schema change
+        // are not transactional, we can't kill during `alter table add/drop columns` for now, will
+        // remove it until transactional commit of table fragment and catalog is supported.
     }
 }
 
@@ -110,6 +121,9 @@ fn extract_sql_command(sql: &str) -> SqlCmd {
                             SqlCmd::CreateMaterializedView { name }
                         }
                     }
+                    "sink" => SqlCmd::CreateSink {
+                        is_sink_into_table: is_sink_into_table(&sql),
+                    },
                     _ => SqlCmd::Create {
                         is_create_table_as: is_create_table_as(&sql),
                     },
@@ -144,6 +158,8 @@ const KILL_IGNORE_FILES: &[&str] = &[
     "transaction/read_only_multi_conn.slt",
     "transaction/read_only.slt",
     "transaction/tolerance.slt",
+    "transaction/cursor.slt",
+    "transaction/cursor_multi_conn.slt",
 ];
 
 /// Wait for background mv to finish creating
@@ -207,6 +223,10 @@ pub async fn run_slt_task(
         // NOTE(kwannoel): For background ddl
         let mut background_ddl_enabled = false;
 
+        // If background ddl is set to true within the test case, prevent random setting of background_ddl to true.
+        // We can revert it back to false only if we encounter a record that sets background_ddl to false.
+        let mut manual_background_ddl_enabled = false;
+
         for record in sqllogictest::parse_file(path).expect("failed to parse file") {
             // uncomment to print metrics for task counts
             // let metrics = madsim::runtime::Handle::current().metrics();
@@ -238,8 +258,10 @@ pub async fn run_slt_task(
             };
             tracing::debug!(?cmd, "Running");
 
-            if matches!(cmd, SqlCmd::SetBackgroundDdl { .. }) && background_ddl_rate > 0.0 {
-                panic!("We cannot run background_ddl statement with background_ddl_rate > 0.0, since it could be reset");
+            if background_ddl_rate > 0.0
+                && let SqlCmd::SetBackgroundDdl { enable } = cmd
+            {
+                manual_background_ddl_enabled = enable;
             }
 
             // For each background ddl compatible statement, provide a chance for background_ddl=true.
@@ -250,21 +272,21 @@ pub async fn run_slt_task(
                 ..
             } = &record
                 && matches!(cmd, SqlCmd::CreateMaterializedView { .. })
+                && !manual_background_ddl_enabled
             {
                 let background_ddl_setting = rng.gen_bool(background_ddl_rate);
                 let set_background_ddl = Record::Statement {
                     loc: loc.clone(),
                     conditions: conditions.clone(),
                     connection: connection.clone(),
-                    expected_error: None,
+                    expected: StatementExpect::Ok,
                     sql: format!("SET BACKGROUND_DDL={background_ddl_setting};"),
-                    expected_count: None,
                 };
                 tester.run_async(set_background_ddl).await.unwrap();
                 background_ddl_enabled = background_ddl_setting;
             };
 
-            if cmd.ignore_kill() {
+            if !cmd.allow_kill() {
                 for i in 0usize.. {
                     let delay = Duration::from_secs(1 << i);
                     if let Err(err) = tester
@@ -325,13 +347,13 @@ pub async fn run_slt_task(
                         // For background ddl
                         if let SqlCmd::CreateMaterializedView { ref name } = cmd
                             && background_ddl_enabled
-                            && matches!(
+                            && !matches!(
                                 record,
                                 Record::Statement {
-                                    expected_error: None,
+                                    expected: StatementExpect::Error(_),
                                     ..
                                 } | Record::Query {
-                                    expected_error: None,
+                                    expected: QueryExpect::Error(_),
                                     ..
                                 }
                             )
@@ -366,6 +388,9 @@ pub async fn run_slt_task(
                             // allow 'table exists' error when retry CREATE statement
                             SqlCmd::Create {
                                 is_create_table_as: false,
+                            }
+                            | SqlCmd::CreateSink {
+                                is_sink_into_table: false,
                             }
                             | SqlCmd::CreateMaterializedView { .. }
                                 if i != 0
@@ -463,6 +488,7 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
             .expect("failed to get schema path");
     let content = content
         .replace("127.0.0.1:29092", "192.168.11.1:29092")
+        .replace("localhost:29092", "192.168.11.1:29092")
         .replace(
             "/risingwave/avro-simple-schema.avsc",
             simple_avsc_full_path.to_str().unwrap(),

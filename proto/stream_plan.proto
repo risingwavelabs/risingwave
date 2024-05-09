@@ -94,6 +94,16 @@ message CombinedMutation {
   repeated BarrierMutation mutations = 1;
 }
 
+message CreateSubscriptionMutation {
+  uint32 subscription_id = 1;
+  uint32 upstream_mv_table_id = 2;
+}
+
+message DropSubscriptionMutation {
+  uint32 subscription_id = 1;
+  uint32 upstream_mv_table_id = 2;
+}
+
 message BarrierMutation {
   oneof mutation {
     // Add new dispatchers to some actors, used for creating materialized views.
@@ -111,6 +121,10 @@ message BarrierMutation {
     ResumeMutation resume = 8;
     // Throttle specific source exec or chain exec.
     ThrottleMutation throttle = 10;
+    // Create subscription on mv
+    CreateSubscriptionMutation create_subscription = 11;
+    // Drop subscription on mv
+    DropSubscriptionMutation drop_subscription = 12;
     // Combined mutation.
     CombinedMutation combined = 100;
   }
@@ -206,7 +220,7 @@ message StreamFsFetchNode {
 }
 
 message SourceBackfillNode {
-  uint32 source_id = 1;
+  uint32 upstream_source_id = 1;
   optional uint32 row_id_index = 2;
   repeated plan_common.ColumnCatalog columns = 3;
   catalog.StreamSourceInfo info = 4;
@@ -435,6 +449,8 @@ message TemporalJoinNode {
   plan_common.StorageTableDesc table_desc = 7;
   // The output indices of the lookup side table
   repeated uint32 table_output_indices = 8;
+  // The state table used for non-append-only temporal join.
+  optional catalog.Table memo_table = 9;
 }
 
 message DynamicFilterNode {
@@ -559,6 +575,16 @@ message StreamScanNode {
   catalog.Table arrangement_table = 10;
 }
 
+// Config options for CDC backfill
+message StreamCdcScanOptions {
+  // Whether skip the backfill and only consume from upstream.
+  bool disable_backfill = 1;
+
+  uint32 snapshot_barrier_interval = 2;
+
+  uint32 snapshot_batch_size = 3;
+}
+
 message StreamCdcScanNode {
   uint32 table_id = 1;
 
@@ -579,7 +605,10 @@ message StreamCdcScanNode {
   optional uint32 rate_limit = 6;
 
   // Whether skip the backfill and only consume from upstream.
+  // keep it for backward compatibility, new stream plan will use `options.disable_backfill`
   bool disable_backfill = 7;
+
+  StreamCdcScanOptions options = 8;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
@@ -736,12 +765,6 @@ message OverWindowNode {
   OverWindowCachePolicy cache_policy = 5;
 }
 
-message SubscriptionNode {
-  catalog.Subscription subscription_catalog = 1;
-  // log store should have a table.
-  catalog.Table log_store_table = 2;
-}
-
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
@@ -785,7 +808,6 @@ message StreamNode {
     StreamFsFetchNode stream_fs_fetch = 138;
     StreamCdcScanNode stream_cdc_scan = 139;
     CdcFilterNode cdc_filter = 140;
-    SubscriptionNode subscription = 141;
     SourceBackfillNode source_backfill = 142;
   }
   // The id for the operator. This is local per mview.
@@ -876,13 +898,13 @@ enum FragmentTypeFlag {
   FRAGMENT_TYPE_FLAG_MVIEW = 2;
   FRAGMENT_TYPE_FLAG_SINK = 4;
   FRAGMENT_TYPE_FLAG_NOW = 8; // TODO: Remove this and insert a `BarrierRecv` instead.
+  // Include StreamScan and StreamCdcScan
   FRAGMENT_TYPE_FLAG_STREAM_SCAN = 16;
   FRAGMENT_TYPE_FLAG_BARRIER_RECV = 32;
   FRAGMENT_TYPE_FLAG_VALUES = 64;
   FRAGMENT_TYPE_FLAG_DML = 128;
   FRAGMENT_TYPE_FLAG_CDC_FILTER = 256;
-  FRAGMENT_TYPE_FLAG_SUBSCRIPTION = 512;
-  FRAGMENT_TYPE_FLAG_SOURCE_BACKFILL = 1024;
+  FRAGMENT_TYPE_FLAG_SOURCE_SCAN = 1024;
 }
 
 // The streaming context associated with a stream plan

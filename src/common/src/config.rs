@@ -24,7 +24,7 @@ use std::num::NonZeroUsize;
 use anyhow::Context;
 use clap::ValueEnum;
 use educe::Educe;
-use foyer::memory::{LfuConfig, LruConfig};
+use foyer::memory::{LfuConfig, LruConfig, S3FifoConfig};
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
@@ -434,6 +434,11 @@ pub struct MetaDeveloperConfig {
     pub enable_trivial_move: bool,
     #[serde(default = "default::developer::enable_check_task_level_overlap")]
     pub enable_check_task_level_overlap: bool,
+    #[serde(default = "default::developer::max_trivial_move_task_count_per_loop")]
+    pub max_trivial_move_task_count_per_loop: usize,
+
+    #[serde(default = "default::developer::max_get_task_probe_times")]
+    pub max_get_task_probe_times: usize,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -500,6 +505,10 @@ pub struct BatchConfig {
     #[serde(default = "default::batch::frontend_compute_runtime_worker_threads")]
     /// frontend compute runtime worker threads
     pub frontend_compute_runtime_worker_threads: usize,
+
+    /// This is the secs used to mask a worker unavailable temporarily.
+    #[serde(default = "default::batch::mask_worker_temporary_secs")]
+    pub mask_worker_temporary_secs: usize,
 }
 
 /// The section `[streaming]` in `risingwave.toml`.
@@ -525,6 +534,10 @@ pub struct StreamingConfig {
     /// Max unique user stream errors per actor
     #[serde(default = "default::streaming::unique_user_stream_errors")]
     pub unique_user_stream_errors: usize,
+
+    /// Control the strictness of stream consistency.
+    #[serde(default = "default::streaming::unsafe_enable_strict_consistency")]
+    pub unsafe_enable_strict_consistency: bool,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -567,6 +580,9 @@ pub enum CacheEvictionConfig {
         protected_capacity_ratio_in_percent: Option<usize>,
         cmsketch_eps: Option<f64>,
         cmsketch_confidence: Option<f64>,
+    },
+    S3Fifo {
+        small_queue_capacity_ratio_in_percent: Option<usize>,
     },
 }
 
@@ -684,6 +700,7 @@ pub struct StorageConfig {
 
     #[serde(default = "default::storage::compactor_max_sst_key_count")]
     pub compactor_max_sst_key_count: u64,
+    // DEPRECATED: This config will be deprecated in the future version, use `storage.compactor_iter_max_io_retry_times` instead.
     #[serde(default = "default::storage::compact_iter_recreate_timeout_ms")]
     pub compact_iter_recreate_timeout_ms: u64,
     #[serde(default = "default::storage::compactor_max_sst_size")]
@@ -694,12 +711,12 @@ pub struct StorageConfig {
     pub check_compaction_result: bool,
     #[serde(default = "default::storage::max_preload_io_retry_times")]
     pub max_preload_io_retry_times: usize,
-
     #[serde(default = "default::storage::compactor_fast_max_compact_delete_ratio")]
     pub compactor_fast_max_compact_delete_ratio: u32,
-
     #[serde(default = "default::storage::compactor_fast_max_compact_task_size")]
     pub compactor_fast_max_compact_task_size: u64,
+    #[serde(default = "default::storage::compactor_iter_max_io_retry_times")]
+    pub compactor_iter_max_io_retry_times: usize,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -787,9 +804,6 @@ pub struct FileCacheConfig {
 
     #[serde(default = "default::file_cache::insert_rate_limit_mb")]
     pub insert_rate_limit_mb: usize,
-
-    #[serde(default = "default::file_cache::ring_buffer_capacity_mb")]
-    pub ring_buffer_capacity_mb: usize,
 
     #[serde(default = "default::file_cache::catalog_bits")]
     pub catalog_bits: usize,
@@ -962,16 +976,11 @@ for_all_params!(define_system_config);
 /// The subsections `[storage.object_store]`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct ObjectStoreConfig {
-    #[serde(default = "default::object_store_config::object_store_streaming_read_timeout_ms")]
-    pub object_store_streaming_read_timeout_ms: u64,
-    #[serde(default = "default::object_store_config::object_store_streaming_upload_timeout_ms")]
-    pub object_store_streaming_upload_timeout_ms: u64,
-    #[serde(default = "default::object_store_config::object_store_upload_timeout_ms")]
-    pub object_store_upload_timeout_ms: u64,
-    #[serde(default = "default::object_store_config::object_store_read_timeout_ms")]
-    pub object_store_read_timeout_ms: u64,
     #[serde(default = "default::object_store_config::object_store_set_atomic_write_dir")]
     pub object_store_set_atomic_write_dir: bool,
+
+    #[serde(default)]
+    pub retry: ObjectStoreRetryConfig,
 
     #[serde(default)]
     pub s3: S3ObjectStoreConfig,
@@ -994,17 +1003,13 @@ pub struct S3ObjectStoreConfig {
     pub object_store_send_buffer_size: Option<usize>,
     #[serde(default = "default::object_store_config::s3::object_store_nodelay")]
     pub object_store_nodelay: Option<bool>,
-    #[serde(default = "default::object_store_config::s3::object_store_req_retry_interval_ms")]
-    pub object_store_req_retry_interval_ms: u64,
-    #[serde(default = "default::object_store_config::s3::object_store_req_retry_max_delay_ms")]
-    pub object_store_req_retry_max_delay_ms: u64,
-    #[serde(default = "default::object_store_config::s3::object_store_req_retry_max_attempts")]
-    pub object_store_req_retry_max_attempts: usize,
     /// For backwards compatibility, users should use `S3ObjectStoreDeveloperConfig` instead.
     #[serde(
         default = "default::object_store_config::s3::developer::object_store_retry_unknown_service_error"
     )]
     pub retry_unknown_service_error: bool,
+    #[serde(default = "default::object_store_config::s3::identity_resolution_timeout_s")]
+    pub identity_resolution_timeout_s: u64,
     #[serde(default)]
     pub developer: S3ObjectStoreDeveloperConfig,
 }
@@ -1023,6 +1028,75 @@ pub struct S3ObjectStoreDeveloperConfig {
         default = "default::object_store_config::s3::developer::object_store_retryable_service_error_codes"
     )]
     pub object_store_retryable_service_error_codes: Vec<String>,
+
+    #[serde(default = "default::object_store_config::s3::developer::use_opendal")]
+    pub use_opendal: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+pub struct ObjectStoreRetryConfig {
+    #[serde(default = "default::object_store_config::object_store_req_backoff_interval_ms")]
+    pub req_backoff_interval_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_req_backoff_max_delay_ms")]
+    pub req_backoff_max_delay_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_req_backoff_factor")]
+    pub req_backoff_factor: u64,
+
+    // upload
+    #[serde(default = "default::object_store_config::object_store_upload_attempt_timeout_ms")]
+    pub upload_attempt_timeout_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_upload_retry_attempts")]
+    pub upload_retry_attempts: usize,
+
+    // streaming_upload_init + streaming_upload
+    #[serde(
+        default = "default::object_store_config::object_store_streaming_upload_attempt_timeout_ms"
+    )]
+    pub streaming_upload_attempt_timeout_ms: u64,
+    #[serde(
+        default = "default::object_store_config::object_store_streaming_upload_retry_attempts"
+    )]
+    pub streaming_upload_retry_attempts: usize,
+
+    // read
+    #[serde(default = "default::object_store_config::object_store_read_attempt_timeout_ms")]
+    pub read_attempt_timeout_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_read_retry_attempts")]
+    pub read_retry_attempts: usize,
+
+    // streaming_read_init + streaming_read
+    #[serde(
+        default = "default::object_store_config::object_store_streaming_read_attempt_timeout_ms"
+    )]
+    pub streaming_read_attempt_timeout_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_streaming_read_retry_attempts")]
+    pub streaming_read_retry_attempts: usize,
+
+    // metadata
+    #[serde(default = "default::object_store_config::object_store_metadata_attempt_timeout_ms")]
+    pub metadata_attempt_timeout_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_metadata_retry_attempts")]
+    pub metadata_retry_attempts: usize,
+
+    // delete
+    #[serde(default = "default::object_store_config::object_store_delete_attempt_timeout_ms")]
+    pub delete_attempt_timeout_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_delete_retry_attempts")]
+    pub delete_retry_attempts: usize,
+
+    // delete_object
+    #[serde(
+        default = "default::object_store_config::object_store_delete_objects_attempt_timeout_ms"
+    )]
+    pub delete_objects_attempt_timeout_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_delete_objects_retry_attempts")]
+    pub delete_objects_retry_attempts: usize,
+
+    // list
+    #[serde(default = "default::object_store_config::object_store_list_attempt_timeout_ms")]
+    pub list_attempt_timeout_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_list_retry_attempts")]
+    pub list_retry_attempts: usize,
 }
 
 impl SystemConfig {
@@ -1101,7 +1175,7 @@ pub mod default {
         }
 
         pub fn max_heartbeat_interval_sec() -> u32 {
-            300
+            60
         }
 
         pub fn meta_leader_lease_secs() -> u64 {
@@ -1256,14 +1330,21 @@ pub mod default {
         pub fn window_capacity_ratio_in_percent() -> usize {
             10
         }
+
         pub fn protected_capacity_ratio_in_percent() -> usize {
             80
         }
+
         pub fn cmsketch_eps() -> f64 {
             0.002
         }
+
         pub fn cmsketch_confidence() -> f64 {
             0.95
+        }
+
+        pub fn small_queue_capacity_ratio_in_percent() -> usize {
+            10
         }
 
         pub fn meta_cache_capacity_mb() -> usize {
@@ -1283,7 +1364,7 @@ pub mod default {
         }
 
         pub fn compactor_max_task_multiplier() -> f32 {
-            2.5000
+            3.0000
         }
 
         pub fn compactor_memory_available_proportion() -> f64 {
@@ -1323,12 +1404,16 @@ pub mod default {
             10 * 60 * 1000
         }
 
+        pub fn compactor_iter_max_io_retry_times() -> usize {
+            8
+        }
+
         pub fn compactor_max_sst_size() -> u64 {
             512 * 1024 * 1024 // 512m
         }
 
         pub fn enable_fast_compaction() -> bool {
-            false
+            true
         }
 
         pub fn check_compaction_result() -> bool {
@@ -1370,6 +1455,10 @@ pub mod default {
 
         pub fn unique_user_stream_errors() -> usize {
             10
+        }
+
+        pub fn unsafe_enable_strict_consistency() -> bool {
+            true
         }
     }
 
@@ -1417,10 +1506,6 @@ pub mod default {
 
         pub fn insert_rate_limit_mb() -> usize {
             0
-        }
-
-        pub fn ring_buffer_capacity_mb() -> usize {
-            256
         }
 
         pub fn catalog_bits() -> usize {
@@ -1541,6 +1626,14 @@ pub mod default {
             false
         }
 
+        pub fn max_trivial_move_task_count_per_loop() -> usize {
+            256
+        }
+
+        pub fn max_get_task_probe_times() -> usize {
+            5
+        }
+
         pub fn memory_controller_threshold_aggressive() -> f64 {
             0.9
         }
@@ -1569,6 +1662,10 @@ pub mod default {
 
         pub fn frontend_compute_runtime_worker_threads() -> usize {
             4
+        }
+
+        pub fn mask_worker_temporary_secs() -> usize {
+            30
         }
     }
 
@@ -1641,31 +1738,95 @@ pub mod default {
     }
 
     pub mod object_store_config {
-        pub fn object_store_streaming_read_timeout_ms() -> u64 {
-            8 * 60 * 1000
-        }
-
-        pub fn object_store_streaming_upload_timeout_ms() -> u64 {
-            8 * 60 * 1000
-        }
-
-        pub fn object_store_upload_timeout_ms() -> u64 {
-            8 * 60 * 1000
-        }
-
-        pub fn object_store_read_timeout_ms() -> u64 {
-            8 * 60 * 1000
-        }
+        const DEFAULT_REQ_BACKOFF_INTERVAL_MS: u64 = 1000; // 1s
+        const DEFAULT_REQ_BACKOFF_MAX_DELAY_MS: u64 = 10 * 1000; // 10s
+        const DEFAULT_REQ_MAX_RETRY_ATTEMPTS: usize = 3;
 
         pub fn object_store_set_atomic_write_dir() -> bool {
             false
         }
 
+        pub fn object_store_req_backoff_interval_ms() -> u64 {
+            DEFAULT_REQ_BACKOFF_INTERVAL_MS
+        }
+
+        pub fn object_store_req_backoff_max_delay_ms() -> u64 {
+            DEFAULT_REQ_BACKOFF_MAX_DELAY_MS // 10s
+        }
+
+        pub fn object_store_req_backoff_factor() -> u64 {
+            2
+        }
+
+        pub fn object_store_upload_attempt_timeout_ms() -> u64 {
+            8 * 1000 // 8s
+        }
+
+        pub fn object_store_upload_retry_attempts() -> usize {
+            DEFAULT_REQ_MAX_RETRY_ATTEMPTS
+        }
+
+        // init + upload_part + finish
+        pub fn object_store_streaming_upload_attempt_timeout_ms() -> u64 {
+            5 * 1000 // 5s
+        }
+
+        pub fn object_store_streaming_upload_retry_attempts() -> usize {
+            DEFAULT_REQ_MAX_RETRY_ATTEMPTS
+        }
+
+        // tips: depend on block_size
+        pub fn object_store_read_attempt_timeout_ms() -> u64 {
+            8 * 1000 // 8s
+        }
+
+        pub fn object_store_read_retry_attempts() -> usize {
+            DEFAULT_REQ_MAX_RETRY_ATTEMPTS
+        }
+
+        pub fn object_store_streaming_read_attempt_timeout_ms() -> u64 {
+            3 * 1000 // 3s
+        }
+
+        pub fn object_store_streaming_read_retry_attempts() -> usize {
+            DEFAULT_REQ_MAX_RETRY_ATTEMPTS
+        }
+
+        pub fn object_store_metadata_attempt_timeout_ms() -> u64 {
+            60 * 1000 // 1min
+        }
+
+        pub fn object_store_metadata_retry_attempts() -> usize {
+            DEFAULT_REQ_MAX_RETRY_ATTEMPTS
+        }
+
+        pub fn object_store_delete_attempt_timeout_ms() -> u64 {
+            5 * 1000
+        }
+
+        pub fn object_store_delete_retry_attempts() -> usize {
+            DEFAULT_REQ_MAX_RETRY_ATTEMPTS
+        }
+
+        // tips: depend on batch size
+        pub fn object_store_delete_objects_attempt_timeout_ms() -> u64 {
+            5 * 1000
+        }
+
+        pub fn object_store_delete_objects_retry_attempts() -> usize {
+            DEFAULT_REQ_MAX_RETRY_ATTEMPTS
+        }
+
+        pub fn object_store_list_attempt_timeout_ms() -> u64 {
+            10 * 60 * 1000
+        }
+
+        pub fn object_store_list_retry_attempts() -> usize {
+            DEFAULT_REQ_MAX_RETRY_ATTEMPTS
+        }
+
         pub mod s3 {
-            /// Retry config for compute node http timeout error.
-            const DEFAULT_RETRY_INTERVAL_MS: u64 = 20;
-            const DEFAULT_RETRY_MAX_DELAY_MS: u64 = 10 * 1000;
-            const DEFAULT_RETRY_MAX_ATTEMPTS: usize = 8;
+            const DEFAULT_IDENTITY_RESOLUTION_TIMEOUT_S: u64 = 5;
 
             const DEFAULT_KEEPALIVE_MS: u64 = 600 * 1000; // 10min
 
@@ -1685,25 +1846,28 @@ pub mod default {
                 Some(true)
             }
 
-            pub fn object_store_req_retry_interval_ms() -> u64 {
-                DEFAULT_RETRY_INTERVAL_MS
-            }
-
-            pub fn object_store_req_retry_max_delay_ms() -> u64 {
-                DEFAULT_RETRY_MAX_DELAY_MS // 10s
-            }
-
-            pub fn object_store_req_retry_max_attempts() -> usize {
-                DEFAULT_RETRY_MAX_ATTEMPTS
+            pub fn identity_resolution_timeout_s() -> u64 {
+                DEFAULT_IDENTITY_RESOLUTION_TIMEOUT_S
             }
 
             pub mod developer {
+                use crate::util::env_var::env_var_is_true_or;
+                const RW_USE_OPENDAL_FOR_S3: &str = "RW_USE_OPENDAL_FOR_S3";
+
                 pub fn object_store_retry_unknown_service_error() -> bool {
                     false
                 }
 
                 pub fn object_store_retryable_service_error_codes() -> Vec<String> {
                     vec!["SlowDown".into(), "TooManyRequests".into()]
+                }
+
+                pub fn use_opendal() -> bool {
+                    // TODO: deprecate this config when we are completely switch from aws sdk to opendal.
+                    // The reason why we use !env_var_is_false_or(RW_USE_OPENDAL_FOR_S3, false) here is
+                    // 1. Maintain compatibility so that there is no behavior change in cluster with RW_USE_OPENDAL_FOR_S3 set.
+                    // 2. Change the default behavior to use opendal for s3 if RW_USE_OPENDAL_FOR_S3 is not set.
+                    env_var_is_true_or(RW_USE_OPENDAL_FOR_S3, false)
                 }
             }
         }
@@ -1714,6 +1878,7 @@ pub mod default {
 pub enum EvictionConfig {
     Lru(LruConfig),
     Lfu(LfuConfig),
+    S3Fifo(S3FifoConfig),
 }
 
 impl EvictionConfig {
@@ -1730,8 +1895,6 @@ pub struct StorageMemoryConfig {
     pub meta_cache_capacity_mb: usize,
     pub meta_cache_shard_num: usize,
     pub shared_buffer_capacity_mb: usize,
-    pub data_file_cache_ring_buffer_capacity_mb: usize,
-    pub meta_file_cache_ring_buffer_capacity_mb: usize,
     pub compactor_memory_limit_mb: usize,
     pub prefetch_buffer_capacity_mb: usize,
     pub block_cache_eviction_config: EvictionConfig,
@@ -1774,43 +1937,51 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         }
         shard_bits
     });
-    let data_file_cache_ring_buffer_capacity_mb = s.storage.data_file_cache.ring_buffer_capacity_mb;
-    let meta_file_cache_ring_buffer_capacity_mb = s.storage.meta_file_cache.ring_buffer_capacity_mb;
     let compactor_memory_limit_mb = s
         .storage
         .compactor_memory_limit_mb
         .unwrap_or(default::storage::compactor_memory_limit_mb());
 
-    let get_eviction_config = |c: &CacheEvictionConfig| match c {
-        CacheEvictionConfig::Lru {
-            high_priority_ratio_in_percent,
-        } => EvictionConfig::Lru(LruConfig {
-            high_priority_pool_ratio: high_priority_ratio_in_percent.unwrap_or(
-                // adapt to old version
-                s.storage
-                    .high_priority_ratio_in_percent
-                    .unwrap_or(default::storage::high_priority_ratio_in_percent()),
-            ) as f64
-                / 100.0,
-        }),
-        CacheEvictionConfig::Lfu {
-            window_capacity_ratio_in_percent,
-            protected_capacity_ratio_in_percent,
-            cmsketch_eps,
-            cmsketch_confidence,
-        } => EvictionConfig::Lfu(LfuConfig {
-            window_capacity_ratio: window_capacity_ratio_in_percent
-                .unwrap_or(default::storage::window_capacity_ratio_in_percent())
-                as f64
-                / 100.0,
-            protected_capacity_ratio: protected_capacity_ratio_in_percent
-                .unwrap_or(default::storage::protected_capacity_ratio_in_percent())
-                as f64
-                / 100.0,
-            cmsketch_eps: cmsketch_eps.unwrap_or(default::storage::cmsketch_eps()),
-            cmsketch_confidence: cmsketch_confidence
-                .unwrap_or(default::storage::cmsketch_confidence()),
-        }),
+    let get_eviction_config = |c: &CacheEvictionConfig| {
+        match c {
+            CacheEvictionConfig::Lru {
+                high_priority_ratio_in_percent,
+            } => EvictionConfig::Lru(LruConfig {
+                high_priority_pool_ratio: high_priority_ratio_in_percent.unwrap_or(
+                    // adapt to old version
+                    s.storage
+                        .high_priority_ratio_in_percent
+                        .unwrap_or(default::storage::high_priority_ratio_in_percent()),
+                ) as f64
+                    / 100.0,
+            }),
+            CacheEvictionConfig::Lfu {
+                window_capacity_ratio_in_percent,
+                protected_capacity_ratio_in_percent,
+                cmsketch_eps,
+                cmsketch_confidence,
+            } => EvictionConfig::Lfu(LfuConfig {
+                window_capacity_ratio: window_capacity_ratio_in_percent
+                    .unwrap_or(default::storage::window_capacity_ratio_in_percent())
+                    as f64
+                    / 100.0,
+                protected_capacity_ratio: protected_capacity_ratio_in_percent
+                    .unwrap_or(default::storage::protected_capacity_ratio_in_percent())
+                    as f64
+                    / 100.0,
+                cmsketch_eps: cmsketch_eps.unwrap_or(default::storage::cmsketch_eps()),
+                cmsketch_confidence: cmsketch_confidence
+                    .unwrap_or(default::storage::cmsketch_confidence()),
+            }),
+            CacheEvictionConfig::S3Fifo {
+                small_queue_capacity_ratio_in_percent,
+            } => EvictionConfig::S3Fifo(S3FifoConfig {
+                small_queue_capacity_ratio: small_queue_capacity_ratio_in_percent
+                    .unwrap_or(default::storage::small_queue_capacity_ratio_in_percent())
+                    as f64
+                    / 100.0,
+            }),
+        }
     };
 
     let block_cache_eviction_config = get_eviction_config(&s.storage.cache.block_cache_eviction);
@@ -1826,6 +1997,9 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
                 EvictionConfig::Lfu(lfu) => {
                     ((1.0 - lfu.protected_capacity_ratio) * block_cache_capacity_mb as f64) as usize
                 }
+                EvictionConfig::S3Fifo(s3fifo) => {
+                    (s3fifo.small_queue_capacity_ratio * block_cache_capacity_mb as f64) as usize
+                }
             });
 
     StorageMemoryConfig {
@@ -1834,8 +2008,6 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         meta_cache_capacity_mb,
         meta_cache_shard_num,
         shared_buffer_capacity_mb,
-        data_file_cache_ring_buffer_capacity_mb,
-        meta_file_cache_ring_buffer_capacity_mb,
         compactor_memory_limit_mb,
         prefetch_buffer_capacity_mb,
         block_cache_eviction_config,

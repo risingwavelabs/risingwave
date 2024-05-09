@@ -19,43 +19,16 @@ RECOVERY_DURATION=20
 
 # Setup test directory
 TEST_DIR=.risingwave/backwards-compat-tests/
-KAFKA_PATH=.risingwave/bin/kafka
 mkdir -p $TEST_DIR
 cp -r backwards-compat-tests/slt/* $TEST_DIR
 
-wait_kafka_exit() {
-  # Follow kafka-server-stop.sh
-  while [[ -n "$(ps ax | grep ' kafka\.Kafka ' | grep java | grep -v grep | awk '{print $1}')" ]]; do
-    echo "Waiting for kafka to exit"
-    sleep 1
-  done
-}
-
-wait_zookeeper_exit() {
-  # Follow zookeeper-server-stop.sh
-  while [[ -n "$(ps ax | grep java | grep -i QuorumPeerMain | grep -v grep | awk '{print $1}')" ]]; do
-    echo "Waiting for zookeeper to exit"
-    sleep 1
-  done
-}
-
-kill_kafka() {
-  $KAFKA_PATH/bin/kafka-server-stop.sh
-  wait_kafka_exit
-}
-
-kill_zookeeper() {
-  $KAFKA_PATH/bin/zookeeper-server-stop.sh
-  wait_zookeeper_exit
-}
-
 wait_for_process() {
-    process_name="$1"
+  process_name="$1"
 
-    while pgrep -x "$process_name" > /dev/null; do
-        echo "Process $process_name is still running... Wait for 1 sec"
-        sleep 1
-    done
+  while pgrep -x "$process_name" >/dev/null; do
+    echo "Process $process_name is still running... Wait for 1 sec"
+    sleep 1
+  done
 }
 
 wait_all_process_exit() {
@@ -69,33 +42,26 @@ wait_all_process_exit() {
 # Older versions of RW may not gracefully kill kafka.
 # So we duplicate the definition here.
 kill_cluster() {
-  # Kill other components
-  tmux list-windows -t risedev -F "#{window_name} #{pane_id}" \
-  | grep -v 'kafka' \
-  | grep -v 'zookeeper' \
-  | awk '{ print $2 }' \
-  | xargs -I {} tmux send-keys -t {} C-c C-d
-
-  set +e
-  if [[ -n $(tmux list-windows -t risedev | grep kafka) ]];
-  then
-    echo "kill kafka"
-    kill_kafka
-
-    echo "kill zookeeper"
-    kill_zookeeper
-
-    # Kill their tmux sessions
-    tmux list-windows -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c C-d
+  if tmux -L risedev ls &>/dev/null; then
+    TMUX="tmux -L risedev"
+  else
+    TMUX="tmux"
   fi
-  set -e
 
-  tmux kill-session -t risedev
-  test $? -eq 0 || { echo "Failed to stop all RiseDev components."; exit 1; }
+  # Kill other components
+  $TMUX list-windows -t risedev -F "#{window_name} #{pane_id}" |
+    awk '{ print $2 }' |
+    xargs -I {} $TMUX send-keys -t {} C-c C-d
+
+  $TMUX kill-server
+  test $? -eq 0 || {
+    echo "Failed to stop all RiseDev components."
+    exit 1
+  }
   wait_all_process_exit
 }
 
-run_sql () {
+run_sql() {
   psql -h localhost -p 4566 -d dev -U root -c "$@"
 }
 
@@ -112,18 +78,16 @@ check_version() {
 }
 
 create_kafka_topic() {
-  "$KAFKA_PATH"/bin/kafka-topics.sh \
-    --create \
-    --topic backwards_compat_test_kafka_source --bootstrap-server localhost:29092
+  RPK_BROKERS=message_queue:29092 \
+  rpk topic create backwards_compat_test_kafka_source
 }
 
 insert_json_kafka() {
   local JSON=$1
-  echo "$JSON" | "$KAFKA_PATH"/bin/kafka-console-producer.sh \
-    --topic backwards_compat_test_kafka_source \
-    --bootstrap-server localhost:29092 \
-    --property "parse.key=true" \
-    --property "key.separator=,"
+
+  echo "$JSON" | \
+  RPK_BROKERS=message_queue:29092 \
+  rpk topic produce backwards_compat_test_kafka_source -f "%k,%v"
 }
 
 seed_json_kafka() {
@@ -140,42 +104,41 @@ seed_json_kafka() {
 
 # https://stackoverflow.com/a/4024263
 version_le() {
-    printf '%s\n' "$1" "$2" | sort -C -V
+  printf '%s\n' "$1" "$2" | sort -C -V
 }
 
 version_lt() {
-    ! version_le "$2" "$1"
+  ! version_le "$2" "$1"
 }
 
 ################################### Entry Points
 
 get_old_version() {
-   # For backwards compat test we assume we are testing the latest version of RW (i.e. latest main commit)
-   # against the Nth latest release candidate, where N > 1. N can be larger,
-   # in case some old cluster did not upgrade.
-   if [[ -z $VERSION_OFFSET ]]
-   then
-       local VERSION_OFFSET=1
-   fi
+  # For backwards compat test we assume we are testing the latest version of RW (i.e. latest main commit)
+  # against the Nth latest release candidate, where N > 1. N can be larger,
+  # in case some old cluster did not upgrade.
+  if [[ -z $VERSION_OFFSET ]]; then
+    local VERSION_OFFSET=1
+  fi
 
-   # First we obtain a list of versions from git branch names.
-   # Then we normalize them to semver format (MAJOR.MINOR.PATCH).
-   echo "--- git branch origin output"
-   git branch -r | grep origin
+  # First we obtain a list of versions from git branch names.
+  # Then we normalize them to semver format (MAJOR.MINOR.PATCH).
+  echo "--- git branch origin output"
+  git branch -r | grep origin
 
-   # Extract X.Y.Z tags
-   echo "--- VERSION BRANCHES"
-   local tags=$(git tag | grep -E "^v[0-9]+\.[0-9]+\.[0-9]+$" | tr -d 'v' | tr -d ' ')
-   echo "$tags"
+  # Extract X.Y.Z tags
+  echo "--- VERSION BRANCHES"
+  local tags=$(git tag | grep -E "^v[0-9]+\.[0-9]+\.[0-9]+$" | tr -d 'v' | tr -d ' ')
+  echo "$tags"
 
-   # Then we sort them in descending order.
-   echo "--- VERSIONS"
-   local sorted_versions=$(echo -e "$tags" | sort -t '.' -n)
-   echo "$sorted_versions"
+  # Then we sort them in descending order.
+  echo "--- VERSIONS"
+  local sorted_versions=$(echo -e "$tags" | sort -t '.' -n)
+  echo "$sorted_versions"
 
-   # Then we take the Nth latest version.
-   # We set $OLD_VERSION to this.
-   OLD_VERSION=$(echo -e "$sorted_versions" | tail -n $VERSION_OFFSET | head -1)
+  # Then we take the Nth latest version.
+  # We set $OLD_VERSION to this.
+  OLD_VERSION=$(echo -e "$sorted_versions" | tail -n $VERSION_OFFSET | head -1)
 }
 
 get_new_version() {
@@ -246,7 +209,7 @@ seed_old_cluster() {
   seed_json_kafka
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/seed.slt"
   # use the old syntax for version at most 1.5.4
-  if version_le "$OLD_VERSION" "1.5.4" ; then
+  if version_le "$OLD_VERSION" "1.5.4"; then
     sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/upsert/deprecate_upsert.slt"
   else
     sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/upsert/include_key_as.slt"
@@ -259,7 +222,7 @@ seed_old_cluster() {
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/validate_original.slt"
 
   # Test invalid WITH options, if OLD_VERSION <= 1.5.0
-  if version_le "$OLD_VERSION" "1.5.0" ; then
+  if version_le "$OLD_VERSION" "1.5.0"; then
     echo "--- KAFKA TEST (invalid options): Seeding old cluster with data"
     sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/invalid_options/seed.slt"
 
@@ -300,7 +263,7 @@ validate_new_cluster() {
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/validate_restart.slt"
 
   # Test invalid WITH options, if OLD_VERSION <= 1.5.0
-  if version_le "$OLD_VERSION" "1.5.0" ; then
+  if version_le "$OLD_VERSION" "1.5.0"; then
     echo "--- KAFKA TEST (invalid options): Validating new cluster"
     sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/invalid_options/validate_restart.slt"
   fi

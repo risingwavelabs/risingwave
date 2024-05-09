@@ -201,7 +201,7 @@ macro_rules! dispatch_state_store {
     }};
 }
 
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, test, feature = "test"))]
 pub mod verify {
     use std::fmt::Debug;
     use std::future::Future;
@@ -212,7 +212,7 @@ pub mod verify {
     use bytes::Bytes;
     use risingwave_common::buffer::Bitmap;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
-    use risingwave_hummock_sdk::HummockReadEpoch;
+    use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
     use tracing::log::warn;
 
     use crate::error::StorageResult;
@@ -631,7 +631,6 @@ impl StateStoreImpl {
                 flushers: opts.data_file_cache_flushers,
                 reclaimers: opts.data_file_cache_reclaimers,
                 recover_concurrency: opts.data_file_cache_recover_concurrency,
-                ring_buffer_capacity: opts.data_file_cache_ring_buffer_capacity_mb * MB,
                 catalog_bits: opts.data_file_cache_catalog_bits,
                 admissions: vec![],
                 reinsertions: vec![],
@@ -669,7 +668,6 @@ impl StateStoreImpl {
                 flushers: opts.meta_file_cache_flushers,
                 reclaimers: opts.meta_file_cache_reclaimers,
                 recover_concurrency: opts.meta_file_cache_recover_concurrency,
-                ring_buffer_capacity: opts.meta_file_cache_ring_buffer_capacity_mb * MB,
                 catalog_bits: opts.meta_file_cache_catalog_bits,
                 admissions: vec![],
                 reinsertions: vec![],
@@ -690,7 +688,7 @@ impl StateStoreImpl {
                     hummock.strip_prefix("hummock+").unwrap(),
                     object_store_metrics.clone(),
                     "Hummock",
-                    opts.object_store_config.clone(),
+                    Arc::new(opts.object_store_config.clone()),
                 )
                 .await;
 
@@ -780,7 +778,7 @@ pub mod boxed_state_store {
     use dyn_clone::{clone_trait_object, DynClone};
     use risingwave_common::buffer::Bitmap;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
-    use risingwave_hummock_sdk::HummockReadEpoch;
+    use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
 
     use crate::error::StorageResult;
     use crate::hummock::HummockStorage;

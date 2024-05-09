@@ -15,6 +15,7 @@ extend = [
   { path = "src/storage/backup/integration_tests/Makefile.toml" },
   { path = "src/java_binding/make-java-binding.toml" },
   { path = "src/stream/tests/integration_tests/integration_test.toml" },
+  { path = "e2e_test/source_inline/commands.toml" },
 ]
 
 env_files = ["./risedev-components.user.env"]
@@ -34,6 +35,7 @@ is_release = get_env ENABLE_RELEASE_PROFILE
 is_not_release = not ${is_release}
 is_dynamic_linking = get_env ENABLE_DYNAMIC_LINKING
 is_hummock_trace = get_env ENABLE_HUMMOCK_TRACE
+is_deno_udf_enabled = get_env ENABLE_DENO_UDF
 is_python_udf_enabled = get_env ENABLE_PYTHON_UDF
 
 if ${is_sanitizer_enabled}
@@ -45,9 +47,6 @@ else
   set_env RISEDEV_BUILD_TARGET_DIR ""
 end
 
-set_env RISEDEV_CARGO_BUILD_CRATE "risingwave_cmd_all"
-set_env RISEDEV_CTL_RUN_CMD "-- risectl"
-
 if ${is_hdfs_backend}
   set_env BUILD_HDFS_BACKEND_CMD "-p risingwave_object_store --features hdfs-backend"
 else
@@ -58,6 +57,11 @@ if ${is_not_release} and ${is_dynamic_linking}
   set_env RISINGWAVE_FEATURE_FLAGS "--features rw-dynamic-link --no-default-features"
 else
   set_env RISINGWAVE_FEATURE_FLAGS "--features rw-static-link"
+end
+
+if ${is_deno_udf_enabled}
+  flags = get_env RISINGWAVE_FEATURE_FLAGS
+  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features embedded-deno-udf"
 end
 
 if ${is_python_udf_enabled}
@@ -91,6 +95,8 @@ if ${is_not_ci}
     set_env RUST_LOG "pgwire_query_log=info,${rust_log}"
   end
 end
+
+set_env TMUX "tmux -L risedev"
 ''',
 ]
 
@@ -101,7 +107,7 @@ skip_core_tasks = true
 skip_git_env_info = true
 skip_rust_env_info = false
 skip_crate_env_info = true
-min_version = "0.36.10"
+min_version = "0.37.1"
 
 [tasks.clean-full]
 category = "Misc"
@@ -122,6 +128,16 @@ rm -rf "${PREFIX_CONFIG}"
 rm -rf "${PREFIX_PROFILING}"
 '''
 
+[tasks.reset-rw]
+category = "RiseDev - Start/Stop"
+description = "Clean all data in the default database dev of the running RisingWave"
+dependencies = ["check-and-load-risedev-env-file"]
+script = '''
+#!/usr/bin/env bash
+psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root -d dev -c "CREATE DATABASE risedev_tmp;"
+psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root -d risedev_tmp -c "DROP DATABASE dev; CREATE DATABASE dev;"
+psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root -d dev -c "DROP DATABASE risedev_tmp;"
+'''
 
 [tasks.l]
 alias = "logs"
@@ -155,7 +171,7 @@ category = "Misc"
 description = "List all nodes in the cluster"
 script = '''
 #!/usr/bin/env bash
-tmux list-windows -t risedev | grep -v active | cut -d'(' -f1
+${TMUX} list-windows -t risedev | grep -v active | cut -d'(' -f1
 '''
 
 [tasks.lsw]
@@ -163,7 +179,7 @@ category = "Misc"
 description = "List --watch all nodes in the cluster"
 script = '''
 #!/usr/bin/env bash
-watch -n 1 "tmux list-windows -t risedev | grep -v active | cut -d'(' -f1"
+watch -n 1 "${TMUX} list-windows -t risedev | grep -v active | cut -d'(' -f1"
 '''
 
 [tasks.del]
@@ -176,7 +192,7 @@ script = '''
 #!/usr/bin/env bash
 
 risedev_ls () {
-  tmux list-windows -t risedev | grep -v active | cut -d'(' -f1
+  ${TMUX} list-windows -t risedev | grep -v active | cut -d'(' -f1
 }
 
 err () {
@@ -195,7 +211,7 @@ if [[ -z $(risedev_ls | grep "$1" ) ]]; then
   err
 fi
 
-tmux kill-window -t $1
+${TMUX} kill-window -t $1
 '''
 
 [tasks.f]
@@ -365,7 +381,8 @@ echo "$(tput setaf 4)$(tput bold)[Reminder]$(tput sgr0) risedev will only build 
 [[ -z "${RISEDEV_RUSTFLAGS}" ]] || export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
 echo + RUSTFLAGS="${RUSTFLAGS:-<not set>}"
 set -xe
-cargo build -p ${RISEDEV_CARGO_BUILD_CRATE} -p risedev ${BUILD_HDFS_BACKEND_CMD}\
+cargo build -p risedev
+cargo build -p risingwave_cmd_all ${BUILD_HDFS_BACKEND_CMD}\
 ${BUILD_HUMMOCK_TRACE_CMD}\
             --profile "${RISINGWAVE_BUILD_PROFILE}" \
             ${RISINGWAVE_FEATURE_FLAGS} \
@@ -550,16 +567,21 @@ if [ ! -f "${RC_ENV_FILE}" ]; then
 fi
 '''
 
+[tasks.check-and-load-risedev-env-file]
+private = true
+category = "RiseDev - Prepare"
+dependencies = ["check-risedev-env-file"]
+env_files = ["${PREFIX_CONFIG}/risedev-env"]
+
 [tasks.psql-env]
 category = "RiseDev - Start/Stop"
 description = "Dump env configuration for psql"
-dependencies = ["check-risedev-env-file"]
-env_files = ["${PREFIX_CONFIG}/risedev-env"]
+dependencies = ["check-and-load-risedev-env-file"]
 script = '''
 #!/usr/bin/env bash
 cat <<EOF > "${PREFIX_CONFIG}/psql-env"
-export PGHOST=$RW_FRONTEND_LISTEN_ADDRESS
-export PGPORT=$RW_FRONTEND_PORT
+export PGHOST=$RISEDEV_RW_FRONTEND_LISTEN_ADDRESS
+export PGPORT=$RISEDEV_RW_FRONTEND_PORT
 export PGUSER=root
 export PGDATABASE=dev
 EOF
@@ -572,21 +594,19 @@ echo "   $(tput setaf 4)source ${PREFIX_CONFIG}/psql-env$(tput sgr0)"
 [tasks.psql]
 category = "RiseDev - Start/Stop"
 description = "Run local psql client with default connection parameters. You can pass extra arguments to psql."
-dependencies = ["check-risedev-env-file"]
-env_files = ["${PREFIX_CONFIG}/risedev-env"]
+dependencies = ["check-and-load-risedev-env-file"]
 script = '''
 #!/usr/bin/env bash
-psql -h $RW_FRONTEND_LISTEN_ADDRESS -p $RW_FRONTEND_PORT -U root -d dev "$@"
+psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root -d dev "$@"
 '''
 
 [tasks.ctl]
 category = "RiseDev - Start/Stop"
 description = "Start RiseCtl"
-dependencies = ["check-risedev-env-file"]
-env_files = ["${PREFIX_CONFIG}/risedev-env"]
+dependencies = ["check-and-load-risedev-env-file"]
 script = '''
 #!/usr/bin/env bash
-cargo run -p ${RISEDEV_CARGO_BUILD_CRATE} --profile "${RISINGWAVE_BUILD_PROFILE}" ${RISEDEV_CTL_RUN_CMD} "$@"
+cargo run -p risingwave_cmd_all --profile "${RISINGWAVE_BUILD_PROFILE}" -- ctl "$@"
 test $? -eq 0 || exit 1
 '''
 
@@ -658,7 +678,7 @@ if [[ $ENABLE_COREDUMP == "true" ]]; then
 fi
 
 set -x
-target/${BUILD_MODE_DIR}/risedev-dev ${@}
+target/debug/risedev-dev ${@}
 '''
 
 [tasks.kill-risedev]
@@ -677,44 +697,37 @@ wait_kafka_exit() {
   done
 }
 
-wait_zookeeper_exit() {
-  # Follow zookeeper-server-stop.sh
-  while [[ -n "$(ps ax | grep java | grep -i QuorumPeerMain | grep -v grep | awk '{print $1}')" ]]; do
-    echo "Waiting for zookeeper to exit"
-    sleep 1
-  done
-}
-
 kill_kafka() {
   ${PREFIX_BIN}/kafka/bin/kafka-server-stop.sh
   wait_kafka_exit
 }
 
-kill_zookeeper() {
-  ${PREFIX_BIN}/kafka/bin/zookeeper-server-stop.sh
-  wait_zookeeper_exit
-}
+if ! ${TMUX} ls &>/dev/null ; then
+  echo "No risedev cluster to kill. Exiting..."
+  exit 0
+fi
 
-# Kill other components
-tmux list-windows -t risedev -F "#{window_name} #{pane_id}" \
-| grep -v 'kafka' \
-| grep -v 'zookeeper' \
+# Kill other components with Ctrl+C/Ctrl+D
+${TMUX} list-windows -F "#{window_name} #{pane_id}" \
+| grep --invert-match --extended-regexp '(kafka)' \
 | awk '{ print $2 }' \
-| xargs -I {} tmux send-keys -t {} C-c C-d
+| xargs -I {} ${TMUX} send-keys -t {} C-c C-d
 
-if [[ -n $(tmux list-windows -t risedev | grep kafka) ]];
+# Stop docker components
+containers=$(docker ps -a -q -f name=risedev- 2>/dev/null) || true
+if [[ -n ${containers} ]]; then
+  echo "Stopping docker components..."
+  docker stop ${containers}
+fi
+
+# Kill kafka cleanly. Ctrl+C will lose data.
+if [[ -n $(${TMUX} list-windows | grep kafka) ]];
 then
   echo "kill kafka"
   kill_kafka || true
-
-  echo "kill zookeeper"
-  kill_zookeeper || true
-
-  # Kill their tmux sessions
-  tmux list-windows -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c C-d
 fi
 
-tmux kill-session -t risedev
+${TMUX} kill-server
 test $? -eq 0 || { echo "Failed to stop all RiseDev components."; exit 1; }
 '''
 
@@ -768,8 +781,8 @@ do
   echo
 done
 
-echo "check: $(tput setaf 4)tmux >= v3.2a$(tput sgr0)"
-tmux -V || echo "$(tput setaf 3)tmux$(tput sgr0) not found."
+echo "check: $(tput setaf 4)${TMUX} >= v3.2a$(tput sgr0)"
+${TMUX} -V || echo "$(tput setaf 3)tmux$(tput sgr0) not found."
 echo
 
 echo "check: $(tput setaf 4)psql >= 14$(tput sgr0)"
@@ -878,7 +891,7 @@ cargo build \
 """
 
 [tasks.stest]
-category = "RiseDev - Deterministic Simulation"
+category = "RiseDev - Test - Deterministic Simulation"
 description = "Run unit tests in deterministic simulation mode"
 dependencies = ["install-nextest"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -903,7 +916,7 @@ cargo nextest run \
 """
 
 [tasks.sit-test]
-category = "RiseDev - Deterministic Simulation"
+category = "RiseDev - Test - Deterministic Simulation"
 description = "Run integration tests in deterministic simulation mode"
 dependencies = ["install-nextest"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -918,7 +931,7 @@ cargo nextest run \
 """
 
 [tasks.sarchive-it-test]
-category = "RiseDev - Deterministic Simulation"
+category = "RiseDev - Test - Deterministic Simulation"
 description = "Archive integration tests in deterministic simulation mode"
 dependencies = ["install-nextest"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -934,7 +947,7 @@ cargo nextest archive \
 """
 
 [tasks.scheck]
-category = "RiseDev - Deterministic Simulation"
+category = "RiseDev - Test - Deterministic Simulation"
 description = "Run cargo check in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -959,7 +972,7 @@ cargo check \
 """
 
 [tasks.sslt]
-category = "RiseDev - Deterministic Simulation"
+category = "RiseDev - Test - Deterministic Simulation"
 description = "Run e2e tests in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -973,7 +986,7 @@ cargo run \
 """
 
 [tasks.sslt-build-all]
-category = "RiseDev - Deterministic Simulation"
+category = "RiseDev - Test - Deterministic Simulation"
 description = "Build deterministic simulation runner and tests"
 dependencies = ["warn-on-missing-tools"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -988,7 +1001,7 @@ cargo build \
 """
 
 [tasks.sslt-cov]
-category = "RiseDev - Deterministic Simulation"
+category = "RiseDev - Test - Deterministic Simulation"
 description = "Run e2e tests in deterministic simulation mode and report code coverage"
 dependencies = ["install-llvm-cov"]
 env = { CARGO_TARGET_DIR = "target/sim-cov" }
@@ -1074,8 +1087,8 @@ script = """
 echo "Running $(tput setaf 4)cargo sort$(tput sgr0) checks and attempting to fix"
 
 # Rewriting Cargo.toml will cause a full rebuild of all crates, so we always check before fix.
-(cargo sort -w -c > /dev/null) || cargo sort -w
-test $? -eq 0 || { echo "cargo sort check failed. You may run $(tput setaf 4)cargo sort -w$(tput sgr0) to fix it."; exit 1; }
+(cargo sort -g -w -c > /dev/null) || cargo sort -g -w
+test $? -eq 0 || { echo "cargo sort check failed. You may run $(tput setaf 4)cargo sort -g -w$(tput sgr0) to fix it."; exit 1; }
 """
 
 [tasks.check-fmt]
@@ -1127,7 +1140,7 @@ fi
 private = true
 category = "RiseDev - Check"
 description = "Run cargo typos-cli check"
-install_crate = { min_version = "1.15.0", crate_name = "typos-cli", binary = "typos", test_arg = [
+install_crate = { min_version = "1.20.4", crate_name = "typos-cli", binary = "typos", test_arg = [
   "--help",
 ], install_command = "binstall" }
 script = """
@@ -1173,7 +1186,8 @@ scripts/check/check-trailing-spaces.sh --fix
 category = "RiseDev - Check"
 dependencies = [
   "warn-on-missing-tools",
-  "check-hakari",
+  # Disable hakari until we make sure it's useful
+  # "check-hakari",
   "check-dep-sort",
   "check-fmt",
   "check-trailing-spaces",
@@ -1284,42 +1298,53 @@ echo "All processes has exited."
 """
 
 [tasks.slt]
-category = "RiseDev - SQLLogicTest"
-install_crate = { version = "0.19.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+category = "RiseDev - Test - SQLLogicTest"
+install_crate = { version = "0.20.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
   "--help",
 ], install_command = "binstall" }
-dependencies = ["check-risedev-env-file"]
-env_files = ["${PREFIX_CONFIG}/risedev-env"]
-env = { SLT_HOST = "${RW_FRONTEND_LISTEN_ADDRESS}", SLT_PORT = "${RW_FRONTEND_PORT}", SLT_DB = "dev" }
+dependencies = ["check-and-load-risedev-env-file"]
 command = "sqllogictest"
 args = ["${@}"]
 description = "🌟 Run SQLLogicTest"
 
+[tasks.slt.env]
+SLT_HOST = "${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS}"
+SLT_PORT = "${RISEDEV_RW_FRONTEND_PORT}"
+SLT_DB = "dev"
+PATH = "${PWD}/e2e_test/commands:${PATH}"
+
+[tasks.slt-clean]
+category = "RiseDev - Test - SQLLogicTest"
+dependencies = ["clean-kafka", "reset-rw"]
+description = "Run SQLLogicTest with a clean environment"
+run_task = "slt"
+args = ["${@}"]
+
 [tasks.slt-streaming]
-category = "RiseDev - SQLLogicTest"
+category = "RiseDev - Test - SQLLogicTest"
 extend = "slt"
 args = ["${@}", "./e2e_test/streaming/**/*.slt"]
 description = "Run all streaming e2e tests"
 
 [tasks.slt-batch]
-category = "RiseDev - SQLLogicTest"
+category = "RiseDev - Test - SQLLogicTest"
 extend = "slt"
 args = ["${@}", "./e2e_test/batch/*.slt"]
 description = "Run all batch e2e tests"
 
 [tasks.slt-generated]
-category = "RiseDev - SQLLogicTest"
+category = "RiseDev - Test - SQLLogicTest"
 extend = "slt"
 args = ["${@}", "./e2e_test/generated/**/*.slt"]
 description = "Run all generated e2e tests"
 
 [tasks.slt-all]
-category = "RiseDev - SQLLogicTest"
+category = "RiseDev - Test - SQLLogicTest"
 run_task = { name = ["slt-streaming", "slt-batch", "slt-generated"] }
 description = "Run all e2e tests"
 
 [tasks.docslt]
-category = "RiseDev - SQLLogicTest"
+category = "RiseDev - Test - SQLLogicTest"
 description = "Extract SQL examples written in SQLLogicTest syntax from Rust doc comments"
 script = '''
 #!/usr/bin/env bash
@@ -1394,7 +1419,7 @@ UPDATE_EXPECT=1 cargo test -p risingwave_connector tests::test_with_options_yaml
 '''
 
 [tasks.backwards-compat-test]
-category = "RiseDev - Backwards Compatibility Test"
+category = "RiseDev - Test - Backwards Compatibility Test"
 description = "Run backwards compatibility test"
 script = "./backwards-compat-tests/scripts/run_local.sh"
 
@@ -1409,3 +1434,15 @@ script = """
 vars = dump_variables
 echo ${vars}
 """
+
+[tasks.show-risedev-env]
+description = "Show risedev-env environment variables"
+dependencies = ["check-risedev-env-file"]
+script = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+cat ${PREFIX_CONFIG}/risedev-env
+echo "Hint: To load the environment variables into the shell, you may run:"
+echo "$(tput setaf 4)\set -a; source ${PREFIX_CONFIG}/risedev-env; set +a$(tput sgr0)"
+'''

@@ -17,11 +17,10 @@ use std::sync::Arc;
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::estimate_size::collections::MemMonitoredHeap;
-use risingwave_common::estimate_size::EstimateSize;
-use risingwave_common::memory::{MemoryContext, MonitoredGlobalAlloc};
+use risingwave_common::memory::{MemMonitoredHeap, MemoryContext, MonitoredGlobalAlloc};
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::sort_util::{ColumnOrder, HeapElem};
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PbExchangeSource;
 
@@ -122,7 +121,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeEx
 
     // Check whether there is indeed a chunk and there is a visible row sitting at `row_idx`
     // in the chunk before calling this function.
-    fn push_row_into_heap(&mut self, source_idx: usize, row_idx: usize) {
+    fn push_row_into_heap(&mut self, source_idx: usize, row_idx: usize) -> Result<()> {
         assert!(source_idx < self.source_inputs.len());
         let chunk_ref = self.source_inputs[source_idx].as_ref().unwrap();
         self.min_heap.push(HeapElem::new(
@@ -132,6 +131,14 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeEx
             row_idx,
             None,
         ));
+
+        if self.min_heap.mem_context().check_memory_usage() {
+            Ok(())
+        } else {
+            Err(BatchError::OutOfMemory(
+                self.min_heap.mem_context().mem_limit(),
+            ))
+        }
     }
 }
 
@@ -167,7 +174,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeEx
                 // exchange, therefore we are sure that there is at least
                 // one visible row.
                 let next_row_idx = chunk.next_visible_row_idx(0);
-                self.push_row_into_heap(source_idx, next_row_idx.unwrap());
+                self.push_row_into_heap(source_idx, next_row_idx.unwrap())?;
             }
         }
 
@@ -202,13 +209,13 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeEx
                 let possible_next_row_idx = cur_chunk.next_visible_row_idx(row_idx + 1);
                 match possible_next_row_idx {
                     Some(next_row_idx) => {
-                        self.push_row_into_heap(child_idx, next_row_idx);
+                        self.push_row_into_heap(child_idx, next_row_idx)?;
                     }
                     None => {
                         self.get_source_chunk(child_idx).await?;
                         if let Some(chunk) = &self.source_inputs[child_idx] {
                             let next_row_idx = chunk.next_visible_row_idx(0);
-                            self.push_row_into_heap(child_idx, next_row_idx.unwrap());
+                            self.push_row_into_heap(child_idx, next_row_idx.unwrap())?;
                         }
                     }
                 }

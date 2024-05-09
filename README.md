@@ -9,7 +9,7 @@
 
 <div align="center">
 
-### 🌊 Reimagine Stream Processing.
+### 🌊 Reimagine stream processing.
 
 </div>
 
@@ -61,49 +61,54 @@ RisingWave is a Postgres-compatible streaming database engineered to provide the
 
 ## Try it out in 60 seconds
 
-Install RisingWave:
+Install RisingWave standalone mode:
 ```shell
 curl https://risingwave.com/sh | sh
 ```
 
 Then follow the prompts to start and connect to RisingWave.
 
-To learn about other installation options such as Docker, see [Quick Start](https://docs.risingwave.com/docs/current/get-started/).
+To learn about other installation options, such as using a Docker image, see [Quick Start](https://docs.risingwave.com/docs/current/get-started/).
 
 ## Production deployments
 
-For **single-node deployment**, please refer to [Docker Compose](https://docs.risingwave.com/docs/current/risingwave-docker-compose/).
+[**RisingWave Cloud**](https://cloud.risingwave.com) offers the easiest way to run RisingWave in production, with a _forever-free_ developer tier.
 
-For **distributed deployment**, please refer to [Kubernetes with Helm](https://docs.risingwave.com/docs/current/risingwave-k8s-helm/) or [Kubernetes with Operator](https://docs.risingwave.com/docs/current/risingwave-kubernetes/).
+For **Docker deployment**, please refer to [Docker Compose](https://docs.risingwave.com/docs/current/risingwave-docker-compose/).
 
-**RisingWave Cloud** the easiest way to run a fully-fledged RisingWave cluster. Try it out for free at: [cloud.risingwave.com](https://cloud.risingwave.com).
+For **Kubernetes deployment**, please refer to [Kubernetes with Helm](https://docs.risingwave.com/docs/current/risingwave-k8s-helm/) or [Kubernetes with Operator](https://docs.risingwave.com/docs/current/risingwave-kubernetes/).
+
+## Why RisingWave for real-time materialized views?
+
+RisingWave specializes in providing **incrementally updated, consistent materialized views** — a persistent data structure that represents the results of event stream processing. Compared to materialized views, dynamic tables, and live tables in other database and data warehouse systems, RisingWave's materialized view stands out in several key aspects:
+* Highly cost-efficient - up to 95% cost savings compared to state-of-the-art solutions
+* Synchronous refresh without compromising consistency
+* Extensive SQL support including joins, deletes, and updates
+* High concurrency in query serving
+* Instant fault tolerance
+* Transparent dynamic scaling
+* Speedy bootstrapping and backfilling
+
+RisingWave's extensive CDC support further enables users to seamlessly offload event-driven workloads such as materialized views and triggers from operational databases (e.g., [PostgreSQL](https://docs.risingwave.com/docs/current/ingest-from-postgres-cdc/)) to RisingWave.
 
 
 ## Why RisingWave for stream processing?
 
-RisingWave provides users with a comprehensive set of frequently used stream processing features, including exactly-once consistency, [time window functions](https://docs.risingwave.com/docs/current/sql-function-time-window/), [watermarks](https://docs.risingwave.com/docs/current/watermarks/), and more. It specializes in providing **incrementally updated, consistent materialized views** — a persistent data structure that represents the results of stream processing. RisingWave significantly reduces the complexity of building stream processing applications by allowing developers to express intricate stream processing logic through cascaded materialized views. Furthermore, it allows users to persist data directly within the system, eliminating the need to deliver results to external databases for storage and query serving.
+RisingWave provides users with a comprehensive set of frequently used stream processing features, including exactly-once consistency, [time window functions](https://docs.risingwave.com/docs/current/sql-function-time-window/), [watermarks](https://docs.risingwave.com/docs/current/watermarks/), and more. RisingWave significantly reduces the complexity of building stream processing applications by allowing developers to express intricate stream processing logic through cascaded materialized views. Furthermore, it allows users to persist data directly within the system, eliminating the need to deliver results to external databases for storage and query serving.
 
 ![Real-time Data Pipelines without or with RisingWave](https://github.com/risingwavelabs/risingwave/assets/100685635/414afbb7-5187-410f-9ba4-9a640c8c6306)
 
 Compared to existing stream processing systems like [Apache Flink](https://flink.apache.org/), [Apache Spark Streaming](https://spark.apache.org/docs/latest/streaming-programming-guide.html), and [ksqlDB](https://ksqldb.io/), RisingWave stands out in two primary dimensions: **Ease-of-use** and **cost efficiency**, thanks to its **[PostgreSQL](https://www.postgresql.org/)-style interaction experience** and  **[Snowflake](https://snowflake.com/)-like architectural design** (i.e., decoupled storage and compute).
 
-### Ease-of-use
+|  | RisingWave 🌊 | Traditional stream processing systems |
+| :---:        | :---:          | :---:         |
+| Learning curve 🎢   | PostgreSQL-style experience  | System-specific concepts   |
+| Integration 🔗    | PostgreSQL ecosystem       | System-specific ecosystem      |
+| Complex queries (e.g., joins) 💡  | Highly efficient  | Inefficient   |
+| Failure recovery 🚨     | Instant       |  Minutes or even hours     |
+| Dynamic scaling 🚀     | Transparent       |  Stop-the-world     |
+| Bootstrapping and Backfilling ⏪     | Accelerated via dynamic scaling     | Slow     |
 
-* **Simple to learn**
-  * RisingWave speaks PostgreSQL-style SQL, enabling users to dive into stream processing in much the same way as operating a PostgreSQL database.
-* **Simple to develop**
-  * RisingWave operates as a relational database, allowing users to decompose stream processing logic into smaller, manageable, stacked materialized views, rather than dealing with extensive computational programs.
-* **Simple to integrate**
-  * With integrations to a diverse range of cloud systems and the PostgreSQL ecosystem, RisingWave boasts a rich and expansive ecosystem, making it straightforward to incorporate into existing infrastructures.
-
-### Cost efficiency
-
-* **Highly efficient in complex queries**
-  * RisingWave persists internal states in remote storage systems such as S3, and users can confidently and efficiently perform complex streaming queries (for example, joining dozens of data streams) in a production environment, without worrying about state size.
-* **Transparent dynamic scaling**
-  * RisingWave's state management mechanism enables near-instantaneous dynamic scaling without any service interruptions.
-* **Instant failure recovery**
-  * RisingWave's state management mechanism also allows it to recover from failure in seconds, not minutes or hours.
 
 ### RisingWave as a database
 RisingWave is fundamentally a database that **extends beyond basic streaming data processing capabilities**.  It excels in **the effective management of streaming data**, making it a trusted choice for data persistence and powering online applications. RisingWave offers an extensive range of database capabilities, which include:
@@ -125,7 +130,7 @@ Within your data stack, RisingWave can assist with:
 * Performing real-time ETL (Extract, Transform, Load)
 * Supporting real-time feature stores
 
-RisingWave is extensively utilized in real-time applications such as monitoring, alerting, dashboard reporting, machine learning, among others. It has already been adopted in fields such as financial trading, manufacturing, new media, logistics, gaming, and more. Check out [customer stories](https://www.risingwave.com/use-cases/).
+Read more at [use cases](https://risingwave.com/use-cases/). RisingWave is extensively utilized in real-time applications such as monitoring, alerting, dashboard reporting, machine learning, among others. It has already been adopted in fields such as financial trading, manufacturing, new media, logistics, gaming, and more. Check out [customer stories](https://risingwave.com/resources/?filter=customer-stories).
 
 ## Community
 

@@ -12,17 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::pin::pin;
-
 use futures::channel::{mpsc, oneshot};
+use futures::stream;
 use futures::stream::select_with_strategy;
-use futures::{stream, StreamExt};
-use futures_async_stream::try_stream;
-use risingwave_common::array::StreamChunk;
 
-use super::error::StreamExecutorError;
-use super::{expect_first_barrier, Barrier, Execute, Executor, Message, MessageStream};
-use crate::task::{ActorId, CreateMviewProgress};
+use crate::executor::prelude::*;
+use crate::task::CreateMviewProgress;
 
 /// `ChainExecutor` is an executor that enables synchronization between the existing stream and
 /// newly appended executors. Currently, `ChainExecutor` is mainly used to implement MV on MV
@@ -191,9 +186,9 @@ impl RearrangedChainExecutor {
 
                 // 7. Rearranged task finished.
                 // The reason for finish must be that we told it to stop.
-                tracing::trace!(actor = self.actor_id, "rearranged task finished");
+                tracing::trace!("rearranged task finished");
                 if stop_rearrange_tx.is_some() {
-                    tracing::error!(actor = self.actor_id, "rearrangement finished passively");
+                    tracing::error!("rearrangement finished passively");
                 }
 
                 // 8. Consume remainings.
@@ -213,7 +208,7 @@ impl RearrangedChainExecutor {
             }
 
             // Consume remaining upstream.
-            tracing::trace!(actor = self.actor_id, "begin to consume remaining upstream");
+            tracing::trace!("begin to consume remaining upstream");
 
             #[for_await]
             for msg in upstream {

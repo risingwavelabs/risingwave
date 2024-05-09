@@ -14,12 +14,12 @@
 
 use std::fmt::{Display, Write};
 
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::bytes_array::{BytesWriter, PartialBytesWriter};
 use super::{Array, ArrayBuilder, BytesArray, BytesArrayBuilder, DataType};
 use crate::buffer::Bitmap;
-use crate::estimate_size::EstimateSize;
 
 /// `Utf8Array` is a collection of Rust Utf8 `str`s. It's a wrapper of `BytesArray`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,10 +111,6 @@ impl Utf8Array {
             }
         }
         builder.finish()
-    }
-
-    pub(super) fn data(&self) -> &[u8] {
-        self.bytes.data()
     }
 }
 
@@ -297,12 +293,6 @@ mod tests {
 
         let array = Utf8Array::from_iter(&input);
         assert_eq!(array.len(), input.len());
-
-        assert_eq!(
-            array.bytes.data().len(),
-            input.iter().map(|s| s.unwrap_or("").len()).sum::<usize>()
-        );
-
         assert_eq!(input, array.iter().collect_vec());
     }
 

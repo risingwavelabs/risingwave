@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -22,13 +21,12 @@ use async_trait::async_trait;
 use fail::fail_point;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
-use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
-    SstObjectIdRange,
+    SstObjectIdRange, SyncResult,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
@@ -92,30 +90,6 @@ impl MockHummockMetaClient {
             )
             .await
             .unwrap_or(None)
-    }
-
-    pub async fn commit_epoch_with_watermark(
-        &self,
-        epoch: HummockEpoch,
-        sstables: Vec<LocalSstableInfo>,
-        new_table_watermarks: HashMap<TableId, TableWatermarks>,
-    ) -> Result<()> {
-        let sst_to_worker = sstables
-            .iter()
-            .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), self.context_id))
-            .collect();
-        self.hummock_manager
-            .commit_epoch(
-                epoch,
-                CommitEpochInfo::new(
-                    sstables.into_iter().map(Into::into).collect(),
-                    new_table_watermarks,
-                    sst_to_worker,
-                ),
-            )
-            .await
-            .map_err(mock_err)?;
-        Ok(())
     }
 }
 
@@ -182,17 +156,41 @@ impl HummockMetaClient for MockHummockMetaClient {
             })
     }
 
-    async fn commit_epoch(
-        &self,
-        epoch: HummockEpoch,
-        sstables: Vec<LocalSstableInfo>,
-    ) -> Result<()> {
-        let sst_to_worker = sstables
+    async fn commit_epoch(&self, epoch: HummockEpoch, sync_result: SyncResult) -> Result<()> {
+        let version: HummockVersion = self.hummock_manager.get_current_version().await;
+        let sst_to_worker = sync_result
+            .uncommitted_ssts
             .iter()
             .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), self.context_id))
             .collect();
+        let new_table_watermark = sync_result.table_watermarks;
+        let table_change_log = build_table_change_log_delta(
+            sync_result
+                .old_value_ssts
+                .into_iter()
+                .map(|sst| sst.sst_info),
+            sync_result.uncommitted_ssts.iter().map(|sst| &sst.sst_info),
+            &vec![epoch],
+            version
+                .levels
+                .values()
+                .flat_map(|group| group.member_table_ids.iter().map(|table_id| (*table_id, 0))),
+        );
         self.hummock_manager
-            .commit_epoch(epoch, CommitEpochInfo::for_test(sstables, sst_to_worker))
+            .commit_epoch(
+                epoch,
+                CommitEpochInfo::new(
+                    sync_result
+                        .uncommitted_ssts
+                        .into_iter()
+                        .map(|sst| sst.into())
+                        .collect(),
+                    new_table_watermark,
+                    sst_to_worker,
+                    None,
+                    table_change_log,
+                ),
+            )
             .await
             .map_err(mock_err)?;
         Ok(())

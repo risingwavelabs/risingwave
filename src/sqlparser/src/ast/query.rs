@@ -380,8 +380,7 @@ pub enum TableFactor {
     Table {
         name: ObjectName,
         alias: Option<TableAlias>,
-        /// syntax `FOR SYSTEM_TIME AS OF PROCTIME()` is used for temporal join.
-        for_system_time_as_of_proctime: bool,
+        as_of: Option<AsOf>,
     },
     Derived {
         lateral: bool,
@@ -409,14 +408,11 @@ pub enum TableFactor {
 impl fmt::Display for TableFactor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TableFactor::Table {
-                name,
-                alias,
-                for_system_time_as_of_proctime,
-            } => {
+            TableFactor::Table { name, alias, as_of } => {
                 write!(f, "{}", name)?;
-                if *for_system_time_as_of_proctime {
-                    write!(f, " FOR SYSTEM_TIME AS OF PROCTIME()")?;
+                match as_of {
+                    Some(as_of) => write!(f, "{}", as_of)?,
+                    None => (),
                 }
                 if let Some(alias) = alias {
                     write!(f, " AS {}", alias)?;

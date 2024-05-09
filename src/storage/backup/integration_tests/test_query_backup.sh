@@ -73,7 +73,7 @@ echo "QUERY_EPOCH=safe_epoch. It should fail because it's not covered by any bac
 execute_sql_and_expect \
 "SET QUERY_EPOCH TO ${safe_epoch};
 select * from t1;" \
-"Read backup error backup include epoch ${safe_epoch} not found"
+"backup include epoch ${safe_epoch} not found"
 
 echo "QUERY_EPOCH=0 aka disabling query backup"
 execute_sql_and_expect \
@@ -100,6 +100,6 @@ future_epoch=18446744073709486080
 execute_sql_and_expect \
 "SET QUERY_EPOCH TO ${future_epoch};
 select * from t1;" \
-"Read backup error backup include epoch ${future_epoch} not found"
+"backup include epoch ${future_epoch} not found"
 
 echo "test succeeded"

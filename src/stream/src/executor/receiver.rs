@@ -11,21 +11,17 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::sync::Arc;
 
 use anyhow::Context;
-use futures::StreamExt;
-use futures_async_stream::try_stream;
 use itertools::Itertools;
 use tokio::time::Instant;
 
 use super::exchange::input::BoxedInput;
-use super::ActorContextRef;
 use crate::executor::exchange::input::new_input;
-use crate::executor::monitor::StreamingMetrics;
+use crate::executor::prelude::*;
 use crate::executor::utils::ActorInputMetrics;
-use crate::executor::{expect_first_barrier, BoxedMessageStream, Execute, Message};
 use crate::task::{FragmentId, SharedContext};
+
 /// `ReceiverExecutor` is used along with a channel. After creating a mpsc channel,
 /// there should be a `ReceiverExecutor` running in the background, so as to push
 /// messages down to the executors.
@@ -80,7 +76,6 @@ impl ReceiverExecutor {
     pub fn for_test(input: super::exchange::permit::Receiver) -> Self {
         use super::exchange::input::LocalInput;
         use crate::executor::exchange::input::Input;
-        use crate::executor::ActorContext;
 
         Self::new(
             ActorContext::for_test(114),

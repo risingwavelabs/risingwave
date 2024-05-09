@@ -15,14 +15,12 @@
 use std::ops::Bound::{self, *};
 use std::sync::Arc;
 
-use futures::{pin_mut, stream, StreamExt};
-use futures_async_stream::try_stream;
-use risingwave_common::array::{Array, ArrayImpl, Op, StreamChunk};
+use futures::stream;
+use risingwave_common::array::{Array, ArrayImpl, Op};
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
-use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::row::{self, once, OwnedRow, OwnedRow as RowData, Row};
+use risingwave_common::row::{self, once, OwnedRow as RowData};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::{
@@ -33,15 +31,11 @@ use risingwave_pb::expr::expr_node::Type::{
     GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual,
 };
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
-use super::error::StreamExecutorError;
-use super::monitor::StreamingMetrics;
-use super::{ActorContextRef, BoxedMessageStream, Execute, Executor, ExecutorInfo, Message};
-use crate::common::table::state_table::{StateTable, WatermarkCacheParameterizedStateTable};
-use crate::common::StreamChunkBuilder;
-use crate::executor::expect_first_barrier_from_aligned_stream;
+use crate::common::table::state_table::WatermarkCacheParameterizedStateTable;
+use crate::consistency::consistency_panic;
+use crate::executor::prelude::*;
 use crate::task::ActorEvalErrorReport;
 
 pub struct DynamicFilterExecutor<S: StateStore, const USE_WATERMARK_CACHE: bool> {
@@ -70,7 +64,8 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        info: &ExecutorInfo,
+        eval_error_report: ActorEvalErrorReport,
+        schema: Schema,
         source_l: Executor,
         source_r: Executor,
         key_l: usize,
@@ -82,14 +77,10 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         condition_always_relax: bool,
         cleaned_by_watermark: bool,
     ) -> Self {
-        let eval_error_report = ActorEvalErrorReport {
-            actor_context: ctx.clone(),
-            identity: Arc::from(info.identity.as_str()),
-        };
         Self {
             ctx,
             eval_error_report,
-            schema: info.schema.clone(),
+            schema,
             source_l: Some(source_l),
             source_r: Some(source_r),
             key_l,
@@ -365,10 +356,10 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                                 if Some(row.datum_at(0))
                                     != current_epoch_value.as_ref().map(ToDatumRef::to_datum_ref)
                                 {
-                                    bail!(
-                                        "Inconsistent Delete - current: {:?}, delete: {:?}",
-                                        current_epoch_value,
-                                        row
+                                    consistency_panic!(
+                                        current = ?current_epoch_value,
+                                        to_delete = ?row,
+                                        "inconsistent delete",
                                     );
                                 }
                                 current_epoch_value = None;
@@ -556,13 +547,15 @@ mod tests {
         let (tx_r, source_r) = MockSource::channel();
         let source_r = source_r.into_executor(schema, vec![]);
 
+        let ctx = ActorContext::for_test(123);
+        let eval_error_report = ActorEvalErrorReport {
+            actor_context: ctx.clone(),
+            identity: "DynamicFilterExecutor".into(),
+        };
         let executor = DynamicFilterExecutor::<MemoryStateStore, false>::new(
-            ActorContext::for_test(123),
-            &ExecutorInfo {
-                schema: source_l.schema().clone(),
-                pk_indices: vec![0],
-                identity: "DynamicFilterExecutor".to_string(),
-            },
+            ctx,
+            eval_error_report,
+            source_l.schema().clone(),
             source_l,
             source_r,
             0,

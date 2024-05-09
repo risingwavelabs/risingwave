@@ -35,7 +35,7 @@ pub struct UserManager {
 
 impl UserManager {
     pub async fn new(env: MetaSrvEnv, database: &DatabaseManager) -> MetaResult<Self> {
-        let users = UserInfo::list(env.meta_store_checked()).await?;
+        let users = UserInfo::list(env.meta_store().as_kv()).await?;
         let user_info = BTreeMap::from_iter(users.into_iter().map(|user| (user.id, user)));
 
         let mut user_manager = Self {
@@ -67,6 +67,13 @@ impl UserManager {
                     .map(|table| table.owner),
             )
             .chain(database.views.values().map(|view| view.owner))
+            .chain(database.functions.values().map(|function| function.owner))
+            .chain(
+                database
+                    .connections
+                    .values()
+                    .map(|connection| connection.owner),
+            )
             .for_each(|owner_id| user_manager.increase_ref(owner_id));
 
         Ok(user_manager)

@@ -33,6 +33,7 @@ pub struct BackfillStateTableHandler<S: StateStore> {
 }
 
 impl<S: StateStore> BackfillStateTableHandler<S> {
+    /// See also [`super::SourceStateTableHandler::from_table_catalog`] for how the state table looks like.
     pub async fn from_table_catalog(table_catalog: &PbTable, store: S) -> Self {
         Self {
             state_store: StateTable::from_table_catalog(table_catalog, store, None).await,
@@ -67,7 +68,6 @@ impl<S: StateStore> BackfillStateTableHandler<S> {
         let mut ret = vec![];
         while let Some(item) = state_table_iter.next().await {
             let row = item?.into_owned_row();
-            tracing::debug!("scanning backfill state table, row: {:?}", row);
             let state = match row.datum_at(1) {
                 Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
                     BackfillState::restore_from_json(jsonb_ref.to_owned_scalar())?

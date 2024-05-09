@@ -104,6 +104,10 @@ pub enum AlterTableOperation {
         deferred: bool,
     },
     RefreshSchema,
+    /// `SET STREAMING_RATE_LIMIT TO <rate_limit>`
+    SetStreamingRateLimit {
+        rate_limit: i32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -138,6 +142,10 @@ pub enum AlterViewOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    /// `SET STREAMING_RATE_LIMIT TO <rate_limit>`
+    SetStreamingRateLimit {
+        rate_limit: i32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -163,6 +171,15 @@ pub enum AlterSinkOperation {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterSubscriptionOperation {
+    RenameSubscription { subscription_name: ObjectName },
+    ChangeOwner { new_owner_name: Ident },
+    SetSchema { new_schema_name: ObjectName },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterSourceOperation {
     RenameSource { source_name: ObjectName },
     AddColumn { column_def: ColumnDef },
@@ -170,6 +187,7 @@ pub enum AlterSourceOperation {
     SetSchema { new_schema_name: ObjectName },
     FormatEncode { connector_schema: ConnectorSchema },
     RefreshSchema,
+    SetStreamingRateLimit { rate_limit: i32 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -281,6 +299,9 @@ impl fmt::Display for AlterTableOperation {
             AlterTableOperation::RefreshSchema => {
                 write!(f, "REFRESH SCHEMA")
             }
+            AlterTableOperation::SetStreamingRateLimit { rate_limit } => {
+                write!(f, "SET STREAMING_RATE_LIMIT TO {}", rate_limit)
+            }
         }
     }
 }
@@ -329,6 +350,9 @@ impl fmt::Display for AlterViewOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
+            AlterViewOperation::SetStreamingRateLimit { rate_limit } => {
+                write!(f, "SET STREAMING_RATE_LIMIT TO {}", rate_limit)
+            }
         }
     }
 }
@@ -360,6 +384,22 @@ impl fmt::Display for AlterSinkOperation {
     }
 }
 
+impl fmt::Display for AlterSubscriptionOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterSubscriptionOperation::RenameSubscription { subscription_name } => {
+                write!(f, "RENAME TO {subscription_name}")
+            }
+            AlterSubscriptionOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {}", new_owner_name)
+            }
+            AlterSubscriptionOperation::SetSchema { new_schema_name } => {
+                write!(f, "SET SCHEMA {}", new_schema_name)
+            }
+        }
+    }
+}
+
 impl fmt::Display for AlterSourceOperation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -380,6 +420,9 @@ impl fmt::Display for AlterSourceOperation {
             }
             AlterSourceOperation::RefreshSchema => {
                 write!(f, "REFRESH SCHEMA")
+            }
+            AlterSourceOperation::SetStreamingRateLimit { rate_limit } => {
+                write!(f, "SET STREAMING_RATE_LIMIT TO {}", rate_limit)
             }
         }
     }

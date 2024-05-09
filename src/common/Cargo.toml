@@ -25,7 +25,7 @@ arrow-cast-deltalake = { workspace = true }
 arrow-schema = { workspace = true }
 arrow-schema-deltalake = { workspace = true }
 async-trait = "0.1"
-auto_enums = "0.8"
+auto_enums = { workspace = true }
 auto_impl = "1"
 bitflags = "2"
 byteorder = "1"
@@ -34,8 +34,8 @@ chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",
 ] }
-chrono-tz = { version = "0.8", features = ["case-insensitive"] }
-clap = { version = "4", features = ["derive"] }
+chrono-tz = { version = "0.9", features = ["case-insensitive"] }
+clap = { workspace = true }
 comfy-table = "7"
 crc32fast = "1"
 easy-ext = "1"
@@ -44,7 +44,7 @@ either = "1"
 enum-as-inner = "0.6"
 enumflags2 = { version = "0.7.8" }
 ethnum = { version = "1", features = ["serde"] }
-fixedbitset = { version = "0.5", features = ["std"] }
+fixedbitset = "0.5"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 governor = { version = "0.6", default-features = false, features = ["std"] }
@@ -52,7 +52,7 @@ hex = "0.4.3"
 http = "0.2"
 humantime = "2.1"
 hytra = { workspace = true }
-itertools = "0.12"
+itertools = { workspace = true }
 itoa = "1.0"
 jsonbb = "0.1.2"
 lru = { workspace = true }
@@ -62,7 +62,7 @@ num-traits = "0.2"
 number_prefix = "0.4.0"
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
-parking_lot = "0.12"
+parking_lot = { workspace = true }
 parse-display = "0.9"
 paste = "1"
 pin-project-lite = "0.2"
@@ -71,15 +71,15 @@ postgres-types = { version = "0.2.6", features = [
     "with-chrono-0_4",
     "with-serde_json-1",
 ] }
-prehash = "1"
 prometheus = { version = "0.13" }
 prost = { workspace = true }
-rand = "0.8"
+rand = { workspace = true }
 regex = "1"
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.12.2", features = ["json"] }
 risingwave-fields-derive = { path = "./fields-derive" }
+risingwave_common_estimate_size = { workspace = true }
 risingwave_common_metrics = { path = "./metrics" }
-risingwave_common_proc_macro = { path = "./proc_macro" }
+risingwave_common_proc_macro = { workspace = true }
 risingwave_error = { workspace = true }
 risingwave_pb = { workspace = true }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
@@ -92,7 +92,8 @@ serde_default = "0.1"
 serde_json = "1"
 serde_with = "3"
 smallbitset = "0.7.1"
-speedate = "0.13.0"
+speedate = "0.14.0"
+stacker = "0.1"
 static_assertions = "1"
 strum = "0.26"
 strum_macros = "0.26"
@@ -138,7 +139,7 @@ criterion = { workspace = true }
 expect-test = "1"
 more-asserts = "0.3"
 pretty_assertions = "1"
-rand = "0.8"
+rand = { workspace = true }
 rusty-fork = "0.3"
 tempfile = "3"
 

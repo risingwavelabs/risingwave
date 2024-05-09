@@ -18,11 +18,11 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::aggregate::{AggCall, AggregateState, BoxedAggregateFunction};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
@@ -250,7 +250,9 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 }
             }
             // update memory usage
-            self.mem_context.add(memory_usage_diff);
+            if !self.mem_context.add(memory_usage_diff) {
+                Err(BatchError::OutOfMemory(self.mem_context.mem_limit()))?;
+            }
         }
 
         // Don't use `into_iter` here, it may cause memory leak.
@@ -323,7 +325,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_int32_grouped() {
-        let parent_mem = MemoryContext::root(LabelGuardedIntGauge::<4>::test_int_gauge());
+        let parent_mem = MemoryContext::root(LabelGuardedIntGauge::<4>::test_int_gauge(), u64::MAX);
         {
             let src_exec = Box::new(MockExecutor::with_chunk(
                 DataChunk::from_pretty(

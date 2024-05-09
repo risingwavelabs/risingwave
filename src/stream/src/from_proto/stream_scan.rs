@@ -24,8 +24,8 @@ use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use super::*;
 use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
 use crate::executor::{
-    ArrangementBackfillExecutor, BackfillExecutor, ChainExecutor, FlowControlExecutor,
-    RearrangedChainExecutor,
+    ArrangementBackfillExecutor, BackfillExecutor, ChainExecutor, RearrangedChainExecutor,
+    TroublemakerExecutor,
 };
 
 pub struct StreamScanExecutorBuilder;
@@ -145,14 +145,20 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
             }
             StreamScanType::Unspecified => unreachable!(),
         };
-        let mut info = params.info.clone();
-        info.identity = format!("{} (flow controlled)", info.identity);
 
-        let exec = FlowControlExecutor::new(
-            (info, exec).into(),
-            params.actor_context,
-            node.rate_limit.map(|x| x as _),
-        );
-        Ok((params.info, exec).into())
+        if crate::consistency::insane() {
+            let mut info = params.info.clone();
+            info.identity = format!("{} (troubled)", info.identity);
+            Ok((
+                params.info,
+                TroublemakerExecutor::new(
+                    (info, exec).into(),
+                    params.env.config().developer.chunk_size,
+                ),
+            )
+                .into())
+        } else {
+            Ok((params.info, exec).into())
+        }
     }
 }

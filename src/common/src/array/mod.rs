@@ -14,15 +14,10 @@
 
 //! `Array` defines all in-memory representations of vectorized execution framework.
 
-mod arrow;
-pub use arrow::{
-    to_deltalake_record_batch_with_schema, to_iceberg_record_batch_with_schema,
-    to_record_batch_with_schema,
-};
+pub mod arrow;
 mod bool_array;
 pub mod bytes_array;
 mod chrono_array;
-pub mod compact_chunk;
 mod data_chunk;
 pub mod data_chunk_iter;
 mod decimal_array;
@@ -52,7 +47,6 @@ pub use chrono_array::{
     DateArray, DateArrayBuilder, TimeArray, TimeArrayBuilder, TimestampArray,
     TimestampArrayBuilder, TimestamptzArray, TimestamptzArrayBuilder,
 };
-pub use compact_chunk::*;
 pub use data_chunk::{DataChunk, DataChunkTestExt};
 pub use data_chunk_iter::RowRef;
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
@@ -62,15 +56,16 @@ pub use jsonb_array::{JsonbArray, JsonbArrayBuilder};
 pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::PbArray;
 pub use stream_chunk::{Op, StreamChunk, StreamChunkTestExt};
+pub use stream_chunk_builder::StreamChunkBuilder;
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
 
 pub use self::error::ArrayError;
 pub use crate::array::num256_array::{Int256Array, Int256ArrayBuilder};
 use crate::buffer::Bitmap;
-use crate::estimate_size::EstimateSize;
 use crate::types::*;
 use crate::{dispatch_array_builder_variants, dispatch_array_variants, for_all_array_variants};
 pub type ArrayResult<T> = Result<T, ArrayError>;

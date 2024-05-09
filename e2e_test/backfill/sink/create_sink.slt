@@ -12,6 +12,9 @@ statement ok
 insert into t select * from generate_series(1, 10000);
 
 statement ok
+SET BACKGROUND_DDL=true;
+
+statement ok
 create sink s as select x.v1 as v1
 from t x join t y
     on x.v1 = y.v1
@@ -23,3 +26,6 @@ with (
     allow.auto.create.topics=true,
 )
 FORMAT DEBEZIUM ENCODE JSON;
+
+statement ok
+SET BACKGROUND_DDL=false;

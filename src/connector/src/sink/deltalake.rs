@@ -25,7 +25,8 @@ use deltalake::table::builder::s3_storage_options::{
 };
 use deltalake::writer::{DeltaWriter, RecordBatchWriter};
 use deltalake::DeltaTable;
-use risingwave_common::array::{to_deltalake_record_batch_with_schema, StreamChunk};
+use risingwave_common::array::arrow::DeltaLakeConvert;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
@@ -48,6 +49,7 @@ use crate::sink::writer::SinkWriterExt;
 
 pub const DELTALAKE_SINK: &str = "deltalake";
 pub const DEFAULT_REGION: &str = "us-east-1";
+pub const GCS_SERVICE_ACCOUNT: &str = "service_account_key";
 
 #[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
 pub struct DeltaLakeCommon {
@@ -61,6 +63,8 @@ pub struct DeltaLakeCommon {
     pub s3_region: Option<String>,
     #[serde(rename = "s3.endpoint")]
     pub s3_endpoint: Option<String>,
+    #[serde(rename = "gcs.service.account")]
+    pub gcs_service_account: Option<String>,
 }
 impl DeltaLakeCommon {
     pub async fn create_deltalake_client(&self) -> Result<DeltaTable> {
@@ -98,6 +102,19 @@ impl DeltaLakeCommon {
                 deltalake::open_table_with_storage_options(s3_path.clone(), storage_options).await?
             }
             DeltaTableUrl::Local(local_path) => deltalake::open_table(local_path).await?,
+            DeltaTableUrl::Gcs(gcs_path) => {
+                let mut storage_options = HashMap::new();
+                storage_options.insert(
+                    GCS_SERVICE_ACCOUNT.to_string(),
+                    self.gcs_service_account.clone().ok_or_else(|| {
+                        SinkError::Config(anyhow!(
+                            "gcs.service.account is required with Google Cloud Storage (GCS)"
+                        ))
+                    })?,
+                );
+                deltalake::open_table_with_storage_options(gcs_path.clone(), storage_options)
+                    .await?
+            }
         };
         Ok(table)
     }
@@ -105,11 +122,13 @@ impl DeltaLakeCommon {
     fn get_table_url(path: &str) -> Result<DeltaTableUrl> {
         if path.starts_with("s3://") || path.starts_with("s3a://") {
             Ok(DeltaTableUrl::S3(path.to_string()))
+        } else if path.starts_with("gs://") {
+            Ok(DeltaTableUrl::Gcs(path.to_string()))
         } else if let Some(path) = path.strip_prefix("file://") {
             Ok(DeltaTableUrl::Local(path.to_string()))
         } else {
             Err(SinkError::DeltaLake(anyhow!(
-                "path need to start with 's3://','s3a://'(s3) or file://(local)"
+                "path need to start with 's3://','s3a://'(s3) ,gs://(gcs) or file://(local)"
             )))
         }
     }
@@ -118,6 +137,7 @@ impl DeltaLakeCommon {
 enum DeltaTableUrl {
     S3(String),
     Local(String),
+    Gcs(String),
 }
 
 #[serde_as]
@@ -369,7 +389,8 @@ impl DeltaLakeSinkWriter {
     }
 
     async fn write(&mut self, chunk: StreamChunk) -> Result<()> {
-        let a = to_deltalake_record_batch_with_schema(self.dl_schema.clone(), &chunk)
+        let a = DeltaLakeConvert
+            .to_record_batch(self.dl_schema.clone(), &chunk)
             .context("convert record batch error")
             .map_err(SinkError::DeltaLake)?;
         self.writer.write(a).await?;

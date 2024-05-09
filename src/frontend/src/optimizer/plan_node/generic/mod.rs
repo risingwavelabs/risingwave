@@ -40,10 +40,12 @@ mod expand;
 pub use expand::*;
 mod source;
 pub use source::*;
-mod scan;
-pub use scan::*;
+mod table_scan;
+pub use table_scan::*;
 mod sys_scan;
 pub use sys_scan::*;
+mod log_scan;
+pub use log_scan::*;
 
 mod cdc_scan;
 pub use cdc_scan::*;

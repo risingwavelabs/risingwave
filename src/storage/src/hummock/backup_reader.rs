@@ -24,7 +24,7 @@ use futures::FutureExt;
 use risingwave_backup::error::BackupError;
 use risingwave_backup::meta_snapshot::{MetaSnapshot, Metadata};
 use risingwave_backup::storage::{MetaSnapshotStorage, ObjectStoreMetaSnapshotStorage};
-use risingwave_backup::{meta_snapshot_v1, MetaSnapshotId};
+use risingwave_backup::{meta_snapshot_v1, meta_snapshot_v2, MetaSnapshotId};
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -45,13 +45,14 @@ type VersionHolder = (
 
 async fn create_snapshot_store(
     config: &StoreConfig,
+    object_store_config: &ObjectStoreConfig,
 ) -> StorageResult<ObjectStoreMetaSnapshotStorage> {
     let backup_object_store = Arc::new(
         build_remote_object_store(
             &config.0,
             Arc::new(ObjectStoreMetrics::unused()),
             "Meta Backup",
-            ObjectStoreConfig::default(),
+            Arc::new(object_store_config.clone()),
         )
         .await,
     );
@@ -69,26 +70,38 @@ pub struct BackupReader {
     inflight_request: parking_lot::Mutex<HashMap<MetaSnapshotId, InflightRequest>>,
     store: ArcSwap<(ObjectStoreMetaSnapshotStorage, StoreConfig)>,
     refresh_tx: tokio::sync::mpsc::UnboundedSender<u64>,
+    object_store_config: ObjectStoreConfig,
 }
 
 impl BackupReader {
-    pub async fn new(storage_url: &str, storage_directory: &str) -> StorageResult<BackupReaderRef> {
+    pub async fn new(
+        storage_url: &str,
+        storage_directory: &str,
+        object_store_config: &ObjectStoreConfig,
+    ) -> StorageResult<BackupReaderRef> {
         let config = (storage_url.to_string(), storage_directory.to_string());
-        let store = create_snapshot_store(&config).await?;
+        let store = create_snapshot_store(&config, object_store_config).await?;
         tracing::info!(
             "backup reader is initialized: url={}, dir={}",
             config.0,
             config.1
         );
-        Ok(Self::with_store((store, config)))
+        Ok(Self::with_store(
+            (store, config),
+            object_store_config.clone(),
+        ))
     }
 
-    fn with_store(store: (ObjectStoreMetaSnapshotStorage, StoreConfig)) -> BackupReaderRef {
+    fn with_store(
+        store: (ObjectStoreMetaSnapshotStorage, StoreConfig),
+        object_store_config: ObjectStoreConfig,
+    ) -> BackupReaderRef {
         let (refresh_tx, refresh_rx) = tokio::sync::mpsc::unbounded_channel();
         let instance = Arc::new(Self {
             store: ArcSwap::from_pointee(store),
             versions: Default::default(),
             inflight_request: Default::default(),
+            object_store_config,
             refresh_tx,
         });
         tokio::spawn(Self::start_manifest_refresher(instance.clone(), refresh_rx));
@@ -96,14 +109,17 @@ impl BackupReader {
     }
 
     pub async fn unused() -> BackupReaderRef {
-        Self::with_store((
-            risingwave_backup::storage::unused().await,
-            StoreConfig::default(),
-        ))
+        Self::with_store(
+            (
+                risingwave_backup::storage::unused().await,
+                StoreConfig::default(),
+            ),
+            ObjectStoreConfig::default(),
+        )
     }
 
     async fn set_store(&self, config: StoreConfig) -> StorageResult<()> {
-        let new_store = create_snapshot_store(&config).await?;
+        let new_store = create_snapshot_store(&config, &self.object_store_config).await?;
         tracing::info!(
             "backup reader is updated: url={}, dir={}",
             config.0,
@@ -171,19 +187,17 @@ impl BackupReader {
         // Use the same store throughout the call.
         let current_store = self.store.load_full();
         // 1. check manifest to locate snapshot, if any.
-        let snapshot_id = current_store
+        let Some(snapshot_metadata) = current_store
             .0
             .manifest()
             .snapshot_metadata
             .iter()
             .find(|v| epoch >= v.safe_epoch && epoch <= v.max_committed_epoch)
-            .map(|s| s.id);
-        let snapshot_id = match snapshot_id {
-            None => {
-                return Ok(None);
-            }
-            Some(s) => s,
+            .cloned()
+        else {
+            return Ok(None);
         };
+        let snapshot_id = snapshot_metadata.id;
         // 2. load hummock version of chosen snapshot.
         let future = {
             let mut req_guard = self.inflight_request.lock();
@@ -195,16 +209,28 @@ impl BackupReader {
             } else {
                 let this = self.clone();
                 let f = async move {
-                    // TODO: change to v2
-                    let snapshot: meta_snapshot_v1::MetaSnapshotV1 =
-                        current_store.0.get(snapshot_id).await.map_err(|e| {
-                            format!(
-                                "failed to get meta snapshot {}: {}",
-                                snapshot_id,
-                                e.as_report()
-                            )
-                        })?;
-                    let version_holder = build_version_holder(snapshot);
+                    let to_not_found_error = |e: BackupError| {
+                        format!(
+                            "failed to get meta snapshot {}: {}",
+                            snapshot_id,
+                            e.as_report()
+                        )
+                    };
+                    let version_holder = if snapshot_metadata.format_version < 2 {
+                        let snapshot: meta_snapshot_v1::MetaSnapshotV1 = current_store
+                            .0
+                            .get(snapshot_id)
+                            .await
+                            .map_err(to_not_found_error)?;
+                        build_version_holder(snapshot)
+                    } else {
+                        let snapshot: meta_snapshot_v2::MetaSnapshotV2 = current_store
+                            .0
+                            .get(snapshot_id)
+                            .await
+                            .map_err(to_not_found_error)?;
+                        build_version_holder(snapshot)
+                    };
                     let version_clone = version_holder.0.clone();
                     this.versions.write().insert(snapshot_id, version_holder);
                     Ok(version_clone)

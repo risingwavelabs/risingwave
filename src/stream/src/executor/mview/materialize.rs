@@ -12,40 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
-use std::ops::Deref;
-use std::sync::Arc;
+use std::ops::{Deref, Index};
 
 use bytes::Bytes;
-use futures::{stream, StreamExt};
-use futures_async_stream::try_stream;
+use futures::stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::Op;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Schema, TableId};
-use risingwave_common::row::{CompactedRow, RowDeserializer};
-use risingwave_common::types::DataType;
+use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, TableId};
+use risingwave_common::row::{CompactedRow, OwnedRow, RowDeserializer};
+use risingwave_common::types::DefaultOrd;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_common::util::value_encoding::BasicSerde;
+use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerializer};
 use risingwave_pb::catalog::Table;
 use risingwave_storage::mem_table::KeyOp;
-use risingwave_storage::row_serde::value_serde::ValueRowSerde;
-use risingwave_storage::StateStore;
+use risingwave_storage::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
-use crate::common::table::state_table::StateTableInner;
-use crate::executor::error::StreamExecutorError;
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{
-    expect_first_barrier, ActorContext, ActorContextRef, AddMutation, BoxedMessageStream, Execute,
-    Executor, Message, Mutation, StreamExecutorResult, UpdateMutation,
-};
-use crate::task::{ActorId, AtomicU64Ref};
+use crate::common::table::state_table::{StateTableInner, StateTableOpConsistencyLevel};
+use crate::executor::prelude::*;
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
 pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
@@ -63,6 +55,28 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
     materialize_cache: MaterializeCache<SD>,
 
     conflict_behavior: ConflictBehavior,
+
+    version_column_index: Option<u32>,
+
+    may_have_downstream: bool,
+
+    depended_subscription_ids: HashSet<u32>,
+}
+
+fn get_op_consistency_level(
+    conflict_behavior: ConflictBehavior,
+    may_have_downstream: bool,
+    depended_subscriptions: &HashSet<u32>,
+) -> StateTableOpConsistencyLevel {
+    if !depended_subscriptions.is_empty() {
+        StateTableOpConsistencyLevel::LogStoreEnabled
+    } else if !may_have_downstream && matches!(conflict_behavior, ConflictBehavior::Overwrite) {
+        // Table with overwrite conflict behavior could disable conflict check
+        // if no downstream mv depends on it, so we use a inconsistent_op to skip sanity check as well.
+        StateTableOpConsistencyLevel::Inconsistent
+    } else {
+        StateTableOpConsistencyLevel::ConsistentOldValue
+    }
 }
 
 impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
@@ -80,31 +94,59 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         table_catalog: &Table,
         watermark_epoch: AtomicU64Ref,
         conflict_behavior: ConflictBehavior,
+        version_column_index: Option<u32>,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
-        let arrange_key_indices: Vec<usize> = arrange_key.iter().map(|k| k.column_index).collect();
+        let table_columns: Vec<ColumnDesc> = table_catalog
+            .columns
+            .iter()
+            .map(|col| col.column_desc.as_ref().unwrap().into())
+            .collect();
 
+        let row_serde: BasicSerde = BasicSerde::new(
+            Arc::from_iter(table_catalog.value_indices.iter().map(|val| *val as usize)),
+            Arc::from(table_columns.into_boxed_slice()),
+        );
+
+        let arrange_key_indices: Vec<usize> = arrange_key.iter().map(|k| k.column_index).collect();
+        let may_have_downstream = actor_context.initial_dispatch_num != 0;
+        let depended_subscription_ids = actor_context
+            .related_subscriptions
+            .get(&TableId::new(table_catalog.id))
+            .cloned()
+            .unwrap_or_default();
+        let op_consistency_level = get_op_consistency_level(
+            conflict_behavior,
+            may_have_downstream,
+            &depended_subscription_ids,
+        );
         // Note: The current implementation could potentially trigger a switch on the inconsistent_op flag. If the storage relies on this flag to perform optimizations, it would be advisable to maintain consistency with it throughout the lifecycle.
-        let state_table = if matches!(conflict_behavior, ConflictBehavior::Overwrite)
-            && actor_context.dispatch_num == 0
-        {
-            // Table with overwrite conflict behavior could disable conflict check if no downstream mv depends on it, so we use a inconsistent_op to skip sanity check as well.
-            StateTableInner::from_table_catalog_inconsistent_op(table_catalog, store, vnodes).await
-        } else {
-            StateTableInner::from_table_catalog(table_catalog, store, vnodes).await
-        };
+        let state_table = StateTableInner::from_table_catalog_with_consistency_level(
+            table_catalog,
+            store,
+            vnodes,
+            op_consistency_level,
+        )
+        .await;
 
         let metrics_info =
             MetricsInfo::new(metrics, table_catalog.id, actor_context.id, "Materialize");
-
         Self {
             input,
             schema,
             state_table,
             arrange_key_indices,
             actor_context,
-            materialize_cache: MaterializeCache::new(watermark_epoch, metrics_info),
+            materialize_cache: MaterializeCache::new(
+                watermark_epoch,
+                metrics_info,
+                row_serde,
+                version_column_index,
+            ),
             conflict_behavior,
+            version_column_index,
+            may_have_downstream,
+            depended_subscription_ids,
         }
     }
 
@@ -114,6 +156,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         let table_id_str = self.state_table.table_id().to_string();
         let actor_id_str = self.actor_context.id.to_string();
         let fragment_id_str = self.actor_context.fragment_id.to_string();
+
+        let mv_table_id = TableId::new(self.state_table.table_id());
 
         let data_types = self.schema.data_types();
         let mut input = self.input.execute();
@@ -138,9 +182,17 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                         .inc_by(chunk.cardinality() as u64);
 
+                    // This is an optimization that handles conflicts only when a particular materialized view downstream has no MV dependencies.
+                    // This optimization is applied only when there is no specified version column and the is_consistent_op flag of the state table is false,
+                    // and the conflict behavior is overwrite.
+                    let do_not_handle_conflict = !self.state_table.is_consistent_op()
+                        && self.version_column_index.is_none()
+                        && self.conflict_behavior == ConflictBehavior::Overwrite;
                     match self.conflict_behavior {
-                        ConflictBehavior::Overwrite | ConflictBehavior::IgnoreConflict
-                            if self.state_table.is_consistent_op() =>
+                        ConflictBehavior::Overwrite
+                        | ConflictBehavior::IgnoreConflict
+                        | ConflictBehavior::DoUpdateIfNotNull
+                            if !do_not_handle_conflict =>
                         {
                             if chunk.cardinality() == 0 {
                                 // empty chunk
@@ -193,25 +245,37 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             }
                         }
                         ConflictBehavior::IgnoreConflict => unreachable!(),
-                        ConflictBehavior::NoCheck | ConflictBehavior::Overwrite => {
+                        ConflictBehavior::NoCheck
+                        | ConflictBehavior::Overwrite
+                        | ConflictBehavior::DoUpdateIfNotNull => {
                             self.state_table.write_chunk(chunk.clone());
                             self.state_table.try_flush().await?;
                             Message::Chunk(chunk)
-                        }
+                        } // ConflictBehavior::DoUpdateIfNotNull => unimplemented!(),
                     }
                 }
                 Message::Barrier(b) => {
-                    let mutation = b.mutation.clone();
                     // If a downstream mv depends on the current table, we need to do conflict check again.
-                    if !self.state_table.is_consistent_op()
-                        && Self::new_downstream_created(mutation, self.actor_context.id)
+                    if !self.may_have_downstream
+                        && b.has_more_downstream_fragments(self.actor_context.id)
                     {
+                        self.may_have_downstream = true;
+                    }
+                    Self::may_update_depended_subscriptions(
+                        &mut self.depended_subscription_ids,
+                        b.mutation.as_deref(),
+                        mv_table_id,
+                    );
+                    let op_consistency_level = get_op_consistency_level(
+                        self.conflict_behavior,
+                        self.may_have_downstream,
+                        &self.depended_subscription_ids,
+                    );
+                    self.state_table
+                        .commit_may_switch_consistent_op(b.epoch, op_consistency_level)
+                        .await?;
+                    if !self.state_table.is_consistent_op() {
                         assert_eq!(self.conflict_behavior, ConflictBehavior::Overwrite);
-                        self.state_table
-                            .commit_with_switch_consistent_op(b.epoch, Some(true))
-                            .await?;
-                    } else {
-                        self.state_table.commit(b.epoch).await?;
                     }
 
                     // Update the vnode bitmap for the state table if asked.
@@ -230,32 +294,54 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         }
     }
 
-    fn new_downstream_created(mutation: Option<Arc<Mutation>>, actor_id: ActorId) -> bool {
-        let Some(mutation) = mutation.as_deref() else {
-            return false;
+    /// return true when changed
+    fn may_update_depended_subscriptions(
+        depended_subscriptions: &mut HashSet<u32>,
+        mutation: Option<&Mutation>,
+        mv_table_id: TableId,
+    ) {
+        let Some(mutation) = mutation else {
+            return;
         };
         match mutation {
-            // Add is for mv, index and sink creation.
-            Mutation::Add(AddMutation { adds, .. }) => adds.get(&actor_id).is_some(),
-            // AddAndUpdate is for sink-into-table.
-            Mutation::AddAndUpdate(
-                AddMutation { adds, .. },
-                UpdateMutation {
-                    dispatchers,
-                    actor_new_dispatchers: actor_dispatchers,
-                    ..
-                },
-            ) => {
-                adds.get(&actor_id).is_some()
-                    || actor_dispatchers.get(&actor_id).is_some()
-                    || dispatchers.get(&actor_id).is_some()
+            Mutation::CreateSubscription {
+                subscription_id,
+                upstream_mv_table_id,
+            } => {
+                if *upstream_mv_table_id == mv_table_id
+                    && !depended_subscriptions.insert(*subscription_id)
+                {
+                    warn!(
+                        ?depended_subscriptions,
+                        ?mv_table_id,
+                        subscription_id,
+                        "subscription id already exists"
+                    );
+                }
             }
-            Mutation::Update(_)
-            | Mutation::Stop(_)
+            Mutation::DropSubscription {
+                subscription_id,
+                upstream_mv_table_id,
+            } => {
+                if *upstream_mv_table_id == mv_table_id
+                    && !depended_subscriptions.remove(subscription_id)
+                {
+                    warn!(
+                        ?depended_subscriptions,
+                        ?mv_table_id,
+                        subscription_id,
+                        "drop non existing subscription id"
+                    );
+                }
+            }
+            Mutation::Stop(_)
+            | Mutation::Update(_)
+            | Mutation::Add(_)
+            | Mutation::SourceChangeSplit(_)
             | Mutation::Pause
             | Mutation::Resume
-            | Mutation::SourceChangeSplit(_)
-            | Mutation::Throttle(_) => false,
+            | Mutation::Throttle(_)
+            | Mutation::AddAndUpdate(_, _) => {}
         }
     }
 }
@@ -275,12 +361,16 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
         let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_index).collect();
         let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
         let schema = input.schema().clone();
-        let columns = column_ids
+        let columns: Vec<ColumnDesc> = column_ids
             .into_iter()
             .zip_eq_fast(schema.fields.iter())
             .map(|(column_id, field)| ColumnDesc::unnamed(column_id, field.data_type()))
             .collect_vec();
 
+        let row_serde = BasicSerde::new(
+            Arc::from((0..columns.len()).collect_vec()),
+            Arc::from(columns.clone().into_boxed_slice()),
+        );
         let state_table = StateTableInner::new_without_distribution(
             store,
             table_id,
@@ -296,8 +386,16 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             state_table,
             arrange_key_indices: arrange_columns.clone(),
             actor_context: ActorContext::for_test(0),
-            materialize_cache: MaterializeCache::new(watermark_epoch, MetricsInfo::for_test()),
+            materialize_cache: MaterializeCache::new(
+                watermark_epoch,
+                MetricsInfo::for_test(),
+                row_serde,
+                None,
+            ),
             conflict_behavior,
+            version_column_index: None,
+            may_have_downstream: true,
+            depended_subscription_ids: HashSet::new(),
         }
     }
 }
@@ -442,18 +540,27 @@ impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S
 pub struct MaterializeCache<SD> {
     data: ManagedLruCache<Vec<u8>, CacheValue>,
     metrics_info: MetricsInfo,
+    row_serde: BasicSerde,
+    version_column_index: Option<u32>,
     _serde: PhantomData<SD>,
 }
 
 type CacheValue = Option<CompactedRow>;
 
 impl<SD: ValueRowSerde> MaterializeCache<SD> {
-    pub fn new(watermark_epoch: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
+    pub fn new(
+        watermark_epoch: AtomicU64Ref,
+        metrics_info: MetricsInfo,
+        row_serde: BasicSerde,
+        version_column_index: Option<u32>,
+    ) -> Self {
         let cache: ManagedLruCache<Vec<u8>, CacheValue> =
             new_unbounded(watermark_epoch, metrics_info.clone());
         Self {
             data: cache,
             metrics_info,
+            row_serde,
+            version_column_index,
             _serde: PhantomData,
         }
     }
@@ -468,11 +575,11 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
             .iter()
             .map(|(_, k, _)| k.as_slice().into())
             .collect();
-
         self.fetch_keys(key_set.iter().map(|v| v.deref()), table, conflict_behavior)
             .await?;
-
         let mut fixed_changes = MaterializeBuffer::new();
+        let row_serde = self.row_serde.clone();
+        let version_column_index = self.version_column_index;
         for (op, key, value) in row_ops {
             let mut update_cache = false;
             let fixed_changes = &mut fixed_changes;
@@ -486,11 +593,30 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                     match conflict_behavior {
                         ConflictBehavior::Overwrite => {
                             match self.force_get(&key) {
-                                Some(old_row) => fixed_changes().update(
-                                    key.clone(),
-                                    old_row.row.clone(),
-                                    value.clone(),
-                                ),
+                                Some(old_row) => {
+                                    let mut handle_conflict = true;
+                                    if let Some(idx) = version_column_index {
+                                        let old_row_deserialized = row_serde
+                                            .deserializer
+                                            .deserialize(old_row.row.clone())?;
+                                        let new_row_deserialized =
+                                            row_serde.deserializer.deserialize(value.clone())?;
+
+                                        handle_conflict = should_handle_conflict(
+                                            old_row_deserialized.index(idx as usize),
+                                            new_row_deserialized.index(idx as usize),
+                                        );
+                                    }
+                                    if handle_conflict {
+                                        fixed_changes().update(
+                                            key.clone(),
+                                            old_row.row.clone(),
+                                            value.clone(),
+                                        )
+                                    } else {
+                                        update_cache = false;
+                                    }
+                                }
                                 None => fixed_changes().insert(key.clone(), value.clone()),
                             };
                         }
@@ -502,17 +628,65 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                 }
                             };
                         }
+
+                        ConflictBehavior::DoUpdateIfNotNull => {
+                            match self.force_get(&key) {
+                                Some(old_row) => {
+                                    // In this section, we compare the new row and old row column by column and perform `DoUpdateIfNotNull` replacement.
+                                    // todo(wcy-fdu):find a way to output the resulting new row directly to the downstream chunk, thus avoiding an additional deserialization step.
+                                    let mut old_row_deserialized_vec = row_serde
+                                        .deserializer
+                                        .deserialize(old_row.row.clone())?
+                                        .into_inner()
+                                        .into_vec();
+                                    let new_row_deserialized =
+                                        row_serde.deserializer.deserialize(value.clone())?;
+                                    let mut handle_conflict = true;
+                                    if let Some(idx) = version_column_index {
+                                        handle_conflict = should_handle_conflict(
+                                            &old_row_deserialized_vec[idx as usize],
+                                            new_row_deserialized.index(idx as usize),
+                                        );
+                                    }
+                                    if handle_conflict {
+                                        execute_do_update_if_not_null_replacement(
+                                            &mut old_row_deserialized_vec,
+                                            new_row_deserialized,
+                                        );
+                                        let new_row = OwnedRow::new(old_row_deserialized_vec);
+                                        let new_row_bytes =
+                                            Bytes::from(row_serde.serializer.serialize(new_row));
+                                        fixed_changes().update(
+                                            key.clone(),
+                                            old_row.row.clone(),
+                                            new_row_bytes.clone(),
+                                        );
+                                        // Since `DoUpdateIfNotNull` may generate values that differ from both the new row and old row,
+                                        // an update cache needs to be done here.
+                                        self.data.push(
+                                            key.clone(),
+                                            Some(CompactedRow { row: new_row_bytes }),
+                                        );
+                                    }
+                                    update_cache = false;
+                                }
+                                None => {
+                                    fixed_changes().insert(key.clone(), value.clone());
+                                    update_cache = true;
+                                }
+                            };
+                        }
                         _ => unreachable!(),
                     };
 
                     if update_cache {
                         match conflict_behavior {
-                            ConflictBehavior::Overwrite => {
+                            ConflictBehavior::Overwrite
+                            | ConflictBehavior::IgnoreConflict
+                            | ConflictBehavior::DoUpdateIfNotNull => {
                                 self.data.push(key, Some(CompactedRow { row: value }));
                             }
-                            ConflictBehavior::IgnoreConflict => {
-                                self.data.push(key, Some(CompactedRow { row: value }));
-                            }
+
                             _ => unreachable!(),
                         }
                     }
@@ -520,20 +694,12 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
 
                 Op::Delete | Op::UpdateDelete => {
                     match conflict_behavior {
-                        ConflictBehavior::Overwrite => {
+                        ConflictBehavior::Overwrite
+                        | ConflictBehavior::IgnoreConflict
+                        | ConflictBehavior::DoUpdateIfNotNull => {
                             match self.force_get(&key) {
                                 Some(old_row) => {
                                     fixed_changes().delete(key.clone(), old_row.row.clone());
-                                }
-                                None => (), // delete a nonexistent value
-                            };
-                        }
-                        ConflictBehavior::IgnoreConflict => {
-                            match self.force_get(&key) {
-                                Some(old_row) => {
-                                    if old_row.row == value {
-                                        fixed_changes().delete(key.clone(), old_row.row.clone());
-                                    }
                                 }
                                 None => (), // delete a nonexistent value
                             };
@@ -581,7 +747,9 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         while let Some(result) = buffered.next().await {
             let (key, value) = result;
             match conflict_behavior {
-                ConflictBehavior::Overwrite => self.data.push(key, value?),
+                ConflictBehavior::Overwrite | ConflictBehavior::DoUpdateIfNotNull => {
+                    self.data.push(key, value?)
+                }
                 ConflictBehavior::IgnoreConflict => self.data.push(key, value?),
                 _ => unreachable!(),
             };
@@ -601,6 +769,61 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
 
     fn evict(&mut self) {
         self.data.evict()
+    }
+}
+
+/// Generates a new row with the behavior of "do update if not null" by replacing columns in the old row with non-empty columns in the new row.
+///
+/// # Arguments
+///
+/// * `old_row` - The old row containing the original values.
+/// * `new_row` - The new row containing the replacement values.
+///
+/// # Example
+///
+/// ```no_run
+/// let old_row = vec![Some(1), None, Some(3)];
+/// let mut new_row = vec![Some(10), Some(20), None];
+///
+///
+/// // After the execute_do_update_if_not_null_replacement function call, old_row will be [Some(10), Some(20), Some(3)].
+/// ```
+fn execute_do_update_if_not_null_replacement(
+    old_row: &mut Vec<Option<ScalarImpl>>,
+    new_row: OwnedRow,
+) {
+    for (old_col, new_col) in old_row.iter_mut().zip_eq_fast(new_row) {
+        if let Some(new_value) = new_col {
+            *old_col = Some(new_value);
+        }
+    }
+}
+/// Determines whether pk conflict should be handled based on the version column of the new and old rows.
+///
+/// # Arguments
+///
+/// * `old_version_column`: The version column value of the old row.
+/// * `new_version_column`: The version column value of the new row.
+///
+/// # Returns
+///
+/// A boolean value indicating whether a conflict should be handled.
+///
+/// If both the new row's version column and the old row's version column are Some, the function will return true if the new row's version is greater than or equal to the old row's version.
+/// If the new row's version column is None and the old row's version column is Some, do not handle pk conflict.
+/// If both the new row's version column and the old row's version column are None, should handle pk conflict.
+fn should_handle_conflict(
+    old_version_column: &Option<ScalarImpl>,
+    new_version_column: &Option<ScalarImpl>,
+) -> bool {
+    match (old_version_column, new_version_column) {
+        (None, None) => true,
+        (None, Some(_)) => true,
+        (Some(_), None) => false,
+        (Some(old_version_col), Some(new_version_col)) => !matches!(
+            old_version_col.default_cmp(new_version_col),
+            Ordering::Greater
+        ),
     }
 }
 
@@ -625,9 +848,9 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::batch_table::storage_table::StorageTable;
 
+    use super::*;
     use crate::executor::test_utils::prelude::StateTable;
     use crate::executor::test_utils::*;
-    use crate::executor::*;
 
     #[tokio::test]
     async fn test_materialize_executor() {
@@ -1459,10 +1682,7 @@ mod tests {
                     )
                     .await
                     .unwrap();
-                assert_eq!(
-                    row,
-                    Some(OwnedRow::new(vec![Some(3_i32.into()), Some(6_i32.into())]))
-                );
+                assert_eq!(row, None);
 
                 // check delete wrong pk
                 let row = table
@@ -1504,8 +1724,202 @@ mod tests {
                     .unwrap();
                 assert_eq!(
                     row,
-                    Some(OwnedRow::new(vec![Some(2_i32.into()), Some(5_i32.into())]))
+                    Some(OwnedRow::new(vec![Some(2_i32.into()), Some(8_i32.into())]))
                 );
+
+                // check update wrong pk, should become insert
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(9_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    row,
+                    Some(OwnedRow::new(vec![Some(9_i32.into()), Some(1_i32.into())]))
+                );
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_do_update_if_not_null_conflict() {
+        // Prepare storage and memtable.
+        let memory_state_store = MemoryStateStore::new();
+        let table_id = TableId::new(1);
+        // Two columns of int32 type, the first column is PK.
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+        ]);
+        let column_ids = vec![0.into(), 1.into()];
+
+        // should get (8, 2)
+        let chunk1 = StreamChunk::from_pretty(
+            " i i
+            + 1 4
+            + 2 .
+            + 3 6
+            U- 8 .
+            U+ 8 2
+            + 8 .",
+        );
+
+        // should not get (3, x), should not get (5, 0)
+        let chunk2 = StreamChunk::from_pretty(
+            " i i
+            + 7 8
+            - 3 4
+            - 5 0",
+        );
+
+        // should get (2, None), (7, 8)
+        let chunk3 = StreamChunk::from_pretty(
+            " i i
+            + 1 5
+            + 7 .
+            U- 2 4
+            U+ 2 .
+            U- 9 0
+            U+ 9 1",
+        );
+
+        // Prepare stream executors.
+        let source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+            Message::Chunk(chunk1),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+            Message::Chunk(chunk2),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
+            Message::Chunk(chunk3),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
+        ])
+        .into_executor(schema.clone(), PkIndices::new());
+
+        let order_types = vec![OrderType::ascending()];
+        let column_descs = vec![
+            ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+            ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ];
+
+        let table = StorageTable::for_test(
+            memory_state_store.clone(),
+            table_id,
+            column_descs,
+            order_types,
+            vec![0],
+            vec![0, 1],
+        );
+
+        let mut materialize_executor = MaterializeExecutor::for_test(
+            source,
+            memory_state_store,
+            table_id,
+            vec![ColumnOrder::new(0, OrderType::ascending())],
+            column_ids,
+            Arc::new(AtomicU64::new(0)),
+            ConflictBehavior::DoUpdateIfNotNull,
+        )
+        .await
+        .boxed()
+        .execute();
+        materialize_executor.next().await.transpose().unwrap();
+
+        materialize_executor.next().await.transpose().unwrap();
+
+        // First stream chunk. We check the existence of (3) -> (3,6)
+        match materialize_executor.next().await.transpose().unwrap() {
+            Some(Message::Barrier(_)) => {
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(8_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    row,
+                    Some(OwnedRow::new(vec![Some(8_i32.into()), Some(2_i32.into())]))
+                );
+
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(2_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(row, Some(OwnedRow::new(vec![Some(2_i32.into()), None])));
+            }
+            _ => unreachable!(),
+        }
+        materialize_executor.next().await.transpose().unwrap();
+
+        match materialize_executor.next().await.transpose().unwrap() {
+            Some(Message::Barrier(_)) => {
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(7_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    row,
+                    Some(OwnedRow::new(vec![Some(7_i32.into()), Some(8_i32.into())]))
+                );
+
+                // check delete wrong value
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(3_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(row, None);
+
+                // check delete wrong pk
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(5_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(row, None);
+            }
+            _ => unreachable!(),
+        }
+
+        materialize_executor.next().await.transpose().unwrap();
+        // materialize_executor.next().await.transpose().unwrap();
+        // Second stream chunk. We check the existence of (7) -> (7,8)
+        match materialize_executor.next().await.transpose().unwrap() {
+            Some(Message::Barrier(_)) => {
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(7_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    row,
+                    Some(OwnedRow::new(vec![Some(7_i32.into()), Some(8_i32.into())]))
+                );
+
+                // check update wrong value
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(2_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(row, Some(OwnedRow::new(vec![Some(2_i32.into()), None])));
 
                 // check update wrong pk, should become insert
                 let row = table

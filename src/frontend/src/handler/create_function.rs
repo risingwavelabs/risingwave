@@ -17,6 +17,7 @@ use arrow_schema::Fields;
 use bytes::Bytes;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
+use risingwave_common::array::arrow::{ToArrow, UdfArrowConvert};
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::get_or_create_wasm_runtime;
@@ -64,6 +65,21 @@ pub async fn handle_create_function(
         // correct protocol.
         None => "".to_string(),
     };
+
+    let rt = match params.runtime {
+        Some(runtime) => {
+            if language.as_str() == "javascript" {
+                runtime.to_string()
+            } else {
+                return Err(ErrorCode::InvalidParameterValue(
+                    "runtime is only supported for javascript".to_string(),
+                )
+                .into());
+            }
+        }
+        None => "".to_string(),
+    };
+
     let return_type;
     let kind = match returns {
         Some(CreateFunctionReturns::Value(data_type)) => {
@@ -122,6 +138,8 @@ pub async fn handle_create_function(
     let mut link = None;
     let mut body = None;
     let mut compressed_binary = None;
+    let mut function_type = None;
+    let mut runtime = None;
 
     match language.as_str() {
         "python" if params.using.is_none() => {
@@ -153,20 +171,20 @@ pub async fn handle_create_function(
                     .await
                     .map_err(|e| anyhow!(e))?;
                 /// A helper function to create a unnamed field from data type.
-                fn to_field(data_type: arrow_schema::DataType) -> arrow_schema::Field {
-                    arrow_schema::Field::new("", data_type, true)
+                fn to_field(data_type: &DataType) -> Result<arrow_schema::Field> {
+                    Ok(UdfArrowConvert.to_arrow_field("", data_type)?)
                 }
                 let args = arrow_schema::Schema::new(
                     arg_types
                         .iter()
-                        .map::<Result<_>, _>(|t| Ok(to_field(t.try_into()?)))
+                        .map(to_field)
                         .try_collect::<_, Fields, _>()?,
                 );
                 let returns = arrow_schema::Schema::new(match kind {
-                    Kind::Scalar(_) => vec![to_field(return_type.clone().try_into()?)],
+                    Kind::Scalar(_) => vec![to_field(&return_type)?],
                     Kind::Table(_) => vec![
                         arrow_schema::Field::new("row_index", arrow_schema::DataType::Int32, true),
-                        to_field(return_type.clone().try_into()?),
+                        to_field(&return_type)?,
                     ],
                     _ => unreachable!(),
                 });
@@ -177,7 +195,7 @@ pub async fn handle_create_function(
             }
             link = Some(l);
         }
-        "javascript" => {
+        "javascript" if rt.as_str() != "deno" => {
             identifier = function_name.to_string();
             body = Some(
                 params
@@ -185,6 +203,46 @@ pub async fn handle_create_function(
                     .ok_or_else(|| ErrorCode::InvalidParameterValue("AS must be specified".into()))?
                     .into_string(),
             );
+            runtime = Some("quickjs".to_string());
+        }
+        "javascript" if rt.as_str() == "deno" => {
+            identifier = function_name.to_string();
+            match (params.using, params.as_) {
+                (None, None) => {
+                    return Err(ErrorCode::InvalidParameterValue(
+                        "Either USING or AS must be specified".into(),
+                    )
+                    .into())
+                }
+                (None, Some(_as)) => body = Some(_as.into_string()),
+                (Some(CreateFunctionUsing::Link(link)), None) => {
+                    let bytes = download_code_from_link(&link).await?;
+                    compressed_binary = Some(zstd::stream::encode_all(bytes.as_slice(), 0)?);
+                }
+                (Some(CreateFunctionUsing::Base64(encoded)), None) => {
+                    use base64::prelude::{Engine, BASE64_STANDARD};
+                    let bytes = BASE64_STANDARD
+                        .decode(encoded)
+                        .context("invalid base64 encoding")?;
+                    compressed_binary = Some(zstd::stream::encode_all(bytes.as_slice(), 0)?);
+                }
+                (Some(_), Some(_)) => {
+                    return Err(ErrorCode::InvalidParameterValue(
+                        "Both USING and AS cannot be specified".into(),
+                    )
+                    .into())
+                }
+            };
+
+            function_type = match params.function_type {
+                Some(CreateFunctionType::Sync) => Some("sync".to_string()),
+                Some(CreateFunctionType::Async) => Some("async".to_string()),
+                Some(CreateFunctionType::Generator) => Some("generator".to_string()),
+                Some(CreateFunctionType::AsyncGenerator) => Some("async_generator".to_string()),
+                None => None,
+            };
+
+            runtime = Some("deno".to_string());
         }
         "rust" => {
             if params.using.is_some() {
@@ -282,6 +340,8 @@ pub async fn handle_create_function(
         always_retry_on_network_error: with_options
             .always_retry_on_network_error
             .unwrap_or_default(),
+        runtime,
+        function_type,
     };
 
     let catalog_writer = session.catalog_writer()?;
@@ -325,16 +385,56 @@ fn find_wasm_identifier_v2(
     runtime: &arrow_udf_wasm::Runtime,
     inlined_signature: &str,
 ) -> Result<String> {
+    // Inline types in function signature.
+    //
+    // # Example
+    //
+    // ```text
+    // types = { "KeyValue": "key:varchar,value:varchar" }
+    // input = "keyvalue(varchar, varchar) -> struct KeyValue"
+    // output = "keyvalue(varchar, varchar) -> struct<key:varchar,value:varchar>"
+    // ```
+    let inline_types = |s: &str| -> String {
+        let mut inlined = s.to_string();
+        // iteratively replace `struct Xxx` with `struct<...>` until no replacement is made.
+        loop {
+            let replaced = inlined.clone();
+            for (k, v) in runtime.types() {
+                inlined = inlined.replace(&format!("struct {k}"), &format!("struct<{v}>"));
+            }
+            if replaced == inlined {
+                return inlined;
+            }
+        }
+    };
+    // Function signature in arrow-udf is case sensitive.
+    // However, SQL identifiers are usually case insensitive and stored in lowercase.
+    // So we should convert the signature to lowercase before comparison.
     let identifier = runtime
-        .find_function_by_inlined_signature(inlined_signature)
+        .functions()
+        .find(|f| inline_types(f).to_lowercase() == inlined_signature)
         .ok_or_else(|| {
             ErrorCode::InvalidParameterValue(format!(
-                "function not found in wasm binary: \"{}\"\nHINT: available functions:\n  {}",
+                "function not found in wasm binary: \"{}\"\nHINT: available functions:\n  {}\navailable types:\n  {}",
                 inlined_signature,
-                runtime.functions().join("\n  ")
+                runtime.functions().join("\n  "),
+                runtime.types().map(|(k, v)| format!("{k}: {v}")).join("\n  "),
             ))
         })?;
     Ok(identifier.into())
+}
+
+/// Download wasm binary from a link.
+#[allow(clippy::unused_async)]
+async fn download_code_from_link(link: &str) -> Result<Vec<u8>> {
+    // currently only local file system is supported
+    if let Some(path) = link.strip_prefix("fs://") {
+        let content =
+            std::fs::read(path).context("failed to read the code from local file system")?;
+        Ok(content)
+    } else {
+        Err(ErrorCode::InvalidParameterValue("only 'fs://' is supported".to_string()).into())
+    }
 }
 
 /// Generate a function identifier in v0.1 format from the function signature.

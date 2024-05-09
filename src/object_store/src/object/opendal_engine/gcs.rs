@@ -12,16 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use opendal::layers::{LoggingLayer, RetryLayer};
+use std::sync::Arc;
+
+use opendal::layers::LoggingLayer;
 use opendal::services::Gcs;
 use opendal::Operator;
+use risingwave_common::config::ObjectStoreConfig;
 
 use super::{EngineType, OpendalObjectStore};
 use crate::object::ObjectResult;
 
 impl OpendalObjectStore {
     /// create opendal gcs engine.
-    pub fn new_gcs_engine(bucket: String, root: String) -> ObjectResult<Self> {
+    pub fn new_gcs_engine(
+        bucket: String,
+        root: String,
+        config: Arc<ObjectStoreConfig>,
+    ) -> ObjectResult<Self> {
         // Create gcs backend builder.
         let mut builder = Gcs::default();
 
@@ -34,13 +41,14 @@ impl OpendalObjectStore {
         if let Ok(cred) = cred {
             builder.credential(&cred);
         }
+
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
-            .layer(RetryLayer::default())
             .finish();
         Ok(Self {
             op,
             engine_type: EngineType::Gcs,
+            config,
         })
     }
 }

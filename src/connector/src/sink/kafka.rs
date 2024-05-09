@@ -26,6 +26,7 @@ use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use strum_macros::{Display, EnumString};
@@ -34,7 +35,7 @@ use with_options::WithOptions;
 
 use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam};
-use crate::common::{KafkaCommon, KafkaPrivateLinkCommon, RdKafkaPropertiesCommon};
+use crate::connector_common::{KafkaCommon, KafkaPrivateLinkCommon, RdKafkaPropertiesCommon};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
@@ -161,6 +162,10 @@ pub struct RdKafkaPropertiesProducer {
     )]
     #[serde_as(as = "DisplayFromStr")]
     max_in_flight_requests_per_connection: usize,
+
+    #[serde(rename = "properties.request.required.acks")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    request_required_acks: Option<i32>,
 }
 
 impl RdKafkaPropertiesProducer {
@@ -194,6 +199,9 @@ impl RdKafkaPropertiesProducer {
         }
         if let Some(v) = &self.compression_codec {
             c.set("compression.codec", v.to_string());
+        }
+        if let Some(v) = self.request_required_acks {
+            c.set("request.required.acks", v.to_string());
         }
         c.set("message.timeout.ms", self.message_timeout_ms.to_string());
         c.set(
@@ -306,8 +314,12 @@ impl Sink for KafkaSink {
 
     const SINK_NAME: &'static str = KAFKA_SINK;
 
-    fn default_sink_decouple(desc: &SinkDesc) -> bool {
-        desc.sink_type.is_append_only()
+    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+        match user_specified {
+            SinkDecouple::Default => Ok(desc.sink_type.is_append_only()),
+            SinkDecouple::Disable => Ok(false),
+            SinkDecouple::Enable => Ok(true),
+        }
     }
 
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
@@ -358,7 +370,7 @@ impl Sink for KafkaSink {
         // use enumerator to validate broker reachability and existence of topic
         let check = KafkaSplitEnumerator::new(
             KafkaProperties::from(self.config.clone()),
-            Arc::new(SourceEnumeratorContext::default()),
+            Arc::new(SourceEnumeratorContext::dummy()),
         )
         .await?;
         if !check.check_reachability().await {
@@ -598,6 +610,7 @@ mod test {
             "properties.compression.codec".to_string() => "zstd".to_string(),
             "properties.message.timeout.ms".to_string() => "114514".to_string(),
             "properties.max.in.flight.requests.per.connection".to_string() => "114514".to_string(),
+            "properties.request.required.acks".to_string() => "-1".to_string(),
         };
         let c = KafkaConfig::from_hashmap(props).unwrap();
         assert_eq!(
@@ -613,6 +626,10 @@ mod test {
             c.rdkafka_properties_producer
                 .max_in_flight_requests_per_connection,
             114514
+        );
+        assert_eq!(
+            c.rdkafka_properties_producer.request_required_acks,
+            Some(-1)
         );
 
         let props: HashMap<String, String> = hashmap! {

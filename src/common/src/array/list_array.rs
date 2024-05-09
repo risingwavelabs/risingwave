@@ -20,6 +20,7 @@ use std::mem::size_of;
 
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::{ListArrayData, PbArray, PbArrayType};
 use serde::{Deserialize, Serializer};
 use thiserror_ext::AsReport;
@@ -29,7 +30,6 @@ use super::{
     PrimitiveArrayItemType, RowRef, Utf8Array,
 };
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::estimate_size::EstimateSize;
 use crate::row::Row;
 use crate::types::{
     hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarImpl, ScalarRefImpl,
@@ -237,6 +237,11 @@ impl ListArray {
             ArrayImpl::List(inner) => inner.flatten(),
             a => a.clone(),
         }
+    }
+
+    /// Return the inner array of the list array.
+    pub fn values(&self) -> &ArrayImpl {
+        &self.value
     }
 
     pub fn from_protobuf(array: &PbArray) -> ArrayResult<ArrayImpl> {

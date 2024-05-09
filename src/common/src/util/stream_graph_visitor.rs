@@ -109,6 +109,9 @@ pub fn visit_stream_node_tables_inner<F>(
                 always!(node.right_table, "HashJoinRight");
                 always!(node.right_degree_table, "HashJoinDegreeRight");
             }
+            NodeBody::TemporalJoin(node) => {
+                optional!(node.memo_table, "TemporalJoinMemo");
+            }
             NodeBody::DynamicFilter(node) => {
                 if node.condition_always_relax {
                     always!(node.left_table, "DynamicFilterLeftNotSatisfy");
@@ -186,6 +189,9 @@ pub fn visit_stream_node_tables_inner<F>(
                 if let Some(source) = &mut node.node_inner {
                     always!(source.state_table, "FsFetch");
                 }
+            }
+            NodeBody::SourceBackfill(node) => {
+                always!(node.state_table, "SourceBackfill")
             }
 
             // Sink

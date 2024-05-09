@@ -87,6 +87,9 @@ DeltaLakeConfig:
   - name: s3.endpoint
     field_type: String
     required: false
+  - name: gcs.service.account
+    field_type: String
+    required: false
   - name: r#type
     field_type: String
     required: true
@@ -107,6 +110,31 @@ DorisConfig:
   - name: doris.table
     field_type: String
     required: true
+  - name: r#type
+    field_type: String
+    required: true
+GooglePubSubConfig:
+  fields:
+  - name: pubsub.project_id
+    field_type: String
+    comments: The Google Pub/Sub Project ID
+    required: true
+  - name: pubsub.topic
+    field_type: String
+    comments: Specifies the Pub/Sub topic to publish messages
+    required: true
+  - name: pubsub.endpoint
+    field_type: String
+    comments: The Google Pub/Sub endpoint URL
+    required: true
+  - name: pubsub.emulator_host
+    field_type: String
+    comments: use the connector with a pubsub emulator  <https://cloud.google.com/pubsub/docs/emulator>
+    required: false
+  - name: pubsub.credentials
+    field_type: String
+    comments: A JSON string containing the service account credentials for authorization,  see the [service-account](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account) credentials guide.  The provided account credential must have the  `pubsub.publisher` [role](https://cloud.google.com/pubsub/docs/access-control#roles)
+    required: false
   - name: r#type
     field_type: String
     required: true
@@ -159,6 +187,10 @@ IcebergConfig:
   - name: java_catalog_props
     field_type: HashMap<String,String>
     required: false
+  - name: commit_checkpoint_interval
+    field_type: u64
+    required: false
+    default: Default::default
 KafkaConfig:
   fields:
   - name: properties.bootstrap.server
@@ -312,6 +344,9 @@ KafkaConfig:
     comments: The maximum number of unacknowledged requests the client will send on a single connection before blocking.
     required: false
     default: '5'
+  - name: properties.request.required.acks
+    field_type: i32
+    required: false
   - name: broker.rewrite.endpoints
     field_type: HashMap<String,String>
     comments: This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
@@ -356,10 +391,6 @@ MqttConfig:
     field_type: String
     comments: The url of the broker to connect to. e.g. tcp://localhost.  Must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,  to denote the protocol for establishing a connection with the broker.  `mqtts://`, `ssl://` will use the native certificates if no ca is specified
     required: true
-  - name: topic
-    field_type: String
-    comments: The topic name to subscribe or publish to. When subscribing, it can be a wildcard topic. e.g /topic/#
-    required: true
   - name: qos
     field_type: QualityOfService
     comments: The quality of service to use when publishing messages. Defaults to at_most_once.  Could be at_most_once, at_least_once or exactly_once
@@ -397,6 +428,10 @@ MqttConfig:
     field_type: String
     comments: Path to client's private key file (PEM). Required for client authentication.  Can be a file path under fs:// or a string with the private key content.
     required: false
+  - name: topic
+    field_type: String
+    comments: The topic name to subscribe or publish to. When subscribing, it can be a wildcard topic. e.g /topic/#
+    required: false
   - name: retain
     field_type: bool
     comments: Whether the message should be retained by the broker
@@ -405,6 +440,9 @@ MqttConfig:
   - name: r#type
     field_type: String
     required: true
+  - name: topic.field
+    field_type: String
+    required: false
 NatsConfig:
   fields:
   - name: server_url
@@ -517,6 +555,56 @@ RedisConfig:
   fields:
   - name: redis.url
     field_type: String
+    required: true
+SnowflakeConfig:
+  fields:
+  - name: snowflake.database
+    field_type: String
+    comments: The snowflake database used for sinking
+    required: true
+  - name: snowflake.schema
+    field_type: String
+    comments: The corresponding schema where sink table exists
+    required: true
+  - name: snowflake.pipe
+    field_type: String
+    comments: The created pipe object, will be used as `insertFiles` target
+    required: true
+  - name: snowflake.account_identifier
+    field_type: String
+    comments: 'The unique, snowflake provided `account_identifier`  NOTE: please use the form `<orgname>-<account_name>`  For detailed guidance, reference: <https://docs.snowflake.com/en/user-guide/admin-account-identifier>'
+    required: true
+  - name: snowflake.user
+    field_type: String
+    comments: 'The user that owns the table to be sinked  NOTE: the user should''ve been granted corresponding *role*  reference: <https://docs.snowflake.com/en/sql-reference/sql/grant-role>'
+    required: true
+  - name: snowflake.rsa_public_key_fp
+    field_type: String
+    comments: 'The public key fingerprint used when generating custom `jwt_token`  reference: <https://docs.snowflake.com/en/developer-guide/sql-api/authenticating>'
+    required: true
+  - name: snowflake.private_key
+    field_type: String
+    comments: The rsa pem key *without* encryption
+    required: true
+  - name: snowflake.s3_bucket
+    field_type: String
+    comments: The s3 bucket where intermediate sink files will be stored
+    required: true
+  - name: snowflake.s3_path
+    field_type: String
+    comments: The optional s3 path to be specified  the actual file location would be `s3://<s3_bucket>/<s3_path>/<rw_auto_gen_intermediate_file_name>`  if this field is specified by user(s)  otherwise it would be `s3://<s3_bucket>/<rw_auto_gen_intermediate_file_name>`
+    required: false
+  - name: snowflake.aws_access_key_id
+    field_type: String
+    comments: s3 credentials
+    required: true
+  - name: snowflake.aws_secret_access_key
+    field_type: String
+    comments: s3 credentials
+    required: true
+  - name: snowflake.aws_region
+    field_type: String
+    comments: The s3 region, e.g., us-east-2
     required: true
 StarrocksConfig:
   fields:

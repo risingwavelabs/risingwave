@@ -19,6 +19,7 @@ use itertools::{EitherOrBoth, Itertools};
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::StreamScanType;
+use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{
     push_down_into_join, push_down_join_condition, GenericPlanNode, GenericPlanRef,
@@ -932,7 +933,7 @@ impl LogicalJoin {
     fn should_be_temporal_join(&self) -> bool {
         let right = self.right();
         if let Some(logical_scan) = right.as_logical_scan() {
-            logical_scan.for_system_time_as_of_proctime()
+            matches!(logical_scan.as_of(), Some(AsOf::ProcessTime))
         } else {
             false
         }
@@ -999,7 +1000,7 @@ impl LogicalJoin {
             )));
         };
 
-        if !logical_scan.for_system_time_as_of_proctime() {
+        if !matches!(logical_scan.as_of(), Some(AsOf::ProcessTime)) {
             return Err(RwError::from(ErrorCode::NotSupported(
                 "Temporal join requires a table defined as temporal table".into(),
                 "Please use FOR SYSTEM_TIME AS OF PROCTIME() syntax".into(),
@@ -1069,13 +1070,6 @@ impl LogicalJoin {
         let left = self.left().to_stream(ctx)?;
         // Enforce a shuffle for the temporal join LHS to let the scheduler be able to schedule the join fragment together with the RHS with a `no_shuffle` exchange.
         let left = required_dist.enforce(left, &Order::any());
-
-        if !left.append_only() {
-            return Err(RwError::from(ErrorCode::NotSupported(
-                "Temporal join requires an append-only left input".into(),
-                "Please ensure your left input is append-only".into(),
-            )));
-        }
 
         // Extract the predicate from logical scan. Only pure scan is supported.
         let (new_scan, scan_predicate, project_expr) = logical_scan.predicate_pull_up();

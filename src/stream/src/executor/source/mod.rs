@@ -12,34 +12,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod executor_core;
 use std::collections::HashMap;
+use std::num::NonZeroU32;
 
 use await_tree::InstrumentAwait;
-pub use executor_core::StreamSourceCore;
-mod fs_source_executor;
-#[expect(deprecated)]
-pub use fs_source_executor::*;
+use governor::clock::MonotonicClock;
+use governor::{Quota, RateLimiter};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::row::Row;
-use risingwave_connector::source::{SourceColumnDesc, SplitId};
+use risingwave_connector::error::ConnectorError;
+use risingwave_connector::source::{BoxChunkSourceStream, SourceColumnDesc, SplitId};
 use risingwave_pb::plan_common::additional_column::ColumnType;
 use risingwave_pb::plan_common::AdditionalColumn;
 pub use state_table_handler::*;
-pub mod fetch_executor;
+
+mod executor_core;
+pub use executor_core::StreamSourceCore;
+
+mod fs_source_executor;
+#[expect(deprecated)]
+pub use fs_source_executor::*;
+mod source_executor;
+pub use source_executor::*;
+mod source_backfill_executor;
+pub use source_backfill_executor::*;
+mod list_executor;
+pub use list_executor::*;
+mod fetch_executor;
 pub use fetch_executor::*;
 
-pub mod source_backfill_executor;
-pub mod source_backfill_state_table;
+mod source_backfill_state_table;
 pub use source_backfill_state_table::BackfillStateTableHandler;
-pub mod source_executor;
 
-pub mod list_executor;
 pub mod state_table_handler;
 use futures_async_stream::try_stream;
-pub use list_executor::*;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::executor::error::StreamExecutorError;
@@ -60,7 +68,9 @@ pub fn get_split_offset_mapping_from_chunk(
     offset_idx: usize,
 ) -> Option<HashMap<SplitId, String>> {
     let mut split_offset_mapping = HashMap::new();
-    for (_, row) in chunk.rows() {
+    // All rows (including those visible or invisible) will be used to update the source offset.
+    for i in 0..chunk.capacity() {
+        let (_, row, _) = chunk.row_at(i);
         let split_id = row.datum_at(split_idx).unwrap().into_utf8().into();
         let offset = row.datum_at(offset_idx).unwrap().into_utf8();
         split_offset_mapping.insert(split_id, offset.to_string());
@@ -104,4 +114,71 @@ pub fn prune_additional_cols(
             })
             .collect_vec(),
     )
+}
+
+#[try_stream(ok = StreamChunk, error = ConnectorError)]
+pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Option<u32>) {
+    if rate_limit_rps == Some(0) {
+        // block the stream until the rate limit is reset
+        let future = futures::future::pending::<()>();
+        future.await;
+        unreachable!();
+    }
+
+    let limiter = rate_limit_rps.map(|limit| {
+        tracing::info!(rate_limit = limit, "rate limit applied");
+        RateLimiter::direct_with_clock(
+            Quota::per_second(NonZeroU32::new(limit).unwrap()),
+            &MonotonicClock,
+        )
+    });
+
+    fn compute_chunk_permits(chunk: &StreamChunk, limit: usize) -> usize {
+        let chunk_size = chunk.capacity();
+        let ends_with_update = if chunk_size >= 2 {
+            // Note we have to check if the 2nd last is `U-` to be consistenct with `StreamChunkBuilder`.
+            // If something inconsistent happens in the stream, we may not have `U+` after this `U-`.
+            chunk.ops()[chunk_size - 2].is_update_delete()
+        } else {
+            false
+        };
+        if chunk_size == limit + 1 && ends_with_update {
+            // If the chunk size exceed limit because of the last `Update` operation,
+            // we should minus 1 to make sure the permits consumed is within the limit (max burst).
+            chunk_size - 1
+        } else {
+            chunk_size
+        }
+    }
+
+    #[for_await]
+    for chunk in stream {
+        let chunk = chunk?;
+        let chunk_size = chunk.capacity();
+
+        if rate_limit_rps.is_none() || chunk_size == 0 {
+            // no limit, or empty chunk
+            yield chunk;
+            continue;
+        }
+
+        let limiter = limiter.as_ref().unwrap();
+        let limit = rate_limit_rps.unwrap() as usize;
+
+        let required_permits = compute_chunk_permits(&chunk, limit);
+        if required_permits <= limit {
+            let n = NonZeroU32::new(required_permits as u32).unwrap();
+            // `InsufficientCapacity` should never happen because we have check the cardinality
+            limiter.until_n_ready(n).await.unwrap();
+            yield chunk;
+        } else {
+            // Cut the chunk into smaller chunks
+            for chunk in chunk.split(limit) {
+                let n = NonZeroU32::new(compute_chunk_permits(&chunk, limit) as u32).unwrap();
+                // chunks split should have effective chunk size <= limit
+                limiter.until_n_ready(n).await.unwrap();
+                yield chunk;
+            }
+        }
+    }
 }

@@ -16,10 +16,11 @@ use risingwave_pb::catalog::connection::PbInfo;
 use risingwave_pb::catalog::PbConnection;
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
+use serde::{Deserialize, Serialize};
 
 use crate::{ConnectionId, PrivateLinkService};
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "connection")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
@@ -73,7 +74,7 @@ impl From<PbConnection> for ActiveModel {
         Self {
             connection_id: Set(conn.id as _),
             name: Set(conn.name),
-            info: Set(PrivateLinkService(private_link_srv)),
+            info: Set(PrivateLinkService::from(&private_link_srv)),
         }
     }
 }

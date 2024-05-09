@@ -31,7 +31,7 @@ use tokio_util::io;
 use tokio_util::io::ReaderStream;
 
 use crate::aws_utils::{default_conn_config, s3_client};
-use crate::common::AwsAuthProps;
+use crate::connector_common::AwsAuthProps;
 use crate::error::ConnectorResult;
 use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
 use crate::source::base::{SplitMetaData, SplitReader};
@@ -266,7 +266,9 @@ mod tests {
     };
     use crate::source::filesystem::s3::S3PropertiesCommon;
     use crate::source::filesystem::S3SplitEnumerator;
-    use crate::source::{SourceColumnDesc, SourceEnumeratorContext, SplitEnumerator};
+    use crate::source::{
+        SourceColumnDesc, SourceContext, SourceEnumeratorContext, SplitEnumerator,
+    };
 
     #[tokio::test]
     #[ignore]
@@ -281,7 +283,7 @@ mod tests {
         }
         .into();
         let mut enumerator =
-            S3SplitEnumerator::new(props.clone(), SourceEnumeratorContext::default().into())
+            S3SplitEnumerator::new(props.clone(), SourceEnumeratorContext::dummy().into())
                 .await
                 .unwrap();
         let splits = enumerator.list_splits().await.unwrap();
@@ -307,7 +309,7 @@ mod tests {
             },
         };
 
-        let reader = S3FileReader::new(props, splits, config, Default::default(), None)
+        let reader = S3FileReader::new(props, splits, config, SourceContext::dummy().into(), None)
             .await
             .unwrap();
 

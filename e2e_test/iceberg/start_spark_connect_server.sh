@@ -1,7 +1,7 @@
 set -ex
 
-ICEBERG_VERSION=1.3.1
-SPARK_VERSION=3.4.2
+ICEBERG_VERSION=1.4.3
+SPARK_VERSION=3.4.3
 
 PACKAGES="org.apache.iceberg:iceberg-spark-runtime-3.4_2.12:$ICEBERG_VERSION,org.apache.hadoop:hadoop-aws:3.3.2"
 PACKAGES="$PACKAGES,org.apache.spark:spark-connect_2.12:$SPARK_VERSION"

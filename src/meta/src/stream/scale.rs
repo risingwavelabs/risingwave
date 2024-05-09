@@ -46,14 +46,19 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, PbStreamActor, StreamNode,
 };
+use risingwave_pb::stream_service::build_actor_info::SubscriptionIds;
+use risingwave_pb::stream_service::BuildActorInfo;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::{oneshot, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
+use tracing::warn;
 
 use crate::barrier::{Command, Reschedule, StreamRpcManager};
-use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv, MetadataManager, WorkerId};
+use crate::manager::{
+    IdCategory, IdGenManagerImpl, LocalNotification, MetaSrvEnv, MetadataManager, WorkerId,
+};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::serving::{
     to_deleted_fragment_parallel_unit_mapping, to_fragment_parallel_unit_mapping,
@@ -732,7 +737,7 @@ impl ScaleController {
 
             if (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0 {
                 let stream_node = fragment.actor_template.nodes.as_ref().unwrap();
-                if TableFragments::find_stream_source(stream_node).is_some() {
+                if stream_node.find_stream_source().is_some() {
                     stream_source_fragment_ids.insert(*fragment_id);
                 }
             }
@@ -821,7 +826,7 @@ impl ScaleController {
         &self,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
         actor_infos_to_broadcast: BTreeMap<ActorId, ActorInfo>,
-        node_actors_to_create: HashMap<WorkerId, Vec<PbStreamActor>>,
+        node_actors_to_create: HashMap<WorkerId, Vec<BuildActorInfo>>,
         broadcast_worker_ids: HashSet<WorkerId>,
     ) -> MetaResult<()> {
         self.stream_rpc_manager
@@ -843,7 +848,7 @@ impl ScaleController {
                             *node_id,
                             stream_actors
                                 .iter()
-                                .map(|stream_actor| stream_actor.actor_id)
+                                .map(|stream_actor| stream_actor.actor.as_ref().unwrap().actor_id)
                                 .collect_vec(),
                         )
                     }),
@@ -1121,8 +1126,23 @@ impl ScaleController {
             // After modification, for newly created actors, both upstream and downstream actor ids
             // have been modified
             let mut actor_infos_to_broadcast = BTreeMap::new();
-            let mut node_actors_to_create: HashMap<WorkerId, Vec<_>> = HashMap::new();
+            let mut node_actors_to_create: HashMap<WorkerId, Vec<BuildActorInfo>> = HashMap::new();
             let mut broadcast_worker_ids = HashSet::new();
+
+            let subscriptions: HashMap<_, SubscriptionIds> = self
+                .metadata_manager
+                .get_mv_depended_subscriptions()
+                .await?
+                .iter()
+                .map(|(table_id, subscriptions)| {
+                    (
+                        table_id.table_id,
+                        SubscriptionIds {
+                            subscription_ids: subscriptions.keys().cloned().collect(),
+                        },
+                    )
+                })
+                .collect();
 
             for actors_to_create in fragment_actors_to_create.values() {
                 for (new_actor_id, new_parallel_unit_id) in actors_to_create {
@@ -1185,7 +1205,12 @@ impl ScaleController {
                     node_actors_to_create
                         .entry(worker.id)
                         .or_default()
-                        .push(new_actor.clone());
+                        .push(BuildActorInfo {
+                            actor: Some(new_actor.clone()),
+                            // TODO: may include only the subscriptions related to the table fragment
+                            // of the actor.
+                            related_subscriptions: subscriptions.clone(),
+                        });
 
                     broadcast_worker_ids.insert(worker.id);
 
@@ -1234,6 +1259,7 @@ impl ScaleController {
                 fragment_stream_source_actor_splits.insert(*fragment_id, actor_splits);
             }
         }
+        // TODO: support migrate splits for SourceBackfill
 
         // Generate fragment reschedule plan
         let mut reschedule_fragment: HashMap<FragmentId, Reschedule> =
@@ -1494,16 +1520,12 @@ impl ScaleController {
             }
 
             for created_parallel_unit_id in added_parallel_units {
-                let id = match self.env.sql_id_gen_manager_ref() {
-                    None => {
-                        self.env
-                            .id_gen_manager()
-                            .generate::<{ IdCategory::Actor }>()
-                            .await? as ActorId
+                let id = match self.env.id_gen_manager() {
+                    IdGenManagerImpl::Kv(mgr) => {
+                        mgr.generate::<{ IdCategory::Actor }>().await? as ActorId
                     }
-                    Some(id_gen) => {
-                        let id = id_gen.generate_interval::<{ IdCategory::Actor }>(1);
-
+                    IdGenManagerImpl::Sql(mgr) => {
+                        let id = mgr.generate_interval::<{ IdCategory::Actor }>(1);
                         id as ActorId
                     }
                 };
@@ -1739,6 +1761,7 @@ impl ScaleController {
             self.source_manager
                 .apply_source_change(
                     None,
+                    None,
                     Some(stream_source_actor_splits),
                     Some(stream_source_dropped_actors),
                 )
@@ -1828,16 +1851,17 @@ impl ScaleController {
             table_fragment_id_map: &mut HashMap<u32, HashSet<FragmentId>>,
             fragment_actor_id_map: &mut HashMap<FragmentId, HashSet<u32>>,
             table_fragments: &BTreeMap<TableId, TableFragments>,
-        ) {
+        ) -> MetaResult<()> {
             // This is only for assertion purposes and will be removed once the dispatcher_id is guaranteed to always correspond to the downstream fragment_id,
             // such as through the foreign key constraints in the SQL backend.
             let mut actor_fragment_id_map_for_check = HashMap::new();
             for table_fragments in table_fragments.values() {
                 for (fragment_id, fragment) in &table_fragments.fragments {
                     for actor in &fragment.actors {
-                        debug_assert!(actor_fragment_id_map_for_check
-                            .insert(actor.actor_id, *fragment_id)
-                            .is_none());
+                        let prev =
+                            actor_fragment_id_map_for_check.insert(actor.actor_id, *fragment_id);
+
+                        debug_assert!(prev.is_none());
                     }
                 }
             }
@@ -1870,9 +1894,10 @@ impl ScaleController {
                                         dispatcher.dispatcher_id as FragmentId
                                     );
                                 } else {
-                                    tracing::warn!(
-                                        "downstream actor id {} not found in fragment_actor_id_map",
-                                        downstream_actor_id
+                                    bail!(
+                                        "downstream actor id {} from actor {} not found in fragment_actor_id_map",
+                                        downstream_actor_id,
+                                        actor.actor_id,
                                     );
                                 }
 
@@ -1892,6 +1917,8 @@ impl ScaleController {
 
                 actor_status.extend(table_fragments.actor_status.clone());
             }
+
+            Ok(())
         }
 
         match &self.metadata_manager {
@@ -1905,7 +1932,7 @@ impl ScaleController {
                     &mut table_fragment_id_map,
                     &mut fragment_actor_id_map,
                     guard.table_fragments(),
-                );
+                )?;
             }
             MetadataManager::V2(_) => {
                 let all_table_fragments = self.list_all_table_fragments().await?;
@@ -1922,7 +1949,7 @@ impl ScaleController {
                     &mut table_fragment_id_map,
                     &mut fragment_actor_id_map,
                     &all_table_fragments,
-                );
+                )?;
             }
         }
 
@@ -2001,12 +2028,19 @@ impl ScaleController {
                                 ),
                             );
                         }
-                        TableParallelism::Fixed(n) => {
-                            if n > all_available_parallel_unit_ids.len() {
-                                bail!(
-                                    "Not enough ParallelUnits available for fragment {}",
-                                    fragment_id
+                        TableParallelism::Fixed(mut n) => {
+                            let available_parallelism = all_available_parallel_unit_ids.len();
+
+                            if n > available_parallelism {
+                                warn!(
+                                    "not enough parallel units available for job {} fragment {}, required {}, resetting to {}",
+                                    table_id,
+                                    fragment_id,
+                                    n,
+                                    available_parallelism,
                                 );
+
+                                n = available_parallelism;
                             }
 
                             let rebalance_result =
@@ -2768,10 +2802,10 @@ impl GlobalStreamManager {
                     streaming_parallelisms
                         .into_iter()
                         .map(|(table_id, parallelism)| {
-                            // no custom for sql backend
                             let table_parallelism = match parallelism {
                                 StreamingParallelism::Adaptive => TableParallelism::Adaptive,
                                 StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n),
+                                StreamingParallelism::Custom => TableParallelism::Custom,
                             };
 
                             (table_id as u32, table_parallelism)
