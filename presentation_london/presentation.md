@@ -1,14 +1,19 @@
 # Presentation TiDB + RisingWave
 
+## Intro to streaming
+
+...
+
 ## Intro to RisingWave
 
-## Intro to streaming
+...
+
 
 ## Demo
 
 - This is the big streaming demo 
 - Showing how to get data from TiDB to RW
-- TODO: Add yaml file and commands
+    - New files created e.g. if `max_binlog_size` is reached or on restart
 
 ## Intro to Capture Data Change (CDC) 
 
@@ -29,7 +34,7 @@
 
 - TODO: Connection to Transactions?
 
-- CDC comes along and consumes these logs
+- CDC implementation consumes these logs
   - CDC then emits events and pushes them to e.g. Kafka
   - Example CDC implementation: Debezium
   
@@ -83,7 +88,6 @@ show binary logs;
 ```
 
 - We can see multiple binlogs
-  - TODO: When does the DB create a new log?
 - We can observe that we are writing into binlog, because that is the one where the size increased
   - File size will also increase on deletes
 
