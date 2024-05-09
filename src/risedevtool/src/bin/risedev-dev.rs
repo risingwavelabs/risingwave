@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(iterator_try_collect)]
+
 use std::env;
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use console::style;
 use fs_err::OpenOptions;
 use indicatif::ProgressBar;
@@ -30,6 +32,7 @@ use risedev::{
     PubsubService, RedisService, ServiceConfig, SqliteConfig, Task, TempoService, ZooKeeperService,
     RISEDEV_NAME,
 };
+use serde::{Deserialize, Serialize};
 use tempfile::tempdir;
 use thiserror_ext::AsReport;
 use yaml_rust::YamlEmitter;
@@ -316,7 +319,7 @@ fn task_main(
                 ctx.pb
                     .set_message(format!("redis {}:{}", c.address, c.port));
             }
-            ServiceConfig::MySql(c) => {
+            ServiceConfig::Mysql(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 MySqlService::new(c.clone()).execute(&mut ctx)?;
@@ -336,6 +339,13 @@ fn task_main(
     Ok((stat, log_buffer))
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct Input {
+    profile: String,
+    config_file: Option<String>,
+    steps: Vec<ServiceConfig>,
+}
+
 fn main() -> Result<()> {
     // Intentionally disable backtrace to provide more compact error message for `risedev dev`.
     // Backtraces for RisingWave components are enabled in `Task::execute`.
@@ -347,23 +357,36 @@ fn main() -> Result<()> {
         .nth(1)
         .unwrap_or_else(|| "default".to_string());
 
-    let (config_path, risedev_config) = ConfigExpander::expand(".", &task_name)?;
+    let json = std::process::Command::new("rsjsonnet")
+        .arg("risedev.jsonnet")
+        .arg("-V")
+        .arg(format!("profile={task_name}"))
+        .output()
+        .context("failed to evaluate risedev.jsonnet")?;
+
+    if !json.status.success() {
+        bail!(
+            "failed to evaluate RiseDev profile configuration:\n{}",
+            String::from_utf8_lossy(&json.stderr)
+        );
+    }
+    let input = json.stdout;
+
+    fs_err::write(
+        Path::new(&env::var("PREFIX_CONFIG")?).join("risedev-profile-expanded.json"),
+        &input,
+    )?;
+
+    let Input {
+        profile: task_name,
+        config_file: config_path,
+        steps: services,
+    }: Input = serde_json::from_slice(&input).context("failed to parse input")?;
 
     if let Some(config_path) = &config_path {
         let target = Path::new(&env::var("PREFIX_CONFIG")?).join("risingwave.toml");
         fs_err::copy(config_path, target).context("config file not found")?;
     }
-
-    {
-        let mut out_str = String::new();
-        let mut emitter = YamlEmitter::new(&mut out_str);
-        emitter.dump(&risedev_config)?;
-        fs_err::write(
-            Path::new(&env::var("PREFIX_CONFIG")?).join("risedev-expanded.yml"),
-            &out_str,
-        )?;
-    }
-    let services = ConfigExpander::deserialize(&risedev_config)?;
 
     let mut manager = ProgressManager::new();
     // Always create a progress before calling `task_main`. Otherwise the progress bar won't be

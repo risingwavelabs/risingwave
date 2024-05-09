@@ -5,9 +5,10 @@ local _ = import 'risedev-template.libsonnet';
     configFile: 'src/config/example.toml',
     steps: [
       _.metaNode,
-      _.computeNode { port: 4588, userManaged: true },
-      _.computeNode { port: 4599 },
-      _.minio,
+      _.computeNode,
+      // _.computeNode { port: 4588, userManaged: true },
+      // _.computeNode { port: 4599 },
+      // _.minio,
       _.frontend,
     ],
   },

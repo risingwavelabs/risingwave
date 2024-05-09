@@ -77,7 +77,7 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 writeln!(env, r#"RISEDEV_KAFKA_WITH_OPTIONS_COMMON="connector='kafka',properties.bootstrap.server='{brokers}'""#).unwrap();
                 writeln!(env, r#"RPK_BROKERS="{brokers}""#).unwrap();
             }
-            ServiceConfig::MySql(c) => {
+            ServiceConfig::Mysql(c) => {
                 let host = &c.address;
                 let port = &c.port;
                 let user = &c.user;

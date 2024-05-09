@@ -1,4 +1,8 @@
-local expand = import 'expand.libsonnet';
-local profiles = import 'risedev-profiles.libsonnet';
+local expand = import 'risedev-expand.libsonnet';
+local allProfiles = import 'risedev-profiles.libsonnet';
+local profile = std.extVar('profile');
 
-expand(profiles)[std.extVar('profile')]
+if profile in allProfiles then
+  expand(allProfiles)[profile] { profile: profile }
+else
+  error 'unknown profile ' + profile

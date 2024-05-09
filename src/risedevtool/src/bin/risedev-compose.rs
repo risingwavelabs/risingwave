@@ -222,7 +222,7 @@ fn main() -> Result<()> {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
                 (c.address.clone(), c.compose(&compose_config)?)
             }
-            ServiceConfig::Redis(_) | ServiceConfig::MySql(_) => {
+            ServiceConfig::Redis(_) | ServiceConfig::Mysql(_) => {
                 return Err(anyhow!("not supported"))
             }
         };

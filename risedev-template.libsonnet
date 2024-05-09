@@ -1,5 +1,5 @@
 // The `use` field specified in the above `risedev` section will refer to the templates below.
-{
+local templates = {
   minio: {
     // Advertise address of MinIO s3 endpoint
     address: '127.0.0.1',
@@ -339,4 +339,9 @@
     // to serve at the above address and port in any way they see fit.
     userManaged: false,
   },
+};
+
+{
+  [name]: templates[name] { use: name }
+  for name in std.objectFields(templates)
 }

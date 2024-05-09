@@ -668,6 +668,9 @@ alias = "dev"
 category = "RiseDev - Start/Stop"
 dependencies = ["pre-start-dev"]
 description = "🌟 Start a full RisingWave dev cluster using risedev-dev"
+install_crate = { min_version = "0.1.1", crate_name = "rsjsonnet", binary = "rsjsonnet", test_arg = [
+  "--help",
+] }
 script = '''
 #!/usr/bin/env bash
 
