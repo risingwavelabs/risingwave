@@ -935,16 +935,9 @@ where
 
 #[cfg(test)]
 pub mod tests {
-    use bytes::Bytes;
-    use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::can_concat;
-    use risingwave_hummock_sdk::key::{TableKey, UserKey};
-    use risingwave_hummock_sdk::version::InputLevel;
 
-    use super::*;
-    use crate::filter_key_extractor::FullKeyFilterKeyExtractor;
     use crate::hummock::compactor::compactor_runner::partition_overlapping_sstable_infos;
-    use crate::hummock::compactor::StateCleanUpCompactionFilter;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
         default_builder_opt_for_test, gen_test_sstable_info, test_key_of, test_value_of,

@@ -969,14 +969,14 @@ pub mod tests {
         let levels = vec![
             Level {
                 level_idx: 1,
-                level_type: LevelType::Nonoverlapping as i32,
+                level_type: LevelType::Nonoverlapping,
                 table_infos: vec![generate_table(0, 1, 50, 100, 2)], // 50
                 total_file_size: 50,
                 ..Default::default()
             },
             Level {
                 level_idx: 2,
-                level_type: LevelType::Nonoverlapping as i32,
+                level_type: LevelType::Nonoverlapping,
                 table_infos: vec![
                     generate_table(1, 1, 101, 150, 1), // 50
                 ],
@@ -985,7 +985,7 @@ pub mod tests {
             },
             Level {
                 level_idx: 3,
-                level_type: LevelType::Nonoverlapping as i32,
+                level_type: LevelType::Nonoverlapping,
                 table_infos: vec![
                     generate_table(2, 1, 151, 200, 2), // 50
                 ],
@@ -994,7 +994,7 @@ pub mod tests {
             },
             Level {
                 level_idx: 4,
-                level_type: LevelType::Nonoverlapping as i32,
+                level_type: LevelType::Nonoverlapping,
                 table_infos: vec![
                     generate_table(3, 1, 50, 300, 2), // 250
                 ],

@@ -28,7 +28,6 @@ use risingwave_common::util::value_encoding::ValueRowSerializer;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::version::SstableInfo;
-use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
 use risingwave_pb::hummock::compact_task::PbTaskType;
