@@ -9,11 +9,14 @@ on:
         description: 'release version'
         required: true
 
+env:
+  NEW_APP_VERSION: ${{ github.event.inputs.version || github.event.release.tag_name }}
+
 jobs:
   update-helm-charts:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Helm Charts Repoistory
+      - name: Checkout Helm Charts Repository
         uses: actions/checkout@v3
         with:
           repository: 'risingwavelabs/helm-charts'
@@ -22,7 +25,7 @@ jobs:
 
       - name: Update values.yaml
         run: |
-          sed -i "s/^  tag:.*/  tag: \"${{ github.event.inputs.version || github.event.release.tag_name }}\"/" helm-charts/charts/risingwave/values.yaml
+          sed -i "s/^  tag:.*/  tag: \"${{ env.NEW_APP_VERSION }}\"/" helm-charts/charts/risingwave/values.yaml
 
       - name: Update Chart.yaml
         run: |
@@ -30,9 +33,8 @@ jobs:
           CURRENT_VERSION=$(grep 'version:' Chart.yaml | awk '{print $2}' | head -n 1)
           NEW_VERSION=$(echo $CURRENT_VERSION | awk -F. -v OFS='.' '{$NF++; print}')
           sed -i "/type: application/,/version:/!b; /version:/s/version: .*/version: $NEW_VERSION/" Chart.yaml
-          sed -i "s/^appVersion: .*/appVersion: \"${{ github.event.inputs.version || github.event.release.tag_name }}\"/" Chart.yaml
+          sed -i "s/^appVersion: .*/appVersion: \"${{ env.NEW_APP_VERSION }}\"/" Chart.yaml
           echo "NEW_CHART_VERSION=$NEW_VERSION" >> $GITHUB_ENV
-          echo "NEW_APP_VERSION=${{ github.event.inputs.version || github.event.release.tag_name }}" >> $GITHUB_ENV
 
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v4
@@ -41,7 +43,7 @@ jobs:
           commit-message: 'chore: bump risingwave to ${{ env.NEW_APP_VERSION }}, release chart ${{ env.NEW_CHART_VERSION }}'
           title: 'chore: bump risingwave to ${{ env.NEW_APP_VERSION }}, release chart ${{ env.NEW_CHART_VERSION }}'
           body: 'This is an automated pull request to update the chart versions'
-          branch: 'auto-update-${{ github.event.inputs.version || github.event.release.tag_name }}'
+          branch: 'auto-update-${{ env.NEW_APP_VERSION }}'
 
   update-risingwave-operator:
     runs-on: ubuntu-latest
@@ -57,7 +59,7 @@ jobs:
         run: |
           cd risingwave-operator
           PREV_VERSION=$(grep -roh "risingwavelabs/risingwave:v[0-9\.]*" * | head -n 1 | cut -d':' -f2)
-          grep -rl "risingwavelabs/risingwave:$PREV_VERSION" . | xargs sed -i "s|risingwavelabs/risingwave:${PREV_VERSION}|risingwavelabs/risingwave:${{ env.NEW_APP_VERSION }}|g"
+          grep -rl "risingwavelabs/risingwave:$PREV_VERSION" . | xargs sed -i "s|risingwavelabs/risingwave:$PREV_VERSION|risingwavelabs/risingwave:${{ env.NEW_APP_VERSION }}|g"
 
       - name: Create Pull Request for risingwave-operator
         uses: peter-evans/create-pull-request@v4
@@ -66,5 +68,4 @@ jobs:
           commit-message: 'chore: bump risingwave image tags to ${{ env.NEW_APP_VERSION }}'
           title: 'chore: bump risingwave image tags to ${{ env.NEW_APP_VERSION }}'
           body: 'This is an automated pull request to update the risingwave image tags'
-          branch: 'auto-update-${{ github.event.inputs.version || github.event.release.tag_name }}'
-          path: 'risingwave-operator'
+          branch: 'auto-update-${{ env.NEW_APP_VERSION }}'
