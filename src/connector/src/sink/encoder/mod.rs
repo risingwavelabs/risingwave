@@ -24,6 +24,7 @@ mod avro;
 mod json;
 mod proto;
 pub mod template;
+pub mod text;
 
 pub use avro::{AvroEncoder, AvroHeader};
 pub use json::JsonEncoder;

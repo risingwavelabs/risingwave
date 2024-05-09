@@ -718,10 +718,23 @@ fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
         E::Protobuf => SinkEncode::Protobuf,
         E::Avro => SinkEncode::Avro,
         E::Template => SinkEncode::Template,
-        e @ (E::Native | E::Csv | E::Bytes | E::None) => {
+        e @ (E::Native | E::Csv | E::Bytes | E::None | E::Text) => {
             return Err(ErrorCode::BindError(format!("sink encode unsupported: {e}")).into());
         }
     };
+
+    let mut key_encode = None;
+    if let Some(encode) = value.key_encode {
+        if encode == E::Text {
+            key_encode = Some(SinkEncode::Text);
+        } else {
+            return Err(ErrorCode::BindError(format!(
+                "sink key encode unsupported: {encode}, only TEXT supported"
+            ))
+            .into());
+        }
+    }
+
     let mut options = WithOptions::try_from(value.row_options.as_slice())?.into_inner();
 
     options
@@ -732,6 +745,7 @@ fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
         format,
         encode,
         options,
+        key_encode,
     })
 }
 
