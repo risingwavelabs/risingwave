@@ -1385,12 +1385,13 @@ pub async fn bind_create_source(
         )
         .into());
     }
-    let (mut columns, pk_col_ids, row_id_index) = bind_pk_on_relation(columns, pk_names, true)?;
 
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
     debug_assert!(is_column_ids_dedup(&columns));
+
+    let (mut columns, pk_col_ids, row_id_index) = bind_pk_on_relation(columns, pk_names, true)?;
 
     let watermark_descs =
         bind_source_watermark(session, source_name.clone(), source_watermarks, &columns)?;
