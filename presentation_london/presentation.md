@@ -28,7 +28,7 @@
 - Logging in DBs
   - You do a commit, before confirming the commit, the DB needs to persist
   - Persisting to many different DB files may be slow 
-  - If DB crashes it can then recover from these file
+  - If DB crashes it can then recover from log files
   - It is faster to use an append only file i.e. a log
   - Originally these files were meant for internal use only
 
