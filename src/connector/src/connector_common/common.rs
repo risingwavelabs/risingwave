@@ -61,16 +61,28 @@ use aws_types::SdkConfig;
 /// A flatten config map for aws auth.
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct AwsAuthProps {
+    #[serde(rename = "aws.region", alias = "region")]
     pub region: Option<String>,
-    #[serde(alias = "endpoint_url")]
+
+    #[serde(
+        rename = "aws.endpoint_url",
+        alias = "endpoint_url",
+        alias = "endpoint"
+    )]
     pub endpoint: Option<String>,
+    #[serde(rename = "aws.credentials.access_key_id", alias = "access_key")]
     pub access_key: Option<String>,
+    #[serde(rename = "aws.credentials.secret_access_key", alias = "secret_key")]
     pub secret_key: Option<String>,
+    #[serde(rename = "aws.credentials.session_token", alias = "session_token")]
     pub session_token: Option<String>,
     /// IAM role
+    #[serde(rename = "aws.credentials.role.arn", alias = "arn")]
     pub arn: Option<String>,
     /// external ID in IAM role trust policy
+    #[serde(rename = "aws.credentials.role.external_id", alias = "external_id")]
     pub external_id: Option<String>,
+    #[serde(rename = "aws.region.profile", alias = "profile")]
     pub profile: Option<String>,
 }
 
