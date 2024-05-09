@@ -521,14 +521,14 @@ impl StateStoreIterStatsTrait for StateStoreIterStats {
 
     fn report(&mut self, table_id: u32, metrics: &MonitoredStorageMetrics) {
         Self::for_table_metrics(table_id, metrics, |table_metrics| {
-            self.inner.flush(&mut table_metrics.inner);
+            self.inner.apply_to_local(&mut table_metrics.inner);
             table_metrics.may_flush();
         });
     }
 }
 
 impl StateStoreIterStatsInner {
-    fn flush(&self, table_metrics: &mut LocalIterMetricsInner) {
+    fn apply_to_local(&self, table_metrics: &mut LocalIterMetricsInner) {
         {
             let iter_scan_duration = self.iter_scan_time.elapsed();
             table_metrics
@@ -608,7 +608,7 @@ impl StateStoreIterStatsTrait for StateStoreIterLogStats {
 
     fn report(&mut self, table_id: u32, metrics: &MonitoredStorageMetrics) {
         Self::for_table_metrics(table_id, metrics, |table_metrics| {
-            self.inner.flush(&mut table_metrics.iter_metrics);
+            self.inner.apply_to_local(&mut table_metrics.iter_metrics);
             table_metrics.insert_count.inc_by(self.insert_count);
             table_metrics.update_count.inc_by(self.update_count);
             table_metrics.delete_count.inc_by(self.delete_count);
