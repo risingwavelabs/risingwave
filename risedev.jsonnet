@@ -7,6 +7,6 @@ local allProfiles = profiles + compatProfiles;
 local profile = std.extVar('profile');
 
 if profile in allProfiles then
-  expand(allProfiles)[profile] { profile: profile }
+  expand(allProfiles[profile])
 else
   error 'unknown profile ' + profile

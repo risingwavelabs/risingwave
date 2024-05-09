@@ -1,3 +1,5 @@
+// Import and transform profiles from traditional `risedev.yml` in `risedev.jsonnet`.
+
 local yaml = importstr 'risedev.yml';
 local profiles = std.parseYaml(yaml).profile;
 
@@ -10,7 +12,9 @@ local kebabToCamel = function(s)
   ));
 
 local mapStep = function(step)
+  // Expand the full configuration for the corresponding service indicated by `use` field.
   _[kebabToCamel(step.use)]
+  // Override configuration entries with other fields.
   {
     [kebabToCamel(name)]: step[name]
     for name in std.objectFields(step)

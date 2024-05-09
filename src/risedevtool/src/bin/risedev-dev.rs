@@ -340,9 +340,9 @@ fn task_main(
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct Input {
-    profile: String,
-    config_file: Option<String>,
+    config_path: Option<String>,
     steps: Vec<ServiceConfig>,
 }
 
@@ -378,8 +378,7 @@ fn main() -> Result<()> {
     )?;
 
     let Input {
-        profile: task_name,
-        config_file: config_path,
+        config_path,
         steps: services,
     }: Input = serde_json::from_slice(&input).context("failed to parse input")?;
 
