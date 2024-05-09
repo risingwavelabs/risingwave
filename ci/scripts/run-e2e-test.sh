@@ -105,6 +105,7 @@ echo "--- e2e, $mode, Apache Superset"
 sqllogictest -p 4566 -d dev './e2e_test/superset/*.slt' --junit "batch-${profile}"
 
 echo "--- e2e, $mode, external python udf"
+python3 -m pip install --break-system-packages arrow-udf==0.2.1
 python3 e2e_test/udf/test.py &
 sleep 1
 sqllogictest -p 4566 -d dev './e2e_test/udf/external_udf.slt'
@@ -123,7 +124,7 @@ sqllogictest -p 4566 -d dev './e2e_test/udf/external_udf.slt'
 pkill java
 
 echo "--- e2e, $mode, embedded udf"
-python3 -m pip install --break-system-packages flask waitress arrow-udf==0.2.1
+python3 -m pip install --break-system-packages flask waitress
 sqllogictest -p 4566 -d dev './e2e_test/udf/wasm_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/rust_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/js_udf.slt'
