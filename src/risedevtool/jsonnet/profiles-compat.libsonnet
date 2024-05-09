@@ -1,9 +1,9 @@
 // Import and transform profiles from traditional `risedev.yml` in `risedev.jsonnet`.
 
-local yaml = importstr 'risedev.yml';
+local yaml = importstr '../../../risedev.yml';
 local profiles = std.parseYaml(yaml).profile;
 
-local _ = import 'risedev-template.libsonnet';
+local _ = import '../../../risedev-template.libsonnet';
 
 local kebabToCamel = function(s)
   std.join('', std.mapWithIndex(

@@ -358,7 +358,7 @@ fn main() -> Result<()> {
         .unwrap_or_else(|| "default".to_string());
 
     let json = std::process::Command::new("rsjsonnet")
-        .arg("risedev.jsonnet")
+        .arg("src/risedevtool/jsonnet/main.jsonnet")
         .arg("-V")
         .arg(format!("profile={task_name}"))
         .output()
