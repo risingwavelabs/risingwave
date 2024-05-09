@@ -225,7 +225,7 @@ struct MemoryLimiterInner {
 
 impl MemoryLimiterInner {
     fn release_quota(&self, quota: u64) {
-        self.total_size.fetch_sub(quota, AtomicOrdering::Release);
+        self.total_size.fetch_sub(quota, AtomicOrdering::SeqCst);
     }
 
     fn add_memory(&self, quota: u64) {
@@ -702,6 +702,7 @@ mod tests {
 
     use futures::future::join_all;
     use futures::FutureExt;
+    use rand::random;
 
     use crate::hummock::utils::MemoryLimiter;
 
@@ -734,20 +735,24 @@ mod tests {
         assert_eq!(0, memory_limiter.get_memory_usage());
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 5)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
     async fn test_multi_thread_acquire_memory() {
-        const QUOTA: u64 = 15;
-        let memory_limiter = Arc::new(MemoryLimiter::new(100));
+        const QUOTA: u64 = 10;
+        let memory_limiter = Arc::new(MemoryLimiter::new(200));
         let mut handles = vec![];
-        for _ in 0..10 {
+        for _ in 0..40 {
             let limiter = memory_limiter.clone();
             let h = tokio::spawn(async move {
                 let mut buffers = vec![];
-                for idx in 0..1000 {
-                    if let Some(tracker) = limiter.try_require_memory(QUOTA) {
+                let mut current_buffer_usage = (random::<usize>() % 8) + 2;
+                for _ in 0..1000 {
+                    if buffers.len() < current_buffer_usage
+                        && let Some(tracker) = limiter.try_require_memory(QUOTA)
+                    {
                         buffers.push(tracker);
                     } else {
                         buffers.clear();
+                        current_buffer_usage = (random::<usize>() % 8) + 2;
                         let req = limiter.require_memory(QUOTA);
                         match tokio::time::timeout(std::time::Duration::from_millis(1), req).await {
                             Ok(tracker) => {
@@ -758,9 +763,8 @@ mod tests {
                             }
                         }
                     }
-                    if idx % 3 == 0 {
-                        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
-                    }
+                    let sleep_time = random::<u64>() % 3 + 1;
+                    tokio::time::sleep(std::time::Duration::from_millis(sleep_time)).await;
                 }
             });
             handles.push(h);
