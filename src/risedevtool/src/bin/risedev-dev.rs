@@ -360,16 +360,17 @@ fn main() -> Result<()> {
         .arg("-V")
         .arg(format!("profile={task_name}"))
         .output()
-        .context("failed to evaluate risedev.jsonnet")?;
+        .context("`risedev-dev` requires `rsjsonnet` to be installed to expand profiles")?;
 
     if !json.status.success() {
         bail!(
-            "failed to evaluate RiseDev profile configuration:\n{}",
+            "failed to evaluate profile configuration:\n{}",
             String::from_utf8_lossy(&json.stderr)
         );
     }
     let input = json.stdout;
 
+    // Dump the expanded profile to `.risingwave/risedev-profile-expanded.json` for debugging.
     fs_err::write(
         Path::new(&env::var("PREFIX_CONFIG")?).join("risedev-profile-expanded.json"),
         &input,

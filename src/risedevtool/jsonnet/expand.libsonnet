@@ -1,4 +1,7 @@
 // Post-process on a profile.
+// TODO: expanding `provide-xx` fields is essentially to be compatible with the existing code
+// to extract the information of other services inside a config. This might not be necessary
+// as we can simply also pass the configs of sibling services.
 
 local pruneProvide = function(step)
   {

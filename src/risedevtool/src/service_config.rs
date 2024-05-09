@@ -23,7 +23,6 @@ pub struct ComputeNodeConfig {
     pub id: String,
 
     pub address: String,
-
     pub port: u16,
     pub listen_address: String,
     pub exporter_port: u16,
