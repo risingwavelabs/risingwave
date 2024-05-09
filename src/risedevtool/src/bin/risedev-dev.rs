@@ -26,16 +26,14 @@ use fs_err::OpenOptions;
 use indicatif::ProgressBar;
 use risedev::util::{complete_spin, fail_spin};
 use risedev::{
-    generate_risedev_env, preflight_check, CompactorService, ComputeNodeService, ConfigExpander,
-    ConfigureTmuxTask, DummyService, EnsureStopService, ExecuteContext, FrontendService,
-    GrafanaService, KafkaService, MetaNodeService, MinioService, MySqlService, PrometheusService,
-    PubsubService, RedisService, ServiceConfig, SqliteConfig, Task, TempoService, ZooKeeperService,
-    RISEDEV_NAME,
+    generate_risedev_env, preflight_check, CompactorService, ComputeNodeService, ConfigureTmuxTask,
+    DummyService, EnsureStopService, ExecuteContext, FrontendService, GrafanaService, KafkaService,
+    MetaNodeService, MinioService, MySqlService, PrometheusService, PubsubService, RedisService,
+    ServiceConfig, SqliteConfig, Task, TempoService, ZooKeeperService, RISEDEV_NAME,
 };
 use serde::{Deserialize, Serialize};
 use tempfile::tempdir;
 use thiserror_ext::AsReport;
-use yaml_rust::YamlEmitter;
 
 #[derive(Default)]
 pub struct ProgressManager {
