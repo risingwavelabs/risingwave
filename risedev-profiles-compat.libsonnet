@@ -20,8 +20,6 @@ local mapStep = function(step)
 
 local mapProfile = function(name, profile)
   (if 'config-path' in profile then { configPath: profile['config-path'] } else {})
-  {
-    steps: std.map(mapStep, profile.steps),
-  };
+  { steps: std.map(mapStep, profile.steps) };
 
 std.mapWithKey(mapProfile, profiles)

@@ -6,6 +6,7 @@ local pruneProvide = function(step)
   };
 
 local mapStep = function(step, steps)
+  { use: std.splitLimitR(step.id, '-', 1)[0] }
   {
     [name]: if std.startsWith(name, 'provide') then
       [
@@ -24,9 +25,9 @@ local mapSteps = function(steps)
   ];
 
 local mapRoot = function(allProfiles)
-  {
-    [name]: allProfiles[name] { steps: mapSteps(allProfiles[name].steps) }
-    for name in std.objectFields(allProfiles)
-  };
+  std.mapWithKey(
+    function(name, profile) profile { steps: mapSteps(profile.steps) },
+    allProfiles,
+  );
 
 mapRoot

@@ -347,7 +347,7 @@ pub struct MySqlConfig {
 
 /// All service configuration
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "use", rename_all = "camelCase")]
+#[serde(tag = "use", rename_all = "kebab-case")] // use: 'compute-node'
 pub enum ServiceConfig {
     ComputeNode(ComputeNodeConfig),
     MetaNode(MetaNodeConfig),
@@ -368,14 +368,6 @@ pub enum ServiceConfig {
     RedPanda(RedPandaConfig),
     Mysql(MySqlConfig),
 }
-
-// impl TryFrom<serde_json::Value> for ServiceConfig {
-//     type Error = anyhow::Error;
-
-//     fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
-//         todo!()
-//     }
-// }
 
 impl ServiceConfig {
     pub fn id(&self) -> &str {

@@ -1,6 +1,9 @@
-// The `use` field specified in the above `risedev` section will refer to the templates below.
-local templates = {
+// The templates used as steps in RiseDev profiles.
+
+{
   minio: {
+    // Id of this instance
+    id: 'minio',
     // Advertise address of MinIO s3 endpoint
     address: '127.0.0.1',
     // Advertise port of MinIO s3 endpoint
@@ -17,8 +20,6 @@ local templates = {
     rootPassword: 'hummockadmin',
     // Bucket name to store hummock information
     hummockBucket: 'hummock001',
-    // Id of this instance
-    id: 'minio',
     // Prometheus nodes used by this MinIO
     providePrometheus: 'prometheus*',
     // Max concurrent api requests.
@@ -57,6 +58,8 @@ local templates = {
   },
 
   computeNode: {
+    // Id of this instance
+    id: 'compute-node-' + self.port,
     // Compute-node advertise address
     address: '127.0.0.1',
     // Listen address
@@ -65,8 +68,6 @@ local templates = {
     port: 5688,
     // Prometheus exporter listen port
     exporterPort: 1222,
-    // Id of this instance
-    id: 'compute-node-' + self.port,
     // Whether to enable async stack trace for this compute node, `off`, `on`, or `verbose`.
     // Considering the performance, `verbose` mode only effect under `release` profile with `debug_assertions` off.
     asyncStackTrace: 'verbose',
@@ -92,6 +93,8 @@ local templates = {
   },
 
   metaNode: {
+    // Id of this instance
+    id: 'meta-node-' + self.port,
     // Meta-node advertise address
     address: '127.0.0.1',
     // Meta-node listen port
@@ -102,8 +105,6 @@ local templates = {
     dashboardPort: 5691,
     // Prometheus exporter listen port
     exporterPort: 1250,
-    // Id of this instance
-    id: 'meta-node-' + self.port,
     // If `user-managed` is true, this service will be started by user with the above config
     userManaged: false,
     // Etcd backend config
@@ -129,14 +130,14 @@ local templates = {
   },
 
   prometheus: {
+    // Id of this instance
+    id: 'prometheus',
     // Advertise address of Prometheus
     address: '127.0.0.1',
     // Listen port of Prometheus
     port: 9500,
     // Listen address
     listenAddress: self.address,
-    // Id of this instance
-    id: 'prometheus',
     // If `remote_write` is true, this Prometheus instance will push metrics to remote instance
     remoteWrite: false,
     // AWS region of remote write
@@ -162,6 +163,8 @@ local templates = {
   },
 
   frontend: {
+    // Id of this instance
+    id: 'frontend-' + self.port,
     // Advertise address of frontend
     address: '127.0.0.1',
     // Listen port of frontend
@@ -172,8 +175,6 @@ local templates = {
     exporterPort: 2222,
     // Health check listen port
     healthCheckPort: 6786,
-    // Id of this instance
-    id: 'frontend-' + self.port,
     // Meta-nodes used by this frontend instance
     provideMetaNode: 'meta-node*',
     // Tempo used by this frontend instance
@@ -183,6 +184,8 @@ local templates = {
   },
 
   compactor: {
+    // Id of this instance
+    id: 'compactor-' + self.port,
     // Compactor advertise address
     address: '127.0.0.1',
     // Compactor listen port
@@ -191,8 +194,6 @@ local templates = {
     listenAddress: self.address,
     // Prometheus exporter listen port
     exporterPort: 1260,
-    // Id of this instance
-    id: 'compactor-' + self.port,
     // Minio instances used by this compactor
     provideMinio: 'minio*',
     // Meta-nodes used by this compactor
@@ -204,14 +205,14 @@ local templates = {
   },
 
   grafana: {
+    // Id of this instance
+    id: 'grafana',
     // Listen address of Grafana
     listenAddress: self.address,
     // Advertise address of Grafana
     address: '127.0.0.1',
     // Listen port of Grafana
     port: 3001,
-    // Id of this instance
-    id: 'grafana',
     // Prometheus used by this Grafana instance
     providePrometheus: 'prometheus*',
     // Tempo used by this Grafana instance
@@ -339,9 +340,4 @@ local templates = {
     // to serve at the above address and port in any way they see fit.
     userManaged: false,
   },
-};
-
-{
-  [name]: templates[name] { use: name }
-  for name in std.objectFields(templates)
 }
