@@ -28,7 +28,7 @@ pub struct Model {
     pub retention_seconds: i64,
     pub definition: String,
     pub subscription_state: i32,
-    pub dependent_table_id: u32,
+    pub dependent_table_id: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -59,7 +59,7 @@ impl From<PbSubscription> for ActiveModel {
             retention_seconds: Set(pb_subscription.retention_seconds as _),
             definition: Set(pb_subscription.definition),
             subscription_state: Set(pb_subscription.subscription_state),
-            dependent_table_id: Set(pb_subscription.dependent_table_id),
+            dependent_table_id: Set(pb_subscription.dependent_table_id as _),
         }
     }
 }
