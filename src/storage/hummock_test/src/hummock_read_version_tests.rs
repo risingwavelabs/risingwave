@@ -22,7 +22,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
-use risingwave_hummock_sdk::key::{key_with_epoch, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{key_with_epoch, map_table_key_range};
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -65,10 +65,10 @@ async fn test_read_version_basic() {
         read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
 
         let key = iterator_test_table_key_of(1_usize);
-        let key_range = (
-            Bound::Included(UserKey::new(TableId::default(), TableKey(key.as_slice()))),
-            Bound::Included(UserKey::new(TableId::default(), TableKey(key.as_slice()))),
-        );
+        let key_range = map_table_key_range((
+            Bound::Included(Bytes::from(key.to_vec())),
+            Bound::Included(Bytes::from(key.to_vec())),
+        ));
 
         let (staging_imm_iter, staging_sst_iter) =
             read_version
@@ -101,11 +101,11 @@ async fn test_read_version_basic() {
 
         for e in 1..6 {
             let epoch = test_epoch(e);
-            let key = TableKey(iterator_test_table_key_of(e as usize));
-            let key_range = (
-                Bound::Included(UserKey::new(TableId::default(), key.to_ref())),
-                Bound::Included(UserKey::new(TableId::default(), key.to_ref())),
-            );
+            let key = iterator_test_table_key_of(e as usize);
+            let key_range = map_table_key_range((
+                Bound::Included(Bytes::from(key.to_vec())),
+                Bound::Included(Bytes::from(key.to_vec())),
+            ));
             let (staging_imm_iter, staging_sst_iter) =
                 read_version
                     .staging()
@@ -206,13 +206,13 @@ async fn test_read_version_basic() {
     }
 
     {
-        let key_range_left = TableKey(iterator_test_table_key_of(0));
-        let key_range_right = TableKey(iterator_test_table_key_of(4_usize));
+        let key_range_left = iterator_test_table_key_of(0);
+        let key_range_right = iterator_test_table_key_of(4_usize);
 
-        let key_range = (
-            Bound::Included(UserKey::new(TableId::default(), key_range_left.to_ref())),
-            Bound::Included(UserKey::new(TableId::default(), key_range_right.to_ref())),
-        );
+        let key_range = map_table_key_range((
+            Bound::Included(Bytes::from(key_range_left)),
+            Bound::Included(Bytes::from(key_range_right)),
+        ));
 
         let (staging_imm_iter, staging_sst_iter) =
             read_version
@@ -231,13 +231,13 @@ async fn test_read_version_basic() {
     }
 
     {
-        let key_range_left = TableKey(iterator_test_table_key_of(3));
-        let key_range_right = TableKey(iterator_test_table_key_of(4));
+        let key_range_left = iterator_test_table_key_of(3);
+        let key_range_right = iterator_test_table_key_of(4);
 
-        let key_range = (
-            Bound::Included(UserKey::new(TableId::default(), key_range_left.to_ref())),
-            Bound::Included(UserKey::new(TableId::default(), key_range_right.to_ref())),
-        );
+        let key_range = map_table_key_range((
+            Bound::Included(Bytes::from(key_range_left)),
+            Bound::Included(Bytes::from(key_range_right)),
+        ));
 
         let (staging_imm_iter, staging_sst_iter) =
             read_version
@@ -289,12 +289,9 @@ async fn test_read_filter_basic() {
             .update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
 
         // directly prune_overlap
+        let key = Bytes::from(iterator_test_table_key_of(epoch as usize));
+        let key_range = map_table_key_range((Bound::Included(key.clone()), Bound::Included(key)));
 
-        let key = iterator_test_table_key_of(epoch as usize);
-        let key_range = (
-            Bound::Included(UserKey::new(TableId::default(), TableKey(key.as_slice()))),
-            Bound::Included(UserKey::new(TableId::default(), TableKey(key.as_slice()))),
-        );
         let (staging_imm, staging_sst) = {
             let read_guard = read_version.read();
             let (staging_imm_iter, staging_sst_iter) = {
@@ -315,10 +312,7 @@ async fn test_read_filter_basic() {
 
         // test read_filter_for_version
         {
-            let key_range = (
-                Bound::Included(TableKey(Bytes::from(key.clone()))),
-                Bound::Included(TableKey(Bytes::from(key))),
-            );
+            let key_range = key_range.clone();
             let (_, hummock_read_snapshot) =
                 read_filter_for_version(epoch, TableId::from(table_id), key_range, &read_version)
                     .unwrap();
