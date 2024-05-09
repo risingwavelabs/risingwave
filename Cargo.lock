@@ -1198,6 +1198,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-msk-iam-sasl-signer"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7036b8409ffe698dfdc5ae08722999d960092aeb738026ea99c3071c94831668"
+dependencies = [
+ "aws-config",
+ "aws-credential-types",
+ "aws-sdk-sts",
+ "aws-sigv4",
+ "aws-types",
+ "base64 0.22.0",
+ "chrono",
+ "futures",
+ "thiserror",
+ "url",
+]
+
+[[package]]
 name = "aws-runtime"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7055,9 +7073,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-rdkafka"
-version = "0.3.4+0.34.0"
+version = "0.4.1+0.34.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0992d46c19414bda24bad935ea223ad025dcd7e64f38f0acee388efa8ff5319b"
+checksum = "053a71e7138773932b4195c70503129a3795e3ace59c7e7786fd64acfdc12b6f"
 dependencies = [
  "async-channel",
  "async-trait",
@@ -10464,6 +10482,7 @@ dependencies = [
  "await-tree",
  "aws-config",
  "aws-credential-types",
+ "aws-msk-iam-sasl-signer",
  "aws-sdk-kinesis",
  "aws-sdk-s3",
  "aws-smithy-http",
@@ -10474,6 +10493,7 @@ dependencies = [
  "base64 0.22.0",
  "byteorder",
  "bytes",
+ "cfg-or-panic",
  "chrono",
  "clickhouse",
  "criterion",
