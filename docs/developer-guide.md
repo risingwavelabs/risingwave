@@ -97,7 +97,7 @@ Then you'll be able to compile and start RiseDev!
 >
 > `.cargo/config.toml` contains `rustflags` configurations like `-Clink-arg` and `-Ctarget-feature`. Since it will be [merged](https://doc.rust-lang.org/cargo/reference/config.html#hierarchical-structure) with `$HOME/.cargo/config.toml`, check the config files and make sure they don't conflict if you have global `rustflags` configurations for e.g. linker there.
 
-> [!INFO]
+> [!TIP]
 >
 > If you want to build RisingWave with `embedded-python-udf` feature, you need to install Python 3.12.
 >
@@ -185,15 +185,9 @@ For example, you can modify the default section to:
     - use: frontend
     - use: prometheus
     - use: grafana
-    - use: zookeeper
-      persist-data: true
     - use: kafka
       persist-data: true
 ```
-
-> [!NOTE]
->
-> The Kafka service depends on the ZooKeeper service. If you want to enable the Kafka component, enable the ZooKeeper component first.
 
 Now you can run `./risedev d` to start a new dev cluster. The new dev cluster will contain components as configured in the yaml file. RiseDev will automatically configure the components to use the available storage service and to monitor the target.
 

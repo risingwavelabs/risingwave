@@ -82,9 +82,11 @@ pub struct RdKafkaPropertiesConsumer {
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub fetch_max_bytes: Option<usize>,
 
-    /// Automatically and periodically commit offsets in the background.
-    /// Note: setting this to false does not prevent the consumer from fetching previously committed start offsets.
-    /// To circumvent this behaviour set specific start offsets per partition in the call to assign().
+    /// Whether to automatically and periodically commit offsets in the background.
+    ///
+    /// Note that RisingWave does NOT rely on committed offsets. Committing offset is only for exposing the
+    /// progress for monitoring. Setting this to false can avoid creating consumer groups.
+    ///
     /// default: true
     #[serde(rename = "properties.enable.auto.commit")]
     #[serde_as(as = "Option<DisplayFromStr>")]

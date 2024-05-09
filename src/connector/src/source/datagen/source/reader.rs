@@ -337,6 +337,7 @@ mod tests {
 
     use super::*;
     use crate::parser::SpecificParserConfig;
+    use crate::source::SourceContext;
 
     #[tokio::test]
     async fn test_generator() -> Result<()> {
@@ -403,7 +404,7 @@ mod tests {
                 },
                 ..Default::default()
             },
-            Default::default(),
+            SourceContext::dummy().into(),
             Some(mock_datum),
         )
         .await?
@@ -465,7 +466,7 @@ mod tests {
             properties.clone(),
             state,
             parser_config.clone(),
-            Default::default(),
+            SourceContext::dummy().into(),
             Some(mock_datum.clone()),
         )
         .await?
@@ -482,7 +483,7 @@ mod tests {
             properties,
             state,
             parser_config,
-            Default::default(),
+            SourceContext::dummy().into(),
             Some(mock_datum),
         )
         .await?

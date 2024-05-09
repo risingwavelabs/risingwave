@@ -30,9 +30,9 @@ use risingwave_meta_model_v2::prelude::{
 };
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, fragment, index, object, object_dependency, sink, source,
-    streaming_job, subscription, table, ActorId, ActorUpstreamActors, CreateType, DatabaseId,
-    ExprNodeArray, FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SourceId,
-    StreamNode, StreamingParallelism, TableId, TableVersion, UserId,
+    streaming_job, table, ActorId, ActorUpstreamActors, CreateType, DatabaseId, ExprNodeArray,
+    FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SourceId, StreamNode,
+    StreamingParallelism, TableId, TableVersion, UserId,
 };
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableVersion};
@@ -171,22 +171,6 @@ impl CatalogController {
                 sink.id = job_id as _;
                 let sink: sink::ActiveModel = sink.clone().into();
                 Sink::insert(sink).exec(&txn).await?;
-            }
-            StreamingJob::Subscription(subscription) => {
-                let job_id = Self::create_streaming_job_obj(
-                    &txn,
-                    ObjectType::Subscription,
-                    subscription.owner as _,
-                    Some(subscription.database_id as _),
-                    Some(subscription.schema_id as _),
-                    create_type,
-                    ctx,
-                    streaming_parallelism,
-                )
-                .await?;
-                subscription.id = job_id as _;
-                let subscription: subscription::ActiveModel = subscription.clone().into();
-                subscription.insert(&txn).await?;
             }
             StreamingJob::Table(src, table, _) => {
                 let job_id = Self::create_streaming_job_obj(
@@ -978,12 +962,21 @@ impl CatalogController {
 
         fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
             let mut found = false;
-            if *fragment_type_mask & PbFragmentTypeFlag::StreamScan as i32 != 0 {
-                visit_stream_node(stream_node, |node| {
-                    if let PbNodeBody::StreamScan(node) = node {
+            if (*fragment_type_mask & PbFragmentTypeFlag::StreamScan as i32 != 0)
+                || (*fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0)
+            {
+                visit_stream_node(stream_node, |node| match node {
+                    PbNodeBody::StreamScan(node) => {
                         node.rate_limit = rate_limit;
                         found = true;
                     }
+                    PbNodeBody::Source(node) => {
+                        if let Some(inner) = node.source_inner.as_mut() {
+                            inner.rate_limit = rate_limit;
+                            found = true;
+                        }
+                    }
+                    _ => {}
                 });
             }
             found
@@ -991,7 +984,7 @@ impl CatalogController {
 
         if fragments.is_empty() {
             return Err(MetaError::invalid_parameter(format!(
-                "stream scan node not found in job id {job_id}"
+                "stream scan node or source node not found in job id {job_id}"
             )));
         }
         let fragment_ids = fragments.iter().map(|(id, _, _)| *id).collect_vec();

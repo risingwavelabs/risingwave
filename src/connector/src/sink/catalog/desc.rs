@@ -107,7 +107,7 @@ impl SinkDesc {
             target_table: self.target_table,
             created_at_cluster_version: None,
             initialized_at_cluster_version: None,
-            create_type: CreateType::Foreground,
+            create_type: self.create_type,
         }
     }
 

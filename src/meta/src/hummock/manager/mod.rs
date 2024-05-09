@@ -263,6 +263,7 @@ pub struct CommitEpochInfo {
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
     pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
     pub new_table_fragment_info: Option<NewTableFragmentInfo>,
+    pub change_log_delta: HashMap<TableId, ChangeLogDelta>,
 }
 
 impl CommitEpochInfo {
@@ -271,12 +272,14 @@ impl CommitEpochInfo {
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
         sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
         new_table_fragment_info: Option<NewTableFragmentInfo>,
+        change_log_delta: HashMap<TableId, ChangeLogDelta>,
     ) -> Self {
         Self {
             sstables,
             new_table_watermarks,
             sst_to_context,
             new_table_fragment_info,
+            change_log_delta,
         }
     }
 
@@ -290,6 +293,7 @@ impl CommitEpochInfo {
             HashMap::new(),
             sst_to_context,
             None,
+            HashMap::new(),
         )
     }
 }
@@ -374,7 +378,7 @@ impl HummockManager {
                 state_store_url.strip_prefix("hummock+").unwrap_or("memory"),
                 metrics.object_store_metric.clone(),
                 "Version Checkpoint",
-                object_store_config,
+                Arc::new(object_store_config),
             )
             .await,
         );
@@ -610,7 +614,10 @@ impl HummockManager {
         };
 
         versioning_guard.objects_to_delete.clear();
-        versioning_guard.mark_objects_for_deletion();
+        // Not delete stale objects when archive is enabled
+        if !self.env.opts.enable_hummock_data_archive {
+            versioning_guard.mark_objects_for_deletion();
+        }
 
         self.initial_compaction_group_config_after_load(versioning_guard)
             .await?;
@@ -914,7 +921,6 @@ impl HummockManager {
         let developer_config = Arc::new(CompactionDeveloperConfig::new_from_meta_opts(
             &self.env.opts,
         ));
-        const MAX_TRIVIAL_MOVE_TASK_COUNT: usize = 256;
         'outside: for compaction_group_id in compaction_groups {
             if pick_tasks.len() >= max_select_count {
                 break;
@@ -1073,7 +1079,7 @@ impl HummockManager {
                     );
                     current_version.apply_version_delta(&version_delta);
                     trivial_tasks.push(compact_task);
-                    if trivial_tasks.len() >= MAX_TRIVIAL_MOVE_TASK_COUNT {
+                    if trivial_tasks.len() >= self.env.opts.max_trivial_move_task_count_per_loop {
                         break 'outside;
                     }
                 } else {
@@ -1621,6 +1627,7 @@ impl HummockManager {
             new_table_watermarks,
             sst_to_context,
             new_table_fragment_info,
+            change_log_delta,
         } = commit_info;
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
@@ -1656,6 +1663,7 @@ impl HummockManager {
         );
         new_version_delta.max_committed_epoch = epoch;
         new_version_delta.new_table_watermarks = new_table_watermarks;
+        new_version_delta.change_log_delta = change_log_delta;
 
         let mut table_compaction_group_mapping = old_version.build_compaction_group_info();
 
@@ -1982,6 +1990,7 @@ impl HummockManager {
     pub async fn check_state_consistency(&self) {
         let mut compaction_guard = write_lock!(self, compaction).await;
         let mut versioning_guard = write_lock!(self, versioning).await;
+        let objects_to_delete = versioning_guard.objects_to_delete.clone();
         // We don't check `checkpoint` because it's allowed to update its in memory state without
         // persisting to object store.
         let get_state =
@@ -2019,6 +2028,7 @@ impl HummockManager {
             mem_state, loaded_state,
             "hummock in-mem state is inconsistent with meta store state",
         );
+        versioning_guard.objects_to_delete = objects_to_delete;
     }
 
     /// Gets current version without pinning it.
@@ -3291,6 +3301,26 @@ impl HummockManager {
 
         Ok(())
     }
+
+    #[named]
+    pub async fn list_change_log_epochs(
+        &self,
+        table_id: u32,
+        min_epoch: u64,
+        max_count: u32,
+    ) -> Vec<u64> {
+        let versioning = read_lock!(self, versioning).await;
+        if let Some(table_change_log) = versioning
+            .current_version
+            .table_change_log
+            .get(&TableId::new(table_id))
+        {
+            let table_change_log = table_change_log.clone();
+            table_change_log.get_epochs(min_epoch, max_count as usize)
+        } else {
+            vec![]
+        }
+    }
 }
 
 // This structure describes how hummock handles sst switching in a compaction group. A better sst cut will result in better data alignment, which in turn will improve the efficiency of the compaction.
@@ -3350,7 +3380,6 @@ fn gen_version_delta<'a>(
         .entry(compact_task.compaction_group_id)
         .or_default()
         .group_deltas;
-    let mut gc_object_ids = vec![];
     let mut removed_table_ids_map: BTreeMap<u32, Vec<u64>> = BTreeMap::default();
 
     for level in &compact_task.input_ssts {
@@ -3361,15 +3390,13 @@ fn gen_version_delta<'a>(
             .map(|sst| {
                 let object_id = sst.get_object_id();
                 let sst_id = sst.get_sst_id();
-                if !trivial_move
-                    && drop_sst(
+                if !trivial_move {
+                    drop_sst(
                         branched_ssts,
                         compact_task.compaction_group_id,
                         object_id,
                         sst_id,
-                    )
-                {
-                    gc_object_ids.push(object_id);
+                    );
                 }
                 sst_id
             })
@@ -3402,7 +3429,6 @@ fn gen_version_delta<'a>(
         })),
     };
     group_deltas.push(group_delta);
-    version_delta.gc_object_ids.append(&mut gc_object_ids);
     version_delta.safe_epoch = std::cmp::max(old_version.safe_epoch, compact_task.watermark);
 
     // Don't persist version delta generated by compaction to meta store in deterministic mode.
@@ -3474,6 +3500,7 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
 type CompactionRequestChannelItem = (CompactionGroupId, compact_task::TaskType);
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_pb::hummock::hummock_version_delta::ChangeLogDelta;
 use tokio::sync::mpsc::error::SendError;
 
 use super::compaction::CompactionSelector;

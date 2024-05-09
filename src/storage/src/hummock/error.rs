@@ -18,8 +18,8 @@ use thiserror_ext::AsReport;
 use tokio::sync::oneshot::error::RecvError;
 
 // TODO(error-handling): should prefer use error types than strings.
-#[derive(Error, Debug, thiserror_ext::Box)]
-#[thiserror_ext(newtype(name = HummockError, backtrace, report_debug))]
+#[derive(Error, thiserror_ext::ReportDebug, thiserror_ext::Box)]
+#[thiserror_ext(newtype(name = HummockError, backtrace))]
 pub enum HummockErrorInner {
     #[error("Magic number mismatch: expected {expected}, found: {found}")]
     MagicMismatch { expected: u32, found: u32 },

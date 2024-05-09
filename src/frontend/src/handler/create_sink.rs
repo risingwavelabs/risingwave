@@ -22,8 +22,9 @@ use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::array::arrow::{FromArrow, IcebergArrowConvert};
 use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, TableId, UserId};
-use risingwave_common::types::{DataType, Datum};
+use risingwave_common::types::Datum;
 use risingwave_common::util::value_encoding::DatumFromProtoExt;
 use risingwave_common::{bail, catalog};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
@@ -38,13 +39,13 @@ use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DispatcherType, MergeNode, StreamFragmentGraph, StreamNode};
 use risingwave_sqlparser::ast::{
-    ConnectorSchema, CreateSink, CreateSinkStatement, EmitMode, Encode, Format, ObjectName, Query,
-    Select, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins,
+    ConnectorSchema, CreateSink, CreateSinkStatement, EmitMode, Encode, Format, Query, Statement,
 };
 use risingwave_sqlparser::parser::Parser;
 
 use super::create_mv::get_column_names;
 use super::create_source::UPSTREAM_SOURCE_KEY;
+use super::util::gen_query_from_table_name;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogReadGuard;
@@ -65,32 +66,6 @@ use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::resolve_privatelink_in_with_option;
 use crate::{Explain, Planner, TableCatalog, WithOptions};
-
-pub fn gen_sink_subscription_query_from_name(from_name: ObjectName) -> Result<Query> {
-    let table_factor = TableFactor::Table {
-        name: from_name,
-        alias: None,
-        as_of: None,
-    };
-    let from = vec![TableWithJoins {
-        relation: table_factor,
-        joins: vec![],
-    }];
-    let select = Select {
-        from,
-        projection: vec![SelectItem::Wildcard(None)],
-        ..Default::default()
-    };
-    let body = SetExpr::Select(Box::new(select));
-    Ok(Query {
-        with: None,
-        body,
-        order_by: vec![],
-        limit: None,
-        offset: None,
-        fetch: None,
-    })
-}
 
 // used to store result of `gen_sink_plan`
 pub struct SinkPlanContext {
@@ -119,7 +94,7 @@ pub fn gen_sink_plan(
         CreateSink::From(from_name) => {
             sink_from_table_name = from_name.0.last().unwrap().real_value();
             direct_sink = true;
-            Box::new(gen_sink_subscription_query_from_name(from_name)?)
+            Box::new(gen_query_from_table_name(from_name))
         }
         CreateSink::AsQuery(query) => {
             sink_from_table_name = sink_table_name.clone();
@@ -377,14 +352,14 @@ async fn get_partition_compute_info_for_iceberg(
         })
         .collect::<Result<Vec<_>>>()?;
 
-    let DataType::Struct(partition_type) = arrow_type.into() else {
+    let ArrowDataType::Struct(partition_type) = arrow_type else {
         return Err(RwError::from(ErrorCode::SinkError(
             "Partition type of iceberg should be a struct type".into(),
         )));
     };
 
     Ok(Some(PartitionComputeInfo::Iceberg(IcebergPartitionInfo {
-        partition_type,
+        partition_type: IcebergArrowConvert.from_fields(&partition_type)?,
         partition_fields,
     })))
 }
@@ -743,10 +718,23 @@ fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
         E::Protobuf => SinkEncode::Protobuf,
         E::Avro => SinkEncode::Avro,
         E::Template => SinkEncode::Template,
-        e @ (E::Native | E::Csv | E::Bytes | E::None) => {
+        e @ (E::Native | E::Csv | E::Bytes | E::None | E::Text) => {
             return Err(ErrorCode::BindError(format!("sink encode unsupported: {e}")).into());
         }
     };
+
+    let mut key_encode = None;
+    if let Some(encode) = value.key_encode {
+        if encode == E::Text {
+            key_encode = Some(SinkEncode::Text);
+        } else {
+            return Err(ErrorCode::BindError(format!(
+                "sink key encode unsupported: {encode}, only TEXT supported"
+            ))
+            .into());
+        }
+    }
+
     let mut options = WithOptions::try_from(value.row_options.as_slice())?.into_inner();
 
     options
@@ -757,11 +745,13 @@ fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
         format,
         encode,
         options,
+        key_encode,
     })
 }
 
 static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, Vec<Encode>>>> =
     LazyLock::new(|| {
+        use risingwave_connector::sink::google_pubsub::GooglePubSubSink;
         use risingwave_connector::sink::kafka::KafkaSink;
         use risingwave_connector::sink::kinesis::KinesisSink;
         use risingwave_connector::sink::mqtt::MqttSink;
@@ -770,6 +760,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
         use risingwave_connector::sink::Sink as _;
 
         convert_args!(hashmap!(
+                GooglePubSubSink::SINK_NAME => hashmap!(
+                    Format::Plain => vec![Encode::Json],
+                ),
                 KafkaSink::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Protobuf],
                     Format::Upsert => vec![Encode::Json, Encode::Avro],
@@ -789,8 +782,8 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Debezium => vec![Encode::Json],
                 ),
                 RedisSink::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Json,Encode::Template],
-                    Format::Upsert => vec![Encode::Json,Encode::Template],
+                    Format::Plain => vec![Encode::Json, Encode::Template],
+                    Format::Upsert => vec![Encode::Json, Encode::Template],
                 ),
         ))
     });

@@ -113,6 +113,31 @@ DorisConfig:
   - name: r#type
     field_type: String
     required: true
+GooglePubSubConfig:
+  fields:
+  - name: pubsub.project_id
+    field_type: String
+    comments: The Google Pub/Sub Project ID
+    required: true
+  - name: pubsub.topic
+    field_type: String
+    comments: Specifies the Pub/Sub topic to publish messages
+    required: true
+  - name: pubsub.endpoint
+    field_type: String
+    comments: The Google Pub/Sub endpoint URL
+    required: true
+  - name: pubsub.emulator_host
+    field_type: String
+    comments: use the connector with a pubsub emulator  <https://cloud.google.com/pubsub/docs/emulator>
+    required: false
+  - name: pubsub.credentials
+    field_type: String
+    comments: A JSON string containing the service account credentials for authorization,  see the [service-account](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account) credentials guide.  The provided account credential must have the  `pubsub.publisher` [role](https://cloud.google.com/pubsub/docs/access-control#roles)
+    required: false
+  - name: r#type
+    field_type: String
+    required: true
 IcebergConfig:
   fields:
   - name: connector
@@ -319,6 +344,9 @@ KafkaConfig:
     comments: The maximum number of unacknowledged requests the client will send on a single connection before blocking.
     required: false
     default: '5'
+  - name: properties.request.required.acks
+    field_type: i32
+    required: false
   - name: broker.rewrite.endpoints
     field_type: HashMap<String,String>
     comments: This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
@@ -564,7 +592,7 @@ SnowflakeConfig:
     required: true
   - name: snowflake.s3_path
     field_type: String
-    comments: The optional s3 path to be specified  the actual file location would be `<s3_bucket>://<s3_path>/<rw_auto_gen_file_name>`  if this field is specified by user(s)  otherwise it would be `<s3_bucket>://<rw_auto_gen_file_name>`
+    comments: The optional s3 path to be specified  the actual file location would be `s3://<s3_bucket>/<s3_path>/<rw_auto_gen_intermediate_file_name>`  if this field is specified by user(s)  otherwise it would be `s3://<s3_bucket>/<rw_auto_gen_intermediate_file_name>`
     required: false
   - name: snowflake.aws_access_key_id
     field_type: String
@@ -577,10 +605,6 @@ SnowflakeConfig:
   - name: snowflake.aws_region
     field_type: String
     comments: The s3 region, e.g., us-east-2
-    required: true
-  - name: snowflake.max_batch_row_num
-    field_type: String
-    comments: The configurable max row(s) to batch,  which should be *explicitly* specified by user(s)
     required: true
 StarrocksConfig:
   fields:

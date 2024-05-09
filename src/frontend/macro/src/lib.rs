@@ -112,6 +112,7 @@ fn gen_sys_table(attr: Attr, item_fn: ItemFn) -> Result<TokenStream2> {
     let struct_type = strip_outer_type(ty, "Vec").ok_or_else(return_type_error)?;
     let _await = item_fn.sig.asyncness.map(|_| quote!(.await));
     let handle_error = return_result.then(|| quote!(?));
+    let chunk_size = 1024usize;
 
     Ok(quote! {
         #[linkme::distributed_slice(crate::catalog::system_catalog::SYS_CATALOGS_SLICE)]
@@ -121,19 +122,26 @@ fn gen_sys_table(attr: Attr, item_fn: ItemFn) -> Result<TokenStream2> {
                 assert!(#struct_type::PRIMARY_KEY.is_some(), "primary key is required for system table");
             };
 
+            #[futures_async_stream::try_stream(boxed, ok = risingwave_common::array::DataChunk, error = risingwave_common::error::BoxedError)]
+            async fn function(reader: &crate::catalog::system_catalog::SysCatalogReaderImpl) {
+                let rows = #user_fn_name(reader) #_await #handle_error;
+                let mut builder = #struct_type::data_chunk_builder(#chunk_size);
+                for row in rows {
+                    if let Some(chunk) = builder.append_one_row(row.into_owned_row()) {
+                        yield chunk;
+                    }
+                }
+                if let Some(chunk) = builder.consume_all() {
+                    yield chunk;
+                }
+            }
+
             crate::catalog::system_catalog::BuiltinCatalog::Table(crate::catalog::system_catalog::BuiltinTable {
                 name: #table_name,
                 schema: #schema_name,
                 columns: #struct_type::fields(),
                 pk: #struct_type::PRIMARY_KEY.unwrap(),
-                function: |reader| std::boxed::Box::pin(async {
-                    let rows = #user_fn_name(reader) #_await #handle_error;
-                    let mut builder = #struct_type::data_chunk_builder(rows.len() + 1);
-                    for row in rows {
-                        _ = builder.append_one_row(row.into_owned_row());
-                    }
-                    Ok(builder.finish())
-                }),
+                function,
             })
         }
     })

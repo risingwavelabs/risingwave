@@ -18,14 +18,14 @@ use std::sync::Arc;
 use parking_lot::{RwLock, RwLockReadGuard};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::{HummockEpoch, SyncResult};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::HummockResult;
 use crate::mem_table::ImmutableMemtable;
-use crate::store::{SealCurrentEpochOptions, SyncResult};
+use crate::store::SealCurrentEpochOptions;
 
 pub mod hummock_event_handler;
 pub mod refiller;

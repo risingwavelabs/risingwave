@@ -12,16 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::mem::size_of;
 use std::sync::Arc;
 
 use prost::Message;
 use risingwave_common::catalog::TableId;
-use risingwave_pb::hummock::hummock_version::PbLevels;
-use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
-use risingwave_pb::hummock::{PbHummockVersion, PbHummockVersionDelta};
+use risingwave_pb::hummock::group_delta::DeltaType;
+use risingwave_pb::hummock::hummock_version::Levels as PbLevels;
+use risingwave_pb::hummock::hummock_version_delta::{ChangeLogDelta, GroupDeltas as PbGroupDeltas};
+use risingwave_pb::hummock::{
+    HummockVersionDelta as PbHummockVersionDelta, PbHummockVersion, SstableInfo,
+};
 
+use crate::change_log::TableChangeLog;
 use crate::table_watermark::TableWatermarks;
 use crate::{CompactionGroupId, HummockSstableObjectId};
 
@@ -32,6 +36,7 @@ pub struct HummockVersion {
     pub max_committed_epoch: u64,
     pub safe_epoch: u64,
     pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
+    pub table_change_log: HashMap<TableId, TableChangeLog>,
 }
 
 impl Default for HummockVersion {
@@ -73,6 +78,16 @@ impl HummockVersion {
                     )
                 })
                 .collect(),
+            table_change_log: pb_version
+                .table_change_logs
+                .iter()
+                .map(|(table_id, change_log)| {
+                    (
+                        TableId::new(*table_id),
+                        TableChangeLog::from_protobuf(change_log),
+                    )
+                })
+                .collect(),
         }
     }
 
@@ -90,6 +105,11 @@ impl HummockVersion {
                 .table_watermarks
                 .iter()
                 .map(|(table_id, watermark)| (table_id.table_id, watermark.to_protobuf()))
+                .collect(),
+            table_change_logs: self
+                .table_change_log
+                .iter()
+                .map(|(table_id, change_log)| (table_id.table_id, change_log.to_protobuf()))
                 .collect(),
         }
     }
@@ -118,9 +138,9 @@ pub struct HummockVersionDelta {
     pub max_committed_epoch: u64,
     pub safe_epoch: u64,
     pub trivial_move: bool,
-    pub gc_object_ids: Vec<HummockSstableObjectId>,
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
     pub removed_table_ids: Vec<TableId>,
+    pub change_log_delta: HashMap<TableId, ChangeLogDelta>,
 }
 
 impl Default for HummockVersionDelta {
@@ -150,7 +170,6 @@ impl HummockVersionDelta {
             max_committed_epoch: delta.max_committed_epoch,
             safe_epoch: delta.safe_epoch,
             trivial_move: delta.trivial_move,
-            gc_object_ids: delta.gc_object_ids.clone(),
             new_table_watermarks: delta
                 .new_table_watermarks
                 .iter()
@@ -166,6 +185,19 @@ impl HummockVersionDelta {
                 .iter()
                 .map(|table_id| TableId::new(*table_id))
                 .collect(),
+            change_log_delta: delta
+                .change_log_delta
+                .iter()
+                .map(|(table_id, log_delta)| {
+                    (
+                        TableId::new(*table_id),
+                        ChangeLogDelta {
+                            new_log: log_delta.new_log.clone(),
+                            truncate_epoch: log_delta.truncate_epoch,
+                        },
+                    )
+                })
+                .collect(),
         }
     }
 
@@ -177,7 +209,6 @@ impl HummockVersionDelta {
             max_committed_epoch: self.max_committed_epoch,
             safe_epoch: self.safe_epoch,
             trivial_move: self.trivial_move,
-            gc_object_ids: self.gc_object_ids.clone(),
             new_table_watermarks: self
                 .new_table_watermarks
                 .iter()
@@ -188,6 +219,46 @@ impl HummockVersionDelta {
                 .iter()
                 .map(|table_id| table_id.table_id)
                 .collect(),
+            change_log_delta: self
+                .change_log_delta
+                .iter()
+                .map(|(table_id, log_delta)| (table_id.table_id, log_delta.clone()))
+                .collect(),
         }
+    }
+}
+
+impl HummockVersionDelta {
+    /// Get the newly added object ids from the version delta.
+    ///
+    /// Note: the result can be false positive because we only collect the set of sst object ids in the `inserted_table_infos`,
+    /// but it is possible that the object is moved or split from other compaction groups or levels.
+    pub fn newly_added_object_ids(&self) -> HashSet<HummockSstableObjectId> {
+        self.group_deltas
+            .values()
+            .flat_map(|group_deltas| {
+                group_deltas.group_deltas.iter().flat_map(|group_delta| {
+                    group_delta.delta_type.iter().flat_map(|delta_type| {
+                        static EMPTY_VEC: Vec<SstableInfo> = Vec::new();
+                        let sst_slice = match delta_type {
+                            DeltaType::IntraLevel(level_delta) => &level_delta.inserted_table_infos,
+                            DeltaType::GroupConstruct(_)
+                            | DeltaType::GroupDestroy(_)
+                            | DeltaType::GroupMetaChange(_)
+                            | DeltaType::GroupTableChange(_) => &EMPTY_VEC,
+                        };
+                        sst_slice.iter().map(|sst| sst.object_id)
+                    })
+                })
+            })
+            .chain(self.change_log_delta.values().flat_map(|delta| {
+                let new_log = delta.new_log.as_ref().unwrap();
+                new_log
+                    .new_value
+                    .iter()
+                    .map(|sst| sst.object_id)
+                    .chain(new_log.old_value.iter().map(|sst| sst.object_id))
+            }))
+            .collect()
     }
 }

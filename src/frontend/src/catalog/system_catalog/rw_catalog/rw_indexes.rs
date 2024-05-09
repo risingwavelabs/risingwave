@@ -24,7 +24,8 @@ struct RwIndex {
     id: i32,
     name: String,
     primary_table_id: i32,
-    indkey: Vec<i16>,
+    key_columns: Vec<i16>,
+    include_columns: Vec<i16>,
     schema_id: i32,
     owner: i32,
     definition: String,
@@ -46,10 +47,23 @@ fn read_rw_indexes(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIndex>> {
                 id: index.id.index_id as i32,
                 name: index.name.clone(),
                 primary_table_id: index.primary_table.id().table_id as i32,
-                indkey: index
+                key_columns: index
                     .index_item
                     .iter()
                     .take(index.index_columns_len as usize)
+                    .map(|index| {
+                        let ind = if let Some(input_ref) = index.as_input_ref() {
+                            input_ref.index() + 1
+                        } else {
+                            0
+                        };
+                        ind as i16
+                    })
+                    .collect(),
+                include_columns: index
+                    .index_item
+                    .iter()
+                    .skip(index.index_columns_len as usize)
                     .map(|index| {
                         let ind = if let Some(input_ref) = index.as_input_ref() {
                             input_ref.index() + 1
