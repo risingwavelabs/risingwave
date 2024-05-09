@@ -37,21 +37,24 @@ use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 
+pub(super) fn parse_column_names(columns: &[Ident]) -> Option<Vec<String>> {
+    if columns.is_empty() {
+        None
+    } else {
+        Some(columns.iter().map(|v| v.real_value()).collect())
+    }
+}
+
+/// If columns is empty, it means that the user did not specify the column names.
+/// In this case, we extract the column names from the query.
+/// If columns is not empty, it means that user specify the column names and the user
+/// should guarantee that the column names number are consistent with the query.
 pub(super) fn get_column_names(
     bound: &BoundQuery,
     session: &SessionImpl,
     columns: Vec<Ident>,
 ) -> Result<Option<Vec<String>>> {
-    // If columns is empty, it means that the user did not specify the column names.
-    // In this case, we extract the column names from the query.
-    // If columns is not empty, it means that user specify the column names and the user
-    // should guarantee that the column names number are consistent with the query.
-    let col_names: Option<Vec<String>> = if columns.is_empty() {
-        None
-    } else {
-        Some(columns.iter().map(|v| v.real_value()).collect())
-    };
-
+    let col_names = parse_column_names(&columns);
     if let BoundSetExpr::Select(select) = &bound.body {
         // `InputRef`'s alias will be implicitly assigned in `bind_project`.
         // If user provide columns name (col_names.is_some()), we don't need alias.

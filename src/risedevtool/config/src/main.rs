@@ -74,6 +74,7 @@ pub enum Components {
     DynamicLinking,
     HummockTrace,
     Coredump,
+    NoBacktrace,
 }
 
 impl Components {
@@ -95,6 +96,7 @@ impl Components {
             Self::DynamicLinking => "[Build] Enable dynamic linking",
             Self::HummockTrace => "[Build] Hummock Trace",
             Self::Coredump => "[Runtime] Enable coredump",
+            Self::NoBacktrace => "[Runtime] Disable backtrace",
         }
         .into()
     }
@@ -192,6 +194,11 @@ the binaries will also be codesigned with `get-task-allow` enabled.
 As a result, RisingWave will dump the core on panics.
                 "
             }
+            Components::NoBacktrace => {
+                "
+With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching nodes.
+                "
+            }
         }
         .into()
     }
@@ -213,6 +220,8 @@ As a result, RisingWave will dump the core on panics.
             "ENABLE_REDIS" => Some(Self::Redis),
             "ENABLE_BUILD_RW_CONNECTOR" => Some(Self::BuildConnectorNode),
             "ENABLE_HUMMOCK_TRACE" => Some(Self::HummockTrace),
+            "ENABLE_COREDUMP" => Some(Self::Coredump),
+            "DISABLE_BACKTRACE" => Some(Self::NoBacktrace),
             _ => None,
         }
     }
@@ -235,6 +244,7 @@ As a result, RisingWave will dump the core on panics.
             Self::DynamicLinking => "ENABLE_DYNAMIC_LINKING",
             Self::HummockTrace => "ENABLE_HUMMOCK_TRACE",
             Self::Coredump => "ENABLE_COREDUMP",
+            Self::NoBacktrace => "DISABLE_BACKTRACE",
         }
         .into()
     }

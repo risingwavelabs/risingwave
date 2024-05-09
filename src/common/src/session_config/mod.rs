@@ -236,6 +236,10 @@ pub struct SessionConfig {
     #[parameter(default = 0)]
     lock_timeout: i32,
 
+    /// For limiting the startup time of a shareable CDC streaming source when the source is being created. Unit: seconds.
+    #[parameter(default = 30)]
+    cdc_source_wait_streaming_start_timeout: i32,
+
     /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-ROW-SECURITY>.
     /// Unused in RisingWave, support for compatibility.
     #[parameter(default = true)]

@@ -19,7 +19,7 @@ use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_meta_model_v2::ObjectId;
-use risingwave_pb::catalog::{CreateType, Table};
+use risingwave_pb::catalog::{CreateType, Subscription, Table};
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::Dispatcher;
 use thiserror_ext::AsReport;
@@ -740,6 +740,39 @@ impl GlobalStreamManager {
         };
 
         Ok(())
+    }
+
+    // Dont need add actor, just send a command
+    pub async fn create_subscription(
+        self: &Arc<Self>,
+        subscription: &Subscription,
+    ) -> MetaResult<()> {
+        let command = Command::CreateSubscription {
+            subscription_id: subscription.id,
+            upstream_mv_table_id: TableId::new(subscription.dependent_table_id),
+            retention_second: subscription.retention_seconds,
+        };
+
+        tracing::debug!("sending Command::CreateSubscription");
+        self.barrier_scheduler.run_command(command).await?;
+        Ok(())
+    }
+
+    // Dont need add actor, just send a command
+    pub async fn drop_subscription(self: &Arc<Self>, subscription_id: u32, table_id: u32) {
+        let command = Command::DropSubscription {
+            subscription_id,
+            upstream_mv_table_id: TableId::new(table_id),
+        };
+
+        tracing::debug!("sending Command::DropSubscription");
+        let _ = self
+            .barrier_scheduler
+            .run_command(command)
+            .await
+            .inspect_err(|err| {
+                tracing::error!(error = ?err.as_report(), "failed to run drop command");
+            });
     }
 }
 
