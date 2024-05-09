@@ -20,6 +20,7 @@ pub mod coordinate;
 pub mod deltalake;
 pub mod doris;
 pub mod doris_starrocks_connector;
+pub mod dynamodb;
 pub mod elasticsearch;
 pub mod encoder;
 pub mod formatter;
@@ -96,6 +97,7 @@ macro_rules! for_all_sinks {
                 { Snowflake, $crate::sink::snowflake::SnowflakeSink },
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
+                { DynamoDb, $crate::sink::dynamodb::DynamoDbSink },
                 { Test, $crate::sink::test_sink::TestSink },
                 { Table, $crate::sink::trivial::TableSink }
             }
@@ -557,6 +559,12 @@ pub enum SinkError {
     ),
     #[error("BigQuery error: {0}")]
     BigQuery(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("DynamoDB error: {0}")]
+    DynamoDb(
         #[source]
         #[backtrace]
         anyhow::Error,

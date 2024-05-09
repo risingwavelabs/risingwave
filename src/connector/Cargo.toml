@@ -32,6 +32,7 @@ auto_enums = { workspace = true }
 auto_impl = "1"
 aws-config = { workspace = true }
 aws-credential-types = { workspace = true }
+aws-sdk-dynamodb = "1.23.0"
 aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-smithy-http = { workspace = true }
