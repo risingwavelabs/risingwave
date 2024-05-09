@@ -118,10 +118,12 @@ impl BatchManager {
             let this = self.clone();
             let task_id = task_id.clone();
             let state_reporter = state_reporter.clone();
-            let heartbeat_join_handle = self.runtime.spawn(async move {
-                this.start_task_heartbeat(state_reporter, task_id).await;
-            });
-            task.set_heartbeat_join_handle(heartbeat_join_handle);
+            if std::env::var("RW_BATCH_HEARTBEAT").is_ok() {
+                let heartbeat_join_handle = self.runtime.spawn(async move {
+                    this.start_task_heartbeat(state_reporter, task_id).await;
+                });
+                task.set_heartbeat_join_handle(heartbeat_join_handle);
+            }
 
             Ok(())
         } else {
