@@ -16,11 +16,11 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::num::NonZeroUsize;
 
 use itertools::Itertools;
-use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
+use risingwave_common::{bail, current_cluster_version};
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::actor_dispatcher::DispatcherType;
 use risingwave_meta_model_v2::object::ObjectType;
@@ -49,11 +49,11 @@ use risingwave_pb::meta::{
 use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::update_mutation::PbMergeUpdate;
+use risingwave_pb::stream_plan::update_mutation::{MergeUpdate, PbMergeUpdate};
 use risingwave_pb::stream_plan::{
     PbDispatcher, PbDispatcherType, PbFragmentTypeFlag, PbStreamActor,
 };
-use sea_orm::sea_query::SimpleExpr;
+use sea_orm::sea_query::{Expr, SimpleExpr};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveEnum, ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel,
@@ -571,6 +571,186 @@ impl CatalogController {
         txn.commit().await?;
 
         Ok(obj_id)
+    }
+
+    /// `finish_streaming_job` marks job related objects as `Created` and notify frontend.
+    pub async fn finish_streaming_job(
+        &self,
+        job_id: ObjectId,
+        replace_table_job_info: Option<(crate::manager::StreamingJob, Vec<MergeUpdate>, u32)>,
+    ) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let job_type = Object::find_by_id(job_id)
+            .select_only()
+            .column(object::Column::ObjType)
+            .into_tuple()
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
+
+        // update `created_at` as now() and `created_at_cluster_version` as current cluster version.
+        let res = Object::update_many()
+            .col_expr(object::Column::CreatedAt, Expr::current_timestamp().into())
+            .col_expr(
+                object::Column::CreatedAtClusterVersion,
+                current_cluster_version().into(),
+            )
+            .filter(object::Column::Oid.eq(job_id))
+            .exec(&txn)
+            .await?;
+        if res.rows_affected == 0 {
+            return Err(MetaError::catalog_id_not_found("streaming job", job_id));
+        }
+
+        // mark the target stream job as `Created`.
+        let job = streaming_job::ActiveModel {
+            job_id: Set(job_id),
+            job_status: Set(JobStatus::Created),
+            ..Default::default()
+        };
+        job.update(&txn).await?;
+
+        // notify frontend: job, internal tables.
+        let internal_table_objs = Table::find()
+            .find_also_related(Object)
+            .filter(table::Column::BelongsToJobId.eq(job_id))
+            .all(&txn)
+            .await?;
+        let mut relations = internal_table_objs
+            .iter()
+            .map(|(table, obj)| PbRelation {
+                relation_info: Some(PbRelationInfo::Table(
+                    ObjectModel(table.clone(), obj.clone().unwrap()).into(),
+                )),
+            })
+            .collect_vec();
+
+        match job_type {
+            ObjectType::Table => {
+                let (table, obj) = Table::find_by_id(job_id)
+                    .find_also_related(Object)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("table", job_id))?;
+                if let Some(source_id) = table.optional_associated_source_id {
+                    let (src, obj) = Source::find_by_id(source_id)
+                        .find_also_related(Object)
+                        .one(&txn)
+                        .await?
+                        .ok_or_else(|| MetaError::catalog_id_not_found("source", source_id))?;
+                    relations.push(PbRelation {
+                        relation_info: Some(PbRelationInfo::Source(
+                            ObjectModel(src, obj.unwrap()).into(),
+                        )),
+                    });
+                }
+                relations.push(PbRelation {
+                    relation_info: Some(PbRelationInfo::Table(
+                        ObjectModel(table, obj.unwrap()).into(),
+                    )),
+                });
+            }
+            ObjectType::Sink => {
+                let (sink, obj) = Sink::find_by_id(job_id)
+                    .find_also_related(Object)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("sink", job_id))?;
+                relations.push(PbRelation {
+                    relation_info: Some(PbRelationInfo::Sink(
+                        ObjectModel(sink, obj.unwrap()).into(),
+                    )),
+                });
+            }
+            ObjectType::Index => {
+                let (index, obj) = Index::find_by_id(job_id)
+                    .find_also_related(Object)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("index", job_id))?;
+                {
+                    let (table, obj) = Table::find_by_id(index.index_table_id)
+                        .find_also_related(Object)
+                        .one(&txn)
+                        .await?
+                        .ok_or_else(|| {
+                            MetaError::catalog_id_not_found("table", index.index_table_id)
+                        })?;
+                    relations.push(PbRelation {
+                        relation_info: Some(PbRelationInfo::Table(
+                            ObjectModel(table, obj.unwrap()).into(),
+                        )),
+                    });
+                }
+                relations.push(PbRelation {
+                    relation_info: Some(PbRelationInfo::Index(
+                        ObjectModel(index, obj.unwrap()).into(),
+                    )),
+                });
+            }
+            ObjectType::Source => {
+                let (source, obj) = Source::find_by_id(job_id)
+                    .find_also_related(Object)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("source", job_id))?;
+                relations.push(PbRelation {
+                    relation_info: Some(PbRelationInfo::Source(
+                        ObjectModel(source, obj.unwrap()).into(),
+                    )),
+                });
+            }
+            _ => unreachable!("invalid job type: {:?}", job_type),
+        }
+
+        let fragment_mapping = get_fragment_mappings(&txn, job_id).await?;
+
+        let replace_table_mapping_update = match replace_table_job_info {
+            Some((streaming_job, merge_updates, dummy_id)) => {
+                let incoming_sink_id = job_id;
+
+                let (relations, fragment_mapping) = Self::finish_replace_streaming_job_inner(
+                    dummy_id as ObjectId,
+                    merge_updates,
+                    None,
+                    Some(incoming_sink_id as _),
+                    None,
+                    &txn,
+                    streaming_job,
+                )
+                .await?;
+
+                Some((relations, fragment_mapping))
+            }
+            None => None,
+        };
+
+        txn.commit().await?;
+
+        self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
+            .await;
+
+        let mut version = self
+            .notify_frontend(
+                NotificationOperation::Add,
+                NotificationInfo::RelationGroup(PbRelationGroup { relations }),
+            )
+            .await;
+
+        if let Some((relations, fragment_mapping)) = replace_table_mapping_update {
+            self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
+                .await;
+            version = self
+                .notify_frontend(
+                    NotificationOperation::Update,
+                    NotificationInfo::RelationGroup(PbRelationGroup { relations }),
+                )
+                .await;
+        }
+
+        Ok(version)
     }
 
     pub async fn finish_replace_streaming_job(
