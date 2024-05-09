@@ -68,7 +68,9 @@ use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tower::Layer;
 
-use crate::memory::config::{reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB};
+use crate::memory::config::{
+    batch_mem_limit, reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB,
+};
 use crate::memory::manager::{MemoryManager, MemoryManagerConfig};
 use crate::observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::config_service::ConfigServiceImpl;
@@ -271,6 +273,7 @@ pub async fn compute_node_serve(
     let batch_mgr = Arc::new(BatchManager::new(
         config.batch.clone(),
         batch_manager_metrics,
+        batch_mem_limit(compute_memory_bytes),
     ));
 
     // NOTE: Due to some limits, we use `compute_memory_bytes + storage_memory_bytes` as

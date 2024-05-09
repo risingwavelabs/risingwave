@@ -1619,11 +1619,11 @@ dependencies = [
 
 [[package]]
 name = "backon"
-version = "0.4.1"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c1a6197b2120bb2185a267f6515038558b019e92b832bb0320e96d66268dcf9"
+checksum = "d67782c3f868daa71d3533538e98a8e13713231969def7536e8039606fc46bf0"
 dependencies = [
- "fastrand 1.9.0",
+ "fastrand 2.0.1",
  "futures-core",
  "pin-project",
  "tokio",
@@ -9285,9 +9285,9 @@ dependencies = [
 
 [[package]]
 name = "pulsar"
-version = "6.1.0"
+version = "6.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d21c6a837986cf25d22ac5b951c267d95808f3c830ff009c2879fff259a0268"
+checksum = "107f9e726e06d7154a1f0039877816d6366e58782a6f0808732ffe94dca2a6da"
 dependencies = [
  "async-trait",
  "bit-vec",
@@ -11971,9 +11971,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-pki-types"
-version = "1.5.0"
+version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "beb461507cee2c2ff151784c52762cf4d9ff6a61f3e80968600ed24fa837fa54"
+checksum = "976295e77ce332211c0d24d92c0e83e50f5c5f046d11082cea19f3df13a3562d"
 
 [[package]]
 name = "rustls-tokio-stream"

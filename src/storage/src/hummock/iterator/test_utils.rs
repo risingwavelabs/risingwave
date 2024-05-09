@@ -59,7 +59,7 @@ pub fn mock_sstable_store() -> SstableStoreRef {
     mock_sstable_store_with_object_store(Arc::new(ObjectStoreImpl::InMem(
         InMemObjectStore::new().monitored(
             Arc::new(ObjectStoreMetrics::unused()),
-            ObjectStoreConfig::default(),
+            Arc::new(ObjectStoreConfig::default()),
         ),
     )))
 }

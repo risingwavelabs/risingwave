@@ -21,6 +21,7 @@ use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::array::arrow::{FromArrow, IcebergArrowConvert};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     is_column_ids_dedup, ColumnCatalog, ColumnDesc, ColumnId, Schema, TableId,
@@ -40,7 +41,8 @@ use risingwave_connector::schema::schema_registry::{
 use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::cdc::{
     CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY,
-    CITUS_CDC_CONNECTOR, MONGODB_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
+    CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CITUS_CDC_CONNECTOR, MONGODB_CDC_CONNECTOR,
+    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
@@ -1219,11 +1221,10 @@ pub async fn extract_iceberg_columns(
             .iter()
             .enumerate()
             .map(|(i, field)| {
-                let data_type = field.data_type().clone();
                 let column_desc = ColumnDesc::named(
                     field.name(),
                     ColumnId::new((i as u32).try_into().unwrap()),
-                    data_type.into(),
+                    IcebergArrowConvert.from_field(field).unwrap(),
                 );
                 ColumnCatalog {
                     column_desc,
@@ -1288,11 +1289,7 @@ pub async fn check_iceberg_source(
         .collect::<Vec<_>>();
     let new_iceberg_schema = arrow_schema::Schema::new(new_iceberg_field);
 
-    risingwave_connector::sink::iceberg::try_matches_arrow_schema(
-        &schema,
-        &new_iceberg_schema,
-        true,
-    )?;
+    risingwave_connector::sink::iceberg::try_matches_arrow_schema(&schema, &new_iceberg_schema)?;
 
     Ok(())
 }
@@ -1371,6 +1368,13 @@ pub async fn handle_create_source(
         with_properties.insert(CDC_SHARING_MODE_KEY.into(), "true".into());
         // enable transactional cdc
         with_properties.insert(CDC_TRANSACTIONAL_KEY.into(), "true".into());
+        with_properties.insert(
+            CDC_WAIT_FOR_STREAMING_START_TIMEOUT.into(),
+            session
+                .config()
+                .cdc_source_wait_streaming_start_timeout()
+                .to_string(),
+        );
     }
 
     // must behind `handle_addition_columns`
@@ -1494,6 +1498,7 @@ fn row_encode_to_prost(row_encode: &Encode) -> EncodeType {
         Encode::Bytes => EncodeType::Bytes,
         Encode::Template => EncodeType::Template,
         Encode::None => EncodeType::None,
+        Encode::Text => EncodeType::Text,
     }
 }
 
