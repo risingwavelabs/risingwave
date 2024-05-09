@@ -2,6 +2,10 @@
 
 local yaml = importstr '../../../risedev.yml';
 local profiles = std.parseYaml(yaml).profile;
+local userYaml = importstr '../../../risedev-profiles.user.yml';
+local userProfiles = std.parseYaml(userYaml);
+
+local allProfiles = profiles + userProfiles;
 
 local _ = import '../../../risedev-template.libsonnet';
 
@@ -26,4 +30,4 @@ local mapProfile = function(name, profile)
   (if 'config-path' in profile then { configPath: profile['config-path'] } else {})
   { steps: std.map(mapStep, profile.steps) };
 
-std.mapWithKey(mapProfile, profiles)
+std.mapWithKey(mapProfile, allProfiles)
