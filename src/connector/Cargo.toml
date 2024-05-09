@@ -33,6 +33,7 @@ auto_impl = "1"
 await-tree = { workspace = true }
 aws-config = { workspace = true }
 aws-credential-types = { workspace = true }
+aws-msk-iam-sasl-signer = "1.0.0"
 aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-smithy-http = { workspace = true }
@@ -43,6 +44,7 @@ aws-types = { workspace = true }
 base64 = "0.22"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
+cfg-or-panic = "0.2"
 chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",

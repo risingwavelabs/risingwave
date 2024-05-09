@@ -14,14 +14,10 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::str::FromStr;
-use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use rdkafka::client::BrokerAddr;
-use rdkafka::consumer::ConsumerContext;
-use rdkafka::producer::{DeliveryResult, ProducerContext};
-use rdkafka::{ClientContext, Statistics};
 use risingwave_common::bail;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -31,14 +27,13 @@ use crate::connector_common::{
     AwsPrivateLinkItem, PRIVATE_LINK_BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY,
 };
 use crate::error::ConnectorResult;
-use crate::source::kafka::stats::RdKafkaStats;
 use crate::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
 
 pub const PRIVATELINK_ENDPOINT_KEY: &str = "privatelink.endpoint";
 pub const CONNECTION_NAME_KEY: &str = "connection.name";
 
 #[derive(Debug)]
-enum PrivateLinkContextRole {
+pub(super) enum PrivateLinkContextRole {
     Consumer,
     Producer,
 }
@@ -52,13 +47,13 @@ impl std::fmt::Display for PrivateLinkContextRole {
     }
 }
 
-struct BrokerAddrRewriter {
+pub(super) struct BrokerAddrRewriter {
     role: PrivateLinkContextRole,
     rewrite_map: BTreeMap<BrokerAddr, BrokerAddr>,
 }
 
 impl BrokerAddrRewriter {
-    fn rewrite_broker_addr(&self, addr: BrokerAddr) -> BrokerAddr {
+    pub(super) fn rewrite_broker_addr(&self, addr: BrokerAddr) -> BrokerAddr {
         let rewrote_addr = match self.rewrite_map.get(&addr) {
             None => addr,
             Some(new_addr) => new_addr.clone(),
@@ -93,94 +88,6 @@ impl BrokerAddrRewriter {
         let rewrite_map = rewrite_map?;
         Ok(Self { role, rewrite_map })
     }
-}
-
-pub struct PrivateLinkConsumerContext {
-    inner: BrokerAddrRewriter,
-
-    // identifier is required when reporting metrics as a label, usually it is compose by connector
-    // format (source or sink) and corresponding id (source_id or sink_id)
-    // identifier and metrics should be set at the same time
-    identifier: Option<String>,
-    metrics: Option<Arc<RdKafkaStats>>,
-}
-
-impl PrivateLinkConsumerContext {
-    pub fn new(
-        broker_rewrite_map: Option<HashMap<String, String>>,
-        identifier: Option<String>,
-        metrics: Option<Arc<RdKafkaStats>>,
-    ) -> ConnectorResult<Self> {
-        let inner = BrokerAddrRewriter::new(PrivateLinkContextRole::Consumer, broker_rewrite_map)?;
-        Ok(Self {
-            inner,
-            identifier,
-            metrics,
-        })
-    }
-}
-
-impl ClientContext for PrivateLinkConsumerContext {
-    /// this func serves as a callback when `poll` is completed.
-    fn stats(&self, statistics: Statistics) {
-        if let Some(metrics) = &self.metrics
-            && let Some(id) = &self.identifier
-        {
-            metrics.report(id.as_str(), &statistics);
-        }
-    }
-
-    fn rewrite_broker_addr(&self, addr: BrokerAddr) -> BrokerAddr {
-        self.inner.rewrite_broker_addr(addr)
-    }
-}
-
-// required by the trait bound of BaseConsumer
-impl ConsumerContext for PrivateLinkConsumerContext {}
-
-pub struct PrivateLinkProducerContext {
-    inner: BrokerAddrRewriter,
-
-    // identifier is required when reporting metrics as a label, usually it is compose by connector
-    // format (source or sink) and corresponding id (source_id or sink_id)
-    // identifier and metrics should be set at the same time
-    identifier: Option<String>,
-    metrics: Option<Arc<RdKafkaStats>>,
-}
-
-impl PrivateLinkProducerContext {
-    pub fn new(
-        broker_rewrite_map: Option<HashMap<String, String>>,
-        identifier: Option<String>,
-        metrics: Option<Arc<RdKafkaStats>>,
-    ) -> ConnectorResult<Self> {
-        let inner = BrokerAddrRewriter::new(PrivateLinkContextRole::Producer, broker_rewrite_map)?;
-        Ok(Self {
-            inner,
-            identifier,
-            metrics,
-        })
-    }
-}
-
-impl ClientContext for PrivateLinkProducerContext {
-    fn stats(&self, statistics: Statistics) {
-        if let Some(metrics) = &self.metrics
-            && let Some(id) = &self.identifier
-        {
-            metrics.report(id.as_str(), &statistics);
-        }
-    }
-
-    fn rewrite_broker_addr(&self, addr: BrokerAddr) -> BrokerAddr {
-        self.inner.rewrite_broker_addr(addr)
-    }
-}
-
-impl ProducerContext for PrivateLinkProducerContext {
-    type DeliveryOpaque = ();
-
-    fn delivery(&self, _: &DeliveryResult<'_>, _: Self::DeliveryOpaque) {}
 }
 
 #[inline(always)]
