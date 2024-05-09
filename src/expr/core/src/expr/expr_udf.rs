@@ -341,10 +341,7 @@ impl Build for UserDefinedFunction {
                 );
                 rt.add_function(
                     identifier,
-                    arrow_convert
-                        .to_arrow_field("", &return_type)?
-                        .data_type()
-                        .clone(),
+                    arrow_convert.to_arrow_field("", &return_type)?,
                     JsCallMode::CalledOnNullInput,
                     &body,
                 )?;
@@ -383,17 +380,12 @@ impl Build for UserDefinedFunction {
                     )
                 };
 
-                futures::executor::block_on(
-                    rt.add_function(
-                        identifier,
-                        arrow_convert
-                            .to_arrow_field("", &return_type)?
-                            .data_type()
-                            .clone(),
-                        DenoCallMode::CalledOnNullInput,
-                        &body,
-                    ),
-                )?;
+                futures::executor::block_on(rt.add_function(
+                    identifier,
+                    arrow_convert.to_arrow_field("", &return_type)?,
+                    DenoCallMode::CalledOnNullInput,
+                    &body,
+                ))?;
 
                 UdfImpl::Deno(rt)
             }
@@ -403,10 +395,7 @@ impl Build for UserDefinedFunction {
                 let body = udf.get_body()?;
                 rt.add_function(
                     identifier,
-                    arrow_convert
-                        .to_arrow_field("", &return_type)?
-                        .data_type()
-                        .clone(),
+                    arrow_convert.to_arrow_field("", &return_type)?,
                     PythonCallMode::CalledOnNullInput,
                     body,
                 )?;

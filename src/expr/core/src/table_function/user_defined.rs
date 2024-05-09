@@ -213,10 +213,7 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
             );
             rt.add_function(
                 identifier,
-                arrow_convert
-                    .to_arrow_field("", &return_type)?
-                    .data_type()
-                    .clone(),
+                arrow_convert.to_arrow_field("", &return_type)?,
                 JsCallMode::CalledOnNullInput,
                 &body,
             )?;
@@ -252,17 +249,12 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
                 body
             );
 
-            futures::executor::block_on(
-                rt.add_function(
-                    identifier,
-                    arrow_convert
-                        .to_arrow_field("", &return_type)?
-                        .data_type()
-                        .clone(),
-                    DenoCallMode::CalledOnNullInput,
-                    &body,
-                ),
-            )?;
+            futures::executor::block_on(rt.add_function(
+                identifier,
+                arrow_convert.to_arrow_field("", &return_type)?,
+                DenoCallMode::CalledOnNullInput,
+                &body,
+            ))?;
             UdfImpl::Deno(rt)
         }
         #[cfg(feature = "embedded-python-udf")]
@@ -271,10 +263,7 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
             let body = udtf.get_body()?;
             rt.add_function(
                 identifier,
-                arrow_convert
-                    .to_arrow_field("", &return_type)?
-                    .data_type()
-                    .clone(),
+                arrow_convert.to_arrow_field("", &return_type)?,
                 PythonCallMode::CalledOnNullInput,
                 body,
             )?;
