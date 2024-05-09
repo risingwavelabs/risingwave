@@ -40,6 +40,9 @@ const STORAGE_SHARED_BUFFER_MAX_MEMORY_MB: usize = 4096;
 const STORAGE_META_CACHE_MEMORY_PROPORTION: f64 = 0.35;
 const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.3;
 
+/// The proportion of compute memory used for batch processing.
+const COMPUTE_BATCH_MEMORY_PROPORTION: f64 = 0.3;
+
 /// Each compute node reserves some memory for stack and code segment of processes, allocation
 /// overhead, network buffer, etc. based on `SYSTEM_RESERVED_MEMORY_PROPORTION`. The reserve memory
 /// size must be larger than `MIN_SYSTEM_RESERVED_MEMORY_MB`
@@ -232,6 +235,10 @@ pub fn storage_memory_config(
         block_cache_eviction_config,
         meta_cache_eviction_config,
     }
+}
+
+pub fn batch_mem_limit(compute_memory_bytes: usize) -> u64 {
+    (compute_memory_bytes as f64 * COMPUTE_BATCH_MEMORY_PROPORTION) as u64
 }
 
 #[cfg(test)]
