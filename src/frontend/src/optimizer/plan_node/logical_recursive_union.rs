@@ -29,6 +29,7 @@ use super::{
 use crate::error::Result;
 use crate::utils::Condition;
 use crate::PlanRef;
+use crate::binder::ShareId;
 
 /// `LogicalRecursiveUnion` returns the union of the rows of its inputs.
 /// note: if `all` is false, it needs to eliminate duplicates.
@@ -39,17 +40,18 @@ pub struct LogicalRecursiveUnion {
 }
 
 impl LogicalRecursiveUnion {
-    pub fn new(base_plan: PlanRef, recursive: PlanRef) -> Self {
+    pub fn new(base_plan: PlanRef, recursive: PlanRef, id: ShareId) -> Self {
         let core = generic::RecursiveUnion {
             base: base_plan,
             recursive,
+            id,
         };
         let base = PlanBase::new_logical_with_core(&core);
         LogicalRecursiveUnion { base, core }
     }
 
-    pub fn create(base_plan: PlanRef, recursive: PlanRef) -> PlanRef {
-        Self::new(base_plan, recursive).into()
+    pub fn create(base_plan: PlanRef, recursive: PlanRef, id: ShareId) -> PlanRef {
+        Self::new(base_plan, recursive, id).into()
     }
 
     pub(super) fn pretty_fields(base: impl GenericPlanRef, name: &str) -> XmlNode<'_> {
@@ -64,7 +66,7 @@ impl PlanTreeNode for LogicalRecursiveUnion {
 
     fn clone_with_inputs(&self, inputs: &[PlanRef]) -> PlanRef {
         let mut inputs = inputs.iter().cloned();
-        Self::create(inputs.next().unwrap(), inputs.next().unwrap())
+        Self::create(inputs.next().unwrap(), inputs.next().unwrap(), self.core.id)
     }
 }
 
@@ -81,7 +83,9 @@ impl ColPrunable for LogicalRecursiveUnion {
             .iter()
             .map(|input| input.prune_col(required_cols, ctx))
             .collect_vec();
-        self.clone_with_inputs(&new_inputs)
+        let new_plan = self.clone_with_inputs(&new_inputs);
+        self.ctx().insert_rcte_cache_plan(self.core.id, new_plan.clone());
+        new_plan
     }
 }
 

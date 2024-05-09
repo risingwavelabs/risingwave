@@ -26,7 +26,7 @@ impl Planner {
     ) -> Result<PlanRef> {
         let base = self.plan_set_expr(base, vec![], &[])?;
         let recursive = self.plan_set_expr(recursive, vec![], &[])?;
-        let plan = LogicalRecursiveUnion::create(base, recursive);
+        let plan = LogicalRecursiveUnion::create(base, recursive, id);
         self.ctx.insert_rcte_cache_plan(id, plan.clone());
         Ok(plan)
     }

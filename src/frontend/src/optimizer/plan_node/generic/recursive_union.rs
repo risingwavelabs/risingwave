@@ -16,6 +16,7 @@ use pretty_xmlish::StrAssocArr;
 use risingwave_common::catalog::Schema;
 
 use super::{impl_distill_unit_from_fields, GenericPlanNode, GenericPlanRef};
+use crate::binder::ShareId;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::OptimizerContextRef;
 
@@ -23,6 +24,7 @@ use crate::OptimizerContextRef;
 /// note: if `all` is false, it needs to eliminate duplicates.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RecursiveUnion<PlanRef> {
+    pub id: ShareId,
     pub base: PlanRef,
     pub recursive: PlanRef,
 }
