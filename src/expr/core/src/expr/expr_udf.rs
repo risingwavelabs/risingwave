@@ -326,6 +326,7 @@ impl Build for UserDefinedFunction {
                     .context("failed to decompress wasm binary")?;
                 let runtime = get_or_create_wasm_runtime(&wasm_binary)?;
                 // backward compatibility
+                // see <https://github.com/risingwavelabs/risingwave/pull/16619> for details
                 if runtime.abi_version().0 <= 2 {
                     arrow_convert = UdfArrowConvert { legacy: true };
                 }
@@ -406,6 +407,7 @@ impl Build for UserDefinedFunction {
                 let link = udf.get_link()?;
                 let client = crate::expr::expr_udf::get_or_create_flight_client(link)?;
                 // backward compatibility
+                // see <https://github.com/risingwavelabs/risingwave/pull/16619> for details
                 if client.protocol_version() == 1 {
                     arrow_convert = UdfArrowConvert { legacy: true };
                 }
