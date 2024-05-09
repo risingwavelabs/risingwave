@@ -178,18 +178,19 @@ enum MemoryRequest {
 
 pub struct PendingRequestCancelGuard {
     inner: Option<Arc<MemoryLimiterInner>>,
-    rc: Receiver<MemoryTrackerImpl>,
+    rx: Receiver<MemoryTrackerImpl>,
 }
 
 impl Drop for PendingRequestCancelGuard {
     fn drop(&mut self) {
         if let Some(limiter) = self.inner.take() {
-            self.rc.close();
-            if let Ok(msg) = self.rc.try_recv() {
+            // close rc before calling `try_recv`, it will make `MemoryTrackerImpl` which generates after dropping of `PendingRequestCancelGuard` drop in loop of `may_notify_waiters` in other thread.
+            // If `MemoryTrackerImpl` send before this thread calling `close`, it can still be received by this thread. Once this thread receives the message, it need drop the message and update `total_size` in `MemoryTrackerImpl`'s drop.
+            self.rx.close();
+            if let Ok(msg) = self.rx.try_recv() {
                 drop(msg);
-                if limiter.pending_request_count.load(AtomicOrdering::Acquire) > 0 {
-                    limiter.may_notify_waiters();
-                }
+                // every time `MemoryTrackerImpl` drop, it will update `total_size` and we need to check whether there exist waiters to be notified.
+                limiter.may_notify_waiters();
             }
         }
     }
@@ -202,7 +203,7 @@ impl Future for PendingRequestCancelGuard {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Self::Output> {
-        match self.rc.poll_unpin(cx) {
+        match self.rx.poll_unpin(cx) {
             Poll::Ready(Ok(msg)) => {
                 self.inner.take();
                 Poll::Ready(Some(msg))
@@ -233,6 +234,10 @@ impl MemoryLimiterInner {
     }
 
     fn may_notify_waiters(self: &Arc<Self>) {
+        if self.pending_request_count.load(AtomicOrdering::Acquire) == 0 {
+            return;
+        }
+        // check `inflight_barrier` to avoid access lock every times drop `MemoryTracker`.
         let mut waiters = self.controller.lock();
         while let Some((_, quota)) = waiters.front() {
             if !self.try_require_memory(*quota) {
@@ -280,12 +285,12 @@ impl MemoryLimiterInner {
             }
             return MemoryRequest::Ready(MemoryTrackerImpl::new(self.clone(), quota));
         }
-        let (tx, rc) = channel();
+        let (tx, rx) = channel();
         waiters.push_back((tx, quota));
         // This variable can only update within lock.
         self.pending_request_count
             .store(waiters.len() as u64, AtomicOrdering::Release);
-        MemoryRequest::Pending(rc)
+        MemoryRequest::Pending(rx)
     }
 
     fn permit_quota(&self, current_quota: u64, _request_quota: u64) -> bool {
@@ -380,11 +385,12 @@ impl MemoryLimiter {
     pub async fn require_memory(&self, quota: u64) -> MemoryTracker {
         match self.inner.require_memory(quota) {
             MemoryRequest::Ready(inner) => MemoryTracker { inner },
-            MemoryRequest::Pending(rc) => {
+            MemoryRequest::Pending(rx) => {
                 let guard = PendingRequestCancelGuard {
                     inner: Some(self.inner.clone()),
-                    rc,
+                    rx,
                 };
+                // We will never clear an exist `require_memory` request. Every request will be return in some time unless it is canceled. So it is safe to await unwrap here.
                 let inner = guard.await.unwrap();
                 MemoryTracker { inner }
             }
@@ -420,16 +426,7 @@ impl Drop for MemoryTracker {
     fn drop(&mut self) {
         if let Some(quota) = self.inner.quota.take() {
             self.inner.limiter.release_quota(quota);
-            // check `inflight_barrier` to avoid access lock every times drop `MemoryTracker`.
-            if self
-                .inner
-                .limiter
-                .pending_request_count
-                .load(AtomicOrdering::Acquire)
-                > 0
-            {
-                self.inner.limiter.may_notify_waiters();
-            }
+            self.inner.limiter.may_notify_waiters();
         }
     }
 }
