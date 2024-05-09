@@ -19,9 +19,8 @@ use std::str::FromStr;
 
 #[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
 pub enum QueryMode {
-    #[default]
     Auto,
-
+    #[default]
     Local,
 
     Distributed,
