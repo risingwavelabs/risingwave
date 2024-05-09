@@ -20,7 +20,6 @@ use alloc::{
     vec,
     vec::Vec,
 };
-use core::cmp::Ordering;
 use core::fmt;
 
 use itertools::Itertools;
@@ -1212,21 +1211,11 @@ impl Parser {
 
     /// Parses an array expression `[ex1, ex2, ..]`
     pub fn parse_array_expr(&mut self) -> Result<Expr, ParserError> {
-        self.expect_token(&Token::LBracket)?;
-
-        if self.consume_token(&Token::RBracket) {
-            return Ok(Expr::Array(Array {
-                elem: vec![],
-                named: true,
-            }));
-        }
-
         let mut expected_depth = None;
-        let exprs =
-            self.parse_comma_separated(|parser| parser.parse_array_inner(0, &mut expected_depth))?;
-        self.expect_token(&Token::RBracket)?;
+        let exprs = self.parse_array_inner(0, &mut expected_depth)?;
         Ok(Expr::Array(Array {
             elem: exprs,
+            // Top-level array is named.
             named: true,
         }))
     }
@@ -1234,44 +1223,37 @@ impl Parser {
     fn parse_array_inner(
         &mut self,
         depth: usize,
-        // All elements in the same array should have the same depth. When meet the first leaf element, set the value.
         expected_depth: &mut Option<usize>,
-    ) -> Result<Expr, ParserError> {
-        Ok(if self.consume_token(&Token::LBracket) {
-            if self.consume_token(&Token::RBracket) {
-                return Ok(Expr::Array(Array {
-                    elem: vec![],
+    ) -> Result<Vec<Expr>, ParserError> {
+        self.expect_token(&Token::LBracket)?;
+        if let Some(expected_depth) = *expected_depth
+            && depth > expected_depth
+        {
+            return self.expected("]", self.peek_token());
+        }
+        let exprs = if self.peek_token() == Token::LBracket {
+            self.parse_comma_separated(|parser| {
+                let exprs = parser.parse_array_inner(depth + 1, expected_depth)?;
+                Ok(Expr::Array(Array {
+                    elem: exprs,
                     named: false,
-                }));
-            }
-            let exprs = self.parse_comma_separated(|parser| {
-                parser.parse_array_inner(depth + 1, expected_depth)
-            })?;
-            self.expect_token(&Token::RBracket)?;
-            Expr::Array(Array {
-                elem: exprs,
-                // Only top-level array is named.
-                named: false,
-            })
+                }))
+            })?
         } else {
             if let Some(expected_depth) = *expected_depth {
-                match depth.cmp(&expected_depth) {
-                    Ordering::Less => {
-                        return self.expected("]", self.peek_token());
-                    }
-                    Ordering::Greater => {
-                        return parser_err!(format!(
-                            "dimension mismatch, expected {}, actual {}",
-                            expected_depth, depth
-                        ));
-                    }
-                    _ => {}
+                if depth < expected_depth {
+                    return self.expected("[", self.peek_token());
                 }
             } else {
                 *expected_depth = Some(depth);
             }
-            self.parse_expr()?
-        })
+            if self.consume_token(&Token::RBracket) {
+                return Ok(vec![]);
+            }
+            self.parse_comma_separated(Self::parse_expr)?
+        };
+        self.expect_token(&Token::RBracket)?;
+        Ok(exprs)
     }
 
     // This function parses date/time fields for interval qualifiers.

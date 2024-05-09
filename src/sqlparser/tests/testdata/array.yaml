@@ -31,17 +31,29 @@
   formatted_sql: SELECT ARRAY[ARRAY[1, 2], ARRAY[3, 4]]
 - input: SELECT ARRAY[[],[]]
   formatted_sql: SELECT ARRAY[[], []]
+- input: SELECT ARRAY[ARRAY[],[]]
+  error_msg: |-
+    sql parser error: Expected an expression:, found: [ at line:1, column:23
+    Near "SELECT ARRAY[ARRAY[],["
+- input: SELECT ARRAY[[],ARRAY[]]
+  error_msg: |-
+    sql parser error: Expected [, found: ARRAY at line:1, column:22
+    Near "SELECT ARRAY[[],"
 - input: SELECT ARRAY[[1,2],3]
   error_msg: |-
-    sql parser error: Expected ], found: 3 at line:1, column:21
+    sql parser error: Expected [, found: 3 at line:1, column:21
     Near "SELECT ARRAY[[1,2],"
 - input: SELECT ARRAY[1,[2,3]]
-  error_msg: 'sql parser error: dimension mismatch, expected 0, actual 1'
+  error_msg: |-
+    sql parser error: Expected an expression:, found: [ at line:1, column:17
+    Near "SELECT ARRAY[1,["
 - input: SELECT ARRAY[ARRAY[1,2],[3,4]]
-  error_msg: 'sql parser error: dimension mismatch, expected 0, actual 1'
+  error_msg: |-
+    sql parser error: Expected an expression:, found: [ at line:1, column:26
+    Near "ARRAY[ARRAY[1,2],["
 - input: SELECT ARRAY[[1,2],ARRAY[3,4]]
   error_msg: |-
-    sql parser error: Expected ], found: ARRAY at line:1, column:25
+    sql parser error: Expected [, found: ARRAY at line:1, column:25
     Near "SELECT ARRAY[[1,2],"
 - input: SELECT ARRAY[[1,2],[3] || [4]]
   error_msg: |-
