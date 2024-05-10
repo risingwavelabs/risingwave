@@ -32,6 +32,7 @@ use tokio_postgres::{NoTls, Statement};
 
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::postgres_row_to_owned_row;
+use crate::parser::scalar_adapter::ScalarAdapter;
 #[cfg(not(madsim))]
 use crate::source::cdc::external::maybe_tls_connector::MaybeMakeTlsConnector;
 use crate::source::cdc::external::{
@@ -240,12 +241,12 @@ impl PostgresExternalTableReader {
 
         let stream = match start_pk_row {
             Some(ref pk_row) => {
-                let params: Vec<Option<scalar_adapter::ScalarAdapter<'_>>> = pk_row
+                let params: Vec<Option<ScalarAdapter<'_>>> = pk_row
                     .iter()
                     .zip_eq_fast(self.prepared_scan_stmt.params())
                     .map(|(datum, ty)| {
                         datum
-                            .map(|scalar| scalar_adapter::to_extra(scalar, ty))
+                            .map(|scalar| ScalarAdapter::from_scalar(scalar, ty))
                             .transpose()
                     })
                     .try_collect()?;
@@ -259,7 +260,7 @@ impl PostgresExternalTableReader {
                     Self::get_normalized_table_name(&table_name),
                     order_key,
                 );
-                let params: Vec<Option<scalar_adapter::ScalarAdapter<'_>>> = vec![];
+                let params: Vec<Option<ScalarAdapter<'_>>> = vec![];
                 client.query_raw(&sql, &params).await?
             }
         };
@@ -294,72 +295,6 @@ impl PostgresExternalTableReader {
 
     fn quote_column(column: &str) -> String {
         format!("\"{}\"", column)
-    }
-}
-
-mod scalar_adapter {
-    use pg_bigdecimal::PgNumeric;
-    use risingwave_common::types::ScalarRefImpl;
-    use tokio_postgres::types::{to_sql_checked, IsNull, Kind, ToSql, Type};
-
-    use crate::parser::EnumString;
-
-    #[derive(Debug)]
-    pub(super) enum ScalarAdapter<'a> {
-        Builtin(ScalarRefImpl<'a>),
-        Uuid(uuid::Uuid),
-        Numeric(PgNumeric),
-        Enum(EnumString),
-    }
-
-    impl ToSql for ScalarAdapter<'_> {
-        to_sql_checked!();
-
-        fn to_sql(
-            &self,
-            ty: &Type,
-            out: &mut bytes::BytesMut,
-        ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>> {
-            match self {
-                ScalarAdapter::Builtin(v) => v.to_sql(ty, out),
-                ScalarAdapter::Uuid(v) => v.to_sql(ty, out),
-                ScalarAdapter::Numeric(v) => v.to_sql(ty, out),
-                ScalarAdapter::Enum(v) => v.to_sql(ty, out),
-            }
-        }
-
-        fn accepts(_ty: &Type) -> bool {
-            true
-        }
-    }
-
-    /// convert `ScalarRefImpl` to `ScalarAdapter` so that we can correctly encode to postgres value
-    pub(super) fn to_extra<'a>(
-        scalar: ScalarRefImpl<'a>,
-        ty: &Type,
-    ) -> super::ConnectorResult<ScalarAdapter<'a>> {
-        Ok(match (scalar, ty, ty.kind()) {
-            (ScalarRefImpl::Utf8(s), &Type::UUID, _) => ScalarAdapter::Uuid(s.parse()?),
-            (ScalarRefImpl::Utf8(s), &Type::NUMERIC, _) => {
-                ScalarAdapter::Numeric(string_to_pg_numeric(s)?)
-            }
-            (ScalarRefImpl::Int256(s), &Type::NUMERIC, _) => {
-                ScalarAdapter::Numeric(string_to_pg_numeric(&s.to_string())?)
-            }
-            (ScalarRefImpl::Utf8(s), _, Kind::Enum(_)) => {
-                ScalarAdapter::Enum(EnumString(s.to_owned()))
-            }
-            _ => ScalarAdapter::Builtin(scalar),
-        })
-    }
-
-    fn string_to_pg_numeric(s: &str) -> super::ConnectorResult<PgNumeric> {
-        Ok(match s {
-            "NEGATIVE_INFINITY" => PgNumeric::NegativeInf,
-            "POSITIVE_INFINITY" => PgNumeric::PositiveInf,
-            "NAN" => PgNumeric::NaN,
-            _ => PgNumeric::Normalized(s.parse().unwrap()),
-        })
     }
 }
 
