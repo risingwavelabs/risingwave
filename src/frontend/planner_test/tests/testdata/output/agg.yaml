@@ -1278,7 +1278,7 @@
   logical_plan: |-
     LogicalProject { exprs: [Case((count(t.v1) <= 1:Int64), null:Decimal, Sqrt(((sum($expr1)::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1)::Decimal)) / (count(t.v1) - 1:Int64)::Decimal))) as $expr2, Sqrt(((sum($expr1)::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1)::Decimal)) / count(t.v1)::Decimal)) as $expr3] }
     └─LogicalAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
-      └─LogicalProject { exprs: [t.v1, (t.v1 * t.v1) as $expr1] }
+      └─LogicalProject { exprs: [(t.v1 * t.v1) as $expr1, t.v1] }
         └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   batch_plan: |-
     BatchProject { exprs: [Case((sum0(count(t.v1)) <= 1:Int64), null:Decimal, Sqrt(((sum(sum($expr1))::Decimal - (($expr2 * $expr2) / $expr3)) / (sum0(count(t.v1)) - 1:Int64)::Decimal))) as $expr4, Sqrt(((sum(sum($expr1))::Decimal - (($expr2 * $expr2) / $expr3)) / $expr3)) as $expr5] }
@@ -1286,14 +1286,14 @@
       └─BatchSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1))] }
         └─BatchExchange { order: [], dist: Single }
           └─BatchSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
-            └─BatchProject { exprs: [t.v1, (t.v1 * t.v1) as $expr1] }
+            └─BatchProject { exprs: [(t.v1 * t.v1) as $expr1, t.v1] }
               └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   batch_local_plan: |-
     BatchProject { exprs: [Case((count(t.v1) <= 1:Int64), null:Decimal, Sqrt(((sum($expr1)::Decimal - (($expr2 * $expr2) / $expr3)) / (count(t.v1) - 1:Int64)::Decimal))) as $expr4, Sqrt(((sum($expr1)::Decimal - (($expr2 * $expr2) / $expr3)) / $expr3)) as $expr5] }
     └─BatchProject { exprs: [sum($expr1), sum(t.v1), count(t.v1), sum(t.v1)::Decimal as $expr2, count(t.v1)::Decimal as $expr3] }
       └─BatchSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
         └─BatchExchange { order: [], dist: Single }
-          └─BatchProject { exprs: [t.v1, (t.v1 * t.v1) as $expr1] }
+          └─BatchProject { exprs: [(t.v1 * t.v1) as $expr1, t.v1] }
             └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [stddev_samp, stddev_pop], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
@@ -1302,7 +1302,7 @@
         └─StreamSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1)), count] }
           └─StreamExchange { dist: Single }
             └─StreamStatelessSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
-              └─StreamProject { exprs: [t.v1, (t.v1 * t.v1) as $expr1, t._row_id] }
+              └─StreamProject { exprs: [(t.v1 * t.v1) as $expr1, t.v1, t._row_id] }
                 └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: stddev_samp with other columns
   sql: |
@@ -1310,7 +1310,7 @@
   logical_plan: |-
     LogicalProject { exprs: [count('':Varchar), Case((count(1:Int32) <= 1:Int64), null:Decimal, Sqrt(((sum($expr1)::Decimal - ((sum(1:Int32)::Decimal * sum(1:Int32)::Decimal) / count(1:Int32)::Decimal)) / (count(1:Int32) - 1:Int64)::Decimal))) as $expr2] }
     └─LogicalAgg { aggs: [count('':Varchar), sum($expr1), sum(1:Int32), count(1:Int32)] }
-      └─LogicalProject { exprs: ['':Varchar, 1:Int32, (1:Int32 * 1:Int32) as $expr1] }
+      └─LogicalProject { exprs: ['':Varchar, (1:Int32 * 1:Int32) as $expr1, 1:Int32] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - name: stddev_samp with group
   sql: |
@@ -1319,7 +1319,7 @@
   logical_plan: |-
     LogicalProject { exprs: [Case((count(t.v) <= 1:Int64), null:Decimal, Sqrt(((sum($expr1)::Decimal - ((sum(t.v)::Decimal * sum(t.v)::Decimal) / count(t.v)::Decimal)) / (count(t.v) - 1:Int64)::Decimal))) as $expr2] }
     └─LogicalAgg { group_key: [t.w], aggs: [sum($expr1), sum(t.v), count(t.v)] }
-      └─LogicalProject { exprs: [t.w, t.v, (t.v * t.v) as $expr1] }
+      └─LogicalProject { exprs: [t.w, (t.v * t.v) as $expr1, t.v] }
         └─LogicalScan { table: t, columns: [t.v, t.w, t._row_id] }
 - name: force two phase aggregation should succeed with UpstreamHashShard and SomeShard (batch only).
   sql: |
