@@ -121,7 +121,11 @@ fn get_user_name_by_id(user_info_reader: &UserInfoReader, user_id: i32) -> Resul
 }
 
 #[capture_context(CATALOG_READER, DB_NAME)]
-fn get_grant_object_by_oid(catalog_reader: &CatalogReader, db_name: &str, oid: i32) -> Result<Object> {
+fn get_grant_object_by_oid(
+    catalog_reader: &CatalogReader,
+    db_name: &str,
+    oid: i32,
+) -> Result<Object> {
     catalog_reader
         .read_guard()
         .get_database_by_name(db_name)
