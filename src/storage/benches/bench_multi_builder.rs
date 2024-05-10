@@ -332,5 +332,5 @@ fn bench_table_scan(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_table_scan);
+criterion_group!(benches, bench_multi_builder, bench_table_scan);
 criterion_main!(benches);
