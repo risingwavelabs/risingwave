@@ -421,7 +421,7 @@ impl Build for UserDefinedFunction {
             #[cfg(not(madsim))]
             _ => {
                 let link = udf.get_link()?;
-                let client = crate::expr::expr_udf::get_or_create_flight_client(link)?;
+                let client = get_or_create_flight_client(link)?;
                 // backward compatibility
                 // see <https://github.com/risingwavelabs/risingwave/pull/16619> for details
                 if client.protocol_version() == 1 {
@@ -456,11 +456,11 @@ impl Build for UserDefinedFunction {
     }
 }
 
-#[cfg(not(madsim))]
+#[cfg_or_panic(not(madsim))]
 /// Get or create a client for the given UDF service.
 ///
 /// There is a global cache for clients, so that we can reuse the same client for the same service.
-pub(crate) fn get_or_create_flight_client(link: &str) -> Result<Arc<FlightClient>> {
+pub fn get_or_create_flight_client(link: &str) -> Result<Arc<FlightClient>> {
     static CLIENTS: LazyLock<std::sync::Mutex<HashMap<String, Weak<FlightClient>>>> =
         LazyLock::new(Default::default);
     let mut clients = CLIENTS.lock().unwrap();
@@ -489,11 +489,11 @@ async fn connect_tonic(mut addr: &str) -> Result<tonic::transport::Channel> {
     const REQUEST_TIMEOUT_SECS: u64 = 5;
     const CONNECT_TIMEOUT_SECS: u64 = 5;
 
-    if addr.starts_with("http://") {
-        addr = addr.strip_prefix("http://").unwrap();
+    if let Some(s) = addr.strip_prefix("http://") {
+        addr = s;
     }
-    if addr.starts_with("https://") {
-        addr = addr.strip_prefix("https://").unwrap();
+    if let Some(s) = addr.strip_prefix("https://") {
+        addr = s;
     }
     let host_addr = addr.parse::<HostAddr>().map_err(|e| {
         arrow_udf_flight::Error::Service(format!(

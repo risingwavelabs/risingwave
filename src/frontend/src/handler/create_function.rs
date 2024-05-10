@@ -12,16 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use arrow_schema::Fields;
-use arrow_udf_flight::Client as FlightClient;
 use bytes::Bytes;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::array::arrow::{ToArrow, UdfArrowConvert};
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
-use risingwave_expr::expr::get_or_create_wasm_runtime;
+use risingwave_expr::expr::{get_or_create_flight_client, get_or_create_wasm_runtime};
 use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 use risingwave_pb::catalog::Function;
 use risingwave_sqlparser::ast::{CreateFunctionBody, ObjectName, OperateFunctionArg};
@@ -167,7 +166,7 @@ pub async fn handle_create_function(
 
             // check UDF server
             {
-                let client = FlightClient::connect(&l).await.map_err(|e| anyhow!(e))?;
+                let client = get_or_create_flight_client(&l)?;
                 let convert = UdfArrowConvert {
                     legacy: client.protocol_version() == 1,
                 };
