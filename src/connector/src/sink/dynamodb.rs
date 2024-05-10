@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::usize;
 
 use anyhow::{anyhow, Context};
@@ -56,6 +56,7 @@ impl DynamoDbConfig {
 pub struct DynamoDbSink {
     pub config: DynamoDbConfig,
     schema: Schema,
+    pk_indices: Vec<usize>,
 }
 
 impl Sink for DynamoDbSink {
@@ -89,14 +90,39 @@ impl Sink for DynamoDbSink {
             )));
         }
 
-        // validate all key are in schema
-        let fields = self.schema.fields();
-        let keys = table.key_schema();
-        for key in keys {
-            if !fields.iter().any(|f| f.name == key.attribute_name()) {
+        let all_set: HashSet<String> = self
+            .schema
+            .fields()
+            .iter()
+            .map(|f| f.name.clone())
+            .collect();
+        let pk_set: HashSet<String> = self
+            .schema
+            .fields()
+            .iter()
+            .enumerate()
+            .filter(|(k, _)| self.pk_indices.contains(k))
+            .map(|(_, v)| v.name.clone())
+            .collect();
+        let key_schema = table.key_schema();
+
+        // 1. validate all DynamoDb key element are in RisingWave schema and are primary key
+        for key_element in key_schema.iter().map(|x| x.attribute_name()) {
+            if !pk_set.iter().any(|x| x == key_element) {
                 return Err(SinkError::DynamoDb(anyhow!(
-                    "DynamoDB table key {} not found in schema",
-                    key.attribute_name()
+                    "table {} key field {} not found in schema or not primary key",
+                    table_name,
+                    key_element
+                )));
+            }
+        }
+        // 2. validate RisingWave schema fields are subset of dynamodb key fields
+        for ref field in all_set {
+            if !key_schema.iter().any(|x| x.attribute_name() == field) {
+                return Err(SinkError::DynamoDb(anyhow!(
+                    "table {} field {} not found in dynamodb key",
+                    table_name,
+                    field
                 )));
             }
         }
@@ -120,7 +146,11 @@ impl TryFrom<SinkParam> for DynamoDbSink {
         let schema = param.schema();
         let config = DynamoDbConfig::from_hashmap(param.properties)?;
 
-        Ok(Self { config, schema })
+        Ok(Self {
+            config,
+            schema,
+            pk_indices: param.downstream_pk,
+        })
     }
 }
 
