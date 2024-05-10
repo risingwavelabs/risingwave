@@ -174,12 +174,11 @@ pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompact
     multi_filter
 }
 
-const MAX_FILE_COUNT: usize = 32;
 fn generate_splits_fast(
     sstable_infos: &Vec<SstableInfo>,
     compaction_size: u64,
     context: &CompactorContext,
-) -> HummockResult<Vec<KeyRange_vec>> {
+) -> Vec<KeyRange_vec> {
     let worker_num = context.compaction_executor.worker_num();
     let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
 
@@ -224,7 +223,8 @@ fn generate_splits_fast(
         }
         last_split_key_count += 1;
     }
-    Ok(splits)
+
+    splits
 }
 
 pub async fn generate_splits(
@@ -232,10 +232,15 @@ pub async fn generate_splits(
     compaction_size: u64,
     context: &CompactorContext,
 ) -> HummockResult<Vec<KeyRange_vec>> {
+    const MAX_FILE_COUNT: usize = 32;
     let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
     if compaction_size > parallel_compact_size {
         if sstable_infos.len() > MAX_FILE_COUNT {
-            return generate_splits_fast(sstable_infos, compaction_size, context);
+            return Ok(generate_splits_fast(
+                sstable_infos,
+                compaction_size,
+                context,
+            ));
         }
         let mut indexes = vec![];
         // preload the meta and get the smallest key to split sub_compaction
@@ -265,18 +270,15 @@ pub async fn generate_splits(
         let mut splits = vec![];
         splits.push(KeyRange_vec::new(vec![], vec![]));
 
-        let worker_num = context.compaction_executor.worker_num();
-
-        let parallelism = std::cmp::min(
-            worker_num as u64,
-            std::cmp::min(
-                indexes.len() as u64,
-                context.storage_opts.max_sub_compaction as u64,
-            ),
+        let parallelism = calculate_task_parallelism_impl(
+            context.compaction_executor.worker_num(),
+            parallel_compact_size,
+            compaction_size,
+            context.storage_opts.max_sub_compaction,
         );
+
         let sub_compaction_data_size =
-            std::cmp::max(compaction_size / parallelism, parallel_compact_size);
-        let parallelism = compaction_size / sub_compaction_data_size;
+            std::cmp::max(compaction_size / parallelism as u64, parallel_compact_size);
 
         if parallelism > 1 {
             let mut last_buffer_size = 0;
@@ -651,8 +653,21 @@ pub fn calculate_task_parallelism(compact_task: &CompactTask, context: &Compacto
         .iter()
         .map(|table_info| table_info.file_size)
         .sum::<u64>();
+    let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
+    calculate_task_parallelism_impl(
+        context.compaction_executor.worker_num(),
+        parallel_compact_size,
+        compaction_size,
+        context.storage_opts.max_sub_compaction,
+    )
+}
 
-    generate_splits_fast(&sstable_infos, compaction_size, context)
-        .unwrap()
-        .len()
+pub fn calculate_task_parallelism_impl(
+    worker_num: usize,
+    parallel_compact_size: u64,
+    compaction_size: u64,
+    max_sub_compaction: u32,
+) -> usize {
+    let parallelism = (compaction_size + parallel_compact_size - 1) / parallel_compact_size;
+    worker_num.min(parallelism.min(max_sub_compaction as u64) as usize)
 }

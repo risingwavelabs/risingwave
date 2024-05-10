@@ -330,7 +330,7 @@ pub async fn compact(
 
     let multi_filter_key_extractor = match build_filter_key_extractor(
         &compact_task,
-        filter_key_extractor_manager.clone(),
+        filter_key_extractor_manager,
         &compact_table_ids,
     )
     .await
