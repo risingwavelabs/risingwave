@@ -26,10 +26,10 @@ use super::{
     PredicatePushdown, PredicatePushdownContext, RewriteStreamContext, ToBatch, ToStream,
     ToStreamContext,
 };
+use crate::binder::ShareId;
 use crate::error::Result;
 use crate::utils::Condition;
 use crate::PlanRef;
-use crate::binder::ShareId;
 
 /// `LogicalRecursiveUnion` returns the union of the rows of its inputs.
 /// note: if `all` is false, it needs to eliminate duplicates.
@@ -84,7 +84,8 @@ impl ColPrunable for LogicalRecursiveUnion {
             .map(|input| input.prune_col(required_cols, ctx))
             .collect_vec();
         let new_plan = self.clone_with_inputs(&new_inputs);
-        self.ctx().insert_rcte_cache_plan(self.core.id, new_plan.clone());
+        self.ctx()
+            .insert_rcte_cache_plan(self.core.id, new_plan.clone());
         new_plan
     }
 }
