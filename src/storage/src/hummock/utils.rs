@@ -18,7 +18,7 @@ use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
-use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
 use std::task::Poll;
 use std::time::Duration;
@@ -220,7 +220,7 @@ impl Future for PendingRequestCancelGuard {
 struct MemoryLimiterInner {
     total_size: AtomicU64,
     controller: Mutex<RequestQueue>,
-    pending_request_count: AtomicU64,
+    has_waiter: AtomicBool,
     quota: u64,
 }
 
@@ -234,10 +234,10 @@ impl MemoryLimiterInner {
     }
 
     fn may_notify_waiters(self: &Arc<Self>) {
-        if self.pending_request_count.load(AtomicOrdering::Acquire) == 0 {
+        // check `has_waiter` to avoid access lock every times drop `MemoryTracker`.
+        if !self.has_waiter.load(AtomicOrdering::Acquire) {
             return;
         }
-        // check `inflight_barrier` to avoid access lock every times drop `MemoryTracker`.
         let mut waiters = self.controller.lock();
         while let Some((_, quota)) = waiters.front() {
             if !self.try_require_memory(*quota) {
@@ -247,8 +247,9 @@ impl MemoryLimiterInner {
             let _ = tx.send(MemoryTrackerImpl::new(self.clone(), quota));
         }
 
-        self.pending_request_count
-            .store(waiters.len() as u64, AtomicOrdering::Release);
+        if waiters.is_empty() {
+            self.has_waiter.store(false, AtomicOrdering::Release);
+        }
     }
 
     fn try_require_memory(&self, quota: u64) -> bool {
@@ -275,21 +276,18 @@ impl MemoryLimiterInner {
         let mut waiters = self.controller.lock();
         let first_req = waiters.is_empty();
         if first_req {
-            // When this request is the first waiter but the previous `MemoryTracker` is just release a large quota, it may skip notifying this waiter because it has checked `inflight_barrier` and found it was zero. So we must set it one and retry `try_require_memory` again to avoid deadlock.
-            self.pending_request_count.store(1, AtomicOrdering::Release);
+            // When this request is the first waiter but the previous `MemoryTracker` is just release a large quota, it may skip notifying this waiter because it has checked `has_waiter` and found it was false. So we must set it one and retry `try_require_memory` again to avoid deadlock.
+            self.has_waiter.store(true, AtomicOrdering::Release);
         }
         // We must require again with lock because some other MemoryTracker may drop just after this thread gets mutex but before it enters queue.
         if self.try_require_memory(quota) {
             if first_req {
-                self.pending_request_count.store(0, AtomicOrdering::Release);
+                self.has_waiter.store(false, AtomicOrdering::Release);
             }
             return MemoryRequest::Ready(MemoryTrackerImpl::new(self.clone(), quota));
         }
         let (tx, rx) = channel();
         waiters.push_back((tx, quota));
-        // This variable can only update within lock.
-        self.pending_request_count
-            .store(waiters.len() as u64, AtomicOrdering::Release);
         MemoryRequest::Pending(rx)
     }
 
@@ -346,7 +344,7 @@ impl MemoryLimiter {
             inner: Arc::new(MemoryLimiterInner {
                 total_size: AtomicU64::new(0),
                 controller: Mutex::new(VecDeque::default()),
-                pending_request_count: AtomicU64::new(0),
+                has_waiter: AtomicBool::new(false),
                 quota,
             }),
         }
