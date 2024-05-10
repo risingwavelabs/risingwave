@@ -14,6 +14,7 @@
 
 use std::fmt::Debug;
 use std::ops::Range;
+use anyhow::anyhow;
 
 use downcast_rs::{impl_downcast, Downcast};
 use itertools::Itertools;
@@ -58,7 +59,7 @@ pub trait AggregateFunction: Send + Sync + 'static {
     fn encode_state(&self, state: &AggregateState) -> Result<Datum> {
         match state {
             AggregateState::Datum(d) => Ok(d.clone()),
-            _ => panic!("cannot encode state"),
+            AggregateState::Any(_) => Err(ExprError::Internal(anyhow!("cannot encode state"))),
         }
     }
 

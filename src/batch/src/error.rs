@@ -139,6 +139,13 @@ pub enum BatchError {
 
     #[error("Not enough memory to run this query, batch memory limit is {0} bytes")]
     OutOfMemory(u64),
+
+    #[error(transparent)]
+    Spill(
+        #[from]
+        #[backtrace]
+        opendal::Error,
+    ),
 }
 
 // Serialize/deserialize error.

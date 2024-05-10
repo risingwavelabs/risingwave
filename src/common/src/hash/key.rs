@@ -237,7 +237,7 @@ impl<T: BuildHasher> From<u64> for HashCode<T> {
 }
 
 impl<T: BuildHasher> HashCode<T> {
-    pub fn value(self) -> u64 {
+    pub fn value(&self) -> u64 {
         self.value
     }
 }

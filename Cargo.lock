@@ -10008,6 +10008,7 @@ dependencies = [
  "assert_matches",
  "async-recursion",
  "async-trait",
+ "bytes",
  "criterion",
  "either",
  "foyer",
@@ -10021,9 +10022,11 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
+ "opendal",
  "parking_lot 0.12.1",
  "paste",
  "prometheus",
+ "prost 0.12.1",
  "rand",
  "risingwave_common",
  "risingwave_common_estimate_size",
@@ -10046,6 +10049,8 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tracing",
+ "twox-hash",
+ "uuid",
  "workspace-hack",
 ]
 
