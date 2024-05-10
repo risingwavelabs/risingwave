@@ -200,12 +200,6 @@ pub(crate) mod tests {
         storage_opts: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
     ) -> CompactorContext {
-        let compaction_executor = Arc::new(CompactionExecutor::new(Some(1)));
-        let max_task_parallelism = Arc::new(AtomicU32::new(
-            (compaction_executor.worker_num() as f32 * storage_opts.compactor_max_task_multiplier)
-                .ceil() as u32,
-        ));
-
         CompactorContext {
             storage_opts,
             sstable_store,
