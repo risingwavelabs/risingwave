@@ -377,7 +377,7 @@ impl LogicalAggBuilder {
     }
 
     /// Rewrite [`AggCall`] if needed, and push it into the builder using `push_agg_call`.
-    /// This is shared by [`LogicalAggBuilder`] and [`LogicalOverWindowBuilder`].
+    /// This is shared by [`LogicalAggBuilder`] and `LogicalOverWindowBuilder`.
     pub(crate) fn general_rewrite_agg_call(
         agg_call: AggCall,
         mut push_agg_call: impl FnMut(AggCall) -> Result<InputRef>,
