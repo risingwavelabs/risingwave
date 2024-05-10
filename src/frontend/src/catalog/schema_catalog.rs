@@ -704,7 +704,7 @@ impl SchemaCatalog {
             .map(|s| s.to_owned())
     }
 
-    pub fn get_object_by_oid(&self, oid: u32) -> Option<Object> {
+    pub fn get_grant_object_by_oid(&self, oid: u32) -> Option<Object> {
         #[allow(clippy::manual_map)]
         if self.get_table_by_id(&TableId::new(oid)).is_some()
             || self.get_index_by_id(&IndexId::new(oid)).is_some()

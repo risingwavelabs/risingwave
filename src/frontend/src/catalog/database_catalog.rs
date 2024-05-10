@@ -100,9 +100,9 @@ impl DatabaseCatalog {
             .find(|schema| schema.get_table_by_id(table_id).is_some())
     }
 
-    pub fn get_object_by_oid(&self, oid: u32) -> Option<Object> {
+    pub fn get_grant_object_by_oid(&self, oid: u32) -> Option<Object> {
         for schema in self.schema_by_name.values() {
-            let object = schema.get_object_by_oid(oid);
+            let object = schema.get_grant_object_by_oid(oid);
             if object.is_some() {
                 return object;
             }

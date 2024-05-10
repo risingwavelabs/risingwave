@@ -44,7 +44,7 @@ fn has_table_privilege_1(user_name: &str, table_oid: i32, privileges: &str) -> R
     // currently, we haven't support grant for view.
     has_privilege_impl_captured(
         user_name,
-        &get_object_id_by_oid_captured(table_oid)?,
+        &get_grant_object_by_oid_captured(table_oid)?,
         &actions,
     )
 }
@@ -62,7 +62,7 @@ fn has_any_column_privilege_1(user_name: &str, table_oid: i32, privileges: &str)
     let actions = parse_privilege(privileges, &allowed_actions)?;
     has_privilege_impl_captured(
         user_name,
-        &get_object_id_by_oid_captured(table_oid)?,
+        &get_grant_object_by_oid_captured(table_oid)?,
         &actions,
     )
 }
@@ -121,7 +121,7 @@ fn get_user_name_by_id(user_info_reader: &UserInfoReader, user_id: i32) -> Resul
 }
 
 #[capture_context(CATALOG_READER, DB_NAME)]
-fn get_object_id_by_oid(catalog_reader: &CatalogReader, db_name: &str, oid: i32) -> Result<Object> {
+fn get_grant_object_by_oid(catalog_reader: &CatalogReader, db_name: &str, oid: i32) -> Result<Object> {
     catalog_reader
         .read_guard()
         .get_database_by_name(db_name)
@@ -129,7 +129,7 @@ fn get_object_id_by_oid(catalog_reader: &CatalogReader, db_name: &str, oid: i32)
             name: "oid",
             reason: e.to_report_string().into(),
         })?
-        .get_object_by_oid(oid as u32)
+        .get_grant_object_by_oid(oid as u32)
         .ok_or(ExprError::InvalidParam {
             name: "oid",
             reason: format!("Table {} not found", oid).as_str().into(),

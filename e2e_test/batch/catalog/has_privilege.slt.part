@@ -132,6 +132,17 @@ SELECT has_table_privilege('test_user', 'foo_source', 'INSERT');
 ----
 f
 
+# Indexes are granted by `GRANT SELECT ON ALL MATERIALIZED VIEWS`
+query I
+SELECT has_table_privilege('test_user', 'foo_index'::regclass, 'SELECT');
+----
+t
+
+query I
+SELECT has_table_privilege('test_user', 'foo_index', 'INSERT');
+----
+f
+
 query I
 SELECT has_table_privilege('test_user', 'bar', 'INSERT');
 ----
