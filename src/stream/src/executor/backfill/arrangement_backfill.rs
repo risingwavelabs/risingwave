@@ -67,6 +67,8 @@ pub struct ArrangementBackfillExecutor<S: StateStore, SD: ValueRowSerde> {
     rate_limit: Option<usize>,
 }
 
+const INITIAL_ADAPTIVE_RATE_LIMIT: usize = 1;
+
 impl<S, SD> ArrangementBackfillExecutor<S, SD>
 where
     S: StateStore,
@@ -132,6 +134,22 @@ where
             .collect();
 
         let mut upstream = self.upstream.execute();
+
+        // Query the current barrier latency from meta.
+        // Permit a +10% fluctuation in barrier latency. Set baseline to 5s.
+        let baseline_barrier_latency = {
+            let avg_latency = Self::get_barrier_latency(&self.metrics);
+            let fluctuation = avg_latency * 0.1;
+            if avg_latency < 5.0 {
+                5.0
+            } else {
+                avg_latency + fluctuation
+            }
+        };
+        let adaptive_rate_limit = true;
+        let mut rate_limit = Some(INITIAL_ADAPTIVE_RATE_LIMIT);
+        let mut threshold_rate_limit = 50_000;
+        let mut rate_limit_linear_offset = 1000;
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
@@ -537,6 +555,45 @@ where
                     }
                 }
 
+                // Adapt Rate Limit
+                if adaptive_rate_limit {
+                    // First, check if we exceed the barrier latency
+                    let barrier_latency = Self::get_barrier_latency(&self.metrics);
+                    if barrier_latency > baseline_barrier_latency {
+                        // Exceed
+                        threshold_rate_limit /= 2;
+                        tracing::debug!(
+                            target: "adaptive_rate_limit",
+                            actor = self.actor_id,
+                            barrier_latency,
+                            threshold_rate_limit,
+                            "barrier latency exceeds threshold"
+                        );
+                        rate_limit = Some(INITIAL_ADAPTIVE_RATE_LIMIT);
+                        // We don't want to immediately zero the threshold, so we should let the system stabilize back to baseline first,
+                        // Before going back to exponential increase.
+                    } else {
+                        // Does not exceed
+                        if let Some(rate_limit_set) = rate_limit {
+                            let new_rate_limit = if rate_limit_set < threshold_rate_limit {
+                                rate_limit_set * 2
+                            } else {
+                                // rate_limit_set >= threshold_rate_limit
+                                rate_limit_set + rate_limit_linear_offset
+                            };
+                            rate_limit = Some(new_rate_limit);
+                        }
+                    }
+                    tracing::trace!(
+                        target: "adaptive_rate_limit",
+                        actor = self.actor_id,
+                        barrier_latency,
+                        rate_limit = ?rate_limit,
+                        "adjusted rate limit"
+                    );
+                    rate_limiter = rate_limit.and_then(create_limiter);
+                }
+
                 yield Message::Barrier(barrier);
 
                 // We will switch snapshot at the start of the next iteration of the backfill loop.
@@ -605,6 +662,18 @@ where
                 yield msg;
             }
         }
+    }
+
+    // FIXME(kwannoel): Is there some way for an actor to directly query meta?
+    // FIXME(kwannoel): IIUC These metrics are per parallelism.
+    // It is a good-enough approximate,
+    // but it can be further improved, e.g. another parallelism might be the bottleneck,
+    // so we should still consider the global inflight barrier latency,
+    // since chunks could be exchanged from this parallelism
+    // to the hot parallelism.
+    fn get_barrier_latency(metrics: &StreamingMetrics) -> f64 {
+        let histogram = &metrics.barrier_inflight_latency;
+        histogram.get_sample_sum() / histogram.get_sample_count() as f64
     }
 
     #[try_stream(ok = Option<(VirtualNode, OwnedRow)>, error = StreamExecutorError)]
