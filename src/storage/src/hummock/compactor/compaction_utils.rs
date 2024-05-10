@@ -182,14 +182,11 @@ fn generate_splits_fast(
     let worker_num = context.compaction_executor.worker_num();
     let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
 
-    let parallelism = (compaction_size + parallel_compact_size - 1) / parallel_compact_size;
-
-    let parallelism = std::cmp::min(
+    let parallelism = calculate_task_parallelism_impl(
         worker_num,
-        std::cmp::min(
-            parallelism as usize,
-            context.storage_opts.max_sub_compaction as usize,
-        ),
+        parallel_compact_size,
+        compaction_size,
+        context.storage_opts.max_sub_compaction,
     );
     let mut indexes = vec![];
     for sst in sstable_infos {
@@ -211,6 +208,10 @@ fn generate_splits_fast(
     }
     indexes.sort_by(|a, b| KeyComparator::compare_encoded_full_key(a.as_ref(), b.as_ref()));
     indexes.dedup();
+    if indexes.len() <= parallelism {
+        return vec![];
+    }
+
     let mut splits = vec![];
     splits.push(KeyRange_vec::new(vec![], vec![]));
     let parallel_key_count = indexes.len() / parallelism;

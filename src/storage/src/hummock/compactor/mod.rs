@@ -35,7 +35,7 @@ pub(super) mod task_progress;
 
 use std::collections::{HashMap, VecDeque};
 use std::marker::PhantomData;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
@@ -300,14 +300,14 @@ pub fn start_compactor(
     let stream_retry_interval = Duration::from_secs(30);
     let task_progress = compactor_context.task_progress_manager.clone();
     let periodic_event_update_interval = Duration::from_millis(1000);
-    let pull_task_ack = Arc::new(AtomicBool::new(true));
+
+    let max_task_parallelism: u32 = (compactor_context.compaction_executor.worker_num() as f32
+        * compactor_context.storage_opts.compactor_max_task_multiplier)
+        .ceil() as u32;
+    let running_task_parallelism = Arc::new(AtomicU32::new(0));
+
     const MAX_PULL_TASK_COUNT: u32 = 4;
-    let max_pull_task_count = std::cmp::min(
-        compactor_context
-            .max_task_parallelism
-            .load(Ordering::SeqCst),
-        MAX_PULL_TASK_COUNT,
-    );
+    let max_pull_task_count = std::cmp::min(max_task_parallelism, MAX_PULL_TASK_COUNT);
 
     assert_ge!(
         compactor_context.storage_opts.compactor_max_task_multiplier,
@@ -322,7 +322,8 @@ pub fn start_compactor(
         // This outer loop is to recreate stream.
         'start_stream: loop {
             // reset state
-            pull_task_ack.store(true, Ordering::SeqCst);
+            // pull_task_ack.store(true, Ordering::SeqCst);
+            let mut pull_task_ack = true;
             tokio::select! {
                 // Wait for interval.
                 _ = min_interval.tick() => {},
@@ -366,7 +367,7 @@ pub fn start_compactor(
                     event_loop_iteration_now = Instant::now();
                 }
 
-                let pull_task_ack = pull_task_ack.clone();
+                let running_task_parallelism = running_task_parallelism.clone();
                 let request_sender = request_sender.clone();
                 let event: Option<Result<SubscribeCompactionEventResponse, _>> = tokio::select! {
                     _ = periodic_event_interval.tick() => {
@@ -390,9 +391,9 @@ pub fn start_compactor(
 
 
                         let mut pending_pull_task_count = 0;
-                        if pull_task_ack.load(Ordering::SeqCst) {
+                        if pull_task_ack {
                             // TODO: Compute parallelism on meta side
-                            pending_pull_task_count = compactor_context.get_free_quota().max(max_pull_task_count);
+                            pending_pull_task_count = (max_task_parallelism - running_task_parallelism.load(Ordering::SeqCst)).max(max_pull_task_count);
 
                             if pending_pull_task_count > 0 {
                                 if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
@@ -411,14 +412,14 @@ pub fn start_compactor(
                                     // re subscribe stream
                                     continue 'start_stream;
                                 } else {
-                                    pull_task_ack.store(false, Ordering::SeqCst);
+                                    pull_task_ack = false;
                                 }
                             }
                         }
 
                         tracing::info!(
-                            running_parallelism_count = %compactor_context.running_task_parallelism.load(Ordering::Relaxed),
-                            pull_task_ack = %pull_task_ack.load(Ordering::Relaxed),
+                            running_parallelism_count = %running_task_parallelism.load(Ordering::SeqCst),
+                            pull_task_ack = %pull_task_ack,
                             pending_pull_task_count = %pending_pull_task_count
                         );
 
@@ -484,36 +485,36 @@ pub fn start_compactor(
                                     calculate_task_parallelism(&compact_task, &context);
 
                                 assert_ne!(parallelism, 0, "splits cannot be empty");
-                                let release_guard = match context
-                                    .acquire_task_quota(parallelism as u32)
+
+                                if (max_task_parallelism
+                                    - running_task_parallelism.load(Ordering::SeqCst))
+                                    < parallelism as u32
                                 {
-                                    Some(release_guard) => release_guard,
-                                    None => {
-                                        tracing::warn!(
-                                                "Not enough core parallelism to serve the task {} task_parallelism {} running_task_parallelism {} max_task_parallelism {}",
-                                                compact_task.task_id,
-                                                parallelism,
-                                                context.running_task_parallelism.load(Ordering::Relaxed),
-                                                context.max_task_parallelism.load(Ordering::Relaxed),
-                                            );
-                                        let (compact_task, table_stats) = compact_done(
-                                            compact_task,
-                                            context.clone(),
-                                            vec![],
-                                            TaskStatus::NoAvailCpuResourceCanceled,
-                                        );
+                                    tracing::warn!(
+                                        "Not enough core parallelism to serve the task {} task_parallelism {} running_task_parallelism {} max_task_parallelism {}",
+                                        compact_task.task_id,
+                                        parallelism,
+                                        max_task_parallelism,
+                                        running_task_parallelism.load(Ordering::Relaxed),
+                                    );
+                                    let (compact_task, table_stats) = compact_done(
+                                        compact_task,
+                                        context.clone(),
+                                        vec![],
+                                        TaskStatus::NoAvailCpuResourceCanceled,
+                                    );
 
-                                        send_report_task_event(
-                                            &compact_task,
-                                            table_stats,
-                                            &request_sender,
-                                        );
+                                    send_report_task_event(
+                                        &compact_task,
+                                        table_stats,
+                                        &request_sender,
+                                    );
 
-                                        continue 'start_stream;
-                                    }
-                                };
+                                    continue 'start_stream;
+                                }
+
                                 executor.spawn(async move {
-                                    let _release_guard = release_guard;
+                                    running_task_parallelism.fetch_add(parallelism as u32, Ordering::SeqCst);
                                     let (tx, rx) = tokio::sync::oneshot::channel();
                                     let task_id = compact_task.task_id;
                                     shutdown.lock().unwrap().insert(task_id, tx);
@@ -552,6 +553,7 @@ pub fn start_compactor(
                                             }
                                         };
                                     shutdown.lock().unwrap().remove(&task_id);
+                                    running_task_parallelism.fetch_sub(parallelism as u32, Ordering::SeqCst);
 
                                     send_report_task_event(
                                         &compact_task,
@@ -647,7 +649,7 @@ pub fn start_compactor(
 
                             ResponseEvent::PullTaskAck(_pull_task_ack) => {
                                 // set flag
-                                pull_task_ack.store(true, Ordering::SeqCst);
+                                pull_task_ack = true;
                             }
                         }
                     }

@@ -215,8 +215,6 @@ pub(crate) mod tests {
             memory_limiter: MemoryLimiter::unlimit(),
             task_progress_manager: Default::default(),
             await_tree_reg: None,
-            running_task_parallelism: Arc::new(AtomicU32::new(0)),
-            max_task_parallelism,
         }
     }
 
