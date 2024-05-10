@@ -4,7 +4,7 @@ system ok
 e2e_test/source_inline/pubsub/prepare-data.rs
 
 # fail with invalid emulator_host
-statement error failed to lookup address information: nodename nor servname provided, or not known
+statement error failed to lookup address information
 CREATE TABLE s1 (v1 int, v2 varchar) WITH (
     connector = 'google_pubsub',
     pubsub.subscription = 'test-subscription-1',
