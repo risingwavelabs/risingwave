@@ -16,13 +16,16 @@ use std::collections::VecDeque;
 use std::ops::DerefMut;
 use std::sync::Arc;
 
+use await_tree::InstrumentAwait;
 use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult, TruncateOffset};
 use tokio::sync::{oneshot, Notify};
 
-use crate::common::log_store_impl::kv_log_store::{ReaderTruncationOffsetType, SeqIdType};
+use crate::common::log_store_impl::kv_log_store::{
+    KvLogStoreMetrics, ReaderTruncationOffsetType, SeqIdType,
+};
 
 #[derive(Clone)]
 pub(crate) enum LogStoreBufferItem {
@@ -60,9 +63,45 @@ struct LogStoreBufferInner {
     truncation_list: VecDeque<ReaderTruncationOffsetType>,
 
     next_chunk_id: ChunkId,
+
+    metrics: KvLogStoreMetrics,
 }
 
 impl LogStoreBufferInner {
+    fn update_unconsumed_buffer_metrics(&self) {
+        let mut epoch_count = 0;
+        let mut row_count = 0;
+        for (_, item) in &self.unconsumed_queue {
+            match item {
+                LogStoreBufferItem::StreamChunk { chunk, .. } => {
+                    row_count += chunk.cardinality();
+                }
+                LogStoreBufferItem::Flushed {
+                    start_seq_id,
+                    end_seq_id,
+                    ..
+                } => {
+                    row_count += (end_seq_id - start_seq_id) as usize;
+                }
+                LogStoreBufferItem::Barrier { .. } => {
+                    epoch_count += 1;
+                }
+                LogStoreBufferItem::UpdateVnodes(_) => {}
+            }
+        }
+        self.metrics.buffer_unconsumed_epoch_count.set(epoch_count);
+        self.metrics.buffer_unconsumed_row_count.set(row_count as _);
+        self.metrics
+            .buffer_unconsumed_item_count
+            .set(self.unconsumed_queue.len() as _);
+        self.metrics.buffer_unconsumed_min_epoch.set(
+            self.unconsumed_queue
+                .front()
+                .map(|(epoch, _)| *epoch)
+                .unwrap_or_default() as _,
+        );
+    }
+
     fn can_add_stream_chunk(&self) -> bool {
         self.row_count < self.max_row_count
     }
@@ -75,6 +114,7 @@ impl LogStoreBufferInner {
             self.next_chunk_id = 0;
         }
         self.unconsumed_queue.push_front((epoch, item));
+        self.update_unconsumed_buffer_metrics();
     }
 
     pub(crate) fn try_add_stream_chunk(
@@ -100,6 +140,7 @@ impl LogStoreBufferInner {
                     chunk_id,
                 },
             ));
+            self.update_unconsumed_buffer_metrics();
             None
         }
     }
@@ -107,6 +148,7 @@ impl LogStoreBufferInner {
     fn pop_item(&mut self) -> Option<(u64, LogStoreBufferItem)> {
         if let Some((epoch, item)) = self.unconsumed_queue.pop_back() {
             self.consumed_queue.push_front((epoch, item.clone()));
+            self.update_unconsumed_buffer_metrics();
             Some((epoch, item))
         } else {
             None
@@ -154,12 +196,14 @@ impl LogStoreBufferInner {
                 },
             );
         }
+        self.update_unconsumed_buffer_metrics();
     }
 
     fn rewind(&mut self) {
         while let Some((epoch, item)) = self.consumed_queue.pop_front() {
-            self.unconsumed_queue.push_back((epoch, item))
+            self.unconsumed_queue.push_back((epoch, item));
         }
+        self.update_unconsumed_buffer_metrics();
     }
 }
 
@@ -319,7 +363,7 @@ impl LogStoreBufferReceiver {
         } {
             item
         } else {
-            notified.await;
+            notified.instrument_await("Wait For New Buffer Item").await;
             self.buffer
                 .inner()
                 .pop_item()
@@ -405,6 +449,7 @@ impl LogStoreBufferReceiver {
 
 pub(crate) fn new_log_store_buffer(
     max_row_count: usize,
+    metrics: KvLogStoreMetrics,
 ) -> (LogStoreBufferSender, LogStoreBufferReceiver) {
     let buffer = SharedMutex::new(LogStoreBufferInner {
         unconsumed_queue: VecDeque::new(),
@@ -413,6 +458,7 @@ pub(crate) fn new_log_store_buffer(
         max_row_count,
         truncation_list: VecDeque::new(),
         next_chunk_id: 0,
+        metrics,
     });
     let update_notify = Arc::new(Notify::new());
     let (init_epoch_tx, init_epoch_rx) = oneshot::channel();

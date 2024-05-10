@@ -201,7 +201,7 @@ macro_rules! dispatch_state_store {
     }};
 }
 
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, test, feature = "test"))]
 pub mod verify {
     use std::fmt::Debug;
     use std::future::Future;
@@ -643,7 +643,7 @@ impl StateStoreImpl {
                     hummock.strip_prefix("hummock+").unwrap(),
                     object_store_metrics.clone(),
                     "Hummock",
-                    opts.object_store_config.clone(),
+                    Arc::new(opts.object_store_config.clone()),
                 )
                 .await;
 

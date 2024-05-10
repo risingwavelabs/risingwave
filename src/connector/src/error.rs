@@ -41,6 +41,7 @@ def_anyhow_newtype! {
     url::ParseError => "failed to parse url",
     serde_json::Error => "failed to parse json",
     csv::Error => "failed to parse csv",
+    uuid::Error => transparent, // believed to be self-explanatory
 
     // Connector errors
     opendal::Error => transparent, // believed to be self-explanatory

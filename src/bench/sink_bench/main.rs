@@ -116,7 +116,7 @@ impl LogReader for MockRangeLogReader {
         }
     }
 
-    async fn truncate(&mut self, _offset: TruncateOffset) -> LogStoreResult<()> {
+    fn truncate(&mut self, _offset: TruncateOffset) -> LogStoreResult<()> {
         Ok(())
     }
 
@@ -404,6 +404,7 @@ fn mock_from_legacy_type(
             format,
             encode: SinkEncode::Json,
             options: Default::default(),
+            key_encode: None,
         }))
     } else {
         SinkFormatDesc::from_legacy_type(connector, r#type)

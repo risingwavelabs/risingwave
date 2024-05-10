@@ -443,6 +443,11 @@
     select * from max();
   expected_outputs:
   - binder_error
+- sql: |
+    create table t (k int, j jsonb);
+    select a * k + b from t, jsonb_populate_record(null::struct<a int, b int>, j);
+  expected_outputs:
+  - batch_plan
 - name: Grafana issue-10134
   sql: |
     SELECT * FROM
