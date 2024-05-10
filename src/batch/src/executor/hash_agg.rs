@@ -15,6 +15,7 @@
 use std::hash::BuildHasher;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use bytes::Bytes;
@@ -45,6 +46,7 @@ use crate::error::{BatchError, Result};
 use crate::executor::aggregation::build as build_agg;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    WrapStreamExecutor,
 };
 use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 
@@ -56,11 +58,12 @@ impl HashKeyDispatcher for HashAggExecutorBuilder {
 
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
         Box::new(HashAggExecutor::<K>::new(
-            self.aggs,
+            Arc::new(self.aggs),
             self.group_key_columns,
             self.group_key_types,
             self.schema,
             self.child,
+            None,
             self.identity,
             self.chunk_size,
             self.mem_context,
@@ -169,7 +172,7 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
 /// `HashAggExecutor` implements the hash aggregate algorithm.
 pub struct HashAggExecutor<K> {
     /// Aggregate functions.
-    aggs: Vec<BoxedAggregateFunction>,
+    aggs: Arc<Vec<BoxedAggregateFunction>>,
     /// Column indexes that specify a group
     group_key_columns: Vec<usize>,
     /// Data types of group key columns
@@ -177,6 +180,8 @@ pub struct HashAggExecutor<K> {
     /// Output schema
     schema: Schema,
     child: BoxedExecutor,
+    /// Used to initialize the state of the aggregation from the spilled files.
+    init_agg_state_executor: Option<BoxedExecutor>,
     identity: String,
     chunk_size: usize,
     mem_context: MemoryContext,
@@ -186,11 +191,12 @@ pub struct HashAggExecutor<K> {
 
 impl<K> HashAggExecutor<K> {
     pub fn new(
-        aggs: Vec<BoxedAggregateFunction>,
+        aggs: Arc<Vec<BoxedAggregateFunction>>,
         group_key_columns: Vec<usize>,
         group_key_types: Vec<DataType>,
         schema: Schema,
         child: BoxedExecutor,
+        init_agg_state_executor: Option<BoxedExecutor>,
         identity: String,
         chunk_size: usize,
         mem_context: MemoryContext,
@@ -202,6 +208,7 @@ impl<K> HashAggExecutor<K> {
             group_key_types,
             schema,
             child,
+            init_agg_state_executor,
             identity,
             chunk_size,
             mem_context,
@@ -407,6 +414,24 @@ impl AggSpillManager {
     }
 
     pub async fn close_writers(&mut self) -> Result<()> {
+        for partition in 0..self.partition_num {
+            if let Some(output_chunk) = self.agg_state_chunk_builder[partition].consume_all() {
+                let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
+                let buf = Message::encode_to_vec(&chunk_pb);
+                let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
+                self.agg_state_writers[partition].write(len_bytes).await?;
+                self.agg_state_writers[partition].write(buf).await?;
+            }
+
+            if let Some(output_chunk) = self.input_chunk_builders[partition].consume_all() {
+                let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
+                let buf = Message::encode_to_vec(&chunk_pb);
+                let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
+                self.input_writers[partition].write(len_bytes).await?;
+                self.input_writers[partition].write(buf).await?;
+            }
+        }
+
         for mut w in self.agg_state_writers.drain(..) {
             w.close().await?;
         }
@@ -452,16 +477,45 @@ impl AggSpillManager {
 impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
+        let child_schema = self.child.schema().clone();
+        let enable_spill = true;
+        let mut need_to_spill = false;
+
         // hash map for each agg groups
         let mut groups = AggHashMap::<K, _>::with_hasher_in(
             PrecomputedBuildHasher,
             self.mem_context.global_allocator(),
         );
 
-        let child_schema = self.child.schema().clone();
+        if let Some(init_agg_state_executor) = self.init_agg_state_executor {
+            let mut init_agg_state_stream = init_agg_state_executor.execute();
+            #[for_await]
+            for chunk in &mut init_agg_state_stream {
+                let chunk = chunk?;
+                let group_key_indices = (0..self.group_key_columns.len()).collect_vec();
+                let keys = K::build_many(&group_key_indices, &chunk);
+                let mut memory_usage_diff = 0;
+                for (row_id, key) in keys.into_iter().enumerate() {
+                    let mut agg_states = vec![];
+                    for i in 0..self.aggs.len() {
+                        let agg = &self.aggs[i];
+                        let datum = chunk
+                            .row_at(row_id)
+                            .0
+                            .datum_at(self.group_key_columns.len() + i)
+                            .to_owned_datum();
+                        let agg_state = agg.decode_state(datum)?;
+                        memory_usage_diff += agg_state.estimated_size() as i64;
+                        agg_states.push(agg_state);
+                    }
+                    groups.try_insert(key, agg_states).unwrap();
+                }
 
-        let enable_spill = true;
-        let mut need_to_spill = false;
+                if !self.mem_context.add(memory_usage_diff) {
+                    warn!("not enough memory to load one partition agg state after spill which is not a normal case, so keep going");
+                }
+            }
+        }
 
         let mut input_stream = self.child.execute();
         // consume all chunks to compute the agg result
@@ -534,10 +588,6 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
 
             // Release memory occupied by agg hash map
             self.mem_context.add(memory_usage_diff);
-            groups = AggHashMap::<K, _>::with_hasher_in(
-                PrecomputedBuildHasher,
-                self.mem_context.global_allocator(),
-            );
 
             // Spill input chunks
             #[for_await]
@@ -562,116 +612,83 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
 
             for i in 0..agg_spill_manager.partition_num {
                 let agg_state_stream = agg_spill_manager.read_agg_state_partition(i).await?;
-
-                #[for_await]
-                for chunk in agg_state_stream {
-                    let chunk = chunk?;
-                    let group_key_indices = (0..self.group_key_columns.len()).collect_vec();
-                    let keys = K::build_many(&group_key_indices, &chunk);
-                    let mut memory_usage_diff = 0;
-                    for (row_id, key) in keys.into_iter().enumerate() {
-                        let mut agg_states = vec![];
-                        for i in 0..self.aggs.len() {
-                            let agg = &self.aggs[i];
-                            let datum = chunk
-                                .row_at(row_id)
-                                .0
-                                .datum_at(self.group_key_columns.len() + i)
-                                .to_owned_datum();
-                            let agg_state = agg.decode_state(datum)?;
-                            memory_usage_diff += agg_state.estimated_size() as i64;
-                            agg_states.push(agg_state);
-                        }
-                        groups.try_insert(key, agg_states).unwrap();
-                    }
-
-                    // if !self.mem_context.add(memory_usage_diff) {
-                    //     Err(BatchError::OutOfMemory(self.mem_context.mem_limit()))?;
-                    // }
-                }
-
                 let input_stream = agg_spill_manager.read_input_partition(i).await?;
 
+                let sub_hash_agg_executor: HashAggExecutor<K> = HashAggExecutor::new(
+                    self.aggs.clone(),
+                    self.group_key_columns.clone(),
+                    self.group_key_types.clone(),
+                    self.schema.clone(),
+                    Box::new(WrapStreamExecutor::new(child_schema.clone(), input_stream)),
+                    Some(Box::new(WrapStreamExecutor::new(
+                        self.schema.clone(),
+                        agg_state_stream,
+                    ))),
+                    format!("{}-sub{}", self.identity.clone(), i),
+                    self.chunk_size,
+                    self.mem_context.clone(),
+                    self.shutdown_rx.clone(),
+                );
+
+                println!(
+                    "create sub_hash_agg_executor {} for hash_agg {}",
+                    sub_hash_agg_executor.identity, self.identity
+                );
+
+                let sub_hash_agg_stream = Box::new(sub_hash_agg_executor).execute();
+
                 #[for_await]
-                for chunk in input_stream {
+                for chunk in sub_hash_agg_stream {
                     let chunk = chunk?;
-                    let chunk = StreamChunk::from(chunk);
-                    let keys = K::build_many(self.group_key_columns.as_slice(), &chunk);
-                    let mut memory_usage_diff = 0;
-                    for (row_id, (key, visible)) in keys
-                        .into_iter()
-                        .zip_eq_fast(chunk.visibility().iter())
-                        .enumerate()
+                    yield chunk;
+                }
+            }
+            return Ok(());
+        } else {
+            // Don't use `into_iter` here, it may cause memory leak.
+            let mut result = groups.iter_mut();
+            let cardinality = self.chunk_size;
+            loop {
+                let mut group_builders: Vec<_> = self
+                    .group_key_types
+                    .iter()
+                    .map(|datatype| datatype.create_array_builder(cardinality))
+                    .collect();
+
+                let mut agg_builders: Vec<_> = self
+                    .aggs
+                    .iter()
+                    .map(|agg| agg.return_type().create_array_builder(cardinality))
+                    .collect();
+
+                let mut has_next = false;
+                let mut array_len = 0;
+                for (key, states) in result.by_ref().take(cardinality) {
+                    self.shutdown_rx.check()?;
+                    has_next = true;
+                    array_len += 1;
+                    key.deserialize_to_builders(&mut group_builders[..], &self.group_key_types)?;
+                    for ((agg, state), builder) in (self.aggs.iter())
+                        .zip_eq_fast(states)
+                        .zip_eq_fast(&mut agg_builders)
                     {
-                        if !visible {
-                            continue;
-                        }
-                        let mut new_group = false;
-                        let states = groups.entry(key).or_insert_with(|| {
-                            new_group = true;
-                            self.aggs.iter().map(|agg| agg.create_state()).collect()
-                        });
-
-                        // TODO: currently not a vectorized implementation
-                        for (agg, state) in self.aggs.iter().zip_eq_fast(states) {
-                            if !new_group {
-                                memory_usage_diff -= state.estimated_size() as i64;
-                            }
-                            agg.update_range(state, &chunk, row_id..row_id + 1).await?;
-                            memory_usage_diff += state.estimated_size() as i64;
-                        }
+                        let result = agg.get_result(state).await?;
+                        builder.append(result);
                     }
-                    // update memory usage
-                    // if !self.mem_context.add(memory_usage_diff) {
-                    //     Err(BatchError::OutOfMemory(self.mem_context.mem_limit()))?;
-                    // }
                 }
-            }
-        }
-
-        // Don't use `into_iter` here, it may cause memory leak.
-        let mut result = groups.iter_mut();
-        let cardinality = self.chunk_size;
-        loop {
-            let mut group_builders: Vec<_> = self
-                .group_key_types
-                .iter()
-                .map(|datatype| datatype.create_array_builder(cardinality))
-                .collect();
-
-            let mut agg_builders: Vec<_> = self
-                .aggs
-                .iter()
-                .map(|agg| agg.return_type().create_array_builder(cardinality))
-                .collect();
-
-            let mut has_next = false;
-            let mut array_len = 0;
-            for (key, states) in result.by_ref().take(cardinality) {
-                self.shutdown_rx.check()?;
-                has_next = true;
-                array_len += 1;
-                key.deserialize_to_builders(&mut group_builders[..], &self.group_key_types)?;
-                for ((agg, state), builder) in (self.aggs.iter())
-                    .zip_eq_fast(states)
-                    .zip_eq_fast(&mut agg_builders)
-                {
-                    let result = agg.get_result(state).await?;
-                    builder.append(result);
+                if !has_next {
+                    break; // exit loop
                 }
-            }
-            if !has_next {
-                break; // exit loop
-            }
 
-            let columns = group_builders
-                .into_iter()
-                .chain(agg_builders)
-                .map(|b| b.finish().into())
-                .collect::<Vec<_>>();
+                let columns = group_builders
+                    .into_iter()
+                    .chain(agg_builders)
+                    .map(|b| b.finish().into())
+                    .collect::<Vec<_>>();
 
-            let output = DataChunk::new(columns, array_len);
-            yield output;
+                let output = DataChunk::new(columns, array_len);
+                yield output;
+            }
         }
     }
 }
