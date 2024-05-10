@@ -133,7 +133,7 @@ fn postgres_cell_to_scalar_impl(
             // Note: It's only used to map the numeric type in upstream Postgres to RisingWave's rw_int256.
             let res = row.try_get::<_, Option<PgNumeric>>(i);
             match res {
-                Ok(val) => pg_numeric_to_rw_int256(val, name),
+                Ok(val) => val.and_then(|val| pg_numeric_to_rw_int256(val, name)),
                 Err(err) => {
                     log_error!(name, err, "parse numeric column as pg_numeric failed");
                     None
@@ -171,7 +171,7 @@ fn postgres_cell_to_scalar_impl(
                         // Note: It's only used to map the numeric type in upstream Postgres to RisingWave's varchar.
                         let res = row.try_get::<_, Option<PgNumeric>>(i);
                         match res {
-                            Ok(val) => pg_numeric_to_varchar(val),
+                            Ok(val) => val.map(pg_numeric_to_varchar),
                             Err(err) => {
                                 log_error!(name, err, "parse numeric column as pg_numeric failed");
                                 None
@@ -264,34 +264,12 @@ fn postgres_cell_to_scalar_impl(
                                 if let Some(v) = val {
                                     // In Debezium, when there's inf, -inf, nan or invalid item in a list, the whole list will fallback null.
                                     // So we directly return None here to keep backfill behavior consistent with Debezium behavior.
-                                    for val in v {
-                                        match val {
-                                            Some(num) => match num {
-                                                PgNumeric::NegativeInf
-                                                | PgNumeric::PositiveInf
-                                                | PgNumeric::NaN => return None,
-                                                PgNumeric::Normalized(big_decimal) => {
-                                                    match Decimal::from_str(
-                                                        big_decimal.to_string().as_str(),
-                                                    ) {
-                                                        Ok(num) => {
-                                                            builder.append(Some(ScalarImpl::from(
-                                                                num,
-                                                            )));
-                                                        }
-                                                        Err(err) => {
-                                                            log_error!(name, err, "parse numeric string as rw_int256 failed");
-                                                            return None;
-                                                        }
-                                                    }
-                                                }
-                                            },
-                                            // NULL
-                                            None => {
-                                                builder.append(Option::<ScalarImpl>::None);
-                                            }
-                                        };
-                                    }
+                                    builder = handle_pg_numeric_list(
+                                        v,
+                                        name,
+                                        builder,
+                                        pg_numeric_to_numeric,
+                                    )?;
                                 }
                             }
                             Err(err) => {
@@ -329,15 +307,12 @@ fn postgres_cell_to_scalar_impl(
                                         if let Some(v) = val {
                                             // In Debezium, when there's inf, -inf or nan in a list, the whole list will fallback null.
                                             // So we directly return None here to keep backfill behavior consistent with Debezium behavior.
-                                            for val in v {
-                                                match val {
-                                                    Some(PgNumeric::NaN)
-                                                    | Some(PgNumeric::NegativeInf)
-                                                    | Some(PgNumeric::PositiveInf) => return None,
-                                                    _ => {}
-                                                };
-                                                builder.append(pg_numeric_to_varchar(val))
-                                            }
+                                            builder = handle_pg_numeric_list(
+                                                v,
+                                                name,
+                                                builder,
+                                                |val, _name| Some(pg_numeric_to_varchar(val)),
+                                            )?;
                                         }
                                     }
                                     Err(err) => {
@@ -408,31 +383,12 @@ fn postgres_cell_to_scalar_impl(
                                     // In Debezium, when there's inf, -inf, nan or invalid item in a list, the whole list will fallback null.
                                     // In Json Parser, when there's a numeric with decimal part in a numeric list, the whole list will fallback null.
                                     // So we directly return None here to keep backfill behavior consistent with Debezium behavior.
-                                    for val in v {
-                                        match val {
-                                            Some(PgNumeric::NaN)
-                                            | Some(PgNumeric::NegativeInf)
-                                            | Some(PgNumeric::PositiveInf) => {
-                                                return None;
-                                            }
-                                            Some(PgNumeric::Normalized(big_decimal)) => {
-                                                match Int256::from_str(
-                                                    big_decimal.to_string().as_str(),
-                                                ) {
-                                                    Ok(num) => {
-                                                        builder.append(Some(ScalarImpl::from(num)));
-                                                    }
-                                                    Err(err) => {
-                                                        log_error!(name, err, "parse numeric string as rw_int256 failed");
-                                                        return None;
-                                                    }
-                                                }
-                                            }
-                                            None => {
-                                                builder.append(Option::<ScalarImpl>::None);
-                                            }
-                                        }
-                                    }
+                                    builder = handle_pg_numeric_list(
+                                        v,
+                                        name,
+                                        builder,
+                                        pg_numeric_to_rw_int256,
+                                    )?;
                                 }
                             }
                             Err(err) => {
@@ -462,28 +418,24 @@ fn postgres_cell_to_scalar_impl(
     }
 }
 
-fn pg_numeric_to_numeric(num: Option<PgNumeric>, name: &str) -> Option<ScalarImpl> {
-    match num {
-        Some(num) => match num {
-            PgNumeric::NegativeInf => Some(ScalarImpl::from(Decimal::NegativeInf)),
-            PgNumeric::PositiveInf => Some(ScalarImpl::from(Decimal::PositiveInf)),
-            PgNumeric::NaN => Some(ScalarImpl::from(Decimal::NaN)),
-            PgNumeric::Normalized(d) => match Decimal::from_str(d.to_string().as_str()) {
-                Ok(d) => Some(ScalarImpl::from(d)),
-                Err(err) => {
-                    log_error!(name, err, "parse pg-numeric as rw-numeric failed");
-                    None
-                }
-            },
+fn pg_numeric_to_numeric(num: PgNumeric, name: &str) -> Option<ScalarImpl> {
+    Some(ScalarImpl::Decimal(match num {
+        PgNumeric::NegativeInf => Decimal::NegativeInf,
+        PgNumeric::PositiveInf => Decimal::PositiveInf,
+        PgNumeric::NaN => Decimal::NaN,
+        PgNumeric::Normalized(d) => match Decimal::from_str(d.to_string().as_str()) {
+            Ok(d) => d,
+            Err(err) => {
+                log_error!(name, err, "parse pg-numeric as rw-numeric failed");
+                return None;
+            }
         },
-        // NULL
-        None => None,
-    }
+    }))
 }
 
-fn pg_numeric_to_rw_int256(val: Option<PgNumeric>, name: &str) -> Option<ScalarImpl> {
+fn pg_numeric_to_rw_int256(val: PgNumeric, name: &str) -> Option<ScalarImpl> {
     match val {
-        Some(PgNumeric::Normalized(big_decimal)) => {
+        PgNumeric::Normalized(big_decimal) => {
             match Int256::from_str(big_decimal.to_string().as_str()) {
                 Ok(num) => Some(ScalarImpl::from(num)),
                 Err(err) => {
@@ -492,23 +444,53 @@ fn pg_numeric_to_rw_int256(val: Option<PgNumeric>, name: &str) -> Option<ScalarI
                 }
             }
         }
-        // inf, -inf, nan or NULL
-        _ => None,
+        PgNumeric::NaN | PgNumeric::NegativeInf | PgNumeric::PositiveInf => None,
     }
 }
 
-fn pg_numeric_to_varchar(val: Option<PgNumeric>) -> Option<ScalarImpl> {
-    val.map(|pg_numeric|
-        // FIXME(kexiang): NEGATIVE_INFINITY -> -Infinity, POSITIVE_INFINITY -> Infinity, NAN -> NaN
-        // https://github.com/risingwavelabs/risingwave/issues/16395
-        // The current implementation is to ensure consistency with the behavior of cdc event parsor.
-        match pg_numeric {
-            PgNumeric::NegativeInf => String::from("NEGATIVE_INFINITY"),
-            PgNumeric::Normalized(big_decimal) => big_decimal.to_string(),
-            PgNumeric::PositiveInf => String::from("POSITIVE_INFINITY"),
-            PgNumeric::NaN => String::from("NAN"),
-        })
-    .map(ScalarImpl::from)
+fn pg_numeric_to_varchar(val: PgNumeric) -> ScalarImpl {
+    // FIXME(kexiang): NEGATIVE_INFINITY -> -Infinity, POSITIVE_INFINITY -> Infinity, NAN -> NaN
+    // https://github.com/risingwavelabs/risingwave/issues/16395
+    // The current implementation is to ensure consistency with the behavior of cdc event parsor.
+    ScalarImpl::from(match val {
+        PgNumeric::NegativeInf => String::from("NEGATIVE_INFINITY"),
+        PgNumeric::Normalized(big_decimal) => big_decimal.to_string(),
+        PgNumeric::PositiveInf => String::from("POSITIVE_INFINITY"),
+        PgNumeric::NaN => String::from("NAN"),
+    })
+}
+
+// Takes ownership of `builder` and only gives it back when all `append` succeeds.
+fn handle_pg_numeric_list<F>(
+    v: Vec<Option<PgNumeric>>,
+    name: &str,
+    mut builder: risingwave_common::array::ArrayBuilderImpl,
+    f: F,
+) -> Option<risingwave_common::array::ArrayBuilderImpl>
+where
+    F: Fn(PgNumeric, &str) -> Option<ScalarImpl>,
+{
+    for val in v {
+        let Some(val) = val else {
+            builder.append(Option::<ScalarImpl>::None);
+            continue;
+        };
+        if matches!(
+            val,
+            PgNumeric::NaN | PgNumeric::NegativeInf | PgNumeric::PositiveInf
+        ) {
+            return None;
+        }
+        match f(val, name) {
+            Some(num) => {
+                builder.append(Some(num));
+            }
+            None => {
+                return None;
+            }
+        }
+    }
+    Some(builder)
 }
 
 #[derive(Clone, Debug)]
