@@ -537,7 +537,7 @@ pub(crate) fn gen_create_table_plan(
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
     let with_properties = context.with_options().inner().clone().into_iter().collect();
-    gen_create_table_plan_without_bind(
+    gen_create_table_plan_without_source(
         context,
         table_name,
         columns,
@@ -554,7 +554,7 @@ pub(crate) fn gen_create_table_plan(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn gen_create_table_plan_without_bind(
+pub(crate) fn gen_create_table_plan_without_source(
     context: OptimizerContext,
     table_name: ObjectName,
     columns: Vec<ColumnCatalog>,
@@ -612,7 +612,6 @@ pub(crate) fn gen_create_table_plan_without_bind(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn gen_table_plan_with_source(
     context: OptimizerContextRef,
     source_catalog: SourceCatalog,
