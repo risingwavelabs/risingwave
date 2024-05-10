@@ -1,26 +1,27 @@
 --
 -- Find the top10 hotest hashtags.
 --
-CREATE MATERIALIZED VIEW hot_hashtags AS WITH tags AS (
+CREATE MATERIALIZED VIEW hot_hashtags4 AS WITH tags AS (
     SELECT
         unnest(regexp_matches(tweet.text, '#\w+', 'g')) AS hashtag,
         tweet.created_at AT TIME ZONE 'UTC' AS created_at
     FROM
-        tweet JOIN user
-    ON
-        tweet.author_id = user.id
+        tweet
+        JOIN user ON tweet.author_id = user.id
 )
 SELECT
     hashtag,
     COUNT(*) AS hashtag_occurrences,
     window_start
 FROM
-    TUMBLE(tags, created_at, INTERVAL '5 minute')
+    TUMBLE(tags, created_at, INTERVAL '30 seconds')
 GROUP BY
     hashtag,
     window_start
 ORDER BY
-    hashtag_occurrences;
+    hashtag_occurrences DESC
+LIMIT
+    10;
 
 CREATE MATERIALIZED VIEW datatype_c0_boolean AS
 SELECT
