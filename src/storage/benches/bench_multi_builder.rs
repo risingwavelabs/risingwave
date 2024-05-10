@@ -22,6 +22,7 @@ use std::time::Duration;
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::future::try_join_all;
 use itertools::Itertools;
+use rand::random;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{EvictionConfig, MetricLevel, ObjectStoreConfig};
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
@@ -235,6 +236,7 @@ fn bench_table_scan(c: &mut Criterion) {
         ))
         .await
     });
+    println!("sst count: {}", ssts.len());
     let mut group = c.benchmark_group("bench_multi_builder");
     group
         .sample_size(SAMPLE_COUNT)
@@ -262,7 +264,6 @@ fn bench_table_scan(c: &mut Criterion) {
             }
         });
     });
-    println!("========end");
     group.bench_function("bench_table_reverse_scan", |b| {
         let mut sstable_ssts = ssts.clone();
         sstable_ssts.reverse();
@@ -286,7 +287,50 @@ fn bench_table_scan(c: &mut Criterion) {
             }
         });
     });
+    group.bench_function("bench_point_scan", |b| {
+        let sstable_ssts = ssts.clone();
+        b.to_async(&runtime).iter(|| {
+            let sstable_ssts = sstable_ssts.clone();
+            let sstable_store = sstable_store.clone();
+            let read_options = read_options.clone();
+            let idx = random::<u64>() % (RANGE.end - RANGE.start);
+            let key = FullKey::from_user_key(test_user_key_of(idx), 1);
+            async move {
+                let mut iter = ConcatIterator::new(
+                    sstable_ssts.clone(),
+                    sstable_store.clone(),
+                    read_options.clone(),
+                );
+                iter.seek(key.to_ref()).await.unwrap();
+                if iter.is_valid() {
+                    iter.next().await.unwrap();
+                }
+            }
+        });
+    });
+    group.bench_function("bench_point_reverse_scan", |b| {
+        let mut sstable_ssts = ssts.clone();
+        sstable_ssts.reverse();
+        b.to_async(&runtime).iter(|| {
+            let sstable_ssts = sstable_ssts.clone();
+            let sstable_store = sstable_store.clone();
+            let read_options = read_options.clone();
+            let idx = random::<u64>() % (RANGE.end - RANGE.start);
+            let key = FullKey::from_user_key(test_user_key_of(idx), 1);
+            async move {
+                let mut iter = ConcatIteratorInner::<BackwardSstableIterator>::new(
+                    sstable_ssts.clone(),
+                    sstable_store.clone(),
+                    read_options.clone(),
+                );
+                iter.seek(key.to_ref()).await.unwrap();
+                if iter.is_valid() {
+                    iter.next().await.unwrap();
+                }
+            }
+        });
+    });
 }
 
-criterion_group!(benches, bench_multi_builder, bench_table_scan);
+criterion_group!(benches, bench_table_scan);
 criterion_main!(benches);
