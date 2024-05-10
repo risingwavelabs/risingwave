@@ -259,7 +259,7 @@ KafkaProperties:
     required: false
     alias:
     - external_id
-  - name: aws.region.profile
+  - name: aws.profile
     field_type: String
     required: false
     alias:
@@ -723,7 +723,7 @@ PulsarProperties:
     required: false
     alias:
     - external_id
-  - name: aws.region.profile
+  - name: aws.profile
     field_type: String
     required: false
     alias:

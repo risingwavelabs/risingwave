@@ -82,7 +82,7 @@ pub struct AwsAuthProps {
     /// external ID in IAM role trust policy
     #[serde(rename = "aws.credentials.role.external_id", alias = "external_id")]
     pub external_id: Option<String>,
-    #[serde(rename = "aws.region.profile", alias = "profile")]
+    #[serde(rename = "aws.profile", alias = "profile")]
     pub profile: Option<String>,
 }
 

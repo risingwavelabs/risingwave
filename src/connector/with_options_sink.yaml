@@ -59,7 +59,7 @@ BigQueryConfig:
     required: false
     alias:
     - external_id
-  - name: aws.region.profile
+  - name: aws.profile
     field_type: String
     required: false
     alias:
@@ -408,7 +408,7 @@ KafkaConfig:
     required: false
     alias:
     - external_id
-  - name: aws.region.profile
+  - name: aws.profile
     field_type: String
     required: false
     alias:
@@ -627,7 +627,7 @@ PulsarConfig:
     required: false
     alias:
     - external_id
-  - name: aws.region.profile
+  - name: aws.profile
     field_type: String
     required: false
     alias:
