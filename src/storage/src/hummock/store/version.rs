@@ -42,7 +42,8 @@ use sync_point::sync_point;
 use crate::error::StorageResult;
 use crate::hummock::iterator::change_log::ChangeLogIterator;
 use crate::hummock::iterator::{
-    BackwardUserIterator, ConcatIteratorInner, IteratorFactory, MergeIterator, UserIterator,
+    BackwardUserIterator, ConcatIteratorInner, DirectionEnum, IteratorFactory, MergeIterator,
+    UserIterator,
 };
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::sstable::{SstableIteratorReadOptions, SstableIteratorType};
@@ -1016,7 +1017,7 @@ impl HummockVersionReader {
 
             if level.level_type == LevelType::Nonoverlapping as i32 {
                 let table_infos = prune_nonoverlapping_ssts(&level.table_infos, user_key_range_ref);
-                let sstables = table_infos
+                let mut sstables = table_infos
                     .filter(|sstable_info| {
                         sstable_info
                             .table_ids
@@ -1029,6 +1030,10 @@ impl HummockVersionReader {
                     continue;
                 }
                 if sstables.len() > 1 {
+                    use crate::hummock::iterator::HummockIteratorDirection;
+                    if F::Direction::direction() == DirectionEnum::Backward {
+                        sstables.reverse();
+                    }
                     factory.add_concat_sst_iter(
                         ConcatIteratorInner::<F::SstableIteratorType>::new(
                             sstables,

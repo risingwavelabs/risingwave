@@ -25,13 +25,18 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{EvictionConfig, MetricLevel, ObjectStoreConfig};
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
-use risingwave_object_store::object::{ObjectStore, ObjectStoreImpl, S3ObjectStore};
+use risingwave_object_store::object::{
+    InMemObjectStore, ObjectStore, ObjectStoreImpl, S3ObjectStore,
+};
+use risingwave_pb::hummock::SstableInfo;
+use risingwave_storage::hummock::iterator::{ConcatIterator, ConcatIteratorInner, HummockIterator};
 use risingwave_storage::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    BatchSstableWriterFactory, CachePolicy, FileCache, HummockResult, MemoryLimiter,
-    SstableBuilder, SstableBuilderOptions, SstableStore, SstableStoreConfig, SstableWriterFactory,
-    SstableWriterOptions, StreamingSstableWriterFactory, Xor16FilterBuilder,
+    BackwardSstableIterator, BatchSstableWriterFactory, CachePolicy, FileCache, HummockResult,
+    MemoryLimiter, SstableBuilder, SstableBuilderOptions, SstableIteratorReadOptions, SstableStore,
+    SstableStoreConfig, SstableWriterFactory, SstableWriterOptions, StreamingSstableWriterFactory,
+    Xor16FilterBuilder,
 };
 use risingwave_storage::monitor::{global_hummock_state_store_metrics, ObjectStoreMetrics};
 
@@ -100,7 +105,7 @@ fn test_user_key_of(idx: u64) -> UserKey<Vec<u8>> {
 
 async fn build_tables<F: SstableWriterFactory>(
     mut builder: CapacitySplitTableBuilder<LocalTableBuilderFactory<F>>,
-) {
+) -> Vec<SstableInfo> {
     for i in RANGE {
         builder
             .add_full_key_for_test(
@@ -112,11 +117,35 @@ async fn build_tables<F: SstableWriterFactory>(
             .unwrap();
     }
     let split_table_outputs = builder.finish().await.unwrap();
+    let ssts = split_table_outputs
+        .iter()
+        .map(|handle| handle.sst_info.sst_info.clone())
+        .collect_vec();
     let join_handles = split_table_outputs
         .into_iter()
         .map(|o| o.upload_join_handle)
         .collect_vec();
     try_join_all(join_handles).await.unwrap();
+    ssts
+}
+
+fn generate_sstable_store(object_store: Arc<ObjectStoreImpl>) -> SstableStore {
+    SstableStore::new(SstableStoreConfig {
+        store: object_store,
+        path: "test".to_string(),
+        block_cache_capacity: 64 << 20,
+        meta_cache_capacity: 128 << 20,
+        meta_cache_shard_num: 2,
+        block_cache_shard_num: 2,
+        block_cache_eviction: EvictionConfig::for_test(),
+        meta_cache_eviction: EvictionConfig::for_test(),
+        prefetch_buffer_capacity: 64 << 20,
+        max_prefetch_block_number: 16,
+        data_file_cache: FileCache::none(),
+        meta_file_cache: FileCache::none(),
+        recent_filter: None,
+        state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
+    })
 }
 
 fn bench_builder(
@@ -138,22 +167,7 @@ fn bench_builder(
             .monitored(metrics, default_config)
     });
     let object_store = Arc::new(ObjectStoreImpl::S3(object_store));
-    let sstable_store = Arc::new(SstableStore::new(SstableStoreConfig {
-        store: object_store,
-        path: "test".to_string(),
-        block_cache_capacity: 64 << 20,
-        meta_cache_capacity: 128 << 20,
-        meta_cache_shard_num: 2,
-        block_cache_shard_num: 2,
-        block_cache_eviction: EvictionConfig::for_test(),
-        meta_cache_eviction: EvictionConfig::for_test(),
-        prefetch_buffer_capacity: 64 << 20,
-        max_prefetch_block_number: 16,
-        data_file_cache: FileCache::none(),
-        meta_file_cache: FileCache::none(),
-        recent_filter: None,
-        state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
-    }));
+    let sstable_store = Arc::new(generate_sstable_store(object_store));
 
     let mut group = c.benchmark_group("bench_multi_builder");
     group
@@ -197,5 +211,82 @@ fn bench_multi_builder(c: &mut Criterion) {
     }
 }
 
-criterion_group!(benches, bench_multi_builder);
+fn bench_table_scan(c: &mut Criterion) {
+    let capacity_mb: usize = 32;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    let store = InMemObjectStore::new().monitored(
+        Arc::new(ObjectStoreMetrics::unused()),
+        Arc::new(ObjectStoreConfig::default()),
+    );
+    let object_store = Arc::new(ObjectStoreImpl::InMem(store));
+    let sstable_store = Arc::new(generate_sstable_store(object_store));
+
+    let ssts = runtime.block_on(async {
+        build_tables(CapacitySplitTableBuilder::for_test(
+            LocalTableBuilderFactory::new(
+                1,
+                BatchSstableWriterFactory::new(sstable_store.clone()),
+                get_builder_options(capacity_mb),
+            ),
+        ))
+        .await
+    });
+    let mut group = c.benchmark_group("bench_multi_builder");
+    group
+        .sample_size(SAMPLE_COUNT)
+        .measurement_time(ESTIMATED_MEASUREMENT_TIME);
+    let read_options = Arc::new(SstableIteratorReadOptions::default());
+    group.bench_function("bench_table_scan", |b| {
+        let sstable_ssts = ssts.clone();
+        b.to_async(&runtime).iter(|| {
+            let sstable_ssts = sstable_ssts.clone();
+            let sstable_store = sstable_store.clone();
+            let read_options = read_options.clone();
+            async move {
+                let mut iter = ConcatIterator::new(
+                    sstable_ssts.clone(),
+                    sstable_store.clone(),
+                    read_options.clone(),
+                );
+                iter.rewind().await.unwrap();
+                let mut count = 0;
+                while iter.is_valid() {
+                    count += 1;
+                    iter.next().await.unwrap();
+                }
+                assert_eq!(count, RANGE.end - RANGE.start);
+            }
+        });
+    });
+    println!("========end");
+    group.bench_function("bench_table_reverse_scan", |b| {
+        let mut sstable_ssts = ssts.clone();
+        sstable_ssts.reverse();
+        b.to_async(&runtime).iter(|| {
+            let sstable_ssts = sstable_ssts.clone();
+            let sstable_store = sstable_store.clone();
+            let read_options = read_options.clone();
+            async move {
+                let mut iter = ConcatIteratorInner::<BackwardSstableIterator>::new(
+                    sstable_ssts.clone(),
+                    sstable_store.clone(),
+                    read_options.clone(),
+                );
+                iter.rewind().await.unwrap();
+                let mut count = 0;
+                while iter.is_valid() {
+                    count += 1;
+                    iter.next().await.unwrap();
+                }
+                assert_eq!(count, RANGE.end - RANGE.start);
+            }
+        });
+    });
+}
+
+criterion_group!(benches, bench_multi_builder, bench_table_scan);
 criterion_main!(benches);
