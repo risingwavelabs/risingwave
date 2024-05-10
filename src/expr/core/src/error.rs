@@ -119,6 +119,10 @@ pub enum ExprError {
 
     #[error("error in cryptography: {0}")]
     Cryptography(Box<CryptographyError>),
+
+    /// Function error message returned by UDF.
+    #[error("{0}")]
+    Custom(String),
 }
 
 #[derive(Debug)]
@@ -181,6 +185,12 @@ impl Display for MultiExprError {
 impl From<Vec<ExprError>> for MultiExprError {
     fn from(v: Vec<ExprError>) -> Self {
         Self(v.into_boxed_slice())
+    }
+}
+
+impl FromIterator<ExprError> for MultiExprError {
+    fn from_iter<T: IntoIterator<Item = ExprError>>(iter: T) -> Self {
+        Self(iter.into_iter().collect())
     }
 }
 

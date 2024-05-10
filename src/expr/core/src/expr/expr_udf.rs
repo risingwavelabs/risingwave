@@ -36,7 +36,7 @@ use prometheus::{
     register_int_counter_vec_with_registry, HistogramVec, IntCounter, IntCounterVec, Registry,
 };
 use risingwave_common::array::arrow::{FromArrow, ToArrow, UdfArrowConvert};
-use risingwave_common::array::{ArrayRef, DataChunk};
+use risingwave_common::array::{Array, ArrayRef, DataChunk};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
@@ -47,7 +47,7 @@ use thiserror_ext::AsReport;
 
 use super::{BoxedExpression, Build};
 use crate::expr::Expression;
-use crate::{bail, Result};
+use crate::{bail, ExprError, Result};
 
 #[derive(Debug)]
 pub struct UserDefinedFunction {
@@ -247,6 +247,22 @@ impl UserDefinedFunction {
                 array.data_type(),
                 self.return_type,
             );
+        }
+
+        // handle optional error column
+        if let Some(errors) = output.columns().get(1) {
+            if errors.data_type() != DataType::Varchar {
+                bail!(
+                    "UDF returned errors column with invalid type: {:?}",
+                    errors.data_type()
+                );
+            }
+            let errors = errors
+                .as_utf8()
+                .iter()
+                .filter_map(|msg| msg.map(|s| ExprError::Custom(s.into())))
+                .collect();
+            return Err(crate::ExprError::Multiple(array.clone(), errors));
         }
 
         Ok(array.clone())
