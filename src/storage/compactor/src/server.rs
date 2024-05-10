@@ -131,7 +131,7 @@ pub async fn prepare_start_parameters(
         SstableStore::for_compactor(
             object_store,
             storage_opts.data_directory.to_string(),
-            1 << 20, // set 1MB memory to avoid panic.
+            0,
             meta_cache_capacity_bytes,
         )
         .await
