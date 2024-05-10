@@ -604,6 +604,10 @@ impl SstableStore {
         self.meta_cache_v2.cache().usage() as _
     }
 
+    pub fn get_prefetch_memory_usage(&self) -> usize {
+        self.prefetch_buffer_usage.load(Ordering::Acquire)
+    }
+
     pub async fn get_stream_for_blocks(
         &self,
         object_id: HummockSstableObjectId,
@@ -680,6 +684,10 @@ impl MemoryCollector for HummockMemoryCollector {
 
     fn get_uploading_memory_usage(&self) -> u64 {
         self.limiter.get_memory_usage()
+    }
+
+    fn get_prefetch_memory_usage(&self) -> usize {
+        self.sstable_store.get_prefetch_memory_usage()
     }
 
     fn get_meta_cache_memory_usage_ratio(&self) -> f64 {

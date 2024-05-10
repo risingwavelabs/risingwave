@@ -688,7 +688,7 @@ impl StateStoreImpl {
                     hummock.strip_prefix("hummock+").unwrap(),
                     object_store_metrics.clone(),
                     "Hummock",
-                    opts.object_store_config.clone(),
+                    Arc::new(opts.object_store_config.clone()),
                 )
                 .await;
 

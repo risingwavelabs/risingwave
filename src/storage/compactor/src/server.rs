@@ -122,7 +122,7 @@ pub async fn prepare_start_parameters(
             .expect("object store must be hummock for compactor server"),
         object_metrics,
         "Hummock",
-        config.storage.object_store.clone(),
+        Arc::new(config.storage.object_store.clone()),
     )
     .await;
 

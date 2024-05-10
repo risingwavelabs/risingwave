@@ -56,8 +56,8 @@ use crate::catalog::{check_valid_column_name, ColumnId};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InlineNowProcTime};
 use crate::handler::create_source::{
-    bind_all_columns, bind_columns_from_source, bind_source_pk, bind_source_watermark,
-    check_source_schema, handle_addition_columns, validate_compatibility, UPSTREAM_SOURCE_KEY,
+    bind_all_columns, bind_columns_from_source, bind_connector_props, bind_source_pk,
+    bind_source_watermark, check_source_schema, handle_addition_columns, UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::{CdcScanOptions, SourceNodeKind};
@@ -480,8 +480,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     }
 
     let session = &handler_args.session;
-    let mut with_properties = handler_args.with_options.clone().into_connector_props();
-    validate_compatibility(&source_schema, &mut with_properties)?;
+    let with_properties = bind_connector_props(&handler_args, &source_schema, false)?;
 
     ensure_table_constraints_supported(&constraints)?;
 
@@ -717,7 +716,7 @@ fn gen_table_plan_inner(
     .into();
 
     let required_cols = FixedBitSet::with_capacity(columns.len());
-    let mut plan_root = PlanRoot::new(
+    let plan_root = PlanRoot::new_with_logical_plan(
         source_node,
         RequiredDist::Any,
         Order::any(),
@@ -859,7 +858,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
 
     let scan_node: PlanRef = logical_scan.into();
     let required_cols = FixedBitSet::with_capacity(columns.len());
-    let mut plan_root = PlanRoot::new(
+    let plan_root = PlanRoot::new_with_logical_plan(
         scan_node,
         RequiredDist::Any,
         Order::any(),

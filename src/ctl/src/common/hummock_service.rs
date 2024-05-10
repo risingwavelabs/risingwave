@@ -162,7 +162,7 @@ impl HummockServiceOpts {
             self.hummock_url.strip_prefix("hummock+").unwrap(),
             Arc::new(ObjectStoreMetrics::unused()),
             "Hummock",
-            ObjectStoreConfig::default(),
+            Arc::new(ObjectStoreConfig::default()),
         )
         .await;
 
