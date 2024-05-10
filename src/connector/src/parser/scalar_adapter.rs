@@ -42,10 +42,6 @@ impl<'a> FromSql<'a> for EnumString {
 impl ToSql for EnumString {
     to_sql_checked!();
 
-    fn accepts(ty: &Type) -> bool {
-        matches!(ty.kind(), Kind::Enum(_))
-    }
-
     fn to_sql(
         &self,
         ty: &Type,
@@ -69,6 +65,10 @@ impl ToSql for EnumString {
             }
             _ => Err("EnumString can only be used with ENUM types".into()),
         }
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(ty.kind(), Kind::Enum(_))
     }
 }
 
@@ -132,12 +132,12 @@ impl<'a> FromSql<'a> for ScalarAdapter<'_> {
 }
 
 impl ScalarAdapter<'_> {
-    pub fn name(&self) -> String {
+    pub fn name(&self) -> &'static str {
         match self {
-            ScalarAdapter::Builtin(_) => "Builtin".to_string(),
-            ScalarAdapter::Uuid(_) => "Uuid".to_string(),
-            ScalarAdapter::Numeric(_) => "Numeric".to_string(),
-            ScalarAdapter::Enum(_) => "Enum".to_string(),
+            ScalarAdapter::Builtin(_) => "Builtin",
+            ScalarAdapter::Uuid(_) => "Uuid",
+            ScalarAdapter::Numeric(_) => "Numeric",
+            ScalarAdapter::Enum(_) => "Enum",
         }
     }
 
@@ -178,7 +178,7 @@ impl ScalarAdapter<'_> {
                 tracing::error!(
                     adapter = self.name(),
                     rw_type = ty.pg_name(),
-                    "failed to convert to ScalarAdapter: invalid conversion"
+                    "failed to convert from ScalarAdapter: invalid conversion"
                 );
                 None
             }
