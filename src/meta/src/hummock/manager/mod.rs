@@ -41,7 +41,8 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids,
     get_table_compaction_group_id_mapping, BranchedSstInfo, HummockLevelsExt,
 };
-use risingwave_hummock_sdk::version::HummockVersionDelta;
+use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::version::{CompactTask, HummockVersionDelta, ReportTask, SstableInfo};
 use risingwave_hummock_sdk::{
     version_archive_dir, version_checkpoint_path, CompactionGroupId, ExtendedSstableInfo,
     HummockCompactionTaskId, HummockContextId, HummockEpoch, HummockSstableId,
@@ -55,13 +56,14 @@ use risingwave_pb::hummock::compact_task::{self, TaskStatus, TaskType};
 use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config;
 use risingwave_pb::hummock::subscribe_compaction_event_request::{
-    Event as RequestEvent, HeartBeat, ReportTask,
+    Event as RequestEvent, HeartBeat,
 };
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskAssignment, GroupDelta, GroupMetaChange, HummockPinnedSnapshot,
+    CompactTaskAssignment, GroupDelta, GroupMetaChange, HummockPinnedSnapshot,
     HummockPinnedVersion, HummockSnapshot, HummockVersionStats, IntraLevelDelta,
-    PbCompactionGroupInfo, SstableInfo, SubscribeCompactionEventRequest, TableOption, TableSchema,
+    PbCompactTaskAssignment, PbCompactionGroupInfo, SubscribeCompactionEventRequest, TableOption,
+    TableSchema,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use rw_futures_util::{pending_on_none, select_all};
@@ -491,7 +493,7 @@ impl HummockManager {
         }
 
         compaction_guard.compact_task_assignment = match &meta_store {
-            MetaStoreImpl::Kv(meta_store) => CompactTaskAssignment::list(meta_store)
+            MetaStoreImpl::Kv(meta_store) => PbCompactTaskAssignment::list(meta_store)
                 .await?
                 .into_iter()
                 .map(|assigned| (assigned.key().unwrap(), assigned))
@@ -501,7 +503,12 @@ impl HummockManager {
                 .await
                 .map_err(MetadataModelError::from)?
                 .into_iter()
-                .map(|m| (m.id as HummockCompactionTaskId, m.into()))
+                .map(|m| {
+                    (
+                        m.id as HummockCompactionTaskId,
+                        PbCompactTaskAssignment::from(m),
+                    )
+                })
                 .collect(),
         };
 
@@ -1000,11 +1007,10 @@ impl HummockManager {
                     _ => 0,
                 };
                 let vnode_partition_count = compact_task.input.vnode_partition_count;
-                use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 
                 let mut compact_task = CompactTask {
                     input_ssts: compact_task.input.input_levels,
-                    splits: vec![risingwave_pb::hummock::KeyRange::inf()],
+                    splits: vec![KeyRange::inf()],
                     watermark,
                     sorted_output_ssts: vec![],
                     task_id,
@@ -1015,7 +1021,7 @@ impl HummockManager {
                         .get_compaction_group_levels(compaction_group_id)
                         .is_last_level(target_level_id),
                     base_level: compact_task.base_level as u32,
-                    task_status: TaskStatus::Pending as i32,
+                    task_status: TaskStatus::Pending,
                     compaction_group_id: group_config.group_id,
                     existing_table_ids: member_table_ids.clone(),
                     compression_algorithm,
@@ -1029,7 +1035,7 @@ impl HummockManager {
                     current_epoch_time: Epoch::now().0,
                     compaction_filter_mask: group_config.compaction_config.compaction_filter_mask,
                     target_sub_level_id: compact_task.input.target_sub_level_id,
-                    task_type: compact_task.compaction_task_type as i32,
+                    task_type: compact_task.compaction_task_type,
                     split_weight_by_vnode: vnode_partition_count,
                     ..Default::default()
                 };
@@ -1120,7 +1126,7 @@ impl HummockManager {
                     compact_task_assignment.insert(
                         compact_task.task_id,
                         CompactTaskAssignment {
-                            compact_task: Some(compact_task.clone()),
+                            compact_task: Some(compact_task.clone().into()),
                             context_id: META_NODE_ID, // deprecated
                         },
                     );
@@ -1271,7 +1277,7 @@ impl HummockManager {
             .into_iter()
             .map(|task_id| ReportTask {
                 task_id,
-                task_status: task_status as i32,
+                task_status,
                 sorted_output_ssts: vec![],
                 table_stats_change: HashMap::default(),
             })
@@ -1375,7 +1381,7 @@ impl HummockManager {
         let rets = self
             .report_compact_tasks(vec![ReportTask {
                 task_id,
-                task_status: task_status as i32,
+                task_status,
                 sorted_output_ssts,
                 table_stats_change: table_stats_change.unwrap_or_default(),
             }])
@@ -1400,13 +1406,13 @@ impl HummockManager {
         let mut compact_statuses = create_trx_wrapper!(
             self.meta_store_ref(),
             BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut compaction.compaction_statuses,)
+            BTreeMapTransaction::new(&mut compaction.compaction_statuses)
         );
         let mut rets = vec![false; report_tasks.len()];
         let mut compact_task_assignment = create_trx_wrapper!(
             self.meta_store_ref(),
             BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut compaction.compact_task_assignment,)
+            BTreeMapTransaction::new(&mut compaction.compact_task_assignment)
         );
         // The compaction task is finished.
         let mut versioning_guard = write_lock!(self, versioning).await;
@@ -1425,7 +1431,7 @@ impl HummockManager {
         let mut hummock_version_deltas = create_trx_wrapper!(
             self.meta_store_ref(),
             BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut versioning.hummock_version_deltas,)
+            BTreeMapTransaction::new(&mut versioning.hummock_version_deltas)
         );
         let mut branched_ssts = create_trx_wrapper!(
             self.meta_store_ref(),
@@ -1443,7 +1449,7 @@ impl HummockManager {
         for (idx, task) in report_tasks.into_iter().enumerate() {
             rets[idx] = true;
             let mut compact_task = match compact_task_assignment.remove(task.task_id) {
-                Some(compact_task) => compact_task.compact_task.unwrap(),
+                Some(compact_task) => CompactTask::from(compact_task.compact_task.unwrap()),
                 None => {
                     tracing::warn!("{}", format!("compact task {} not found", task.task_id));
                     rets[idx] = false;
@@ -1453,7 +1459,7 @@ impl HummockManager {
 
             {
                 // apply result
-                compact_task.task_status = task.task_status;
+                compact_task.set_task_status(task.task_status);
                 compact_task.sorted_output_ssts = task.sorted_output_ssts;
             }
 
@@ -1851,7 +1857,10 @@ impl HummockManager {
             let group_delta = GroupDelta {
                 delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
                     level_idx: 0,
-                    inserted_table_infos: group_sstables.clone(),
+                    inserted_table_infos: group_sstables
+                        .into_iter()
+                        .map(|sst| sst.into())
+                        .collect_vec(),
                     l0_sub_level_id,
                     ..Default::default()
                 })),
@@ -2260,7 +2269,7 @@ impl HummockManager {
         let compact_task_string = compact_task_to_string(&compact_task);
         // TODO: shall we need to cancel on meta ?
         compactor
-            .send_event(ResponseEvent::CompactTask(compact_task))
+            .send_event(ResponseEvent::CompactTask(compact_task.into()))
             .with_context(|| {
                 format!(
                     "Failed to trigger compaction task for compaction_group {}",
@@ -2308,7 +2317,7 @@ impl HummockManager {
             guard.compact_task_assignment.insert(
                 task_id,
                 CompactTaskAssignment {
-                    compact_task: Some(task),
+                    compact_task: Some(task.into()),
                     context_id: 0,
                 },
             );
@@ -2318,7 +2327,7 @@ impl HummockManager {
         // So we pass the modified compact_task directly into the `report_compact_task_impl`
         self.report_compact_tasks(vec![ReportTask {
             task_id,
-            task_status: task_status as i32,
+            task_status,
             sorted_output_ssts,
             table_stats_change: table_stats_change.unwrap_or_default(),
         }])
@@ -3422,7 +3431,11 @@ fn gen_version_delta<'a>(
     let group_delta = GroupDelta {
         delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
             level_idx: compact_task.target_level,
-            inserted_table_infos: compact_task.sorted_output_ssts.clone(),
+            inserted_table_infos: compact_task
+                .sorted_output_ssts
+                .iter()
+                .map(|sst| sst.into())
+                .collect_vec(),
             l0_sub_level_id: compact_task.target_sub_level_id,
             vnode_partition_count: compact_task.split_weight_by_vnode,
             ..Default::default()

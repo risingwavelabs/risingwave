@@ -23,9 +23,10 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_hummock_sdk::key::{key_with_epoch, map_table_key_range};
+use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::version::SstableInfo;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
-use risingwave_pb::hummock::{KeyRange, SstableInfo};
 use risingwave_storage::hummock::iterator::test_utils::{
     iterator_test_table_key_of, iterator_test_user_key_of,
 };
@@ -147,8 +148,13 @@ async fn test_read_version_basic() {
                     object_id: 1,
                     sst_id: 1,
                     key_range: Some(KeyRange {
+<<<<<<< HEAD
+                        left: key_with_epoch(iterator_test_user_key_of(1).encode(), 1).into(),
+                        right: key_with_epoch(iterator_test_user_key_of(2).encode(), 2).into(),
+=======
                         left: key_with_epoch(iterator_test_user_key_of(1).encode(), test_epoch(1)),
                         right: key_with_epoch(iterator_test_user_key_of(2).encode(), test_epoch(2)),
+>>>>>>> f7d9ff7fb0a1109974c1e5b1dd57d03f69354412
                         right_exclusive: false,
                     }),
                     file_size: 1,
@@ -163,8 +169,13 @@ async fn test_read_version_basic() {
                     object_id: 2,
                     sst_id: 2,
                     key_range: Some(KeyRange {
+<<<<<<< HEAD
+                        left: key_with_epoch(iterator_test_user_key_of(3).encode(), 3).into(),
+                        right: key_with_epoch(iterator_test_user_key_of(3).encode(), 3).into(),
+=======
                         left: key_with_epoch(iterator_test_user_key_of(3).encode(), test_epoch(3)),
                         right: key_with_epoch(iterator_test_user_key_of(3).encode(), test_epoch(3)),
+>>>>>>> f7d9ff7fb0a1109974c1e5b1dd57d03f69354412
                         right_exclusive: false,
                     }),
                     file_size: 1,

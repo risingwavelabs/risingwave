@@ -584,7 +584,7 @@ impl LocalBarrierWorker {
                                      table_stats,
                                  }| GroupedSstableInfo {
                                     compaction_group_id,
-                                    sst: Some(sst_info),
+                                    sst: Some(sst_info.into()),
                                     table_stats_map: to_prost_table_stats_map(table_stats),
                                 },
                             )
@@ -592,11 +592,11 @@ impl LocalBarrierWorker {
                         worker_id: self.actor_manager.env.worker_id(),
                         table_watermarks: table_watermarks
                             .into_iter()
-                            .map(|(key, value)| (key.table_id, value.to_protobuf()))
+                            .map(|(key, value)| (key.table_id, value.into()))
                             .collect(),
                         old_value_sstables: old_value_ssts
                             .into_iter()
-                            .map(|sst| sst.sst_info)
+                            .map(|sst| sst.sst_info.into())
                             .collect(),
                     },
                 ),

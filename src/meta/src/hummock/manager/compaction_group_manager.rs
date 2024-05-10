@@ -24,13 +24,13 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     get_member_table_ids, try_get_compaction_group_id_by_table_id, TableGroupInfo,
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
+use risingwave_hummock_sdk::version::ReportTask;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_meta_model_v2::compaction_config;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
-use risingwave_pb::hummock::subscribe_compaction_event_request::ReportTask;
 use risingwave_pb::hummock::{
     compact_task, CompactionConfig, CompactionGroupInfo, CompatibilityVersion, GroupConstruct,
     GroupDelta, GroupDestroy, GroupMetaChange, GroupTableChange,
@@ -660,7 +660,7 @@ impl HummockManager {
                 if need_cancel {
                     canceled_tasks.push(ReportTask {
                         task_id: task.task_id,
-                        task_status: TaskStatus::ManualCanceled as i32,
+                        task_status: TaskStatus::ManualCanceled,
                         table_stats_change: HashMap::default(),
                         sorted_output_ssts: vec![],
                     });

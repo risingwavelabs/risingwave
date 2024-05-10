@@ -14,8 +14,8 @@
 
 use std::sync::Arc;
 
-use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, OverlappingLevel};
+use risingwave_hummock_sdk::version::{InputLevel, Levels, OverlappingLevel};
+use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
 use super::min_overlap_compaction_picker::NonOverlapSubLevelPicker;
 use super::{
@@ -184,7 +184,7 @@ impl IntraCompactionPicker {
                     }
                     select_level_inputs.push(InputLevel {
                         level_idx: 0,
-                        level_type: LevelType::Nonoverlapping as i32,
+                        level_type: LevelType::Nonoverlapping,
                         table_infos: level_select_sst,
                     });
 
@@ -229,11 +229,11 @@ impl IntraCompactionPicker {
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
 
         for (idx, level) in l0.sub_levels.iter().enumerate() {
-            if level.level_type == LevelType::Overlapping as i32 || idx + 1 >= l0.sub_levels.len() {
+            if level.level_type == LevelType::Overlapping || idx + 1 >= l0.sub_levels.len() {
                 continue;
             }
 
-            if l0.sub_levels[idx + 1].level_type == LevelType::Overlapping as i32 {
+            if l0.sub_levels[idx + 1].level_type == LevelType::Overlapping {
                 continue;
             }
 
@@ -275,12 +275,12 @@ impl IntraCompactionPicker {
             let input_levels = vec![
                 InputLevel {
                     level_idx: 0,
-                    level_type: LevelType::Nonoverlapping as i32,
+                    level_type: LevelType::Nonoverlapping,
                     table_infos: vec![select_sst],
                 },
                 InputLevel {
                     level_idx: 0,
-                    level_type: LevelType::Nonoverlapping as i32,
+                    level_type: LevelType::Nonoverlapping,
                     table_infos: vec![],
                 },
             ];
@@ -397,7 +397,7 @@ impl WholeLevelCompactionPicker {
 
 #[cfg(test)]
 pub mod tests {
-    use risingwave_pb::hummock::Level;
+    use risingwave_hummock_sdk::version::{Level, Levels};
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -424,7 +424,7 @@ pub mod tests {
         // compacting_key_range.
         let levels = vec![Level {
             level_idx: 1,
-            level_type: LevelType::Nonoverlapping as i32,
+            level_type: LevelType::Nonoverlapping,
             table_infos: vec![],
             ..Default::default()
         }];
@@ -472,7 +472,7 @@ pub mod tests {
         let mut levels = Levels {
             levels: vec![Level {
                 level_idx: 1,
-                level_type: LevelType::Nonoverlapping as i32,
+                level_type: LevelType::Nonoverlapping,
                 table_infos: vec![generate_table(3, 1, 200, 300, 2)],
                 ..Default::default()
             }],
@@ -744,20 +744,20 @@ pub mod tests {
             .is_none());
 
         // Cannot trivial move because latter sub-level is overlapping
-        levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Nonoverlapping as i32;
-        levels.l0.as_mut().unwrap().sub_levels[1].level_type = LevelType::Overlapping as i32;
+        levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Nonoverlapping;
+        levels.l0.as_mut().unwrap().sub_levels[1].level_type = LevelType::Overlapping;
         let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
         assert!(ret.is_none());
 
         // Cannot trivial move because former sub-level is overlapping
-        levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Overlapping as i32;
-        levels.l0.as_mut().unwrap().sub_levels[1].level_type = LevelType::Nonoverlapping as i32;
+        levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Overlapping;
+        levels.l0.as_mut().unwrap().sub_levels[1].level_type = LevelType::Nonoverlapping;
         let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
         assert!(ret.is_none());
 
         // trivial move
-        levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Nonoverlapping as i32;
-        levels.l0.as_mut().unwrap().sub_levels[1].level_type = LevelType::Nonoverlapping as i32;
+        levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Nonoverlapping;
+        levels.l0.as_mut().unwrap().sub_levels[1].level_type = LevelType::Nonoverlapping;
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();

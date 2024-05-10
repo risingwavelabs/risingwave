@@ -32,7 +32,7 @@ use std::collections::HashMap;
 pub use key_cmp::*;
 use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
-use risingwave_pb::hummock::SstableInfo;
+use version::SstableInfo;
 
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
@@ -347,4 +347,8 @@ impl EpochWithGap {
     pub fn offset(&self) -> u64 {
         self.0 & EPOCH_SPILL_TIME_MASK
     }
+}
+
+pub trait ProtoSerializeSizeEstimatedExt {
+    fn estimated_encode_len(&self) -> usize;
 }

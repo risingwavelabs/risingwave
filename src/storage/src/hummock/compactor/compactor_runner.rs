@@ -27,11 +27,12 @@ use risingwave_hummock_sdk::compact::{
 use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
+use risingwave_hummock_sdk::version::{CompactTask, SstableInfo};
 use risingwave_hummock_sdk::{
     can_concat, compact_task_output_to_string, HummockSstableObjectId, KeyComparator,
 };
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
-use risingwave_pb::hummock::{BloomFilterType, CompactTask, LevelType, SstableInfo};
+use risingwave_pb::hummock::{BloomFilterType, LevelType};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 
@@ -94,8 +95,8 @@ impl CompactorRunner {
             BlockedXor16FilterBuilder::is_kv_count_too_large(kv_count) || task.target_level > 0;
 
         let key_range = KeyRange {
-            left: Bytes::copy_from_slice(task.splits[split_index].get_left()),
-            right: Bytes::copy_from_slice(task.splits[split_index].get_right()),
+            left: task.splits[split_index].left.clone(),
+            right: task.splits[split_index].right.clone(),
             right_exclusive: true,
         };
 
@@ -108,7 +109,7 @@ impl CompactorRunner {
                 gc_delete_keys: task.gc_delete_keys,
                 watermark: task.watermark,
                 stats_target_table_ids: Some(HashSet::from_iter(task.existing_table_ids.clone())),
-                task_type: task.task_type(),
+                task_type: task.task_type,
                 is_target_l0_or_lbase: task.target_level == 0
                     || task.target_level == task.base_level,
                 use_block_based_filter,
@@ -173,18 +174,19 @@ impl CompactorRunner {
                 .table_infos
                 .iter()
                 .filter(|table_info| {
-                    let key_range = KeyRange::from(table_info.key_range.as_ref().unwrap());
                     let table_ids = &table_info.table_ids;
                     let exist_table = table_ids
                         .iter()
                         .any(|table_id| self.compact_task.existing_table_ids.contains(table_id));
 
-                    self.key_range.full_key_overlap(&key_range) && exist_table
+                    self.key_range
+                        .full_key_overlap(table_info.key_range.as_ref().unwrap())
+                        && exist_table
                 })
                 .cloned()
                 .collect_vec();
             // Do not need to filter the table because manager has done it.
-            if level.level_type == LevelType::Nonoverlapping as i32 {
+            if level.level_type == LevelType::Nonoverlapping {
                 debug_assert!(can_concat(&level.table_infos));
                 table_iters.push(ConcatSstableIterator::new(
                     self.compact_task.existing_table_ids.clone(),
@@ -202,7 +204,7 @@ impl CompactorRunner {
                     sst_groups.len()
                 );
                 for table_infos in sst_groups {
-                    assert!(can_concat(&table_infos));
+                    assert!(can_concat(table_infos.as_slice()));
                     table_iters.push(ConcatSstableIterator::new(
                         self.compact_task.existing_table_ids.clone(),
                         table_infos,
@@ -243,7 +245,7 @@ pub fn partition_overlapping_sstable_infos(
 ) -> Vec<Vec<SstableInfo>> {
     pub struct SstableGroup {
         ssts: Vec<SstableInfo>,
-        max_right_bound: Vec<u8>,
+        max_right_bound: Bytes,
     }
 
     impl PartialEq for SstableGroup {
@@ -434,7 +436,7 @@ pub async fn compact(
         .sum::<u64>();
     let all_ssts_are_blocked_filter = sstable_infos
         .iter()
-        .all(|table_info| table_info.bloom_filter_kind() == BloomFilterType::Blocked);
+        .all(|table_info| table_info.bloom_filter_kind == BloomFilterType::Blocked);
 
     let delete_key_count = sstable_infos
         .iter()
@@ -454,7 +456,7 @@ pub async fn compact(
         && compaction_size < context.storage_opts.compactor_fast_max_compact_task_size
         && delete_key_count * 100
             < context.storage_opts.compactor_fast_max_compact_delete_ratio as u64 * total_key_count
-        && compact_task.task_type() == TaskType::Dynamic;
+        && compact_task.task_type == TaskType::Dynamic;
 
     if !optimize_by_copy_block {
         match generate_splits(&sstable_infos, compaction_size, context.clone()).await {
@@ -714,7 +716,7 @@ fn compact_done(
     task_status: TaskStatus,
 ) -> (CompactTask, HashMap<u32, TableStats>) {
     let mut table_stats_map = TableStatsMap::default();
-    compact_task.set_task_status(task_status);
+    compact_task.task_status = task_status;
     compact_task
         .sorted_output_ssts
         .reserve(compact_task.splits.len());

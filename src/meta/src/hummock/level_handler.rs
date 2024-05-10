@@ -15,9 +15,9 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
+use risingwave_hummock_sdk::version::{Level, SstableInfo};
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockSstableId};
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
-use risingwave_pb::hummock::{Level, SstableInfo};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LevelHandler {

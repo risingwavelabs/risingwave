@@ -16,11 +16,68 @@ use std::collections::HashMap;
 
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::hummock_version_delta::ChangeLogDelta;
-use risingwave_pb::hummock::{EpochNewChangeLog, SstableInfo, TableChangeLog as PbTableChangeLog};
+use risingwave_pb::hummock::{PbEpochNewChangeLog, TableChangeLog as PbTableChangeLog};
 use tracing::warn;
+
+use crate::version::SstableInfo;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableChangeLog(pub Vec<EpochNewChangeLog>);
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EpochNewChangeLog {
+    pub new_value: Vec<SstableInfo>,
+    pub old_value: Vec<SstableInfo>,
+    pub epochs: Vec<u64>,
+}
+
+impl From<&EpochNewChangeLog> for PbEpochNewChangeLog {
+    fn from(val: &EpochNewChangeLog) -> Self {
+        Self {
+            new_value: val.new_value.iter().map(|a| a.clone().into()).collect(),
+            old_value: val.old_value.iter().map(|a| a.clone().into()).collect(),
+            epochs: val.epochs.clone(),
+        }
+    }
+}
+
+impl From<&PbEpochNewChangeLog> for EpochNewChangeLog {
+    fn from(value: &PbEpochNewChangeLog) -> Self {
+        Self {
+            new_value: value.new_value.iter().map(|a| a.into()).collect(),
+            old_value: value.old_value.iter().map(|a| a.into()).collect(),
+            epochs: value.epochs.clone(),
+        }
+    }
+}
+
+impl From<EpochNewChangeLog> for PbEpochNewChangeLog {
+    fn from(val: EpochNewChangeLog) -> Self {
+        Self {
+            new_value: val
+                .new_value
+                .into_iter()
+                .map(|a| a.clone().into())
+                .collect(),
+            old_value: val
+                .old_value
+                .into_iter()
+                .map(|a| a.clone().into())
+                .collect(),
+            epochs: val.epochs.clone(),
+        }
+    }
+}
+
+impl From<PbEpochNewChangeLog> for EpochNewChangeLog {
+    fn from(value: PbEpochNewChangeLog) -> Self {
+        Self {
+            new_value: value.new_value.into_iter().map(|a| a.into()).collect(),
+            old_value: value.old_value.into_iter().map(|a| a.into()).collect(),
+            epochs: value.epochs.clone(),
+        }
+    }
+}
 
 impl TableChangeLog {
     pub fn filter_epoch(&self, (min_epoch, max_epoch): (u64, u64)) -> &[EpochNewChangeLog] {
@@ -56,12 +113,12 @@ impl TableChangeLog {
 impl TableChangeLog {
     pub fn to_protobuf(&self) -> PbTableChangeLog {
         PbTableChangeLog {
-            change_logs: self.0.clone(),
+            change_logs: self.0.iter().map(|a| a.into()).collect(),
         }
     }
 
     pub fn from_protobuf(val: &PbTableChangeLog) -> Self {
-        Self(val.change_logs.clone())
+        Self(val.change_logs.clone().iter().map(|a| a.into()).collect())
     }
 }
 
@@ -77,7 +134,7 @@ pub fn build_table_change_log_delta<'a>(
                 TableId::new(table_id),
                 ChangeLogDelta {
                     truncate_epoch,
-                    new_log: Some(EpochNewChangeLog {
+                    new_log: Some(PbEpochNewChangeLog {
                         new_value: vec![],
                         old_value: vec![],
                         epochs: epochs.clone(),
@@ -90,7 +147,11 @@ pub fn build_table_change_log_delta<'a>(
         for table_id in &sst.table_ids {
             match table_change_log.get_mut(&TableId::new(*table_id)) {
                 Some(log) => {
-                    log.new_log.as_mut().unwrap().old_value.push(sst.clone());
+                    log.new_log
+                        .as_mut()
+                        .unwrap()
+                        .old_value
+                        .push(sst.clone().into());
                 }
                 None => {
                     warn!(table_id, ?sst, "old value sst contains non-log-store table");
@@ -101,7 +162,11 @@ pub fn build_table_change_log_delta<'a>(
     for sst in new_value_ssts {
         for table_id in &sst.table_ids {
             if let Some(log) = table_change_log.get_mut(&TableId::new(*table_id)) {
-                log.new_log.as_mut().unwrap().new_value.push(sst.clone());
+                log.new_log
+                    .as_mut()
+                    .unwrap()
+                    .new_value
+                    .push(sst.clone().into());
             }
         }
     }

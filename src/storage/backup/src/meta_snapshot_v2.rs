@@ -17,6 +17,7 @@ use std::fmt::{Display, Formatter};
 use bytes::{Buf, BufMut};
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_meta_model_v2 as model_v2;
+use risingwave_pb::hummock::PbHummockVersion;
 use serde::{Deserialize, Serialize};
 
 use crate::meta_snapshot::{MetaSnapshot, Metadata};
@@ -78,7 +79,7 @@ impl Display for MetadataV2 {
 impl Metadata for MetadataV2 {
     fn encode_to(&self, buf: &mut Vec<u8>) -> BackupResult<()> {
         put_n(buf, &self.seaql_migrations)?;
-        put_1(buf, &self.hummock_version.to_protobuf())?;
+        put_1(buf, &PbHummockVersion::from(&self.hummock_version))?;
         put_n(buf, &self.version_stats)?;
         put_n(buf, &self.compaction_configs)?;
         put_n(buf, &self.actors)?;

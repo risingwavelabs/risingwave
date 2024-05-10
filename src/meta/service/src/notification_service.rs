@@ -292,7 +292,7 @@ impl NotificationServiceImpl {
 
         Ok(MetaSnapshot {
             tables,
-            hummock_version: Some(hummock_version.to_protobuf()),
+            hummock_version: Some(hummock_version.into()),
             version: Some(SnapshotVersion {
                 catalog_version,
                 ..Default::default()

@@ -31,8 +31,7 @@ pub use emergency_compaction_picker::EmergencyCompactionPicker;
 pub use intra_compaction_picker::IntraCompactionPicker;
 pub use manual_compaction_picker::ManualCompactionPicker;
 pub use min_overlap_compaction_picker::MinOverlappingPicker;
-use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::InputLevel;
+use risingwave_hummock_sdk::version::{InputLevel, Levels};
 pub use space_reclaim_compaction_picker::{SpaceReclaimCompactionPicker, SpaceReclaimPickerState};
 pub use tier_compaction_picker::TierCompactionPicker;
 pub use tombstone_reclaim_compaction_picker::{

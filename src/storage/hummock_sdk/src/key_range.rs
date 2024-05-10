@@ -15,11 +15,12 @@
 use std::cmp;
 
 use bytes::Bytes;
+use serde::Serialize;
 
 use super::key_cmp::KeyComparator;
 use crate::key::{FullKey, UserKey};
 
-#[derive(PartialEq, Eq, Clone, Debug, Default)]
+#[derive(PartialEq, Eq, Clone, Debug, Default, Serialize)]
 pub struct KeyRange {
     pub left: Bytes,
     pub right: Bytes,

@@ -20,11 +20,13 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use bytes::Bytes;
 use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
+use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::version::Levels;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockSstableId};
-use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{compact_task, KeyRange};
+use risingwave_pb::hummock::compact_task;
 
 use super::{CompactionSelector, DynamicLevelSelectorCore, LocalSelectorStatistic};
 use crate::hummock::compaction::picker::{
@@ -53,8 +55,8 @@ impl Default for ManualCompactionOption {
         Self {
             sst_ids: vec![],
             key_range: KeyRange {
-                left: vec![],
-                right: vec![],
+                left: Bytes::default(),
+                right: Bytes::default(),
                 right_exclusive: false,
             },
             internal_table_id: HashSet::default(),

@@ -29,12 +29,12 @@ use foyer::memory::{
 use futures::{future, StreamExt};
 use itertools::Itertools;
 use risingwave_common::config::{EvictionConfig, StorageMemoryConfig};
+use risingwave_hummock_sdk::version::SstableInfo;
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
     ObjectError, ObjectMetadataIter, ObjectStoreRef, ObjectStreamingUploader,
 };
-use risingwave_pb::hummock::SstableInfo;
 use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
@@ -1254,8 +1254,8 @@ mod tests {
     use std::ops::Range;
     use std::sync::Arc;
 
+    use risingwave_hummock_sdk::version::SstableInfo;
     use risingwave_hummock_sdk::HummockSstableObjectId;
-    use risingwave_pb::hummock::SstableInfo;
 
     use super::{SstableStoreRef, SstableWriterOptions};
     use crate::hummock::iterator::test_utils::{iterator_test_key_of, mock_sstable_store};

@@ -28,6 +28,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
+use risingwave_hummock_sdk::change_log::EpochNewChangeLog;
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, is_empty_key_range, FullKey, TableKey, TableKeyRange, UserKey,
 };
@@ -35,9 +36,9 @@ use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
 };
-use risingwave_hummock_sdk::version::HummockVersionDelta;
+use risingwave_hummock_sdk::version::{HummockVersionDelta, SstableInfo};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, LocalSstableInfo};
-use risingwave_pb::hummock::{EpochNewChangeLog, LevelType, SstableInfo};
+use risingwave_pb::hummock::LevelType;
 use sync_point::sync_point;
 
 use super::StagingDataIterator;
@@ -864,7 +865,7 @@ impl HummockVersionReader {
                 continue;
             }
 
-            if level.level_type == LevelType::Nonoverlapping as i32 {
+            if level.level_type == LevelType::Nonoverlapping {
                 let table_infos = prune_nonoverlapping_ssts(&level.table_infos, user_key_range_ref);
                 let sstables = table_infos
                     .filter(|sstable_info| {

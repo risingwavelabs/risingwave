@@ -17,6 +17,7 @@
 pub mod compaction_config;
 mod overlap_strategy;
 use risingwave_common::catalog::TableOption;
+use risingwave_hummock_sdk::version::{CompactTask, Levels};
 use risingwave_pb::hummock::compact_task::{self, TaskType};
 
 mod picker;
@@ -28,8 +29,7 @@ use std::sync::Arc;
 use picker::{LevelCompactionPicker, TierCompactionPicker};
 use risingwave_hummock_sdk::{can_concat, CompactionGroupId, HummockCompactionTaskId};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
-use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{CompactTask, CompactionConfig, LevelType};
+use risingwave_pb::hummock::{CompactionConfig, LevelType, PbCompactTask};
 pub use selector::CompactionSelector;
 
 use self::selector::{EmergencySelector, LocalSelectorStatistic};
@@ -174,6 +174,12 @@ impl CompactStatus {
     }
 
     /// Declares a task as either succeeded, failed or canceled.
+    pub fn report_compact_task_pb(&mut self, compact_task: &PbCompactTask) {
+        for level in &compact_task.input_ssts {
+            self.level_handlers[level.level_idx as usize].remove_task(compact_task.task_id);
+        }
+    }
+
     pub fn report_compact_task(&mut self, compact_task: &CompactTask) {
         for level in &compact_task.input_ssts {
             self.level_handlers[level.level_idx as usize].remove_task(compact_task.task_id);

@@ -17,8 +17,8 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
-use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{CompactionConfig, InputLevel, Level, LevelType, OverlappingLevel};
+use risingwave_hummock_sdk::version::{InputLevel, Level, Levels, OverlappingLevel};
+use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
 use super::min_overlap_compaction_picker::NonOverlapSubLevelPicker;
 use super::{
@@ -51,7 +51,7 @@ impl CompactionPicker for LevelCompactionPicker {
         if l0.sub_levels.is_empty() {
             return None;
         }
-        if l0.sub_levels[0].level_type != LevelType::Nonoverlapping as i32
+        if l0.sub_levels[0].level_type != LevelType::Nonoverlapping
             && l0.sub_levels[0].table_infos.len() > 1
         {
             stats.skip_by_overlapping += 1;
@@ -230,7 +230,7 @@ impl LevelCompactionPicker {
                 .into_iter()
                 .map(|table_infos| InputLevel {
                     level_idx: 0,
-                    level_type: LevelType::Nonoverlapping as i32,
+                    level_type: LevelType::Nonoverlapping,
                     table_infos,
                 })
                 .collect_vec();
@@ -406,7 +406,7 @@ pub mod tests {
 
         let levels = vec![Level {
             level_idx: 1,
-            level_type: LevelType::Nonoverlapping as i32,
+            level_type: LevelType::Nonoverlapping,
             table_infos: vec![
                 generate_table(3, 1, 0, 50, 1),
                 generate_table(4, 1, 150, 200, 1),
@@ -470,7 +470,7 @@ pub mod tests {
         let mut picker = create_compaction_picker_for_test();
         let levels = vec![Level {
             level_idx: 1,
-            level_type: LevelType::Nonoverlapping as i32,
+            level_type: LevelType::Nonoverlapping,
             table_infos: vec![],
             total_file_size: 0,
             sub_level_id: 0,
@@ -535,7 +535,7 @@ pub mod tests {
         let mut levels = Levels {
             levels: vec![Level {
                 level_idx: 1,
-                level_type: LevelType::Nonoverlapping as i32,
+                level_type: LevelType::Nonoverlapping,
                 table_infos: vec![
                     generate_table(1, 1, 100, 399, 2),
                     generate_table(2, 1, 400, 699, 2),
@@ -583,7 +583,7 @@ pub mod tests {
         ]);
         // We can set level_type only because the input above is valid.
         for s in &mut l0.sub_levels {
-            s.level_type = LevelType::Nonoverlapping as i32;
+            s.level_type = LevelType::Nonoverlapping;
         }
         let levels = Levels {
             l0: Some(l0),
