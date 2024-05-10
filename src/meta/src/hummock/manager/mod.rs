@@ -39,13 +39,13 @@ use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::{compact_task_to_string, statistics_compact_task};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids,
-    get_table_compaction_group_id_mapping, BranchedSstInfo, HummockLevelsExt,
+    get_table_compaction_group_id_mapping, HummockLevelsExt,
 };
 use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_hummock_sdk::{
     version_archive_dir, version_checkpoint_path, CompactionGroupId, ExtendedSstableInfo,
-    HummockCompactionTaskId, HummockContextId, HummockEpoch, HummockSstableId,
-    HummockSstableObjectId, HummockVersionId, SstObjectIdRange, INVALID_VERSION_ID,
+    HummockCompactionTaskId, HummockContextId, HummockEpoch, HummockSstableObjectId,
+    HummockVersionId, SstObjectIdRange, INVALID_VERSION_ID,
 };
 use risingwave_meta_model_v2::{
     compaction_status, compaction_task, hummock_pinned_snapshot, hummock_pinned_version,
@@ -60,7 +60,7 @@ use risingwave_pb::hummock::subscribe_compaction_event_request::{
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskAssignment, GroupDelta, GroupMetaChange, HummockPinnedSnapshot,
-    HummockPinnedVersion, HummockSnapshot, HummockVersionStats, IntraLevelDelta,
+    HummockPinnedVersion, HummockSnapshot, HummockVersionStats, InputLevel, IntraLevelDelta, Level,
     PbCompactionGroupInfo, SstableInfo, SubscribeCompactionEventRequest, TableOption, TableSchema,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -580,7 +580,6 @@ impl HummockManager {
             .into(),
         );
         versioning_guard.current_version = redo_state;
-        versioning_guard.branched_ssts = versioning_guard.current_version.build_branched_sst_info();
         versioning_guard.hummock_version_deltas = hummock_version_deltas;
 
         versioning_guard.pinned_versions = match &meta_store {
@@ -909,11 +908,6 @@ impl HummockManager {
             BTreeMapTransactionWrapper,
             BTreeMapTransaction::new(&mut versioning.hummock_version_deltas)
         );
-        let mut branched_ssts = create_trx_wrapper!(
-            self.meta_store_ref(),
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut versioning.branched_ssts)
-        );
 
         let mut unschedule_groups = vec![];
         let mut trivial_tasks = vec![];
@@ -1072,7 +1066,6 @@ impl HummockManager {
                         .inc();
                     let version_delta = gen_version_delta(
                         &mut hummock_version_deltas,
-                        &mut branched_ssts,
                         &current_version,
                         &compact_task,
                         deterministic_mode,
@@ -1150,7 +1143,6 @@ impl HummockManager {
                 compact_task_assignment,
                 hummock_version_deltas
             )?;
-            branched_ssts.commit_memory();
 
             trigger_version_stat(&self.metrics, &current_version);
             versioning.current_version = current_version;
@@ -1348,17 +1340,34 @@ impl HummockManager {
 
     fn is_compact_task_expired(
         compact_task: &CompactTask,
-        branched_ssts: &BTreeMap<HummockSstableObjectId, BranchedSstInfo>,
+        hummock_version: &HummockVersion,
     ) -> bool {
-        for input_level in compact_task.get_input_ssts() {
-            for table_info in input_level.get_table_infos() {
-                if let Some(mp) = branched_ssts.get(&table_info.object_id) {
-                    if mp
-                        .get(&compact_task.compaction_group_id)
-                        .map_or(true, |sst_id| *sst_id != table_info.sst_id)
-                    {
-                        return true;
+        if let Some(group) = hummock_version
+            .levels
+            .get(&compact_task.compaction_group_id)
+        {
+            for input_level in compact_task.get_input_ssts() {
+                let input_level: &InputLevel = input_level;
+                let mut sst_ids: HashSet<_> = input_level
+                    .table_infos
+                    .iter()
+                    .map(|sst| sst.sst_id)
+                    .collect();
+                fn filter_ssts(levels: &Level, sst_ids: &mut HashSet<u64>) {
+                    for sst in &levels.table_infos {
+                        sst_ids.remove(&sst.sst_id);
                     }
+                }
+                if input_level.level_idx == 0 {
+                    for level in &group.get_level0().sub_levels {
+                        filter_ssts(level, &mut sst_ids);
+                    }
+                } else {
+                    filter_ssts(group.get_level(input_level.level_idx as _), &mut sst_ids);
+                }
+                if !sst_ids.is_empty() {
+                    warn!(stale_sst_id = ?sst_ids, ?compact_task, "compact task expired");
+                    return true;
                 }
             }
         }
@@ -1427,11 +1436,6 @@ impl HummockManager {
             BTreeMapTransactionWrapper,
             BTreeMapTransaction::new(&mut versioning.hummock_version_deltas,)
         );
-        let mut branched_ssts = create_trx_wrapper!(
-            self.meta_store_ref(),
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut versioning.branched_ssts)
-        );
 
         let mut version_stats = create_trx_wrapper!(
             self.meta_store_ref(),
@@ -1478,8 +1482,7 @@ impl HummockManager {
                 .collect();
             let is_success = if let TaskStatus::Success = compact_task.task_status() {
                 // if member_table_ids changes, the data of sstable may stale.
-                let is_expired =
-                    Self::is_compact_task_expired(&compact_task, branched_ssts.tree_ref());
+                let is_expired = Self::is_compact_task_expired(&compact_task, &current_version);
                 if is_expired {
                     compact_task.set_task_status(TaskStatus::InputOutdatedCanceled);
                     false
@@ -1506,7 +1509,6 @@ impl HummockManager {
                 success_count += 1;
                 let version_delta = gen_version_delta(
                     &mut hummock_version_deltas,
-                    &mut branched_ssts,
                     &current_version,
                     &compact_task,
                     deterministic_mode,
@@ -1536,7 +1538,6 @@ impl HummockManager {
                 hummock_version_deltas,
                 version_stats
             )?;
-            branched_ssts.commit_memory();
 
             trigger_version_stat(&self.metrics, &current_version);
             trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
@@ -1786,11 +1787,6 @@ impl HummockManager {
             }
         }
         let mut new_sst_id = next_sstable_object_id(&self.env, new_sst_id_number).await?;
-        let mut branched_ssts = create_trx_wrapper!(
-            self.meta_store_ref(),
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut versioning.branched_ssts)
-        );
         let original_sstables = std::mem::take(&mut sstables);
         sstables.reserve_exact(original_sstables.len() - incorrect_ssts.len() + new_sst_id_number);
         let mut incorrect_ssts = incorrect_ssts.into_iter();
@@ -1808,9 +1804,6 @@ impl HummockManager {
                     ));
                     branch_groups.insert(group_id, new_sst_id);
                     new_sst_id += 1;
-                }
-                if !branch_groups.is_empty() {
-                    branched_ssts.insert(sst.get_object_id(), branch_groups);
                 }
             } else {
                 sstables.push(original_sstable);
@@ -1897,7 +1890,6 @@ impl HummockManager {
             table_metrics.inc_write_throughput(stats_value as u64);
         }
         commit_multi_var!(self.meta_store_ref(), new_version_delta, version_stats)?;
-        branched_ssts.commit_memory();
         versioning.current_version = new_hummock_version;
 
         let snapshot = HummockSnapshot {
@@ -2002,28 +1994,23 @@ impl HummockManager {
                 let pinned_snapshots_copy = versioning_guard.pinned_snapshots.clone();
                 let hummock_version_deltas_copy = versioning_guard.hummock_version_deltas.clone();
                 let version_stats_copy = versioning_guard.version_stats.clone();
-                let branched_ssts = versioning_guard.branched_ssts.clone();
-                (
-                    (
-                        compact_statuses_copy,
-                        compact_task_assignment_copy,
-                        pinned_versions_copy,
-                        pinned_snapshots_copy,
-                        hummock_version_deltas_copy,
-                        version_stats_copy,
-                    ),
-                    branched_ssts,
-                )
+                ((
+                    compact_statuses_copy,
+                    compact_task_assignment_copy,
+                    pinned_versions_copy,
+                    pinned_snapshots_copy,
+                    hummock_version_deltas_copy,
+                    version_stats_copy,
+                ),)
             };
-        let (mem_state, branched_ssts) = get_state(&compaction_guard, &versioning_guard);
+        let mem_state = get_state(&compaction_guard, &versioning_guard);
         self.load_meta_store_state_impl(
             compaction_guard.borrow_mut(),
             versioning_guard.borrow_mut(),
         )
         .await
         .expect("Failed to load state from meta store");
-        let (loaded_state, load_branched_ssts) = get_state(&compaction_guard, &versioning_guard);
-        assert_eq!(branched_ssts, load_branched_ssts);
+        let loaded_state = get_state(&compaction_guard, &versioning_guard);
         assert_eq!(
             mem_state, loaded_state,
             "hummock in-mem state is inconsistent with meta store state",
@@ -2046,13 +2033,6 @@ impl HummockManager {
             .await
             .current_version
             .max_committed_epoch
-    }
-
-    /// Gets branched sstable infos
-    /// Should not be called inside [`HummockManager`], because it requests locks internally.
-    #[named]
-    pub async fn get_branched_ssts_info(&self) -> BTreeMap<HummockSstableId, BranchedSstInfo> {
-        read_lock!(self, versioning).await.branched_ssts.clone()
     }
 
     #[named]
@@ -2535,12 +2515,7 @@ impl HummockManager {
                                 }
 
                                 HummockTimerEvent::Report => {
-                                    let (
-                                        current_version,
-                                        id_to_config,
-                                        branched_sst,
-                                        version_stats,
-                                    ) = {
+                                    let (current_version, id_to_config, version_stats) = {
                                         let versioning_guard =
                                             read_lock!(hummock_manager.as_ref(), versioning).await;
 
@@ -2550,7 +2525,6 @@ impl HummockManager {
                                         (
                                             versioning_deref.current_version.clone(),
                                             configs,
-                                            versioning_deref.branched_ssts.clone(),
                                             versioning_deref.version_stats.clone(),
                                         )
                                     };
@@ -2578,13 +2552,6 @@ impl HummockManager {
                                                 compaction_group_config.group_id(),
                                             );
 
-                                        trigger_split_stat(
-                                            &hummock_manager.metrics,
-                                            compaction_group_config.group_id(),
-                                            group_levels.member_table_ids.len(),
-                                            &branched_sst,
-                                        );
-
                                         trigger_lsm_stat(
                                             &hummock_manager.metrics,
                                             compaction_group_config.compaction_config(),
@@ -2592,6 +2559,8 @@ impl HummockManager {
                                             compaction_group_config.group_id(),
                                         )
                                     }
+
+                                    trigger_split_stat(&hummock_manager.metrics, &current_version);
                                 }
 
                                 HummockTimerEvent::CompactionHeartBeatExpiredCheck => {
@@ -3191,7 +3160,6 @@ impl HummockManager {
             .move_state_table_to_compaction_group(
                 parent_group_id,
                 &[*table_id],
-                None,
                 partition_vnode_count,
             )
             .await;
@@ -3336,32 +3304,8 @@ pub enum TableAlignRule {
     SplitByTable(StateTableId),
 }
 
-fn drop_sst(
-    branched_ssts: &mut BTreeMapTransactionWrapper<'_, HummockSstableObjectId, BranchedSstInfo>,
-    group_id: CompactionGroupId,
-    object_id: HummockSstableObjectId,
-    sst_id: HummockSstableId,
-) -> bool {
-    match branched_ssts.get_mut(object_id) {
-        Some(mut entry) => {
-            // if group_id not exist, it would not pass the stale check before.
-            let removed_sst_id = entry.get(&group_id).unwrap();
-            assert_eq!(*removed_sst_id, sst_id);
-            entry.remove(&group_id);
-            if entry.is_empty() {
-                branched_ssts.remove(object_id);
-                true
-            } else {
-                false
-            }
-        }
-        None => true,
-    }
-}
-
-fn gen_version_delta<'a>(
-    txn: &mut BTreeMapTransactionWrapper<'a, HummockVersionId, HummockVersionDelta>,
-    branched_ssts: &mut BTreeMapTransactionWrapper<'a, HummockSstableObjectId, BranchedSstInfo>,
+fn gen_version_delta(
+    txn: &mut BTreeMapTransactionWrapper<'_, HummockVersionId, HummockVersionDelta>,
     old_version: &HummockVersion,
     compact_task: &CompactTask,
     deterministic_mode: bool,
@@ -3387,19 +3331,7 @@ fn gen_version_delta<'a>(
         let mut removed_table_ids = level
             .table_infos
             .iter()
-            .map(|sst| {
-                let object_id = sst.get_object_id();
-                let sst_id = sst.get_sst_id();
-                if !trivial_move {
-                    drop_sst(
-                        branched_ssts,
-                        compact_task.compaction_group_id,
-                        object_id,
-                        sst_id,
-                    );
-                }
-                sst_id
-            })
+            .map(|sst| sst.get_sst_id())
             .collect_vec();
 
         removed_table_ids_map
