@@ -1,15 +1,20 @@
+control substitution on
+
+system ok
+e2e_test/source_inline/pubsub/prepare-data.rs
+
 # fail with invalid emulator_host
-statement error
+statement error failed to lookup address information: nodename nor servname provided, or not known
 CREATE TABLE s1 (v1 int, v2 varchar) WITH (
+    connector = 'google_pubsub',
     pubsub.subscription = 'test-subscription-1',
     pubsub.emulator_host = 'invalid_host:5981'
 ) FORMAT PLAIN ENCODE JSON;
 
 statement ok
 CREATE TABLE s1 (v1 int, v2 varchar) WITH (
-    connector = 'google_pubsub',
+    ${RISEDEV_PUBSUB_WITH_OPTIONS_COMMON},
     pubsub.subscription = 'test-subscription-1',
-    pubsub.emulator_host = 'localhost:5980'
 ) FORMAT PLAIN ENCODE JSON;
 
 statement ok
@@ -18,29 +23,25 @@ SELECT * FROM s1;
 statement ok
 DROP TABLE s1;
 
-# fail with invalid subscription
-statement error
+statement error subscription test-subscription-not-exist does not exist
 CREATE TABLE s2 (v1 int, v2 varchar) WITH (
-    connector = 'google_pubsub',
-    pubsub.subscription = 'test-subscription-not-2',
-    pubsub.emulator_host = 'localhost:5980'
+    ${RISEDEV_PUBSUB_WITH_OPTIONS_COMMON},
+    pubsub.subscription = 'test-subscription-not-exist',
 ) FORMAT PLAIN ENCODE JSON;
 
 statement ok
 CREATE TABLE s2 (v1 int, v2 varchar) WITH (
-    connector = 'google_pubsub',
+    ${RISEDEV_PUBSUB_WITH_OPTIONS_COMMON},
     pubsub.subscription = 'test-subscription-2',
-    pubsub.emulator_host = 'localhost:5980'
 ) FORMAT PLAIN ENCODE JSON;
 
 # fail if both start_offset and start_snapshot are provided
-statement error
+statement error specify at most one of start_offset or start_snapshot
 CREATE TABLE s3 (v1 int, v2 varchar) WITH (
-    connector = 'google_pubsub',
+    ${RISEDEV_PUBSUB_WITH_OPTIONS_COMMON},
     pubsub.subscription = 'test-subscription-3',
-    pubsub.emulator_host = 'localhost:5980',
-    pubsub.start_offset = "121212",
-    pubsub.start_snapshot = "snapshot-that-doesnt-exist"
+    pubsub.start_offset.nanos = '121212',
+    pubsub.start_snapshot = 'snapshot-that-doesnt-exist'
 ) FORMAT PLAIN ENCODE JSON;
 
 # wait for source

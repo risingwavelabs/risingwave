@@ -1,6 +1,19 @@
-use std::fs::File;
-use std::io::prelude::*;
-use std::io::BufReader;
+#!/usr/bin/env -S cargo -Zscript
+```cargo
+[dependencies]
+anyhow = "1"
+google-cloud-googleapis = { version = "0.12", features = ["pubsub"] }
+google-cloud-pubsub = "0.24"
+tokio = { version = "0.2", package = "madsim-tokio", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+    "fs",
+] }
+```
 
 use google_cloud_googleapis::pubsub::v1::PubsubMessage;
 use google_cloud_pubsub::client::Client;
@@ -38,21 +51,11 @@ async fn main() -> anyhow::Result<()> {
             .await?;
     }
 
-    let path = std::env::current_exe()?
-        .parent()
-        .and_then(|p| p.parent())
-        .and_then(|p| p.parent())
-        .unwrap()
-        .join("scripts/source/test_data/pubsub_1_test_topic.1");
-
-    let file = File::open(path)?;
-    let file = BufReader::new(file);
-
     let publisher = topic.new_publisher(Default::default());
-    for line in file.lines().map_while(Result::ok) {
+    for line in DATA.lines() {
         let a = publisher
             .publish(PubsubMessage {
-                data: line.clone().into_bytes(),
+                data: line.to_string().into_bytes(),
                 ..Default::default()
             })
             .await;
@@ -62,3 +65,25 @@ async fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+const DATA: &str = r#"{"v1":1,"v2":"name0"}
+{"v1":2,"v2":"name0"}
+{"v1":6,"v2":"name3"}
+{"v1":0,"v2":"name5"}
+{"v1":5,"v2":"name8"}
+{"v1":6,"v2":"name4"}
+{"v1":8,"v2":"name9"}
+{"v1":9,"v2":"name2"}
+{"v1":4,"v2":"name6"}
+{"v1":5,"v2":"name3"}
+{"v1":8,"v2":"name8"}
+{"v1":9,"v2":"name2"}
+{"v1":2,"v2":"name3"}
+{"v1":4,"v2":"name7"}
+{"v1":7,"v2":"name0"}
+{"v1":0,"v2":"name9"}
+{"v1":3,"v2":"name2"}
+{"v1":7,"v2":"name5"}
+{"v1":1,"v2":"name7"}
+{"v1":3,"v2":"name9"}
+"#;
