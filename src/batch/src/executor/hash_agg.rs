@@ -12,27 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::hash::{BuildHasher, Hasher};
+use std::hash::BuildHasher;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
+
 use anyhow::anyhow;
 use bytes::Bytes;
-
 use futures_async_stream::try_stream;
 use futures_util::AsyncReadExt;
 use itertools::Itertools;
 use opendal::layers::RetryLayer;
-use opendal::Operator;
 use opendal::services::Fs;
+use opendal::Operator;
 use prost::Message;
-use twox_hash::XxHash64;
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::buffer::Bitmap;
-use risingwave_pb::data::DataChunk as PbDataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::memory::MemoryContext;
-use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -40,7 +38,8 @@ use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::aggregate::{AggCall, AggregateState, BoxedAggregateFunction};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
-use risingwave_common::row::RowExt;
+use risingwave_pb::data::DataChunk as PbDataChunk;
+use twox_hash::XxHash64;
 
 use crate::error::{BatchError, Result};
 use crate::executor::aggregation::build as build_agg;
@@ -234,9 +233,7 @@ pub fn new_spill_op(root: String) -> Result<SpillOp> {
     let op: Operator = Operator::new(builder)?
         .layer(RetryLayer::default())
         .finish();
-    Ok(SpillOp {
-        op,
-    })
+    Ok(SpillOp { op })
 }
 
 pub struct SpillOp {
@@ -245,7 +242,12 @@ pub struct SpillOp {
 
 impl SpillOp {
     pub async fn writer_with(&self, name: &str) -> Result<opendal::Writer> {
-        Ok(self.op.writer_with(name).append(true).buffer(64 * 1024).await?)
+        Ok(self
+            .op
+            .writer_with(name)
+            .append(true)
+            .buffer(64 * 1024)
+            .await?)
     }
 
     pub async fn reader_with(&self, name: &str) -> Result<opendal::Reader> {
@@ -287,6 +289,163 @@ impl BuildHasher for SpillBuildHasher {
 
     fn build_hasher(&self) -> Self::Hasher {
         XxHash64::with_seed(self.0)
+    }
+}
+
+pub struct AggSpillManager {
+    op: SpillOp,
+    partition_num: usize,
+    agg_state_writers: Vec<opendal::Writer>,
+    agg_state_readers: Vec<opendal::Reader>,
+    agg_state_chunk_builder: Vec<DataChunkBuilder>,
+    input_writers: Vec<opendal::Writer>,
+    input_readers: Vec<opendal::Reader>,
+    input_chunk_builders: Vec<DataChunkBuilder>,
+    spill_build_hasher: SpillBuildHasher,
+    group_key_types: Vec<DataType>,
+    child_data_types: Vec<DataType>,
+    agg_data_types: Vec<DataType>,
+    spill_chunk_size: usize,
+}
+
+impl AggSpillManager {
+    pub fn new(
+        agg_identity: &String,
+        partition_num: usize,
+        group_key_types: Vec<DataType>,
+        agg_data_types: Vec<DataType>,
+        child_data_types: Vec<DataType>,
+        spill_chunk_size: usize,
+    ) -> Result<Self> {
+        let suffix_uuid = uuid::Uuid::new_v4();
+        let dir = format!("/tmp/rw_batch_spill-{}-{}/", agg_identity, suffix_uuid,);
+        let op = new_spill_op(dir)?;
+        let agg_state_writers = Vec::with_capacity(partition_num);
+        let agg_state_readers = Vec::with_capacity(partition_num);
+        let agg_state_chunk_builder = Vec::with_capacity(partition_num);
+        let input_writers = Vec::with_capacity(partition_num);
+        let input_readers = Vec::with_capacity(partition_num);
+        let input_chunk_builders = Vec::with_capacity(partition_num);
+        let spill_build_hasher = SpillBuildHasher(suffix_uuid.as_u64_pair().1);
+        Ok(Self {
+            op,
+            partition_num,
+            agg_state_writers,
+            agg_state_readers,
+            agg_state_chunk_builder,
+            input_writers,
+            input_readers,
+            input_chunk_builders,
+            spill_build_hasher,
+            group_key_types,
+            child_data_types,
+            agg_data_types,
+            spill_chunk_size,
+        })
+    }
+
+    pub async fn init_writers(&mut self) -> Result<()> {
+        for i in 0..self.partition_num {
+            let agg_state_partition_file_name = format!("agg-state-p{}", i);
+            let w = self.op.writer_with(&agg_state_partition_file_name).await?;
+            self.agg_state_writers.push(w);
+
+            let partition_file_name = format!("input-chunks-p{}", i);
+            let w = self.op.writer_with(&partition_file_name).await?;
+            self.input_writers.push(w);
+            self.input_chunk_builders.push(DataChunkBuilder::new(
+                self.child_data_types.clone(),
+                self.spill_chunk_size,
+            ));
+            self.agg_state_chunk_builder.push(DataChunkBuilder::new(
+                self.group_key_types
+                    .iter()
+                    .cloned()
+                    .chain(self.agg_data_types.iter().cloned())
+                    .collect(),
+                self.spill_chunk_size,
+            ));
+        }
+        Ok(())
+    }
+
+    pub async fn write_agg_state_row(&mut self, row: impl Row, hash_code: u64) -> Result<()> {
+        let partition = hash_code as usize % self.partition_num;
+        if let Some(output_chunk) = self.agg_state_chunk_builder[partition].append_one_row(row) {
+            let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
+            let buf = Message::encode_to_vec(&chunk_pb);
+            let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
+            self.agg_state_writers[partition].write(len_bytes).await?;
+            self.agg_state_writers[partition].write(buf).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn write_input_chunk(
+        &mut self,
+        chunk: DataChunk,
+        hash_codes: Vec<u64>,
+    ) -> Result<()> {
+        let (columns, vis) = chunk.into_parts_v2();
+        for partition in 0..self.partition_num {
+            let new_vis = vis.clone()
+                & Bitmap::from_iter(
+                    hash_codes
+                        .iter()
+                        .map(|hash_code| (*hash_code as usize % self.partition_num) == partition),
+                );
+            let new_chunk = DataChunk::from_parts(columns.clone(), new_vis);
+            for output_chunk in self.input_chunk_builders[partition].append_chunk(new_chunk) {
+                let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
+                let buf = Message::encode_to_vec(&chunk_pb);
+                let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
+                self.input_writers[partition].write(len_bytes).await?;
+                self.input_writers[partition].write(buf).await?;
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn close_writers(&mut self) -> Result<()> {
+        for mut w in self.agg_state_writers.drain(..) {
+            w.close().await?;
+        }
+        for mut w in self.input_writers.drain(..) {
+            w.close().await?;
+        }
+        Ok(())
+    }
+
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
+    async fn read_stream(mut reader: opendal::Reader) {
+        let mut buf = [0u8; 4];
+        loop {
+            if let Err(err) = reader.read_exact(&mut buf).await {
+                if err.kind() == std::io::ErrorKind::UnexpectedEof {
+                    break;
+                } else {
+                    return Err(anyhow!(err).into());
+                }
+            }
+            let len = u32::from_le_bytes(buf) as usize;
+            let mut buf = vec![0u8; len];
+            reader.read_exact(&mut buf).await.map_err(|e| anyhow!(e))?;
+            let chunk_pb: PbDataChunk = Message::decode(buf.as_slice()).map_err(|e| anyhow!(e))?;
+            let chunk = DataChunk::from_protobuf(&chunk_pb)?;
+            yield chunk;
+        }
+    }
+
+    async fn read_agg_state_partition(&mut self, partition: usize) -> Result<BoxedDataChunkStream> {
+        let agg_state_partition_file_name = format!("agg-state-p{}", partition);
+        let r = self.op.reader_with(&agg_state_partition_file_name).await?;
+        Ok(Self::read_stream(r))
+    }
+
+    async fn read_input_partition(&mut self, partition: usize) -> Result<BoxedDataChunkStream> {
+        let input_partition_file_name = format!("input-chunks-p{}", partition);
+        let r = self.op.reader_with(&input_partition_file_name).await?;
+        Ok(Self::read_stream(r))
     }
 }
 
@@ -346,34 +505,18 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
         }
 
         if need_to_spill {
-            let suffix_uuid = uuid::Uuid::new_v4();
-            let dir = format!("/tmp/rw_batch_spill-{}-{}/", &self.identity, suffix_uuid.to_string());
-            let op = new_spill_op(dir.into())?;
-            let partition_num = 4;
-            let mut agg_state_writers = Vec::with_capacity(partition_num);
-            let mut agg_state_chunk_builder = Vec::with_capacity(partition_num);
-            let mut writers = Vec::with_capacity(partition_num);
-            let mut chunk_builders = Vec::with_capacity(partition_num);
-            let spill_build_hasher = SpillBuildHasher(suffix_uuid.as_u64_pair().1);
+            let mut agg_spill_manager = AggSpillManager::new(
+                &self.identity,
+                4,
+                self.group_key_types.clone(),
+                self.aggs.iter().map(|agg| agg.return_type()).collect(),
+                child_schema.data_types(),
+                1024,
+            )?;
+            agg_spill_manager.init_writers().await?;
 
-            for i in 0..partition_num {
-                let agg_state_partition_file_name = format!("agg-state-p{}", i);
-                let w = op.writer_with(&agg_state_partition_file_name).await?;
-                agg_state_writers.push(w);
-
-                let partition_file_name = format!("input-chunks-p{}", i);
-                let w = op.writer_with(&partition_file_name).await?;
-                writers.push(w);
-                chunk_builders.push(DataChunkBuilder::new(child_schema.data_types(), 1024));
-                agg_state_chunk_builder.push(DataChunkBuilder::new(self
-                                                              .group_key_types
-                                                              .iter().cloned().chain(self
-                    .aggs
-                    .iter().map(|agg| agg.return_type())).collect(), 1024));
-            }
-
-            // Spill the agg state
             let mut memory_usage_diff = 0;
+            // Spill agg states
             for (key, states) in groups {
                 let key_row = key.deserialize(&self.group_key_types)?;
                 let mut agg_datums = vec![];
@@ -383,104 +526,46 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     agg_datums.push(encode_state);
                 }
                 let agg_state_row = OwnedRow::from_iter(agg_datums.into_iter());
-                let mut hasher = spill_build_hasher.build_hasher();
-                key.hash(&mut hasher);
-                let hash_code = hasher.finish();
-                let partition = hash_code as usize % partition_num;
-                if let Some(output_chunk) = agg_state_chunk_builder[partition].append_one_row(key_row.chain(agg_state_row)) {
-                    let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
-                    let buf = Message::encode_to_vec(&chunk_pb);
-                    let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
-                    agg_state_writers[partition].write(len_bytes).await?;
-                    agg_state_writers[partition].write(buf).await?;
-                }
+                let hash_code = agg_spill_manager.spill_build_hasher.hash_one(key);
+                agg_spill_manager
+                    .write_agg_state_row(key_row.chain(agg_state_row), hash_code)
+                    .await?;
             }
 
-            for i in 0..partition_num {
-                if let Some(output_chunk) = agg_state_chunk_builder[i].consume_all() {
-                    let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
-                    let buf = Message::encode_to_vec(&chunk_pb);
-                    let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
-                    agg_state_writers[i].write(len_bytes).await?;
-                    agg_state_writers[i].write(buf).await?;
-                }
-            }
-
-            for mut w in agg_state_writers {
-                w.close().await?;
-            }
-
+            // Release memory occupied by agg hash map
             self.mem_context.add(memory_usage_diff);
-
             groups = AggHashMap::<K, _>::with_hasher_in(
                 PrecomputedBuildHasher,
                 self.mem_context.global_allocator(),
             );
 
-
+            // Spill input chunks
             #[for_await]
             for chunk in input_stream {
                 let chunk: DataChunk = chunk?;
-                let hash_codes = chunk.get_hash_values(self.group_key_columns.as_slice(), spill_build_hasher);
-                let (columns, vis) = chunk.into_parts_v2();
-                for i in 0..partition_num {
-                    let new_vis = vis.clone() & Bitmap::from_iter(hash_codes.iter().map(|hash_code| (hash_code.value() as usize % partition_num) == i));
-                    let new_chunk = DataChunk::from_parts(columns.clone(), new_vis);
-                    for output_chunk in chunk_builders[i].append_chunk(new_chunk) {
-                        let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
-                        let buf = Message::encode_to_vec(&chunk_pb);
-                        let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
-                        writers[i].write(len_bytes).await?;
-                        writers[i].write(buf).await?;
-                    }
-                }
+                let hash_codes = chunk.get_hash_values(
+                    self.group_key_columns.as_slice(),
+                    agg_spill_manager.spill_build_hasher,
+                );
+                agg_spill_manager
+                    .write_input_chunk(
+                        chunk,
+                        hash_codes
+                            .into_iter()
+                            .map(|hash_code| hash_code.value())
+                            .collect(),
+                    )
+                    .await?;
             }
 
-            for i in 0..partition_num {
-                if let Some(output_chunk) = chunk_builders[i].consume_all() {
-                    let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
-                    let buf = Message::encode_to_vec(&chunk_pb);
-                    let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
-                    writers[i].write(len_bytes).await?;
-                    writers[i].write(buf).await?;
-                }
-            }
+            agg_spill_manager.close_writers().await?;
 
-            for mut w in writers {
-                w.close().await?;
-            }
+            for i in 0..agg_spill_manager.partition_num {
+                let agg_state_stream = agg_spill_manager.read_agg_state_partition(i).await?;
 
-            let mut agg_state_readers = Vec::with_capacity(partition_num);
-            for i in 0..partition_num {
-                let agg_state_partition_file_name = format!("agg-state-p{}", i);
-                let r = op.reader_with(&agg_state_partition_file_name).await?;
-                agg_state_readers.push(r);
-            }
-
-            let mut readers = Vec::with_capacity(partition_num);
-            for i in 0..partition_num {
-                let partition_file_name = format!("input-chunks-p{}", i);
-                let r = op.reader_with(&partition_file_name).await?;
-                readers.push(r);
-            }
-
-            for mut agg_state_reader in agg_state_readers {
-                let mut buf = [0u8; 4];
-                loop {
-                    if let Err(err) = agg_state_reader.read_exact(&mut buf).await {
-                        if err.kind() == std::io::ErrorKind::UnexpectedEof {
-                            break
-                        } else {
-                            return Err(anyhow!(err).into());
-                        }
-                    }
-                    let len = u32::from_le_bytes(buf) as usize;
-                    let mut buf = vec![0u8; len];
-                    agg_state_reader.read_exact(&mut buf).await.map_err(|e| anyhow!(e))?;
-                    let chunk_pb: PbDataChunk = Message::decode(buf.as_slice()).map_err(|e| anyhow!(e))?;
-                    let chunk = DataChunk::from_protobuf(&chunk_pb)?;
-                    // println!("agg state chunk = {}", chunk.to_pretty());
-
+                #[for_await]
+                for chunk in agg_state_stream {
+                    let chunk = chunk?;
                     let group_key_indices = (0..self.group_key_columns.len()).collect_vec();
                     let keys = K::build_many(&group_key_indices, &chunk);
                     let mut memory_usage_diff = 0;
@@ -488,7 +573,11 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                         let mut agg_states = vec![];
                         for i in 0..self.aggs.len() {
                             let agg = &self.aggs[i];
-                            let datum = chunk.row_at(row_id).0.datum_at(self.group_key_columns.len() + i).to_owned_datum();
+                            let datum = chunk
+                                .row_at(row_id)
+                                .0
+                                .datum_at(self.group_key_columns.len() + i)
+                                .to_owned_datum();
                             let agg_state = agg.decode_state(datum)?;
                             memory_usage_diff += agg_state.estimated_size() as i64;
                             agg_states.push(agg_state);
@@ -499,28 +588,13 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     // if !self.mem_context.add(memory_usage_diff) {
                     //     Err(BatchError::OutOfMemory(self.mem_context.mem_limit()))?;
                     // }
-
                 }
-            }
 
-            for mut reader in readers {
-                let mut buf = [0u8; 4];
-                loop {
-                    if let Err(err) = reader.read_exact(&mut buf).await {
-                        if err.kind() == std::io::ErrorKind::UnexpectedEof {
-                            break
-                        } else {
-                            return Err(anyhow!(err).into());
-                        }
-                    }
-                    let len = u32::from_le_bytes(buf) as usize;
-                    let mut buf = vec![0u8; len];
-                    reader.read_exact(&mut buf).await.map_err(|e| anyhow!(e))?;
-                    let chunk_pb: PbDataChunk = Message::decode(buf.as_slice()).map_err(|e| anyhow!(e))?;
-                    let chunk = DataChunk::from_protobuf(&chunk_pb)?;
-                    // println!("chunk = {}", chunk.to_pretty());
+                let input_stream = agg_spill_manager.read_input_partition(i).await?;
 
-                    // Process chunk
+                #[for_await]
+                for chunk in input_stream {
+                    let chunk = chunk?;
                     let chunk = StreamChunk::from(chunk);
                     let keys = K::build_many(self.group_key_columns.as_slice(), &chunk);
                     let mut memory_usage_diff = 0;
@@ -551,7 +625,6 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     // if !self.mem_context.add(memory_usage_diff) {
                     //     Err(BatchError::OutOfMemory(self.mem_context.mem_limit()))?;
                     // }
-
                 }
             }
         }

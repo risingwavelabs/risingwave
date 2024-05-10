@@ -14,8 +14,8 @@
 
 use std::fmt::Debug;
 use std::ops::Range;
-use anyhow::anyhow;
 
+use anyhow::anyhow;
 use downcast_rs::{impl_downcast, Downcast};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;

@@ -20,6 +20,7 @@ arrow-schema = { workspace = true }
 assert_matches = "1"
 async-recursion = "1"
 async-trait = "0.1"
+bytes = "1"
 either = "1"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -30,9 +31,11 @@ hytra = "0.1.2"
 icelake = { workspace = true }
 itertools = { workspace = true }
 memcomparable = "0.2"
+opendal = "0.45.1"
 parking_lot = { workspace = true }
 paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
+prost = "0.12"
 rand = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
@@ -48,11 +51,6 @@ scopeguard = "1"
 serde_json = "1"
 thiserror = "1"
 thiserror-ext = { workspace = true }
-opendal = "0.45.1"
-uuid = { version = "1", features = ["v4"] }
-twox-hash = "1"
-prost = "0.12"
-bytes = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -67,6 +65,8 @@ tokio-stream = "0.1"
 tokio-util = { workspace = true }
 tonic = { workspace = true }
 tracing = "0.1"
+twox-hash = "1"
+uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
