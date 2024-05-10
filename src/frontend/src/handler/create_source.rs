@@ -1332,7 +1332,7 @@ pub async fn bind_create_source(
     columns_from_resolve_source: Option<Vec<ColumnCatalog>>,
     source_info: StreamSourceInfo,
     include_column_options: IncludeOption,
-    mut col_id_gen: ColumnIdGenerator,
+    col_id_gen: &mut ColumnIdGenerator,
     // `true` for "create source", `false` for "create table with connector"
     is_create_source: bool,
 ) -> Result<(SourceCatalog, DatabaseId, SchemaId)> {
@@ -1406,6 +1406,7 @@ pub async fn bind_create_source(
         sql_columns_defs.to_vec(),
         &pk_col_ids,
     )?;
+    check_source_schema(&with_properties, row_id_index, &columns).await?;
 
     // resolve privatelink connection for Kafka
     let mut with_properties = WithOptions::new(with_properties);
@@ -1479,7 +1480,7 @@ pub async fn handle_create_source(
         source_info.cdc_source_job = true;
         source_info.is_distributed = !create_cdc_source_job;
     }
-    let col_id_gen = ColumnIdGenerator::new_initial();
+    let mut col_id_gen = ColumnIdGenerator::new_initial();
 
     let (source_catalog, database_id, schema_id) = bind_create_source(
         handler_args.clone(),
@@ -1493,7 +1494,7 @@ pub async fn handle_create_source(
         columns_from_resolve_source,
         source_info,
         stmt.include_column_options,
-        col_id_gen,
+        &mut col_id_gen,
         true,
     )
     .await?;

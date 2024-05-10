@@ -96,7 +96,7 @@ pub async fn handle_create_as(
             .clone()
             .into_iter()
             .collect();
-        let (plan, source, table) = gen_create_table_plan_without_bind(
+        let (plan, table) = gen_create_table_plan_without_bind(
             context,
             table_name.clone(),
             columns,
@@ -118,7 +118,7 @@ pub async fn handle_create_as(
                 .map(|parallelism| Parallelism {
                     parallelism: parallelism.get(),
                 });
-        (graph, source, table)
+        (graph, None, table)
     };
 
     tracing::trace!(
