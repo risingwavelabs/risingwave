@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use either::Either;
-use foyer::memory::CacheContext;
+use foyer::CacheContext;
 use futures::{pin_mut, FutureExt, Stream, StreamExt, TryStreamExt};
 use futures_async_stream::for_await;
 use itertools::{izip, Itertools};
@@ -277,6 +277,8 @@ where
     W: WatermarkBufferStrategy,
 {
     /// Create state table from table catalog and store.
+    ///
+    /// If `vnodes` is `None`, [`TableDistribution::singleton()`] will be used.
     pub async fn from_table_catalog(
         table_catalog: &Table,
         store: S,
@@ -1434,9 +1436,6 @@ where
     /// This function scans rows from the relational table with specific `prefix` and `sub_range` under the same
     /// `vnode`. If `sub_range` is (Unbounded, Unbounded), it scans rows from the relational table with specific `pk_prefix`.
     /// `pk_prefix` is used to identify the exact vnode the scan should perform on.
-
-    /// This function scans rows from the relational table with specific `prefix` and `pk_sub_range` under the same
-    /// `vnode`.
     pub async fn iter_with_prefix(
         &self,
         pk_prefix: impl Row,

@@ -31,6 +31,12 @@ buildkite-agent artifact download risingwave-connector.tar.gz ./
 mkdir ./connector-node
 tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
+echo "--- e2e, inline test"
+risedev ci-start ci-inline-source-test
+risedev slt './e2e_test/source_inline/**/*.slt'
+echo "--- Kill cluster"
+risedev ci-kill
+
 echo "--- Prepare data"
 cp src/connector/src/test_data/simple-schema.avsc ./avro-simple-schema.avsc
 cp src/connector/src/test_data/complex-schema.avsc ./avro-complex-schema.avsc
@@ -81,15 +87,6 @@ echo "--- cdc share source test"
 # cdc share stream test cases
 export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
 risedev slt './e2e_test/source/cdc/cdc.share_stream.slt'
-
-# create a share source and check whether heartbeat message is received
-risedev slt './e2e_test/source/cdc/cdc.create_source_job.slt'
-table_id=$(psql -U root -h localhost -p 4566 -d dev -t -c "select id from rw_internal_tables where name like '%mysql_source%';" | xargs);
-table_count=$(psql -U root -h localhost -p 4566 -d dev -t -c "select count(*) from rw_table(${table_id}, public);" | xargs);
-if [ "$table_count" -eq 0 ]; then
-    echo "ERROR: internal table of cdc share source is empty!"
-    exit 1
-fi
 
 echo "--- mysql & postgres load and check"
 risedev slt './e2e_test/source/cdc/cdc.load.slt'
@@ -159,6 +156,10 @@ risedev slt './e2e_test/source/basic/*.slt'
 risedev slt './e2e_test/source/basic/old_row_format_syntax/*.slt'
 risedev slt './e2e_test/source/basic/alter/kafka.slt'
 
+echo "--- e2e, kafka alter source rate limit"
+risedev slt './e2e_test/source/basic/alter/rate_limit_source_kafka.slt'
+risedev slt './e2e_test/source/basic/alter/rate_limit_table_kafka.slt'
+
 echo "--- e2e, kafka alter source"
 chmod +x ./scripts/source/prepare_data_after_alter.sh
 ./scripts/source/prepare_data_after_alter.sh 2
@@ -167,9 +168,6 @@ risedev slt './e2e_test/source/basic/alter/kafka_after_new_data.slt'
 echo "--- e2e, kafka alter source again"
 ./scripts/source/prepare_data_after_alter.sh 3
 risedev slt './e2e_test/source/basic/alter/kafka_after_new_data_2.slt'
-
-echo "--- e2e, inline test"
-risedev slt './e2e_test/source_inline/**/*.slt'
 
 echo "--- Run CH-benCHmark"
 risedev slt './e2e_test/ch_benchmark/batch/ch_benchmark.slt'

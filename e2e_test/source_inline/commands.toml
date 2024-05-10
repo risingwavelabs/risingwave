@@ -1,9 +1,5 @@
 # This file contains commands used by the tests.
 
-[tasks.source-test-hook]
-private = true
-dependencies = ["check-risedev-env-file"]
-env_files = ["${PREFIX_CONFIG}/risedev-env"]
 
 # Note about the Kafka CLI tooling:
 # - Built-in Kafka console tools:
@@ -16,10 +12,10 @@ env_files = ["${PREFIX_CONFIG}/risedev-env"]
 # - rpk:
 #       Golang based.
 #       Style example: RPK_BROKERS=localhost:9092 rpk topic create t
-[tasks.kafka-hook]
+[tasks.check-kafka]
 private = true
 description = "Check if Kafka is started by RiseDev"
-dependencies = ["source-test-hook"]
+dependencies = ["check-and-load-risedev-env-file"]
 script = '''
 #!/usr/bin/env sh
 set -e
@@ -38,13 +34,22 @@ fi
 [tasks.clean-kafka]
 category = "RiseDev - Test - Source Test - Kafka"
 description = "Delete all kafka topics."
-dependencies = ["kafka-hook"]
-command = "rpk"
-args = ["topic", "delete", "-r", "*"]
+dependencies = ["check-and-load-risedev-env-file"]
+script = '''
+#!/usr/bin/env sh
+set -e
+
+if [ -n "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" ]; then
+    echo "Deleting all Kafka topics..."
+    rpk topic delete -r "*"
+else
+    echo "No Kafka to clean."
+fi
+'''
 
 [tasks.kafka-topics]
 category = "RiseDev - Test - Source Test - Kafka"
-dependencies = ["kafka-hook"]
+dependencies = ["check-kafka"]
 script = """
 #!/usr/bin/env sh
 set -e
@@ -53,7 +58,7 @@ ${PREFIX_BIN}/kafka/bin/kafka-topics.sh --bootstrap-server ${RISEDEV_KAFKA_BOOTS
 
 [tasks.kafka-produce]
 category = "RiseDev - Test - Source Test - Kafka"
-dependencies = ["kafka-hook"]
+dependencies = ["check-kafka"]
 script = """
 #!/usr/bin/env sh
 set -e
@@ -62,7 +67,7 @@ ${PREFIX_BIN}/kafka/bin/kafka-console-producer.sh --bootstrap-server ${RISEDEV_K
 
 [tasks.kafka-consume]
 category = "RiseDev - Test - Source Test - Kafka"
-dependencies = ["kafka-hook"]
+dependencies = ["check-kafka"]
 script = """
 #!/usr/bin/env sh
 set -e
@@ -71,7 +76,7 @@ ${PREFIX_BIN}/kafka/bin/kafka-console-consumer.sh --bootstrap-server ${RISEDEV_K
 
 [tasks.kafka-consumer-groups]
 category = "RiseDev - Test - Source Test - Kafka"
-dependencies = ["kafka-hook"]
+dependencies = ["check-kafka"]
 script = """
 #!/usr/bin/env sh
 set -e
@@ -81,7 +86,7 @@ ${PREFIX_BIN}/kafka/bin/kafka-consumer-groups.sh --bootstrap-server ${RISEDEV_KA
 # rpk tools
 [tasks.rpk]
 category = "RiseDev - Test - Source Test - Kafka"
-dependencies = ["kafka-hook"]
+dependencies = ["check-kafka"]
 # check https://docs.redpanda.com/current/reference/rpk/rpk-x-options/ or rpk -X help/list for options
 script = """
 #!/usr/bin/env sh
@@ -98,7 +103,7 @@ rpk "$@"
 [tasks.redpanda-console]
 category = "RiseDev - Test - Source Test - Kafka"
 description = "Start Redpanda console (Kafka GUI) at localhost:8080."
-dependencies = ["kafka-hook"]
+dependencies = ["check-kafka"]
 script = '''
 #!/usr/bin/env sh
 set -e

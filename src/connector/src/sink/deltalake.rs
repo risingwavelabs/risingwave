@@ -25,7 +25,8 @@ use deltalake::table::builder::s3_storage_options::{
 };
 use deltalake::writer::{DeltaWriter, RecordBatchWriter};
 use deltalake::DeltaTable;
-use risingwave_common::array::{to_deltalake_record_batch_with_schema, StreamChunk};
+use risingwave_common::array::arrow::DeltaLakeConvert;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
@@ -388,7 +389,8 @@ impl DeltaLakeSinkWriter {
     }
 
     async fn write(&mut self, chunk: StreamChunk) -> Result<()> {
-        let a = to_deltalake_record_batch_with_schema(self.dl_schema.clone(), &chunk)
+        let a = DeltaLakeConvert
+            .to_record_batch(self.dl_schema.clone(), &chunk)
             .context("convert record batch error")
             .map_err(SinkError::DeltaLake)?;
         self.writer.write(a).await?;

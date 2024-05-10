@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::fmt::Write;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use risingwave_common::array::{Op, StreamChunk};
@@ -250,13 +250,13 @@ impl SnowflakeSinkWriter {
             .opendal_s3_engine
             .streaming_upload(&path)
             .await
-            .map_err(|err| {
-                SinkError::Snowflake(format!(
-                    "failed to create the streaming uploader of opendal s3 engine for epoch {}, error: {}",
-                    self.epoch,
-                    err
-                ))
-            })?;
+            .with_context(|| {
+                format!(
+                    "failed to create the streaming uploader of opendal s3 engine for epoch {}",
+                    self.epoch
+                )
+            })
+            .map_err(SinkError::Snowflake)?;
         Ok((uploader, file_suffix))
     }
 
@@ -276,12 +276,8 @@ impl SnowflakeSinkWriter {
         uploader
             .write_bytes(data)
             .await
-            .map_err(|err| {
-                SinkError::Snowflake(format!(
-                    "failed to write bytes when streaming uploading to s3 for snowflake sink, error: {}",
-                    err
-                ))
-            })?;
+            .context("failed to write bytes when streaming uploading to s3")
+            .map_err(SinkError::Snowflake)?;
         Ok(())
     }
 
@@ -293,12 +289,11 @@ impl SnowflakeSinkWriter {
             // there is no data to be uploaded for this epoch
             return Ok(None);
         };
-        uploader.finish().await.map_err(|err| {
-            SinkError::Snowflake(format!(
-                "failed to finish streaming upload to s3 for snowflake sink, error: {}",
-                err
-            ))
-        })?;
+        uploader
+            .finish()
+            .await
+            .context("failed to finish streaming upload to s3")
+            .map_err(SinkError::Snowflake)?;
         Ok(Some(file_suffix))
     }
 
@@ -315,12 +310,7 @@ impl SnowflakeSinkWriter {
                 "{}",
                 Value::Object(self.row_encoder.encode(row)?)
             )
-            .map_err(|err| {
-                SinkError::Snowflake(format!(
-                    "failed to write json object to `row_buf`, error: {}",
-                    err
-                ))
-            })?;
+            .unwrap(); // write to a `BytesMut` should never fail
         }
 
         // streaming upload in a chunk-by-chunk manner

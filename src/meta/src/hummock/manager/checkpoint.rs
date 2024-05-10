@@ -28,6 +28,7 @@ use risingwave_pb::hummock::hummock_version_checkpoint::{
 };
 use risingwave_pb::hummock::{PbHummockVersionArchive, PbHummockVersionCheckpoint};
 use thiserror_ext::AsReport;
+use tracing::warn;
 
 use crate::hummock::error::Result;
 use crate::hummock::manager::versioning::Versioning;
@@ -159,19 +160,35 @@ impl HummockManager {
                     summary
                         .insert_table_infos
                         .iter()
-                        .map(|t| (t.object_id, t.file_size)),
+                        .map(|t| (t.object_id, t.file_size))
+                        .chain(
+                            version_delta
+                                .change_log_delta
+                                .values()
+                                .flat_map(|change_log| {
+                                    let new_log = change_log.new_log.as_ref().unwrap();
+                                    new_log
+                                        .new_value
+                                        .iter()
+                                        .chain(new_log.old_value.iter())
+                                        .map(|t| (t.object_id, t.file_size))
+                                }),
+                        ),
                 );
             }
-
             versions_object_ids.extend(version_delta.newly_added_object_ids());
         }
 
         // Object ids that once exist in any hummock version but not exist in the latest hummock version
         let removed_object_ids = &versions_object_ids - &current_version.get_object_ids();
-
         let total_file_size = removed_object_ids
             .iter()
-            .map(|t| object_sizes.get(t).copied().unwrap())
+            .map(|t| {
+                object_sizes.get(t).copied().unwrap_or_else(|| {
+                    warn!(object_id = t, "unable to get size of removed object id");
+                    0
+                })
+            })
             .sum::<u64>();
         stale_objects.insert(
             current_version.id,

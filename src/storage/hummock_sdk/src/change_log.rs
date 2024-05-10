@@ -33,6 +33,16 @@ impl TableChangeLog {
         &self.0[start..end]
     }
 
+    pub fn get_epochs(&self, min_epoch: u64, max_count: usize) -> Vec<u64> {
+        self.filter_epoch((min_epoch, u64::MAX))
+            .iter()
+            .flat_map(|epoch_change_log| epoch_change_log.epochs.iter().cloned())
+            .filter(|a| a >= &min_epoch)
+            .clone()
+            .take(max_count)
+            .collect()
+    }
+
     pub fn truncate(&mut self, truncate_epoch: u64) {
         // TODO: may optimize by using VecDeque to maintain the log
         self.0
