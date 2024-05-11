@@ -17,7 +17,6 @@ pub(crate) mod tests {
 
     use std::collections::{BTreeMap, BTreeSet, VecDeque};
     use std::ops::Bound;
-    use std::sync::atomic::AtomicU32;
     use std::sync::Arc;
 
     use bytes::{BufMut, Bytes, BytesMut};
