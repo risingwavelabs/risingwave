@@ -16,6 +16,7 @@ jobs:
   update-helm-charts:
     runs-on: ubuntu-latest
     permissions:
+      contents: write
       pull-requests: write
     steps:
       - name: Checkout Helm Charts Repository
