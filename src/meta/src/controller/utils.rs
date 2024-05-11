@@ -24,17 +24,12 @@ use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
-    object_dependency, schema, sink, source, table, user, user_privilege, view, worker_property,
-    ActorId, DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId,
-    PrivilegeId, SchemaId, SourceId, StreamNode, UserId, WorkerId,
-    subscription,
-
+    object_dependency, schema, sink, source, subscription, table, user, user_privilege, view,
+    worker_property, ActorId, DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping,
+    I32Array, ObjectId, PrivilegeId, SchemaId, SourceId, StreamNode, UserId, WorkerId,
 };
-
-use risingwave_pb::meta::{PbFragmentParallelUnitMapping, PbFragmentWorkerMapping};
-
 use risingwave_pb::catalog::{PbConnection, PbFunction, PbSubscription};
-
+use risingwave_pb::meta::{PbFragmentParallelUnitMapping, PbFragmentWorkerMapping};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode, StreamSource};
 use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};

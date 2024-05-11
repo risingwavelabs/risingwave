@@ -18,13 +18,8 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use itertools::Itertools;
-
-use risingwave_common::catalog::{
-    is_subscription_internal_table, TableOption, DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS,
-};
+use risingwave_common::catalog::{TableOption, DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
 use risingwave_common::hash::ParallelUnitMapping;
-
-
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
@@ -71,11 +66,9 @@ use crate::controller::rename::{alter_relation_rename, alter_relation_rename_ref
 use crate::controller::utils::{
     check_connection_name_duplicate, check_database_name_duplicate,
     check_function_signature_duplicate, check_relation_name_duplicate, check_schema_name_duplicate,
-    ensure_object_id, ensure_object_not_refer, ensure_schema_empty, ensure_user_id,
-    get_fragment_mappings, get_fragment_mappings_by_jobs, get_parallel_unit_to_worker_map,
+    ensure_object_id, ensure_object_not_refer, ensure_schema_empty, ensure_user_id, get_fragment_mappings_by_jobs, get_parallel_unit_to_worker_map,
     get_referring_objects, get_referring_objects_cascade, get_user_privilege,
     list_user_info_by_ids, resolve_source_register_info_for_jobs, PartialObject,
-
 };
 use crate::controller::ObjectModel;
 use crate::manager::{Catalog, MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
