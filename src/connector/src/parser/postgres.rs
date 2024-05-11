@@ -12,35 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::str::FromStr;
 use std::sync::LazyLock;
 
-use bytes::BytesMut;
 use chrono::{NaiveDate, Utc};
-use pg_bigdecimal::PgNumeric;
 use risingwave_common::catalog::Schema;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
-    DataType, Date, Decimal, Int256, Interval, JsonbVal, ListValue, ScalarImpl, Time, Timestamp,
+    DataType, Date, Decimal, Interval, JsonbVal, ListValue, ScalarImpl, Time, Timestamp,
     Timestamptz,
 };
 use rust_decimal::Decimal as RustDecimal;
 use thiserror_ext::AsReport;
-use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql, Type};
+use tokio_postgres::types::{Kind, Type};
 
+use crate::parser::scalar_adapter::ScalarAdapter;
 use crate::parser::util::log_error;
 
 static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
 
 macro_rules! handle_list_data_type {
     ($row:expr, $i:expr, $name:expr, $type:ty, $builder:expr) => {
-        let res = $row.try_get::<_, Option<Vec<$type>>>($i);
+        let res = $row.try_get::<_, Option<Vec<Option<$type>>>>($i);
         match res {
             Ok(val) => {
                 if let Some(v) = val {
                     v.into_iter()
-                        .for_each(|val| $builder.append(Some(ScalarImpl::from(val))))
+                        .for_each(|val| $builder.append(val.map(ScalarImpl::from)))
                 }
             }
             Err(err) => {
@@ -49,12 +47,12 @@ macro_rules! handle_list_data_type {
         }
     };
     ($row:expr, $i:expr, $name:expr, $type:ty, $builder:expr, $rw_type:ty) => {
-        let res = $row.try_get::<_, Option<Vec<$type>>>($i);
+        let res = $row.try_get::<_, Option<Vec<Option<$type>>>>($i);
         match res {
             Ok(val) => {
                 if let Some(v) = val {
                     v.into_iter().for_each(|val| {
-                        $builder.append(Some(ScalarImpl::from(<$rw_type>::from(val))))
+                        $builder.append(val.map(|v| ScalarImpl::from(<$rw_type>::from(v))))
                     })
                 }
             }
@@ -121,9 +119,9 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                     // we use the PgNumeric type to convert the decimal to a string.
                     // Then we convert the string to Int256.
                     // Note: It's only used to map the numeric type in upstream Postgres to RisingWave's rw_int256.
-                    let res = row.try_get::<_, Option<PgNumeric>>(i);
+                    let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
                     match res {
-                        Ok(val) => pg_numeric_to_rw_int256(val, name),
+                        Ok(val) => val.and_then(|v| v.into_scalar(DataType::Int256)),
                         Err(err) => {
                             log_error!(name, err, "parse numeric column as pg_numeric failed");
                             None
@@ -133,9 +131,9 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                 DataType::Varchar => {
                     if let Kind::Enum(_) = row.columns()[i].type_().kind() {
                         // enum type needs to be handled separately
-                        let res = row.try_get::<_, Option<EnumString>>(i);
+                        let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
                         match res {
-                            Ok(val) => val.map(|v| ScalarImpl::from(v.0)),
+                            Ok(val) => val.and_then(|v| v.into_scalar(DataType::Varchar)),
                             Err(err) => {
                                 log_error!(name, err, "parse enum column failed");
                                 None
@@ -145,9 +143,9 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                         match *row.columns()[i].type_() {
                             // Since we don't support UUID natively, adapt it to a VARCHAR column
                             Type::UUID => {
-                                let res = row.try_get::<_, Option<uuid::Uuid>>(i);
+                                let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
                                 match res {
-                                    Ok(val) => val.map(|v| ScalarImpl::from(v.to_string())),
+                                    Ok(val) => val.and_then(|v| v.into_scalar(DataType::Varchar)),
                                     Err(err) => {
                                         log_error!(name, err, "parse uuid column failed");
                                         None
@@ -159,9 +157,9 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                 // Currently in order to handle the decimal beyond RustDecimal,
                                 // we use the PgNumeric type to convert the decimal to a string.
                                 // Note: It's only used to map the numeric type in upstream Postgres to RisingWave's varchar.
-                                let res = row.try_get::<_, Option<PgNumeric>>(i);
+                                let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
                                 match res {
-                                    Ok(val) => pg_numeric_to_varchar(val),
+                                    Ok(val) => val.and_then(|v| v.into_scalar(DataType::Varchar)),
                                     Err(err) => {
                                         log_error!(
                                             name,
@@ -212,17 +210,23 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                     if let Kind::Array(item_type) = row.columns()[i].type_().kind()
                         && let Kind::Enum(_) = item_type.kind()
                     {
-                        let res = row.try_get::<_, Option<Vec<EnumString>>>(i);
+                        // FIXME(Kexiang): The null of enum list is not supported in Debezium.
+                        // As `NULL` in enum list is not supported in Debezium, we use `EnumString`
+                        // instead of `Option<EnumString>` to handle enum to keep the behaviors aligned.
+                        // An enum list contains `NULL` will be converted to `NULL`.
+                        let res = row.try_get::<_, Option<Vec<ScalarAdapter<'_>>>>(i);
                         match res {
                             Ok(val) => {
-                                if let Some(v) = val {
-                                    v.into_iter().for_each(|val| {
-                                        builder.append(Some(ScalarImpl::from(val.0)))
-                                    });
+                                if let Some(vec) = val {
+                                    for val in vec {
+                                        builder.append(val.into_scalar(DataType::Varchar))
+                                    }
                                 }
+                                Some(ScalarImpl::from(ListValue::new(builder.finish())))
                             }
                             Err(err) => {
                                 log_error!(name, err, "parse enum column failed");
+                                None
                             }
                         }
                     } else {
@@ -255,15 +259,18 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                 match *row.columns()[i].type_() {
                                     // Since we don't support UUID natively, adapt it to a VARCHAR column
                                     Type::UUID_ARRAY => {
-                                        let res = row.try_get::<_, Option<Vec<uuid::Uuid>>>(i);
+                                        let res = row
+                                            .try_get::<_, Option<Vec<Option<ScalarAdapter<'_>>>>>(
+                                                i,
+                                            );
                                         match res {
                                             Ok(val) => {
-                                                if let Some(v) = val {
-                                                    v.into_iter().for_each(|val| {
-                                                        builder.append(Some(ScalarImpl::from(
-                                                            val.to_string(),
-                                                        )))
-                                                    });
+                                                if let Some(vec) = val {
+                                                    for val in vec {
+                                                        builder.append(val.and_then(|v| {
+                                                            v.into_scalar(DataType::Varchar)
+                                                        }))
+                                                    }
                                                 }
                                             }
                                             Err(err) => {
@@ -272,15 +279,18 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                         };
                                     }
                                     Type::NUMERIC_ARRAY => {
-                                        let res = row.try_get::<_, Option<Vec<PgNumeric>>>(i);
+                                        let res = row
+                                            .try_get::<_, Option<Vec<Option<ScalarAdapter<'_>>>>>(
+                                                i,
+                                            );
                                         match res {
                                             Ok(val) => {
-                                                if let Some(v) = val {
-                                                    v.into_iter().for_each(|val| {
-                                                        builder.append(pg_numeric_to_varchar(Some(
-                                                            val,
-                                                        )))
-                                                    });
+                                                if let Some(vec) = val {
+                                                    for val in vec {
+                                                        builder.append(val.and_then(|v| {
+                                                            v.into_scalar(DataType::Varchar)
+                                                        }))
+                                                    }
                                                 }
                                             }
                                             Err(err) => {
@@ -341,14 +351,14 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                 );
                             }
                             DataType::Bytea => {
-                                let res = row.try_get::<_, Option<Vec<Vec<u8>>>>(i);
+                                let res = row.try_get::<_, Option<Vec<Option<Vec<u8>>>>>(i);
                                 match res {
                                     Ok(val) => {
                                         if let Some(v) = val {
                                             v.into_iter().for_each(|val| {
-                                                builder.append(Some(ScalarImpl::from(
-                                                    val.into_boxed_slice(),
-                                                )))
+                                                builder.append(val.map(|v| {
+                                                    ScalarImpl::from(v.into_boxed_slice())
+                                                }))
                                             })
                                         }
                                     }
@@ -358,16 +368,18 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                 }
                             }
                             DataType::Int256 => {
-                                let res = row.try_get::<_, Option<Vec<PgNumeric>>>(i);
+                                let res =
+                                    row.try_get::<_, Option<Vec<Option<ScalarAdapter<'_>>>>>(i);
                                 match res {
                                     Ok(val) => {
-                                        if let Some(v) = val {
-                                            v.into_iter().for_each(|val| {
-                                                builder.append(pg_numeric_to_rw_int256(
-                                                    Some(val),
-                                                    name,
-                                                ))
-                                            });
+                                        if let Some(vec) = val {
+                                            for val in vec {
+                                                builder.append(
+                                                    val.and_then(|v| {
+                                                        v.into_scalar(DataType::Int256)
+                                                    }),
+                                                )
+                                            }
                                         }
                                     }
                                     Err(err) => {
@@ -386,8 +398,8 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                 );
                             }
                         };
+                        Some(ScalarImpl::from(ListValue::new(builder.finish())))
                     }
-                    Some(ScalarImpl::from(ListValue::new(builder.finish())))
                 }
                 DataType::Struct(_) | DataType::Serial => {
                     // Interval, Struct, List are not supported
@@ -401,91 +413,11 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
     OwnedRow::new(datums)
 }
 
-fn pg_numeric_to_rw_int256(val: Option<PgNumeric>, name: &str) -> Option<ScalarImpl> {
-    let string = pg_numeric_to_string(val)?;
-    match Int256::from_str(string.as_str()) {
-        Ok(num) => Some(ScalarImpl::from(num)),
-        Err(err) => {
-            log_error!(name, err, "parse numeric string as rw_int256 failed");
-            None
-        }
-    }
-}
-
-fn pg_numeric_to_varchar(val: Option<PgNumeric>) -> Option<ScalarImpl> {
-    pg_numeric_to_string(val).map(ScalarImpl::from)
-}
-
-fn pg_numeric_to_string(val: Option<PgNumeric>) -> Option<String> {
-    if let Some(pg_numeric) = val {
-        // TODO(kexiang): NEGATIVE_INFINITY -> -Infinity, POSITIVE_INFINITY -> Infinity, NAN -> NaN
-        // The current implementation is to ensure consistency with the behavior of cdc event parsor.
-        match pg_numeric {
-            PgNumeric::NegativeInf => Some(String::from("NEGATIVE_INFINITY")),
-            PgNumeric::Normalized(big_decimal) => Some(big_decimal.to_string()),
-            PgNumeric::PositiveInf => Some(String::from("POSITIVE_INFINITY")),
-            PgNumeric::NaN => Some(String::from("NAN")),
-        }
-    } else {
-        // NULL
-        None
-    }
-}
-
-#[derive(Clone, Debug)]
-struct EnumString(String);
-
-impl<'a> FromSql<'a> for EnumString {
-    fn from_sql(
-        _ty: &Type,
-        raw: &'a [u8],
-    ) -> Result<Self, Box<dyn std::error::Error + 'static + Sync + Send>> {
-        Ok(EnumString(String::from_utf8_lossy(raw).into_owned()))
-    }
-
-    fn accepts(ty: &Type) -> bool {
-        matches!(ty.kind(), Kind::Enum(_))
-    }
-}
-
-impl ToSql for EnumString {
-    to_sql_checked!();
-
-    fn accepts(ty: &Type) -> bool {
-        matches!(ty.kind(), Kind::Enum(_))
-    }
-
-    fn to_sql(
-        &self,
-        ty: &Type,
-        out: &mut BytesMut,
-    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>>
-    where
-        Self: Sized,
-    {
-        match ty.kind() {
-            Kind::Enum(e) => {
-                if e.contains(&self.0) {
-                    out.extend_from_slice(self.0.as_bytes());
-                    Ok(IsNull::No)
-                } else {
-                    Err(format!(
-                        "EnumString value {} is not in the enum type {:?}",
-                        self.0, e
-                    )
-                    .into())
-                }
-            }
-            _ => Err("EnumString can only be used with ENUM types".into()),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use tokio_postgres::NoTls;
 
-    use crate::parser::postgres::EnumString;
+    use crate::parser::scalar_adapter::EnumString;
     const DB: &str = "postgres";
     const USER: &str = "kexiang";
 

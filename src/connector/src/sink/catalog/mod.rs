@@ -119,6 +119,8 @@ pub struct SinkFormatDesc {
     pub format: SinkFormat,
     pub encode: SinkEncode,
     pub options: BTreeMap<String, String>,
+
+    pub key_encode: Option<SinkEncode>,
 }
 
 /// TODO: consolidate with [`crate::source::SourceFormat`] and [`crate::parser::ProtocolProperties`].
@@ -136,6 +138,7 @@ pub enum SinkEncode {
     Protobuf,
     Avro,
     Template,
+    Text,
 }
 
 impl SinkFormatDesc {
@@ -166,6 +169,7 @@ impl SinkFormatDesc {
             format,
             encode,
             options: Default::default(),
+            key_encode: None,
         }))
     }
 
@@ -177,12 +181,16 @@ impl SinkFormatDesc {
             SinkFormat::Upsert => F::Upsert,
             SinkFormat::Debezium => F::Debezium,
         };
-        let encode = match self.encode {
+        let mapping_encode = |sink_encode: &SinkEncode| match sink_encode {
             SinkEncode::Json => E::Json,
             SinkEncode::Protobuf => E::Protobuf,
             SinkEncode::Avro => E::Avro,
             SinkEncode::Template => E::Template,
+            SinkEncode::Text => E::Text,
         };
+
+        let encode = mapping_encode(&self.encode);
+        let key_encode = self.key_encode.as_ref().map(|e| mapping_encode(e).into());
         let options = self
             .options
             .iter()
@@ -193,6 +201,7 @@ impl SinkFormatDesc {
             format: format.into(),
             encode: encode.into(),
             options,
+            key_encode,
         }
     }
 }
@@ -224,10 +233,27 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             E::Protobuf => SinkEncode::Protobuf,
             E::Template => SinkEncode::Template,
             E::Avro => SinkEncode::Avro,
-            e @ (E::Unspecified | E::Native | E::Csv | E::Bytes | E::None) => {
+            e @ (E::Unspecified | E::Native | E::Csv | E::Bytes | E::None | E::Text) => {
                 return Err(SinkError::Config(anyhow!(
                     "sink encode unsupported: {}",
                     e.as_str_name()
+                )))
+            }
+        };
+        let key_encode = match &value.key_encode() {
+            E::Text => Some(SinkEncode::Text),
+            E::Unspecified => None,
+            encode @ (E::Avro
+            | E::Bytes
+            | E::Csv
+            | E::Json
+            | E::Protobuf
+            | E::Template
+            | E::Native
+            | E::None) => {
+                return Err(SinkError::Config(anyhow!(
+                    "unsupported {} as sink key encode",
+                    encode.as_str_name()
                 )))
             }
         };
@@ -237,6 +263,7 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             format,
             encode,
             options,
+            key_encode,
         })
     }
 }

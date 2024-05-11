@@ -28,7 +28,7 @@ use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReader
 use super::external::ExternalStorageTable;
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::backfill::utils::{get_new_pos, iter_chunks};
-use crate::executor::{StreamExecutorError, StreamExecutorResult, INVALID_EPOCH};
+use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 pub trait UpstreamTableRead {
     fn snapshot_read_full_table(
@@ -44,9 +44,7 @@ pub trait UpstreamTableRead {
 
 #[derive(Debug, Clone, Default)]
 pub struct SnapshotReadArgs {
-    pub epoch: u64,
     pub current_pos: Option<OwnedRow>,
-    pub ordered: bool,
     pub rate_limit_rps: Option<u32>,
     pub pk_in_output_indices: Vec<usize>,
 }
@@ -58,9 +56,7 @@ impl SnapshotReadArgs {
         pk_in_output_indices: Vec<usize>,
     ) -> Self {
         Self {
-            epoch: INVALID_EPOCH,
             current_pos,
-            ordered: false,
             rate_limit_rps,
             pk_in_output_indices,
         }

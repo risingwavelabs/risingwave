@@ -172,7 +172,6 @@ impl ConfigExpander {
                     "kafka" => ServiceConfig::Kafka(serde_yaml::from_str(&out_str)?),
                     "pubsub" => ServiceConfig::Pubsub(serde_yaml::from_str(&out_str)?),
                     "redis" => ServiceConfig::Redis(serde_yaml::from_str(&out_str)?),
-                    "zookeeper" => ServiceConfig::ZooKeeper(serde_yaml::from_str(&out_str)?),
                     "redpanda" => ServiceConfig::RedPanda(serde_yaml::from_str(&out_str)?),
                     "mysql" => ServiceConfig::MySql(serde_yaml::from_str(&out_str)?),
                     other => return Err(anyhow!("unsupported use type: {}", other)),
