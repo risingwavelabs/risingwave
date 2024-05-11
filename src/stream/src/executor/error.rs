@@ -113,7 +113,7 @@ pub enum ErrorKind {
     NotImplemented(#[from] NotImplemented),
 
     #[error(transparent)]
-    Internal(
+    Uncategorized(
         #[from]
         #[backtrace]
         anyhow::Error,
@@ -150,7 +150,7 @@ impl From<PbFieldNotFound> for StreamExecutorError {
 
 impl From<String> for StreamExecutorError {
     fn from(s: String) -> Self {
-        ErrorKind::Internal(anyhow::anyhow!(s)).into()
+        ErrorKind::Uncategorized(anyhow::anyhow!(s)).into()
     }
 }
 

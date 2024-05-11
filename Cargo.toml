@@ -20,7 +20,6 @@ members = [
     "src/expr/core",
     "src/expr/impl",
     "src/expr/macro",
-    "src/expr/udf",
     "src/frontend",
     "src/frontend/macro",
     "src/frontend/planner_test",
@@ -78,7 +77,7 @@ license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
-foyer = "0.6"
+foyer = { version = "0.8.6", features = ["nightly"] }
 auto_enums = { version = "0.8", features = ["futures03", "tokio1"] }
 await-tree = "0.2.1"
 aws-config = { version = "1", default-features = false, features = [
@@ -118,7 +117,7 @@ axum = "=0.7.4" # TODO: 0.7.5+ does not work with current toolchain
 etcd-client = { package = "madsim-etcd-client", version = "0.4" }
 futures-async-stream = "0.2.9"
 hytra = "0.1"
-rdkafka = { package = "madsim-rdkafka", version = "0.3.4", features = [
+rdkafka = { package = "madsim-rdkafka", version = "0.4.1", features = [
     "cmake-build",
 ] }
 hashbrown = { version = "0.14", features = ["ahash", "inline-more", "nightly"] }
@@ -139,10 +138,11 @@ arrow-flight = "50"
 arrow-select = "50"
 arrow-ord = "50"
 arrow-row = "50"
-arrow-udf-js = "0.1"
-arrow-udf-js-deno = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "23fe0dd" }
-arrow-udf-wasm = { version = "0.2.1", features = ["build"] }
-arrow-udf-python = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "6c32f71" }
+arrow-udf-js = "0.2"
+arrow-udf-js-deno = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "fa36365" }
+arrow-udf-wasm = { version = "0.2.2", features = ["build"] }
+arrow-udf-python = "0.1"
+arrow-udf-flight = "0.1"
 arrow-array-deltalake = { package = "arrow-array", version = "48.0.1" }
 arrow-buffer-deltalake = { package = "arrow-buffer", version = "48.0.1" }
 arrow-cast-deltalake = { package = "arrow-cast", version = "48.0.1" }

@@ -56,9 +56,3 @@ Config with the following. It may work.
   "java.format.settings.profile": "Android"
 }
 ```
-
-## Deploy UDF Library to Maven
-
-```sh
-mvn clean deploy --pl udf --am
-```
