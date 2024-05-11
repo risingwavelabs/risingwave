@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::VecDeque;
 use std::default::Default;
 use std::future::Future;
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
@@ -25,7 +24,7 @@ use auto_enums::auto_enum;
 use await_tree::InstrumentAwait;
 use bytes::{BufMut, Bytes, BytesMut};
 use foyer::memory::CacheContext;
-use futures::future::{join_all, try_join_all};
+use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{Either, Itertools};
@@ -996,12 +995,13 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
 }
 
 struct ColumnarStoreStorageTableInnerIterInner<S: StateStore> {
-    iters: VecDeque<S::Iter>,
+    iters: Vec<S::Iter>,
     mapping: ColumnMapping,
     output_pk_position_in_pk_indices: Vec<usize>,
     non_pk_position_in_output_indices: Vec<usize>,
     data_types: Vec<DataType>,
     pk_serializer: OrderedRowSerde,
+    vnode: VirtualNode,
 }
 
 impl<S: StateStore> ColumnarStoreStorageTableInnerIterInner<S> {
@@ -1061,12 +1061,12 @@ impl<S: StateStore> ColumnarStoreStorageTableInnerIterInner<S> {
                         column_id,
                     ),
                 )
+            })
+            .skip(if non_pk_position_in_output_indices.is_empty() {
+                0
+            } else {
+                1
             });
-        // .skip(if non_pk_position_in_output_indices.is_empty() {
-        //     0
-        // } else {
-        //     1
-        // });
         let mut iter_fut = Vec::with_capacity(1 + non_pk_position_in_output_indices.len());
         for (column_id, table_key_range) in iter_ranges {
             let col_prefix_hint = read_options.prefix_hint.as_ref().map(|bytes| {
@@ -1087,12 +1087,13 @@ impl<S: StateStore> ColumnarStoreStorageTableInnerIterInner<S> {
         tracing::debug!(iter_num = iters.len(), "column store iter num");
         store.validate_read_epoch(epoch)?;
         let iter = Self {
-            iters: iters.into(),
+            iters,
             mapping: ColumnMapping::new(iter_to_output_mapping),
             non_pk_position_in_output_indices,
             output_pk_position_in_pk_indices,
             data_types,
             pk_serializer,
+            vnode,
         };
         Ok(iter)
     }
@@ -1112,81 +1113,45 @@ impl<S: StateStore> ColumnarStoreStorageTableInnerIterInner<S> {
             );
             buffer.freeze()
         }
-        let buffer_size = std::env::var("RW_COLUMN_STORE_BUFFER_SIZE")
-            .unwrap_or("1024".into())
-            .parse()
-            .unwrap();
-        let mut pk_iter = self.iters.pop_front().unwrap();
-        let (pk_tx, mut pk_rx) = tokio::sync::mpsc::channel(buffer_size);
-        let _pk_task = tokio::spawn(async move {
-            let pk_tx_ = pk_tx.clone();
-            let loop_fn = async move {
-                while let Some((k, _)) = pk_iter.try_next().await? {
-                    let table_key_with_vnode_and_column_id = k.user_key.table_key;
-                    let vnode_prefixed_key =
-                        TableKey(vnode_prefixed_key(&table_key_with_vnode_and_column_id));
-                    let mut iter_output = vec![];
-                    if !self.output_pk_position_in_pk_indices.is_empty() {
-                        // TODO(columnar_store): try to optimize deserialize out.
-                        let table_key = strip_vnode_and_column_id_from_table_key(
-                            &table_key_with_vnode_and_column_id,
-                        );
-                        let pk = self.pk_serializer.deserialize(table_key)?;
-                        for datum in pk
-                            .project(&self.output_pk_position_in_pk_indices)
-                            .into_owned_row()
-                        {
-                            iter_output.push(datum);
-                        }
-                    }
-                    let _ = pk_tx_.send(Ok((vnode_prefixed_key, iter_output))).await;
-                }
-                Ok::<(), StorageError>(())
-            };
-            if let Err(err) = loop_fn.await {
-                let _ = pk_tx.send(Err(err)).await;
-            }
-        });
-
-        let mut col_rxs = vec![];
-        for (pos, mut col_iter) in self
-            .non_pk_position_in_output_indices
-            .iter()
-            .zip_eq_debug(self.iters)
-        {
-            let (col_tx, col_rx) = tokio::sync::mpsc::channel(buffer_size);
-            col_rxs.push(col_rx);
-            let data_type = self.data_types[*pos].clone();
-            let _col_task = tokio::spawn(async move {
-                let col_tx_ = col_tx.clone();
-                let loop_fn = async move {
-                    while let Some((_, v)) = col_iter.try_next().await? {
-                        let col_val = deserialize_datum(v, &data_type)?;
-                        let _ = col_tx_.send(Ok(col_val)).await;
-                    }
-                    Ok::<(), StorageError>(())
-                };
-                if let Err(err) = loop_fn.await {
-                    let _ = col_tx.send(Err(err)).await;
-                }
-            });
-        }
-
         loop {
-            let (vnode_prefixed_key, mut iter_output) = match pk_rx.recv().await {
-                Some(r) => r?,
-                None => {
-                    break;
+            let mut fut_iter = Vec::with_capacity(self.iters.len());
+            for iter in &mut self.iters {
+                let fut = iter.try_next();
+                fut_iter.push(fut);
+            }
+            let kvs = try_join_all(fut_iter).await?;
+            if kvs.iter().any(|kv| kv.is_none()) {
+                assert!(kvs.iter().all(|kv| kv.is_none()));
+                break;
+            }
+            let mut iter_output = Vec::with_capacity(self.output_indices.len());
+            let table_key_with_vnode_and_column_id = kvs[0].as_ref().unwrap().0.user_key.table_key;
+            let vnode_prefixed_key =
+                TableKey(vnode_prefixed_key(&table_key_with_vnode_and_column_id));
+            if !self.output_pk_position_in_pk_indices.is_empty() {
+                // TODO(columnar_store): try to optimize deserialize out.
+                let table_key =
+                    strip_vnode_and_column_id_from_table_key(&table_key_with_vnode_and_column_id);
+                let pk = self.pk_serializer.deserialize(table_key)?;
+                for datum in pk
+                    .project(&self.output_pk_position_in_pk_indices)
+                    .into_owned_row()
+                {
+                    iter_output.push(datum);
                 }
-            };
-            iter_output.reserve(self.non_pk_position_in_output_indices.len());
-            let fut_iter = col_rxs.iter_mut().map(|rx| rx.recv());
-            let kvs = join_all(fut_iter).await;
-            for col_val in kvs
-                .into_iter()
-                .map(|kv| kv.unwrap_or_else(|| panic!("col expected")))
-            {
-                iter_output.push(col_val?);
+            }
+            if !self.non_pk_position_in_output_indices.is_empty() {
+                let kvs = kvs.into_iter().map(|kv| kv.unwrap());
+                for (pos, (_, value)) in self
+                    .non_pk_position_in_output_indices
+                    .iter()
+                    .zip_eq_debug(kvs)
+                {
+                    // TODO(columnar_store): use a deserializer
+                    let data_type = &self.data_types[*pos];
+                    let col_val = deserialize_datum(value, data_type)?;
+                    iter_output.push(col_val);
+                }
             }
             let row = self
                 .mapping
