@@ -247,18 +247,28 @@ pub struct SpillOp {
     op: Operator,
 }
 
+const DEFAULT_SPILL_CHUNK_SIZE: usize = 1024;
+const DEFAULT_SPILL_PARTITION_NUM: usize = 20;
+const DEFAULT_SPILL_DIR: &str = "/tmp/";
+const RW_MANAGED_SPILL_DIR: &str = "/rw_batch_spill/";
+const DEFAULT_IO_BUFFER_SIZE: usize = 256 * 1024;
+
 impl SpillOp {
     pub async fn writer_with(&self, name: &str) -> Result<opendal::Writer> {
         Ok(self
             .op
             .writer_with(name)
             .append(true)
-            .buffer(64 * 1024)
+            .buffer(DEFAULT_IO_BUFFER_SIZE)
             .await?)
     }
 
     pub async fn reader_with(&self, name: &str) -> Result<opendal::Reader> {
-        Ok(self.op.reader_with(name).buffer(64 * 1024).await?)
+        Ok(self
+            .op
+            .reader_with(name)
+            .buffer(DEFAULT_IO_BUFFER_SIZE)
+            .await?)
     }
 }
 
@@ -325,7 +335,12 @@ impl AggSpillManager {
         spill_chunk_size: usize,
     ) -> Result<Self> {
         let suffix_uuid = uuid::Uuid::new_v4();
-        let dir = format!("/tmp/rw_batch_spill-{}-{}/", agg_identity, suffix_uuid,);
+        let spill_dir =
+            std::env::var("RW_BATCH_SPILL_DIR").unwrap_or_else(|_| DEFAULT_SPILL_DIR.to_string());
+        let dir = format!(
+            "/{}/{}/{}-{}/",
+            spill_dir, RW_MANAGED_SPILL_DIR, agg_identity, suffix_uuid
+        );
         let op = new_spill_op(dir)?;
         let agg_state_writers = Vec::with_capacity(partition_num);
         let agg_state_readers = Vec::with_capacity(partition_num);
@@ -472,6 +487,14 @@ impl AggSpillManager {
         let r = self.op.reader_with(&input_partition_file_name).await?;
         Ok(Self::read_stream(r))
     }
+
+    async fn clear_partition(&mut self, partition: usize) -> Result<()> {
+        let agg_state_partition_file_name = format!("agg-state-p{}", partition);
+        self.op.delete(&agg_state_partition_file_name).await?;
+        let input_partition_file_name = format!("input-chunks-p{}", partition);
+        self.op.delete(&input_partition_file_name).await?;
+        Ok(())
+    }
 }
 
 impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
@@ -561,11 +584,11 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
         if need_to_spill {
             let mut agg_spill_manager = AggSpillManager::new(
                 &self.identity,
-                4,
+                DEFAULT_SPILL_PARTITION_NUM,
                 self.group_key_types.clone(),
                 self.aggs.iter().map(|agg| agg.return_type()).collect(),
                 child_schema.data_types(),
-                1024,
+                DEFAULT_SPILL_CHUNK_SIZE,
             )?;
             agg_spill_manager.init_writers().await?;
 
@@ -630,8 +653,8 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     self.shutdown_rx.clone(),
                 );
 
-                println!(
-                    "create sub_hash_agg_executor {} for hash_agg {}",
+                debug!(
+                    "create sub_hash_agg {} for hash_agg {} to spill",
                     sub_hash_agg_executor.identity, self.identity
                 );
 
@@ -642,8 +665,9 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     let chunk = chunk?;
                     yield chunk;
                 }
+
+                agg_spill_manager.clear_partition(i).await?;
             }
-            return Ok(());
         } else {
             // Don't use `into_iter` here, it may cause memory leak.
             let mut result = groups.iter_mut();
