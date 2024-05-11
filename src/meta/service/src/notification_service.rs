@@ -23,10 +23,7 @@ use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::hummock::WriteLimits;
 use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
-use risingwave_pb::meta::{
-    FragmentParallelUnitMapping, GetSessionParamsResponse, MetaSnapshot, SubscribeRequest,
-    SubscribeType,
-};
+use risingwave_pb::meta::{FragmentParallelUnitMapping, FragmentWorkerMapping, GetSessionParamsResponse, MetaSnapshot, SubscribeRequest, SubscribeType};
 use risingwave_pb::user::UserInfo;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -138,6 +135,30 @@ impl NotificationServiceImpl {
         }
     }
 
+    async fn get_worker_mapping_snapshot(
+        &self,
+    ) -> MetaResult<(Vec<FragmentWorkerMapping>, NotificationVersion)> {
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                let fragment_guard = mgr.fragment_manager.get_fragment_read_guard().await;
+                let parallel_unit_mappings =
+                    fragment_guard.all_running_fragment_mappings().collect_vec();
+                let notification_version = self.env.notification_manager().current_version().await;
+                Ok((parallel_unit_mappings, notification_version))
+            }
+            MetadataManager::V2(mgr) => {
+                let fragment_guard = mgr.catalog_controller.get_inner_read_guard().await;
+                let parallel_unit_mappings = fragment_guard
+                    .all_running_fragment_mappings()
+                    .await?
+                    .collect_vec();
+                let notification_version = self.env.notification_manager().current_version().await;
+                Ok((parallel_unit_mappings, notification_version))
+            }
+        }
+    }
+
+
     async fn get_parallel_unit_mapping_snapshot(
         &self,
     ) -> MetaResult<(Vec<FragmentParallelUnitMapping>, NotificationVersion)> {
@@ -241,8 +262,9 @@ impl NotificationServiceImpl {
             users,
             catalog_version,
         ) = self.get_catalog_snapshot().await?;
-        let (parallel_unit_mappings, parallel_unit_mapping_version) =
-            self.get_parallel_unit_mapping_snapshot().await?;
+
+        let (streaming_worker_mappings, streaming_worker_mapping_version) =
+            self.get_worker_mapping_snapshot().await?;
         let serving_parallel_unit_mappings = self.get_serving_vnode_mappings();
         let (nodes, worker_node_version) = self.get_worker_node_snapshot().await?;
 
@@ -270,16 +292,16 @@ impl NotificationServiceImpl {
             functions,
             connections,
             users,
-            parallel_unit_mappings,
             nodes,
             hummock_snapshot,
             serving_parallel_unit_mappings,
             version: Some(SnapshotVersion {
                 catalog_version,
-                parallel_unit_mapping_version,
                 worker_node_version,
+                streaming_worker_mapping_version,
             }),
             session_params,
+            streaming_worker_mappings,
             ..Default::default()
         })
     }

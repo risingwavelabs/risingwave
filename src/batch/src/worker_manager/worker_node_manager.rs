@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use rand::seq::SliceRandom;
 use risingwave_common::bail;
-use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping};
+use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping, WorkerMapping};
 use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
 use risingwave_pb::common::{WorkerNode, WorkerType};
@@ -39,7 +39,7 @@ struct WorkerNodeManagerInner {
     /// A cache for parallel units to worker nodes. It should be consistent with `worker_nodes`.
     pu_to_worker: HashMap<ParallelUnitId, WorkerNode>,
     /// fragment vnode mapping info for streaming
-    streaming_fragment_vnode_mapping: HashMap<FragmentId, ParallelUnitMapping>,
+    streaming_fragment_vnode_mapping: HashMap<FragmentId, WorkerMapping>,
     /// fragment vnode mapping info for serving
     serving_fragment_vnode_mapping: HashMap<FragmentId, ParallelUnitMapping>,
 }
@@ -135,7 +135,7 @@ impl WorkerNodeManager {
     pub fn refresh(
         &self,
         nodes: Vec<WorkerNode>,
-        streaming_mapping: HashMap<FragmentId, ParallelUnitMapping>,
+        streaming_mapping: HashMap<FragmentId, WorkerMapping>,
         serving_mapping: HashMap<FragmentId, ParallelUnitMapping>,
     ) {
         let mut write_guard = self.inner.write().unwrap();
@@ -184,7 +184,7 @@ impl WorkerNodeManager {
     pub fn get_streaming_fragment_mapping(
         &self,
         fragment_id: &FragmentId,
-    ) -> Result<ParallelUnitMapping> {
+    ) -> Result<WorkerMapping> {
         self.inner
             .read()
             .unwrap()
@@ -197,7 +197,7 @@ impl WorkerNodeManager {
     pub fn insert_streaming_fragment_mapping(
         &self,
         fragment_id: FragmentId,
-        vnode_mapping: ParallelUnitMapping,
+        vnode_mapping: WorkerMapping,
     ) {
         self.inner
             .write()
@@ -210,7 +210,7 @@ impl WorkerNodeManager {
     pub fn update_streaming_fragment_mapping(
         &self,
         fragment_id: FragmentId,
-        vnode_mapping: ParallelUnitMapping,
+        vnode_mapping: WorkerMapping,
     ) {
         let mut guard = self.inner.write().unwrap();
         guard

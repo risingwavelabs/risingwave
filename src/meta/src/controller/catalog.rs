@@ -45,7 +45,7 @@ use risingwave_pb::meta::relation::PbRelationInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
-use risingwave_pb::meta::{PbRelation, PbRelationGroup};
+use risingwave_pb::meta::{FragmentParallelUnitMapping, PbFragmentWorkerMapping, PbRelation, PbRelationGroup};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
 use risingwave_pb::user::PbUserInfo;
@@ -57,8 +57,9 @@ use sea_orm::{
     TransactionTrait, Value,
 };
 use tokio::sync::{RwLock, RwLockReadGuard};
+use risingwave_common::hash::ParallelUnitMapping;
 
-use super::utils::check_subscription_name_duplicate;
+use super::utils::{check_subscription_name_duplicate, get_parallel_unit_to_worker_map};
 use crate::controller::rename::{alter_relation_rename, alter_relation_rename_refs};
 use crate::controller::utils::{
     check_connection_name_duplicate, check_database_name_duplicate,
@@ -275,7 +276,30 @@ impl CatalogController {
             .into_tuple()
             .all(&txn)
             .await?;
+
+
+        let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
+
         let fragment_mappings = get_fragment_mappings_by_jobs(&txn, streaming_jobs.clone()).await?;
+
+        let fragment_mappings = fragment_mappings
+            .into_iter()
+            .map(
+                |FragmentParallelUnitMapping {
+                     fragment_id,
+                     mapping,
+                 }| {
+                    PbFragmentWorkerMapping {
+                        fragment_id,
+                        mapping: Some(
+                            ParallelUnitMapping::from_protobuf(&mapping.unwrap())
+                                .to_worker(&parallel_unit_to_worker)
+                                .to_protobuf(),
+                        ),
+                    }
+                },
+            )
+            .collect();
 
         // The schema and objects in the database will be delete cascade.
         let res = Object::delete_by_id(database_id).exec(&txn).await?;
@@ -1976,6 +2000,8 @@ impl CatalogController {
         }
         let user_infos = list_user_info_by_ids(to_update_user_ids, &txn).await?;
 
+        let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
+
         txn.commit().await?;
 
         // notify about them.
@@ -2050,6 +2076,26 @@ impl CatalogController {
                 NotificationInfo::RelationGroup(PbRelationGroup { relations }),
             )
             .await;
+
+        let fragment_mappings = fragment_mappings
+            .into_iter()
+            .map(
+                |FragmentParallelUnitMapping {
+                     fragment_id,
+                     mapping,
+                 }| {
+                    PbFragmentWorkerMapping {
+                        fragment_id,
+                        mapping: Some(
+                            ParallelUnitMapping::from_protobuf(&mapping.unwrap())
+                                .to_worker(&parallel_unit_to_worker)
+                                .to_protobuf(),
+                        ),
+                    }
+                },
+            )
+            .collect();
+
         self.notify_fragment_mapping(NotificationOperation::Delete, fragment_mappings)
             .await;
 

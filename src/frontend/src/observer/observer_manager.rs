@@ -19,7 +19,7 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::catalog::CatalogVersion;
-use risingwave_common::hash::ParallelUnitMapping;
+use risingwave_common::hash::{ParallelUnitMapping, WorkerMapping};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeFrontend};
@@ -27,7 +27,9 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{FragmentParallelUnitMapping, MetaSnapshot, SubscribeResponse};
+use risingwave_pb::meta::{
+    FragmentParallelUnitMapping, FragmentWorkerMapping, MetaSnapshot, SubscribeResponse,
+};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::watch::Sender;
 
@@ -72,7 +74,7 @@ impl ObserverState for FrontendObserverNode {
             Info::User(_) => {
                 self.handle_user_notification(resp);
             }
-            Info::ParallelUnitMapping(_) => self.handle_fragment_mapping_notification(resp),
+
             Info::Snapshot(_) => {
                 panic!(
                     "receiving a snapshot in the middle is unsupported now {:?}",
@@ -109,6 +111,8 @@ impl ObserverState for FrontendObserverNode {
             Info::Recovery(_) => {
                 self.compute_client_pool.invalidate_all();
             }
+
+            Info::StreamingWorkerMapping(_) => self.handle_fragment_mapping_notification(resp),
         }
     }
 
@@ -133,7 +137,6 @@ impl ObserverState for FrontendObserverNode {
             functions,
             connections,
             users,
-            parallel_unit_mappings,
             serving_parallel_unit_mappings,
             nodes,
             hummock_snapshot,
@@ -141,6 +144,7 @@ impl ObserverState for FrontendObserverNode {
             meta_backup_manifest_id: _,
             hummock_write_limits: _,
             session_params,
+            streaming_worker_mappings,
             version,
         } = snapshot;
 
@@ -179,7 +183,7 @@ impl ObserverState for FrontendObserverNode {
         }
         self.worker_node_manager.refresh(
             nodes,
-            convert_pu_mapping(&parallel_unit_mappings),
+            convert_worker_mapping(&streaming_worker_mappings),
             convert_pu_mapping(&serving_parallel_unit_mappings),
         );
         self.hummock_snapshot_manager
@@ -481,6 +485,23 @@ fn convert_pu_mapping(
                  mapping,
              }| {
                 let mapping = ParallelUnitMapping::from_protobuf(mapping.as_ref().unwrap());
+                (*fragment_id, mapping)
+            },
+        )
+        .collect()
+}
+
+fn convert_worker_mapping(
+    worker_mappings: &[FragmentWorkerMapping],
+) -> HashMap<FragmentId, WorkerMapping> {
+    worker_mappings
+        .iter()
+        .map(
+            |FragmentWorkerMapping {
+                 fragment_id,
+                 mapping,
+             }| {
+                let mapping = WorkerMapping::from_protobuf(mapping.as_ref().unwrap());
                 (*fragment_id, mapping)
             },
         )

@@ -145,8 +145,13 @@ where
             | Info::Function(_) => {
                 notification.version > info.version.as_ref().unwrap().catalog_version
             }
-            Info::ParallelUnitMapping(_) => {
-                notification.version > info.version.as_ref().unwrap().parallel_unit_mapping_version
+            Info::StreamingWorkerMapping(_) => {
+                notification.version
+                    > info
+                        .version
+                        .as_ref()
+                        .unwrap()
+                        .streaming_worker_mapping_version
             }
             Info::Node(_) => {
                 notification.version > info.version.as_ref().unwrap().worker_node_version
