@@ -123,7 +123,7 @@ impl ObjectStore for OpendalObjectStore {
             )));
         }
 
-        Ok(Bytes::from(data))
+        Ok(data.to_bytes())
     }
 
     /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
@@ -157,9 +157,8 @@ impl ObjectStore for OpendalObjectStore {
                 self.config.retry.streaming_read_attempt_timeout_ms,
             )))
             .reader_with(path)
-            .range(range)
             .await?;
-        let stream = reader.into_stream().map(|item| {
+        let stream = reader.into_bytes_stream(range).map(|item| {
             item.map_err(|e| {
                 ObjectError::internal(format!("reader into_stream fail {}", e.as_report()))
             })
@@ -249,9 +248,18 @@ impl ObjectStore for OpendalObjectStore {
 /// Store multiple parts in a map, and concatenate them on finish.
 pub struct OpendalStreamingUploader {
     writer: Writer,
+    /// Buffer for data. It will store at least `UPLOAD_BUFFER_SIZE` bytes of data before wrapping itself
+    /// into a stream and upload to object store as a part.
+    buf: Vec<Bytes>,
+    /// Length of the data that have not been uploaded to object store.
+    not_uploaded_len: usize,
+    /// Whether the writer is valid. The writer is invalid after abort/close.
+    is_valid: bool,
 }
 
 impl OpendalStreamingUploader {
+    const UPLOAD_BUFFER_SIZE: usize = 16 * 1024 * 1024;
+    
     pub async fn new(
         op: Operator,
         path: String,
@@ -272,23 +280,49 @@ impl OpendalStreamingUploader {
             )))
             .writer_with(&path)
             .concurrent(8)
-            .buffer(OPENDAL_BUFFER_SIZE)
             .await?;
-        Ok(Self { writer })
+        Ok(Self { writer, buf: vec![], not_uploaded_len: 0, is_valid: true })
+    }
+
+    async fn flush(&mut self) -> ObjectResult<()> {
+        let data: Vec<Bytes> = self.buf.drain(..).collect();
+        debug_assert_eq!(
+            data.iter().map(|b| b.len()).sum::<usize>(),
+            self.not_uploaded_len
+        );
+        if let Err(err) = self.writer.write(data).await {
+            self.is_valid = false;
+            self.writer.abort().await?;
+            return Err(err.into());
+        }
+        self.not_uploaded_len = 0;
+        Ok(())
     }
 }
 
-const OPENDAL_BUFFER_SIZE: usize = 16 * 1024 * 1024;
 
 #[async_trait::async_trait]
 impl StreamingUploader for OpendalStreamingUploader {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
-        self.writer.write(data).await?;
-
+        assert!(self.is_valid);
+        self.not_uploaded_len += data.len();
+        self.buf.push(data);
+        if self.not_uploaded_len >= Self::UPLOAD_BUFFER_SIZE {
+            self.flush().await?;
+        }
         Ok(())
     }
 
     async fn finish(mut self: Box<Self>) -> ObjectResult<()> {
+        assert!(self.is_valid);
+        if self.not_uploaded_len > 0 {
+            self.flush().await?;
+        }
+        
+        assert!(self.buf.is_empty());
+        assert_eq!(self.not_uploaded_len, 0);
+
+        self.is_valid = false;
         match self.writer.close().await {
             Ok(_) => (),
             Err(err) => {
@@ -301,7 +335,7 @@ impl StreamingUploader for OpendalStreamingUploader {
     }
 
     fn get_memory_usage(&self) -> u64 {
-        OPENDAL_BUFFER_SIZE as u64
+       Self::UPLOAD_BUFFER_SIZE as u64
     }
 }
 
