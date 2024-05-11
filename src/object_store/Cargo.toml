@@ -28,9 +28,19 @@ hyper-rustls = { version = "0.24.2", features = ["webpki-roots"] }
 hyper-tls = "0.5.0"
 itertools = { workspace = true }
 madsim = "0.2.27"
-opendal = "0.45.1"
+opendal = { version = "0.46", features = [
+    "services-azblob",
+    "services-fs",
+    "services-gcs",
+    "services-memory",
+    "services-obs",
+    "services-oss",
+    "services-s3",
+    "services-webhdfs",
+    "services-azfile",
+] }
 prometheus = { version = "0.13", features = ["process"] }
-reqwest = "0.11"                                                              # required by opendal
+reqwest = "0.12.2" # required by opendal
 risingwave_common = { workspace = true }
 rustls = "0.23.5"
 spin = "0.9"
