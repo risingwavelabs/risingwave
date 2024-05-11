@@ -36,6 +36,9 @@ jobs:
           sed -i "s/^appVersion: .*/appVersion: \"${{ env.NEW_APP_VERSION }}\"/" Chart.yaml
           echo "NEW_CHART_VERSION=$NEW_VERSION" >> $GITHUB_ENV
 
+      - name: Print current directory
+        run: pwd
+
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v4
         with:
