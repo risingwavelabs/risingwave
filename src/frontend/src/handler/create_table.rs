@@ -500,7 +500,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     )
     .await?;
 
-    let pb_source: risingwave_pb::catalog::Source = source_catalog.to_prost(schema_id, database_id);
+    let pb_source = source_catalog.to_prost(schema_id, database_id);
 
     let context = OptimizerContext::new(handler_args, explain_options);
 
