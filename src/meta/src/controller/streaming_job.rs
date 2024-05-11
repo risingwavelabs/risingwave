@@ -43,8 +43,8 @@ use risingwave_pb::meta::subscribe_response::{
 };
 use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::{
-    FragmentWorkerMapping,
-    PbFragmentWorkerMapping, PbRelation, PbRelationGroup, PbTableFragments, Relation,
+    FragmentWorkerMapping, PbFragmentWorkerMapping, PbRelation, PbRelationGroup, PbTableFragments,
+    Relation,
 };
 use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
