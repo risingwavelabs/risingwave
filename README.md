@@ -57,7 +57,7 @@
 RisingWave is a Postgres-compatible streaming database engineered to provide the <i><b>simplest</b></i> and <i><b>most cost-efficient</b></i> approach for <b>processing</b>, <b>analyzing</b>, and <b>managing</b> real-time event streaming data.
 
 
-![image](https://github.com/risingwavelabs/risingwave/assets/41638002/fc3468d4-45e0-4907-8078-e17730fb0ac0)
+![RisingWave](https://github.com/risingwavelabs/risingwave/assets/41638002/fc3468d4-45e0-4907-8078-e17730fb0ac0)
 
 
 ## Try it out in 60 seconds
