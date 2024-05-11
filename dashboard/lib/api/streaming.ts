@@ -24,6 +24,7 @@ import {
   Source,
   Table,
   View,
+  Subscription,
 } from "../../proto/gen/catalog"
 import {
   ListObjectDependenciesResponse_ObjectDependencies as ObjectDependencies,
@@ -47,9 +48,9 @@ export interface Relation {
   owner: number
   schemaId: number
   databaseId: number
-  columns: (ColumnCatalog | Field)[]
 
   // For display
+  columns?: (ColumnCatalog | Field)[]
   ownerName?: string
   schemaName?: string
   databaseName?: string
@@ -98,7 +99,8 @@ export async function getRelations() {
     await getTables(),
     await getIndexes(),
     await getSinks(),
-    await getSources()
+    await getSources(),
+    await getSubscriptions(),
   )
   relations = sortBy(relations, (x) => x.id)
   return relations
@@ -148,6 +150,12 @@ export async function getViews() {
   let views: View[] = (await api.get("/views")).map(View.fromJSON)
   views = sortBy(views, (x) => x.id)
   return views
+}
+
+export async function getSubscriptions() {
+  let subscriptions: Subscription[] = (await api.get("/subscriptions")).map(Subscription.fromJSON)
+  subscriptions = sortBy(subscriptions, (x) => x.id)
+  return subscriptions
 }
 
 export async function getUsers() {
