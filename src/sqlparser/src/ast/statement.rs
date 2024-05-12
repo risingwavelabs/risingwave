@@ -476,7 +476,6 @@ impl fmt::Display for CreateSink {
         }
     }
 }
-
 // sql_grammar!(CreateSinkStatement {
 //     if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS],
 //     sink_name: Ident,
@@ -521,7 +520,7 @@ impl ParseTo for CreateSinkStatement {
             p.expected("FROM or AS after CREATE SINK sink_name", p.peek_token())?
         };
 
-        let emit_mode = p.parse_emit_mode()?;
+        let emit_mode: Option<EmitMode> = p.parse_emit_mode()?;
 
         // This check cannot be put into the `WithProperties::parse_to`, since other
         // statements may not need the with properties.
