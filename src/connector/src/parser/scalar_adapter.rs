@@ -185,56 +185,52 @@ impl ScalarAdapter<'_> {
         }
     }
 
-    // return scalar and a flag indicating if the list should fallback to NULL
-    pub fn into_scalar_in_list(self, ty: DataType) -> (Option<ScalarImpl>, bool) {
-        match (&self, &ty) {
-            (ScalarAdapter::Builtin(scalar), _) => (Some(scalar.into_scalar_impl()), false),
-            (ScalarAdapter::Uuid(uuid), &DataType::Varchar) => {
-                (Some(ScalarImpl::from(uuid.to_string())), false)
-            }
-            (ScalarAdapter::Numeric(numeric), &DataType::Varchar) => {
-                if pg_numeric_is_special(numeric) {
-                    (None, true)
-                } else {
-                    (Some(ScalarImpl::from(pg_numeric_to_string(numeric))), false)
-                }
-            }
-            (ScalarAdapter::Numeric(numeric), &DataType::Int256) => match numeric {
-                PgNumeric::Normalized(big_decimal) => {
-                    match Int256::from_str(big_decimal.to_string().as_str()) {
-                        Ok(num) => (Some(ScalarImpl::from(num)), false),
-                        Err(err) => {
-                            tracing::error!(error = %err.as_report(), "parse pg-numeric as rw_int256 failed");
-                            (None, true)
-                        }
+    pub fn build_scalar_in_list(
+        vec: Vec<Option<ScalarAdapter<'_>>>,
+        ty: DataType,
+        mut builder: risingwave_common::array::ArrayBuilderImpl,
+    ) -> Option<risingwave_common::array::ArrayBuilderImpl> {
+        for val in vec {
+            let scalar = match (val, &ty) {
+                (Some(ScalarAdapter::Numeric(numeric)), &DataType::Varchar) => {
+                    if pg_numeric_is_special(&numeric) {
+                        return None;
+                    } else {
+                        Some(ScalarImpl::from(pg_numeric_to_string(&numeric)))
                     }
                 }
-                _ => (None, true),
-            },
-            (ScalarAdapter::Numeric(numeric), &DataType::Decimal) => match numeric {
-                PgNumeric::Normalized(big_decimal) => {
-                    match Decimal::from_str(big_decimal.to_string().as_str()) {
-                        Ok(num) => (Some(ScalarImpl::from(num)), false),
-                        Err(err) => {
-                            tracing::error!(error = %err.as_report(), "parse pg-numeric as rw-numeric failed (likely out-of-range");
-                            (None, true)
+                (Some(ScalarAdapter::Numeric(numeric)), &DataType::Int256) => match numeric {
+                    PgNumeric::Normalized(big_decimal) => {
+                        match Int256::from_str(big_decimal.to_string().as_str()) {
+                            Ok(num) => Some(ScalarImpl::from(num)),
+                            Err(err) => {
+                                tracing::error!(error = %err.as_report(), "parse pg-numeric as rw_int256 failed");
+                                return None;
+                            }
                         }
                     }
-                }
-                _ => (None, true),
-            },
-            (ScalarAdapter::Enum(EnumString(s)), &DataType::Varchar) => {
-                (Some(ScalarImpl::from(s)), false)
-            }
-            _ => {
-                tracing::error!(
-                    adapter = self.name(),
-                    rw_type = ty.pg_name(),
-                    "failed to convert from ScalarAdapter: invalid conversion"
-                );
-                (None, false)
-            }
+                    _ => return None,
+                },
+                (Some(ScalarAdapter::Numeric(numeric)), &DataType::Decimal) => match numeric {
+                    PgNumeric::Normalized(big_decimal) => {
+                        match Decimal::from_str(big_decimal.to_string().as_str()) {
+                            Ok(num) => Some(ScalarImpl::from(num)),
+                            Err(err) => {
+                                tracing::error!(error = %err.as_report(), "parse pg-numeric as rw-numeric failed (likely out-of-range");
+                                return None;
+                            }
+                        }
+                    }
+                    _ => return None,
+                },
+                (Some(_), _) => unreachable!(
+                    "into_scalar_in_list should only be called with ScalarAdapter::Numeric types"
+                ),
+                (None, _) => None,
+            };
+            builder.append(scalar);
         }
+        return Some(builder);
     }
 }
 

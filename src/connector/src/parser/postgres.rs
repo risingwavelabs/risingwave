@@ -260,21 +260,11 @@ fn postgres_cell_to_scalar_impl(
                         match res {
                             Ok(val) => {
                                 if let Some(vec) = val {
-                                    for val in vec {
-                                        let scalar = match val {
-                                            Some(v) => {
-                                                match v.into_scalar_in_list(DataType::Decimal) {
-                                                    // Issue #2, return NULL::numeric[] directly, discarding `builder`
-                                                    (_, true) => {
-                                                        return None;
-                                                    }
-                                                    (s, false) => s,
-                                                }
-                                            }
-                                            None => None,
-                                        };
-                                        builder.append(scalar);
-                                    }
+                                    builder = ScalarAdapter::build_scalar_in_list(
+                                        vec,
+                                        DataType::Decimal,
+                                        builder,
+                                    )?;
                                 }
                             }
                             Err(err) => {
@@ -314,21 +304,11 @@ fn postgres_cell_to_scalar_impl(
                                 match res {
                                     Ok(val) => {
                                         if let Some(vec) = val {
-                                            for val in vec {
-                                                let scalar = match val {
-                                                    Some(v) => {
-                                                        match v
-                                                            .into_scalar_in_list(DataType::Varchar)
-                                                        {
-                                                            // Issue #2, return NULL::varchar[] directly, discarding `builder`
-                                                            (_, true) => return None,
-                                                            (s, false) => s,
-                                                        }
-                                                    }
-                                                    None => None,
-                                                };
-                                                builder.append(scalar);
-                                            }
+                                            builder = ScalarAdapter::build_scalar_in_list(
+                                                vec,
+                                                DataType::Varchar,
+                                                builder,
+                                            )?;
                                         }
                                     }
                                     Err(err) => {
@@ -396,19 +376,11 @@ fn postgres_cell_to_scalar_impl(
                         match res {
                             Ok(val) => {
                                 if let Some(vec) = val {
-                                    for val in vec {
-                                        let scalar = match val {
-                                            Some(v) => {
-                                                match v.into_scalar_in_list(DataType::Int256) {
-                                                    // Issue #2, return NULL::rw_int256[] directly, discarding `builder`
-                                                    (_, true) => return None,
-                                                    (s, false) => s,
-                                                }
-                                            }
-                                            None => None,
-                                        };
-                                        builder.append(scalar);
-                                    }
+                                    builder = ScalarAdapter::build_scalar_in_list(
+                                        vec,
+                                        DataType::Int256,
+                                        builder,
+                                    )?;
                                 }
                             }
                             Err(err) => {
