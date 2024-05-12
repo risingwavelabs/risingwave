@@ -177,8 +177,7 @@ impl UserCatalog {
         if self.is_super {
             return true;
         }
-        let mut action_map: HashMap<_, _> =
-            actions.into_iter().map(|action| (action, false)).collect();
+        let mut action_map: HashMap<_, _> = actions.iter().map(|action| (action, false)).collect();
 
         for privilege in &self.grant_privileges {
             if privilege.get_object().unwrap() != object {
@@ -188,7 +187,7 @@ impl UserCatalog {
                 let action = awo.get_action().unwrap();
                 let with_grant_option = awo.with_grant_option;
 
-                for (&key, found) in action_map.iter_mut() {
+                for (&key, found) in &mut action_map {
                     let (required_action, required_grant_option) = *key;
 
                     if action == required_action && (!required_grant_option | with_grant_option) {
