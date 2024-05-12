@@ -230,7 +230,7 @@ impl ScalarAdapter<'_> {
             };
             builder.append(scalar);
         }
-        return Some(builder);
+        Some(builder)
     }
 }
 
