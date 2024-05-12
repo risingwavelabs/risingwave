@@ -86,6 +86,21 @@ SELECT has_table_privilege('test_user', 'foo', 'INSERT WITH GRANT OPTION');
 ----
 f
 
+query I
+SELECT has_table_privilege('test_user', 'foo', 'INSERT, SELECT WITH GRANT OPTION');
+----
+t
+
+query I
+SELECT has_table_privilege('test_user', 'foo', 'DELETE, INSERT, SELECT WITH GRANT OPTION');
+----
+t
+
+query I
+SELECT has_table_privilege('test_user', 'foo', 'DELETE WITH GRANT OPTION, INSERT, SELECT WITH GRANT OPTION');
+----
+f
+
 # FIXME(Kexiang): Currently, RW's grant privilege on all table doesn't apply to VIEWS.
 query I
 SELECT has_table_privilege('test_user', 'foo_view', 'SELECT');

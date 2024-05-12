@@ -177,23 +177,26 @@ impl UserCatalog {
         if self.is_super {
             return true;
         }
-        // Find matching privilege for the given object
-        if let Some(privilege) = self
-            .grant_privileges
-            .iter()
-            .find(|p| p.get_object().unwrap() == object)
-        {
-            for &(action, check_with_grant_option) in actions {
-                // Check if any action_with_opts match the given action and with_grant_option
-                if !privilege.action_with_opts.iter().any(|awo| {
-                    awo.get_action().unwrap() == action
-                        && (!check_with_grant_option | awo.with_grant_option)
-                }) {
-                    return false;
+        let mut action_map: HashMap<_, _> =
+            actions.into_iter().map(|action| (action, false)).collect();
+
+        for privilege in &self.grant_privileges {
+            if privilege.get_object().unwrap() != object {
+                continue;
+            }
+            for awo in &privilege.action_with_opts {
+                let action = awo.get_action().unwrap();
+                let with_grant_option = awo.with_grant_option;
+
+                for (&key, found) in action_map.iter_mut() {
+                    let (required_action, required_grant_option) = *key;
+
+                    if action == required_action && (!required_grant_option | with_grant_option) {
+                        *found = true;
+                    }
                 }
             }
-            return true;
         }
-        false
+        action_map.values().all(|&found| found)
     }
 }
