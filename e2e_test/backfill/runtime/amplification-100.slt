@@ -1,0 +1,86 @@
+statement ok
+create table fact(v1 int);
+
+statement ok
+create table dim(v1 int);
+
+statement ok
+insert into fact select 1 from generate_series(1, 1000000);
+
+statement ok
+insert into dim select 1 from generate_series(1, 100);
+
+statement ok
+flush;
+
+statement ok
+set background_ddl = true;
+
+statement ok
+create sink s1 as select fact.v1 from fact join dim on fact.v1 = dim.v1 with (connector = 'blackhole');
+
+statement ok
+set background_ddl = false;
+
+# Let at least 16 barriers pass through
+# Then we have 1 * 2^16 = 65536
+
+skipif in-memory
+sleep 10s
+
+statement ok
+flush;
+
+statement ok
+flush;
+
+statement ok
+flush;
+
+statement ok
+flush;
+
+statement ok
+flush;
+
+statement ok
+flush;
+
+statement ok
+flush;
+
+statement ok
+flush;
+
+statement ok
+flush;
+
+statement ok
+flush;
+
+statement ok
+flush;
+
+statement ok
+flush;
+
+statement ok
+flush;
+
+statement ok
+flush;
+
+statement ok
+flush;
+
+statement ok
+flush;
+
+# statement ok
+# drop sink s1;
+
+# statement ok
+# drop table fact;
+
+# statement ok
+# drop table dim;
