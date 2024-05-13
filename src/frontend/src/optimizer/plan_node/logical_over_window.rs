@@ -14,7 +14,7 @@
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::{bail_not_implemented, not_implemented};
 use risingwave_expr::aggregate::AggKind;
@@ -29,9 +29,11 @@ use super::{
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
-    Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, WindowFunction,
+    AggCall, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef,
+    WindowFunction,
 };
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::plan_node::logical_agg::LogicalAggBuilder;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, Literal, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -103,7 +105,7 @@ impl<'a> LogicalOverWindowBuilder<'a> {
             window_func.frame,
         );
 
-        if let WindowFuncKind::Aggregate(agg_kind) = kind
+        let new_expr = if let WindowFuncKind::Aggregate(agg_kind) = kind
             && matches!(
                 agg_kind,
                 AggKind::Avg
@@ -111,148 +113,39 @@ impl<'a> LogicalOverWindowBuilder<'a> {
                     | AggKind::StddevSamp
                     | AggKind::VarPop
                     | AggKind::VarSamp
-            )
-        {
-            // Refer to `LogicalAggBuilder::try_rewrite_agg_call`
-            match agg_kind {
-                AggKind::Avg => {
-                    assert_eq!(args.len(), 1);
-                    let left_ref = ExprImpl::from(self.push_window_func(WindowFunction::new(
-                        WindowFuncKind::Aggregate(AggKind::Sum),
+            ) {
+            let agg_call = AggCall::new(
+                agg_kind,
+                args,
+                false,
+                order_by,
+                Condition::true_cond(),
+                vec![],
+            )?;
+            LogicalAggBuilder::general_rewrite_agg_call(agg_call, |agg_call| {
+                Ok(self.push_window_func(
+                    // AggCall -> WindowFunction
+                    WindowFunction::new(
+                        WindowFuncKind::Aggregate(agg_call.agg_kind),
                         partition_by.clone(),
-                        order_by.clone(),
-                        args.clone(),
+                        agg_call.order_by.clone(),
+                        agg_call.args.clone(),
                         frame.clone(),
-                    )?))
-                    .cast_explicit(return_type)?;
-                    let right_ref = ExprImpl::from(self.push_window_func(WindowFunction::new(
-                        WindowFuncKind::Aggregate(AggKind::Count),
-                        partition_by,
-                        order_by,
-                        args,
-                        frame,
-                    )?));
-
-                    let new_expr = ExprImpl::from(FunctionCall::new(
-                        ExprType::Divide,
-                        vec![left_ref, right_ref],
-                    )?);
-                    Ok(new_expr)
-                }
-                AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp => {
-                    let input = args.first().unwrap();
-                    let squared_input_expr = ExprImpl::from(FunctionCall::new(
-                        ExprType::Multiply,
-                        vec![input.clone(), input.clone()],
-                    )?);
-
-                    let sum_of_squares_expr =
-                        ExprImpl::from(self.push_window_func(WindowFunction::new(
-                            WindowFuncKind::Aggregate(AggKind::Sum),
-                            partition_by.clone(),
-                            order_by.clone(),
-                            vec![squared_input_expr],
-                            frame.clone(),
-                        )?))
-                        .cast_explicit(return_type.clone())?;
-
-                    let sum_expr = ExprImpl::from(self.push_window_func(WindowFunction::new(
-                        WindowFuncKind::Aggregate(AggKind::Sum),
-                        partition_by.clone(),
-                        order_by.clone(),
-                        args.clone(),
-                        frame.clone(),
-                    )?))
-                    .cast_explicit(return_type.clone())?;
-
-                    let count_expr = ExprImpl::from(self.push_window_func(WindowFunction::new(
-                        WindowFuncKind::Aggregate(AggKind::Count),
-                        partition_by,
-                        order_by,
-                        args.clone(),
-                        frame,
-                    )?));
-
-                    let square_of_sum_expr = ExprImpl::from(FunctionCall::new(
-                        ExprType::Multiply,
-                        vec![sum_expr.clone(), sum_expr],
-                    )?);
-
-                    let numerator_expr = ExprImpl::from(FunctionCall::new(
-                        ExprType::Subtract,
-                        vec![
-                            sum_of_squares_expr,
-                            ExprImpl::from(FunctionCall::new(
-                                ExprType::Divide,
-                                vec![square_of_sum_expr, count_expr.clone()],
-                            )?),
-                        ],
-                    )?);
-
-                    let denominator_expr = match agg_kind {
-                        AggKind::StddevPop | AggKind::VarPop => count_expr.clone(),
-                        AggKind::StddevSamp | AggKind::VarSamp => {
-                            ExprImpl::from(FunctionCall::new(
-                                ExprType::Subtract,
-                                vec![
-                                    count_expr.clone(),
-                                    ExprImpl::from(Literal::new(
-                                        Datum::from(ScalarImpl::Int64(1)),
-                                        DataType::Int64,
-                                    )),
-                                ],
-                            )?)
-                        }
-                        _ => unreachable!(),
-                    };
-
-                    let mut target_expr = ExprImpl::from(FunctionCall::new(
-                        ExprType::Divide,
-                        vec![numerator_expr, denominator_expr],
-                    )?);
-
-                    if matches!(agg_kind, AggKind::StddevPop | AggKind::StddevSamp) {
-                        target_expr = ExprImpl::from(
-                            FunctionCall::new(ExprType::Sqrt, vec![target_expr]).unwrap(),
-                        );
-                    }
-
-                    match agg_kind {
-                        AggKind::VarPop | AggKind::StddevPop => Ok(target_expr),
-                        AggKind::StddevSamp | AggKind::VarSamp => {
-                            let less_than_expr = ExprImpl::from(FunctionCall::new(
-                                ExprType::LessThanOrEqual,
-                                vec![
-                                    count_expr,
-                                    ExprImpl::from(Literal::new(
-                                        Datum::from(ScalarImpl::Int64(1)),
-                                        DataType::Int64,
-                                    )),
-                                ],
-                            )?);
-                            let null_expr = ExprImpl::from(Literal::new(None, return_type));
-
-                            let case_expr = ExprImpl::from(FunctionCall::new(
-                                ExprType::Case,
-                                vec![less_than_expr, null_expr, target_expr],
-                            )?);
-                            Ok(case_expr)
-                        }
-                        _ => unreachable!(),
-                    }
-                }
-                _ => unreachable!(),
-            }
+                    )?,
+                ))
+            })?
         } else {
-            let new_expr = ExprImpl::from(self.push_window_func(WindowFunction::new(
+            ExprImpl::from(self.push_window_func(WindowFunction::new(
                 kind,
                 partition_by,
                 order_by,
                 args,
                 frame,
-            )?));
-            Ok(new_expr)
-        }
+            )?))
+        };
+
+        assert_eq!(new_expr.return_type(), return_type);
+        Ok(new_expr)
     }
 }
 

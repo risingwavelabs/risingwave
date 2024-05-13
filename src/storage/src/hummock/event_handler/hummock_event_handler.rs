@@ -1089,7 +1089,7 @@ mod tests {
             version_update_rx,
             initial_version.clone(),
             None,
-            mock_sstable_store(),
+            mock_sstable_store().await,
             Arc::new(HummockStateStoreMetrics::unused()),
             &default_opts_for_test(),
             Arc::new(|_, _| unreachable!("should not spawn upload task")),

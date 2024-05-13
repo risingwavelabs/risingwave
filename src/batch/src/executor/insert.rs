@@ -267,7 +267,7 @@ mod tests {
     use std::sync::Arc;
 
     use assert_matches::assert_matches;
-    use foyer::memory::CacheContext;
+    use foyer::CacheContext;
     use futures::StreamExt;
     use itertools::Itertools;
     use risingwave_common::array::{Array, ArrayImpl, I32Array, StructArray};
