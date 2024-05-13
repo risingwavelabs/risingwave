@@ -30,16 +30,12 @@ message SinkParam {
   string sink_name = 8;
 }
 
-enum SinkPayloadFormat {
-  FORMAT_UNSPECIFIED = 0;
-  JSON = 1;
-  STREAM_CHUNK = 2;
-}
-
 message SinkWriterStreamRequest {
   message StartSink {
     SinkParam sink_param = 1;
-    SinkPayloadFormat format = 2;
+    // Deprecated: SinkPayloadFormat format = 2;
+    reserved "format";
+    reserved 2;
     TableSchema payload_schema = 3;
   }
 

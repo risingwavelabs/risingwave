@@ -118,7 +118,6 @@ pub fn create_source_desc_builder(
         row_id_index.map(|x| x as _),
         with_properties,
         source_info,
-        params.env.connector_params(),
         params.env.config().developer.connector_message_buffer_size,
         // `pk_indices` is used to ensure that a message will be skipped instead of parsed
         // with null pk when the pk column is missing.
