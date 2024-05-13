@@ -1778,7 +1778,7 @@ pub mod default {
 
         // init + upload_part + finish
         pub fn object_store_streaming_upload_attempt_timeout_ms() -> u64 {
-            5 * 1000 // 5s
+            10 * 1000 // 10s
         }
 
         pub fn object_store_streaming_upload_retry_attempts() -> usize {
@@ -1787,7 +1787,7 @@ pub mod default {
 
         // tips: depend on block_size
         pub fn object_store_read_attempt_timeout_ms() -> u64 {
-            8 * 1000 // 8s
+            16 * 1000 // 16s
         }
 
         pub fn object_store_read_retry_attempts() -> usize {
