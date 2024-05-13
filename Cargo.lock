@@ -8850,16 +8850,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04bfa62906ce8d9badf8d1764501640ae7f0bcea3437a209315830e0f73564d1"
 
 [[package]]
-name = "prepare_ci_pubsub"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "google-cloud-googleapis",
- "google-cloud-pubsub",
- "madsim-tokio",
-]
-
-[[package]]
 name = "pretty-xmlish"
 version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
