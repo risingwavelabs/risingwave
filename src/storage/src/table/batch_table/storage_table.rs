@@ -22,7 +22,7 @@ use std::{iter, mem};
 
 use auto_enums::auto_enum;
 use await_tree::InstrumentAwait;
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{Bytes, BytesMut};
 use foyer::memory::CacheContext;
 use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
@@ -1108,11 +1108,10 @@ impl<S: StateStore> ColumnarStoreStorageTableInnerIterInner<S> {
             &table_key.0.as_ref()[(VirtualNode::SIZE + mem::size_of::<ColumnId>())..]
         }
         fn vnode_prefixed_key<T: AsRef<[u8]>>(table_key: &TableKey<T>) -> Bytes {
-            let mut buffer = BytesMut::new();
-            buffer.put_slice(&table_key.0.as_ref()[..VirtualNode::SIZE]);
-            buffer.put_slice(
-                &table_key.0.as_ref()[(VirtualNode::SIZE + mem::size_of::<ColumnId>())..],
-            );
+            let t_ref = table_key.0.as_ref();
+            let mut buffer = BytesMut::with_capacity(t_ref.len() - mem::size_of::<ColumnId>());
+            buffer.extend_from_slice(&t_ref[..VirtualNode::SIZE]);
+            buffer.extend_from_slice(&t_ref[(VirtualNode::SIZE + mem::size_of::<ColumnId>())..]);
             buffer.freeze()
         }
         loop {
