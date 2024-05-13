@@ -4,7 +4,6 @@ package connector_service;
 
 import "catalog.proto";
 import "common.proto";
-import "data.proto";
 import "plan_common.proto";
 
 option java_outer_classname = "ConnectorServiceProto";
