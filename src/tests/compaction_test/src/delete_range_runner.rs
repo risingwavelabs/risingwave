@@ -20,12 +20,13 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
-use foyer::{CacheContext, HybridCacheBuilder};
+use foyer::memory::CacheContext;
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig, RwConfig,
+    extract_storage_memory_config, load_config, EvictionConfig, NoOverride, ObjectStoreConfig,
+    RwConfig,
 };
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
@@ -52,7 +53,7 @@ use risingwave_storage::hummock::compactor::{
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::utils::cmp_delete_range_left_bounds;
 use risingwave_storage::hummock::{
-    CachePolicy, HummockStorage, MemoryLimiter, SstableObjectIdManager, SstableStore,
+    CachePolicy, FileCache, HummockStorage, MemoryLimiter, SstableObjectIdManager, SstableStore,
     SstableStoreConfig,
 };
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
@@ -209,27 +210,21 @@ async fn compaction_test(
         Arc::new(ObjectStoreConfig::default()),
     )
     .await;
-    let meta_cache_v2 = HybridCacheBuilder::new()
-        .memory(storage_memory_config.meta_cache_capacity_mb * (1 << 20))
-        .with_shards(storage_memory_config.meta_cache_shard_num)
-        .storage()
-        .build()
-        .await?;
-    let block_cache_v2 = HybridCacheBuilder::new()
-        .memory(storage_memory_config.block_cache_capacity_mb * (1 << 20))
-        .with_shards(storage_memory_config.block_cache_shard_num)
-        .storage()
-        .build()
-        .await?;
     let sstable_store = Arc::new(SstableStore::new(SstableStoreConfig {
         store: Arc::new(remote_object_store),
         path: system_params.data_directory().to_string(),
+        block_cache_capacity: storage_memory_config.block_cache_capacity_mb * (1 << 20),
+        meta_cache_capacity: storage_memory_config.meta_cache_capacity_mb * (1 << 20),
+        block_cache_shard_num: storage_memory_config.block_cache_shard_num,
+        meta_cache_shard_num: storage_memory_config.meta_cache_shard_num,
+        block_cache_eviction: EvictionConfig::for_test(),
+        meta_cache_eviction: EvictionConfig::for_test(),
         prefetch_buffer_capacity: storage_memory_config.prefetch_buffer_capacity_mb * (1 << 20),
         max_prefetch_block_number: storage_opts.max_prefetch_block_number,
+        data_file_cache: FileCache::none(),
+        meta_file_cache: FileCache::none(),
         recent_filter: None,
         state_store_metrics: state_store_metrics.clone(),
-        meta_cache_v2,
-        block_cache_v2,
     }));
 
     let store = HummockStorage::new(

@@ -584,7 +584,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_concat_iterator() {
-        let sstable_store = mock_sstable_store().await;
+        let sstable_store = mock_sstable_store();
         let mut table_infos = vec![];
         for object_id in 0..3 {
             let start_index = object_id * TEST_KEYS_COUNT;
@@ -704,7 +704,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_concat_iterator_seek_idx() {
-        let sstable_store = mock_sstable_store().await;
+        let sstable_store = mock_sstable_store();
         let mut table_infos = vec![];
         for object_id in 0..3 {
             let start_index = object_id * TEST_KEYS_COUNT + TEST_KEYS_COUNT / 2;

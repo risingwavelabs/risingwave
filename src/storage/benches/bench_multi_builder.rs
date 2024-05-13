@@ -20,18 +20,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use foyer::HybridCacheBuilder;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
+use risingwave_common::config::{EvictionConfig, MetricLevel, ObjectStoreConfig};
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_object_store::object::{ObjectStore, ObjectStoreImpl, S3ObjectStore};
 use risingwave_storage::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    BatchSstableWriterFactory, CachePolicy, HummockResult, MemoryLimiter, SstableBuilder,
-    SstableBuilderOptions, SstableStore, SstableStoreConfig, SstableWriterFactory,
+    BatchSstableWriterFactory, CachePolicy, FileCache, HummockResult, MemoryLimiter,
+    SstableBuilder, SstableBuilderOptions, SstableStore, SstableStoreConfig, SstableWriterFactory,
     SstableWriterOptions, StreamingSstableWriterFactory, Xor16FilterBuilder,
 };
 use risingwave_storage::monitor::{global_hummock_state_store_metrics, ObjectStoreMetrics};
@@ -132,7 +131,6 @@ fn bench_builder(
         .unwrap();
 
     let metrics = Arc::new(ObjectStoreMetrics::unused());
-
     let default_config = Arc::new(ObjectStoreConfig::default());
     let object_store = runtime.block_on(async {
         S3ObjectStore::new_with_config(bucket.to_string(), metrics.clone(), default_config.clone())
@@ -140,35 +138,22 @@ fn bench_builder(
             .monitored(metrics, default_config)
     });
     let object_store = Arc::new(ObjectStoreImpl::S3(object_store));
-
-    let sstable_store = runtime.block_on(async {
-        let meta_cache_v2 = HybridCacheBuilder::new()
-            .memory(64 << 20)
-            .with_shards(2)
-            .storage()
-            .build()
-            .await
-            .unwrap();
-        let block_cache_v2 = HybridCacheBuilder::new()
-            .memory(128 << 20)
-            .with_shards(2)
-            .storage()
-            .build()
-            .await
-            .unwrap();
-        Arc::new(SstableStore::new(SstableStoreConfig {
-            store: object_store,
-            path: "test".to_string(),
-            prefetch_buffer_capacity: 64 << 20,
-            max_prefetch_block_number: 16,
-            recent_filter: None,
-            state_store_metrics: Arc::new(global_hummock_state_store_metrics(
-                MetricLevel::Disabled,
-            )),
-            meta_cache_v2,
-            block_cache_v2,
-        }))
-    });
+    let sstable_store = Arc::new(SstableStore::new(SstableStoreConfig {
+        store: object_store,
+        path: "test".to_string(),
+        block_cache_capacity: 64 << 20,
+        meta_cache_capacity: 128 << 20,
+        meta_cache_shard_num: 2,
+        block_cache_shard_num: 2,
+        block_cache_eviction: EvictionConfig::for_test(),
+        meta_cache_eviction: EvictionConfig::for_test(),
+        prefetch_buffer_capacity: 64 << 20,
+        max_prefetch_block_number: 16,
+        data_file_cache: FileCache::none(),
+        meta_file_cache: FileCache::none(),
+        recent_filter: None,
+        state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
+    }));
 
     let mut group = c.benchmark_group("bench_multi_builder");
     group

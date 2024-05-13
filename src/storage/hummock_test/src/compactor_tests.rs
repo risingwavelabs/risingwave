@@ -21,7 +21,7 @@ pub(crate) mod tests {
     use std::sync::Arc;
 
     use bytes::{BufMut, Bytes, BytesMut};
-    use foyer::CacheContext;
+    use foyer::memory::CacheContext;
     use itertools::Itertools;
     use rand::{Rng, RngCore, SeedableRng};
     use risingwave_common::buffer::BitmapBuilder;
@@ -104,7 +104,7 @@ pub(crate) mod tests {
             write_conflict_detection_enabled: true,
             ..Default::default()
         });
-        let sstable_store = mock_sstable_store().await;
+        let sstable_store = mock_sstable_store();
 
         let hummock = GlobalHummockStorage::for_test(
             options,
@@ -138,7 +138,7 @@ pub(crate) mod tests {
             write_conflict_detection_enabled: true,
             ..Default::default()
         });
-        let sstable_store = mock_sstable_store().await;
+        let sstable_store = mock_sstable_store();
 
         GlobalHummockStorage::for_test(
             options,

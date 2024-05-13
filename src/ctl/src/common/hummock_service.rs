@@ -17,12 +17,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
-use foyer::HybridCacheBuilder;
-use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
+use risingwave_common::config::{EvictionConfig, MetricLevel, ObjectStoreConfig};
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::{HummockStorage, SstableStore, SstableStoreConfig};
+use risingwave_storage::hummock::{FileCache, HummockStorage, SstableStore, SstableStoreConfig};
 use risingwave_storage::monitor::{
     global_hummock_state_store_metrics, CompactorMetrics, HummockMetrics, HummockStateStoreMetrics,
     MonitoredStateStore, MonitoredStorageMetrics, ObjectStoreMetrics,
@@ -168,30 +167,23 @@ impl HummockServiceOpts {
 
         let opts = self.get_storage_opts();
 
-        let meta_cache_v2 = HybridCacheBuilder::new()
-            .memory(opts.meta_cache_capacity_mb * (1 << 20))
-            .with_shards(opts.meta_cache_shard_num)
-            .storage()
-            .build()
-            .await?;
-        let block_cache_v2 = HybridCacheBuilder::new()
-            .memory(opts.block_cache_capacity_mb * (1 << 20))
-            .with_shards(opts.block_cache_shard_num)
-            .storage()
-            .build()
-            .await?;
-
         Ok(Arc::new(SstableStore::new(SstableStoreConfig {
             store: Arc::new(object_store),
             path: opts.data_directory,
+            block_cache_capacity: opts.block_cache_capacity_mb * (1 << 20),
+            meta_cache_capacity: opts.meta_cache_capacity_mb * (1 << 20),
+            block_cache_shard_num: opts.block_cache_shard_num,
+            meta_cache_shard_num: opts.meta_cache_shard_num,
+            block_cache_eviction: EvictionConfig::for_test(),
+            meta_cache_eviction: EvictionConfig::for_test(),
             prefetch_buffer_capacity: opts.block_cache_capacity_mb * (1 << 20),
             max_prefetch_block_number: opts.max_prefetch_block_number,
+            data_file_cache: FileCache::none(),
+            meta_file_cache: FileCache::none(),
             recent_filter: None,
             state_store_metrics: Arc::new(global_hummock_state_store_metrics(
                 MetricLevel::Disabled,
             )),
-            meta_cache_v2,
-            block_cache_v2,
         })))
     }
 }

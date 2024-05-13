@@ -27,7 +27,6 @@ pub use block_iterator::*;
 mod bloom;
 mod xor_filter;
 pub use bloom::BloomFilterBuilder;
-use serde::{Deserialize, Serialize};
 pub use xor_filter::{
     BlockedXor16FilterBuilder, Xor16FilterBuilder, Xor8FilterBuilder, XorFilterReader,
 };
@@ -148,7 +147,7 @@ impl DeleteRangeTombstone {
 /// next event key wmk2 (7) (not inclusive).
 /// If there is no range deletes between current event key and next event key, `new_epoch` will be
 /// `HummockEpoch::MAX`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MonotonicDeleteEvent {
     pub event_key: PointRange<Vec<u8>>,
     pub new_epoch: HummockEpoch,
@@ -210,25 +209,11 @@ impl Display for MonotonicDeleteEvent {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-struct SerdeSstable {
-    id: HummockSstableObjectId,
-    meta: SstableMeta,
-}
-
-impl From<SerdeSstable> for Sstable {
-    fn from(SerdeSstable { id, meta }: SerdeSstable) -> Self {
-        Sstable::new(id, meta)
-    }
-}
-
 /// [`Sstable`] is a handle for accessing SST.
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(from = "SerdeSstable")]
+#[derive(Clone)]
 pub struct Sstable {
     pub id: HummockSstableObjectId,
     pub meta: SstableMeta,
-    #[serde(skip)]
     pub filter_reader: XorFilterReader,
 }
 
@@ -295,7 +280,7 @@ impl Sstable {
     }
 }
 
-#[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Eq, PartialEq)]
 pub struct BlockMeta {
     pub smallest_key: Vec<u8>,
     pub offset: u32,
@@ -365,7 +350,7 @@ impl BlockMeta {
     }
 }
 
-#[derive(Default, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[derive(Default, Clone, PartialEq, Eq, Debug)]
 pub struct SstableMeta {
     pub block_metas: Vec<BlockMeta>,
     pub bloom_filter: Vec<u8>,
@@ -577,14 +562,9 @@ impl SstableIteratorReadOptions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hummock::iterator::test_utils::{
-        default_builder_opt_for_test, iterator_test_key_of,
-    };
-    use crate::hummock::test_utils::gen_test_sstable_data;
-    use crate::hummock::HummockValue;
 
     #[test]
-    fn test_sstable_meta_enc_dec() {
+    pub fn test_sstable_meta_enc_dec() {
         let meta = SstableMeta {
             block_metas: vec![
                 BlockMeta {
@@ -613,29 +593,5 @@ mod tests {
         assert_eq!(sz, buf.len());
         let decoded_meta = SstableMeta::decode(&buf[..]).unwrap();
         assert_eq!(decoded_meta, meta);
-
-        println!("buf: {}", buf.len());
-    }
-
-    #[tokio::test]
-    async fn test_sstable_serde() {
-        let (_, meta) = gen_test_sstable_data(
-            default_builder_opt_for_test(),
-            (0..100).clone().map(|x| {
-                (
-                    iterator_test_key_of(x),
-                    HummockValue::put(format!("overlapped_new_{}", x).as_bytes().to_vec()),
-                )
-            }),
-        )
-        .await;
-
-        let buffer = bincode::serialize(&meta).unwrap();
-
-        let m: SstableMeta = bincode::deserialize(&buffer).unwrap();
-
-        assert_eq!(meta, m);
-
-        println!("{} vs {}", buffer.len(), meta.encoded_size());
     }
 }

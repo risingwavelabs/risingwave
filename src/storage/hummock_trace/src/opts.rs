@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use bincode::{Decode, Encode};
-use foyer::CacheContext;
+use foyer::memory::CacheContext;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
@@ -33,6 +33,7 @@ pub struct TracedPrefetchOptions {
 pub enum TracedCachePolicy {
     Disable,
     Fill(TracedCachePriority),
+    FileFileCache,
     NotFill,
 }
 

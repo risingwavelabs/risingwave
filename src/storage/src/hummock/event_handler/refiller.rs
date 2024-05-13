@@ -14,12 +14,13 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::poll_fn;
-use std::ops::Range;
+use std::ops::{Deref, Range};
 use std::sync::{Arc, LazyLock};
 use std::task::{ready, Poll};
 use std::time::{Duration, Instant};
 
-use foyer::{HybridCacheEntry, RangeBoundsExt, Storage, StorageWriter};
+use foyer::common::code::Key;
+use foyer::common::range::RangeBoundsExt;
 use futures::future::{join_all, try_join_all};
 use futures::{Future, FutureExt};
 use itertools::Itertools;
@@ -29,15 +30,18 @@ use prometheus::{
     register_int_gauge_with_registry, Histogram, HistogramVec, IntGauge, Registry,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::{HummockSstableObjectId, KeyComparator};
 use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
+use crate::hummock::file_cache::preclude::*;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::{
-    Block, HummockError, HummockResult, Sstable, SstableBlockIndex, SstableStoreRef, TableHolder,
+    CachedBlock, FileCacheCompression, HummockError, HummockResult, Sstable, SstableBlockIndex,
+    SstableStoreRef, TableHolder,
 };
 use crate::monitor::StoreLocalStatistic;
 use crate::opts::StorageOpts;
@@ -388,7 +392,7 @@ impl CacheRefillTask {
     fn get_units_to_refill_by_inheritance(
         context: &CacheRefillContext,
         ssts: &[TableHolder],
-        parent_ssts: impl IntoIterator<Item = HybridCacheEntry<HummockSstableObjectId, Box<Sstable>>>,
+        parent_ssts: &[impl Deref<Target = Sstable>],
     ) -> HashSet<SstableUnit> {
         let mut res = HashSet::default();
 
@@ -557,12 +561,12 @@ impl CacheRefillTask {
             }
         });
         let parent_ssts = match try_join_all(futures).await {
-            Ok(parent_ssts) => parent_ssts.into_iter().flatten(),
+            Ok(parent_ssts) => parent_ssts.into_iter().flatten().collect_vec(),
             Err(e) => {
                 return tracing::error!(error = %e.as_report(), "get old meta from cache error")
             }
         };
-        let units = Self::get_units_to_refill_by_inheritance(context, &holders, parent_ssts);
+        let units = Self::get_units_to_refill_by_inheritance(context, &holders, &parent_ssts);
 
         let ssts: HashMap<HummockSstableObjectId, TableHolder> =
             holders.into_iter().map(|meta| (meta.id, meta)).collect();
@@ -594,7 +598,8 @@ impl CacheRefillTask {
         let blocks = unit.blks.size().unwrap();
 
         let mut tasks = vec![];
-        let mut contexts = Vec::with_capacity(blocks);
+        let mut writers = Vec::with_capacity(blocks);
+        let mut ranges = Vec::with_capacity(blocks);
         let mut admits = 0;
 
         let (range_first, _) = sst.calculate_block_info(unit.blks.start);
@@ -606,22 +611,25 @@ impl CacheRefillTask {
             .inc_by(range.size().unwrap() as u64);
 
         for blk in unit.blks {
-            let (range, uncompressed_capacity) = sst.calculate_block_info(blk);
+            let (range, _uncompressed_capacity) = sst.calculate_block_info(blk);
             let key = SstableBlockIndex {
                 sst_id: sst.id,
                 block_idx: blk as u64,
             };
-
-            let mut writer = sstable_store.block_cache().store().writer(key);
+            // see `CachedBlock::serialized_len()`
+            let mut writer = sstable_store
+                .data_file_cache()
+                .writer(key, key.serialized_len() + 1 + 8 + range.size().unwrap());
 
             if writer.judge() {
                 admits += 1;
             }
 
-            contexts.push((writer, range, uncompressed_capacity))
+            writers.push(writer);
+            ranges.push(range);
         }
 
-        if admits as f64 / contexts.len() as f64 >= threshold {
+        if admits as f64 / writers.len() as f64 >= threshold {
             let task = async move {
                 GLOBAL_CACHE_REFILL_METRICS.data_refill_attempts_total.inc();
 
@@ -638,20 +646,23 @@ impl CacheRefillTask {
                     .read(&sstable_store.get_sst_data_path(sst.id), range.clone())
                     .await?;
                 let mut futures = vec![];
-                for (mut writer, r, uncompressed_capacity) in contexts {
+                for (mut writer, r) in writers.into_iter().zip_eq_fast(ranges) {
                     let offset = r.start - range.start;
                     let len = r.end - r.start;
                     let bytes = data.slice(offset..offset + len);
 
                     let future = async move {
-                        let value = Box::new(Block::decode(bytes, uncompressed_capacity)?);
+                        let value = CachedBlock::Fetched {
+                            bytes,
+                            uncompressed_capacity: writer.weight() - writer.key().serialized_len(),
+                        };
+
                         writer.force();
-                        if writer
-                            .finish(value)
-                            .await
-                            .map_err(|e| HummockError::foyer_error(e.into()))?
-                            .is_some()
-                        {
+                        // TODO(MrCroxx): compress if raw is not compressed?
+                        // skip compression for it may already be compressed.
+                        writer.set_compression(FileCacheCompression::None);
+                        let res = writer.finish(value).await.map_err(HummockError::file_cache);
+                        if matches!(res, Ok(true)) {
                             GLOBAL_CACHE_REFILL_METRICS
                                 .data_refill_success_bytes
                                 .inc_by(len as u64);
@@ -659,7 +670,7 @@ impl CacheRefillTask {
                                 .data_refill_block_success_total
                                 .inc();
                         }
-                        Ok::<_, HummockError>(())
+                        res
                     };
                     futures.push(future);
                 }

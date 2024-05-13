@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use foyer::{LfuConfig, LruConfig, S3FifoConfig};
+use foyer::memory::{LfuConfig, LruConfig, S3FifoConfig};
 use risingwave_common::config::{
     CacheEvictionConfig, EvictionConfig, StorageConfig, StorageMemoryConfig,
     MAX_BLOCK_CACHE_SHARD_BITS, MAX_META_CACHE_SHARD_BITS, MIN_BUFFER_SIZE_PER_SHARD,
@@ -211,22 +211,12 @@ pub fn storage_memory_config(
         }),
         CacheEvictionConfig::S3Fifo {
             small_queue_capacity_ratio_in_percent,
-            ghost_queue_capacity_ratio_in_percent,
-            small_to_main_freq_threshold,
         } => EvictionConfig::S3Fifo(S3FifoConfig {
             small_queue_capacity_ratio: small_queue_capacity_ratio_in_percent.unwrap_or(
                 risingwave_common::config::default::storage::small_queue_capacity_ratio_in_percent(
                 ),
             ) as f64
                 / 100.0,
-            ghost_queue_capacity_ratio: ghost_queue_capacity_ratio_in_percent.unwrap_or(
-                risingwave_common::config::default::storage::ghost_queue_capacity_ratio_in_percent(
-                ),
-            ) as f64
-                / 100.0,
-            small_to_main_freq_threshold: small_to_main_freq_threshold.unwrap_or(
-                risingwave_common::config::default::storage::small_to_main_freq_threshold(),
-            ),
         }),
     };
 

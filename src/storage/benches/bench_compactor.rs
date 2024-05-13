@@ -17,9 +17,9 @@ use std::sync::Arc;
 
 use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
-use foyer::{CacheContext, HybridCacheBuilder};
+use foyer::memory::CacheContext;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
+use risingwave_common::config::{EvictionConfig, MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
@@ -44,45 +44,35 @@ use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    CachePolicy, SstableBuilder, SstableBuilderOptions, SstableIterator, SstableStore,
+    CachePolicy, FileCache, SstableBuilder, SstableBuilderOptions, SstableIterator, SstableStore,
     SstableStoreConfig, SstableWriterOptions, Xor16FilterBuilder,
 };
 use risingwave_storage::monitor::{
     global_hummock_state_store_metrics, CompactorMetrics, StoreLocalStatistic,
 };
 
-pub async fn mock_sstable_store() -> SstableStoreRef {
+pub fn mock_sstable_store() -> SstableStoreRef {
     let store = InMemObjectStore::new().monitored(
         Arc::new(ObjectStoreMetrics::unused()),
         Arc::new(ObjectStoreConfig::default()),
     );
     let store = Arc::new(ObjectStoreImpl::InMem(store));
     let path = "test".to_string();
-    let meta_cache_v2 = HybridCacheBuilder::new()
-        .memory(64 << 20)
-        .with_shards(2)
-        .storage()
-        .build()
-        .await
-        .unwrap();
-    let block_cache_v2 = HybridCacheBuilder::new()
-        .memory(128 << 20)
-        .with_shards(2)
-        .storage()
-        .build()
-        .await
-        .unwrap();
     Arc::new(SstableStore::new(SstableStoreConfig {
         store,
         path,
-
+        block_cache_capacity: 64 << 20,
+        meta_cache_capacity: 128 << 20,
+        meta_cache_shard_num: 2,
+        block_cache_shard_num: 2,
+        block_cache_eviction: EvictionConfig::for_test(),
+        meta_cache_eviction: EvictionConfig::for_test(),
         prefetch_buffer_capacity: 64 << 20,
         max_prefetch_block_number: 16,
+        data_file_cache: FileCache::none(),
+        meta_file_cache: FileCache::none(),
         recent_filter: None,
         state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
-
-        meta_cache_v2,
-        block_cache_v2,
     }))
 }
 
@@ -223,11 +213,11 @@ async fn scan_all_table(info: &SstableInfo, sstable_store: SstableStoreRef) {
 
 fn bench_table_build(c: &mut Criterion) {
     c.bench_function("bench_table_build", |b| {
+        let sstable_store = mock_sstable_store();
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_time()
             .build()
             .unwrap();
-        let sstable_store = runtime.block_on(mock_sstable_store());
         b.to_async(&runtime).iter(|| async {
             build_table(sstable_store.clone(), 0, 0..(MAX_KEY_COUNT as u64), 1).await;
         });
@@ -235,11 +225,11 @@ fn bench_table_build(c: &mut Criterion) {
 }
 
 fn bench_table_scan(c: &mut Criterion) {
+    let sstable_store = mock_sstable_store();
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_time()
         .build()
         .unwrap();
-    let sstable_store = runtime.block_on(mock_sstable_store());
     let info = runtime.block_on(async {
         build_table(sstable_store.clone(), 0, 0..(MAX_KEY_COUNT as u64), 1).await
     });
@@ -299,7 +289,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
         .enable_time()
         .build()
         .unwrap();
-    let sstable_store = runtime.block_on(mock_sstable_store());
+    let sstable_store = mock_sstable_store();
     let test_key_size = 256 * 1024;
     let info1 = runtime
         .block_on(async { build_table(sstable_store.clone(), 1, 0..test_key_size / 2, 1).await });
@@ -375,7 +365,7 @@ fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
         .enable_time()
         .build()
         .unwrap();
-    let sstable_store = runtime.block_on(mock_sstable_store());
+    let sstable_store = mock_sstable_store();
     let test_key_size = 256 * 1024;
     let info1 = runtime.block_on(async {
         build_table_2(

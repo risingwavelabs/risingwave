@@ -16,7 +16,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes};
-use foyer::CacheContext;
+use foyer::memory::CacheContext;
 use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::buffer::BitmapBuilder;

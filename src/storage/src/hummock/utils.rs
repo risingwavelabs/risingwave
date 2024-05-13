@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use foyer::CacheContext;
+use foyer::memory::CacheContext;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, EmptySliceRef, FullKey, TableKey, UserKey,

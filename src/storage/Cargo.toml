@@ -52,8 +52,6 @@ risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 scopeguard = "1"
-serde = { version = "1", features = ["derive"] }
-serde_bytes = "0.11"
 sled = "0.34.7"
 spin = "0.9"
 sync-point = { path = "../utils/sync-point" }
@@ -91,7 +89,6 @@ mach2 = "0.4"
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
-bincode = "1"
 criterion = { workspace = true, features = ["async_futures", "async_tokio"] }
 expect-test = "1"
 moka = { version = "0.12", features = ["future"] }

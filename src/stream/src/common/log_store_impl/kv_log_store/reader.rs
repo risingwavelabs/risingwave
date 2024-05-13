@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use await_tree::InstrumentAwait;
-use foyer::CacheContext;
+use foyer::memory::CacheContext;
 use futures::future::{try_join_all, BoxFuture};
 use futures::{FutureExt, TryFutureExt};
 use risingwave_common::array::StreamChunk;

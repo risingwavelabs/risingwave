@@ -110,7 +110,7 @@ mod test {
 
     #[tokio::test]
     async fn test_merge_invalidate_reset() {
-        let sstable_store = mock_sstable_store().await;
+        let sstable_store = mock_sstable_store();
         let read_options = Arc::new(SstableIteratorReadOptions::default());
         let table0 = gen_iterator_test_sstable_info(
             0,

@@ -389,7 +389,7 @@ mod tests {
             bloom_false_positive: 0.1,
             ..Default::default()
         };
-        let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store().await, opts);
+        let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
         let builder = CapacitySplitTableBuilder::for_test(builder_factory);
         let results = builder.finish().await.unwrap();
         assert!(results.is_empty());
@@ -406,7 +406,7 @@ mod tests {
             bloom_false_positive: 0.1,
             ..Default::default()
         };
-        let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store().await, opts);
+        let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
         let mut builder = CapacitySplitTableBuilder::for_test(builder_factory);
 
         for i in 0..table_capacity {
@@ -432,7 +432,7 @@ mod tests {
         let opts = default_builder_opt_for_test();
         let mut builder = CapacitySplitTableBuilder::for_test(LocalTableBuilderFactory::new(
             1001,
-            mock_sstable_store().await,
+            mock_sstable_store(),
             opts,
         ));
         let mut epoch = test_epoch(100);
@@ -476,7 +476,7 @@ mod tests {
         let opts = default_builder_opt_for_test();
         let mut builder = CapacitySplitTableBuilder::for_test(LocalTableBuilderFactory::new(
             1001,
-            mock_sstable_store().await,
+            mock_sstable_store(),
             opts,
         ));
         builder
@@ -501,7 +501,7 @@ mod tests {
             BTreeMap::from([(1_u32, 4_u32), (2_u32, 4_u32), (3_u32, 4_u32)]);
 
         let mut builder = CapacitySplitTableBuilder::new(
-            LocalTableBuilderFactory::new(1001, mock_sstable_store().await, opts),
+            LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
             Arc::new(CompactorMetrics::unused()),
             None,
             table_partition_vnode,

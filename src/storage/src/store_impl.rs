@@ -13,25 +13,22 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
-use foyer::{
-    set_metrics_registry, FsDeviceConfigBuilder, HybridCacheBuilder, RatedTicketAdmissionPolicy,
-    RuntimeConfigBuilder,
-};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
-use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::build_remote_object_store;
 
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{RemoteTableAccessor, RpcFilterKeyExtractorManager};
+use crate::hummock::file_cache::preclude::*;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::{
-    Block, HummockError, HummockStorage, RecentFilter, Sstable, SstableBlockIndex, SstableStore,
-    SstableStoreConfig,
+    set_foyer_metrics_registry, FileCache, FileCacheConfig, HummockError, HummockStorage,
+    RecentFilter, SstableStore, SstableStoreConfig,
 };
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
@@ -559,7 +556,6 @@ pub mod verify {
 impl StateStoreImpl {
     #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
     #[allow(clippy::too_many_arguments)]
-    #[expect(clippy::borrowed_box)]
     pub async fn new(
         s: &str,
         opts: Arc<StorageOpts>,
@@ -570,116 +566,75 @@ impl StateStoreImpl {
         compactor_metrics: Arc<CompactorMetrics>,
         await_tree_config: Option<await_tree::Config>,
     ) -> StorageResult<Self> {
-        const MB: usize = 1 << 20;
+        set_foyer_metrics_registry(GLOBAL_METRICS_REGISTRY.clone());
 
-        set_metrics_registry(GLOBAL_METRICS_REGISTRY.clone());
-
-        let meta_cache_v2 = {
-            let mut builder = HybridCacheBuilder::new()
-                .memory(opts.meta_cache_capacity_mb * MB)
-                .with_shards(opts.meta_cache_shard_num)
-                .with_eviction_config(opts.meta_cache_eviction_config.clone())
-                .with_object_pool_capacity(1024 * opts.meta_cache_shard_num)
-                .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
-                    u64::BITS as usize / 8 + value.estimate_size()
-                })
-                .storage();
-
-            if !opts.meta_file_cache_dir.is_empty() {
-                builder = builder
-                    .with_name("foyer.meta")
-                    .with_device_config(
-                        FsDeviceConfigBuilder::new(&opts.meta_file_cache_dir)
-                            .with_capacity(opts.meta_file_cache_capacity_mb * MB)
-                            .with_file_size(opts.meta_file_cache_file_capacity_mb * MB)
-                            .with_align(opts.meta_file_cache_device_align)
-                            .with_io_size(opts.meta_file_cache_device_io_size)
-                            .build(),
-                    )
-                    .with_catalog_shards(64)
-                    .with_admission_policy(Arc::new(RatedTicketAdmissionPolicy::new(
-                        opts.meta_file_cache_insert_rate_limit_mb * MB,
-                    )))
-                    .with_flushers(opts.meta_file_cache_flushers)
-                    .with_reclaimers(opts.meta_file_cache_reclaimers)
-                    .with_clean_region_threshold(
-                        opts.meta_file_cache_reclaimers + opts.meta_file_cache_reclaimers / 2,
-                    )
-                    .with_recover_concurrency(opts.meta_file_cache_recover_concurrency)
-                    .with_compression(
-                        opts.meta_file_cache_compression
-                            .as_str()
-                            .try_into()
-                            .map_err(HummockError::foyer_error)?,
-                    )
-                    .with_runtime_config(
-                        RuntimeConfigBuilder::new()
-                            .with_thread_name("foyer.meta.runtime")
-                            .build(),
-                    )
-                    .with_lazy(true);
-            }
-
-            builder.build().await.map_err(HummockError::foyer_error)?
-        };
-
-        let block_cache_v2 = {
-            let mut builder = HybridCacheBuilder::new()
-                .memory(opts.block_cache_capacity_mb * MB)
-                .with_shards(opts.block_cache_shard_num)
-                .with_eviction_config(opts.block_cache_eviction_config.clone())
-                .with_object_pool_capacity(1024 * opts.block_cache_shard_num)
-                .with_weighter(|_: &SstableBlockIndex, value: &Box<Block>| {
-                    // FIXME(MrCroxx): Calculate block weight more accurately.
-                    u64::BITS as usize * 2 / 8 + value.raw().len()
-                })
-                .storage();
-
-            if !opts.meta_file_cache_dir.is_empty() {
-                builder = builder
-                    .with_name("foyer.block")
-                    .with_device_config(
-                        FsDeviceConfigBuilder::new(&opts.data_file_cache_dir)
-                            .with_capacity(opts.data_file_cache_capacity_mb * MB)
-                            .with_file_size(opts.data_file_cache_file_capacity_mb * MB)
-                            .with_align(opts.data_file_cache_device_align)
-                            .with_io_size(opts.data_file_cache_device_io_size)
-                            .build(),
-                    )
-                    .with_catalog_shards(64)
-                    .with_admission_policy(Arc::new(RatedTicketAdmissionPolicy::new(
-                        opts.data_file_cache_insert_rate_limit_mb * MB,
-                    )))
-                    .with_flushers(opts.data_file_cache_flushers)
-                    .with_reclaimers(opts.data_file_cache_reclaimers)
-                    .with_clean_region_threshold(
-                        opts.data_file_cache_reclaimers + opts.data_file_cache_reclaimers / 2,
-                    )
-                    .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
-                    .with_compression(
-                        opts.data_file_cache_compression
-                            .as_str()
-                            .try_into()
-                            .map_err(HummockError::foyer_error)?,
-                    )
-                    .with_runtime_config(
-                        RuntimeConfigBuilder::new()
-                            .with_thread_name("foyer.block.runtime")
-                            .build(),
-                    )
-                    .with_lazy(true);
-            }
-
-            builder.build().await.map_err(HummockError::foyer_error)?
-        };
-
-        let recent_filter = if opts.data_file_cache_dir.is_empty() {
-            None
+        let (data_file_cache, recent_filter) = if opts.data_file_cache_dir.is_empty() {
+            (FileCache::none(), None)
         } else {
-            Some(Arc::new(RecentFilter::new(
+            const MB: usize = 1024 * 1024;
+
+            let config = FileCacheConfig {
+                name: "data".to_string(),
+                dir: PathBuf::from(opts.data_file_cache_dir.clone()),
+                capacity: opts.data_file_cache_capacity_mb * MB,
+                file_capacity: opts.data_file_cache_file_capacity_mb * MB,
+                device_align: opts.data_file_cache_device_align,
+                device_io_size: opts.data_file_cache_device_io_size,
+                lfu_window_to_cache_size_ratio: opts.data_file_cache_lfu_window_to_cache_size_ratio,
+                lfu_tiny_lru_capacity_ratio: opts.data_file_cache_lfu_tiny_lru_capacity_ratio,
+                insert_rate_limit: opts.data_file_cache_insert_rate_limit_mb * MB,
+                flushers: opts.data_file_cache_flushers,
+                reclaimers: opts.data_file_cache_reclaimers,
+                recover_concurrency: opts.data_file_cache_recover_concurrency,
+                catalog_bits: opts.data_file_cache_catalog_bits,
+                admissions: vec![],
+                reinsertions: vec![],
+                compression: opts
+                    .data_file_cache_compression
+                    .as_str()
+                    .try_into()
+                    .map_err(HummockError::file_cache)?,
+            };
+            let cache = FileCache::open(config)
+                .await
+                .map_err(HummockError::file_cache)?;
+            let filter = Some(Arc::new(RecentFilter::new(
                 opts.cache_refill_recent_filter_layers,
                 Duration::from_millis(opts.cache_refill_recent_filter_rotate_interval_ms as u64),
-            )))
+            )));
+            (cache, filter)
+        };
+
+        let meta_file_cache = if opts.meta_file_cache_dir.is_empty() {
+            FileCache::none()
+        } else {
+            const MB: usize = 1024 * 1024;
+
+            let config = FileCacheConfig {
+                name: "meta".to_string(),
+                dir: PathBuf::from(opts.meta_file_cache_dir.clone()),
+                capacity: opts.meta_file_cache_capacity_mb * MB,
+                file_capacity: opts.meta_file_cache_file_capacity_mb * MB,
+                device_align: opts.meta_file_cache_device_align,
+                device_io_size: opts.meta_file_cache_device_io_size,
+                lfu_window_to_cache_size_ratio: opts.meta_file_cache_lfu_window_to_cache_size_ratio,
+                lfu_tiny_lru_capacity_ratio: opts.meta_file_cache_lfu_tiny_lru_capacity_ratio,
+                insert_rate_limit: opts.meta_file_cache_insert_rate_limit_mb * MB,
+                flushers: opts.meta_file_cache_flushers,
+                reclaimers: opts.meta_file_cache_reclaimers,
+                recover_concurrency: opts.meta_file_cache_recover_concurrency,
+                catalog_bits: opts.meta_file_cache_catalog_bits,
+                admissions: vec![],
+                reinsertions: vec![],
+                compression: opts
+                    .meta_file_cache_compression
+                    .as_str()
+                    .try_into()
+                    .map_err(HummockError::file_cache)?,
+            };
+            FileCache::open(config)
+                .await
+                .map_err(HummockError::file_cache)?
         };
 
         let store = match s {
@@ -695,13 +650,18 @@ impl StateStoreImpl {
                 let sstable_store = Arc::new(SstableStore::new(SstableStoreConfig {
                     store: Arc::new(object_store),
                     path: opts.data_directory.to_string(),
+                    block_cache_capacity: opts.block_cache_capacity_mb * (1 << 20),
+                    block_cache_shard_num: opts.block_cache_shard_num,
+                    block_cache_eviction: opts.block_cache_eviction_config.clone(),
+                    meta_cache_capacity: opts.meta_cache_capacity_mb * (1 << 20),
+                    meta_cache_shard_num: opts.meta_cache_shard_num,
+                    meta_cache_eviction: opts.meta_cache_eviction_config.clone(),
                     prefetch_buffer_capacity: opts.prefetch_buffer_capacity_mb * (1 << 20),
                     max_prefetch_block_number: opts.max_prefetch_block_number,
+                    data_file_cache,
+                    meta_file_cache,
                     recent_filter,
                     state_store_metrics: state_store_metrics.clone(),
-
-                    meta_cache_v2,
-                    block_cache_v2,
                 }));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());

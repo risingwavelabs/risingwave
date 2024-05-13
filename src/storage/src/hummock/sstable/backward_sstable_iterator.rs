@@ -15,7 +15,7 @@
 use std::cmp::Ordering::{Equal, Less};
 use std::sync::Arc;
 
-use foyer::CacheContext;
+use foyer::memory::CacheContext;
 use risingwave_hummock_sdk::key::FullKey;
 
 use crate::hummock::iterator::{Backward, HummockIterator, ValueMeta};
@@ -187,7 +187,7 @@ mod tests {
     #[tokio::test]
     async fn test_backward_sstable_iterator() {
         // build remote sstable
-        let sstable_store = mock_sstable_store().await;
+        let sstable_store = mock_sstable_store();
         let handle =
             gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
                 .await;
@@ -212,7 +212,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_backward_sstable_seek() {
-        let sstable_store = mock_sstable_store().await;
+        let sstable_store = mock_sstable_store();
         let sstable =
             gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
                 .await;

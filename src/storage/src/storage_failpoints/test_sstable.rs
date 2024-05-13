@@ -35,7 +35,7 @@ use crate::monitor::StoreLocalStatistic;
 async fn test_failpoints_table_read() {
     let mem_read_err_fp = "mem_read_err";
     // build remote table
-    let sstable_store = mock_sstable_store().await;
+    let sstable_store = mock_sstable_store();
 
     // We should close buffer, so that table iterator must read in object_stores
     let kv_iter =
@@ -84,7 +84,7 @@ async fn test_failpoints_vacuum_and_metadata() {
     let data_upload_err = "data_upload_err";
     let mem_upload_err = "mem_upload_err";
     let mem_delete_err = "mem_delete_err";
-    let sstable_store = mock_sstable_store().await;
+    let sstable_store = mock_sstable_store();
     // when upload data is successful, but upload meta is fail and delete is fail
 
     fail::cfg_callback(data_upload_err, move || {

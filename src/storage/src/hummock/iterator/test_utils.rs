@@ -16,10 +16,9 @@ use std::iter::Iterator;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use foyer::HybridCacheBuilder;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
+use risingwave_common::config::{EvictionConfig, MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::key::{prefix_slice_with_vnode, FullKey, TableKey, UserKey};
@@ -37,8 +36,8 @@ use crate::hummock::test_utils::{
     gen_test_sstable, gen_test_sstable_info, gen_test_sstable_with_range_tombstone,
 };
 use crate::hummock::{
-    HummockValue, SstableBuilderOptions, SstableIterator, SstableIteratorType, SstableStoreConfig,
-    SstableStoreRef, TableHolder,
+    FileCache, HummockValue, SstableBuilderOptions, SstableIterator, SstableIteratorType,
+    SstableStoreConfig, SstableStoreRef, TableHolder,
 };
 use crate::monitor::{global_hummock_state_store_metrics, ObjectStoreMetrics};
 
@@ -56,44 +55,33 @@ macro_rules! assert_bytes_eq {
 
 pub const TEST_KEYS_COUNT: usize = 10;
 
-pub async fn mock_sstable_store() -> SstableStoreRef {
+pub fn mock_sstable_store() -> SstableStoreRef {
     mock_sstable_store_with_object_store(Arc::new(ObjectStoreImpl::InMem(
         InMemObjectStore::new().monitored(
             Arc::new(ObjectStoreMetrics::unused()),
             Arc::new(ObjectStoreConfig::default()),
         ),
     )))
-    .await
 }
 
-pub async fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableStoreRef {
+pub fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableStoreRef {
     let path = "test".to_string();
-    let meta_cache_v2 = HybridCacheBuilder::new()
-        .memory(64 << 20)
-        .with_shards(2)
-        .storage()
-        .build()
-        .await
-        .unwrap();
-    let block_cache_v2 = HybridCacheBuilder::new()
-        .memory(64 << 20)
-        .with_shards(2)
-        .storage()
-        .build()
-        .await
-        .unwrap();
     Arc::new(SstableStore::new(SstableStoreConfig {
         store,
         path,
-
+        block_cache_capacity: 64 << 20,
+        block_cache_shard_num: 2,
+        block_cache_eviction: EvictionConfig::for_test(),
+        meta_cache_capacity: 64 << 20,
+        meta_cache_shard_num: 2,
+        meta_cache_eviction: EvictionConfig::for_test(),
         prefetch_buffer_capacity: 64 << 20,
         max_prefetch_block_number: 16,
 
+        data_file_cache: FileCache::none(),
+        meta_file_cache: FileCache::none(),
         recent_filter: None,
         state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
-
-        meta_cache_v2,
-        block_cache_v2,
     }))
 }
 
@@ -239,7 +227,7 @@ pub async fn gen_merge_iterator_interleave_test_sstable_iters(
     key_count: usize,
     count: usize,
 ) -> Vec<SstableIterator> {
-    let sstable_store = mock_sstable_store().await;
+    let sstable_store = mock_sstable_store();
     let mut result = vec![];
     for i in 0..count {
         let table = gen_iterator_test_sstable_base(

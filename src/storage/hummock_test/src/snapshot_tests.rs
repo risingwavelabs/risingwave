@@ -15,7 +15,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use foyer::CacheContext;
+use foyer::memory::CacheContext;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_hummock_sdk::key::prefixed_range_with_vnode;

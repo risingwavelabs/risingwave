@@ -15,10 +15,9 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use foyer::HybridCacheBuilder;
-use futures::{Stream, TryFutureExt, TryStreamExt};
+use futures::{Stream, TryStreamExt};
 use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
+use risingwave_common::config::{EvictionConfig, MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
@@ -29,12 +28,12 @@ use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::java_binding::key_range::Bound;
 use risingwave_pb::java_binding::{KeyRange, ReadPlan};
-use risingwave_storage::error::{StorageError, StorageResult};
+use risingwave_storage::error::StorageResult;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::store::version::HummockVersionReader;
 use risingwave_storage::hummock::store::HummockStorageIterator;
 use risingwave_storage::hummock::{
-    get_committed_read_version_tuple, CachePolicy, HummockError, SstableStore, SstableStoreConfig,
+    get_committed_read_version_tuple, CachePolicy, FileCache, SstableStore, SstableStoreConfig,
 };
 use risingwave_storage::monitor::{global_hummock_state_store_metrics, HummockStateStoreMetrics};
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
@@ -78,35 +77,23 @@ impl HummockJavaBindingIterator {
             )
             .await,
         );
-
-        let meta_cache_v2 = HybridCacheBuilder::new()
-            .memory(1 << 10)
-            .with_shards(2)
-            .storage()
-            .build()
-            .map_err(HummockError::foyer_error)
-            .map_err(StorageError::from)
-            .await?;
-        let block_cache_v2 = HybridCacheBuilder::new()
-            .memory(1 << 10)
-            .with_shards(2)
-            .storage()
-            .build()
-            .map_err(HummockError::foyer_error)
-            .map_err(StorageError::from)
-            .await?;
-
         let sstable_store = Arc::new(SstableStore::new(SstableStoreConfig {
             store: object_store,
             path: read_plan.data_dir,
+            block_cache_capacity: 1 << 10,
+            block_cache_shard_num: 2,
+            block_cache_eviction: EvictionConfig::for_test(),
+            meta_cache_capacity: 1 << 10,
+            meta_cache_shard_num: 2,
+            meta_cache_eviction: EvictionConfig::for_test(),
             prefetch_buffer_capacity: 1 << 10,
             max_prefetch_block_number: 16,
+            data_file_cache: FileCache::none(),
+            meta_file_cache: FileCache::none(),
             recent_filter: None,
             state_store_metrics: Arc::new(global_hummock_state_store_metrics(
                 MetricLevel::Disabled,
             )),
-            meta_cache_v2,
-            block_cache_v2,
         }));
         let reader = HummockVersionReader::new(
             sstable_store,

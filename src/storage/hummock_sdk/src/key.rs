@@ -24,7 +24,6 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common_estimate_size::EstimateSize;
-use serde::{Deserialize, Serialize};
 
 use crate::{EpochWithGap, HummockEpoch};
 
@@ -441,14 +440,8 @@ impl CopyFromSlice for Bytes {
 ///
 /// Its name come from the assumption that Hummock is always accessed by a table-like structure
 /// identified by a [`TableId`].
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize)]
-pub struct TableKey<T: AsRef<[u8]>>(
-    #[serde(bound(
-        serialize = "T: serde::Serialize + serde_bytes::Serialize",
-        deserialize = "T: serde::Deserialize<'de> + serde_bytes::Deserialize<'de>"
-    ))]
-    pub T,
-);
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct TableKey<T: AsRef<[u8]>>(pub T);
 
 impl<T: AsRef<[u8]>> Debug for TableKey<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -538,15 +531,11 @@ pub fn gen_key_from_str(vnode: VirtualNode, payload: &str) -> TableKey<Bytes> {
 /// will group these two values into one struct for convenient filtering.
 ///
 /// The encoded format is | `table_id` | `table_key` |.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct UserKey<T: AsRef<[u8]>> {
     // When comparing `UserKey`, we first compare `table_id`, then `table_key`. So the order of
     // declaration matters.
     pub table_id: TableId,
-    #[serde(bound(
-        serialize = "T: serde::Serialize + serde_bytes::Serialize",
-        deserialize = "T: serde::Deserialize<'de> + serde_bytes::Deserialize<'de>"
-    ))]
     pub table_key: TableKey<T>,
 }
 
@@ -878,14 +867,10 @@ impl<T: AsRef<[u8]> + Ord + Eq> PartialOrd for FullKey<T> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PointRange<T: AsRef<[u8]>> {
     // When comparing `PointRange`, we first compare `left_user_key`, then
     // `is_exclude_left_key`. Therefore the order of declaration matters.
-    #[serde(bound(
-        serialize = "T: serde::Serialize + serde_bytes::Serialize",
-        deserialize = "T: serde::Deserialize<'de> + serde_bytes::Deserialize<'de>"
-    ))]
     pub left_user_key: UserKey<T>,
     /// `PointRange` represents the left user key itself if `is_exclude_left_key==false`
     /// while represents the right δ Neighborhood of the left user key if

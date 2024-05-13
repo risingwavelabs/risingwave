@@ -1848,7 +1848,7 @@ dependencies = [
  "bitflags 2.5.0",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "log",
@@ -2502,6 +2502,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a31c789563b815f77f4250caee12365734369f942439b7defd71e18a48197130"
 dependencies = [
  "cc",
+]
+
+[[package]]
+name = "cmsketch"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93710598b87c37ea250ab17a36f9f79dbaf3bd20e55806cf09345103bc26d60e"
+dependencies = [
+ "paste",
 ]
 
 [[package]]
@@ -4976,102 +4985,128 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.8.9"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e7321845edd6be7f1d505413409d119cddf1fc110197d1d0606fb28cbec6d28"
+checksum = "15240094bab62dfeb59bb974e2fb7bff18727c6dc7bd1f5f6fc82a9e6fda5a38"
 dependencies = [
- "ahash 0.8.6",
- "anyhow",
  "foyer-common",
  "foyer-intrusive",
  "foyer-memory",
  "foyer-storage",
+ "foyer-workspace-hack",
 ]
 
 [[package]]
 name = "foyer-common"
-version = "0.6.4"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "deef44aeda48784c3ec1316fe64ed8d9cacbd50b37afcfd1aa211d4eb6360b61"
+checksum = "ad95f985cfbd5a8bf9f115d963918e742dfbb75350febff509b09cf194842b0c"
 dependencies = [
- "ahash 0.8.6",
+ "anyhow",
  "bytes",
- "cfg-if",
- "crossbeam",
- "hashbrown 0.14.3",
+ "foyer-workspace-hack",
  "itertools 0.12.1",
  "madsim-tokio",
- "nix 0.28.0",
  "parking_lot 0.12.1",
- "rustversion",
- "serde",
+ "paste",
+ "tracing",
 ]
 
 [[package]]
 name = "foyer-intrusive"
-version = "0.5.3"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7145b59837d77f0090582f5631a6e36f01f09e451ab82685fdba6c9bdac7bd0d"
+checksum = "acf22ed0dfa6315714099046504711d5563d191a442afcd87bd4d0bf5010bb9a"
 dependencies = [
  "bytes",
+ "cmsketch 0.1.5",
  "foyer-common",
+ "foyer-workspace-hack",
  "itertools 0.12.1",
  "memoffset",
  "parking_lot 0.12.1",
+ "paste",
+ "tracing",
+ "twox-hash",
 ]
 
 [[package]]
 name = "foyer-memory"
-version = "0.3.6"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c28baff47d3b1e4a4d416186066ec7bd590b7b50b6332a25e62fab1686904570"
+checksum = "f59727e86709e4eab603f8a5086f3b2c7d3ddddf7c8b31d8dea2b00364b7fb95"
 dependencies = [
  "ahash 0.8.6",
  "bitflags 2.5.0",
- "cmsketch",
- "foyer-common",
+ "cmsketch 0.2.0",
+ "crossbeam",
  "foyer-intrusive",
+ "foyer-workspace-hack",
  "futures",
  "hashbrown 0.14.3",
  "itertools 0.12.1",
  "libc",
  "madsim-tokio",
  "parking_lot 0.12.1",
- "serde",
 ]
 
 [[package]]
 name = "foyer-storage"
-version = "0.7.6"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3ec3638bdc66bc1c83aba27805770d2cafd18ec553e337e2563d69a5676898b"
+checksum = "a5e0749c569ef5f8d9f877a6a81da24e7d1b6f8ea87ec6c3933e12dac0c7632f"
 dependencies = [
- "ahash 0.8.6",
- "allocator-api2",
  "anyhow",
- "bincode 1.3.3",
  "bitflags 2.5.0",
  "bitmaps",
  "bytes",
- "either",
  "foyer-common",
- "foyer-memory",
+ "foyer-intrusive",
+ "foyer-workspace-hack",
  "futures",
  "itertools 0.12.1",
- "lazy_static",
  "libc",
  "lz4",
  "madsim-tokio",
  "memoffset",
+ "nix 0.28.0",
  "parking_lot 0.12.1",
  "paste",
  "prometheus",
  "rand",
- "serde",
  "thiserror",
  "tracing",
  "twox-hash",
  "zstd 0.13.0",
+]
+
+[[package]]
+name = "foyer-workspace-hack"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77a5ee5ab890d1893232fd44af33197c7499813816b8880649a15ee9438d5e07"
+dependencies = [
+ "ahash 0.8.6",
+ "cc",
+ "crossbeam-channel",
+ "crossbeam-utils",
+ "either",
+ "futures-channel",
+ "futures-core",
+ "futures-executor",
+ "futures-sink",
+ "futures-util",
+ "hashbrown 0.14.3",
+ "libc",
+ "parking_lot 0.12.1",
+ "parking_lot_core 0.9.8",
+ "proc-macro2",
+ "quote",
+ "rand",
+ "smallvec",
+ "syn 2.0.57",
+ "tokio",
+ "tracing-core",
 ]
 
 [[package]]
@@ -9332,7 +9367,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.11.2",
+ "parking_lot 0.12.1",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
@@ -10580,7 +10615,6 @@ dependencies = [
  "chrono",
  "clap",
  "comfy-table",
- "foyer",
  "futures",
  "hex",
  "inquire",
@@ -10880,8 +10914,6 @@ dependencies = [
  "risingwave_common",
  "risingwave_common_estimate_size",
  "risingwave_pb",
- "serde",
- "serde_bytes",
  "tracing",
  "workspace-hack",
 ]
@@ -10965,7 +10997,6 @@ dependencies = [
  "cfg-or-panic",
  "chrono",
  "expect-test",
- "foyer",
  "fs-err",
  "futures",
  "itertools 0.12.1",
@@ -11472,7 +11503,6 @@ dependencies = [
  "async-trait",
  "auto_enums",
  "await-tree",
- "bincode 1.3.3",
  "bytes",
  "criterion",
  "crossbeam",
@@ -11516,8 +11546,6 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_test_runner",
  "scopeguard",
- "serde",
- "serde_bytes",
  "sled",
  "spin 0.9.8",
  "sync-point",

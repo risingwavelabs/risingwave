@@ -20,7 +20,7 @@ use std::sync::{Arc, LazyLock};
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use foyer::CacheContext;
+use foyer::memory::CacheContext;
 use futures::future::{try_join, try_join_all};
 use futures::{stream, FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;

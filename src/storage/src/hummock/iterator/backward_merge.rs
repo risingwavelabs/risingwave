@@ -23,7 +23,7 @@ mod test {
 
     #[tokio::test]
     async fn test_backward_merge_basic() {
-        let sstable_store = mock_sstable_store().await;
+        let sstable_store = mock_sstable_store();
         let table0 = gen_iterator_test_sstable_base(
             0,
             default_builder_opt_for_test(),
@@ -76,7 +76,7 @@ mod test {
 
     #[tokio::test]
     async fn test_backward_merge_seek() {
-        let sstable_store = mock_sstable_store().await;
+        let sstable_store = mock_sstable_store();
         let table0 = gen_iterator_test_sstable_base(
             0,
             default_builder_opt_for_test(),
@@ -151,7 +151,7 @@ mod test {
 
     #[tokio::test]
     async fn test_backward_merge_invalidate_reset() {
-        let sstable_store = mock_sstable_store().await;
+        let sstable_store = mock_sstable_store();
         let table0 = gen_iterator_test_sstable_base(
             0,
             default_builder_opt_for_test(),

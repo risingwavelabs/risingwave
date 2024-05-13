@@ -945,7 +945,7 @@ pub mod tests {
     #[tokio::test]
     async fn test_partition_overlapping_level() {
         const TEST_KEYS_COUNT: usize = 10;
-        let sstable_store = mock_sstable_store().await;
+        let sstable_store = mock_sstable_store();
         let mut table_infos = vec![];
         for object_id in 0..10 {
             let start_index = object_id * TEST_KEYS_COUNT;

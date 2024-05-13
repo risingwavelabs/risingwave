@@ -690,7 +690,7 @@ pub(super) mod tests {
         };
 
         // build remote table
-        let sstable_store = mock_sstable_store().await;
+        let sstable_store = mock_sstable_store();
         let sst_info = gen_test_sstable_impl::<Vec<u8>, F>(
             opts,
             0,
@@ -734,7 +734,7 @@ pub(super) mod tests {
     async fn test_no_bloom_filter_block() {
         let opts = SstableBuilderOptions::default();
         // build remote table
-        let sstable_store = mock_sstable_store().await;
+        let sstable_store = mock_sstable_store();
         let writer_opts = SstableWriterOptions::default();
         let object_id = 1;
         let writer = sstable_store

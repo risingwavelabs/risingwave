@@ -22,7 +22,6 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::KeyComparator;
-use serde::{Deserialize, Serialize};
 use {lz4, zstd};
 
 use super::utils::{bytes_diff_below_max_key_length, xxhash64_verify, CompressionAlgorithm};
@@ -36,7 +35,7 @@ pub const DEFAULT_RESTART_INTERVAL: usize = 16;
 pub const DEFAULT_ENTRY_SIZE: usize = 24; // table_id(u64) + primary_key(u64) + epoch(u64)
 
 #[allow(non_camel_case_types)]
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum LenType {
     u8 = 1,
     u16 = 2,
@@ -126,7 +125,7 @@ impl LenType {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug)]
 pub struct RestartPoint {
     pub offset: u32,
     pub key_len_type: LenType,
@@ -175,26 +174,6 @@ impl Debug for Block {
             .field("table_id", &self.table_id)
             .field("restart_points", &self.restart_points)
             .finish()
-    }
-}
-
-impl Serialize for Block {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serde_bytes::serialize(&self.data[..], serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for Block {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let data: Vec<u8> = serde_bytes::deserialize(deserializer)?;
-        let data = Bytes::from(data);
-        Ok(Block::decode_from_raw(data))
     }
 }
 
@@ -1023,36 +1002,5 @@ mod tests {
             assert!(!bi.is_valid());
             builder.clear();
         }
-    }
-
-    #[test]
-    fn test_block_serde() {
-        fn assmut_serde<'de, T: Serialize + Deserialize<'de>>() {}
-
-        assmut_serde::<Block>();
-        assmut_serde::<Box<Block>>();
-
-        let options = BlockBuilderOptions::default();
-        let mut builder = BlockBuilder::new(options);
-        for i in 0..100 {
-            builder.add_for_test(
-                construct_full_key_struct_for_test(0, format!("k{i:8}").as_bytes(), i),
-                format!("v{i:8}").as_bytes(),
-            );
-        }
-
-        let capacity = builder.uncompressed_block_size();
-        assert_eq!(capacity, builder.approximate_len() - 9);
-        let buf = builder.build().to_vec();
-
-        let block = Box::new(Block::decode(buf.into(), capacity).unwrap());
-
-        let buffer = bincode::serialize(&block).unwrap();
-        let blk: Block = bincode::deserialize(&buffer).unwrap();
-
-        assert_eq!(block.data, blk.data);
-        assert_eq!(block.data_len, blk.data_len);
-        assert_eq!(block.table_id, blk.table_id,);
-        assert_eq!(block.restart_points, blk.restart_points);
     }
 }

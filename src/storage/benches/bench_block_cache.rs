@@ -21,15 +21,14 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
 use criterion::{criterion_group, criterion_main, Criterion};
+use foyer::memory as foyer;
 use moka::future::Cache;
 use rand::rngs::SmallRng;
 use rand::{RngCore, SeedableRng};
 use risingwave_common::cache::CachePriority;
 use risingwave_storage::hummock::{HummockError, HummockResult, LruCache};
-use serde::{Deserialize, Serialize};
 use tokio::runtime::{Builder, Runtime};
 
-#[derive(Debug, Serialize, Deserialize)]
 pub struct Block {
     sst: u64,
     offset: u64,
@@ -124,13 +123,16 @@ pub struct FoyerCache {
 
 impl FoyerCache {
     pub fn lru(capacity: usize, fake_io_latency: Duration) -> Self {
-        let inner = foyer::CacheBuilder::new(capacity)
-            .with_shards(8)
-            .with_eviction_config(foyer::LruConfig {
-                high_priority_pool_ratio: 0.8,
-            })
-            .with_object_pool_capacity(8 * 1024)
-            .build();
+        let inner = foyer::Cache::lru(foyer::LruCacheConfig {
+            capacity,
+            shards: 8,
+            eviction_config: foyer::LruConfig {
+                high_priority_pool_ratio: 0.0,
+            },
+            object_pool_capacity: 8 * 1024,
+            hash_builder: ahash::RandomState::default(),
+            event_listener: foyer::DefaultCacheEventListener::default(),
+        });
         Self {
             inner,
             fake_io_latency,
@@ -138,16 +140,19 @@ impl FoyerCache {
     }
 
     pub fn lfu(capacity: usize, fake_io_latency: Duration) -> Self {
-        let inner = foyer::CacheBuilder::new(capacity)
-            .with_shards(8)
-            .with_eviction_config(foyer::LfuConfig {
+        let inner = foyer::Cache::lfu(foyer::LfuCacheConfig {
+            capacity,
+            shards: 8,
+            eviction_config: foyer::LfuConfig {
                 window_capacity_ratio: 0.1,
                 protected_capacity_ratio: 0.8,
                 cmsketch_eps: 0.001,
                 cmsketch_confidence: 0.9,
-            })
-            .with_object_pool_capacity(8 * 1024)
-            .build();
+            },
+            object_pool_capacity: 8 * 1024,
+            hash_builder: ahash::RandomState::default(),
+            event_listener: foyer::DefaultCacheEventListener::default(),
+        });
         Self {
             inner,
             fake_io_latency,
@@ -165,76 +170,10 @@ impl CacheBase for FoyerCache {
                 async move {
                     get_fake_block(sst_object_id, block_idx, latency)
                         .await
-                        .map(|block| (Arc::new(block), foyer::CacheContext::Default))
+                        .map(|block| (Arc::new(block), 1, foyer::CacheContext::Default))
                 }
             })
             .await?;
-        Ok(entry.value().clone())
-    }
-}
-
-pub struct FoyerHybridCache {
-    inner: foyer::HybridCache<(u64, u64), Arc<Block>>,
-    fake_io_latency: Duration,
-}
-
-impl FoyerHybridCache {
-    pub async fn lru(capacity: usize, fake_io_latency: Duration) -> Self {
-        let inner = foyer::HybridCacheBuilder::new()
-            .memory(capacity)
-            .with_shards(8)
-            .with_eviction_config(foyer::LruConfig {
-                high_priority_pool_ratio: 0.8,
-            })
-            .with_object_pool_capacity(8 * 1024)
-            .storage()
-            .build()
-            .await
-            .unwrap();
-        Self {
-            inner,
-            fake_io_latency,
-        }
-    }
-
-    pub async fn lfu(capacity: usize, fake_io_latency: Duration) -> Self {
-        let inner = foyer::HybridCacheBuilder::new()
-            .memory(capacity)
-            .with_shards(8)
-            .with_eviction_config(foyer::LfuConfig {
-                window_capacity_ratio: 0.1,
-                protected_capacity_ratio: 0.8,
-                cmsketch_eps: 0.001,
-                cmsketch_confidence: 0.9,
-            })
-            .with_object_pool_capacity(8 * 1024)
-            .storage()
-            .build()
-            .await
-            .unwrap();
-        Self {
-            inner,
-            fake_io_latency,
-        }
-    }
-}
-
-#[async_trait]
-impl CacheBase for FoyerHybridCache {
-    async fn try_get_with(&self, sst_object_id: u64, block_idx: u64) -> HummockResult<Arc<Block>> {
-        let entry = self
-            .inner
-            .entry((sst_object_id, block_idx), || {
-                let latency = self.fake_io_latency;
-                async move {
-                    get_fake_block(sst_object_id, block_idx, latency)
-                        .await
-                        .map(|block| (Arc::new(block), foyer::CacheContext::Default))
-                        .map_err(anyhow::Error::from)
-                }
-            })
-            .await
-            .map_err(HummockError::foyer_error)?;
         Ok(entry.value().clone())
     }
 }
@@ -321,20 +260,6 @@ fn bench_block_cache(c: &mut Criterion) {
     bench_cache(block_cache, c, 10000);
     let block_cache = Arc::new(FoyerCache::lfu(2048, Duration::from_millis(0)));
     bench_cache(block_cache, c, 10000);
-    let block_cache = Arc::new(
-        tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap()
-            .block_on(FoyerHybridCache::lru(2048, Duration::from_millis(0))),
-    );
-    bench_cache(block_cache, c, 10000);
-    let block_cache = Arc::new(
-        tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap()
-            .block_on(FoyerHybridCache::lfu(2048, Duration::from_millis(0))),
-    );
-    bench_cache(block_cache, c, 10000);
 
     let block_cache = Arc::new(MokaCache::new(2048, Duration::from_millis(1)));
     bench_cache(block_cache, c, 1000);
@@ -344,20 +269,6 @@ fn bench_block_cache(c: &mut Criterion) {
     bench_cache(block_cache, c, 1000);
     let block_cache = Arc::new(FoyerCache::lfu(2048, Duration::from_millis(1)));
     bench_cache(block_cache, c, 1000);
-    let block_cache = Arc::new(
-        tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap()
-            .block_on(FoyerHybridCache::lru(2048, Duration::from_millis(1))),
-    );
-    bench_cache(block_cache, c, 1000);
-    let block_cache = Arc::new(
-        tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap()
-            .block_on(FoyerHybridCache::lfu(2048, Duration::from_millis(1))),
-    );
-    bench_cache(block_cache, c, 1000);
 
     let block_cache = Arc::new(MokaCache::new(256, Duration::from_millis(10)));
     bench_cache(block_cache, c, 200);
@@ -366,20 +277,6 @@ fn bench_block_cache(c: &mut Criterion) {
     let block_cache = Arc::new(FoyerCache::lru(256, Duration::from_millis(10)));
     bench_cache(block_cache, c, 200);
     let block_cache = Arc::new(FoyerCache::lfu(256, Duration::from_millis(10)));
-    bench_cache(block_cache, c, 200);
-    let block_cache = Arc::new(
-        tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap()
-            .block_on(FoyerHybridCache::lru(256, Duration::from_millis(10))),
-    );
-    bench_cache(block_cache, c, 200);
-    let block_cache = Arc::new(
-        tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap()
-            .block_on(FoyerHybridCache::lfu(256, Duration::from_millis(10))),
-    );
     bench_cache(block_cache, c, 200);
 }
 

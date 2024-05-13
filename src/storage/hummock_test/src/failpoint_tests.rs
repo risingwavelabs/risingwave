@@ -16,7 +16,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes};
-use foyer::CacheContext;
+use foyer::memory::CacheContext;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::TABLE_PREFIX_LEN;
@@ -43,7 +43,7 @@ use crate::test_utils::{gen_key_from_str, TestIngestBatch};
 async fn test_failpoints_state_store_read_upload() {
     let mem_upload_err = "mem_upload_err";
     let mem_read_err = "mem_read_err";
-    let sstable_store = mock_sstable_store().await;
+    let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
@@ -147,8 +147,8 @@ async fn test_failpoints_state_store_read_upload() {
         .await
         .unwrap();
     // clear block cache
-    sstable_store.clear_block_cache().unwrap();
-    sstable_store.clear_meta_cache().unwrap();
+    sstable_store.clear_block_cache();
+    sstable_store.clear_meta_cache();
     fail::cfg(mem_read_err, "return").unwrap();
 
     let anchor_prefix_hint = {

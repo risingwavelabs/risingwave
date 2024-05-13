@@ -17,10 +17,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use foyer::{
-    CacheContext, HybridCache, HybridCacheBuilder, StorageKey as HybridKey,
-    StorageValue as HybridValue,
-};
+use foyer::memory::CacheContext;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::EvictionConfig;
@@ -357,19 +354,6 @@ pub async fn count_stream(mut i: impl StateStoreIter) -> usize {
 
 pub fn create_small_table_cache() -> Arc<LruCache<HummockSstableObjectId, Box<Sstable>>> {
     Arc::new(LruCache::new(1, 4, 0))
-}
-
-pub async fn hybrid_cache_for_test<K, V>() -> HybridCache<K, V>
-where
-    K: HybridKey,
-    V: HybridValue,
-{
-    HybridCacheBuilder::new()
-        .memory(10)
-        .storage()
-        .build()
-        .await
-        .unwrap()
 }
 
 pub mod delete_range {

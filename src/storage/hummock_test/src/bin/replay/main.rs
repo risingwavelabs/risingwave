@@ -29,10 +29,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 use clap::Parser;
-use foyer::HybridCacheBuilder;
 use replay_impl::{get_replay_notification_client, GlobalReplayImpl};
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig, StorageConfig,
+    extract_storage_memory_config, load_config, EvictionConfig, NoOverride, ObjectStoreConfig,
+    StorageConfig,
 };
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_hummock_trace::{
@@ -44,7 +44,7 @@ use risingwave_object_store::object::build_remote_object_store;
 use risingwave_storage::filter_key_extractor::{
     FakeRemoteTableAccessor, RpcFilterKeyExtractorManager,
 };
-use risingwave_storage::hummock::{HummockStorage, SstableStore, SstableStoreConfig};
+use risingwave_storage::hummock::{FileCache, HummockStorage, SstableStore, SstableStoreConfig};
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics, ObjectStoreMetrics};
 use risingwave_storage::opts::StorageOpts;
 use serde::{Deserialize, Serialize};
@@ -111,30 +111,21 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
     )
     .await;
 
-    let meta_cache_v2 = HybridCacheBuilder::new()
-        .memory(storage_opts.meta_cache_capacity_mb * (1 << 20))
-        .with_shards(storage_opts.meta_cache_shard_num)
-        .storage()
-        .build()
-        .await
-        .unwrap();
-    let block_cache_v2 = HybridCacheBuilder::new()
-        .memory(storage_opts.block_cache_capacity_mb * (1 << 20))
-        .with_shards(storage_opts.block_cache_shard_num)
-        .storage()
-        .build()
-        .await
-        .unwrap();
-
     let sstable_store = Arc::new(SstableStore::new(SstableStoreConfig {
         store: Arc::new(object_store),
         path: storage_opts.data_directory.to_string(),
+        block_cache_capacity: storage_opts.block_cache_capacity_mb * (1 << 20),
+        meta_cache_capacity: storage_opts.meta_cache_capacity_mb * (1 << 20),
+        block_cache_shard_num: storage_opts.block_cache_shard_num,
+        meta_cache_shard_num: storage_opts.meta_cache_shard_num,
+        block_cache_eviction: EvictionConfig::for_test(),
+        meta_cache_eviction: EvictionConfig::for_test(),
         prefetch_buffer_capacity: storage_opts.prefetch_buffer_capacity_mb * (1 << 20),
         max_prefetch_block_number: storage_opts.max_prefetch_block_number,
+        data_file_cache: FileCache::none(),
+        meta_file_cache: FileCache::none(),
         recent_filter: None,
         state_store_metrics: state_store_metrics.clone(),
-        meta_cache_v2,
-        block_cache_v2,
     }));
 
     let (hummock_meta_client, notification_client, notifier) = {

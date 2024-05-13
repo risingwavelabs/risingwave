@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use expect_test::expect;
-use foyer::CacheContext;
+use foyer::memory::CacheContext;
 use futures::{pin_mut, StreamExt};
 use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
@@ -526,7 +526,7 @@ async fn test_state_store_sync_v2() {
 /// Fix this when we finished epoch management.
 #[ignore]
 async fn test_reload_storage() {
-    let sstable_store = mock_sstable_store().await;
+    let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;

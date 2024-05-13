@@ -442,7 +442,7 @@ impl Clone for XorFilterReader {
 
 #[cfg(test)]
 mod tests {
-    use foyer::CacheContext;
+    use foyer::memory::CacheContext;
     use rand::RngCore;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::EpochWithGap;
@@ -458,7 +458,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_blocked_bloom_filter() {
-        let sstable_store = mock_sstable_store().await;
+        let sstable_store = mock_sstable_store();
         let writer_opts = SstableWriterOptions {
             capacity_hint: None,
             tracker: None,

@@ -20,7 +20,7 @@ use std::sync::Arc;
 use auto_enums::auto_enum;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use foyer::CacheContext;
+use foyer::memory::CacheContext;
 use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;

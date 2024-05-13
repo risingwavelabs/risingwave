@@ -77,7 +77,7 @@ license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
-foyer = { version = "0.8.6", features = ["nightly"] }
+foyer = "0.6"
 auto_enums = { version = "0.8", features = ["futures03", "tokio1"] }
 await-tree = "0.2.1"
 aws-config = { version = "1", default-features = false, features = [

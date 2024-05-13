@@ -41,7 +41,7 @@ use crate::monitor::StoreLocalStatistic;
 async fn test_failpoints_concat_read_err() {
     fail::cfg("disable_block_cache", "return").unwrap();
     let mem_read_err = "mem_read_err";
-    let sstable_store = mock_sstable_store().await;
+    let sstable_store = mock_sstable_store();
     let table0 = gen_iterator_test_sstable_info(
         0,
         default_builder_opt_for_test(),
@@ -101,7 +101,7 @@ async fn test_failpoints_concat_read_err() {
 async fn test_failpoints_backward_concat_read_err() {
     fail::cfg("disable_block_cache", "return").unwrap();
     let mem_read_err = "mem_read_err";
-    let sstable_store = mock_sstable_store().await;
+    let sstable_store = mock_sstable_store();
     let table0 = gen_iterator_test_sstable_info(
         0,
         default_builder_opt_for_test(),
@@ -157,7 +157,7 @@ async fn test_failpoints_backward_concat_read_err() {
 async fn test_failpoints_merge_invalid_key() {
     fail::cfg("disable_block_cache", "return").unwrap();
     let mem_read_err = "mem_read_err";
-    let sstable_store = mock_sstable_store().await;
+    let sstable_store = mock_sstable_store();
     let table0 = gen_iterator_test_sstable_base(
         0,
         default_builder_opt_for_test(),
@@ -205,7 +205,7 @@ async fn test_failpoints_merge_invalid_key() {
 async fn test_failpoints_backward_merge_invalid_key() {
     fail::cfg("disable_block_cache", "return").unwrap();
     let mem_read_err = "mem_read_err";
-    let sstable_store = mock_sstable_store().await;
+    let sstable_store = mock_sstable_store();
     let table0 = gen_iterator_test_sstable_base(
         0,
         default_builder_opt_for_test(),
@@ -249,7 +249,7 @@ async fn test_failpoints_backward_merge_invalid_key() {
 async fn test_failpoints_user_read_err() {
     fail::cfg("disable_block_cache", "return").unwrap();
     let mem_read_err = "mem_read_err";
-    let sstable_store = mock_sstable_store().await;
+    let sstable_store = mock_sstable_store();
     let table0 = gen_iterator_test_sstable_base(
         0,
         default_builder_opt_for_test(),
@@ -309,7 +309,7 @@ async fn test_failpoints_user_read_err() {
 async fn test_failpoints_backward_user_read_err() {
     fail::cfg("disable_block_cache", "return").unwrap();
     let mem_read_err = "mem_read_err";
-    let sstable_store = mock_sstable_store().await;
+    let sstable_store = mock_sstable_store();
     let table0 = gen_iterator_test_sstable_base(
         0,
         default_builder_opt_for_test(),
@@ -362,7 +362,7 @@ async fn test_failpoints_compactor_iterator_recreate() {
     let get_stream_err = "get_stream_err";
     let stream_read_err = "stream_read_err";
     let create_stream_err = "create_stream_err";
-    let sstable_store = mock_sstable_store().await;
+    let sstable_store = mock_sstable_store();
     // when upload data is successful, but upload meta is fail and delete is fail
     let has_create = Arc::new(AtomicBool::new(false));
     fail::cfg_callback(get_stream_err, move || {
