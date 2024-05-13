@@ -21,9 +21,9 @@ use aws_sdk_dynamodb::client::Client;
 use aws_smithy_types::Blob;
 use dynamodb::types::{AttributeValue, TableStatus};
 use risingwave_common::array::{Op, RowRef, StreamChunk};
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row as _;
-use risingwave_common::types::{ScalarRefImpl, ToText};
+use risingwave_common::types::{DataType, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
@@ -182,8 +182,9 @@ impl DynamoDbPayloadWriter {
                 .map_err(|e| {
                     SinkError::DynamoDb(anyhow!(e).context("failed to put item to DynamoDB sink"))
                 })
-                .map(|_| ())
-        } else if !self.delete_items.is_empty() {
+                .map(|_| ())?
+        }
+        if !self.delete_items.is_empty() {
             let new_items = std::mem::take(&mut self.delete_items);
             self.client
                 .delete_item()
@@ -196,10 +197,10 @@ impl DynamoDbPayloadWriter {
                         anyhow!(e).context("failed to delete item from DynamoDB sink"),
                     )
                 })
-                .map(|_| ())
-        } else {
-            Ok(())
+                .map(|_| ())?
         }
+
+        Ok(())
     }
 }
 
@@ -229,12 +230,12 @@ impl DynamoDbSinkWriter {
         for (op, row) in chunk.rows() {
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    for (k, v) in self.formatter.format_row(row) {
+                    for (k, v) in self.formatter.format_row(row)? {
                         self.payload_writer.write_one_insert(k, v);
                     }
                 }
                 Op::Delete | Op::UpdateDelete => {
-                    for (k, v) in self.formatter.format_row(row) {
+                    for (k, v) in self.formatter.format_row(row)? {
                         self.payload_writer.write_one_delete(k, v);
                     }
                 }
@@ -259,40 +260,70 @@ struct DynamoDbFormatter {
 }
 
 impl DynamoDbFormatter {
-    fn format_row(&self, row: RowRef<'_>) -> Vec<(String, AttributeValue)> {
-        let mut items = Vec::new();
-        for (scalar, field) in row.iter().zip_eq_debug((self.schema.clone()).into_fields()) {
-            let attr_value = map_data_type(scalar);
-            items.push((field.name, attr_value));
-        }
-
-        items
+    fn format_row(&self, row: RowRef<'_>) -> Result<Vec<(String, AttributeValue)>> {
+        row.iter()
+            .zip_eq_debug((self.schema.clone()).into_fields())
+            .map(|(scalar, field)| {
+                map_data_type(scalar, &field.data_type()).map(|attr| (field.name, attr))
+            })
+            .collect()
     }
 }
 
-fn map_data_type(scalar: Option<ScalarRefImpl<'_>>) -> AttributeValue {
-    match scalar {
-        None => AttributeValue::Null(true),
-        Some(s) => match s {
-            number @ (ScalarRefImpl::Int16(_)
-            | ScalarRefImpl::Int32(_)
-            | ScalarRefImpl::Int64(_)
-            | ScalarRefImpl::Int256(_)
-            | ScalarRefImpl::Float32(_)
-            | ScalarRefImpl::Float64(_)
-            | ScalarRefImpl::Decimal(_)
-            | ScalarRefImpl::Serial(_)) => AttributeValue::N(number.to_text()),
-            string @ (ScalarRefImpl::Utf8(_)
-            | ScalarRefImpl::Interval(_)
-            | ScalarRefImpl::Date(_)
-            | ScalarRefImpl::Time(_)
-            | ScalarRefImpl::Timestamp(_)
-            | ScalarRefImpl::Timestamptz(_)
-            | ScalarRefImpl::Struct(_)
-            | ScalarRefImpl::Jsonb(_)) => AttributeValue::S(string.to_text()),
-            ScalarRefImpl::Bool(x) => AttributeValue::Bool(x),
-            ScalarRefImpl::Bytea(x) => AttributeValue::B(Blob::new(x)),
-            ScalarRefImpl::List(x) => AttributeValue::L(x.iter().map(map_data_type).collect()),
-        },
-    }
+fn map_data_type(
+    scalar_ref: Option<ScalarRefImpl<'_>>,
+    data_type: &DataType,
+) -> Result<AttributeValue> {
+    let Some(scalar_ref) = scalar_ref else {
+        return Ok(AttributeValue::Null(true));
+    };
+    let attr = match (data_type, scalar_ref) {
+        (DataType::Int16, ScalarRefImpl::Int16(_))
+        | (DataType::Int32, ScalarRefImpl::Int32(_))
+        | (DataType::Int64, ScalarRefImpl::Int64(_))
+        | (DataType::Int256, ScalarRefImpl::Int256(_))
+        | (DataType::Float32, ScalarRefImpl::Float32(_))
+        | (DataType::Float64, ScalarRefImpl::Float64(_))
+        | (DataType::Decimal, ScalarRefImpl::Decimal(_))
+        | (DataType::Serial, ScalarRefImpl::Serial(_)) => {
+            AttributeValue::N(scalar_ref.to_text_with_type(data_type))
+        }
+        // TODO: jsonb as dynamic type (https://github.com/risingwavelabs/risingwave/issues/11699)
+        (DataType::Varchar, ScalarRefImpl::Utf8(_))
+        | (DataType::Interval, ScalarRefImpl::Interval(_))
+        | (DataType::Date, ScalarRefImpl::Date(_))
+        | (DataType::Time, ScalarRefImpl::Time(_))
+        | (DataType::Timestamp, ScalarRefImpl::Timestamp(_))
+        | (DataType::Timestamptz, ScalarRefImpl::Timestamptz(_))
+        | (DataType::Jsonb, ScalarRefImpl::Jsonb(_)) => {
+            AttributeValue::S(scalar_ref.to_text_with_type(data_type))
+        }
+        (DataType::Boolean, ScalarRefImpl::Bool(v)) => AttributeValue::Bool(v),
+        (DataType::Bytea, ScalarRefImpl::Bytea(v)) => AttributeValue::B(Blob::new(v)),
+        (DataType::List(datatype), ScalarRefImpl::List(list_ref)) => {
+            let list_attr = list_ref
+                .iter()
+                .map(|x| map_data_type(x, datatype))
+                .collect::<Result<Vec<_>>>()?;
+            AttributeValue::L(list_attr)
+        }
+        (DataType::Struct(st), ScalarRefImpl::Struct(struct_ref)) => {
+            let mut map = HashMap::with_capacity(st.len());
+            for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
+                st.iter()
+                    .map(|(name, dt)| Field::with_name(dt.clone(), name)),
+            ) {
+                let attr = map_data_type(sub_datum_ref, &sub_field.data_type())?;
+                map.insert(sub_field.name.clone(), attr);
+            }
+            AttributeValue::M(map)
+        }
+        (data_type, scalar_ref) => {
+            return Err(SinkError::DynamoDb(anyhow!(format!(
+                "map_data_type: unsupported data type: logical type: {:?}, physical type: {:?}",
+                data_type, scalar_ref
+            ),)));
+        }
+    };
+    Ok(attr)
 }
