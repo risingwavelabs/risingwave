@@ -189,7 +189,6 @@ impl UserCatalog {
 
                 for (&key, found) in &mut action_map {
                     let (required_action, required_grant_option) = *key;
-
                     if action == required_action && (!required_grant_option | with_grant_option) {
                         *found = true;
                     }

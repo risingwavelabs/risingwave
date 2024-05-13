@@ -359,6 +359,14 @@ impl DatabaseManager {
             .collect_vec()
     }
 
+    pub fn list_view_ids(&self, schema_id: SchemaId) -> Vec<ViewId> {
+        self.views
+            .values()
+            .filter(|view| view.schema_id == schema_id)
+            .map(|view| view.id)
+            .collect_vec()
+    }
+
     pub fn list_sources(&self) -> Vec<Source> {
         self.sources.values().cloned().collect_vec()
     }
