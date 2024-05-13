@@ -15,7 +15,6 @@
 use std::cmp;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use function_name::named;
 use itertools::Itertools;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
@@ -38,8 +37,10 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use super::check_cg_write_limit;
 use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
+use crate::hummock::manager::context::ContextInfo;
+use crate::hummock::manager::gc::DeleteObjectTracker;
 use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
-use crate::hummock::manager::{commit_multi_var, create_trx_wrapper, read_lock, write_lock};
+use crate::hummock::manager::{commit_multi_var, create_trx_wrapper};
 use crate::hummock::metrics_utils::{
     trigger_safepoint_stat, trigger_write_stop_stats, LocalTableMetrics,
 };
@@ -71,36 +72,27 @@ impl Drop for HummockVersionSafePoint {
 #[derive(Default)]
 pub struct Versioning {
     // Volatile states below
-    /// Avoide commit epoch epochs
+    /// Avoid commit epoch epochs
     /// Don't persist compaction version delta to meta store
     pub disable_commit_epochs: bool,
     /// Latest hummock version
     pub current_version: HummockVersion,
-    /// Objects that waits to be deleted from object store. It comes from either compaction, or
-    /// full GC (listing object store).
-    pub objects_to_delete: HashSet<HummockSstableObjectId>,
     /// SST whose `object_id` != `sst_id`
     pub branched_ssts: BTreeMap<
         // SST object id
         HummockSstableObjectId,
         BranchedSstInfo,
     >,
-    /// `version_safe_points` is similar to `pinned_versions` expect for being a transient state.
-    pub version_safe_points: Vec<HummockVersionId>,
-    /// Tables that write limit is trigger for.
-    pub write_limit: HashMap<CompactionGroupId, WriteLimit>,
+    pub local_metrics: HashMap<u32, LocalTableMetrics>,
 
     // Persistent states below
     pub hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
-    pub pinned_versions: BTreeMap<HummockContextId, HummockPinnedVersion>,
-    pub pinned_snapshots: BTreeMap<HummockContextId, HummockPinnedSnapshot>,
     /// Stats for latest hummock version.
     pub version_stats: HummockVersionStats,
     pub checkpoint: HummockVersionCheckpoint,
-    pub local_metrics: HashMap<u32, LocalTableMetrics>,
 }
 
-impl Versioning {
+impl ContextInfo {
     pub fn min_pinned_version_id(&self) -> HummockVersionId {
         let mut min_pinned_version_id = HummockVersionId::MAX;
         for id in self
@@ -113,16 +105,22 @@ impl Versioning {
         }
         min_pinned_version_id
     }
+}
 
+impl Versioning {
     /// Marks all objects <= `min_pinned_version_id` for deletion.
-    pub(super) fn mark_objects_for_deletion(&mut self) {
-        let min_pinned_version_id = self.min_pinned_version_id();
-        self.objects_to_delete.extend(
+    pub(super) fn mark_objects_for_deletion(
+        &self,
+        context_info: &ContextInfo,
+        delete_object_tracker: &DeleteObjectTracker,
+    ) {
+        let min_pinned_version_id = context_info.min_pinned_version_id();
+        delete_object_tracker.add(
             self.checkpoint
                 .stale_objects
                 .iter()
                 .filter(|(version_id, _)| **version_id <= min_pinned_version_id)
-                .flat_map(|(_, stale_objects)| stale_objects.id.clone()),
+                .flat_map(|(_, stale_objects)| stale_objects.id.iter().cloned()),
         );
     }
 
@@ -168,9 +166,9 @@ impl Versioning {
 }
 
 impl HummockManager {
-    #[named]
     pub async fn list_pinned_version(&self) -> Vec<HummockPinnedVersion> {
-        read_lock!(self, versioning)
+        self.context_info
+            .read()
             .await
             .pinned_versions
             .values()
@@ -178,9 +176,9 @@ impl HummockManager {
             .collect_vec()
     }
 
-    #[named]
     pub async fn list_pinned_snapshot(&self) -> Vec<HummockPinnedSnapshot> {
-        read_lock!(self, versioning)
+        self.context_info
+            .read()
             .await
             .pinned_snapshots
             .values()
@@ -205,16 +203,15 @@ impl HummockManager {
         Ok(workers)
     }
 
-    #[named]
     pub async fn get_version_stats(&self) -> HummockVersionStats {
-        read_lock!(self, versioning).await.version_stats.clone()
+        self.versioning.read().await.version_stats.clone()
     }
 
-    #[named]
     pub async fn register_safe_point(&self) -> HummockVersionSafePoint {
-        let mut wl = write_lock!(self, versioning).await;
+        let versioning = self.versioning.read().await;
+        let mut wl = self.context_info.write().await;
         let safe_point = HummockVersionSafePoint {
-            id: wl.current_version.id,
+            id: versioning.current_version.id,
             event_sender: self.event_sender.clone(),
         };
         wl.version_safe_points.push(safe_point.id);
@@ -222,9 +219,8 @@ impl HummockManager {
         safe_point
     }
 
-    #[named]
     pub async fn unregister_safe_point(&self, safe_point: HummockVersionId) {
-        let mut wl = write_lock!(self, versioning).await;
+        let mut wl = self.context_info.write().await;
         let version_safe_points = &mut wl.version_safe_points;
         if let Some(pos) = version_safe_points.iter().position(|sp| *sp == safe_point) {
             version_safe_points.remove(pos);
@@ -235,41 +231,40 @@ impl HummockManager {
     /// Updates write limits for `target_groups` and sends notification.
     /// Returns true if `write_limit` has been modified.
     /// The implementation acquires `versioning` lock and `compaction_group_manager` lock.
-    #[named]
     pub(super) async fn try_update_write_limits(
         &self,
         target_group_ids: &[CompactionGroupId],
     ) -> bool {
-        let mut guard = write_lock!(self, versioning).await;
-        let config_mgr = self.compaction_group_manager.read().await;
+        let versioning = self.versioning.read().await;
+        let mut cg_manager = self.compaction_group_manager.write().await;
         let target_group_configs = target_group_ids
             .iter()
             .filter_map(|id| {
-                config_mgr
+                cg_manager
                     .try_get_compaction_group_config(*id)
                     .map(|config| (*id, config))
             })
             .collect();
         let mut new_write_limits = calc_new_write_limits(
             target_group_configs,
-            guard.write_limit.clone(),
-            &guard.current_version,
+            cg_manager.write_limit.clone(),
+            &versioning.current_version,
         );
         let all_group_ids: HashSet<_> =
-            HashSet::from_iter(get_compaction_group_ids(&guard.current_version));
+            HashSet::from_iter(get_compaction_group_ids(&versioning.current_version));
         new_write_limits.retain(|group_id, _| all_group_ids.contains(group_id));
-        if new_write_limits == guard.write_limit {
+        if new_write_limits == cg_manager.write_limit {
             return false;
         }
         tracing::debug!("Hummock stopped write is updated: {:#?}", new_write_limits);
         trigger_write_stop_stats(&self.metrics, &new_write_limits);
-        guard.write_limit = new_write_limits;
+        cg_manager.write_limit = new_write_limits;
         self.env
             .notification_manager()
             .notify_hummock_without_version(
                 Operation::Add,
                 Info::HummockWriteLimits(risingwave_pb::hummock::WriteLimits {
-                    write_limits: guard.write_limit.clone(),
+                    write_limits: cg_manager.write_limit.clone(),
                 }),
             );
         true
@@ -277,22 +272,19 @@ impl HummockManager {
 
     /// Gets write limits.
     /// The implementation acquires `versioning` lock.
-    #[named]
     pub async fn write_limits(&self) -> HashMap<CompactionGroupId, WriteLimit> {
-        let guard = read_lock!(self, versioning).await;
+        let guard = self.compaction_group_manager.read().await;
         guard.write_limit.clone()
     }
 
-    #[named]
     pub async fn list_branched_objects(&self) -> BTreeMap<HummockSstableObjectId, BranchedSstInfo> {
-        let guard = read_lock!(self, versioning).await;
+        let guard = self.versioning.read().await;
         guard.branched_ssts.clone()
     }
 
-    #[named]
     pub async fn rebuild_table_stats(&self) -> Result<()> {
         use crate::model::ValTransaction;
-        let mut versioning = write_lock!(self, versioning).await;
+        let mut versioning = self.versioning.write().await;
         let new_stats = rebuild_table_stats(&versioning.current_version);
         let mut version_stats = create_trx_wrapper!(
             self.meta_store_ref(),
@@ -416,29 +408,30 @@ mod tests {
     };
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
+    use crate::hummock::manager::context::ContextInfo;
     use crate::hummock::manager::versioning::{
-        calc_new_write_limits, estimate_table_stats, rebuild_table_stats, Versioning,
+        calc_new_write_limits, estimate_table_stats, rebuild_table_stats,
     };
     use crate::hummock::model::CompactionGroup;
 
     #[test]
     fn test_min_pinned_version_id() {
-        let mut versioning = Versioning::default();
-        assert_eq!(versioning.min_pinned_version_id(), HummockVersionId::MAX);
-        versioning.pinned_versions.insert(
+        let mut context_info = ContextInfo::default();
+        assert_eq!(context_info.min_pinned_version_id(), HummockVersionId::MAX);
+        context_info.pinned_versions.insert(
             1,
             HummockPinnedVersion {
                 context_id: 1,
                 min_pinned_id: 10,
             },
         );
-        assert_eq!(versioning.min_pinned_version_id(), 10);
-        versioning.version_safe_points.push(5);
-        assert_eq!(versioning.min_pinned_version_id(), 5);
-        versioning.version_safe_points.clear();
-        assert_eq!(versioning.min_pinned_version_id(), 10);
-        versioning.pinned_versions.clear();
-        assert_eq!(versioning.min_pinned_version_id(), HummockVersionId::MAX);
+        assert_eq!(context_info.min_pinned_version_id(), 10);
+        context_info.version_safe_points.push(5);
+        assert_eq!(context_info.min_pinned_version_id(), 5);
+        context_info.version_safe_points.clear();
+        assert_eq!(context_info.min_pinned_version_id(), 10);
+        context_info.pinned_versions.clear();
+        assert_eq!(context_info.min_pinned_version_id(), HummockVersionId::MAX);
     }
 
     #[test]

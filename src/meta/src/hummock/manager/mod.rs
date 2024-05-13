@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::BorrowMut;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicBool;
@@ -23,7 +22,6 @@ use anyhow::Context;
 use arc_swap::ArcSwap;
 use bytes::Bytes;
 use fail::fail_point;
-use function_name::named;
 use futures::future::Either;
 use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{FutureExt, StreamExt};
@@ -68,7 +66,6 @@ use rw_futures_util::{pending_on_none, select_all};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Sender;
-use tokio::sync::RwLockWriteGuard;
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::IntervalStream;
 use tonic::Streaming;
@@ -129,19 +126,22 @@ pub struct HummockManager {
     pub env: MetaSrvEnv,
 
     metadata_manager: MetadataManager,
-    /// Lock order: compaction, versioning, `compaction_group_manager`.
-    /// - Lock compaction first, then versioning, and finally `compaction_group_manager`.
+    /// Lock order: `compaction`, `versioning`, `compaction_group_manager`, `context_info`
+    /// - Lock `compaction` first, then `versioning`, then `compaction_group_manager` and finally `context_info`.
     /// - This order should be strictly followed to prevent deadlock.
     compaction: MonitoredRwLock<Compaction>,
     versioning: MonitoredRwLock<Versioning>,
     /// `CompactionGroupManager` manages compaction configs for compaction groups.
-    compaction_group_manager: tokio::sync::RwLock<CompactionGroupManager>,
+    compaction_group_manager: MonitoredRwLock<CompactionGroupManager>,
+    context_info: MonitoredRwLock<ContextInfo>,
     latest_snapshot: Snapshot,
 
     pub metrics: Arc<MetaMetrics>,
 
     pub compactor_manager: CompactorManagerRef,
     event_sender: HummockManagerEventSender,
+
+    delete_object_tracker: DeleteObjectTracker,
 
     object_store: ObjectStoreRef,
     version_checkpoint_path: String,
@@ -174,21 +174,6 @@ pub struct HummockManager {
 
 pub type HummockManagerRef = Arc<HummockManager>;
 
-/// Acquire read lock of the lock with `lock_name`.
-/// The macro will use macro `function_name` to get the name of the function of method that calls
-/// the lock, and therefore, anyone to call this macro should ensured that the caller method has the
-/// macro #[named]
-macro_rules! read_lock {
-    ($hummock_mgr:expr, $lock_name:ident) => {
-        async {
-            $hummock_mgr
-                .$lock_name
-                .read(&[function_name!(), stringify!($lock_name), "read"])
-                .await
-        }
-    };
-}
-pub(crate) use read_lock;
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
@@ -198,28 +183,12 @@ use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
 use risingwave_pb::meta::relation::RelationInfo;
 
-/// Acquire write lock of the lock with `lock_name`.
-/// The macro will use macro `function_name` to get the name of the function of method that calls
-/// the lock, and therefore, anyone to call this macro should ensured that the caller method has the
-/// macro #[named]
-macro_rules! write_lock {
-    ($hummock_mgr:expr, $lock_name:ident) => {
-        async {
-            $hummock_mgr
-                .$lock_name
-                .write(&[function_name!(), stringify!($lock_name), "write"])
-                .await
-        }
-    };
-}
-pub(crate) use write_lock;
-
 macro_rules! start_measure_real_process_timer {
-    ($hummock_mgr:expr) => {
+    ($hummock_mgr:expr, $func_name:literal) => {
         $hummock_mgr
             .metrics
             .hummock_manager_real_process_time
-            .with_label_values(&[function_name!()])
+            .with_label_values(&[$func_name])
             .start_timer()
     };
 }
@@ -359,7 +328,7 @@ impl HummockManager {
         metadata_manager: MetadataManager,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
-        compaction_group_manager: tokio::sync::RwLock<CompactionGroupManager>,
+        compaction_group_manager: CompactionGroupManager,
         compactor_streams_change_tx: UnboundedSender<(
             u32,
             Streaming<SubscribeCompactionEventRequest>,
@@ -415,14 +384,25 @@ impl HummockManager {
             versioning: MonitoredRwLock::new(
                 metrics.hummock_manager_lock_time.clone(),
                 Default::default(),
+                "hummock_manager::versioning",
             ),
             compaction: MonitoredRwLock::new(
                 metrics.hummock_manager_lock_time.clone(),
                 Default::default(),
+                "hummock_manager::compaction",
+            ),
+            compaction_group_manager: MonitoredRwLock::new(
+                metrics.hummock_manager_lock_time.clone(),
+                compaction_group_manager,
+                "hummock_manager::compaction_group_manager",
+            ),
+            context_info: MonitoredRwLock::new(
+                metrics.hummock_manager_lock_time.clone(),
+                Default::default(),
+                "hummock_manager::context_info",
             ),
             metrics,
             metadata_manager,
-            compaction_group_manager,
             // compaction_request_channel: parking_lot::RwLock::new(None),
             compactor_manager,
             latest_snapshot: ArcSwap::from_pointee(HummockSnapshot {
@@ -430,6 +410,7 @@ impl HummockManager {
                 current_epoch: INVALID_EPOCH,
             }),
             event_sender: tx,
+            delete_object_tracker: Default::default(),
             object_store,
             version_checkpoint_path,
             version_archive_dir,
@@ -453,13 +434,14 @@ impl HummockManager {
     }
 
     /// Load state from meta store.
-    #[named]
     async fn load_meta_store_state(&self) -> Result<()> {
-        let mut compaction_guard = write_lock!(self, compaction).await;
-        let mut versioning_guard = write_lock!(self, versioning).await;
+        let mut compaction_guard = self.compaction.write().await;
+        let mut versioning_guard = self.versioning.write().await;
+        let mut context_info_guard = self.context_info.write().await;
         self.load_meta_store_state_impl(
-            compaction_guard.borrow_mut(),
-            versioning_guard.borrow_mut(),
+            &mut compaction_guard,
+            &mut versioning_guard,
+            &mut context_info_guard,
         )
         .await
     }
@@ -467,8 +449,9 @@ impl HummockManager {
     /// Load state from meta store.
     async fn load_meta_store_state_impl(
         &self,
-        compaction_guard: &mut RwLockWriteGuard<'_, Compaction>,
-        versioning_guard: &mut RwLockWriteGuard<'_, Versioning>,
+        compaction_guard: &mut Compaction,
+        versioning_guard: &mut Versioning,
+        context_info: &mut ContextInfo,
     ) -> Result<()> {
         use sea_orm::EntityTrait;
         let meta_store = self.meta_store_ref();
@@ -583,7 +566,7 @@ impl HummockManager {
         versioning_guard.branched_ssts = versioning_guard.current_version.build_branched_sst_info();
         versioning_guard.hummock_version_deltas = hummock_version_deltas;
 
-        versioning_guard.pinned_versions = match &meta_store {
+        context_info.pinned_versions = match &meta_store {
             MetaStoreImpl::Kv(meta_store) => HummockPinnedVersion::list(meta_store)
                 .await?
                 .into_iter()
@@ -598,7 +581,7 @@ impl HummockManager {
                 .collect(),
         };
 
-        versioning_guard.pinned_snapshots = match &meta_store {
+        context_info.pinned_snapshots = match &meta_store {
             MetaStoreImpl::Kv(meta_store) => HummockPinnedSnapshot::list(meta_store)
                 .await?
                 .into_iter()
@@ -613,23 +596,32 @@ impl HummockManager {
                 .collect(),
         };
 
-        versioning_guard.objects_to_delete.clear();
+        self.delete_object_tracker.clear();
         // Not delete stale objects when archive is enabled
         if !self.env.opts.enable_hummock_data_archive {
-            versioning_guard.mark_objects_for_deletion();
+            versioning_guard.mark_objects_for_deletion(context_info, &self.delete_object_tracker);
         }
 
-        self.initial_compaction_group_config_after_load(versioning_guard)
-            .await?;
+        self.initial_compaction_group_config_after_load(
+            versioning_guard,
+            self.compaction_group_manager.write().await.deref_mut(),
+        )
+        .await?;
 
         Ok(())
     }
 
-    /// Caller should hold `versioning` lock, to sync with `HummockManager::release_contexts`.
-    async fn check_context_with_meta_node(&self, context_id: HummockContextId) -> Result<()> {
+    async fn check_context_with_meta_node(
+        &self,
+        context_id: HummockContextId,
+        context_info: &ContextInfo,
+    ) -> Result<()> {
         if context_id == META_NODE_ID {
             // Using the preserved meta id is allowed.
-        } else if !self.check_context(context_id).await? {
+        } else if !context_info
+            .check_context(context_id, &self.metadata_manager)
+            .await?
+        {
             // The worker is not found in cluster.
             return Err(Error::InvalidContext(context_id));
         }
@@ -638,16 +630,16 @@ impl HummockManager {
 
     /// Pin the current greatest hummock version. The pin belongs to `context_id`
     /// and will be unpinned when `context_id` is invalidated.
-    #[named]
     pub async fn pin_version(&self, context_id: HummockContextId) -> Result<HummockVersion> {
-        let mut versioning_guard = write_lock!(self, versioning).await;
-        self.check_context_with_meta_node(context_id).await?;
-        let _timer = start_measure_real_process_timer!(self);
-        let versioning = versioning_guard.deref_mut();
+        let versioning = self.versioning.read().await;
+        let mut context_info = self.context_info.write().await;
+        self.check_context_with_meta_node(context_id, &context_info)
+            .await?;
+        let _timer = start_measure_real_process_timer!(self, "pin_version");
         let mut pinned_versions = create_trx_wrapper!(
             self.meta_store_ref(),
             BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut versioning.pinned_versions,)
+            BTreeMapTransaction::new(&mut context_info.pinned_versions)
         );
         let mut context_pinned_version = pinned_versions.new_entry_txn_or_default(
             context_id,
@@ -663,12 +655,13 @@ impl HummockManager {
         {
             context_pinned_version.min_pinned_id = version_id;
             commit_multi_var!(self.meta_store_ref(), context_pinned_version)?;
-            trigger_pin_unpin_version_state(&self.metrics, &versioning.pinned_versions);
+            trigger_pin_unpin_version_state(&self.metrics, &context_info.pinned_versions);
         }
 
         #[cfg(test)]
         {
-            drop(versioning_guard);
+            drop(context_info);
+            drop(versioning);
             self.check_state_consistency().await;
         }
 
@@ -678,20 +671,19 @@ impl HummockManager {
     /// Unpin all pins which belongs to `context_id` and has an id which is older than
     /// `unpin_before`. All versions >= `unpin_before` will be treated as if they are all pinned by
     /// this `context_id` so they will not be vacuumed.
-    #[named]
     pub async fn unpin_version_before(
         &self,
         context_id: HummockContextId,
         unpin_before: HummockVersionId,
     ) -> Result<()> {
-        let mut versioning_guard = write_lock!(self, versioning).await;
-        self.check_context_with_meta_node(context_id).await?;
-        let _timer = start_measure_real_process_timer!(self);
-        let versioning = versioning_guard.deref_mut();
+        let mut context_info = self.context_info.write().await;
+        self.check_context_with_meta_node(context_id, &context_info)
+            .await?;
+        let _timer = start_measure_real_process_timer!(self, "unpin_version_before");
         let mut pinned_versions = create_trx_wrapper!(
             self.meta_store_ref(),
             BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut versioning.pinned_versions,)
+            BTreeMapTransaction::new(&mut context_info.pinned_versions,)
         );
         let mut context_pinned_version = pinned_versions.new_entry_txn_or_default(
             context_id,
@@ -708,26 +700,26 @@ impl HummockManager {
         );
         context_pinned_version.min_pinned_id = unpin_before;
         commit_multi_var!(self.meta_store_ref(), context_pinned_version)?;
-        trigger_pin_unpin_version_state(&self.metrics, &versioning.pinned_versions);
+        trigger_pin_unpin_version_state(&self.metrics, &context_info.pinned_versions);
 
         #[cfg(test)]
         {
-            drop(versioning_guard);
+            drop(context_info);
             self.check_state_consistency().await;
         }
 
         Ok(())
     }
 
-    #[named]
     pub async fn pin_specific_snapshot(
         &self,
         context_id: HummockContextId,
         epoch: HummockEpoch,
     ) -> Result<HummockSnapshot> {
         let snapshot = self.latest_snapshot.load();
-        let mut guard = write_lock!(self, versioning).await;
-        self.check_context_with_meta_node(context_id).await?;
+        let mut guard = self.context_info.write().await;
+        self.check_context_with_meta_node(context_id, &guard)
+            .await?;
         let mut pinned_snapshots = create_trx_wrapper!(
             self.meta_store_ref(),
             BTreeMapTransactionWrapper,
@@ -749,12 +741,12 @@ impl HummockManager {
     }
 
     /// Make sure `max_committed_epoch` is pinned and return it.
-    #[named]
     pub async fn pin_snapshot(&self, context_id: HummockContextId) -> Result<HummockSnapshot> {
         let snapshot = self.latest_snapshot.load();
-        let mut guard = write_lock!(self, versioning).await;
-        self.check_context_with_meta_node(context_id).await?;
-        let _timer = start_measure_real_process_timer!(self);
+        let mut guard = self.context_info.write().await;
+        self.check_context_with_meta_node(context_id, &guard)
+            .await?;
+        let _timer = start_measure_real_process_timer!(self, "pin_snapshot");
         let mut pinned_snapshots = create_trx_wrapper!(
             self.meta_store_ref(),
             BTreeMapTransactionWrapper,
@@ -780,25 +772,25 @@ impl HummockManager {
         HummockSnapshot::clone(&snapshot)
     }
 
-    #[named]
     pub async fn unpin_snapshot(&self, context_id: HummockContextId) -> Result<()> {
-        let mut versioning_guard = write_lock!(self, versioning).await;
-        self.check_context_with_meta_node(context_id).await?;
-        let _timer = start_measure_real_process_timer!(self);
+        let mut context_info = self.context_info.write().await;
+        self.check_context_with_meta_node(context_id, &context_info)
+            .await?;
+        let _timer = start_measure_real_process_timer!(self, "unpin_snapshot");
         let mut pinned_snapshots = create_trx_wrapper!(
             self.meta_store_ref(),
             BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut versioning_guard.pinned_snapshots,)
+            BTreeMapTransaction::new(&mut context_info.pinned_snapshots,)
         );
         let release_snapshot = pinned_snapshots.remove(context_id);
         if release_snapshot.is_some() {
             commit_multi_var!(self.meta_store_ref(), pinned_snapshots)?;
-            trigger_pin_unpin_snapshot_state(&self.metrics, &versioning_guard.pinned_snapshots);
+            trigger_pin_unpin_snapshot_state(&self.metrics, &context_info.pinned_snapshots);
         }
 
         #[cfg(test)]
         {
-            drop(versioning_guard);
+            drop(context_info);
             self.check_state_consistency().await;
         }
 
@@ -806,18 +798,19 @@ impl HummockManager {
     }
 
     /// Unpin all snapshots smaller than specified epoch for current context.
-    #[named]
     pub async fn unpin_snapshot_before(
         &self,
         context_id: HummockContextId,
         hummock_snapshot: HummockSnapshot,
     ) -> Result<()> {
-        let mut versioning_guard = write_lock!(self, versioning).await;
-        self.check_context_with_meta_node(context_id).await?;
-        let _timer = start_measure_real_process_timer!(self);
+        let versioning = self.versioning.read().await;
+        let mut context_info = self.context_info.write().await;
+        self.check_context_with_meta_node(context_id, &context_info)
+            .await?;
+        let _timer = start_measure_real_process_timer!(self, "unpin_snapshot_before");
         // Use the max_committed_epoch in storage as the snapshot ts so only committed changes are
         // visible in the snapshot.
-        let max_committed_epoch = versioning_guard.current_version.max_committed_epoch;
+        let max_committed_epoch = versioning.current_version.max_committed_epoch;
         // Ensure the unpin will not clean the latest one.
         let snapshot_committed_epoch = hummock_snapshot.committed_epoch;
         #[cfg(not(test))]
@@ -829,7 +822,7 @@ impl HummockManager {
         let mut pinned_snapshots = create_trx_wrapper!(
             self.meta_store_ref(),
             BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut versioning_guard.pinned_snapshots,)
+            BTreeMapTransaction::new(&mut context_info.pinned_snapshots,)
         );
         let mut context_pinned_snapshot = pinned_snapshots.new_entry_txn_or_default(
             context_id,
@@ -846,19 +839,19 @@ impl HummockManager {
         {
             context_pinned_snapshot.minimal_pinned_snapshot = last_read_epoch;
             commit_multi_var!(self.meta_store_ref(), context_pinned_snapshot)?;
-            trigger_pin_unpin_snapshot_state(&self.metrics, &versioning_guard.pinned_snapshots);
+            trigger_pin_unpin_snapshot_state(&self.metrics, &context_info.pinned_snapshots);
         }
 
         #[cfg(test)]
         {
-            drop(versioning_guard);
+            drop(context_info);
+            drop(versioning);
             self.check_state_consistency().await;
         }
 
         Ok(())
     }
 
-    #[named]
     pub async fn get_compact_tasks_impl(
         &self,
         compaction_groups: Vec<CompactionGroupId>,
@@ -875,17 +868,20 @@ impl HummockManager {
             .await
             .map_err(|err| Error::MetaStore(err.into()))?;
 
-        let mut compaction_guard = write_lock!(self, compaction).await;
+        let mut compaction_guard = self.compaction.write().await;
         let compaction = compaction_guard.deref_mut();
-        let mut versioning_guard = write_lock!(self, versioning).await;
+        let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
 
-        let _timer = start_measure_real_process_timer!(self);
+        let _timer = start_measure_real_process_timer!(self, "get_compact_tasks_impl");
 
         let mut current_version = versioning.current_version.clone();
         let start_time = Instant::now();
         let max_committed_epoch = current_version.max_committed_epoch;
-        let watermark = versioning
+        let watermark = self
+            .context_info
+            .read()
+            .await
             .pinned_snapshots
             .values()
             .map(|v| v.minimal_pinned_snapshot)
@@ -1390,9 +1386,8 @@ impl HummockManager {
     ///
     /// Return Ok(false) indicates either the task is not found,
     /// or the task is not owned by `context_id` when `context_id` is not None.
-    #[named]
     pub async fn report_compact_tasks(&self, report_tasks: Vec<ReportTask>) -> Result<Vec<bool>> {
-        let mut guard = write_lock!(self, compaction).await;
+        let mut guard = self.compaction.write().await;
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
         let compaction = guard.deref_mut();
         let start_time = Instant::now();
@@ -1409,9 +1404,9 @@ impl HummockManager {
             BTreeMapTransaction::new(&mut compaction.compact_task_assignment,)
         );
         // The compaction task is finished.
-        let mut versioning_guard = write_lock!(self, versioning).await;
+        let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
-        let _timer = start_measure_real_process_timer!(self);
+        let _timer = start_measure_real_process_timer!(self, "report_compact_tasks");
 
         let mut current_version = versioning.current_version.clone();
         // purge stale compact_status
@@ -1616,7 +1611,6 @@ impl HummockManager {
     }
 
     /// Caller should ensure `epoch` > `max_committed_epoch`
-    #[named]
     pub async fn commit_epoch(
         &self,
         epoch: HummockEpoch,
@@ -1629,8 +1623,8 @@ impl HummockManager {
             new_table_fragment_info,
             change_log_delta,
         } = commit_info;
-        let mut versioning_guard = write_lock!(self, versioning).await;
-        let _timer = start_measure_real_process_timer!(self);
+        let mut versioning_guard = self.versioning.write().await;
+        let _timer = start_measure_real_process_timer!(self, "commit_epoch");
         // Prevent commit new epochs if this flag is set
         if versioning_guard.disable_commit_epochs {
             return Ok(None);
@@ -1980,69 +1974,78 @@ impl HummockManager {
         Ok(SstObjectIdRange::new(start_id, start_id + number as u64))
     }
 
-    #[named]
     pub async fn get_min_pinned_version_id(&self) -> HummockVersionId {
-        read_lock!(self, versioning).await.min_pinned_version_id()
+        self.context_info.read().await.min_pinned_version_id()
     }
 
-    #[named]
     #[cfg(test)]
     pub async fn check_state_consistency(&self) {
-        let mut compaction_guard = write_lock!(self, compaction).await;
-        let mut versioning_guard = write_lock!(self, versioning).await;
-        let objects_to_delete = versioning_guard.objects_to_delete.clone();
+        let mut compaction_guard = self.compaction.write().await;
+        let mut versioning_guard = self.versioning.write().await;
+        let mut context_info_guard = self.context_info.write().await;
+        let objects_to_delete = self.delete_object_tracker.current();
         // We don't check `checkpoint` because it's allowed to update its in memory state without
         // persisting to object store.
-        let get_state =
-            |compaction_guard: &RwLockWriteGuard<'_, Compaction>,
-             versioning_guard: &RwLockWriteGuard<'_, Versioning>| {
-                let compact_statuses_copy = compaction_guard.compaction_statuses.clone();
-                let compact_task_assignment_copy = compaction_guard.compact_task_assignment.clone();
-                let pinned_versions_copy = versioning_guard.pinned_versions.clone();
-                let pinned_snapshots_copy = versioning_guard.pinned_snapshots.clone();
-                let hummock_version_deltas_copy = versioning_guard.hummock_version_deltas.clone();
-                let version_stats_copy = versioning_guard.version_stats.clone();
-                let branched_ssts = versioning_guard.branched_ssts.clone();
+        let get_state = |compaction_guard: &mut Compaction,
+                         versioning_guard: &mut Versioning,
+                         context_info_guard: &mut ContextInfo| {
+            let compact_statuses_copy = compaction_guard.compaction_statuses.clone();
+            let compact_task_assignment_copy = compaction_guard.compact_task_assignment.clone();
+            let pinned_versions_copy = context_info_guard.pinned_versions.clone();
+            let pinned_snapshots_copy = context_info_guard.pinned_snapshots.clone();
+            let hummock_version_deltas_copy = versioning_guard.hummock_version_deltas.clone();
+            let version_stats_copy = versioning_guard.version_stats.clone();
+            let branched_ssts = versioning_guard.branched_ssts.clone();
+            (
                 (
-                    (
-                        compact_statuses_copy,
-                        compact_task_assignment_copy,
-                        pinned_versions_copy,
-                        pinned_snapshots_copy,
-                        hummock_version_deltas_copy,
-                        version_stats_copy,
-                    ),
-                    branched_ssts,
-                )
-            };
-        let (mem_state, branched_ssts) = get_state(&compaction_guard, &versioning_guard);
+                    compact_statuses_copy,
+                    compact_task_assignment_copy,
+                    pinned_versions_copy,
+                    pinned_snapshots_copy,
+                    hummock_version_deltas_copy,
+                    version_stats_copy,
+                ),
+                branched_ssts,
+            )
+        };
+        let (mem_state, branched_ssts) = get_state(
+            &mut compaction_guard,
+            &mut versioning_guard,
+            &mut context_info_guard,
+        );
         self.load_meta_store_state_impl(
-            compaction_guard.borrow_mut(),
-            versioning_guard.borrow_mut(),
+            &mut compaction_guard,
+            &mut versioning_guard,
+            &mut context_info_guard,
         )
         .await
         .expect("Failed to load state from meta store");
-        let (loaded_state, load_branched_ssts) = get_state(&compaction_guard, &versioning_guard);
+        let (loaded_state, load_branched_ssts) = get_state(
+            &mut compaction_guard,
+            &mut versioning_guard,
+            &mut context_info_guard,
+        );
         assert_eq!(branched_ssts, load_branched_ssts);
         assert_eq!(
             mem_state, loaded_state,
             "hummock in-mem state is inconsistent with meta store state",
         );
-        versioning_guard.objects_to_delete = objects_to_delete;
+        self.delete_object_tracker.clear();
+        self.delete_object_tracker
+            .add(objects_to_delete.into_iter());
     }
 
     /// Gets current version without pinning it.
     /// Should not be called inside [`HummockManager`], because it requests locks internally.
     ///
     /// Note: this method can hurt performance because it will clone a large object.
-    #[named]
     pub async fn get_current_version(&self) -> HummockVersion {
-        read_lock!(self, versioning).await.current_version.clone()
+        self.versioning.read().await.current_version.clone()
     }
 
-    #[named]
     pub async fn get_current_max_committed_epoch(&self) -> HummockEpoch {
-        read_lock!(self, versioning)
+        self.versioning
+            .read()
             .await
             .current_version
             .max_committed_epoch
@@ -2050,29 +2053,26 @@ impl HummockManager {
 
     /// Gets branched sstable infos
     /// Should not be called inside [`HummockManager`], because it requests locks internally.
-    #[named]
     pub async fn get_branched_ssts_info(&self) -> BTreeMap<HummockSstableId, BranchedSstInfo> {
-        read_lock!(self, versioning).await.branched_ssts.clone()
+        self.versioning.read().await.branched_ssts.clone()
     }
 
-    #[named]
     /// Gets the mapping from table id to compaction group id
     pub async fn get_table_compaction_group_id_mapping(
         &self,
     ) -> HashMap<StateTableId, CompactionGroupId> {
-        get_table_compaction_group_id_mapping(&read_lock!(self, versioning).await.current_version)
+        get_table_compaction_group_id_mapping(&self.versioning.read().await.current_version)
     }
 
     /// Get version deltas from meta store
     #[cfg_attr(coverage, coverage(off))]
-    #[named]
     pub async fn list_version_deltas(
         &self,
         start_id: u64,
         num_limit: u32,
         committed_epoch_limit: HummockEpoch,
     ) -> Result<Vec<HummockVersionDelta>> {
-        let versioning = read_lock!(self, versioning).await;
+        let versioning = self.versioning.read().await;
         let version_deltas = versioning
             .hummock_version_deltas
             .range(start_id..)
@@ -2139,12 +2139,11 @@ impl HummockManager {
     /// Replay a version delta to current hummock version.
     /// Returns the `version_id`, `max_committed_epoch` of the new version and the modified
     /// compaction groups
-    #[named]
     pub async fn replay_version_delta(
         &self,
         mut version_delta: HummockVersionDelta,
     ) -> Result<(HummockVersion, Vec<CompactionGroupId>)> {
-        let mut versioning_guard = write_lock!(self, versioning).await;
+        let mut versioning_guard = self.versioning.write().await;
         // ensure the version id is ascending after replay
         version_delta.id = versioning_guard.current_version.id + 1;
         version_delta.prev_id = version_delta.id - 1;
@@ -2157,9 +2156,8 @@ impl HummockManager {
         Ok((version_new, compaction_group_ids))
     }
 
-    #[named]
     pub async fn disable_commit_epoch(&self) -> HummockVersion {
-        let mut versioning_guard = write_lock!(self, versioning).await;
+        let mut versioning_guard = self.versioning.write().await;
         versioning_guard.disable_commit_epochs = true;
         versioning_guard.current_version.clone()
     }
@@ -2283,18 +2281,16 @@ impl HummockManager {
     }
 
     #[cfg(any(test, feature = "test"))]
-    #[named]
     pub async fn compaction_task_from_assignment_for_test(
         &self,
         task_id: u64,
     ) -> Option<CompactTaskAssignment> {
-        let compaction_guard = read_lock!(self, compaction).await;
+        let compaction_guard = self.compaction.read().await;
         let assignment_ref = &compaction_guard.compact_task_assignment;
         assignment_ref.get(&task_id).cloned()
     }
 
     #[cfg(any(test, feature = "test"))]
-    #[named]
     pub async fn report_compact_task_for_test(
         &self,
         task_id: u64,
@@ -2304,7 +2300,7 @@ impl HummockManager {
         table_stats_change: Option<PbTableStatsMap>,
     ) -> Result<()> {
         if let Some(task) = compact_task {
-            let mut guard = write_lock!(self, compaction).await;
+            let mut guard = self.compaction.write().await;
             guard.compact_task_assignment.insert(
                 task_id,
                 CompactTaskAssignment {
@@ -2369,10 +2365,7 @@ impl HummockManager {
             .notify_frontend_without_version(Operation::Update, Info::HummockStats(stats.clone()));
     }
 
-    #[named]
     pub fn hummock_timer_task(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
-        use futures::{FutureExt, StreamExt};
-
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             const CHECK_PENDING_TASK_PERIOD_SEC: u64 = 300;
@@ -2542,7 +2535,7 @@ impl HummockManager {
                                         version_stats,
                                     ) = {
                                         let versioning_guard =
-                                            read_lock!(hummock_manager.as_ref(), versioning).await;
+                                            hummock_manager.versioning.read().await;
 
                                         let configs =
                                             hummock_manager.get_compaction_group_map().await;
@@ -2694,12 +2687,11 @@ impl HummockManager {
         (join_handle, shutdown_tx)
     }
 
-    #[named]
     pub async fn check_dead_task(&self) {
         const MAX_COMPACTION_L0_MULTIPLIER: u64 = 32;
         const MAX_COMPACTION_DURATION_SEC: u64 = 20 * 60;
         let (groups, configs) = {
-            let versioning_guard = read_lock!(self, versioning).await;
+            let versioning_guard = self.versioning.read().await;
             let g = versioning_guard
                 .current_version
                 .levels
@@ -2738,7 +2730,7 @@ impl HummockManager {
         }
         let mut pending_tasks: HashMap<u64, (u64, usize, RunningCompactTask)> = HashMap::default();
         {
-            let compaction_guard = read_lock!(self, compaction).await;
+            let compaction_guard = self.compaction.read().await;
             for group_id in slowdown_groups.keys() {
                 if let Some(status) = compaction_guard.compaction_statuses.get(group_id) {
                     for (idx, level_handler) in status.level_handlers.iter().enumerate() {
@@ -3218,15 +3210,13 @@ impl HummockManager {
 
     async fn initial_compaction_group_config_after_load(
         &self,
-        versioning_guard: &mut RwLockWriteGuard<'_, Versioning>,
+        versioning_guard: &Versioning,
+        compaction_group_manager: &mut CompactionGroupManager,
     ) -> Result<()> {
         // 1. Due to version compatibility, we fix some of the configuration of older versions after hummock starts.
         let current_version = &versioning_guard.current_version;
         let all_group_ids = get_compaction_group_ids(current_version);
-        let mut configs = self
-            .compaction_group_manager
-            .write()
-            .await
+        let mut configs = compaction_group_manager
             .get_or_insert_compaction_group_configs(&all_group_ids.collect_vec())
             .await?;
 
@@ -3266,10 +3256,7 @@ impl HummockManager {
             tracing::info!("Compaction group {:?} configs rewrite ", rewrite_cg_ids);
 
             // update meta store
-            let result = self
-                .compaction_group_manager
-                .write()
-                .await
+            let result = compaction_group_manager
                 .update_compaction_config(
                     &rewrite_cg_ids,
                     &[
@@ -3286,10 +3273,13 @@ impl HummockManager {
             }
         }
 
-        versioning_guard.write_limit =
+        compaction_group_manager.write_limit =
             calc_new_write_limits(configs, HashMap::new(), &versioning_guard.current_version);
-        trigger_write_stop_stats(&self.metrics, &versioning_guard.write_limit);
-        tracing::debug!("Hummock stopped write: {:#?}", versioning_guard.write_limit);
+        trigger_write_stop_stats(&self.metrics, &compaction_group_manager.write_limit);
+        tracing::debug!(
+            "Hummock stopped write: {:#?}",
+            compaction_group_manager.write_limit
+        );
 
         {
             // 2. Restore the memory data structure according to the memory of the compaction group config.
@@ -3302,14 +3292,13 @@ impl HummockManager {
         Ok(())
     }
 
-    #[named]
     pub async fn list_change_log_epochs(
         &self,
         table_id: u32,
         min_epoch: u64,
         max_count: u32,
     ) -> Vec<u64> {
-        let versioning = read_lock!(self, versioning).await;
+        let versioning = self.versioning.read().await;
         if let Some(table_change_log) = versioning
             .current_version
             .table_change_log
@@ -3505,6 +3494,8 @@ use tokio::sync::mpsc::error::SendError;
 
 use super::compaction::CompactionSelector;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
+use crate::hummock::manager::context::ContextInfo;
+use crate::hummock::manager::gc::DeleteObjectTracker;
 use crate::hummock::sequence::next_sstable_object_id;
 
 #[derive(Debug, Default)]

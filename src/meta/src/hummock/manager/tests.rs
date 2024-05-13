@@ -590,7 +590,7 @@ async fn test_hummock_manager_basic() {
         );
     }
     // objects_to_delete is always empty because no compaction is ever invoked.
-    assert!(hummock_manager.get_objects_to_delete().await.is_empty());
+    assert!(hummock_manager.get_objects_to_delete().is_empty());
     assert_eq!(
         hummock_manager
             .delete_version_deltas(usize::MAX)
@@ -602,7 +602,7 @@ async fn test_hummock_manager_basic() {
         hummock_manager.create_version_checkpoint(1).await.unwrap(),
         commit_log_count + register_log_count
     );
-    assert!(hummock_manager.get_objects_to_delete().await.is_empty());
+    assert!(hummock_manager.get_objects_to_delete().is_empty());
     assert_eq!(
         hummock_manager
             .delete_version_deltas(usize::MAX)
@@ -1127,7 +1127,7 @@ async fn test_extend_objects_to_delete() {
         .map(|s| s.get_object_id())
         .chain(max_committed_object_id + 1..=max_committed_object_id + orphan_sst_num)
         .collect_vec();
-    assert!(hummock_manager.get_objects_to_delete().await.is_empty());
+    assert!(hummock_manager.get_objects_to_delete().is_empty());
     assert_eq!(
         hummock_manager
             .extend_objects_to_delete_from_scan(&all_object_ids)
@@ -1135,7 +1135,7 @@ async fn test_extend_objects_to_delete() {
         orphan_sst_num as usize
     );
     assert_eq!(
-        hummock_manager.get_objects_to_delete().await.len(),
+        hummock_manager.get_objects_to_delete().len(),
         orphan_sst_num as usize
     );
 
@@ -1145,7 +1145,7 @@ async fn test_extend_objects_to_delete() {
         6
     );
     assert_eq!(
-        hummock_manager.get_objects_to_delete().await.len(),
+        hummock_manager.get_objects_to_delete().len(),
         orphan_sst_num as usize
     );
     // since version1 is still pinned, the sst removed in compaction can not be reclaimed.
@@ -1155,10 +1155,10 @@ async fn test_extend_objects_to_delete() {
             .await,
         orphan_sst_num as usize
     );
-    let objects_to_delete = hummock_manager.get_objects_to_delete().await;
+    let objects_to_delete = hummock_manager.get_objects_to_delete();
     assert_eq!(objects_to_delete.len(), orphan_sst_num as usize);
     let pinned_version2: HummockVersion = hummock_manager.pin_version(context_id).await.unwrap();
-    let objects_to_delete = hummock_manager.get_objects_to_delete().await;
+    let objects_to_delete = hummock_manager.get_objects_to_delete();
     assert_eq!(
         objects_to_delete.len(),
         orphan_sst_num as usize,
@@ -1169,7 +1169,7 @@ async fn test_extend_objects_to_delete() {
         .unpin_version_before(context_id, pinned_version2.id)
         .await
         .unwrap();
-    let objects_to_delete = hummock_manager.get_objects_to_delete().await;
+    let objects_to_delete = hummock_manager.get_objects_to_delete();
     assert_eq!(
         objects_to_delete.len(),
         orphan_sst_num as usize,
@@ -1184,7 +1184,7 @@ async fn test_extend_objects_to_delete() {
             .await,
         orphan_sst_num as usize
     );
-    let objects_to_delete = hummock_manager.get_objects_to_delete().await;
+    let objects_to_delete = hummock_manager.get_objects_to_delete();
     assert_eq!(objects_to_delete.len(), orphan_sst_num as usize);
     let new_epoch = pinned_version2.max_committed_epoch.next_epoch();
     hummock_manager
@@ -1208,7 +1208,7 @@ async fn test_extend_objects_to_delete() {
             .await,
         orphan_sst_num as usize + 3
     );
-    let objects_to_delete = hummock_manager.get_objects_to_delete().await;
+    let objects_to_delete = hummock_manager.get_objects_to_delete();
     assert_eq!(objects_to_delete.len(), orphan_sst_num as usize + 3);
 }
 
@@ -1390,7 +1390,7 @@ async fn test_split_compaction_group_on_commit() {
     );
     let branched_ssts = hummock_manager
         .versioning
-        .read(&["", "", ""])
+        .read()
         .await
         .branched_ssts
         .clone();
@@ -1419,7 +1419,7 @@ async fn get_branched_ssts(
 ) -> BTreeMap<HummockSstableObjectId, BranchedSstInfo> {
     hummock_manager
         .versioning
-        .read(&["", "", ""])
+        .read()
         .await
         .branched_ssts
         .clone()
