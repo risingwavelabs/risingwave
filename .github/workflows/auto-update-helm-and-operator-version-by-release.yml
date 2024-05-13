@@ -29,3 +29,5 @@ jobs:
           cd helm-charts
           git checkout -b auto-update-${{ env.NEW_APP_VERSION }}
           git push --set-upstream origin auto-update-${{ env.NEW_APP_VERSION }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.PR_TOKEN }}
