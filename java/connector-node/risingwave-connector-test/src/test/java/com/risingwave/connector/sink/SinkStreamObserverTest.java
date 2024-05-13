@@ -165,6 +165,13 @@ public class SinkStreamObserverTest {
                                         .setSinkParam(fileSinkParam))
                         .build();
 
+        // Encoded StreamChunk: 1 'test'
+        byte[] data1 =
+                new byte[] {
+                    8, 1, 18, 1, 1, 26, 20, 8, 2, 18, 6, 8, 1, 18, 2, 1, 1, 26, 8, 8, 1, 18, 4, 0,
+                    0, 0, 1, 26, 42, 8, 6, 18, 6, 8, 1, 18, 2, 1, 1, 26, 20, 8, 1, 18, 16, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 26, 8, 8, 1, 18, 4, 116, 101, 115, 116
+                };
         ConnectorServiceProto.SinkWriterStreamRequest firstWrite =
                 ConnectorServiceProto.SinkWriterStreamRequest.newBuilder()
                         .setWriteBatch(
@@ -175,21 +182,7 @@ public class SinkStreamObserverTest {
                                         .setStreamChunkPayload(
                                                 ConnectorServiceProto.SinkWriterStreamRequest
                                                         .WriteBatch.StreamChunkPayload.newBuilder()
-                                                        .setBinaryData(
-                                                                ByteString.copyFrom(
-                                                                        new byte[] {
-                                                                            8, 1, 18, 1, 1, 26, 20,
-                                                                            8, 2, 18, 6, 8, 1, 18,
-                                                                            2, 1, 1, 26, 8, 8, 1,
-                                                                            18, 4, 0, 0, 0, 1, 26,
-                                                                            42, 8, 6, 18, 6, 8, 1,
-                                                                            18, 2, 1, 1, 26, 20, 8,
-                                                                            1, 18, 16, 0, 0, 0, 0,
-                                                                            0, 0, 0, 0, 0, 0, 0, 0,
-                                                                            0, 0, 0, 4, 26, 8, 8, 1,
-                                                                            18, 4, 116, 101, 115,
-                                                                            116
-                                                                        }))
+                                                        .setBinaryData(ByteString.copyFrom(data1))
                                                         .build()))
                         .build();
 
@@ -202,6 +195,13 @@ public class SinkStreamObserverTest {
                                         .build())
                         .build();
 
+        // Encoded StreamChunk: 2 'test'
+        byte[] data2 =
+                new byte[] {
+                    8, 1, 18, 1, 1, 26, 20, 8, 2, 18, 6, 8, 1, 18, 2, 1, 1, 26, 8, 8, 1, 18, 4, 0,
+                    0, 0, 2, 26, 42, 8, 6, 18, 6, 8, 1, 18, 2, 1, 1, 26, 20, 8, 1, 18, 16, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 26, 8, 8, 1, 18, 4, 116, 101, 115, 116
+                };
         ConnectorServiceProto.SinkWriterStreamRequest secondWrite =
                 ConnectorServiceProto.SinkWriterStreamRequest.newBuilder()
                         .setWriteBatch(
@@ -212,21 +212,7 @@ public class SinkStreamObserverTest {
                                         .setStreamChunkPayload(
                                                 ConnectorServiceProto.SinkWriterStreamRequest
                                                         .WriteBatch.StreamChunkPayload.newBuilder()
-                                                        .setBinaryData(
-                                                                ByteString.copyFrom(
-                                                                        new byte[] {
-                                                                            8, 1, 18, 1, 1, 26, 20,
-                                                                            8, 2, 18, 6, 8, 1, 18,
-                                                                            2, 1, 1, 26, 8, 8, 1,
-                                                                            18, 4, 0, 0, 0, 2, 26,
-                                                                            42, 8, 6, 18, 6, 8, 1,
-                                                                            18, 2, 1, 1, 26, 20, 8,
-                                                                            1, 18, 16, 0, 0, 0, 0,
-                                                                            0, 0, 0, 0, 0, 0, 0, 0,
-                                                                            0, 0, 0, 4, 26, 8, 8, 1,
-                                                                            18, 4, 116, 101, 115,
-                                                                            116
-                                                                        }))
+                                                        .setBinaryData(ByteString.copyFrom(data2))
                                                         .build()))
                         .build();
 
@@ -240,21 +226,7 @@ public class SinkStreamObserverTest {
                                         .setStreamChunkPayload(
                                                 ConnectorServiceProto.SinkWriterStreamRequest
                                                         .WriteBatch.StreamChunkPayload.newBuilder()
-                                                        .setBinaryData(
-                                                                ByteString.copyFrom(
-                                                                        new byte[] {
-                                                                            8, 1, 18, 1, 1, 26, 20,
-                                                                            8, 2, 18, 6, 8, 1, 18,
-                                                                            2, 1, 1, 26, 8, 8, 1,
-                                                                            18, 4, 0, 0, 0, 2, 26,
-                                                                            42, 8, 6, 18, 6, 8, 1,
-                                                                            18, 2, 1, 1, 26, 20, 8,
-                                                                            1, 18, 16, 0, 0, 0, 0,
-                                                                            0, 0, 0, 0, 0, 0, 0, 0,
-                                                                            0, 0, 0, 4, 26, 8, 8, 1,
-                                                                            18, 4, 116, 101, 115,
-                                                                            116
-                                                                        }))
+                                                        .setBinaryData(ByteString.copyFrom(data2))
                                                         .build()))
                         .build();
 
@@ -266,7 +238,10 @@ public class SinkStreamObserverTest {
             sinkWriterStreamObserver.onNext(firstWrite);
         } catch (RuntimeException e) {
             exceptionThrown = true;
-            Assert.assertTrue(e.getMessage().toLowerCase().contains("batch id"));
+            if (!e.getMessage().toLowerCase().contains("batch id")) {
+                e.printStackTrace();
+                Assert.fail("Expected `batch id`, but got " + e.getMessage());
+            }
         }
         if (!exceptionThrown) {
             Assert.fail("Expected exception not thrown: `invalid batch id`");
@@ -282,7 +257,10 @@ public class SinkStreamObserverTest {
             sinkWriterStreamObserver.onNext(secondWriteWrongEpoch);
         } catch (RuntimeException e) {
             exceptionThrown = true;
-            Assert.assertTrue(e.getMessage().toLowerCase().contains("invalid epoch"));
+            if (!e.getMessage().toLowerCase().contains("invalid epoch")) {
+                e.printStackTrace();
+                Assert.fail("Expected `invalid epoch`, but got " + e.getMessage());
+            }
         }
         if (!exceptionThrown) {
             Assert.fail(
