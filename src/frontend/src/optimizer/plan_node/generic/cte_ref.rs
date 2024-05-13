@@ -51,13 +51,17 @@ impl<PlanRef> CteRef<PlanRef> {
 
 impl<PlanRef: GenericPlanRef> CteRef<PlanRef> {
     pub fn get_cte_ref(&self) -> Option<optimizer::plan_node::PlanRef> {
-        self.base.ctx().get_rcte_cache_plan(&self.share_id)
+        self.ctx().get_rcte_cache_plan(&self.share_id)
     }
 }
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for CteRef<PlanRef> {
     fn schema(&self) -> Schema {
-        self.base.schema().clone()
+        if let Some(plan_ref) = self.get_cte_ref() {
+            plan_ref.schema().clone()
+        } else {
+            self.base.schema().clone()
+        }
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
@@ -73,11 +77,17 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for CteRef<PlanRef> {
     }
 
     fn ctx(&self) -> OptimizerContextRef {
+        // it does not matter where the context is coming from,
+        // since we are only getting a reference.
         self.base.ctx()
     }
 
     fn functional_dependency(&self) -> FunctionalDependencySet {
-        self.base.functional_dependency().clone()
+        if let Some(plan_ref) = self.get_cte_ref() {
+            plan_ref.functional_dependency().clone()
+        } else {
+            self.base.functional_dependency().clone()
+        }
     }
 }
 
