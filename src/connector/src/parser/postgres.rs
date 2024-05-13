@@ -31,35 +31,39 @@ use crate::parser::util::log_error;
 static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
 
 macro_rules! handle_list_data_type {
-    ($row:expr, $i:expr, $name:expr, $type:ty, $builder:expr) => {
+    ($row:expr, $i:expr, $name:expr, $dtype:expr, $type:ty) => {{
+        let mut builder = $dtype.create_array_builder(0);
         let res = $row.try_get::<_, Option<Vec<Option<$type>>>>($i);
         match res {
             Ok(val) => {
                 if let Some(v) = val {
                     v.into_iter()
-                        .for_each(|val| $builder.append(val.map(ScalarImpl::from)))
+                        .for_each(|val| builder.append(val.map(ScalarImpl::from)))
                 }
             }
             Err(err) => {
                 log_error!($name, err, "parse column failed");
             }
-        }
-    };
-    ($row:expr, $i:expr, $name:expr, $type:ty, $builder:expr, $rw_type:ty) => {
+        };
+        Some(ScalarImpl::from(ListValue::new(builder.finish())))
+    }};
+    ($row:expr, $i:expr, $name:expr, $dtype:expr, $type:ty, $rw_type:ty) => {{
+        let mut builder = $dtype.create_array_builder(0);
         let res = $row.try_get::<_, Option<Vec<Option<$type>>>>($i);
         match res {
             Ok(val) => {
                 if let Some(v) = val {
                     v.into_iter().for_each(|val| {
-                        $builder.append(val.map(|v| ScalarImpl::from(<$rw_type>::from(v))))
+                        builder.append(val.map(|v| ScalarImpl::from(<$rw_type>::from(v))))
                     })
                 }
             }
             Err(err) => {
                 log_error!($name, err, "parse column failed");
             }
-        }
-    };
+        };
+        Some(ScalarImpl::from(ListValue::new(builder.finish())))
+    }};
 }
 
 macro_rules! handle_data_type {
@@ -134,7 +138,7 @@ fn postgres_cell_to_scalar_impl(
             // Note: It's only used to map the numeric type in upstream Postgres to RisingWave's rw_int256.
             let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
             match res {
-                Ok(val) => val.and_then(|v| v.into_scalar(DataType::Int256)),
+                Ok(val) => val.and_then(|v| v.into_scalar(data_type)),
                 Err(err) => {
                     log_error!(name, err, "parse numeric column as pg_numeric failed");
                     None
@@ -146,7 +150,7 @@ fn postgres_cell_to_scalar_impl(
                 // enum type needs to be handled separately
                 let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
                 match res {
-                    Ok(val) => val.and_then(|v| v.into_scalar(DataType::Varchar)),
+                    Ok(val) => val.and_then(|v| v.into_scalar(data_type)),
                     Err(err) => {
                         log_error!(name, err, "parse enum column failed");
                         None
@@ -158,7 +162,7 @@ fn postgres_cell_to_scalar_impl(
                     Type::UUID => {
                         let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
                         match res {
-                            Ok(val) => val.and_then(|v| v.into_scalar(DataType::Varchar)),
+                            Ok(val) => val.and_then(|v| v.into_scalar(data_type)),
                             Err(err) => {
                                 log_error!(name, err, "parse uuid column failed");
                                 None
@@ -172,7 +176,7 @@ fn postgres_cell_to_scalar_impl(
                         // Note: It's only used to map the numeric type in upstream Postgres to RisingWave's varchar.
                         let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
                         match res {
-                            Ok(val) => val.and_then(|v| v.into_scalar(DataType::Varchar)),
+                            Ok(val) => val.and_then(|v| v.into_scalar(data_type)),
                             Err(err) => {
                                 log_error!(name, err, "parse numeric column as pg_numeric failed");
                                 None
@@ -214,7 +218,6 @@ fn postgres_cell_to_scalar_impl(
             handle_data_type!(row, i, name, Interval)
         }
         DataType::List(dtype) => {
-            let mut builder = dtype.create_array_builder(0);
             // enum list needs to be handled separately
             if let Kind::Array(item_type) = row.columns()[i].type_().kind()
                 && let Kind::Enum(_) = item_type.kind()
@@ -223,9 +226,12 @@ fn postgres_cell_to_scalar_impl(
                 let res = row.try_get::<_, Option<Vec<ScalarAdapter<'_>>>>(i);
                 match res {
                     Ok(val) => {
+                        let mut builder = dtype.create_array_builder(0);
                         if let Some(vec) = val {
                             for val in vec {
-                                builder.append(val.into_scalar(DataType::Varchar))
+                                builder.append(
+                                    val.into_scalar(&DataType::List(Box::new(DataType::Varchar))),
+                                )
                             }
                         }
                         Some(ScalarImpl::from(ListValue::new(builder.finish())))
@@ -238,42 +244,35 @@ fn postgres_cell_to_scalar_impl(
             } else {
                 match **dtype {
                     DataType::Boolean => {
-                        handle_list_data_type!(row, i, name, bool, builder);
+                        handle_list_data_type!(row, i, name, dtype, bool)
                     }
                     DataType::Int16 => {
-                        handle_list_data_type!(row, i, name, i16, builder);
+                        handle_list_data_type!(row, i, name, dtype, i16)
                     }
                     DataType::Int32 => {
-                        handle_list_data_type!(row, i, name, i32, builder);
+                        handle_list_data_type!(row, i, name, dtype, i32)
                     }
                     DataType::Int64 => {
-                        handle_list_data_type!(row, i, name, i64, builder);
+                        handle_list_data_type!(row, i, name, dtype, i64)
                     }
                     DataType::Float32 => {
-                        handle_list_data_type!(row, i, name, f32, builder);
+                        handle_list_data_type!(row, i, name, dtype, f32)
                     }
                     DataType::Float64 => {
-                        handle_list_data_type!(row, i, name, f64, builder);
+                        handle_list_data_type!(row, i, name, dtype, f64)
                     }
                     DataType::Decimal => {
-                        let res = row.try_get::<_, Option<Vec<Option<ScalarAdapter<'_>>>>>(i);
+                        let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
                         match res {
-                            Ok(val) => {
-                                if let Some(vec) = val {
-                                    builder = ScalarAdapter::build_scalar_in_list(
-                                        vec,
-                                        DataType::Decimal,
-                                        builder,
-                                    )?;
-                                }
-                            }
+                            Ok(val) => val.and_then(|v| v.into_scalar(data_type)),
                             Err(err) => {
                                 log_error!(name, err, "parse uuid column failed");
+                                None
                             }
-                        };
+                        }
                     }
                     DataType::Date => {
-                        handle_list_data_type!(row, i, name, NaiveDate, builder, Date);
+                        handle_list_data_type!(row, i, name, dtype, NaiveDate, Date)
                     }
                     DataType::Varchar => {
                         match *row.columns()[i].type_() {
@@ -283,123 +282,112 @@ fn postgres_cell_to_scalar_impl(
                                     row.try_get::<_, Option<Vec<Option<ScalarAdapter<'_>>>>>(i);
                                 match res {
                                     Ok(val) => {
+                                        let mut builder = dtype.create_array_builder(0);
                                         if let Some(vec) = val {
                                             for val in vec {
                                                 builder.append(
-                                                    val.and_then(|v| {
-                                                        v.into_scalar(DataType::Varchar)
-                                                    }),
+                                                    val.and_then(|v| v.into_scalar(data_type)),
                                                 )
                                             }
                                         }
+                                        Some(ScalarImpl::from(ListValue::new(builder.finish())))
                                     }
                                     Err(err) => {
                                         log_error!(name, err, "parse uuid column failed");
+                                        None
                                     }
-                                };
+                                }
                             }
                             Type::NUMERIC_ARRAY => {
-                                let res =
-                                    row.try_get::<_, Option<Vec<Option<ScalarAdapter<'_>>>>>(i);
+                                let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
                                 match res {
-                                    Ok(val) => {
-                                        if let Some(vec) = val {
-                                            builder = ScalarAdapter::build_scalar_in_list(
-                                                vec,
-                                                DataType::Varchar,
-                                                builder,
-                                            )?;
-                                        }
-                                    }
+                                    Ok(val) => val.and_then(|v| v.into_scalar(data_type)),
                                     Err(err) => {
                                         log_error!(
                                             name,
                                             err,
                                             "parse numeric list column as pg_numeric list failed"
                                         );
+                                        None
                                     }
-                                };
+                                }
                             }
                             _ => {
-                                handle_list_data_type!(row, i, name, String, builder);
+                                handle_list_data_type!(row, i, name, dtype, String)
                             }
                         }
                     }
                     DataType::Time => {
-                        handle_list_data_type!(row, i, name, chrono::NaiveTime, builder, Time);
+                        handle_list_data_type!(row, i, name, dtype, chrono::NaiveTime, Time)
                     }
                     DataType::Timestamp => {
                         handle_list_data_type!(
                             row,
                             i,
                             name,
+                            dtype,
                             chrono::NaiveDateTime,
-                            builder,
                             Timestamp
-                        );
+                        )
                     }
                     DataType::Timestamptz => {
                         handle_list_data_type!(
                             row,
                             i,
                             name,
+                            dtype,
                             chrono::DateTime<Utc>,
-                            builder,
                             Timestamptz
-                        );
+                        )
                     }
                     DataType::Interval => {
-                        handle_list_data_type!(row, i, name, Interval, builder);
+                        handle_list_data_type!(row, i, name, dtype, Interval)
                     }
                     DataType::Jsonb => {
-                        handle_list_data_type!(row, i, name, serde_json::Value, builder, JsonbVal);
+                        handle_list_data_type!(row, i, name, dtype, serde_json::Value, JsonbVal)
                     }
                     DataType::Bytea => {
                         let res = row.try_get::<_, Option<Vec<Option<Vec<u8>>>>>(i);
                         match res {
                             Ok(val) => {
+                                let mut builder = dtype.create_array_builder(0);
                                 if let Some(v) = val {
                                     v.into_iter().for_each(|val| {
                                         builder.append(
                                             val.map(|v| ScalarImpl::from(v.into_boxed_slice())),
                                         )
-                                    })
+                                    });
                                 }
+                                Some(ScalarImpl::from(ListValue::new(builder.finish())))
                             }
                             Err(err) => {
                                 log_error!(name, err, "parse column failed");
+                                None
                             }
                         }
                     }
                     DataType::Int256 => {
-                        let res = row.try_get::<_, Option<Vec<Option<ScalarAdapter<'_>>>>>(i);
+                        let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
                         match res {
-                            Ok(val) => {
-                                if let Some(vec) = val {
-                                    builder = ScalarAdapter::build_scalar_in_list(
-                                        vec,
-                                        DataType::Int256,
-                                        builder,
-                                    )?;
-                                }
-                            }
+                            Ok(val) => val.and_then(|v| v.into_scalar(data_type)),
                             Err(err) => {
                                 log_error!(
                                     name,
                                     err,
                                     "parse numeric list column as pg_numeric list failed"
                                 );
+                                None
                             }
-                        };
+                        }
                     }
                     DataType::Struct(_) | DataType::List(_) | DataType::Serial => {
                         tracing::warn!(
                             "unsupported List data type {:?}, set the List to empty",
                             **dtype
                         );
+                        None
                     }
-                };
-                Some(ScalarImpl::from(ListValue::new(builder.finish())))
+                }
             }
         }
         DataType::Struct(_) | DataType::Serial => {
