@@ -117,7 +117,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
     ) {
         metrics
             .cdc_backfill_snapshot_read_row_count
-            .with_label_values(&[
+            .with_guarded_label_values(&[
                 upstream_table_id.to_string().as_str(),
                 actor_id.to_string().as_str(),
             ])
@@ -125,7 +125,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
         metrics
             .cdc_backfill_upstream_output_row_count
-            .with_label_values(&[
+            .with_guarded_label_values(&[
                 upstream_table_id.to_string().as_str(),
                 actor_id.to_string().as_str(),
             ])

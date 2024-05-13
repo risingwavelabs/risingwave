@@ -394,12 +394,12 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         this.actor_ctx
             .streaming_metrics
             .agg_dirty_groups_count
-            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+            .with_guarded_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(vars.dirty_groups.len() as i64);
         this.actor_ctx
             .streaming_metrics
             .agg_dirty_groups_heap_size
-            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+            .with_guarded_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(vars.dirty_groups.estimated_heap_size() as i64);
 
         Ok(())
@@ -509,27 +509,27 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         this.actor_ctx
             .streaming_metrics
             .agg_lookup_miss_count
-            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+            .with_guarded_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc_by(std::mem::take(&mut vars.stats.lookup_miss_count));
         this.actor_ctx
             .streaming_metrics
             .agg_total_lookup_count
-            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+            .with_guarded_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc_by(std::mem::take(&mut vars.stats.total_lookup_count));
         this.actor_ctx
             .streaming_metrics
             .agg_cached_entry_count
-            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+            .with_guarded_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(vars.agg_group_cache.len() as i64);
         this.actor_ctx
             .streaming_metrics
             .agg_chunk_lookup_miss_count
-            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+            .with_guarded_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc_by(std::mem::take(&mut vars.stats.chunk_lookup_miss_count));
         this.actor_ctx
             .streaming_metrics
             .agg_chunk_total_lookup_count
-            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+            .with_guarded_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc_by(std::mem::take(&mut vars.stats.chunk_total_lookup_count));
     }
 

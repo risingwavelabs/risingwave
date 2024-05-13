@@ -127,14 +127,14 @@ impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
             self.ctx
                 .streaming_metrics
                 .temporal_join_total_query_cache_count
-                .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+                .with_guarded_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                 .inc();
 
             if self.cache.get(key).is_none() {
                 self.ctx
                     .streaming_metrics
                     .temporal_join_cache_miss_count
-                    .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+                    .with_guarded_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                     .inc();
 
                 futs.push(async {
@@ -696,7 +696,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const A: bool>
             self.ctx
                 .streaming_metrics
                 .temporal_join_cached_entry_count
-                .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+                .with_guarded_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                 .set(self.right_table.cache.len() as i64);
             match msg? {
                 InternalMessage::WaterMark(watermark) => {

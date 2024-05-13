@@ -476,7 +476,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
                     self.metrics
                         .source_output_row_count
-                        .with_label_values(&[
+                        .with_guarded_label_values(&[
                             self.stream_source_core.source_id.to_string().as_ref(),
                             self.stream_source_core.source_name.as_ref(),
                             self.actor_ctx.id.to_string().as_str(),

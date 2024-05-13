@@ -388,19 +388,19 @@ impl<S: StateStore> OverWindowExecutor<S> {
             let metrics = this.actor_ctx.streaming_metrics.clone();
             metrics
                 .over_window_range_cache_entry_count
-                .with_label_values(&[&table_id, &actor_id, &fragment_id])
+                .with_guarded_label_values(&[&table_id, &actor_id, &fragment_id])
                 .set(cache_len as i64);
             metrics
                 .over_window_range_cache_lookup_count
-                .with_label_values(&[&table_id, &actor_id, &fragment_id])
+                .with_guarded_label_values(&[&table_id, &actor_id, &fragment_id])
                 .inc_by(stats.lookup_count);
             metrics
                 .over_window_range_cache_left_miss_count
-                .with_label_values(&[&table_id, &actor_id, &fragment_id])
+                .with_guarded_label_values(&[&table_id, &actor_id, &fragment_id])
                 .inc_by(stats.left_miss_count);
             metrics
                 .over_window_range_cache_right_miss_count
-                .with_label_values(&[&table_id, &actor_id, &fragment_id])
+                .with_guarded_label_values(&[&table_id, &actor_id, &fragment_id])
                 .inc_by(stats.right_miss_count);
 
             // Update recently accessed range for later shrinking cache.
@@ -641,15 +641,27 @@ impl<S: StateStore> OverWindowExecutor<S> {
                         let table_id_str = this.state_table.table_id().to_string();
                         this.metrics
                             .over_window_cached_entry_count
-                            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+                            .with_guarded_label_values(&[
+                                &table_id_str,
+                                &actor_id_str,
+                                &fragment_id_str,
+                            ])
                             .set(vars.cached_partitions.len() as _);
                         this.metrics
                             .over_window_cache_lookup_count
-                            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+                            .with_guarded_label_values(&[
+                                &table_id_str,
+                                &actor_id_str,
+                                &fragment_id_str,
+                            ])
                             .inc_by(std::mem::take(&mut vars.stats.cache_lookup));
                         this.metrics
                             .over_window_cache_miss_count
-                            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+                            .with_guarded_label_values(&[
+                                &table_id_str,
+                                &actor_id_str,
+                                &fragment_id_str,
+                            ])
                             .inc_by(std::mem::take(&mut vars.stats.cache_miss));
                     }
 

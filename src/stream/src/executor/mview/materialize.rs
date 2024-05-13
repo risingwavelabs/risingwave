@@ -179,7 +179,11 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     self.actor_context
                         .streaming_metrics
                         .mview_input_row_count
-                        .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+                        .with_guarded_label_values(&[
+                            &table_id_str,
+                            &actor_id_str,
+                            &fragment_id_str,
+                        ])
                         .inc_by(chunk.cardinality() as u64);
 
                     // This is an optimization that handles conflicts only when a particular materialized view downstream has no MV dependencies.
@@ -727,13 +731,19 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
             self.metrics_info
                 .metrics
                 .materialize_cache_total_count
-                .with_label_values(&[&self.metrics_info.table_id, &self.metrics_info.actor_id])
+                .with_guarded_label_values(&[
+                    &self.metrics_info.table_id,
+                    &self.metrics_info.actor_id,
+                ])
                 .inc();
             if self.data.contains(key) {
                 self.metrics_info
                     .metrics
                     .materialize_cache_hit_count
-                    .with_label_values(&[&self.metrics_info.table_id, &self.metrics_info.actor_id])
+                    .with_guarded_label_values(&[
+                        &self.metrics_info.table_id,
+                        &self.metrics_info.actor_id,
+                    ])
                     .inc();
                 continue;
             }

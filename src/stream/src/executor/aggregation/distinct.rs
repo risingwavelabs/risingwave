@@ -81,7 +81,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
 
             ctx.streaming_metrics
                 .agg_distinct_total_cache_count
-                .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+                .with_guarded_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                 .inc();
             // TODO(yuhao): avoid this `contains`.
             // https://github.com/risingwavelabs/risingwave/issues/9233
@@ -90,7 +90,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
             } else {
                 ctx.streaming_metrics
                     .agg_distinct_cache_miss_count
-                    .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+                    .with_guarded_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                     .inc();
                 // load from table into the cache
                 let counts = if let Some(counts_row) =
@@ -191,7 +191,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
         let table_id_str = dedup_table.table_id().to_string();
         ctx.streaming_metrics
             .agg_distinct_cached_entry_count
-            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+            .with_guarded_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(self.cache.len() as i64);
     }
 }

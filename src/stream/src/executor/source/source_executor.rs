@@ -175,12 +175,14 @@ impl<S: StateStore> SourceExecutor<S> {
     ) -> StreamExecutorResult<()> {
         self.metrics
             .source_split_change_count
-            .with_label_values(
+            .with_guarded_label_values(
                 &self
                     .get_metric_labels()
                     .iter()
                     .map(AsRef::as_ref)
-                    .collect::<Vec<&str>>(),
+                    .collect::<Vec<&str>>()
+                    .try_into()
+                    .unwrap(),
             )
             .inc();
         if let Some(target_splits) = split_assignment.get(&self.actor_ctx.id).cloned() {
@@ -623,12 +625,14 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     self.metrics
                         .source_output_row_count
-                        .with_label_values(
+                        .with_guarded_label_values(
                             &self
                                 .get_metric_labels()
                                 .iter()
                                 .map(AsRef::as_ref)
-                                .collect::<Vec<&str>>(),
+                                .collect::<Vec<&str>>()
+                                .try_into()
+                                .unwrap(),
                         )
                         .inc_by(chunk.cardinality() as u64);
                     let chunk =

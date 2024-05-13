@@ -172,7 +172,7 @@ impl RemoteInput {
 
                     metrics
                         .exchange_frag_recv_size
-                        .with_label_values(&[&up_fragment_id, &down_fragment_id])
+                        .with_guarded_label_values(&[&up_fragment_id, &down_fragment_id])
                         .inc_by(bytes as u64);
 
                     let msg_res = Message::from_protobuf(&msg);

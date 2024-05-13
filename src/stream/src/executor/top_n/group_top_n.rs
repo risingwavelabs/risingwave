@@ -173,7 +173,7 @@ where
             self.ctx
                 .streaming_metrics
                 .group_top_n_total_query_cache_count
-                .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+                .with_guarded_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                 .inc();
             // If 'self.caches' does not already have a cache for the current group, create a new
             // cache for it and insert it into `self.caches`
@@ -181,7 +181,7 @@ where
                 self.ctx
                     .streaming_metrics
                     .group_top_n_cache_miss_count
-                    .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+                    .with_guarded_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                     .inc();
                 let mut topn_cache =
                     TopNCache::new(self.offset, self.limit, self.schema.data_types());
@@ -218,7 +218,7 @@ where
         self.ctx
             .streaming_metrics
             .group_top_n_cached_entry_count
-            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+            .with_guarded_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(self.caches.len() as i64);
         generate_output(res_rows, res_ops, &self.schema)
     }
