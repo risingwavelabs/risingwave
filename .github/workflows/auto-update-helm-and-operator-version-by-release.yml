@@ -48,6 +48,7 @@ jobs:
           committer: github-actions[bot]@users.noreply.github.com
           author: github-actions[bot]@users.noreply.github.com
           reviewers: arkbriar
+          delete-branch: true
 
   update-risingwave-operator:
     runs-on: ubuntu-latest
@@ -77,3 +78,4 @@ jobs:
           committer: github-actions[bot]@users.noreply.github.com
           author: github-actions[bot]@users.noreply.github.com
           reviewers: arkbriar
+          delete-branch: true
