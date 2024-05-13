@@ -113,6 +113,7 @@ pub async fn scan(
     data_dir: Option<String>,
     output_columns_ids: Option<Vec<i32>>,
     vnodes: Option<Vec<i32>>,
+    count: u32,
     silent: bool,
 ) -> Result<()> {
     let meta_client = context.meta_client().await?;
@@ -120,7 +121,17 @@ pub async fn scan(
         .hummock_store(HummockServiceOpts::from_env(data_dir)?)
         .await?;
     let table = get_table_catalog(meta_client, mv_name).await?;
-    do_scan(table, hummock, output_columns_ids, vnodes, silent).await
+    for _ in 0..count {
+        do_scan(
+            &table,
+            hummock.clone(),
+            output_columns_ids.clone(),
+            vnodes.clone(),
+            silent,
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 pub async fn scan_id(
@@ -129,6 +140,7 @@ pub async fn scan_id(
     data_dir: Option<String>,
     output_columns_ids: Option<Vec<i32>>,
     vnodes: Option<Vec<i32>>,
+    count: u32,
     silent: bool,
 ) -> Result<()> {
     let meta_client = context.meta_client().await?;
@@ -136,17 +148,27 @@ pub async fn scan_id(
         .hummock_store(HummockServiceOpts::from_env(data_dir)?)
         .await?;
     let table = get_table_catalog_by_id(meta_client, table_id).await?;
-    do_scan(table, hummock, output_columns_ids, vnodes, silent).await
+    for _ in 0..count {
+        do_scan(
+            &table,
+            hummock.clone(),
+            output_columns_ids.clone(),
+            vnodes.clone(),
+            silent,
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 async fn do_scan(
-    table: TableCatalog,
+    table: &TableCatalog,
     hummock: MonitoredStateStore<HummockStorage>,
     output_columns_ids: Option<Vec<i32>>,
     vnodes: Option<Vec<i32>>,
     silent: bool,
 ) -> Result<()> {
-    print_table_catalog(&table);
+    print_table_catalog(table);
 
     if let Some(ref output_columns_ids) = output_columns_ids {
         println!(
@@ -163,7 +185,7 @@ async fn do_scan(
         println!("Rows:");
     }
     let read_epoch = hummock.inner().get_pinned_version().max_committed_epoch();
-    let storage_table = make_storage_table(hummock, &table, output_columns_ids, vnodes)?;
+    let storage_table = make_storage_table(hummock, table, output_columns_ids, vnodes)?;
     let instant = Instant::now();
     let stream = storage_table
         .batch_iter(

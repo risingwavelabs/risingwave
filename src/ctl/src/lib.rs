@@ -307,6 +307,8 @@ enum TableCommands {
         output_columns_ids: Option<Vec<i32>>,
         #[clap(long, value_delimiter = ',')]
         vnodes: Option<Vec<i32>>,
+        #[clap(long, default_value_t = 1)]
+        count: u32,
         #[clap(long, default_value_t = false)]
         silent: bool,
     },
@@ -320,6 +322,8 @@ enum TableCommands {
         output_columns_ids: Option<Vec<i32>>,
         #[clap(long, value_delimiter = ',')]
         vnodes: Option<Vec<i32>>,
+        #[clap(long, default_value_t = 1)]
+        count: u32,
         #[clap(long, default_value_t = false)]
         silent: bool,
     },
@@ -741,6 +745,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             data_dir,
             output_columns_ids,
             vnodes,
+            count,
             silent,
         }) => {
             cmd_impl::table::scan(
@@ -749,6 +754,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 data_dir,
                 output_columns_ids,
                 vnodes,
+                count,
                 silent,
             )
             .await?
@@ -758,6 +764,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             data_dir,
             output_columns_ids,
             vnodes,
+            count,
             silent,
         }) => {
             cmd_impl::table::scan_id(
@@ -766,6 +773,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 data_dir,
                 output_columns_ids,
                 vnodes,
+                count,
                 silent,
             )
             .await?
