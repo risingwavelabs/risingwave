@@ -81,7 +81,6 @@ macro_rules! def_remote_sink {
             { HttpJava, HttpJavaSink, "http" }
         }
     };
-    () => {};
     ({ $variant_name:ident, $sink_type_name:ident, $sink_name:expr }) => {
         #[derive(Debug)]
         pub struct $variant_name;
