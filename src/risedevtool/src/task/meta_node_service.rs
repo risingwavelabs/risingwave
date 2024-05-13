@@ -83,7 +83,7 @@ impl MetaNodeService {
             }
             "etcd" => {
                 let etcd_config = config.provide_etcd_backend.as_ref().unwrap();
-                assert!(etcd_config.len() > 0);
+                assert!(!etcd_config.is_empty());
                 is_persistent_meta_store = true;
 
                 cmd.arg("--backend")
@@ -127,7 +127,7 @@ impl MetaNodeService {
                         pg_config[0].database
                     ));
             }
-            backend @ _ => {
+            backend => {
                 return Err(anyhow!("unsupported meta backend {}", backend));
             }
         }
