@@ -140,6 +140,7 @@ impl SstableStore {
 
     /// For compactor, we do not need a high concurrency load for cache. Instead, we need the cache
     ///  can be evict more effective.
+    #[expect(clippy::borrowed_box)]
     pub async fn for_compactor(
         store: ObjectStoreRef,
         path: String,
