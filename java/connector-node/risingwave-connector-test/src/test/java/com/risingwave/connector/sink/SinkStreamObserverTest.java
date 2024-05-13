@@ -14,10 +14,10 @@
 
 package com.risingwave.connector.sink;
 
+import com.google.protobuf.ByteString;
 import com.risingwave.connector.SinkWriterStreamObserver;
 import com.risingwave.connector.TestUtils;
 import com.risingwave.proto.ConnectorServiceProto;
-import com.risingwave.proto.Data.Op;
 import io.grpc.stub.StreamObserver;
 import java.util.Map;
 import org.junit.Assert;
@@ -172,19 +172,25 @@ public class SinkStreamObserverTest {
                                         .newBuilder()
                                         .setEpoch(0)
                                         .setBatchId(1)
-                                        .setJsonPayload(
+                                        .setStreamChunkPayload(
                                                 ConnectorServiceProto.SinkWriterStreamRequest
-                                                        .WriteBatch.JsonPayload.newBuilder()
-                                                        .addRowOps(
-                                                                ConnectorServiceProto
-                                                                        .SinkWriterStreamRequest
-                                                                        .WriteBatch.JsonPayload
-                                                                        .RowOp.newBuilder()
-                                                                        .setOpType(Op.INSERT)
-                                                                        .setLine(
-                                                                                "{\"id\": 1, \"name\": \"test\"}")
-                                                                        .build()))
-                                        .build())
+                                                        .WriteBatch.StreamChunkPayload.newBuilder()
+                                                        .setBinaryData(
+                                                                ByteString.copyFrom(
+                                                                        new byte[] {
+                                                                            8, 1, 18, 1, 1, 26, 20,
+                                                                            8, 2, 18, 6, 8, 1, 18,
+                                                                            2, 1, 1, 26, 8, 8, 1,
+                                                                            18, 4, 0, 0, 0, 1, 26,
+                                                                            42, 8, 6, 18, 6, 8, 1,
+                                                                            18, 2, 1, 1, 26, 20, 8,
+                                                                            1, 18, 16, 0, 0, 0, 0,
+                                                                            0, 0, 0, 0, 0, 0, 0, 0,
+                                                                            0, 0, 0, 4, 26, 8, 8, 1,
+                                                                            18, 4, 116, 101, 115,
+                                                                            116
+                                                                        }))
+                                                        .build()))
                         .build();
 
         ConnectorServiceProto.SinkWriterStreamRequest firstSync =
@@ -203,19 +209,25 @@ public class SinkStreamObserverTest {
                                         .newBuilder()
                                         .setEpoch(1)
                                         .setBatchId(2)
-                                        .setJsonPayload(
+                                        .setStreamChunkPayload(
                                                 ConnectorServiceProto.SinkWriterStreamRequest
-                                                        .WriteBatch.JsonPayload.newBuilder()
-                                                        .addRowOps(
-                                                                ConnectorServiceProto
-                                                                        .SinkWriterStreamRequest
-                                                                        .WriteBatch.JsonPayload
-                                                                        .RowOp.newBuilder()
-                                                                        .setOpType(Op.INSERT)
-                                                                        .setLine(
-                                                                                "{\"id\": 2, \"name\": \"test\"}")
-                                                                        .build()))
-                                        .build())
+                                                        .WriteBatch.StreamChunkPayload.newBuilder()
+                                                        .setBinaryData(
+                                                                ByteString.copyFrom(
+                                                                        new byte[] {
+                                                                            8, 1, 18, 1, 1, 26, 20,
+                                                                            8, 2, 18, 6, 8, 1, 18,
+                                                                            2, 1, 1, 26, 8, 8, 1,
+                                                                            18, 4, 0, 0, 0, 2, 26,
+                                                                            42, 8, 6, 18, 6, 8, 1,
+                                                                            18, 2, 1, 1, 26, 20, 8,
+                                                                            1, 18, 16, 0, 0, 0, 0,
+                                                                            0, 0, 0, 0, 0, 0, 0, 0,
+                                                                            0, 0, 0, 4, 26, 8, 8, 1,
+                                                                            18, 4, 116, 101, 115,
+                                                                            116
+                                                                        }))
+                                                        .build()))
                         .build();
 
         ConnectorServiceProto.SinkWriterStreamRequest secondWriteWrongEpoch =
@@ -225,19 +237,25 @@ public class SinkStreamObserverTest {
                                         .newBuilder()
                                         .setEpoch(2)
                                         .setBatchId(3)
-                                        .setJsonPayload(
+                                        .setStreamChunkPayload(
                                                 ConnectorServiceProto.SinkWriterStreamRequest
-                                                        .WriteBatch.JsonPayload.newBuilder()
-                                                        .addRowOps(
-                                                                ConnectorServiceProto
-                                                                        .SinkWriterStreamRequest
-                                                                        .WriteBatch.JsonPayload
-                                                                        .RowOp.newBuilder()
-                                                                        .setOpType(Op.INSERT)
-                                                                        .setLine(
-                                                                                "{\"id\": 2, \"name\": \"test\"}")
-                                                                        .build()))
-                                        .build())
+                                                        .WriteBatch.StreamChunkPayload.newBuilder()
+                                                        .setBinaryData(
+                                                                ByteString.copyFrom(
+                                                                        new byte[] {
+                                                                            8, 1, 18, 1, 1, 26, 20,
+                                                                            8, 2, 18, 6, 8, 1, 18,
+                                                                            2, 1, 1, 26, 8, 8, 1,
+                                                                            18, 4, 0, 0, 0, 2, 26,
+                                                                            42, 8, 6, 18, 6, 8, 1,
+                                                                            18, 2, 1, 1, 26, 20, 8,
+                                                                            1, 18, 16, 0, 0, 0, 0,
+                                                                            0, 0, 0, 0, 0, 0, 0, 0,
+                                                                            0, 0, 0, 4, 26, 8, 8, 1,
+                                                                            18, 4, 116, 101, 115,
+                                                                            116
+                                                                        }))
+                                                        .build()))
                         .build();
 
         boolean exceptionThrown = false;
