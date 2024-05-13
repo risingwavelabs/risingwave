@@ -78,6 +78,8 @@ impl ToSql for EnumString {
 pub(crate) enum ScalarAdapter<'a> {
     Builtin(ScalarRefImpl<'a>),
     Uuid(uuid::Uuid),
+    // Currently in order to handle the decimal beyond RustDecimal,
+    // we use the PgNumeric type to convert the decimal to a string/decimal/rw_int256.
     Numeric(PgNumeric),
     Enum(EnumString),
     NumericList(Vec<Option<PgNumeric>>),
@@ -126,7 +128,8 @@ impl<'a> FromSql<'a> for ScalarAdapter<'_> {
     }
 
     fn accepts(ty: &Type) -> bool {
-        matches!(ty, &Type::UUID | &Type::NUMERIC) || <EnumString as FromSql>::accepts(ty)
+        matches!(ty, &Type::UUID | &Type::NUMERIC | &Type::NUMERIC_ARRAY)
+            || <EnumString as FromSql>::accepts(ty)
     }
 }
 

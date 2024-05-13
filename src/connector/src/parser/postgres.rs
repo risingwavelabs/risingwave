@@ -32,37 +32,35 @@ static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::de
 
 macro_rules! handle_list_data_type {
     ($row:expr, $i:expr, $name:expr, $dtype:expr, $type:ty) => {{
-        let mut builder = $dtype.create_array_builder(0);
         let res = $row.try_get::<_, Option<Vec<Option<$type>>>>($i);
         match res {
-            Ok(val) => {
-                if let Some(v) = val {
-                    v.into_iter()
-                        .for_each(|val| builder.append(val.map(ScalarImpl::from)))
-                }
-            }
+            Ok(val) => val.map(|v| {
+                let mut builder = $dtype.create_array_builder(0);
+                v.into_iter()
+                    .for_each(|val| builder.append(val.map(ScalarImpl::from)));
+                ScalarImpl::from(ListValue::new(builder.finish()))
+            }),
             Err(err) => {
                 log_error!($name, err, "parse column failed");
+                None
             }
-        };
-        Some(ScalarImpl::from(ListValue::new(builder.finish())))
+        }
     }};
     ($row:expr, $i:expr, $name:expr, $dtype:expr, $type:ty, $rw_type:ty) => {{
-        let mut builder = $dtype.create_array_builder(0);
         let res = $row.try_get::<_, Option<Vec<Option<$type>>>>($i);
         match res {
-            Ok(val) => {
-                if let Some(v) = val {
-                    v.into_iter().for_each(|val| {
-                        builder.append(val.map(|v| ScalarImpl::from(<$rw_type>::from(v))))
-                    })
-                }
-            }
+            Ok(val) => val.map(|v| {
+                let mut builder = $dtype.create_array_builder(0);
+                v.into_iter().for_each(|val| {
+                    builder.append(val.map(|v| ScalarImpl::from(<$rw_type>::from(v))))
+                });
+                ScalarImpl::from(ListValue::new(builder.finish()))
+            }),
             Err(err) => {
                 log_error!($name, err, "parse column failed");
+                None
             }
-        };
-        Some(ScalarImpl::from(ListValue::new(builder.finish())))
+        }
     }};
 }
 
@@ -132,10 +130,6 @@ fn postgres_cell_to_scalar_impl(
             handle_data_type!(row, i, name, Decimal)
         }
         DataType::Int256 => {
-            // Currently in order to handle the decimal beyond RustDecimal,
-            // we use the PgNumeric type to convert the decimal to a string.
-            // Then we convert the string to Int256.
-            // Note: It's only used to map the numeric type in upstream Postgres to RisingWave's rw_int256.
             let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
             match res {
                 Ok(val) => val.and_then(|v| v.into_scalar(data_type)),
@@ -171,9 +165,6 @@ fn postgres_cell_to_scalar_impl(
                     }
                     // we support converting NUMERIC to VARCHAR implicitly
                     Type::NUMERIC => {
-                        // Currently in order to handle the decimal beyond RustDecimal,
-                        // we use the PgNumeric type to convert the decimal to a string.
-                        // Note: It's only used to map the numeric type in upstream Postgres to RisingWave's varchar.
                         let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
                         match res {
                             Ok(val) => val.and_then(|v| v.into_scalar(data_type)),
@@ -225,17 +216,12 @@ fn postgres_cell_to_scalar_impl(
                 // Issue #1, we use ScalarAdapter instead of Option<ScalarAdapter>
                 let res = row.try_get::<_, Option<Vec<ScalarAdapter<'_>>>>(i);
                 match res {
-                    Ok(val) => {
+                    Ok(val) => val.map(|val| {
                         let mut builder = dtype.create_array_builder(0);
-                        if let Some(vec) = val {
-                            for val in vec {
-                                builder.append(
-                                    val.into_scalar(&DataType::List(Box::new(DataType::Varchar))),
-                                )
-                            }
-                        }
-                        Some(ScalarImpl::from(ListValue::new(builder.finish())))
-                    }
+                        val.into_iter()
+                            .for_each(|v| builder.append(v.into_scalar(&DataType::Varchar)));
+                        ScalarImpl::from(ListValue::new(builder.finish()))
+                    }),
                     Err(err) => {
                         log_error!(name, err, "parse enum column failed");
                         None
@@ -281,17 +267,15 @@ fn postgres_cell_to_scalar_impl(
                                 let res =
                                     row.try_get::<_, Option<Vec<Option<ScalarAdapter<'_>>>>>(i);
                                 match res {
-                                    Ok(val) => {
+                                    Ok(val) => val.map(|val| {
                                         let mut builder = dtype.create_array_builder(0);
-                                        if let Some(vec) = val {
-                                            for val in vec {
-                                                builder.append(
-                                                    val.and_then(|v| v.into_scalar(data_type)),
-                                                )
-                                            }
-                                        }
-                                        Some(ScalarImpl::from(ListValue::new(builder.finish())))
-                                    }
+                                        val.into_iter().for_each(|val| {
+                                            builder.append(
+                                                val.and_then(|v| v.into_scalar(&DataType::Varchar)),
+                                            )
+                                        });
+                                        ScalarImpl::from(ListValue::new(builder.finish()))
+                                    }),
                                     Err(err) => {
                                         log_error!(name, err, "parse uuid column failed");
                                         None
@@ -349,17 +333,14 @@ fn postgres_cell_to_scalar_impl(
                     DataType::Bytea => {
                         let res = row.try_get::<_, Option<Vec<Option<Vec<u8>>>>>(i);
                         match res {
-                            Ok(val) => {
+                            Ok(val) => val.map(|val| {
                                 let mut builder = dtype.create_array_builder(0);
-                                if let Some(v) = val {
-                                    v.into_iter().for_each(|val| {
-                                        builder.append(
-                                            val.map(|v| ScalarImpl::from(v.into_boxed_slice())),
-                                        )
-                                    });
-                                }
-                                Some(ScalarImpl::from(ListValue::new(builder.finish())))
-                            }
+                                val.into_iter().for_each(|val| {
+                                    builder
+                                        .append(val.map(|v| ScalarImpl::from(v.into_boxed_slice())))
+                                });
+                                ScalarImpl::from(ListValue::new(builder.finish()))
+                            }),
                             Err(err) => {
                                 log_error!(name, err, "parse column failed");
                                 None
