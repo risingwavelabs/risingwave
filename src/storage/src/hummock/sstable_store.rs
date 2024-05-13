@@ -149,6 +149,9 @@ impl SstableStore {
         let meta_cache_v2 = HybridCacheBuilder::new()
             .memory(meta_cache_capacity)
             .with_shards(1)
+            .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
+                u64::BITS as usize / 8 + value.estimate_size()
+            })
             .storage()
             .build()
             .await
@@ -157,6 +160,10 @@ impl SstableStore {
         let block_cache_v2 = HybridCacheBuilder::new()
             .memory(block_cache_capacity)
             .with_shards(1)
+            .with_weighter(|_: &SstableBlockIndex, value: &Box<Block>| {
+                // FIXME(MrCroxx): Calculate block weight more accurately.
+                u64::BITS as usize * 2 / 8 + value.raw().len()
+            })
             .storage()
             .build()
             .await
