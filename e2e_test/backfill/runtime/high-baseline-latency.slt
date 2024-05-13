@@ -2,19 +2,37 @@ statement ok
 create table fact(v1 int);
 
 statement ok
-create table dim(v1 int);
+create table dim1(v1 int);
 
 statement ok
 create table dim2(v1 int);
 
 statement ok
+create table dim3(v1 int);
+
+statement ok
+create table dim4(v1 int);
+
+statement ok
+create table dim5(v1 int);
+
+statement ok
 insert into fact select 1 from generate_series(1, 1000000);
 
 statement ok
-insert into dim select 1 from generate_series(1, 100);
+insert into dim1 select 1 from generate_series(1, 2);
 
 statement ok
-insert into dim2 select 1 from generate_series(1, 100);
+insert into dim2 select 1 from generate_series(1, 5);
+
+statement ok
+insert into dim3 select 1 from generate_series(1, 10);
+
+statement ok
+insert into dim4 select 1 from generate_series(1, 10);
+
+statement ok
+insert into dim5 select 1 from generate_series(1, 10);
 
 statement ok
 flush;
@@ -23,10 +41,24 @@ statement ok
 set background_ddl = true;
 
 statement ok
-create sink s1 as select fact.v1 from fact join dim on fact.v1 = dim.v1 join dim2 on fact.v1 = dim2.v1 with (connector = 'blackhole');
+create sink s1 as select fact.v1 from
+fact
+ join dim1 on fact.v1 = dim1.v1
+  join dim2 on dim1.v1 = dim2.v1
+    join dim3 on dim2.v1 = dim3.v1
+      join dim4 on dim3.v1 = dim4.v1
+        join dim5 on dim4.v1 = dim5.v1
+    with (connector = 'blackhole');
 
 statement ok
-create sink s2 as select count(*) from fact join dim on fact.v1 = dim.v1 join dim2 on fact.v1 = dim2.v1 with (connector = 'blackhole');
+create sink s2 as select fact.v1 from
+fact
+ join dim1 on fact.v1 = dim1.v1
+  join dim2 on dim1.v1 = dim2.v1
+    join dim3 on dim2.v1 = dim3.v1
+      join dim4 on dim3.v1 = dim4.v1
+        join dim5 on dim4.v1 = dim5.v1
+    with (connector = 'blackhole');
 
 statement ok
 set background_ddl = false;
