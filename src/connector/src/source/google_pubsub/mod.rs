@@ -70,6 +70,11 @@ pub struct PubsubProperties {
     #[serde(rename = "pubsub.start_snapshot")]
     pub start_snapshot: Option<String>,
 
+    /// `parallelism` is the number of parallel consumers to run for the subscription.
+    /// TODO: use system parallelism if not set
+    #[serde(rename = "pubsub.parallelism")]
+    pub parallelism: Option<String>,
+
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
 }
@@ -137,7 +142,7 @@ mod tests {
             start_offset: None,
             start_snapshot: None,
             subscription: String::from("test-subscription"),
-
+            parallelism: None,
             unknown_fields: Default::default(),
         };
 

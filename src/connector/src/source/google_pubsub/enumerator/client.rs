@@ -38,6 +38,19 @@ impl SplitEnumerator for PubsubSplitEnumerator {
         properties: Self::Properties,
         _context: SourceEnumeratorContextRef,
     ) -> ConnectorResult<PubsubSplitEnumerator> {
+        let split_count = match &properties.parallelism {
+            Some(parallelism) => {
+                let parallelism = parallelism
+                    .parse::<u32>()
+                    .context("error when parsing parallelism")?;
+                if parallelism < 1 {
+                    bail!("parallelism must be >= 1");
+                }
+                parallelism
+            }
+            None => 1,
+        };
+
         if properties.credentials.is_none() && properties.emulator_host.is_none() {
             bail!("credentials must be set if not using the pubsub emulator")
         }
@@ -88,7 +101,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
 
         Ok(Self {
             subscription: properties.subscription.to_owned(),
-            split_count: 1,
+            split_count,
         })
     }
 
