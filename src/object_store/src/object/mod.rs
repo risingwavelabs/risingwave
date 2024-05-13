@@ -268,13 +268,10 @@ impl ObjectStoreImpl {
     pub fn support_streaming_upload(&self) -> bool {
         match self {
             ObjectStoreImpl::InMem(_) => true,
-            ObjectStoreImpl::Opendal(store) => {
-                match store.inner.store_media_type(){
-                    "Azblob"=> false,
-                    _ =>  store.inner.op.info().native_capability().write_can_multi,
-                }
-               
-            }
+            ObjectStoreImpl::Opendal(store) => match store.inner.store_media_type() {
+                "Azblob" => false,
+                _ => store.inner.op.info().native_capability().write_can_multi,
+            },
             ObjectStoreImpl::S3(_) => true,
             #[cfg(madsim)]
             ObjectStoreImpl::Sim(_) => true,
