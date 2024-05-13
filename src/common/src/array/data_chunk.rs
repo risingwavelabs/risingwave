@@ -249,6 +249,7 @@ impl DataChunk {
         Self::new(columns, Bitmap::ones(cardinality))
     }
 
+    /// Scatter a compacted chunk to a new chunk with the given visibility.
     pub fn uncompact(self, vis: Bitmap) -> Self {
         let mut uncompact_builders: Vec<_> = self
             .columns
