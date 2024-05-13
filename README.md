@@ -58,6 +58,8 @@ RisingWave is a Postgres-compatible streaming database engineered to provide the
 
 
 ![RisingWave](https://github.com/risingwavelabs/risingwave/assets/41638002/fc3468d4-45e0-4907-8078-e17730fb0ac0)
+![RisingWave](https://github.com/risingwavelabs/risingwave/assets/41638002/10c44404-f78b-43ce-bbd9-3646690acc59)
+
 
 
 ## Try it out in 60 seconds
