@@ -58,7 +58,8 @@ jobs:
           git push --set-upstream origin 'auto-update-${{ env.NEW_APP_VERSION }}'
 
       - name: Create Pull Request
-        run: gh pr create -B 'auto-update-${{ env.NEW_APP_VERSION }}' -H main --title 'chore: bump risingwave to ${{ env.NEW_APP_VERSION }}, release chart ${{ env.NEW_CHART_VERSION }}' --body 'This is an automated pull request to update the chart versions.'
+        run: |
+          gh pr create -B 'auto-update-${{ env.NEW_APP_VERSION }}' -H main --title 'chore: bump risingwave to ${{ env.NEW_APP_VERSION }}, release chart ${{ env.NEW_CHART_VERSION }}' --body 'This is an automated pull request to update the chart versions.'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
