@@ -17,8 +17,6 @@
 #![feature(let_chains)]
 #![feature(lint_reasons)]
 
-mod config;
-pub use config::*;
 mod config_gen;
 pub use config_gen::*;
 mod preflight_check;

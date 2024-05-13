@@ -15,7 +15,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct ComputeNodeConfig {
     #[serde(rename = "use")]
@@ -23,7 +23,6 @@ pub struct ComputeNodeConfig {
     pub id: String,
 
     pub address: String,
-    #[serde(with = "string")]
     pub port: u16,
     pub listen_address: String,
     pub exporter_port: u16,
@@ -44,7 +43,7 @@ pub struct ComputeNodeConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct MetaNodeConfig {
     #[serde(rename = "use")]
@@ -52,7 +51,6 @@ pub struct MetaNodeConfig {
     pub id: String,
 
     pub address: String,
-    #[serde(with = "string")]
     pub port: u16,
     pub listen_address: String,
     pub dashboard_port: u16,
@@ -76,7 +74,7 @@ pub struct MetaNodeConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct FrontendConfig {
     #[serde(rename = "use")]
@@ -84,7 +82,6 @@ pub struct FrontendConfig {
     pub id: String,
 
     pub address: String,
-    #[serde(with = "string")]
     pub port: u16,
     pub listen_address: String,
     pub exporter_port: u16,
@@ -97,7 +94,7 @@ pub struct FrontendConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct CompactorConfig {
     #[serde(rename = "use")]
@@ -105,7 +102,6 @@ pub struct CompactorConfig {
     pub id: String,
 
     pub address: String,
-    #[serde(with = "string")]
     pub port: u16,
     pub listen_address: String,
     pub exporter_port: u16,
@@ -120,7 +116,7 @@ pub struct CompactorConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct MinioConfig {
     #[serde(rename = "use")]
@@ -128,12 +124,10 @@ pub struct MinioConfig {
     pub id: String,
 
     pub address: String,
-    #[serde(with = "string")]
     pub port: u16,
     pub listen_address: String,
 
     pub console_address: String,
-    #[serde(with = "string")]
     pub console_port: u16,
 
     pub root_user: String,
@@ -148,7 +142,7 @@ pub struct MinioConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct EtcdConfig {
     #[serde(rename = "use")]
@@ -157,7 +151,6 @@ pub struct EtcdConfig {
 
     // TODO: only one node etcd is supported.
     pub address: String,
-    #[serde(with = "string")]
     pub port: u16,
     pub listen_address: String,
 
@@ -170,7 +163,7 @@ pub struct EtcdConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct SqliteConfig {
     #[serde(rename = "use")]
@@ -181,7 +174,7 @@ pub struct SqliteConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct PrometheusConfig {
     #[serde(rename = "use")]
@@ -189,7 +182,6 @@ pub struct PrometheusConfig {
     pub id: String,
 
     pub address: String,
-    #[serde(with = "string")]
     pub port: u16,
     pub listen_address: String,
 
@@ -209,7 +201,7 @@ pub struct PrometheusConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct GrafanaConfig {
     #[serde(rename = "use")]
@@ -224,7 +216,7 @@ pub struct GrafanaConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct TempoConfig {
     #[serde(rename = "use")]
@@ -239,7 +231,7 @@ pub struct TempoConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct AwsS3Config {
     #[serde(rename = "use")]
@@ -249,7 +241,7 @@ pub struct AwsS3Config {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct OpendalConfig {
     #[serde(rename = "use")]
@@ -262,7 +254,7 @@ pub struct OpendalConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct KafkaConfig {
     #[serde(rename = "use")]
@@ -270,9 +262,7 @@ pub struct KafkaConfig {
     pub id: String,
 
     pub address: String,
-    #[serde(with = "string")]
     pub port: u16,
-    #[serde(with = "string")]
     pub controller_port: u16,
     pub listen_address: String,
 
@@ -282,13 +272,12 @@ pub struct KafkaConfig {
     pub user_managed: bool,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct PubsubConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
     pub id: String,
-    #[serde(with = "string")]
     pub port: u16,
     pub address: String,
 
@@ -296,7 +285,7 @@ pub struct PubsubConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct RedPandaConfig {
     #[serde(rename = "use")]
@@ -310,19 +299,18 @@ pub struct RedPandaConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct RedisConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
     pub id: String,
-
     pub port: u16,
     pub address: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct MySqlConfig {
     #[serde(rename = "use")]
@@ -342,7 +330,8 @@ pub struct MySqlConfig {
 }
 
 /// All service configuration
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "use", rename_all = "kebab-case")] // use: 'compute-node'
 pub enum ServiceConfig {
     ComputeNode(ComputeNodeConfig),
     MetaNode(MetaNodeConfig),
@@ -360,7 +349,7 @@ pub enum ServiceConfig {
     Pubsub(PubsubConfig),
     Redis(RedisConfig),
     RedPanda(RedPandaConfig),
-    MySql(MySqlConfig),
+    Mysql(MySqlConfig),
 }
 
 impl ServiceConfig {
@@ -382,7 +371,7 @@ impl ServiceConfig {
             Self::Redis(c) => &c.id,
             Self::RedPanda(c) => &c.id,
             Self::Opendal(c) => &c.id,
-            Self::MySql(c) => &c.id,
+            Self::Mysql(c) => &c.id,
         }
     }
 
@@ -404,7 +393,7 @@ impl ServiceConfig {
             Self::Redis(c) => Some(c.port),
             Self::RedPanda(_c) => None,
             Self::Opendal(_) => None,
-            Self::MySql(c) => Some(c.port),
+            Self::Mysql(c) => Some(c.port),
         }
     }
 
@@ -426,33 +415,7 @@ impl ServiceConfig {
             Self::Redis(_c) => false,
             Self::RedPanda(_c) => false,
             Self::Opendal(_c) => false,
-            Self::MySql(c) => c.user_managed,
+            Self::Mysql(c) => c.user_managed,
         }
-    }
-}
-
-mod string {
-    use std::fmt::Display;
-    use std::str::FromStr;
-
-    use serde::{de, Deserialize, Deserializer, Serializer};
-
-    pub fn serialize<T, S>(value: &T, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        T: Display,
-        S: Serializer,
-    {
-        serializer.collect_str(value)
-    }
-
-    pub fn deserialize<'de, T, D>(deserializer: D) -> Result<T, D::Error>
-    where
-        T: FromStr,
-        T::Err: Display,
-        D: Deserializer<'de>,
-    {
-        String::deserialize(deserializer)?
-            .parse()
-            .map_err(de::Error::custom)
     }
 }
