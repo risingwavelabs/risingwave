@@ -33,6 +33,9 @@ statement ok
 GRANT INSERT ON bar TO test_user WITH GRANT OPTION GRANTED BY root;
 
 statement ok
+GRANT INSERT ON foo_view TO test_user WITH GRANT OPTION GRANTED BY root;
+
+statement ok
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO test_user WITH GRANT OPTION GRANTED BY root;
 
 statement ok
@@ -43,6 +46,9 @@ GRANT SELECT ON ALL SOURCES IN SCHEMA public TO test_user WITH GRANT OPTION GRAN
 
 statement ok
 GRANT CREATE ON SCHEMA test_schema TO test_user;
+
+query error table not found: bar_err
+GRANT INSERT ON bar_err TO test_user WITH GRANT OPTION GRANTED BY root;
 
 query error Invalid parameter user: User test_user_err not found
 SELECT has_table_privilege('test_user_err', 'foo', 'SELECT');
@@ -101,21 +107,25 @@ SELECT has_table_privilege('test_user', 'foo', 'DELETE WITH GRANT OPTION, INSERT
 ----
 f
 
-# FIXME(Kexiang): Currently, RW's grant privilege on all table doesn't apply to VIEWS.
 query I
 SELECT has_table_privilege('test_user', 'foo_view', 'SELECT');
 ----
-f
+t
 
 query I
 SELECT has_table_privilege('test_user', 'foo_view'::regclass, 'INSERT');
+----
+t
+
+query I
+SELECT has_table_privilege('test_user', 'foo_view'::regclass, 'UPDATE');
 ----
 f
 
 query I
 SELECT has_any_column_privilege('test_user', 'foo_view'::regclass, 'INSERT');
 ----
-f
+t
 
 query I
 SELECT has_table_privilege('test_user', 'foo_mv', 'SELECT');
@@ -202,6 +212,32 @@ query I
 SELECT has_schema_privilege('test_user', 'test_schema', 'CREATE');
 ----
 t
+
+statement ok
+REVOKE SELECT ON ALL TABLES IN SCHEMA public FROM test_user GRANTED BY root;
+
+query I
+SELECT has_table_privilege('test_user', 'bar'::regclass, 'SELECT');
+----
+f
+
+query I
+SELECT has_table_privilege('test_user', 'foo_view', 'SELECT');
+----
+f
+
+query I
+SELECT has_table_privilege('test_user', 'foo_view', 'INSERT');
+----
+t
+
+statement ok
+REVOKE INSERT ON foo_view FROM test_user GRANTED BY root;
+
+query I
+SELECT has_table_privilege('test_user', 'foo_view', 'INSERT');
+----
+f
 
 statement ok
 DROP SOURCE foo_source;
