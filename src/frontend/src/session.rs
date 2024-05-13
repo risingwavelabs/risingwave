@@ -165,7 +165,7 @@ pub struct FrontendEnv {
 type SessionMapRef = Arc<RwLock<HashMap<(i32, i32), Arc<SessionImpl>>>>;
 
 /// The proportion of frontend memory used for batch processing.
-const FRONTEND_BATCH_MEMORY_PROPORTION: f64 = 0.0005;
+const FRONTEND_BATCH_MEMORY_PROPORTION: f64 = 0.5;
 
 impl FrontendEnv {
     pub fn mock() -> Self {
