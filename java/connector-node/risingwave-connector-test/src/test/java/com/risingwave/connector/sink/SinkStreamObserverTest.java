@@ -94,7 +94,6 @@ public class SinkStreamObserverTest {
                         .setStart(
                                 ConnectorServiceProto.SinkWriterStreamRequest.StartSink.newBuilder()
                                         .setSinkParam(fileSinkParam)
-                                        .setFormat(ConnectorServiceProto.SinkPayloadFormat.JSON)
                                         .build())
                         .build();
         ConnectorServiceProto.SinkWriterStreamRequest firstSync =
@@ -138,7 +137,6 @@ public class SinkStreamObserverTest {
                         .setStart(
                                 ConnectorServiceProto.SinkWriterStreamRequest.StartSink.newBuilder()
                                         .setSinkParam(fileSinkParam)
-                                        .setFormat(ConnectorServiceProto.SinkPayloadFormat.JSON)
                                         .build())
                         .build();
         ConnectorServiceProto.SinkWriterStreamRequest firstSync =
@@ -164,7 +162,6 @@ public class SinkStreamObserverTest {
                 ConnectorServiceProto.SinkWriterStreamRequest.newBuilder()
                         .setStart(
                                 ConnectorServiceProto.SinkWriterStreamRequest.StartSink.newBuilder()
-                                        .setFormat(ConnectorServiceProto.SinkPayloadFormat.JSON)
                                         .setSinkParam(fileSinkParam))
                         .build();
 
