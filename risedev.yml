@@ -105,6 +105,7 @@ profile:
       - use: minio
       - use: etcd
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -119,6 +120,7 @@ profile:
       - use: etcd
       - use: meta-node
         user-managed: true
+        meta-backend: etcd
       - use: compute-node
         user-managed: true
       - use: frontend
@@ -136,6 +138,7 @@ profile:
       - use: etcd
       - use: meta-node
         user-managed: true
+        meta-backend: etcd
       - use: compute-node
         user-managed: true
       - use: frontend
@@ -149,6 +152,7 @@ profile:
       - use: etcd
       - use: meta-node
         user-managed: true
+        meta-backend: etcd
       - use: compute-node
         user-managed: true
       - use: frontend
@@ -253,6 +257,7 @@ profile:
       - use: minio
       - use: etcd
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -286,6 +291,7 @@ profile:
         port: 5690
         dashboard-port: 5691
         exporter-port: 1250
+        meta-backend: etcd
       - use: meta-node
         port: 15690
         dashboard-port: 15691
@@ -333,6 +339,7 @@ profile:
         port: 5690
         dashboard-port: 5691
         exporter-port: 1250
+        meta-backend: etcd
       - use: meta-node
         port: 15690
         dashboard-port: 15691
@@ -353,6 +360,7 @@ profile:
         port: 5690
         dashboard-port: 5691
         exporter-port: 1250
+        meta-backend: sqlite
       - use: compactor
       - use: compute-node
       - use: frontend
@@ -366,6 +374,7 @@ profile:
         port: 5690
         dashboard-port: 5691
         exporter-port: 1250
+        meta-backend: sqlite
       - use: compactor
       - use: compute-node
       - use: frontend
@@ -381,6 +390,7 @@ profile:
         port: 5690
         dashboard-port: 5691
         exporter-port: 1250
+        meta-backend: postgres
       - use: compactor
       - use: compute-node
       - use: frontend
@@ -397,6 +407,7 @@ profile:
         port: 5690
         dashboard-port: 5691
         exporter-port: 1250
+        meta-backend: postgres
       - use: compactor
       - use: compute-node
       - use: frontend
@@ -423,6 +434,7 @@ profile:
       - use: minio
       - use: etcd
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         parallelism: 8
       - use: frontend
@@ -581,6 +593,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -593,6 +606,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -615,6 +629,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -641,6 +656,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -665,6 +681,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -689,6 +706,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -748,6 +766,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: opendal
         engine: fs
         bucket: "/tmp/rw_ci"
@@ -781,6 +800,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -832,6 +852,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -850,6 +871,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -874,6 +896,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -887,6 +910,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         enable-tiered-cache: true
         total-memory-bytes: 17179869184
@@ -899,6 +923,7 @@ profile:
       - use: minio
       - use: etcd
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -911,6 +936,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -932,6 +958,7 @@ profile:
       - use: minio
       - use: etcd
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -945,6 +972,7 @@ profile:
       - use: etcd
       - use: minio
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -961,6 +989,7 @@ profile:
       - use: sqlite
       - use: minio
       - use: meta-node
+        meta-backend: sqlite
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -1011,6 +1040,7 @@ profile:
       - use: minio
       - use: etcd
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -1022,6 +1052,7 @@ profile:
         bucket: renjie-iceberg-bench
       - use: etcd
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -1034,6 +1065,7 @@ profile:
       - use: minio
       - use: etcd
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -1193,6 +1225,9 @@ template:
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
+
+    # meta backend type, requires extra config for provided backend
+    meta-backend: "memory"
 
     # Etcd backend config
     provide-etcd-backend: "etcd*"

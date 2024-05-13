@@ -60,6 +60,7 @@ pub struct MetaNodeConfig {
 
     pub user_managed: bool,
 
+    pub meta_backend: String,
     pub provide_etcd_backend: Option<Vec<EtcdConfig>>,
     pub provide_sqlite_backend: Option<Vec<SqliteConfig>>,
     pub provide_postgres_backend: Option<Vec<PostgresConfig>>,

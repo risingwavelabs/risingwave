@@ -77,13 +77,15 @@ impl MetaNodeService {
 
         let mut is_persistent_meta_store = false;
 
-        match (
-            config.provide_etcd_backend.as_ref().unwrap().as_slice(),
-            config.provide_sqlite_backend.as_ref().unwrap().as_slice(),
-            config.provide_postgres_backend.as_ref().unwrap().as_slice(),
-        ) {
-            (etcd_config, [], []) if !etcd_config.is_empty() => {
+        match config.meta_backend.to_ascii_lowercase().as_str() {
+            "memory" => {
+                cmd.arg("--backend").arg("mem");
+            }
+            "etcd" => {
+                let etcd_config = config.provide_etcd_backend.as_ref().unwrap();
+                assert!(etcd_config.len() > 0);
                 is_persistent_meta_store = true;
+
                 cmd.arg("--backend")
                     .arg("etcd")
                     .arg("--etcd-endpoints")
@@ -94,8 +96,11 @@ impl MetaNodeService {
                             .join(","),
                     );
             }
-            ([], sqlite_config, []) if !sqlite_config.is_empty() => {
+            "sqlite" => {
+                let sqlite_config = config.provide_sqlite_backend.as_ref().unwrap();
+                assert_eq!(sqlite_config.len(), 1);
                 is_persistent_meta_store = true;
+
                 let prefix_data = env::var("PREFIX_DATA")?;
                 let file_path = PathBuf::from(&prefix_data)
                     .join(&sqlite_config[0].id)
@@ -105,8 +110,11 @@ impl MetaNodeService {
                     .arg("--sql-endpoint")
                     .arg(format!("sqlite://{}?mode=rwc", file_path.display()));
             }
-            ([], [], pg_config) if !pg_config.is_empty() => {
+            "postgres" => {
+                let pg_config = config.provide_postgres_backend.as_ref().unwrap();
+                assert_eq!(pg_config.len(), 1);
                 is_persistent_meta_store = true;
+
                 cmd.arg("--backend")
                     .arg("sql")
                     .arg("--sql-endpoint")
@@ -119,10 +127,9 @@ impl MetaNodeService {
                         pg_config[0].database
                     ));
             }
-            ([], [], []) => {
-                cmd.arg("--backend").arg("mem");
+            backend @ _ => {
+                return Err(anyhow!("unsupported meta backend {}", backend));
             }
-            _ => return Err(anyhow!("provided more than one meta backend")),
         }
 
         let provide_minio = config.provide_minio.as_ref().unwrap();
