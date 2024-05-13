@@ -15,9 +15,7 @@ env:
 jobs:
   update-helm-charts:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
+    permissions: write-all
     steps:
       - name: Checkout Helm Charts Repository
         uses: actions/checkout@v3
@@ -55,7 +53,7 @@ jobs:
       - name: Push new branch
         run: |
           cd helm-charts
-          git push --set-upstream origin 'auto-update-${{ env.NEW_APP_VERSION }}'
+          git push --set-upstream origin auto-update-${{ env.NEW_APP_VERSION }}
 
       - name: Create Pull Request
         run: |
