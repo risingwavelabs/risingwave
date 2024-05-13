@@ -44,7 +44,7 @@ jobs:
           sed -i "s/^appVersion: .*/appVersion: \"${{ env.NEW_APP_VERSION }}\"/" Chart.yaml
           echo "NEW_CHART_VERSION=$NEW_VERSION" >> $GITHUB_ENV
 
-       - name: Commit changes
+      - name: Commit changes
         run: |
           cd helm-charts
           git config --local user.email "action@github.com"
@@ -65,17 +65,6 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN  }}
           pr_title: "chore: bump risingwave to ${{ env.NEW_APP_VERSION }}, release chart ${{ env.NEW_CHART_VERSION }}"
           pr_body: "This is an automated pull request to update the chart versions."
-      # - name: Create Pull Request
-      #   uses: peter-evans/create-pull-request@v6
-      #   with:
-      #     token: ${{ secrets.GITHUB_TOKEN }}
-      #     commit-message: 'chore: bump risingwave to ${{ env.NEW_APP_VERSION }}, release chart ${{ env.NEW_CHART_VERSION }}'
-      #     committer: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
-      #     author: ${{ github.actor }} <${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com>
-      #     title: 'chore: bump risingwave to ${{ env.NEW_APP_VERSION }}, release chart ${{ env.NEW_CHART_VERSION }}'
-      #     body: 'This is an automated pull request to update the chart versions'
-      #     branch: 'auto-update-${{ env.NEW_APP_VERSION }}'
-      #     path: 'helm-charts'
 
   update-risingwave-operator:
     runs-on: ubuntu-latest
