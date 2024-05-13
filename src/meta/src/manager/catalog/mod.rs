@@ -3515,6 +3515,10 @@ impl CatalogManager {
         self.core.lock().await.database.list_databases()
     }
 
+    pub async fn list_schemas(&self) -> Vec<Schema> {
+        self.core.lock().await.database.list_schemas()
+    }
+
     pub async fn list_tables(&self) -> Vec<Table> {
         self.core.lock().await.database.list_tables()
     }
@@ -3866,7 +3870,6 @@ impl CatalogManager {
         Ok(())
     }
 
-    #[cfg(test)]
     pub async fn list_users(&self) -> Vec<UserInfo> {
         self.core.lock().await.user.list_users()
     }

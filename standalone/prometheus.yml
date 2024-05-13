@@ -1,0 +1,40 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 60s
+  external_labels:
+    rw_cluster: 20240506-185437
+
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["127.0.0.1:9500"]
+
+  - job_name: compute
+    static_configs:
+      - targets: ["127.0.0.1:1222"]
+
+  - job_name: meta
+    static_configs:
+      - targets: ["127.0.0.1:1250"]
+
+  - job_name: minio
+    metrics_path: /minio/v2/metrics/cluster
+    static_configs:
+    - targets: ["127.0.0.1:9301"]
+
+  - job_name: compactor
+    static_configs:
+      - targets: ["127.0.0.1:1260"]
+
+  - job_name: etcd
+    static_configs:
+      - targets: ["127.0.0.1:2379"]
+
+  - job_name: frontend
+    static_configs:
+      - targets: ["127.0.0.1:2222"]
+
+  - job_name: redpanda
+    static_configs:
+      - targets: []

@@ -378,7 +378,7 @@ impl HummockManager {
                 state_store_url.strip_prefix("hummock+").unwrap_or("memory"),
                 metrics.object_store_metric.clone(),
                 "Version Checkpoint",
-                object_store_config,
+                Arc::new(object_store_config),
             )
             .await,
         );
@@ -1097,6 +1097,13 @@ impl HummockManager {
                         .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
                     compact_task.table_watermarks = current_version
                         .safe_epoch_table_watermarks(&compact_task.existing_table_ids);
+
+                    // do not split sst by vnode partition when target_level > base_level
+                    // The purpose of data alignment is mainly to improve the parallelism of base level compaction and reduce write amplification.
+                    // However, at high level, the size of the sst file is often larger and only contains the data of a single table_id, so there is no need to cut it.
+                    if compact_task.target_level > compact_task.base_level {
+                        compact_task.table_vnode_partition.clear();
+                    }
 
                     if self.env.opts.enable_dropped_column_reclaim {
                         // TODO: get all table schemas for all tables in once call to avoid acquiring lock and await.

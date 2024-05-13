@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use foyer::memory::{LfuConfig, LruConfig, S3FifoConfig};
+use foyer::{LfuConfig, LruConfig, S3FifoConfig};
 use risingwave_common::config::{
     CacheEvictionConfig, EvictionConfig, StorageConfig, StorageMemoryConfig,
     MAX_BLOCK_CACHE_SHARD_BITS, MAX_META_CACHE_SHARD_BITS, MIN_BUFFER_SIZE_PER_SHARD,
@@ -39,6 +39,9 @@ const STORAGE_META_CACHE_MAX_MEMORY_MB: usize = 4096;
 const STORAGE_SHARED_BUFFER_MAX_MEMORY_MB: usize = 4096;
 const STORAGE_META_CACHE_MEMORY_PROPORTION: f64 = 0.35;
 const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.3;
+
+/// The proportion of compute memory used for batch processing.
+const COMPUTE_BATCH_MEMORY_PROPORTION: f64 = 0.3;
 
 /// Each compute node reserves some memory for stack and code segment of processes, allocation
 /// overhead, network buffer, etc. based on `SYSTEM_RESERVED_MEMORY_PROPORTION`. The reserve memory
@@ -208,12 +211,22 @@ pub fn storage_memory_config(
         }),
         CacheEvictionConfig::S3Fifo {
             small_queue_capacity_ratio_in_percent,
+            ghost_queue_capacity_ratio_in_percent,
+            small_to_main_freq_threshold,
         } => EvictionConfig::S3Fifo(S3FifoConfig {
             small_queue_capacity_ratio: small_queue_capacity_ratio_in_percent.unwrap_or(
                 risingwave_common::config::default::storage::small_queue_capacity_ratio_in_percent(
                 ),
             ) as f64
                 / 100.0,
+            ghost_queue_capacity_ratio: ghost_queue_capacity_ratio_in_percent.unwrap_or(
+                risingwave_common::config::default::storage::ghost_queue_capacity_ratio_in_percent(
+                ),
+            ) as f64
+                / 100.0,
+            small_to_main_freq_threshold: small_to_main_freq_threshold.unwrap_or(
+                risingwave_common::config::default::storage::small_to_main_freq_threshold(),
+            ),
         }),
     };
 
@@ -232,6 +245,10 @@ pub fn storage_memory_config(
         block_cache_eviction_config,
         meta_cache_eviction_config,
     }
+}
+
+pub fn batch_mem_limit(compute_memory_bytes: usize) -> u64 {
+    (compute_memory_bytes as f64 * COMPUTE_BATCH_MEMORY_PROPORTION) as u64
 }
 
 #[cfg(test)]

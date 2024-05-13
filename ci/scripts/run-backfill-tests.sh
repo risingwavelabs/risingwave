@@ -13,6 +13,7 @@
 #   1002 | CREATE MATERIALIZED VIEW m1 AS SELECT * FROM t | 56.12%   | 2023-09-27 06:37:06.636+00:00
 #(1 row)
 
+# TODO: refactor with inline style.
 
 set -euo pipefail
 
