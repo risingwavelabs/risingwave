@@ -34,7 +34,6 @@ const PUBSUB_MAX_FETCH_MESSAGES: usize = 1024;
 
 pub struct PubsubSplitReader {
     subscription: Subscription,
-    stop_offset: Option<NaiveDateTime>,
 
     split_id: SplitId,
     parser_config: ParserConfig,
@@ -67,16 +66,6 @@ impl CommonSplitReader for PubsubSplitReader {
                 continue;
             }
 
-            let latest_offset: NaiveDateTime = raw_chunk
-                .last()
-                .map(|m| m.message.publish_time.clone().unwrap_or_default())
-                .map(|t| {
-                    let mut t = t;
-                    t.normalize();
-                    NaiveDateTime::from_timestamp_opt(t.seconds, t.nanos as u32).unwrap_or_default()
-                })
-                .unwrap_or_default();
-
             let mut chunk: Vec<SourceMessage> = Vec::with_capacity(raw_chunk.len());
             let mut ack_ids: Vec<String> = Vec::with_capacity(raw_chunk.len());
 
@@ -95,13 +84,6 @@ impl CommonSplitReader for PubsubSplitReader {
                 .context("failed to ack pubsub messages")?;
 
             yield chunk;
-
-            // Stop if we've approached the stop_offset
-            if let Some(stop_offset) = self.stop_offset
-                && latest_offset >= stop_offset
-            {
-                return Ok(());
-            }
         }
     }
 }
@@ -144,22 +126,9 @@ impl SplitReader for PubsubSplitReader {
                 .context("error seeking to pubsub offset")?;
         }
 
-        let stop_offset = if let Some(ref offset) = split.stop_offset {
-            Some(
-                offset
-                    .as_str()
-                    .parse::<i64>()
-                    .map_err(|e| anyhow!(e))
-                    .map(|nanos| NaiveDateTime::from_timestamp_opt(nanos, 0).unwrap_or_default())?,
-            )
-        } else {
-            None
-        };
-
         Ok(Self {
             subscription,
             split_id: split.id(),
-            stop_offset,
             parser_config,
             source_ctx,
         })

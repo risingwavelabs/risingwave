@@ -29,10 +29,9 @@ pub struct PubsubSplit {
     /// pubsub reader.
     pub(crate) start_offset: Option<String>,
 
-    /// `stop_offset` is a numeric timestamp.
-    /// When not `None`, the `PubsubReader` stops reading messages when the `offset` property of
-    /// the `SourceMessage` is greater than or equal to the `stop_offset`.
-    pub(crate) stop_offset: Option<String>,
+    #[serde(rename = "stop_offset")]
+    #[serde(skip_serializing)]
+    pub(crate) __deprecated_stop_offset: Option<String>,
 }
 
 impl SplitMetaData for PubsubSplit {
