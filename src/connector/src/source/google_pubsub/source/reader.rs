@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use async_trait::async_trait;
-use chrono::{NaiveDateTime, TimeZone, Utc};
+use chrono::{TimeZone, Utc};
 use futures_async_stream::try_stream;
-use google_cloud_pubsub::client::{Client, ClientConfig};
 use google_cloud_pubsub::subscription::{SeekTo, Subscription};
 use risingwave_common::{bail, ensure};
 use tonic::Code;
@@ -67,21 +66,13 @@ impl CommonSplitReader for PubsubSplitReader {
             }
 
             let mut chunk: Vec<SourceMessage> = Vec::with_capacity(raw_chunk.len());
-            let mut ack_ids: Vec<String> = Vec::with_capacity(raw_chunk.len());
 
             for message in raw_chunk {
-                ack_ids.push(message.ack_id().into());
                 chunk.push(SourceMessage::from(TaggedReceivedMessage(
                     self.split_id.clone(),
                     message,
                 )));
             }
-
-            self.subscription
-                .ack(ack_ids)
-                .await
-                .map_err(|e| anyhow!(e))
-                .context("failed to ack pubsub messages")?;
 
             yield chunk;
         }
@@ -106,12 +97,7 @@ impl SplitReader for PubsubSplitReader {
         );
         let split = splits.into_iter().next().unwrap();
 
-        // Set environment variables consumed by `google_cloud_pubsub`
-        properties.initialize_env();
-
-        let config = ClientConfig::default().with_auth().await?;
-        let client = Client::new(config).await.map_err(|e| anyhow!(e))?;
-        let subscription = client.subscription(&properties.subscription);
+        let subscription = properties.subscription_client().await?;
 
         if let Some(ref offset) = split.start_offset {
             let timestamp = offset

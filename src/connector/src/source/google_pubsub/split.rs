@@ -20,6 +20,8 @@ use crate::source::{SplitId, SplitMetaData};
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct PubsubSplit {
+    // XXX: `index` and `subscription` seems also not useful. It's only for `SplitMetaData::id`.
+    // Is the split id useful?
     pub(crate) index: u32,
     pub(crate) subscription: String,
 
@@ -47,8 +49,11 @@ impl SplitMetaData for PubsubSplit {
         format!("{}-{}", self.subscription, self.index).into()
     }
 
-    fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
-        self.start_offset = Some(last_seen_offset);
+    /// No-op. Actually `PubsubSplit` doesn't maintain any state. It's fully managed by Pubsub.
+    /// One subscription is like one Kafka consumer group.
+    fn update_offset(&mut self, _last_seen_offset: String) -> ConnectorResult<()> {
+        // forcefully set previously persisted start_offset to None
+        self.start_offset = None;
         Ok(())
     }
 }

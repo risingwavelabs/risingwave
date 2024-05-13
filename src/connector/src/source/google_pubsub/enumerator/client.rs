@@ -15,7 +15,6 @@
 use anyhow::Context;
 use async_trait::async_trait;
 use chrono::{TimeZone, Utc};
-use google_cloud_pubsub::client::{Client, ClientConfig};
 use google_cloud_pubsub::subscription::{SeekTo, SubscriptionConfig};
 use risingwave_common::bail;
 
@@ -39,27 +38,17 @@ impl SplitEnumerator for PubsubSplitEnumerator {
         properties: Self::Properties,
         _context: SourceEnumeratorContextRef,
     ) -> ConnectorResult<PubsubSplitEnumerator> {
-        let subscription = properties.subscription.to_owned();
-
         if properties.credentials.is_none() && properties.emulator_host.is_none() {
             bail!("credentials must be set if not using the pubsub emulator")
         }
 
-        properties.initialize_env();
-
-        // Validate config
-        let config = ClientConfig::default().with_auth().await?;
-        let client = Client::new(config)
-            .await
-            .context("error initializing pubsub client")?;
-
-        let sub = client.subscription(&subscription);
+        let sub = properties.subscription_client().await?;
         if !sub
             .exists(None)
             .await
             .context("error checking subscription validity")?
         {
-            bail!("subscription {} does not exist", &subscription)
+            bail!("subscription {} does not exist", &sub.id())
         }
 
         // We need the `retain_acked_messages` configuration to be true to seek back to timestamps
@@ -98,7 +87,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
         }
 
         Ok(Self {
-            subscription,
+            subscription: properties.subscription.to_owned(),
             split_count: 1,
         })
     }

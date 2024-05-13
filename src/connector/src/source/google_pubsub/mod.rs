@@ -14,6 +14,9 @@
 
 use std::collections::HashMap;
 
+use anyhow::Context;
+use google_cloud_pubsub::client::{Client, ClientConfig};
+use google_cloud_pubsub::subscription::Subscription;
 use serde::Deserialize;
 
 pub mod enumerator;
@@ -25,6 +28,7 @@ pub use source::*;
 pub use split::*;
 use with_options::WithOptions;
 
+use crate::error::ConnectorResult;
 use crate::source::SourceProperties;
 
 pub const GOOGLE_PUBSUB_CONNECTOR: &str = "google_pubsub";
@@ -32,8 +36,6 @@ pub const GOOGLE_PUBSUB_CONNECTOR: &str = "google_pubsub";
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct PubsubProperties {
     /// pubsub subscription to consume messages from
-    /// The subscription should be configured with the `retain-on-ack` property to enable
-    /// message recovery within risingwave.
     #[serde(rename = "pubsub.subscription")]
     pub subscription: String,
 
@@ -96,6 +98,18 @@ impl PubsubProperties {
         if let Some(credentials) = &self.credentials {
             std::env::set_var("GOOGLE_APPLICATION_CREDENTIALS_JSON", credentials);
         }
+    }
+
+    pub(crate) async fn subscription_client(&self) -> ConnectorResult<Subscription> {
+        self.initialize_env();
+
+        // Validate config
+        let config = ClientConfig::default().with_auth().await?;
+        let client = Client::new(config)
+            .await
+            .context("error initializing pubsub client")?;
+
+        Ok(client.subscription(&self.subscription))
     }
 }
 
