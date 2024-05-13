@@ -1787,7 +1787,6 @@ pub mod default {
 
         // tips: depend on block_size
         pub fn object_store_read_attempt_timeout_ms() -> u64 {
-
             16 * 1000 // 16s
         }
 
