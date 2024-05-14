@@ -180,7 +180,7 @@ message Sink {
   // Whether it should use background ddl or block until backfill finishes.
   CreateType create_type = 24;
 
-  // Handle the source relies on any sceret. The key is the propertity name and the value is the secret id.
+  // Handle the sink relies on any sceret. The key is the propertity name and the value is the secret id.
   map<string, uint32> secret_ref = 25;
 }
 
@@ -313,7 +313,7 @@ message Table {
   repeated plan_common.ColumnCatalog columns = 5;
   repeated common.ColumnOrder pk = 6;
   repeated uint32 dependent_relations = 8;
-  oneof optional_associated_source_id { uint32 associated_source_id = 9; }
+  oneof optional_associated_source_id {uint32 associated_source_id = 9;}
   TableType table_type = 10;
   repeated int32 distribution_key = 12;
   // pk_indices of the corresponding materialize operator's output.

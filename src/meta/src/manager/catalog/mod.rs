@@ -352,7 +352,7 @@ impl CatalogManager {
         }
 
         let database = databases.remove(database_id);
-        let connections_dropped = vec![];
+        let connections_dropped;
         if let Some(database) = database {
             let schemas_to_drop = drop_by_database_id!(schemas, database_id);
             let sources_to_drop = drop_by_database_id!(sources, database_id);
@@ -364,6 +364,7 @@ impl CatalogManager {
             let functions_to_drop = drop_by_database_id!(functions, database_id);
             let connections_to_drop = drop_by_database_id!(connections, database_id);
             let secrets_to_drop = drop_by_database_id!(secrets, database_id);
+            connections_dropped = connections_to_drop.clone();
 
             let objects = std::iter::once(Object::DatabaseId(database_id))
                 .chain(
