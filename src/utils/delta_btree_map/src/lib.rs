@@ -287,8 +287,6 @@ impl<'a, K: Ord, V> CursorWithDelta<'a, K, V> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use super::*;
 
     #[test]
