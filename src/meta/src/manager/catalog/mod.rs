@@ -3607,6 +3607,10 @@ impl CatalogManager {
             .list_dml_table_ids(schema_id)
     }
 
+    pub async fn list_view_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
+        self.core.lock().await.database.list_view_ids(schema_id)
+    }
+
     pub async fn list_sources(&self) -> Vec<Source> {
         self.core.lock().await.database.list_sources()
     }
@@ -3695,6 +3699,13 @@ impl CatalogManager {
                     referenced_object_id: *referenced,
                 });
             }
+        }
+
+        for subscription in core.subscriptions.values() {
+            dependencies.push(PbObjectDependencies {
+                object_id: subscription.id,
+                referenced_object_id: subscription.dependent_table_id,
+            });
         }
 
         dependencies
