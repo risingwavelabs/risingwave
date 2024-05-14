@@ -15,25 +15,24 @@
  *
  */
 
-import { Column, Relations} from "../components/Relations"
+import { Column, Relations } from "../components/Relations"
 import { getSubscriptions } from "../lib/api/streaming"
-import {
-    Subscription as RwSubscription
-  } from "../proto/gen/catalog"
+import { Subscription as RwSubscription } from "../proto/gen/catalog"
 
 export default function Subscriptions() {
-    const subscriptionRetentionSeconds: Column<RwSubscription> = {
-        name: "Retention Seconds",
-        width: 3,
-        content: (r) => r.retentionSeconds ?? "unknown",
-    }
+  const subscriptionRetentionSeconds: Column<RwSubscription> = {
+    name: "Retention Seconds",
+    width: 3,
+    content: (r) => r.retentionSeconds ?? "unknown",
+  }
 
-    const subscriptionDependentTableId: Column<RwSubscription> = {
-        name: "Dependent Table Id",
-        width: 3,
-        content: (r) => r.dependentTableId ?? "unknown",
-    }
-    return Relations("Subscriptions", getSubscriptions, [
-        subscriptionRetentionSeconds,
-        subscriptionDependentTableId,])
+  const subscriptionDependentTableId: Column<RwSubscription> = {
+    name: "Dependent Table Id",
+    width: 3,
+    content: (r) => r.dependentTableId ?? "unknown",
+  }
+  return Relations("Subscriptions", getSubscriptions, [
+    subscriptionRetentionSeconds,
+    subscriptionDependentTableId,
+  ])
 }

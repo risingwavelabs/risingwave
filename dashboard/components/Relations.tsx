@@ -186,7 +186,9 @@ export function Relations<R extends Relation>(
                 {r.columns && r.columns.length > 0 && (
                   <Td overflowWrap="normal">
                     {r.columns
-                      .filter((col) => ("isHidden" in col ? !col.isHidden : true))
+                      .filter((col) =>
+                        "isHidden" in col ? !col.isHidden : true
+                      )
                       .map((col) => extractColumnInfo(col))
                       .join(", ")}
                   </Td>

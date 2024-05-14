@@ -22,9 +22,9 @@ import {
   Schema,
   Sink,
   Source,
+  Subscription,
   Table,
   View,
-  Subscription,
 } from "../../proto/gen/catalog"
 import {
   ListObjectDependenciesResponse_ObjectDependencies as ObjectDependencies,
@@ -67,10 +67,9 @@ export function relationType(x: Relation) {
     return "SINK"
   } else if ((x as Source).info !== undefined) {
     return "SOURCE"
-  }  else if ((x as Subscription).dependentTableId !== undefined) {
+  } else if ((x as Subscription).dependentTableId !== undefined) {
     return "SUBSCRIPTION"
-  }
-  else {
+  } else {
     return "UNKNOWN"
   }
 }
@@ -103,7 +102,7 @@ export async function getRelations() {
     await getIndexes(),
     await getSinks(),
     await getSources(),
-    await getSubscriptions(),
+    await getSubscriptions()
   )
   relations = sortBy(relations, (x) => x.id)
   return relations
@@ -156,7 +155,9 @@ export async function getViews() {
 }
 
 export async function getSubscriptions() {
-  let subscriptions: Subscription[] = (await api.get("/subscriptions")).map(Subscription.fromJSON)
+  let subscriptions: Subscription[] = (await api.get("/subscriptions")).map(
+    Subscription.fromJSON
+  )
   subscriptions = sortBy(subscriptions, (x) => x.id)
   return subscriptions
 }

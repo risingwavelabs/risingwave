@@ -581,13 +581,13 @@ impl CatalogController {
             }
         }));
 
-        let subscription_dependencies: Vec<(SubscriptionId, TableId)> = Sink::find()
+        let subscription_dependencies: Vec<(SubscriptionId, TableId)> = Subscription::find()
             .select_only()
             .columns([
                 subscription::Column::SubscriptionId,
                 subscription::Column::DependentTableId,
             ])
-            .join(JoinType::InnerJoin, sink::Relation::Object.def())
+            .join(JoinType::InnerJoin, subscription::Relation::Object.def())
             .filter(
                 subscription::Column::SubscriptionState
                     .eq(Into::<i32>::into(SubscriptionState::Created))
@@ -598,9 +598,9 @@ impl CatalogController {
             .await?;
 
         obj_dependencies.extend(subscription_dependencies.into_iter().map(
-            |(sink_id, table_id)| PbObjectDependencies {
-                object_id: table_id as _,
-                referenced_object_id: sink_id as _,
+            |(subscription_id, table_id)| PbObjectDependencies {
+                object_id: subscription_id as _,
+                referenced_object_id: table_id as _,
             },
         ));
 
