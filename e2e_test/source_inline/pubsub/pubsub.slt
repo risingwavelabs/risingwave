@@ -40,13 +40,9 @@ statement ok
 CREATE TABLE s1 (v1 int, v2 varchar) WITH (
     ${RISEDEV_PUBSUB_WITH_OPTIONS_COMMON},
     pubsub.subscription = 'test-subscription-1',
+    pubsub.parallelism = 5
 ) FORMAT PLAIN ENCODE JSON;
 
-statement ok
-CREATE TABLE s2 (v1 int, v2 varchar) WITH (
-    ${RISEDEV_PUBSUB_WITH_OPTIONS_COMMON},
-    pubsub.subscription = 'test-subscription-2',
-) FORMAT PLAIN ENCODE JSON;
 
 # We want to test Pub/Sub ack messages on checkpoint, so disable checkpointing here.
 # Note that DDL & flush will trigger checkpoint.
@@ -153,9 +149,6 @@ select v1, v2, count(*) FROM s1 group by v1, v2;
 
 statement ok
 DROP TABLE s1;
-
-statement ok
-DROP TABLE s2;
 
 # Restore to the value in src/config/ci.toml
 statement ok

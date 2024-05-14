@@ -105,10 +105,9 @@ impl WaitCheckpointTask {
                         ack_ids.push(ack_id.to_string())
                     }
                 }
+                tracing::trace!("acking pubsub messages {:?}", ack_ids);
                 match subscription.ack(ack_ids).await {
-                    Ok(()) => {
-                        tracing::debug!("ack pubsub messages successfully")
-                    }
+                    Ok(()) => {}
                     Err(e) => {
                         tracing::error!(
                             error = %e.as_report(),
