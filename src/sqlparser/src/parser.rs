@@ -2410,7 +2410,7 @@ impl Parser {
                 body.language = Some(self.parse_identifier()?);
             } else if self.parse_keyword(Keyword::RUNTIME) {
                 ensure_not_set(&body.runtime, "RUNTIME")?;
-                body.runtime = Some(self.parse_function_runtime()?);
+                body.runtime = Some(self.parse_identifier()?);
             } else if self.parse_keyword(Keyword::IMMUTABLE) {
                 ensure_not_set(&body.behavior, "IMMUTABLE | STABLE | VOLATILE")?;
                 body.behavior = Some(FunctionBehavior::Immutable);
@@ -2454,17 +2454,6 @@ impl Parser {
                 Ok(CreateFunctionUsing::Base64(base64))
             }
             _ => unreachable!("{}", keyword),
-        }
-    }
-
-    fn parse_function_runtime(&mut self) -> Result<FunctionRuntime, ParserError> {
-        let ident = self.parse_identifier()?;
-        match ident.value.to_lowercase().as_str() {
-            "deno" => Ok(FunctionRuntime::Deno),
-            "quickjs" => Ok(FunctionRuntime::QuickJs),
-            r => Err(ParserError::ParserError(format!(
-                "Unsupported runtime: {r}"
-            ))),
         }
     }
 
