@@ -95,19 +95,19 @@ pub struct CreateSourceStatement {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Format {
     Native,
-    None,
+
     // Keyword::NONE
-    Debezium,
+    None,
     // Keyword::DEBEZIUM
-    DebeziumMongo,
+    Debezium,
     // Keyword::DEBEZIUM_MONGO
-    Maxwell,
+    DebeziumMongo,
     // Keyword::MAXWELL
-    Canal,
+    Maxwell,
     // Keyword::CANAL
-    Upsert,
+    Canal,
     // Keyword::UPSERT
-    Plain, // Keyword::PLAIN
+    Upsert, // Keyword::PLAINPlain,
 }
 
 // TODO: unify with `from_keyword`
@@ -166,6 +166,7 @@ pub enum Encode {
     // Keyword::BYTES
     None,
     // Keyword::None
+    Text,     // Keyword::TEXT
     Native,
     Template,
 }
@@ -185,6 +186,7 @@ impl fmt::Display for Encode {
                 Encode::Native => "NATIVE",
                 Encode::Template => "TEMPLATE",
                 Encode::None => "NONE",
+                Encode::Text => "TEXT",
             }
         )
     }
@@ -194,6 +196,7 @@ impl Encode {
     pub fn from_keyword(s: &str) -> Result<Self, ParserError> {
         Ok(match s {
             "AVRO" => Encode::Avro,
+            "TEXT" => Encode::Text,
             "BYTES" => Encode::Bytes,
             "CSV" => Encode::Csv,
             "PROTOBUF" => Encode::Protobuf,
@@ -215,6 +218,8 @@ pub struct ConnectorSchema {
     pub format: Format,
     pub row_encode: Encode,
     pub row_options: Vec<SqlOption>,
+
+    pub key_encode: Option<Encode>,
 }
 
 impl Parser {
@@ -304,10 +309,19 @@ impl Parser {
         let row_encode = Encode::from_keyword(&s)?;
         let row_options = self.parse_options()?;
 
+        let key_encode = if self.parse_keywords(&[Keyword::KEY, Keyword::ENCODE]) {
+            Some(Encode::from_keyword(
+                self.parse_identifier()?.value.to_ascii_uppercase().as_str(),
+            )?)
+        } else {
+            None
+        };
+
         Ok(Some(ConnectorSchema {
             format,
             row_encode,
             row_options,
+            key_encode,
         }))
     }
 }
@@ -318,6 +332,7 @@ impl ConnectorSchema {
             format: Format::Plain,
             row_encode: Encode::Json,
             row_options: Vec::new(),
+            key_encode: None,
         }
     }
 
@@ -327,6 +342,7 @@ impl ConnectorSchema {
             format: Format::Debezium,
             row_encode: Encode::Json,
             row_options: Vec::new(),
+            key_encode: None,
         }
     }
 
@@ -335,6 +351,7 @@ impl ConnectorSchema {
             format: Format::DebeziumMongo,
             row_encode: Encode::Json,
             row_options: Vec::new(),
+            key_encode: None,
         }
     }
 
@@ -344,6 +361,7 @@ impl ConnectorSchema {
             format: Format::Native,
             row_encode: Encode::Native,
             row_options: Vec::new(),
+            key_encode: None,
         }
     }
 
@@ -354,6 +372,7 @@ impl ConnectorSchema {
             format: Format::None,
             row_encode: Encode::None,
             row_options: Vec::new(),
+            key_encode: None,
         }
     }
 
@@ -389,9 +408,13 @@ impl ParseTo for CreateSourceStatement {
             .iter()
             .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
         let connector: String = option.map(|opt| opt.value.to_string()).unwrap_or_default();
-        // The format of cdc source job is fixed to `FORMAT PLAIN ENCODE JSON`
-        let cdc_source_job =
-            connector.contains("-cdc") && columns.is_empty() && constraints.is_empty();
+        let cdc_source_job = connector.contains("-cdc");
+        if cdc_source_job && (!columns.is_empty() || !constraints.is_empty()) {
+            return Err(ParserError::ParserError(
+                "CDC source cannot define columns and constraints".to_string(),
+            ));
+        }
+
         // row format for nexmark source must be native
         // default row format for datagen source is native
         let source_schema = p.parse_source_schema_with_connector(&connector, cdc_source_job)?;
@@ -485,7 +508,6 @@ impl fmt::Display for CreateSink {
         }
     }
 }
-
 // sql_grammar!(CreateSinkStatement {
 //     if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS],
 //     sink_name: Ident,
@@ -530,7 +552,7 @@ impl ParseTo for CreateSinkStatement {
             p.expected("FROM or AS after CREATE SINK sink_name", p.peek_token())?
         };
 
-        let emit_mode = p.parse_emit_mode()?;
+        let emit_mode: Option<EmitMode> = p.parse_emit_mode()?;
 
         // This check cannot be put into the `WithProperties::parse_to`, since other
         // statements may not need the with properties.

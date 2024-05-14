@@ -11,6 +11,6 @@ CREATE TABLE IF NOT EXISTS kafka_table
 WITH (
  connector='kafka',
  topic='backwards_compat_test_kafka_source',
- properties.bootstrap.server='localhost:29092',
+ properties.bootstrap.server='message_queue:29092',
  scan.startup.mode='earliest',
 ) FORMAT UPSERT ENCODE JSON;

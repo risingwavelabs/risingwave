@@ -23,8 +23,10 @@ full-without-monitoring:
     - use: compute-node
     - use: frontend
     - use: compactor
-    - use: zookeeper
     - use: kafka
+      user-managed: true
+      address: message_queue
+      port: 29092
 EOF
 
 cat <<EOF > risedev-components.user.env
@@ -32,7 +34,6 @@ RISEDEV_CONFIGURED=false
 
 ENABLE_MINIO=true
 ENABLE_ETCD=true
-ENABLE_KAFKA=true
 
 # Fetch risingwave binary from release.
 ENABLE_BUILD_RUST=true

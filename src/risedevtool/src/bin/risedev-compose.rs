@@ -201,9 +201,6 @@ fn main() -> Result<()> {
             ServiceConfig::Pubsub(_) => {
                 return Err(anyhow!("not supported, please use redpanda instead"))
             }
-            ServiceConfig::ZooKeeper(_) => {
-                return Err(anyhow!("not supported, please use redpanda instead"))
-            }
             ServiceConfig::Opendal(_) => continue,
             ServiceConfig::AwsS3(_) => continue,
             ServiceConfig::RedPanda(c) => {
@@ -222,7 +219,7 @@ fn main() -> Result<()> {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
                 (c.address.clone(), c.compose(&compose_config)?)
             }
-            ServiceConfig::Redis(_) | ServiceConfig::MySql(_) => {
+            ServiceConfig::Redis(_) | ServiceConfig::MySql(_) | ServiceConfig::Postgres(_) => {
                 return Err(anyhow!("not supported"))
             }
         };

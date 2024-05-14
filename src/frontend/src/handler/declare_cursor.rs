@@ -12,25 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::rc::Rc;
-
-use fixedbitset::FixedBitSet;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::session_config::QueryMode;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_sqlparser::ast::{DeclareCursorStatement, ObjectName, Query, Since, Statement};
 
-use super::query::{gen_batch_plan_by_statement, gen_batch_plan_fragmenter, BatchQueryPlanResult};
-use super::util::{convert_epoch_to_logstore_i64, convert_unix_millis_to_logstore_i64};
+use super::query::{gen_batch_plan_by_statement, gen_batch_plan_fragmenter};
+use super::util::convert_unix_millis_to_logstore_u64;
 use super::RwPgResponse;
 use crate::error::{ErrorCode, Result};
 use crate::handler::query::create_stream;
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::{generic, BatchLogSeqScan};
-use crate::optimizer::property::{Order, RequiredDist};
-use crate::optimizer::PlanRoot;
-use crate::{Binder, OptimizerContext, PgResponseStream, PlanRef, TableCatalog};
+use crate::{Binder, OptimizerContext, PgResponseStream};
 
 pub async fn handle_declare_cursor(
     handle_args: HandlerArgs,
@@ -65,19 +58,20 @@ async fn handle_declare_subscription_cursor(
     let cursor_from_subscription_name = sub_name.0.last().unwrap().real_value().clone();
     let subscription =
         session.get_subscription_by_name(schema_name, &cursor_from_subscription_name)?;
+    let table = session.get_table_by_id(&subscription.dependent_table_id)?;
     // Start the first query of cursor, which includes querying the table and querying the subscription's logstore
     let start_rw_timestamp = match rw_timestamp {
         Some(risingwave_sqlparser::ast::Since::TimestampMsNum(start_rw_timestamp)) => {
-            check_cursor_unix_millis(start_rw_timestamp, subscription.get_retention_seconds()?)?;
-            Some(convert_unix_millis_to_logstore_i64(start_rw_timestamp))
+            check_cursor_unix_millis(start_rw_timestamp, subscription.retention_seconds)?;
+            Some(convert_unix_millis_to_logstore_u64(start_rw_timestamp))
         }
-        Some(risingwave_sqlparser::ast::Since::ProcessTime) => {
-            Some(convert_epoch_to_logstore_i64(Epoch::now().0))
-        }
+        Some(risingwave_sqlparser::ast::Since::ProcessTime) => Some(Epoch::now().0),
         Some(risingwave_sqlparser::ast::Since::Begin) => {
             let min_unix_millis =
-                Epoch::now().as_unix_millis() - subscription.get_retention_seconds()? * 1000;
-            Some(convert_unix_millis_to_logstore_i64(min_unix_millis))
+                Epoch::now().as_unix_millis() - subscription.retention_seconds * 1000;
+            let subscription_build_millis = subscription.created_at_epoch.unwrap().as_unix_millis();
+            let min_unix_millis = std::cmp::max(min_unix_millis, subscription_build_millis);
+            Some(convert_unix_millis_to_logstore_u64(min_unix_millis))
         }
         None => None,
     };
@@ -88,6 +82,7 @@ async fn handle_declare_subscription_cursor(
             cursor_name.clone(),
             start_rw_timestamp,
             subscription,
+            table,
             &handle_args,
         )
         .await?;
@@ -118,7 +113,7 @@ async fn handle_declare_query_cursor(
     query: Box<Query>,
 ) -> Result<RwPgResponse> {
     let (row_stream, pg_descs) =
-        create_stream_for_cursor(handle_args.clone(), Statement::Query(query)).await?;
+        create_stream_for_cursor_stmt(handle_args.clone(), Statement::Query(query)).await?;
     handle_args
         .session
         .get_cursor_manager()
@@ -127,7 +122,7 @@ async fn handle_declare_query_cursor(
     Ok(PgResponse::empty_result(StatementType::DECLARE_CURSOR))
 }
 
-pub async fn create_stream_for_cursor(
+pub async fn create_stream_for_cursor_stmt(
     handle_args: HandlerArgs,
     stmt: Statement,
 ) -> Result<(PgResponseStream, Vec<PgFieldDescriptor>)> {
@@ -138,55 +133,4 @@ pub async fn create_stream_for_cursor(
         gen_batch_plan_fragmenter(&session, plan_result)?
     };
     create_stream(session, plan_fragmenter_result, vec![]).await
-}
-
-pub fn create_batch_plan_for_cursor(
-    table_catalog: std::sync::Arc<TableCatalog>,
-    handle_args: HandlerArgs,
-    old_epoch: u64,
-    new_epoch: u64,
-) -> Result<BatchQueryPlanResult> {
-    let context = OptimizerContext::from_handler_args(handle_args.clone());
-    let out_col_idx = table_catalog
-        .columns
-        .iter()
-        .enumerate()
-        .filter(|(_, v)| !v.is_hidden)
-        .map(|(i, _)| i)
-        .collect::<Vec<_>>();
-    let core = generic::LogScan::new(
-        table_catalog.name.clone(),
-        out_col_idx,
-        Rc::new(table_catalog.table_desc()),
-        Rc::new(context),
-        old_epoch,
-        new_epoch,
-    );
-    let batch_log_seq_scan = BatchLogSeqScan::new(core);
-    let out_fields = FixedBitSet::from_iter(0..batch_log_seq_scan.core().schema().len());
-    let out_names = batch_log_seq_scan.core().column_names();
-    // Here we just need a plan_root to call the method, only out_fields and out_names will be used
-    let plan_root = PlanRoot::new_with_batch_plan(
-        PlanRef::from(batch_log_seq_scan.clone()),
-        RequiredDist::single(),
-        Order::default(),
-        out_fields,
-        out_names,
-    );
-    let schema = batch_log_seq_scan.core().schema().clone();
-    let (batch_log_seq_scan, query_mode) = match handle_args.session.config().query_mode() {
-        QueryMode::Auto => (plan_root.gen_batch_local_plan()?, QueryMode::Local),
-        QueryMode::Local => (plan_root.gen_batch_local_plan()?, QueryMode::Local),
-        QueryMode::Distributed => (
-            plan_root.gen_batch_distributed_plan()?,
-            QueryMode::Distributed,
-        ),
-    };
-    Ok(BatchQueryPlanResult {
-        plan: batch_log_seq_scan,
-        query_mode,
-        schema,
-        stmt_type: StatementType::SELECT,
-        dependent_relations: table_catalog.dependent_relations.clone(),
-    })
 }

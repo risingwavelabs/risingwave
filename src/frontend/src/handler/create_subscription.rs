@@ -17,94 +17,56 @@ use std::rc::Rc;
 use either::Either;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::UserId;
-use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
-use risingwave_sqlparser::ast::{CreateSubscriptionStatement, Query};
+use risingwave_sqlparser::ast::CreateSubscriptionStatement;
 
-use super::privilege::resolve_query_privileges;
-use super::util::gen_query_from_table_name;
 use super::{HandlerArgs, RwPgResponse};
-use crate::catalog::subscription_catalog::SubscriptionCatalog;
+use crate::catalog::subscription_catalog::{SubscriptionCatalog, SubscriptionId};
 use crate::error::Result;
-use crate::optimizer::RelationCollectorVisitor;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
-use crate::{
-    build_graph, Binder, Explain, OptimizerContext, OptimizerContextRef, PlanRef, Planner,
-};
+use crate::{Binder, OptimizerContext, OptimizerContextRef};
 
-// used to store result of `gen_subscription_plan`
-pub struct SubscriptionPlanContext {
-    pub query: Box<Query>,
-    pub subscription_plan: PlanRef,
-    pub subscription_catalog: SubscriptionCatalog,
-}
-
-pub fn gen_subscription_plan(
+pub fn create_subscription_catalog(
     session: &SessionImpl,
     context: OptimizerContextRef,
     stmt: CreateSubscriptionStatement,
-) -> Result<SubscriptionPlanContext> {
+) -> Result<SubscriptionCatalog> {
     let db_name = session.database();
-    let (schema_name, subscription_name) =
+    let (subscription_schema_name, subscription_name) =
         Binder::resolve_schema_qualified_name(db_name, stmt.subscription_name.clone())?;
-    let subscription_from_table_name = stmt
-        .subscription_from
-        .0
-        .last()
-        .unwrap()
-        .real_value()
-        .clone();
-    let query = Box::new(gen_query_from_table_name(stmt.subscription_from));
-
-    let (database_id, schema_id) =
-        session.get_database_and_schema_id_for_create(schema_name.clone())?;
-
+    let (table_schema_name, subscription_from_table_name) =
+        Binder::resolve_schema_qualified_name(db_name, stmt.subscription_from.clone())?;
+    let (table_database_id, table_schema_id) =
+        session.get_database_and_schema_id_for_create(table_schema_name.clone())?;
+    let (subscription_database_id, subscription_schema_id) =
+        session.get_database_and_schema_id_for_create(subscription_schema_name.clone())?;
     let definition = context.normalized_sql().to_owned();
+    let dependent_table_id = session
+        .get_table_by_name(
+            &subscription_from_table_name,
+            table_database_id,
+            table_schema_id,
+        )?
+        .id;
 
-    let (dependent_relations, bound) = {
-        let mut binder = Binder::new_for_stream(session);
-        let bound = binder.bind_query(*query.clone())?;
-        (binder.included_relations(), bound)
+    let mut subscription_catalog = SubscriptionCatalog {
+        id: SubscriptionId::placeholder(),
+        name: subscription_name,
+        definition,
+        retention_seconds: 0,
+        database_id: subscription_database_id,
+        schema_id: subscription_schema_id,
+        dependent_table_id,
+        owner: UserId::new(session.user_id()),
+        initialized_at_epoch: None,
+        created_at_epoch: None,
+        created_at_cluster_version: None,
+        initialized_at_cluster_version: None,
     };
 
-    let check_items = resolve_query_privileges(&bound);
-    session.check_privileges(&check_items)?;
+    subscription_catalog.set_retention_seconds(context.with_options().clone().into_inner())?;
 
-    let with_options = context.with_options().clone();
-    let plan_root = Planner::new(context).plan_query(bound)?;
-
-    let subscription_plan = plan_root.gen_subscription_plan(
-        database_id,
-        schema_id,
-        dependent_relations.clone(),
-        subscription_name,
-        definition,
-        with_options,
-        false,
-        subscription_from_table_name,
-        UserId::new(session.user_id()),
-    )?;
-
-    let subscription_catalog = subscription_plan.subscription_catalog();
-
-    let subscription_plan: PlanRef = subscription_plan.into();
-
-    let ctx = subscription_plan.ctx();
-    let explain_trace = ctx.is_explain_trace();
-    if explain_trace {
-        ctx.trace("Create Subscription:");
-        ctx.trace(subscription_plan.explain_to_string());
-    }
-
-    let dependent_relations =
-        RelationCollectorVisitor::collect_with(dependent_relations, subscription_plan.clone());
-
-    let subscription_catalog = subscription_catalog.add_dependent_relations(dependent_relations);
-    Ok(SubscriptionPlanContext {
-        query,
-        subscription_plan,
-        subscription_catalog,
-    })
+    Ok(subscription_catalog)
 }
 
 pub async fn handle_create_subscription(
@@ -120,27 +82,9 @@ pub async fn handle_create_subscription(
     )? {
         return Ok(resp);
     };
-
-    let (subscription_catalog, graph) = {
+    let subscription_catalog = {
         let context = Rc::new(OptimizerContext::from_handler_args(handle_args));
-
-        let SubscriptionPlanContext {
-            query: _,
-            subscription_plan,
-            subscription_catalog,
-        } = gen_subscription_plan(&session, context.clone(), stmt)?;
-
-        let mut graph = build_graph(subscription_plan)?;
-
-        graph.parallelism =
-            session
-                .config()
-                .streaming_parallelism()
-                .map(|parallelism| Parallelism {
-                    parallelism: parallelism.get(),
-                });
-
-        (subscription_catalog, graph)
+        create_subscription_catalog(&session, context.clone(), stmt)?
     };
 
     let _job_guard =
@@ -156,7 +100,7 @@ pub async fn handle_create_subscription(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_subscription(subscription_catalog.to_proto(), graph)
+        .create_subscription(subscription_catalog.to_proto())
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SUBSCRIPTION))

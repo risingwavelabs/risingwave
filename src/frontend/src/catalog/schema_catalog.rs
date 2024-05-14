@@ -25,6 +25,7 @@ use risingwave_pb::catalog::{
     PbConnection, PbFunction, PbIndex, PbSchema, PbSecret, PbSink, PbSource, PbSubscription,
     PbTable, PbView,
 };
+use risingwave_pb::user::grant_privilege::Object;
 
 use super::subscription_catalog::SubscriptionCatalog;
 use super::{OwnedByUserCatalog, SubscriptionId};
@@ -752,6 +753,23 @@ impl SchemaCatalog {
         self.connection_sink_ref
             .get(&connection_id)
             .map(|s| s.to_owned())
+    }
+
+    pub fn get_grant_object_by_oid(&self, oid: u32) -> Option<Object> {
+        #[allow(clippy::manual_map)]
+        if self.get_table_by_id(&TableId::new(oid)).is_some()
+            || self.get_index_by_id(&IndexId::new(oid)).is_some()
+        {
+            Some(Object::TableId(oid))
+        } else if self.get_source_by_id(&oid).is_some() {
+            Some(Object::SourceId(oid))
+        } else if self.get_sink_by_id(&oid).is_some() {
+            Some(Object::SinkId(oid))
+        } else if self.get_view_by_id(&oid).is_some() {
+            Some(Object::ViewId(oid))
+        } else {
+            None
+        }
     }
 
     pub fn id(&self) -> SchemaId {

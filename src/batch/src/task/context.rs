@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use prometheus::core::Atomic;
@@ -63,10 +62,6 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
 
     fn source_metrics(&self) -> Arc<SourceMetrics>;
 
-    fn store_mem_usage(&self, val: usize);
-
-    fn mem_usage(&self) -> usize;
-
     fn create_executor_mem_context(&self, executor_id: &str) -> MemoryContext;
 
     fn worker_node_manager(&self) -> Option<WorkerNodeManagerRef>;
@@ -80,12 +75,6 @@ pub struct ComputeNodeContext {
     batch_metrics: Option<BatchMetricsWithTaskLabels>,
 
     mem_context: MemoryContext,
-
-    // Last mem usage value. Init to be 0. Should be the last value of `cur_mem_val`.
-    last_mem_val: Arc<AtomicUsize>,
-    // How many memory bytes have been used in this task for the latest report value. Will be moved
-    // to `last_mem_val` if new value comes in.
-    cur_mem_val: Arc<AtomicUsize>,
 }
 
 impl BatchTaskContext for ComputeNodeContext {
@@ -127,22 +116,6 @@ impl BatchTaskContext for ComputeNodeContext {
         self.env.source_metrics()
     }
 
-    fn store_mem_usage(&self, val: usize) {
-        // Record the last mem val.
-        // Calculate the difference between old val and new value, and apply the diff to total
-        // memory usage value.
-        let old_value = self.cur_mem_val.load(Ordering::Relaxed);
-        self.last_mem_val.store(old_value, Ordering::Relaxed);
-        let diff = val as i64 - old_value as i64;
-        self.env.task_manager().apply_mem_diff(diff);
-
-        self.cur_mem_val.store(val, Ordering::Relaxed);
-    }
-
-    fn mem_usage(&self) -> usize {
-        self.cur_mem_val.load(Ordering::Relaxed)
-    }
-
     fn create_executor_mem_context(&self, executor_id: &str) -> MemoryContext {
         if let Some(metrics) = &self.batch_metrics {
             let executor_mem_usage = metrics
@@ -167,8 +140,6 @@ impl ComputeNodeContext {
         Self {
             env: BatchEnvironment::for_test(),
             batch_metrics: None,
-            cur_mem_val: Arc::new(0.into()),
-            last_mem_val: Arc::new(0.into()),
             mem_context: MemoryContext::none(),
         }
     }
@@ -189,8 +160,6 @@ impl ComputeNodeContext {
             Self {
                 env,
                 batch_metrics: Some(batch_metrics),
-                cur_mem_val: Arc::new(0.into()),
-                last_mem_val: Arc::new(0.into()),
                 mem_context,
             }
         } else {
@@ -198,8 +167,6 @@ impl ComputeNodeContext {
             Self {
                 env,
                 batch_metrics: None,
-                cur_mem_val: Arc::new(0.into()),
-                last_mem_val: Arc::new(0.into()),
                 mem_context: batch_mem_context,
             }
         }
@@ -210,13 +177,7 @@ impl ComputeNodeContext {
         Self {
             env,
             batch_metrics: None,
-            cur_mem_val: Arc::new(0.into()),
-            last_mem_val: Arc::new(0.into()),
             mem_context: batch_mem_context,
         }
-    }
-
-    pub fn mem_usage(&self) -> usize {
-        self.cur_mem_val.load(Ordering::Relaxed)
     }
 }
