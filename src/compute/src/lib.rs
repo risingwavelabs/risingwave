@@ -76,10 +76,6 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
     pub meta_address: MetaAddressStrategy,
 
-    /// Payload format of connector sink rpc
-    #[clap(long, env = "RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT")]
-    pub connector_rpc_sink_payload_format: Option<String>,
-
     /// The path of `risingwave.toml` configuration file.
     ///
     /// If empty, default configuration values will be used.

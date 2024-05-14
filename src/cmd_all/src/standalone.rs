@@ -356,7 +356,6 @@ mod test {
                                     http://127.0.0.1:5690/,
                                 ],
                             ),
-                            connector_rpc_sink_payload_format: None,
                             config_path: "src/config/test.toml",
                             total_memory_bytes: 34359738368,
                             reserved_memory_bytes: None,
