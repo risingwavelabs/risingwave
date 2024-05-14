@@ -22,7 +22,9 @@ use super::expr_visitable::ExprVisitable;
 use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{
-    generic, ColPrunable, ColumnPruningContext, ExprRewritable, Logical, PlanBase, PlanTreeNode, PredicatePushdown, PredicatePushdownContext, RewriteStreamContext, ToBatch, ToStream, ToStreamContext
+    generic, ColPrunable, ColumnPruningContext, ExprRewritable, Logical, PlanBase, PlanTreeNode,
+    PredicatePushdown, PredicatePushdownContext, RewriteStreamContext, ToBatch, ToStream,
+    ToStreamContext,
 };
 use crate::binder::ShareId;
 use crate::error::Result;
@@ -98,7 +100,8 @@ impl PredicatePushdown for LogicalRecursiveUnion {
         predicate: Condition,
         ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        let new_inputs = self.inputs()
+        let new_inputs = self
+            .inputs()
             .iter()
             .map(|input| input.predicate_pushdown(predicate.clone(), ctx))
             .collect_vec();
@@ -111,19 +114,28 @@ impl PredicatePushdown for LogicalRecursiveUnion {
 
 impl ToBatch for LogicalRecursiveUnion {
     fn to_batch(&self) -> Result<PlanRef> {
-        bail_not_implemented!(issue = 15135, "recursive CTE not supported for to_batch of LogicalRecursiveUnion")
+        bail_not_implemented!(
+            issue = 15135,
+            "recursive CTE not supported for to_batch of LogicalRecursiveUnion"
+        )
     }
 }
 
 impl ToStream for LogicalRecursiveUnion {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        bail_not_implemented!(issue = 15135, "recursive CTE not supported for to_stream of LogicalRecursiveUnion")
+        bail_not_implemented!(
+            issue = 15135,
+            "recursive CTE not supported for to_stream of LogicalRecursiveUnion"
+        )
     }
 
     fn logical_rewrite_for_stream(
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        bail_not_implemented!(issue = 15135, "recursive CTE not supported for logical_rewrite_for_stream of LogicalRecursiveUnion")
+        bail_not_implemented!(
+            issue = 15135,
+            "recursive CTE not supported for logical_rewrite_for_stream of LogicalRecursiveUnion"
+        )
     }
 }
