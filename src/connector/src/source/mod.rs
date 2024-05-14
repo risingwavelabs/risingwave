@@ -25,7 +25,6 @@ pub mod mqtt;
 pub mod nats;
 pub mod nexmark;
 pub mod pulsar;
-use std::collections::HashMap;
 
 pub use base::{UPSTREAM_SOURCE_KEY, *};
 pub(crate) use common::*;
