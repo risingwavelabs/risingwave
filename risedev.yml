@@ -845,7 +845,7 @@ profile:
         health-check-port: 6788
       - use: compactor
 
-  ci-pubsub-kafka:
+  ci-kafka:
     config-path: src/config/ci.toml
     steps:
       - use: minio
@@ -857,8 +857,6 @@ profile:
         enable-tiered-cache: true
       - use: frontend
       - use: compactor
-      - use: pubsub
-        persist-data: true
       - use: kafka
         user-managed: true
         address: message_queue

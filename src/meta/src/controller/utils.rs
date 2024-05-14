@@ -754,12 +754,11 @@ where
             let obj = match object.obj_type {
                 ObjectType::Database => PbObject::DatabaseId(oid),
                 ObjectType::Schema => PbObject::SchemaId(oid),
-                ObjectType::Table => PbObject::TableId(oid),
+                ObjectType::Table | ObjectType::Index => PbObject::TableId(oid),
                 ObjectType::Source => PbObject::SourceId(oid),
                 ObjectType::Sink => PbObject::SinkId(oid),
                 ObjectType::View => PbObject::ViewId(oid),
                 ObjectType::Function => PbObject::FunctionId(oid),
-                ObjectType::Index => unreachable!("index is not supported yet"),
                 ObjectType::Connection => unreachable!("connection is not supported yet"),
                 ObjectType::Subscription => PbObject::SubscriptionId(oid),
             };
