@@ -811,7 +811,7 @@ profile:
         port: 29092
 
   ci-inline-source-test:
-    config-path: src/config/ci.toml
+    config-path: src/config/ci-recovery.toml
     steps:
       - use: minio
       - use: etcd

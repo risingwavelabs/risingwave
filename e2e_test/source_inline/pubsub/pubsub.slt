@@ -150,6 +150,6 @@ select v1, v2, count(*) FROM s1 group by v1, v2;
 statement ok
 DROP TABLE s1;
 
-# Restore to the value in src/config/ci.toml
+# Restore to the value in src/config/ci-recovery.toml
 statement ok
 ALTER SYSTEM SET checkpoint_frequency TO 5;
