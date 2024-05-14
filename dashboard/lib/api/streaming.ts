@@ -67,7 +67,10 @@ export function relationType(x: Relation) {
     return "SINK"
   } else if ((x as Source).info !== undefined) {
     return "SOURCE"
-  } else {
+  }  else if ((x as Subscription).dependentTableId !== undefined) {
+    return "SUBSCRIPTION"
+  }
+  else {
     return "UNKNOWN"
   }
 }

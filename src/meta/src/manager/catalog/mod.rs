@@ -3698,6 +3698,13 @@ impl CatalogManager {
             }
         }
 
+        for subscription in core.subscriptions.values() {
+            dependencies.push(PbObjectDependencies {
+                object_id: subscription.id,
+                referenced_object_id: subscription.dependent_table_id,
+            });
+        }
+
         dependencies
     }
 
