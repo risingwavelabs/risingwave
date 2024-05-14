@@ -596,7 +596,7 @@ PubsubProperties:
   fields:
   - name: pubsub.subscription
     field_type: String
-    comments: pubsub subscription to consume messages from
+    comments: 'Pub/Sub subscription to consume messages from.   Note that we rely on Pub/Sub to load-balance messages between all Readers pulling from  the same subscription. So one `subscription` (i.e., one `Source`) can only used for one MV.  Otherwise, different MVs on the same Source will both receive part of the messages.  TODO: check and enforce this on Meta.'
     required: true
   - name: pubsub.emulator_host
     field_type: String
@@ -612,7 +612,7 @@ PubsubProperties:
     required: false
   - name: pubsub.start_snapshot
     field_type: String
-    comments: '`start_snapshot` is a named pub/sub snapshot. If present, the connector will first seek  to the snapshot before starting consumption. Snapshots are the preferred seeking mechanism  in pub/sub because they guarantee retention of:  - All unacknowledged messages at the time of their creation.  - All messages created after their creation.  Besides retention guarantees, timestamps are also more precise than timestamp-based seeks.  See [Seeking to a snapshot](https://cloud.google.com/pubsub/docs/replay-overview#seeking_to_a_timestamp) for  more details.'
+    comments: '`start_snapshot` is a named pub/sub snapshot. If present, the connector will first seek  to the snapshot before starting consumption. Snapshots are the preferred seeking mechanism  in pub/sub because they guarantee retention of:  - All unacknowledged messages at the time of their creation.  - All messages created after their creation.  Besides retention guarantees, snapshots are also more precise than timestamp-based seeks.  See [Seeking to a snapshot](https://cloud.google.com/pubsub/docs/replay-overview#seeking_to_a_timestamp) for  more details.'
     required: false
   - name: pubsub.parallelism
     field_type: String
