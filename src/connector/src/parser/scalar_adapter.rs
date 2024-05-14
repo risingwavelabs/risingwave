@@ -17,7 +17,7 @@ use std::str::FromStr;
 use anyhow::anyhow;
 use bytes::BytesMut;
 use pg_bigdecimal::PgNumeric;
-use risingwave_common::types::{DataType, Int256, ScalarImpl, ScalarRefImpl};
+use risingwave_common::types::{DataType, Decimal, Int256, ScalarImpl, ScalarRefImpl};
 use thiserror_ext::AsReport;
 use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql, Type};
 
@@ -184,6 +184,61 @@ impl ScalarAdapter<'_> {
             }
         }
     }
+
+    pub fn build_scalar_in_list(
+        vec: Vec<Option<ScalarAdapter<'_>>>,
+        ty: DataType,
+        mut builder: risingwave_common::array::ArrayBuilderImpl,
+    ) -> Option<risingwave_common::array::ArrayBuilderImpl> {
+        for val in vec {
+            let scalar = match (val, &ty) {
+                (Some(ScalarAdapter::Numeric(numeric)), &DataType::Varchar) => {
+                    if pg_numeric_is_special(&numeric) {
+                        return None;
+                    } else {
+                        Some(ScalarImpl::from(pg_numeric_to_string(&numeric)))
+                    }
+                }
+                (Some(ScalarAdapter::Numeric(numeric)), &DataType::Int256) => match numeric {
+                    PgNumeric::Normalized(big_decimal) => {
+                        match Int256::from_str(big_decimal.to_string().as_str()) {
+                            Ok(num) => Some(ScalarImpl::from(num)),
+                            Err(err) => {
+                                tracing::error!(error = %err.as_report(), "parse pg-numeric as rw_int256 failed");
+                                return None;
+                            }
+                        }
+                    }
+                    _ => return None,
+                },
+                (Some(ScalarAdapter::Numeric(numeric)), &DataType::Decimal) => match numeric {
+                    PgNumeric::Normalized(big_decimal) => {
+                        match Decimal::from_str(big_decimal.to_string().as_str()) {
+                            Ok(num) => Some(ScalarImpl::from(num)),
+                            Err(err) => {
+                                tracing::error!(error = %err.as_report(), "parse pg-numeric as rw-numeric failed (likely out-of-range");
+                                return None;
+                            }
+                        }
+                    }
+                    _ => return None,
+                },
+                (Some(_), _) => unreachable!(
+                    "into_scalar_in_list should only be called with ScalarAdapter::Numeric types"
+                ),
+                (None, _) => None,
+            };
+            builder.append(scalar);
+        }
+        Some(builder)
+    }
+}
+
+fn pg_numeric_is_special(val: &PgNumeric) -> bool {
+    matches!(
+        val,
+        PgNumeric::NegativeInf | PgNumeric::PositiveInf | PgNumeric::NaN
+    )
 }
 
 fn pg_numeric_to_rw_int256(val: &PgNumeric) -> Option<ScalarImpl> {

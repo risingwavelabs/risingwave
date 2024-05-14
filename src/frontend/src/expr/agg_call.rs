@@ -21,13 +21,13 @@ use crate::utils::Condition;
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct AggCall {
-    agg_kind: AggKind,
-    return_type: DataType,
-    args: Vec<ExprImpl>,
-    distinct: bool,
-    order_by: OrderBy,
-    filter: Condition,
-    direct_args: Vec<Literal>,
+    pub agg_kind: AggKind,
+    pub return_type: DataType,
+    pub args: Vec<ExprImpl>,
+    pub distinct: bool,
+    pub order_by: OrderBy,
+    pub filter: Condition,
+    pub direct_args: Vec<Literal>,
 }
 
 impl std::fmt::Debug for AggCall {
