@@ -513,8 +513,9 @@ pub fn start_compactor(
                                     continue 'start_stream;
                                 }
 
+                                running_task_parallelism
+                                    .fetch_add(parallelism as u32, Ordering::SeqCst);
                                 executor.spawn(async move {
-                                    running_task_parallelism.fetch_add(parallelism as u32, Ordering::SeqCst);
                                     let (tx, rx) = tokio::sync::oneshot::channel();
                                     let task_id = compact_task.task_id;
                                     shutdown.lock().unwrap().insert(task_id, tx);
@@ -563,8 +564,7 @@ pub fn start_compactor(
 
                                     let enable_check_compaction_result =
                                     context.storage_opts.check_compaction_result;
-                                    let need_check_task = !compact_task.sorted_output_ssts.is_empty()
-                                    && compact_task.task_status() == TaskStatus::Success;
+                                    let need_check_task = !compact_task.sorted_output_ssts.is_empty() && compact_task.task_status() == TaskStatus::Success;
 
                                     if enable_check_compaction_result && need_check_task {
                                         match check_compaction_result(&compact_task, context.clone())
