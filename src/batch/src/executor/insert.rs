@@ -266,7 +266,7 @@ mod tests {
     use std::ops::Bound;
 
     use assert_matches::assert_matches;
-    use foyer::memory::CacheContext;
+    use foyer::CacheContext;
     use futures::StreamExt;
     use risingwave_common::array::{Array, ArrayImpl, I32Array, StructArray};
     use risingwave_common::catalog::{

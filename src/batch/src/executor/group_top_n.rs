@@ -251,7 +251,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_group_top_n_executor() {
-        let parent_mem = MemoryContext::root(LabelGuardedIntGauge::<4>::test_int_gauge());
+        let parent_mem = MemoryContext::root(LabelGuardedIntGauge::<4>::test_int_gauge(), u64::MAX);
         {
             let schema = Schema {
                 fields: vec![

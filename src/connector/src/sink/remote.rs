@@ -20,6 +20,7 @@ use std::time::Instant;
 
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
+use await_tree::InstrumentAwait;
 use futures::future::select;
 use futures::{StreamExt, TryStreamExt};
 use itertools::Itertools;
@@ -311,7 +312,11 @@ impl LogSinker for RemoteLogSinker {
 
         let poll_response_stream = async move {
             loop {
-                let result = response_err_stream_rx.stream.try_next().await;
+                let result = response_err_stream_rx
+                    .stream
+                    .try_next()
+                    .instrument_await("Wait Response Stream")
+                    .await;
                 match result {
                     Ok(Some(response)) => {
                         response_tx.send(response).map_err(|err| {
@@ -325,7 +330,7 @@ impl LogSinker for RemoteLogSinker {
         };
 
         let poll_consume_log_and_sink = async move {
-            async fn truncate_matched_offset(
+            fn truncate_matched_offset(
                 queue: &mut VecDeque<(TruncateOffset, Option<Instant>)>,
                 persisted_offset: TruncateOffset,
                 log_reader: &mut impl SinkLogReader,
@@ -356,7 +361,7 @@ impl LogSinker for RemoteLogSinker {
                         .observe(start_time.elapsed().as_millis() as f64);
                 }
 
-                log_reader.truncate(persisted_offset).await?;
+                log_reader.truncate(persisted_offset)?;
                 Ok(())
             }
 
@@ -365,12 +370,20 @@ impl LogSinker for RemoteLogSinker {
             let mut sent_offset_queue: VecDeque<(TruncateOffset, Option<Instant>)> =
                 VecDeque::new();
 
+            let mut curr_epoch = 0;
+
             loop {
                 let either_result: futures::future::Either<
                     Option<SinkWriterStreamResponse>,
                     LogStoreResult<(u64, LogStoreReadItem)>,
                 > = drop_either_future(
-                    select(pin!(response_rx.recv()), pin!(log_reader.next_item())).await,
+                    select(
+                        pin!(response_rx.recv()),
+                        pin!(log_reader
+                            .next_item()
+                            .instrument_await(format!("Wait Next Item: {}", curr_epoch))),
+                    )
+                    .await,
                 );
                 match either_result {
                     futures::future::Either::Left(opt) => {
@@ -393,8 +406,7 @@ impl LogSinker for RemoteLogSinker {
                                     },
                                     log_reader,
                                     &sink_metrics,
-                                )
-                                .await?;
+                                )?;
                             }
                             SinkWriterStreamResponse {
                                 response:
@@ -413,8 +425,7 @@ impl LogSinker for RemoteLogSinker {
                                     TruncateOffset::Barrier { epoch },
                                     log_reader,
                                     &sink_metrics,
-                                )
-                                .await?;
+                                )?;
                             }
                             response => {
                                 return Err(SinkError::Remote(anyhow!(
@@ -426,6 +437,7 @@ impl LogSinker for RemoteLogSinker {
                     }
                     futures::future::Either::Right(result) => {
                         let (epoch, item): (u64, LogStoreReadItem) = result?;
+                        curr_epoch = epoch;
 
                         match item {
                             LogStoreReadItem::StreamChunk { chunk, chunk_id } => {
@@ -445,6 +457,10 @@ impl LogSinker for RemoteLogSinker {
                                         batch_id: chunk_id as u64,
                                         chunk,
                                     })
+                                    .instrument_await(format!(
+                                        "Send Chunk Request: {} {}",
+                                        curr_epoch, chunk_id
+                                    ))
                                     .await?;
                                 prev_offset = Some(offset);
                                 sent_offset_queue
@@ -457,10 +473,19 @@ impl LogSinker for RemoteLogSinker {
                                 }
                                 let start_time = if is_checkpoint {
                                     let start_time = Instant::now();
-                                    request_tx.barrier(epoch, true).await?;
+                                    request_tx
+                                        .barrier(epoch, true)
+                                        .instrument_await(format!("Commit: {}", curr_epoch))
+                                        .await?;
                                     Some(start_time)
                                 } else {
-                                    request_tx.barrier(epoch, false).await?;
+                                    request_tx
+                                        .barrier(epoch, false)
+                                        .instrument_await(format!(
+                                            "Send Barrier Request: {}",
+                                            curr_epoch
+                                        ))
+                                        .await?;
                                     None
                                 };
                                 prev_offset = Some(offset);

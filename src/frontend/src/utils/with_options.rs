@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::num::NonZeroU32;
 
-use risingwave_connector::source::kafka::{
+use risingwave_connector::source::kafka::private_link::{
     insert_privatelink_broker_rewrite_map, CONNECTION_NAME_KEY, PRIVATELINK_ENDPOINT_KEY,
 };
 use risingwave_connector::WithPropertiesExt;

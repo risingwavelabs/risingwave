@@ -20,6 +20,7 @@ use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_storage::error::StorageError;
 
+use crate::executor::exchange::error::ExchangeChannelClosed;
 use crate::executor::{Barrier, StreamExecutorError};
 use crate::task::ActorId;
 
@@ -86,7 +87,7 @@ pub enum ErrorKind {
     },
 
     #[error(transparent)]
-    Internal(
+    Uncategorized(
         #[from]
         #[backtrace]
         anyhow::Error,
@@ -104,6 +105,12 @@ impl From<PbFieldNotFound> for StreamError {
 
 impl From<ConnectorError> for StreamError {
     fn from(err: ConnectorError) -> Self {
+        StreamExecutorError::from(err).into()
+    }
+}
+
+impl From<ExchangeChannelClosed> for StreamError {
+    fn from(err: ExchangeChannelClosed) -> Self {
         StreamExecutorError::from(err).into()
     }
 }

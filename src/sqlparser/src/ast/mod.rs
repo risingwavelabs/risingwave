@@ -1192,6 +1192,8 @@ pub enum Statement {
         /// RETURNING
         returning: Vec<SelectItem>,
     },
+    /// DISCARD
+    Discard(DiscardType),
     /// CREATE VIEW
     CreateView {
         or_replace: bool,
@@ -1892,6 +1894,7 @@ impl fmt::Display for Statement {
             Statement::AlterConnection { name, operation } => {
                 write!(f, "ALTER CONNECTION {} {}", name, operation)
             }
+            Statement::Discard(t) => write!(f, "DISCARD {}", t),
             Statement::Drop(stmt) => write!(f, "DROP {}", stmt),
             Statement::DropFunction {
                 if_exists,
@@ -3108,6 +3111,21 @@ impl fmt::Display for AsOf {
             TimestampString(ts) => write!(f, " FOR SYSTEM_TIME AS OF '{}'", ts),
             VersionNum(v) => write!(f, " FOR SYSTEM_VERSION AS OF {}", v),
             VersionString(v) => write!(f, " FOR SYSTEM_VERSION AS OF '{}'", v),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum DiscardType {
+    All,
+}
+
+impl fmt::Display for DiscardType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use DiscardType::*;
+        match self {
+            All => write!(f, "ALL"),
         }
     }
 }

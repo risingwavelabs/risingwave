@@ -9,10 +9,18 @@ import "stream_plan.proto";
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
+message BuildActorInfo {
+  stream_plan.StreamActor actor = 1;
+  message SubscriptionIds {
+    repeated uint32 subscription_ids = 1;
+  }
+  map<uint32, SubscriptionIds> related_subscriptions = 2;
+}
+
 // Describe the fragments which will be running on this node
 message UpdateActorsRequest {
   string request_id = 1;
-  repeated stream_plan.StreamActor actors = 2;
+  repeated BuildActorInfo actors = 2;
 }
 
 message UpdateActorsResponse {
@@ -69,6 +77,7 @@ message BarrierCompleteResponse {
   repeated GroupedSstableInfo synced_sstables = 4;
   uint32 worker_id = 5;
   map<uint32, hummock.TableWatermarks> table_watermarks = 6;
+  repeated hummock.SstableInfo old_value_sstables = 7;
 }
 
 // Before starting streaming, the leader node broadcast the actor-host table to needed workers.

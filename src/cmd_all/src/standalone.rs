@@ -204,7 +204,14 @@ pub async fn standalone(
             }
         });
         // wait for the service to be ready
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let mut tries = 0;
+        while !risingwave_meta_node::is_server_started() {
+            if tries % 50 == 0 {
+                tracing::info!("waiting for meta service to be ready...");
+            }
+            tries += 1;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
     }
     if let Some(opts) = compute_opts {
         tracing::info!("starting compute-node thread with cli args: {:?}", opts);
@@ -352,6 +359,7 @@ mod test {
                             connector_rpc_sink_payload_format: None,
                             config_path: "src/config/test.toml",
                             total_memory_bytes: 34359738368,
+                            reserved_memory_bytes: None,
                             parallelism: 10,
                             role: Both,
                             metrics_level: None,
@@ -364,7 +372,7 @@ mod test {
                     ),
                     frontend_opts: Some(
                         FrontendOpts {
-                            listen_addr: "127.0.0.1:4566",
+                            listen_addr: "0.0.0.0:4566",
                             advertise_addr: None,
                             meta_addr: List(
                                 [

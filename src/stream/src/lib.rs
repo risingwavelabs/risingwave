@@ -62,6 +62,18 @@ tokio::task_local! {
     pub(crate) static CONFIG: Arc<StreamingConfig>;
 }
 
+mod config {
+    use risingwave_common::config::default;
+
+    pub(crate) fn chunk_size() -> usize {
+        let res = crate::CONFIG.try_with(|config| config.developer.chunk_size);
+        if res.is_err() && cfg!(not(test)) {
+            tracing::warn!("streaming CONFIG is not set, which is probably a bug")
+        }
+        res.unwrap_or_else(|_| default::developer::stream_chunk_size())
+    }
+}
+
 mod consistency {
     //! This module contains global variables and methods to access the stream consistency settings.
 

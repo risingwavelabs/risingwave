@@ -317,7 +317,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_backward_user_basic() {
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
         let table0 = gen_iterator_test_sstable_base(
             0,
             default_builder_opt_for_test(),
@@ -369,7 +369,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_backward_user_seek() {
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
         let table0 = gen_iterator_test_sstable_base(
             0,
             default_builder_opt_for_test(),
@@ -440,7 +440,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_backward_user_delete() {
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
         // key=[idx, epoch], value
         let kv_pairs = vec![
             (1, 300, HummockValue::delete()),
@@ -479,7 +479,7 @@ mod tests {
     // left..=end
     #[tokio::test]
     async fn test_backward_user_range_inclusive() {
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
         // key=[idx, epoch], value
         let kv_pairs = vec![
             (0, 200, HummockValue::delete()),
@@ -559,7 +559,7 @@ mod tests {
     // left..end
     #[tokio::test]
     async fn test_backward_user_range() {
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
         // key=[idx, epoch], value
         let kv_pairs = vec![
             (0, 200, HummockValue::delete()),
@@ -636,7 +636,7 @@ mod tests {
     // ..=right
     #[tokio::test]
     async fn test_backward_user_range_to_inclusive() {
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
         // key=[idx, epoch], value
         let kv_pairs = vec![
             (0, 200, HummockValue::delete()),
@@ -712,7 +712,7 @@ mod tests {
     // left..
     #[tokio::test]
     async fn test_backward_user_range_from() {
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
         // key=[idx, epoch], value
         let kv_pairs = vec![
             (0, 200, HummockValue::delete()),
@@ -908,7 +908,7 @@ mod tests {
                 prev_time = time.next_epoch();
             }
         }
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
         let sst = gen_test_sstable(
             default_builder_opt_for_test(),
             0,
@@ -1056,7 +1056,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_min_epoch() {
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
         let table0 = gen_iterator_test_sstable_with_incr_epoch(
             0,
             default_builder_opt_for_test(),

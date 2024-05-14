@@ -14,7 +14,6 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -32,7 +31,6 @@ use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_connector::source::cdc::external::{
     DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
-use risingwave_connector::source::cdc::CDC_BACKFILL_ENABLE_KEY;
 use risingwave_connector::{source, WithPropertiesExt};
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, Table, WatermarkDesc};
@@ -58,11 +56,11 @@ use crate::catalog::{check_valid_column_name, ColumnId};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InlineNowProcTime};
 use crate::handler::create_source::{
-    bind_all_columns, bind_columns_from_source, bind_source_pk, bind_source_watermark,
-    check_source_schema, handle_addition_columns, validate_compatibility, UPSTREAM_SOURCE_KEY,
+    bind_all_columns, bind_columns_from_source, bind_connector_props, bind_source_pk,
+    bind_source_watermark, check_source_schema, handle_addition_columns, UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::generic::SourceNodeKind;
+use crate::optimizer::plan_node::generic::{CdcScanOptions, SourceNodeKind};
 use crate::optimizer::plan_node::{LogicalCdcScan, LogicalSource};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
@@ -482,8 +480,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     }
 
     let session = &handler_args.session;
-    let mut with_properties = handler_args.with_options.clone().into_connector_props();
-    validate_compatibility(&source_schema, &mut with_properties)?;
+    let with_properties = bind_connector_props(&handler_args, &source_schema, false)?;
 
     ensure_table_constraints_supported(&constraints)?;
 
@@ -719,7 +716,7 @@ fn gen_table_plan_inner(
     .into();
 
     let required_cols = FixedBitSet::with_capacity(columns.len());
-    let mut plan_root = PlanRoot::new(
+    let plan_root = PlanRoot::new_with_logical_plan(
         source_node,
         RequiredDist::Any,
         Order::any(),
@@ -850,25 +847,18 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
 
     tracing::debug!(?cdc_table_desc, "create cdc table");
 
-    // disable backfill if 'snapshot=false'
-    let disable_backfill = match context.with_options().get(CDC_BACKFILL_ENABLE_KEY) {
-        None => false,
-        Some(v) => {
-            !(bool::from_str(v)
-                .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_ENABLE_KEY))?)
-        }
-    };
+    let options = CdcScanOptions::from_with_options(context.with_options())?;
 
     let logical_scan = LogicalCdcScan::create(
         external_table_name,
         Rc::new(cdc_table_desc),
         context.clone(),
-        disable_backfill,
+        options,
     );
 
     let scan_node: PlanRef = logical_scan.into();
     let required_cols = FixedBitSet::with_capacity(columns.len());
-    let mut plan_root = PlanRoot::new(
+    let plan_root = PlanRoot::new_with_logical_plan(
         scan_node,
         RequiredDist::Any,
         Order::any(),
@@ -1004,6 +994,40 @@ pub(super) async fn handle_create_table_plan(
 
             (None, Some(cdc_table)) => {
                 let context = OptimizerContext::new(handler_args, explain_options);
+                if append_only {
+                    return Err(ErrorCode::NotSupported(
+                        "append only modifier on the table created from a CDC source".into(),
+                        "Remove the APPEND ONLY clause".into(),
+                    )
+                    .into());
+                }
+
+                if !source_watermarks.is_empty() {
+                    return Err(ErrorCode::NotSupported(
+                        "watermark defined on the table created from a CDC source".into(),
+                        "Remove the Watermark definitions".into(),
+                    )
+                    .into());
+                }
+                if wildcard_idx.is_some() {
+                    return Err(ErrorCode::NotSupported(
+                        "star(\"*\") defined on the table created from a CDC source".into(),
+                        "Remove the star(\"*\") in the column list".into(),
+                    )
+                    .into());
+                }
+                for c in &column_defs {
+                    for op in &c.options {
+                        if let ColumnOption::GeneratedColumns(_) = op.option {
+                            return Err(ErrorCode::NotSupported(
+                                "generated column defined on the table created from a CDC source"
+                                    .into(),
+                                "Remove the generated column in the column list".into(),
+                            )
+                            .into());
+                        }
+                    }
+                }
                 let (plan, table) = gen_create_table_plan_for_cdc_source(
                     context.into(),
                     cdc_table.source_name.clone(),

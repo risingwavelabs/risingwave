@@ -147,18 +147,19 @@ impl IcebergPartitionInfo {
         ))
     }
 }
+
 #[inline]
 fn find_column_idx_by_name(columns: &[ColumnCatalog], col_name: &str) -> Result<usize> {
     columns
-            .iter()
-            .position(|col| col.column_desc.name == col_name)
-            .ok_or_else(|| {
-                ErrorCode::SinkError(Box::new(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!("Sink primary key column not found: {}. Please use ',' as the delimiter for different primary key columns.", col_name)
-                )))
+        .iter()
+        .position(|col| col.column_desc.name == col_name)
+        .ok_or_else(|| {
+            ErrorCode::SinkError(Box::new(Error::new(
+                ErrorKind::InvalidInput,
+                format!("Sink primary key column not found: {}. Please use ',' as the delimiter for different primary key columns.", col_name),
+            )))
                 .into()
-            })
+        })
 }
 
 /// [`StreamSink`] represents a table/connector sink at the very end of the graph.
@@ -178,6 +179,7 @@ impl StreamSink {
             .into_stream()
             .expect("input should be stream plan")
             .clone_with_new_plan_id();
+
         Self {
             base,
             input,
@@ -314,6 +316,7 @@ impl StreamSink {
         let (pk, _) = derive_pk(input.clone(), user_order_by, &columns);
         let mut downstream_pk =
             Self::parse_downstream_pk(&columns, properties.get(DOWNSTREAM_PK_KEY))?;
+
         let mut extra_partition_col_idx = None;
         let required_dist = match input.distribution() {
             Distribution::Single => RequiredDist::single(),
@@ -464,16 +467,16 @@ impl StreamSink {
             (false, true, false) => {
                 Err(ErrorCode::SinkError(Box::new(Error::new(
                     ErrorKind::InvalidInput,
-                        format!("The sink cannot be append-only. Please add \"force_append_only='true'\" in {} options to force the sink to be append-only. Notice that this will cause the sink executor to drop any UPDATE or DELETE message.", if syntax_legacy {"WITH"} else {"FORMAT ENCODE"}),
+                    format!("The sink cannot be append-only. Please add \"force_append_only='true'\" in {} options to force the sink to be append-only. Notice that this will cause the sink executor to drop any UPDATE or DELETE message.", if syntax_legacy { "WITH" } else { "FORMAT ENCODE" }),
                 )))
-                .into())
+                    .into())
             }
             (_, false, true) => {
                 Err(ErrorCode::SinkError(Box::new(Error::new(
                     ErrorKind::InvalidInput,
-                    format!("Cannot force the sink to be append-only without \"{}\".", if syntax_legacy {"type='append-only'"} else {"FORMAT PLAIN"}),
+                    format!("Cannot force the sink to be append-only without \"{}\".", if syntax_legacy { "type='append-only'" } else { "FORMAT PLAIN" }),
                 )))
-                .into())
+                    .into())
             }
         }
     }
@@ -611,6 +614,7 @@ mod test {
             },
         ]
     }
+
     #[test]
     fn test_iceberg_convert_to_expression() {
         let partition_type = StructType::new(vec![

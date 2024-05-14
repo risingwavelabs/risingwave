@@ -827,6 +827,7 @@ mod batch_hash_join;
 mod batch_hop_window;
 mod batch_insert;
 mod batch_limit;
+mod batch_log_seq_scan;
 mod batch_lookup_join;
 mod batch_max_one_row;
 mod batch_nested_loop_join;
@@ -898,14 +899,15 @@ mod stream_sort;
 mod stream_source;
 mod stream_source_scan;
 mod stream_stateless_simple_agg;
-mod stream_subscription;
 mod stream_table_scan;
 mod stream_topn;
 mod stream_values;
 mod stream_watermark_filter;
 
+mod batch_iceberg_scan;
 mod batch_kafka_scan;
 mod derive;
+mod logical_iceberg_scan;
 mod stream_cdc_table_scan;
 mod stream_share;
 mod stream_temporal_join;
@@ -920,9 +922,11 @@ pub use batch_group_topn::BatchGroupTopN;
 pub use batch_hash_agg::BatchHashAgg;
 pub use batch_hash_join::BatchHashJoin;
 pub use batch_hop_window::BatchHopWindow;
+pub use batch_iceberg_scan::BatchIcebergScan;
 pub use batch_insert::BatchInsert;
 pub use batch_kafka_scan::BatchKafkaScan;
 pub use batch_limit::BatchLimit;
+pub use batch_log_seq_scan::BatchLogSeqScan;
 pub use batch_lookup_join::BatchLookupJoin;
 pub use batch_max_one_row::BatchMaxOneRow;
 pub use batch_nested_loop_join::BatchNestedLoopJoin;
@@ -949,6 +953,7 @@ pub use logical_except::LogicalExcept;
 pub use logical_expand::LogicalExpand;
 pub use logical_filter::LogicalFilter;
 pub use logical_hop_window::LogicalHopWindow;
+pub use logical_iceberg_scan::LogicalIcebergScan;
 pub use logical_insert::LogicalInsert;
 pub use logical_intersect::LogicalIntersect;
 pub use logical_join::LogicalJoin;
@@ -996,7 +1001,6 @@ pub use stream_sort::StreamEowcSort;
 pub use stream_source::StreamSource;
 pub use stream_source_scan::StreamSourceScan;
 pub use stream_stateless_simple_agg::StreamStatelessSimpleAgg;
-pub use stream_subscription::StreamSubscription;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_temporal_join::StreamTemporalJoin;
 pub use stream_topn::StreamTopN;
@@ -1058,6 +1062,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Except }
             , { Logical, MaxOneRow }
             , { Logical, KafkaScan }
+            , { Logical, IcebergScan }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -1068,6 +1073,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, Update }
             , { Batch, SeqScan }
             , { Batch, SysSeqScan }
+            , { Batch, LogSeqScan }
             , { Batch, HashJoin }
             , { Batch, NestedLoopJoin }
             , { Batch, Values }
@@ -1086,12 +1092,12 @@ macro_rules! for_all_plan_nodes {
             , { Batch, OverWindow }
             , { Batch, MaxOneRow }
             , { Batch, KafkaScan }
+            , { Batch, IcebergScan }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
             , { Stream, CdcTableScan }
             , { Stream, Sink }
-            , { Stream, Subscription }
             , { Stream, Source }
             , { Stream, SourceScan }
             , { Stream, HashJoin }
@@ -1158,6 +1164,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Except }
             , { Logical, MaxOneRow }
             , { Logical, KafkaScan }
+            , { Logical, IcebergScan }
         }
     };
 }
@@ -1174,6 +1181,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, Filter }
             , { Batch, SeqScan }
             , { Batch, SysSeqScan }
+            , { Batch, LogSeqScan }
             , { Batch, HashJoin }
             , { Batch, NestedLoopJoin }
             , { Batch, Values }
@@ -1195,6 +1203,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, OverWindow }
             , { Batch, MaxOneRow }
             , { Batch, KafkaScan }
+            , { Batch, IcebergScan }
         }
     };
 }
@@ -1211,7 +1220,6 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, TableScan }
             , { Stream, CdcTableScan }
             , { Stream, Sink }
-            , { Stream, Subscription }
             , { Stream, Source }
             , { Stream, SourceScan }
             , { Stream, HashAgg }

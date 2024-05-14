@@ -33,6 +33,7 @@ export default function useFetch<T>(
   const [response, setResponse] = useState<T>()
   const toast = useErrorToast()
 
+  // NOTE(eric): Don't put `fetchFn` in the dependency array. It might be a lambda function
   useEffect(() => {
     const fetchData = async () => {
       if (when) {
@@ -52,7 +53,7 @@ export default function useFetch<T>(
 
     const timer = setInterval(fetchData, intervalMs)
     return () => clearInterval(timer)
-  }, [toast, fetchFn, intervalMs, when])
+  }, [toast, intervalMs, when])
 
   return { response }
 }

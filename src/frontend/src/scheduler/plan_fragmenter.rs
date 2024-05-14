@@ -54,7 +54,9 @@ use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::TableId;
 use crate::error::RwError;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
-use crate::optimizer::plan_node::{BatchKafkaScan, BatchSource, PlanNodeId, PlanNodeType};
+use crate::optimizer::plan_node::{
+    BatchIcebergScan, BatchKafkaScan, BatchSource, PlanNodeId, PlanNodeType,
+};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
 use crate::scheduler::SchedulerResult;
@@ -1018,6 +1020,21 @@ impl BatchPlanFragmenter {
                     as_of: None,
                 })));
             }
+        } else if let Some(batch_iceberg_scan) = node.as_batch_iceberg_scan() {
+            let batch_iceberg_scan: &BatchIcebergScan = batch_iceberg_scan;
+            let source_catalog = batch_iceberg_scan.source_catalog();
+            if let Some(source_catalog) = source_catalog {
+                let property = ConnectorProperties::extract(
+                    source_catalog.with_properties.clone().into_iter().collect(),
+                    false,
+                )?;
+                let as_of = batch_iceberg_scan.as_of();
+                return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
+                    connector: property,
+                    timebound: (None, None),
+                    as_of,
+                })));
+            }
         } else if let Some(source_node) = node.as_batch_source() {
             // TODO: use specific batch operator instead of batch source.
             let source_node: &BatchSource = source_node;
@@ -1047,18 +1064,7 @@ impl BatchPlanFragmenter {
     /// If there are multiple scan nodes in this stage, they must have the same distribution, but
     /// maybe different vnodes partition. We just use the same partition for all the scan nodes.
     fn collect_stage_table_scan(&self, node: PlanRef) -> SchedulerResult<Option<TableScanInfo>> {
-        if node.node_type() == PlanNodeType::BatchExchange {
-            // Do not visit next stage.
-            return Ok(None);
-        }
-        if let Some(scan_node) = node.as_batch_sys_seq_scan() {
-            let name = scan_node.core().table_name.to_owned();
-            return Ok(Some(TableScanInfo::system_table(name)));
-        }
-
-        if let Some(scan_node) = node.as_batch_seq_scan() {
-            let name = scan_node.core().table_name.to_owned();
-            let table_desc = &*scan_node.core().table_desc;
+        let build_table_scan_info = |name, table_desc: &TableDesc, scan_range| {
             let table_catalog = self
                 .catalog_reader
                 .read_guard()
@@ -1068,10 +1074,29 @@ impl BatchPlanFragmenter {
             let vnode_mapping = self
                 .worker_node_manager
                 .fragment_mapping(table_catalog.fragment_id)?;
-            let partitions =
-                derive_partitions(scan_node.scan_ranges(), table_desc, &vnode_mapping)?;
+            let partitions = derive_partitions(scan_range, table_desc, &vnode_mapping)?;
             let info = TableScanInfo::new(name, partitions);
             Ok(Some(info))
+        };
+        if node.node_type() == PlanNodeType::BatchExchange {
+            // Do not visit next stage.
+            return Ok(None);
+        }
+        if let Some(scan_node) = node.as_batch_sys_seq_scan() {
+            let name = scan_node.core().table_name.to_owned();
+            Ok(Some(TableScanInfo::system_table(name)))
+        } else if let Some(scan_node) = node.as_batch_log_seq_scan() {
+            build_table_scan_info(
+                scan_node.core().table_name.to_owned(),
+                &scan_node.core().table_desc,
+                &[],
+            )
+        } else if let Some(scan_node) = node.as_batch_seq_scan() {
+            build_table_scan_info(
+                scan_node.core().table_name.to_owned(),
+                &scan_node.core().table_desc,
+                scan_node.scan_ranges(),
+            )
         } else {
             node.inputs()
                 .into_iter()

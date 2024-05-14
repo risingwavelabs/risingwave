@@ -450,6 +450,20 @@ impl TableCatalog {
             .map(|(i, _)| i)
     }
 
+    pub fn default_column_expr(&self, col_idx: usize) -> ExprImpl {
+        if let Some(GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc { expr, .. })) = self
+            .columns[col_idx]
+            .column_desc
+            .generated_or_default_column
+            .as_ref()
+        {
+            ExprImpl::from_expr_proto(expr.as_ref().unwrap())
+                .expect("expr in default columns corrupted")
+        } else {
+            ExprImpl::literal_null(self.columns[col_idx].data_type().clone())
+        }
+    }
+
     pub fn default_columns(&self) -> impl Iterator<Item = (usize, ExprImpl)> + '_ {
         self.columns.iter().enumerate().filter_map(|(i, c)| {
             if let Some(GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc {

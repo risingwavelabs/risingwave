@@ -136,6 +136,9 @@ pub enum BatchError {
 
     #[error("Streaming vnode mapping not found for fragment {0}")]
     StreamingVnodeMappingNotFound(FragmentId),
+
+    #[error("Not enough memory to run this query, batch memory limit is {0} bytes")]
+    OutOfMemory(u64),
 }
 
 // Serialize/deserialize error.

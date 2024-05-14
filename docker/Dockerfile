@@ -13,7 +13,7 @@ ENV PYO3_PYTHON=python3.12
 
 FROM base AS rust-base
 
-RUN apt-get update && apt-get -y install make cmake protobuf-compiler curl bash lld unzip
+RUN apt-get update && apt-get -y install make cmake protobuf-compiler curl bash lld unzip rsync
 
 # Install Node.js as dependency for building the dashboard.
 # Bump version together with `dashboard/.node-version`.
@@ -142,4 +142,4 @@ ENV CONNECTOR_LIBS_PATH /risingwave/bin/connector-node/libs
 ENV IN_CONTAINER=1
 
 ENTRYPOINT [ "/risingwave/bin/risingwave" ]
-CMD [ "playground" ]
+CMD [ "single_node" ]

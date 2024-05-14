@@ -803,6 +803,12 @@ impl TryFrom<ScalarImpl> for String {
     }
 }
 
+impl From<char> for ScalarImpl {
+    fn from(c: char) -> Self {
+        Self::Utf8(c.to_string().into())
+    }
+}
+
 impl From<&[u8]> for ScalarImpl {
     fn from(s: &[u8]) -> Self {
         Self::Bytea(s.into())
