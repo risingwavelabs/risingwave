@@ -65,25 +65,25 @@ impl PredicatePushdown for LogicalCteRef {
         _predicate: Condition,
         _ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        self.clone().into()
+       unimplemented!("recursive CTE not supported for predicate_pushdown of LogicalCteRef")
     }
 }
 
 impl ToBatch for LogicalCteRef {
     fn to_batch(&self) -> Result<PlanRef> {
-        bail_not_implemented!(issue = 15135, "recursive CTE not supported")
+        bail_not_implemented!(issue = 15135, "recursive CTE not supported for to_batch of LogicalCteRef")
     }
 }
 
 impl ToStream for LogicalCteRef {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        bail_not_implemented!(issue = 15135, "recursive CTE not supported")
+        bail_not_implemented!(issue = 15135, "recursive CTE not supported for to_stream of LogicalCteRef")
     }
 
     fn logical_rewrite_for_stream(
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        bail_not_implemented!(issue = 15135, "recursive CTE not supported")
+        bail_not_implemented!(issue = 15135, "recursive CTE not supported for logical_rewrite_for_stream of LogicalCteRef")
     }
 }
