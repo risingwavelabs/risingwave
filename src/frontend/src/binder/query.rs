@@ -284,6 +284,7 @@ impl Binder {
 
     fn bind_with(&mut self, with: With) -> Result<()> {
         for cte_table in with.cte_tables {
+            // note that the new `share_id` for the rcte is generated here
             let share_id = self.next_share_id();
             let Cte { alias, query, .. } = cte_table;
             let table_name = alias.name.real_value();

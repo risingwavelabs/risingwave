@@ -22,9 +22,7 @@ use super::expr_visitable::ExprVisitable;
 use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{
-    generic, ColPrunable, ColumnPruningContext, ExprRewritable, Logical, PlanBase, PlanTreeNode,
-    PredicatePushdown, PredicatePushdownContext, RewriteStreamContext, ToBatch, ToStream,
-    ToStreamContext,
+    gen_filter_and_pushdown, generic, ColPrunable, ColumnPruningContext, ExprRewritable, Logical, PlanBase, PlanTreeNode, PredicatePushdown, PredicatePushdownContext, RewriteStreamContext, ToBatch, ToStream, ToStreamContext
 };
 use crate::binder::ShareId;
 use crate::error::Result;
@@ -97,10 +95,10 @@ impl ExprVisitable for LogicalRecursiveUnion {}
 impl PredicatePushdown for LogicalRecursiveUnion {
     fn predicate_pushdown(
         &self,
-        _predicate: Condition,
-        _ctx: &mut PredicatePushdownContext,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        unimplemented!("recursive CTE not supported for predicate_pushdown of LogicalRecursiveUnion")
+        gen_filter_and_pushdown(node, filter_predicate, pushed_predicate, ctx)
     }
 }
 
