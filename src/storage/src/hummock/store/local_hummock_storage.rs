@@ -24,6 +24,7 @@ use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{is_empty_key_range, vnode_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
+use risingwave_pb::hummock::SstableInfo;
 use tracing::{warn, Instrument};
 
 use super::version::{StagingData, VersionUpdate};
@@ -45,7 +46,10 @@ use crate::hummock::utils::{
     ENABLE_SANITY_CHECK,
 };
 use crate::hummock::write_limiter::WriteLimiterRef;
-use crate::hummock::{BackwardSstableIterator, MemoryLimiter, SstableIterator};
+use crate::hummock::{
+    BackwardSstableIterator, MemoryLimiter, SstableIterator, SstableIteratorReadOptions,
+    SstableStoreRef,
+};
 use crate::mem_table::{KeyOp, MemTable, MemTableHummockIterator, MemTableHummockRevIterator};
 use crate::monitor::{HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic};
 use crate::store::*;
@@ -891,8 +895,18 @@ impl IteratorFactory for ForwardIteratorFactory {
         self.overlapping_iters.push(iter);
     }
 
-    fn add_concat_sst_iter(&mut self, iter: ConcatIteratorInner<Self::SstableIteratorType>) {
-        self.non_overlapping_iters.push(iter);
+    fn add_concat_sst_iter(
+        &mut self,
+        tables: Vec<SstableInfo>,
+        sstable_store: SstableStoreRef,
+        read_options: Arc<SstableIteratorReadOptions>,
+    ) {
+        self.non_overlapping_iters
+            .push(ConcatIteratorInner::<Self::SstableIteratorType>::new(
+                tables,
+                sstable_store,
+                read_options,
+            ));
     }
 }
 
@@ -950,7 +964,18 @@ impl IteratorFactory for BackwardIteratorFactory {
         self.overlapping_iters.push(iter);
     }
 
-    fn add_concat_sst_iter(&mut self, iter: ConcatIteratorInner<Self::SstableIteratorType>) {
-        self.non_overlapping_iters.push(iter);
+    fn add_concat_sst_iter(
+        &mut self,
+        mut tables: Vec<SstableInfo>,
+        sstable_store: SstableStoreRef,
+        read_options: Arc<SstableIteratorReadOptions>,
+    ) {
+        tables.reverse();
+        self.non_overlapping_iters
+            .push(ConcatIteratorInner::<Self::SstableIteratorType>::new(
+                tables,
+                sstable_store,
+                read_options,
+            ));
     }
 }

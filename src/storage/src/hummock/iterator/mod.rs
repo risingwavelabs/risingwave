@@ -15,10 +15,13 @@
 use std::future::Future;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 
 use more_asserts::assert_gt;
 
-use super::{HummockResult, HummockValue, SstableIteratorType};
+use super::{
+    HummockResult, HummockValue, SstableIteratorReadOptions, SstableIteratorType, SstableStoreRef,
+};
 
 mod forward_concat;
 pub use forward_concat::*;
@@ -52,6 +55,7 @@ pub use delete_range_iterator::{
     DeleteRangeIterator, ForwardMergeRangeIterator, RangeIteratorTyped,
 };
 use risingwave_common::catalog::TableId;
+use risingwave_pb::hummock::SstableInfo;
 pub use skip_watermark::*;
 
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
@@ -340,6 +344,7 @@ impl<'a, B: RustIteratorBuilder> Iterator for RustIteratorOfBuilder<'a, B> {
 
 pub trait RustIteratorBuilder: Send + Sync + 'static {
     type Iterable: Send + Sync;
+    type Direction: HummockIteratorDirection;
     type RewindIter<'a>: Iterator<Item = (TableKey<&'a [u8]>, HummockValue<&'a [u8]>)>
         + Send
         + Sync
@@ -374,53 +379,8 @@ impl<'a, B: RustIteratorBuilder> FromRustIterator<'a, B> {
             table_id,
         }
     }
-}
 
-impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
-    type Direction = Forward;
-
-    async fn next(&mut self) -> HummockResult<()> {
-        let (iter, key, value) = self.iter.as_mut().expect("should be valid");
-        if let Some((new_key, new_value)) = iter.next() {
-            *key = new_key;
-            *value = new_value;
-        } else {
-            self.iter = None;
-        }
-        Ok(())
-    }
-
-    fn key(&self) -> FullKey<&[u8]> {
-        let (_, key, _) = self.iter.as_ref().expect("should be valid");
-        FullKey {
-            epoch_with_gap: self.epoch,
-            user_key: UserKey {
-                table_id: self.table_id,
-                table_key: *key,
-            },
-        }
-    }
-
-    fn value(&self) -> HummockValue<&[u8]> {
-        let (_, _, value) = self.iter.as_ref().expect("should be valid");
-        *value
-    }
-
-    fn is_valid(&self) -> bool {
-        self.iter.is_some()
-    }
-
-    async fn rewind(&mut self) -> HummockResult<()> {
-        let mut iter = B::rewind(self.inner);
-        if let Some((key, value)) = iter.next() {
-            self.iter = Some((RustIteratorOfBuilder::Rewind(iter), key, value));
-        } else {
-            self.iter = None;
-        }
-        Ok(())
-    }
-
-    async fn seek<'b>(&'b mut self, key: FullKey<&'b [u8]>) -> HummockResult<()> {
+    async fn seek_inner<'b>(&'b mut self, key: FullKey<&'b [u8]>) -> HummockResult<()> {
         if self.table_id < key.user_key.table_id {
             // returns None when the range of self.table_id must not include the given key
             self.iter = None;
@@ -467,38 +427,45 @@ impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
         Ok(())
     }
 
-    fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
-
-    fn value_meta(&self) -> ValueMeta {
-        ValueMeta::default()
-    }
-}
-
-pub struct FromRustRevIterator<'a, B: RustIteratorBuilder> {
-    inner: &'a B::Iterable,
-    #[expect(clippy::type_complexity)]
-    iter: Option<(
-        RustIteratorOfBuilder<'a, B>,
-        TableKey<&'a [u8]>,
-        HummockValue<&'a [u8]>,
-    )>,
-    epoch: EpochWithGap,
-    table_id: TableId,
-}
-
-impl<'a, B: RustIteratorBuilder> FromRustRevIterator<'a, B> {
-    pub fn new(inner: &'a B::Iterable, epoch: EpochWithGap, table_id: TableId) -> Self {
-        Self {
-            inner,
-            iter: None,
-            epoch,
-            table_id,
+    async fn rev_seek_inner<'b>(&'b mut self, key: FullKey<&'b [u8]>) -> HummockResult<()> {
+        if self.table_id > key.user_key.table_id {
+            // returns None when the range of self.table_id must not include the given key
+            self.iter = None;
+            return Ok(());
         }
+        if self.table_id < key.user_key.table_id {
+            return self.rewind().await;
+        }
+        let mut iter = B::seek(self.inner, key.user_key.table_key);
+        match iter.next() {
+            Some((first_key, first_value)) => {
+                let first_full_key = FullKey {
+                    epoch_with_gap: self.epoch,
+                    user_key: UserKey {
+                        table_id: self.table_id,
+                        table_key: first_key,
+                    },
+                };
+                if first_full_key > key {
+                    // The semantic of `seek_fn` will ensure that `first_key` <= table_key of `key`.
+                    // At the beginning we have checked that `self.table_id` <= table_id of `key`.
+                    // Therefore, when `first_full_key` > `key`, the only possibility is that
+                    // `first_key` == table_key of `key`, and `self.table_id` == table_id of `key`,
+                    // the `self.epoch` > epoch of `key`.
+                    assert_eq!(first_key, key.user_key.table_key);
+                }
+                self.iter = Some((RustIteratorOfBuilder::Seek(iter), first_key, first_value));
+            }
+            None => {
+                self.iter = None;
+            }
+        }
+        Ok(())
     }
 }
 
-impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustRevIterator<'a, B> {
-    type Direction = Backward;
+impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
+    type Direction = B::Direction;
 
     async fn next(&mut self) -> HummockResult<()> {
         let (iter, key, value) = self.iter.as_mut().expect("should be valid");
@@ -542,39 +509,10 @@ impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustRevIterator<'a, B> 
     }
 
     async fn seek<'b>(&'b mut self, key: FullKey<&'b [u8]>) -> HummockResult<()> {
-        if self.table_id > key.user_key.table_id {
-            // returns None when the range of self.table_id must not include the given key
-            self.iter = None;
-            return Ok(());
+        match Self::Direction::direction() {
+            DirectionEnum::Forward => self.seek_inner(key).await,
+            DirectionEnum::Backward => self.rev_seek_inner(key).await,
         }
-        if self.table_id < key.user_key.table_id {
-            return self.rewind().await;
-        }
-        let mut iter = B::seek(self.inner, key.user_key.table_key);
-        match iter.next() {
-            Some((first_key, first_value)) => {
-                let first_full_key = FullKey {
-                    epoch_with_gap: self.epoch,
-                    user_key: UserKey {
-                        table_id: self.table_id,
-                        table_key: first_key,
-                    },
-                };
-                if first_full_key > key {
-                    // The semantic of `seek_fn` will ensure that `first_key` <= table_key of `key`.
-                    // At the beginning we have checked that `self.table_id` <= table_id of `key`.
-                    // Therefore, when `first_full_key` > `key`, the only possibility is that
-                    // `first_key` == table_key of `key`, and `self.table_id` == table_id of `key`,
-                    // the `self.epoch` > epoch of `key`.
-                    assert_eq!(first_key, key.user_key.table_key);
-                }
-                self.iter = Some((RustIteratorOfBuilder::Seek(iter), first_key, first_value));
-            }
-            None => {
-                self.iter = None;
-            }
-        }
-        Ok(())
     }
 
     fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
@@ -616,5 +554,10 @@ pub trait IteratorFactory {
     fn add_batch_iter(&mut self, batch: SharedBufferBatch);
     fn add_staging_sst_iter(&mut self, sst: Self::SstableIteratorType);
     fn add_overlapping_sst_iter(&mut self, iter: Self::SstableIteratorType);
-    fn add_concat_sst_iter(&mut self, iter: ConcatIteratorInner<Self::SstableIteratorType>);
+    fn add_concat_sst_iter(
+        &mut self,
+        tables: Vec<SstableInfo>,
+        sstable_store: SstableStoreRef,
+        read_options: Arc<SstableIteratorReadOptions>,
+    );
 }

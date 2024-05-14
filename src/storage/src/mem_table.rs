@@ -35,7 +35,7 @@ use thiserror_ext::AsReport;
 use tracing::error;
 
 use crate::error::{StorageError, StorageResult};
-use crate::hummock::iterator::{FromRustIterator, FromRustRevIterator, RustIteratorBuilder};
+use crate::hummock::iterator::{Backward, Forward, FromRustIterator, RustIteratorBuilder};
 use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchId};
 use crate::hummock::utils::{
     do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check, ENABLE_SANITY_CHECK,
@@ -93,6 +93,7 @@ fn map_to_hummock_value<'a>(
 }
 
 impl RustIteratorBuilder for MemTableRevIteratorBuilder {
+    type Direction = Backward;
     type Iterable = MemTableStore;
 
     type RewindIter<'a> =
@@ -113,6 +114,7 @@ impl RustIteratorBuilder for MemTableRevIteratorBuilder {
 }
 
 impl RustIteratorBuilder for MemTableIteratorBuilder {
+    type Direction = Forward;
     type Iterable = MemTableStore;
 
     type RewindIter<'a> =
@@ -132,7 +134,7 @@ impl RustIteratorBuilder for MemTableIteratorBuilder {
 }
 
 pub type MemTableHummockIterator<'a> = FromRustIterator<'a, MemTableIteratorBuilder>;
-pub type MemTableHummockRevIterator<'a> = FromRustRevIterator<'a, MemTableRevIteratorBuilder>;
+pub type MemTableHummockRevIterator<'a> = FromRustIterator<'a, MemTableRevIteratorBuilder>;
 
 impl MemTable {
     pub fn new(op_consistency_level: OpConsistencyLevel) -> Self {
