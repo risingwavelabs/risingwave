@@ -26,6 +26,7 @@ mod external;
 #[cfg(feature = "embedded-python-udf")]
 mod python;
 mod quickjs;
+#[cfg(feature = "embedded-wasm-udf")]
 mod wasm;
 
 /// Download wasm binary from a link.

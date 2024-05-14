@@ -16,8 +16,10 @@ ignored = ["workspace-hack", "ctor"]
 normal = ["workspace-hack", "ctor"]
 
 [features]
+default = ["embedded-wasm-udf"]
 embedded-deno-udf = ["arrow-udf-js-deno"]
 embedded-python-udf = ["arrow-udf-python"]
+embedded-wasm-udf = ["arrow-udf-wasm"]
 
 [dependencies]
 aho-corasick = "1"
@@ -29,7 +31,7 @@ arrow-udf-flight = { workspace = true }
 arrow-udf-js = { workspace = true }
 arrow-udf-js-deno = { workspace = true, optional = true }
 arrow-udf-python = { workspace = true, optional = true }
-arrow-udf-wasm = { workspace = true }
+arrow-udf-wasm = { workspace = true, optional = true }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 chrono = { version = "0.4", default-features = false, features = [
