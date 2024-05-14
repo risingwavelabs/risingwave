@@ -18,7 +18,7 @@ use std::sync::LazyLock;
 use openssl::error::ErrorStack;
 use openssl::symm::{Cipher, Crypter, Mode as CipherMode};
 use regex::Regex;
-use risingwave_expr::{function, CryptographyError, CryptographyStage, ExprError, Result};
+use risingwave_expr::{function, ExprError, Result};
 
 #[derive(Debug, Clone, PartialEq)]
 enum Algorithm {
@@ -129,14 +129,13 @@ impl CipherConfig {
         })
     }
 
-    fn eval(&self, input: &[u8], stage: CryptographyStage) -> Result<Box<[u8]>> {
+    fn eval(&self, input: &[u8], stage: CryptographyStage) -> Result<Box<[u8]>, CryptographyError> {
         let operation = match stage {
             CryptographyStage::Encrypt => CipherMode::Encrypt,
             CryptographyStage::Decrypt => CipherMode::Decrypt,
         };
-        self.eval_inner(input, operation).map_err(|reason| {
-            ExprError::Cryptography(Box::new(CryptographyError { stage, reason }))
-        })
+        self.eval_inner(input, operation)
+            .map_err(|reason| CryptographyError { stage, reason })
     }
 
     fn eval_inner(
@@ -163,7 +162,7 @@ impl CipherConfig {
     "decrypt(bytea, bytea, varchar) -> bytea",
     prebuild = "CipherConfig::parse_cipher_config($1, $2)?"
 )]
-pub fn decrypt(data: &[u8], config: &CipherConfig) -> Result<Box<[u8]>> {
+fn decrypt(data: &[u8], config: &CipherConfig) -> Result<Box<[u8]>, CryptographyError> {
     config.eval(data, CryptographyStage::Decrypt)
 }
 
@@ -171,8 +170,22 @@ pub fn decrypt(data: &[u8], config: &CipherConfig) -> Result<Box<[u8]>> {
     "encrypt(bytea, bytea, varchar) -> bytea",
     prebuild = "CipherConfig::parse_cipher_config($1, $2)?"
 )]
-pub fn encrypt(data: &[u8], config: &CipherConfig) -> Result<Box<[u8]>> {
+fn encrypt(data: &[u8], config: &CipherConfig) -> Result<Box<[u8]>, CryptographyError> {
     config.eval(data, CryptographyStage::Encrypt)
+}
+
+#[derive(Debug)]
+enum CryptographyStage {
+    Encrypt,
+    Decrypt,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{stage:?} stage, reason: {reason}")]
+struct CryptographyError {
+    pub stage: CryptographyStage,
+    #[source]
+    pub reason: openssl::error::ErrorStack,
 }
 
 #[cfg(test)]

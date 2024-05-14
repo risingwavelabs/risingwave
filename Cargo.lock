@@ -10693,7 +10693,6 @@ dependencies = [
  "md5",
  "moka",
  "num-traits",
- "openssl",
  "parse-display",
  "paste",
  "prometheus",
