@@ -509,6 +509,9 @@ pub struct BatchConfig {
     /// This is the secs used to mask a worker unavailable temporarily.
     #[serde(default = "default::batch::mask_worker_temporary_secs")]
     pub mask_worker_temporary_secs: usize,
+
+    #[serde(default = "default::batch::enable_spill")]
+    pub enable_spill: bool,
 }
 
 /// The section `[streaming]` in `risingwave.toml`.
@@ -1663,6 +1666,10 @@ pub mod default {
     pub mod batch {
         pub fn enable_barrier_read() -> bool {
             false
+        }
+
+        pub fn enable_spill() -> bool {
+            true
         }
 
         pub fn statement_timeout_in_sec() -> u32 {

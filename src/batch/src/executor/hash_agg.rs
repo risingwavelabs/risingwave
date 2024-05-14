@@ -64,6 +64,7 @@ impl HashKeyDispatcher for HashAggExecutorBuilder {
             self.identity,
             self.chunk_size,
             self.mem_context,
+            self.enable_spill,
             self.shutdown_rx,
         ))
     }
@@ -83,6 +84,7 @@ pub struct HashAggExecutorBuilder {
     identity: String,
     chunk_size: usize,
     mem_context: MemoryContext,
+    enable_spill: bool,
     shutdown_rx: ShutdownToken,
 }
 
@@ -94,6 +96,7 @@ impl HashAggExecutorBuilder {
         identity: String,
         chunk_size: usize,
         mem_context: MemoryContext,
+        enable_spill: bool,
         shutdown_rx: ShutdownToken,
     ) -> Result<BoxedExecutor> {
         let aggs: Vec<_> = hash_agg_node
@@ -132,6 +135,7 @@ impl HashAggExecutorBuilder {
             identity,
             chunk_size,
             mem_context,
+            enable_spill,
             shutdown_rx,
         };
 
@@ -161,6 +165,7 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
             identity.clone(),
             source.context.get_config().developer.chunk_size,
             source.context.create_executor_mem_context(identity),
+            source.context.get_config().enable_spill,
             source.shutdown_rx.clone(),
         )
     }
@@ -182,11 +187,13 @@ pub struct HashAggExecutor<K> {
     identity: String,
     chunk_size: usize,
     mem_context: MemoryContext,
+    enable_spill: bool,
     shutdown_rx: ShutdownToken,
     _phantom: PhantomData<K>,
 }
 
 impl<K> HashAggExecutor<K> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         aggs: Arc<Vec<BoxedAggregateFunction>>,
         group_key_columns: Vec<usize>,
@@ -197,6 +204,7 @@ impl<K> HashAggExecutor<K> {
         identity: String,
         chunk_size: usize,
         mem_context: MemoryContext,
+        enable_spill: bool,
         shutdown_rx: ShutdownToken,
     ) -> Self {
         HashAggExecutor {
@@ -209,6 +217,7 @@ impl<K> HashAggExecutor<K> {
             identity,
             chunk_size,
             mem_context,
+            enable_spill,
             shutdown_rx,
             _phantom: PhantomData,
         }
@@ -429,7 +438,6 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let child_schema = self.child.schema().clone();
-        let enable_spill = true;
         let mut need_to_spill = false;
 
         // hash map for each agg groups
@@ -500,7 +508,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             }
             // update memory usage
             if !self.mem_context.add(memory_usage_diff) {
-                if enable_spill {
+                if self.enable_spill {
                     need_to_spill = true;
                     break;
                 } else {
@@ -521,7 +529,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             agg_spill_manager.init_writers().await?;
 
             let mut memory_usage_diff = 0;
-            // Spill agg states
+            // Spill agg states.
             for (key, states) in groups {
                 let key_row = key.deserialize(&self.group_key_types)?;
                 let mut agg_datums = vec![];
@@ -537,10 +545,10 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     .await?;
             }
 
-            // Release memory occupied by agg hash map
+            // Release memory occupied by agg hash map.
             self.mem_context.add(memory_usage_diff);
 
-            // Spill input chunks
+            // Spill input chunks.
             #[for_await]
             for chunk in input_stream {
                 let chunk: DataChunk = chunk?;
@@ -561,6 +569,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
 
             agg_spill_manager.close_writers().await?;
 
+            // Process each partition one by one.
             for i in 0..agg_spill_manager.partition_num {
                 let agg_state_stream = agg_spill_manager.read_agg_state_partition(i).await?;
                 let input_stream = agg_spill_manager.read_input_partition(i).await?;
@@ -578,6 +587,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     format!("{}-sub{}", self.identity.clone(), i),
                     self.chunk_size,
                     self.mem_context.clone(),
+                    self.enable_spill,
                     self.shutdown_rx.clone(),
                 );
 
@@ -594,6 +604,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     yield chunk;
                 }
 
+                // Clear files of the current partition.
                 agg_spill_manager.clear_partition(i).await?;
             }
         } else {
