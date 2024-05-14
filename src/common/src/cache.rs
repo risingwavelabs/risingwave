@@ -1031,7 +1031,6 @@ mod tests {
 
     use super::*;
 
-    #[expect(dead_code)]
     pub struct Block {
         pub offset: u64,
         pub sst: u64,
