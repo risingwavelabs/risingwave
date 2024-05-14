@@ -843,11 +843,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             if let Some(rows) = &matched_rows {
                 join_matched_join_keys.observe(rows.len() as _);
                 if rows.len() > 100000 {
-                    tracing::warn!( "Join matched join keys count is too large: {}, update_table_id: {}, match_table_id: {}, join_key: {:?}", 
+                    tracing::warn!( "Join matched join keys count is too large: {}, update_table_id: {}, match_table_id: {}, join_key: {:?}, actor_id: {}, fragment_id: {}", 
                         rows.len(),
                         side_update.ht.table_id(),
                         side_match.ht.table_id(),
                         key,
+                        ctx.id,
+                        ctx.fragment_id,
                     );
                 }
             } else {
