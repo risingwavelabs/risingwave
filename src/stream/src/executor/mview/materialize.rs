@@ -833,23 +833,17 @@ mod tests {
     use std::iter;
     use std::sync::atomic::AtomicU64;
 
-    use futures::stream::StreamExt;
     use rand::rngs::SmallRng;
     use rand::{Rng, RngCore, SeedableRng};
     use risingwave_common::array::stream_chunk::{StreamChunkMut, StreamChunkTestExt};
-    use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
-    use risingwave_common::array::Op;
-    use risingwave_common::catalog::{ColumnDesc, ConflictBehavior, Field, Schema, TableId};
-    use risingwave_common::row::OwnedRow;
-    use risingwave_common::types::DataType;
+    use risingwave_common::catalog::Field;
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+    use risingwave_common::util::sort_util::OrderType;
     use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::batch_table::storage_table::StorageTable;
 
     use super::*;
-    use crate::executor::test_utils::prelude::StateTable;
     use crate::executor::test_utils::*;
 
     #[tokio::test]

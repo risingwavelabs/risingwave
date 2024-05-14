@@ -412,16 +412,12 @@ impl SelectReceivers {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
     use std::time::Duration;
 
     use assert_matches::assert_matches;
     use futures::FutureExt;
-    use itertools::Itertools;
-    use risingwave_common::array::{Op, StreamChunk};
-    use risingwave_common::types::ScalarImpl;
+    use risingwave_common::array::Op;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_pb::stream_plan::StreamMessage;
     use risingwave_pb::task_service::exchange_service_server::{
@@ -438,7 +434,6 @@ mod tests {
     use super::*;
     use crate::executor::exchange::input::RemoteInput;
     use crate::executor::exchange::permit::channel_for_test;
-    use crate::executor::{Barrier, Execute, Mutation};
     use crate::task::test_utils::helper_make_local_actor;
     use crate::task::LocalBarrierManager;
 

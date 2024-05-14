@@ -488,9 +488,8 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> Execute
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::*;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_hummock_sdk::HummockReadEpoch;
@@ -499,7 +498,6 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
-    use crate::executor::{ActorContext, StreamExecutorResult};
 
     async fn create_in_memory_state_table(
         mem_state: MemoryStateStore,
