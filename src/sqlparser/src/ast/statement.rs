@@ -875,7 +875,6 @@ impl ParseTo for CreateSecretStatement {
         if parser.parse_keyword(Keyword::AS) {
             credential = parser.parse_value()?;
         }
-        // impl_parse_to!(credential: Value, parser);
         Ok(Self {
             if_not_exists,
             secret_name,

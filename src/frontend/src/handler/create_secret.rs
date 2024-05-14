@@ -14,6 +14,7 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use prost::Message;
+use risingwave_common::bail_not_implemented;
 use risingwave_sqlparser::ast::{CreateSecretStatement, SqlOption, Value};
 
 use crate::error::{ErrorCode, Result};
@@ -64,7 +65,7 @@ pub async fn handle_create_secret(
                         )
                         .into());
                     }
-                    todo!()
+                    bail_not_implemented!()
                 }
                 _ => {
                     return Err(ErrorCode::InvalidParameterValue(format!(
@@ -85,16 +86,6 @@ pub async fn handle_create_secret(
     };
 
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
-    // let secret_payload = match &stmt.credential {
-    //     Value::SingleQuotedString(ref s) => s.as_bytes().to_vec(),
-    //     Value::Null => Vec::new(),
-    //     _ => {
-    //         return Err(ErrorCode::InvalidParameterValue(
-    //             "secret payload must be a string".to_string(),
-    //         )
-    //             .into());
-    //     }
-    // };
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
