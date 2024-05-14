@@ -433,6 +433,24 @@ impl<S: StateStore> SourceExecutor<S> {
                 .await?
             {
                 *ele = recover_state;
+            } else {
+                // This is a new split, not in state table.
+                if self.is_shared {
+                    // For shared source, we start from latest and let the downstream SourceBackfillExecutors to read historical data.
+                    // It's highly probable that the work of scanning historical data cannot be shared,
+                    // so don't waste work on it.
+                    // For more details, see https://github.com/risingwavelabs/risingwave/issues/16576#issuecomment-2095413297
+                    if ele.is_cdc_split() {
+                        // shared CDC source already starts from latest.
+                        continue;
+                    }
+                    match ele {
+                        SplitImpl::Kafka(split) => {
+                            split.seek_to_latest_offset();
+                        }
+                        _ => unreachable!("only kafka source can be shared, got {:?}", ele),
+                    }
+                }
             }
         }
 
