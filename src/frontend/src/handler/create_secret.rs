@@ -65,7 +65,7 @@ pub async fn handle_create_secret(
                         )
                         .into());
                     }
-                    bail_not_implemented!()
+                    bail_not_implemented!("hashicorp_vault backend is not implemented yet")
                 }
                 _ => {
                     return Err(ErrorCode::InvalidParameterValue(format!(

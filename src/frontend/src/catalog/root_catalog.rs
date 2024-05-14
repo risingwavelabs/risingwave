@@ -268,6 +268,25 @@ impl Catalog {
         }
     }
 
+    pub fn update_secret(&mut self, proto: &PbSecret) {
+        let database = self.get_database_mut(proto.database_id).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        let secret_id = SecretId::new(proto.id);
+        if schema.get_secret_by_id(&secret_id).is_some() {
+            schema.update_secret(proto);
+        } else {
+            // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
+            schema.create_secret(proto);
+            database
+                .iter_schemas_mut()
+                .find(|schema| {
+                    schema.id() != proto.schema_id && schema.get_secret_by_id(&secret_id).is_some()
+                })
+                .unwrap()
+                .drop_secret(secret_id);
+        }
+    }
+
     pub fn drop_database(&mut self, db_id: DatabaseId) {
         let name = self.db_name_by_id.remove(&db_id).unwrap();
         let database = self.database_by_name.remove(&name).unwrap();

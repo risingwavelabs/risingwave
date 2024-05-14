@@ -357,7 +357,7 @@ impl FrontendObserverNode {
                     secret.schema_id,
                     SecretId::new(secret.id),
                 ),
-                Operation::Update => unimplemented!(),
+                Operation::Update => catalog_guard.update_secret(secret),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             _ => unreachable!(),
