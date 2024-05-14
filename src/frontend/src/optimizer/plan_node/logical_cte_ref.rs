@@ -65,7 +65,7 @@ impl PredicatePushdown for LogicalCteRef {
         _predicate: Condition,
         _ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-       unimplemented!("recursive CTE not supported for predicate_pushdown of LogicalCteRef")
+        self.clone().into()
     }
 }
 

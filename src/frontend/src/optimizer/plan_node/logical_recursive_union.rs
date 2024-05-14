@@ -22,7 +22,7 @@ use super::expr_visitable::ExprVisitable;
 use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{
-    gen_filter_and_pushdown, generic, ColPrunable, ColumnPruningContext, ExprRewritable, Logical, PlanBase, PlanTreeNode, PredicatePushdown, PredicatePushdownContext, RewriteStreamContext, ToBatch, ToStream, ToStreamContext
+    generic, ColPrunable, ColumnPruningContext, ExprRewritable, Logical, PlanBase, PlanTreeNode, PredicatePushdown, PredicatePushdownContext, RewriteStreamContext, ToBatch, ToStream, ToStreamContext
 };
 use crate::binder::ShareId;
 use crate::error::Result;
@@ -98,7 +98,14 @@ impl PredicatePushdown for LogicalRecursiveUnion {
         predicate: Condition,
         ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        gen_filter_and_pushdown(node, filter_predicate, pushed_predicate, ctx)
+        let new_inputs = self.inputs()
+            .iter()
+            .map(|input| input.predicate_pushdown(predicate.clone(), ctx))
+            .collect_vec();
+        let new_plan = self.clone_with_inputs(&new_inputs);
+        self.ctx()
+            .insert_rcte_cache_plan(self.core.id, new_plan.clone());
+        new_plan
     }
 }
 
