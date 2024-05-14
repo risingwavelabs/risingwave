@@ -1006,10 +1006,10 @@ where
         } => {
             let sdk_err = inner
                 .as_ref()
-                .downcast_ref::<SdkError<E, aws_smithy_runtime_api::http::Response<SdkBody>>>()
-                .unwrap();
+                .downcast_ref::<SdkError<E, aws_smithy_runtime_api::http::Response<SdkBody>>>();
+
             let err_should_retry = match sdk_err {
-                SdkError::DispatchFailure(e) => {
+                Some(SdkError::DispatchFailure(e)) => {
                     if e.is_timeout() {
                         tracing::warn!(target: "http_timeout_retry", "{e:?} occurs, retry S3 get_object request.");
                         true
@@ -1017,7 +1017,8 @@ where
                         false
                     }
                 }
-                SdkError::ServiceError(e) => {
+
+                Some(SdkError::ServiceError(e)) => {
                     let retry = match e.err().code() {
                         None => {
                             if config.s3.developer.object_store_retry_unknown_service_error
@@ -1048,7 +1049,7 @@ where
                     retry
                 }
 
-                SdkError::TimeoutError(_err) => true,
+                Some(SdkError::TimeoutError(_err)) => true,
 
                 _ => false,
             };
