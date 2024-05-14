@@ -15,10 +15,22 @@ ignored = ["workspace-hack", "ctor"]
 [package.metadata.cargo-udeps.ignore]
 normal = ["workspace-hack", "ctor"]
 
+[features]
+default = ["embedded-deno-udf", "embedded-python-udf"]
+embedded-deno-udf = ["arrow-udf-js-deno"]
+embedded-python-udf = ["arrow-udf-python"]
+
 [dependencies]
 aho-corasick = "1"
 anyhow = "1"
+arrow-array = { workspace = true }
+arrow-flight = { workspace = true }
 arrow-schema = { workspace = true }
+arrow-udf-flight = { workspace = true }
+arrow-udf-js = { workspace = true }
+arrow-udf-js-deno = { workspace = true, optional = true }
+arrow-udf-python = { workspace = true, optional = true }
+arrow-udf-wasm = { workspace = true }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 chrono = { version = "0.4", default-features = false, features = [
@@ -29,12 +41,14 @@ chrono-tz = { version = "0.9", features = ["case-insensitive"] }
 fancy-regex = "0.13"
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
+ginepro = "0.7"
 hex = "0.4"
 icelake = { workspace = true }
 itertools = { workspace = true }
 jsonbb = { workspace = true }
 linkme = { version = "0.3", features = ["used_linker"] }
 md5 = "0.7"
+moka = { version = "0.12", features = ["sync"] }
 num-traits = "0.2"
 openssl = { version = "0.10", features = ["vendored"] }
 regex = "1"
@@ -52,7 +66,9 @@ sql-json-path = { version = "0.1", features = ["jsonbb"] }
 thiserror = "1"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["time"] }
+tonic = "0.10"
 tracing = "0.1"
+zstd = { version = "0.13", default-features = false }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }
