@@ -1,32 +1,45 @@
 control substitution on
 
 system ok
-e2e_test/source_inline/pubsub/prepare-data.rs
+e2e_test/source_inline/pubsub/prepare-data.rs create
 
-# fail with invalid emulator_host
+statement error missing field `pubsub.subscription`
+CREATE SOURCE s (v1 int, v2 varchar) WITH (
+    connector = 'google_pubsub'
+) FORMAT PLAIN ENCODE JSON;
+
+statement error credentials must be set if not using the pubsub emulator
+CREATE SOURCE s (v1 int, v2 varchar) WITH (
+    connector = 'google_pubsub',
+    pubsub.subscription = 'test-subscription-1'
+) FORMAT PLAIN ENCODE JSON;
+
 statement error failed to lookup address information
-CREATE TABLE s1 (v1 int, v2 varchar) WITH (
+CREATE TABLE s (v1 int, v2 varchar) WITH (
     connector = 'google_pubsub',
     pubsub.subscription = 'test-subscription-1',
     pubsub.emulator_host = 'invalid_host:5981'
 ) FORMAT PLAIN ENCODE JSON;
 
+statement error subscription test-subscription-not-exist does not exist
+CREATE TABLE s (v1 int, v2 varchar) WITH (
+    ${RISEDEV_PUBSUB_WITH_OPTIONS_COMMON},
+    pubsub.subscription = 'test-subscription-not-exist',
+) FORMAT PLAIN ENCODE JSON;
+
+# fail if both start_offset and start_snapshot are provided
+statement error specify at most one of start_offset or start_snapshot
+CREATE TABLE s (v1 int, v2 varchar) WITH (
+    ${RISEDEV_PUBSUB_WITH_OPTIONS_COMMON},
+    pubsub.subscription = 'test-subscription-3',
+    pubsub.start_offset.nanos = '121212',
+    pubsub.start_snapshot = 'snapshot-that-doesnt-exist'
+) FORMAT PLAIN ENCODE JSON;
+
 statement ok
 CREATE TABLE s1 (v1 int, v2 varchar) WITH (
     ${RISEDEV_PUBSUB_WITH_OPTIONS_COMMON},
     pubsub.subscription = 'test-subscription-1',
-) FORMAT PLAIN ENCODE JSON;
-
-statement ok
-SELECT * FROM s1;
-
-statement ok
-DROP TABLE s1;
-
-statement error subscription test-subscription-not-exist does not exist
-CREATE TABLE s2 (v1 int, v2 varchar) WITH (
-    ${RISEDEV_PUBSUB_WITH_OPTIONS_COMMON},
-    pubsub.subscription = 'test-subscription-not-exist',
 ) FORMAT PLAIN ENCODE JSON;
 
 statement ok
@@ -35,46 +48,115 @@ CREATE TABLE s2 (v1 int, v2 varchar) WITH (
     pubsub.subscription = 'test-subscription-2',
 ) FORMAT PLAIN ENCODE JSON;
 
-# fail if both start_offset and start_snapshot are provided
-statement error specify at most one of start_offset or start_snapshot
-CREATE TABLE s3 (v1 int, v2 varchar) WITH (
-    ${RISEDEV_PUBSUB_WITH_OPTIONS_COMMON},
-    pubsub.subscription = 'test-subscription-3',
-    pubsub.start_offset.nanos = '121212',
-    pubsub.start_snapshot = 'snapshot-that-doesnt-exist'
-) FORMAT PLAIN ENCODE JSON;
+# We want to test Pub/Sub ack messages on checkpoint, so disable checkpointing here.
+# Note that DDL & flush will trigger checkpoint.
+statement ok
+ALTER SYSTEM SET checkpoint_frequency TO 114514;
 
-# wait for source
+# We publish data after the tables are created, because DDL will trigger checkpoint.
+system ok
+e2e_test/source_inline/pubsub/prepare-data.rs publish
+
+# default ack timeout is 10s. Let it redeliver once.
+sleep 15s
+
+# visibility mode is checkpoint
+query IT rowsort
+select count(*) from s1;
+----
+0
+
+statement ok
+set visibility_mode = 'all';
+
+query IT rowsort
+select v1, v2, count(*) FROM s1 group by v1, v2;
+----
+0 name0 2
+1 name1 2
+2 name2 2
+3 name3 2
+4 name4 2
+5 name5 2
+6 name6 2
+7 name7 2
+8 name8 2
+9 name9 2
+
+
+statement ok
+RECOVER;
+
+sleep 1s
+
+statement ok
+flush;
+
+# After recovery, uncheckpointed data in RisingWave is lost.
+query IT rowsort
+select count(*) from s1;
+----
+0
+
+# Wait for another redelivery
 sleep 10s
 
-# flush data into storage
+query IT rowsort
+select v1, v2, count(*) FROM s1 group by v1, v2;
+----
+0 name0 1
+1 name1 1
+2 name2 1
+3 name3 1
+4 name4 1
+5 name5 1
+6 name6 1
+7 name7 1
+8 name8 1
+9 name9 1
+
+# flush will force a checkpoint (and ack Pub/Sub messages on checkpoint)
 statement ok
 flush;
 
 query IT rowsort
-select v1, v2 FROM s2;
+select v1, v2, count(*) FROM s1 group by v1, v2;
 ----
-0 name5
-0 name9
-1 name0
-1 name7
-2 name0
-2 name3
-3 name2
-3 name9
-4 name6
-4 name7
-5 name3
-5 name8
-6 name3
-6 name4
-7 name0
-7 name5
-8 name8
-8 name9
-9 name2
-9 name2
+0 name0 1
+1 name1 1
+2 name2 1
+3 name3 1
+4 name4 1
+5 name5 1
+6 name6 1
+7 name7 1
+8 name8 1
+9 name9 1
+
+sleep 15s
+
+# no redelivery any more
+query IT rowsort
+select v1, v2, count(*) FROM s1 group by v1, v2;
+----
+0 name0 1
+1 name1 1
+2 name2 1
+3 name3 1
+4 name4 1
+5 name5 1
+6 name6 1
+7 name7 1
+8 name8 1
+9 name9 1
+
+
+statement ok
+DROP TABLE s1;
 
 statement ok
 DROP TABLE s2;
 
+# Restore to the value in src/config/ci.toml
+statement ok
+ALTER SYSTEM SET checkpoint_frequency TO 5;

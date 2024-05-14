@@ -106,7 +106,9 @@ impl WaitCheckpointTask {
                     }
                 }
                 match subscription.ack(ack_ids).await {
-                    Ok(()) => {}
+                    Ok(()) => {
+                        tracing::debug!("ack pubsub messages successfully")
+                    }
                     Err(e) => {
                         tracing::error!(
                             error = %e.as_report(),

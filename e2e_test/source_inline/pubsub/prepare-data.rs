@@ -25,65 +25,52 @@ const SUBSCRIPTION_COUNT: usize = 50;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    let command = args[1].as_str();
+
     std::env::set_var("PUBSUB_EMULATOR_HOST", "127.0.0.1:5980");
 
     let client = Client::new(Default::default()).await?;
 
-    // delete and create "test-topic"
     let topic = client.topic(TOPIC);
-    for subscription in topic.subscriptions(None).await? {
-        subscription.delete(None).await?;
-    }
 
-    let _ = topic.delete(None).await;
-    topic.create(Some(Default::default()), None).await?;
-    for i in 0..SUBSCRIPTION_COUNT {
-        let _ = client
-            .create_subscription(
-                format!("test-subscription-{}", i).as_str(),
-                TOPIC,
-                SubscriptionConfig {
-                    retain_acked_messages: true,
+    if command == "create" {
+        // delete and create "test-topic"
+        for subscription in topic.subscriptions(None).await? {
+            subscription.delete(None).await?;
+        }
+
+        let _ = topic.delete(None).await;
+        topic.create(Some(Default::default()), None).await?;
+        for i in 0..SUBSCRIPTION_COUNT {
+            let _ = client
+                .create_subscription(
+                    format!("test-subscription-{}", i).as_str(),
+                    TOPIC,
+                    SubscriptionConfig {
+                        retain_acked_messages: false,
+                        ..Default::default()
+                    },
+                    None,
+                )
+                .await?;
+        }
+    } else if command == "publish" {
+        let publisher = topic.new_publisher(Default::default());
+        for i in 0..10 {
+            let data = format!("{{\"v1\":{i},\"v2\":\"name{i}\"}}");
+            let a = publisher
+                .publish(PubsubMessage {
+                    data: data.to_string().into_bytes(),
                     ..Default::default()
-                },
-                None,
-            )
-            .await?;
-    }
-
-    let publisher = topic.new_publisher(Default::default());
-    for line in DATA.lines() {
-        let a = publisher
-            .publish(PubsubMessage {
-                data: line.to_string().into_bytes(),
-                ..Default::default()
-            })
-            .await;
-        a.get().await?;
-        println!("published {}", line);
+                })
+                .await;
+            a.get().await?;
+            println!("published {}", data);
+        }
+    } else {
+        panic!("unknown command {command}");
     }
 
     Ok(())
 }
-
-const DATA: &str = r#"{"v1":1,"v2":"name0"}
-{"v1":2,"v2":"name0"}
-{"v1":6,"v2":"name3"}
-{"v1":0,"v2":"name5"}
-{"v1":5,"v2":"name8"}
-{"v1":6,"v2":"name4"}
-{"v1":8,"v2":"name9"}
-{"v1":9,"v2":"name2"}
-{"v1":4,"v2":"name6"}
-{"v1":5,"v2":"name3"}
-{"v1":8,"v2":"name8"}
-{"v1":9,"v2":"name2"}
-{"v1":2,"v2":"name3"}
-{"v1":4,"v2":"name7"}
-{"v1":7,"v2":"name0"}
-{"v1":0,"v2":"name9"}
-{"v1":3,"v2":"name2"}
-{"v1":7,"v2":"name5"}
-{"v1":1,"v2":"name7"}
-{"v1":3,"v2":"name9"}
-"#;

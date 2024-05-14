@@ -15,7 +15,7 @@
 use anyhow::Context;
 use async_trait::async_trait;
 use chrono::{TimeZone, Utc};
-use google_cloud_pubsub::subscription::{SeekTo, SubscriptionConfig};
+use google_cloud_pubsub::subscription::SeekTo;
 use risingwave_common::bail;
 
 use crate::error::ConnectorResult;
@@ -62,20 +62,6 @@ impl SplitEnumerator for PubsubSplitEnumerator {
             .context("error checking subscription validity")?
         {
             bail!("subscription {} does not exist", &sub.id())
-        }
-
-        // We need the `retain_acked_messages` configuration to be true to seek back to timestamps
-        // as done in the [`PubsubSplitReader`] and here.
-        let (_, subscription_config) = sub
-            .config(None)
-            .await
-            .context("failed to fetch subscription config")?;
-        if let SubscriptionConfig {
-            retain_acked_messages: false,
-            ..
-        } = subscription_config
-        {
-            bail!("subscription must be configured with retain_acked_messages set to true")
         }
 
         let seek_to = match (properties.start_offset, properties.start_snapshot) {

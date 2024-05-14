@@ -747,12 +747,29 @@ impl WaitCheckpointTaskBuilder {
 
 /// A worker used to do some work after each checkpoint epoch is committed.
 ///
-/// Useages:
-/// - CDC: Commit last consumed offset to upstream DB, so that old data can be discarded.
-/// - Pubsub: Acknowledge consumed messages, so they won't be redelivered.
-///     If we acknowledge immediately after reading the message, the message cannot be replayed,
-///     thus not at-least-once (unless `retain_acked_messages` is enabled).
-///     See also <https://cloud.google.com/pubsub/docs/subscribe-best-practices#process-messages>
+/// # Usage Cases
+///
+/// Typically there are 2 issues related with ack on checkpoint:
+///
+/// 1. Correctness (at-least-once), or don't let upstream clean uncommitted data.
+///    For message queueing semantics (delete after ack), we should ack to avoid redelivery,
+///    and only ack after checkpoint to avoid data loss.
+///
+/// 2. Allow upstream to clean data after commit.
+///
+/// See also <https://github.com/risingwavelabs/risingwave/issues/16736#issuecomment-2109379790>
+///
+/// ## CDC
+///
+/// Commit last consumed offset to upstream DB, so that old data can be discarded.
+///
+/// ## Google Pub/Sub
+///
+/// Due to queueing semantics.
+/// Although Pub/Sub supports `retain_acked_messages` and `seek` functionality,
+/// it's quite limited unlike Kafka.
+///
+/// See also <https://cloud.google.com/pubsub/docs/subscribe-best-practices#process-messages>
 struct WaitCheckpointWorker<S: StateStore> {
     wait_checkpoint_rx: UnboundedReceiver<(Epoch, WaitCheckpointTask)>,
     state_store: S,

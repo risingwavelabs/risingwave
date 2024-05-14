@@ -35,7 +35,12 @@ pub const GOOGLE_PUBSUB_CONNECTOR: &str = "google_pubsub";
 
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct PubsubProperties {
-    /// pubsub subscription to consume messages from
+    /// Pub/Sub subscription to consume messages from.
+    ///
+    /// Note that we rely on Pub/Sub to load-balance messages between all Readers pulling from
+    /// the same subscription. So one `subscription` (i.e., one `Source`) can only used for one MV.
+    /// Otherwise, different MVs on the same Source will both receive part of the messages.
+    /// TODO: check and enforce this on Meta.
     #[serde(rename = "pubsub.subscription")]
     pub subscription: String,
 
@@ -64,7 +69,7 @@ pub struct PubsubProperties {
     /// in pub/sub because they guarantee retention of:
     /// - All unacknowledged messages at the time of their creation.
     /// - All messages created after their creation.
-    /// Besides retention guarantees, timestamps are also more precise than timestamp-based seeks.
+    /// Besides retention guarantees, snapshots are also more precise than timestamp-based seeks.
     /// See [Seeking to a snapshot](https://cloud.google.com/pubsub/docs/replay-overview#seeking_to_a_timestamp) for
     /// more details.
     #[serde(rename = "pubsub.start_snapshot")]
