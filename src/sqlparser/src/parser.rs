@@ -4694,6 +4694,14 @@ impl Parser {
                         return self.expected("from after columns", self.peek_token());
                     }
                 }
+                Keyword::SECRETS => {
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::Secret {
+                            schema: self.parse_from_and_identifier()?,
+                        },
+                        filter: self.parse_show_statement_filter()?,
+                    });
+                }
                 Keyword::CONNECTIONS => {
                     return Ok(Statement::ShowObjects {
                         object: ShowObject::Connection {

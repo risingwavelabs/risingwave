@@ -977,6 +977,7 @@ pub enum ShowObject {
     Subscription { schema: Option<Ident> },
     Columns { table: ObjectName },
     Connection { schema: Option<Ident> },
+    Secret { schema: Option<Ident> },
     Function { schema: Option<Ident> },
     Indexes { table: ObjectName },
     Cluster,
@@ -1025,6 +1026,7 @@ impl fmt::Display for ShowObject {
             ShowObject::Jobs => write!(f, "JOBS"),
             ShowObject::ProcessList => write!(f, "PROCESSLIST"),
             ShowObject::Subscription { schema } => write!(f, "SUBSCRIPTIONS{}", fmt_schema(schema)),
+            ShowObject::Secret { schema } => write!(f, "SECRETS{}", fmt_schema(schema)),
         }
     }
 }

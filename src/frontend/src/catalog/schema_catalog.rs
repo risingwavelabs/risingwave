@@ -593,6 +593,10 @@ impl SchemaCatalog {
         self.connection_by_name.values()
     }
 
+    pub fn iter_secret(&self) -> impl Iterator<Item = &Arc<SecretCatalog>> {
+        self.secret_by_name.values()
+    }
+
     pub fn iter_system_tables(&self) -> impl Iterator<Item = &Arc<SystemTableCatalog>> {
         self.system_table_by_name.values()
     }

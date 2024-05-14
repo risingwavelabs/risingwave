@@ -451,6 +451,7 @@ define_keywords!(
     SEARCH,
     SECOND,
     SECRET,
+    SECRETS,
     SELECT,
     SENSITIVE,
     SEQUENCE,
