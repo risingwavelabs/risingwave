@@ -12,42 +12,131 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
+use anyhow::{anyhow, bail};
 use arrow_udf_wasm::Runtime;
 use futures_util::StreamExt;
+use itertools::Itertools;
+use risingwave_common::types::DataType;
+use risingwave_expr::sig::UdfOptions;
 
 use super::*;
 
 #[linkme::distributed_slice(UDF_RUNTIMES)]
 static WASM: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
-    language: "wasm",
-    runtime: "",
-    build: |opts| {
-        let compressed_binary = opts
-            .compressed_binary
-            .context("compressed binary is required")?;
-        let wasm_binary = zstd::stream::decode_all(compressed_binary)
-            .context("failed to decompress wasm binary")?;
-        let runtime = get_or_create_wasm_runtime(&wasm_binary)?;
-        Ok(Box::new(WasmFunction {
-            runtime,
-            name: opts.name.to_string(),
-        }))
-    },
+    match_: |language, _runtime, _link| language == "wasm",
+    create: create_wasm,
+    build,
 };
+
+#[linkme::distributed_slice(UDF_RUNTIMES)]
+static RUST: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
+    match_: |language, _runtime, _link| language == "rust",
+    create: create_rust,
+    build,
+};
+
+fn create_wasm(opts: CreateFunctionOptions<'_>) -> Result<CreateFunctionOutput> {
+    let wasm_binary: Cow<'_, [u8]> = if let Some(link) = opts.using_link {
+        read_file_from_link(&link)?.into()
+    } else if let Some(bytes) = opts.using_base64_decoded {
+        bytes.into()
+    } else {
+        bail!("USING must be specified")
+    };
+    let runtime = get_or_create_wasm_runtime(&wasm_binary)?;
+    if runtime.abi_version().0 <= 2 {
+        bail!("legacy arrow-udf is no longer supported. please update arrow-udf to 0.3+");
+    }
+    let identifier_v1 = wasm_identifier_v1(
+        opts.name,
+        opts.arg_types,
+        opts.return_type,
+        opts.is_table_function,
+    );
+    let identifier = find_wasm_identifier_v2(&runtime, &identifier_v1)?;
+    let compressed_binary = Some(zstd::stream::encode_all(&*wasm_binary, 0)?);
+    Ok(CreateFunctionOutput {
+        identifier,
+        body: None,
+        compressed_binary,
+    })
+}
+
+fn create_rust(opts: CreateFunctionOptions<'_>) -> Result<CreateFunctionOutput> {
+    if opts.using_link.is_some() {
+        bail!("USING is not supported for rust function");
+    }
+    let identifier_v1 = wasm_identifier_v1(
+        opts.name,
+        opts.arg_types,
+        opts.return_type,
+        opts.is_table_function,
+    );
+    // if the function returns a struct, users need to add `#[function]` macro by themselves.
+    // otherwise, we add it automatically. the code should start with `fn ...`.
+    let function_macro = if opts.return_type.is_struct() {
+        String::new()
+    } else {
+        format!("#[function(\"{}\")]", identifier_v1)
+    };
+    let script = format!(
+        "use arrow_udf::{{function, types::*}};\n{}\n{}",
+        function_macro,
+        opts.as_.context("AS must be specified")?
+    );
+    let body = Some(script.clone());
+
+    let wasm_binary = std::thread::spawn(move || {
+        let mut opts = arrow_udf_wasm::build::BuildOpts::default();
+        opts.arrow_udf_version = Some("0.3".to_string());
+        opts.script = script;
+        // use a fixed tempdir to reuse the build cache
+        opts.tempdir = Some(std::env::temp_dir().join("risingwave-rust-udf"));
+
+        arrow_udf_wasm::build::build_with(&opts)
+    })
+    .join()
+    .unwrap()
+    .context("failed to build rust function")?;
+
+    let runtime = get_or_create_wasm_runtime(&wasm_binary)?;
+    let identifier = find_wasm_identifier_v2(&runtime, &identifier_v1)?;
+
+    let compressed_binary = Some(zstd::stream::encode_all(wasm_binary.as_slice(), 0)?);
+    Ok(CreateFunctionOutput {
+        identifier,
+        body,
+        compressed_binary,
+    })
+}
+
+fn build(opts: UdfOptions<'_>) -> Result<Box<dyn UdfRuntime>> {
+    let compressed_binary = opts
+        .compressed_binary
+        .context("compressed binary is required")?;
+    let wasm_binary =
+        zstd::stream::decode_all(compressed_binary).context("failed to decompress wasm binary")?;
+    let runtime = get_or_create_wasm_runtime(&wasm_binary)?;
+    Ok(Box::new(WasmFunction {
+        runtime,
+        identifier: opts.identifier.to_string(),
+    }))
+}
 
 #[derive(Debug)]
 struct WasmFunction {
     runtime: Arc<Runtime>,
-    name: String,
+    identifier: String,
 }
 
 #[async_trait::async_trait]
 impl UdfRuntime for WasmFunction {
     async fn call(&self, input: &RecordBatch) -> Result<RecordBatch> {
-        self.runtime.call(&self.name, input)
+        self.runtime.call(&self.identifier, input)
     }
 
     async fn call_table_function<'a>(
@@ -55,7 +144,7 @@ impl UdfRuntime for WasmFunction {
         input: &'a RecordBatch,
     ) -> Result<BoxStream<'a, Result<RecordBatch>>> {
         self.runtime
-            .call_table_function(&self.name, input)
+            .call_table_function(&self.identifier, input)
             .map(|s| futures_util::stream::iter(s).boxed())
     }
 
@@ -84,4 +173,111 @@ fn get_or_create_wasm_runtime(binary: &[u8]) -> Result<Arc<Runtime>> {
     let runtime = Arc::new(arrow_udf_wasm::Runtime::new(binary)?);
     RUNTIMES.insert(md5, runtime.clone());
     Ok(runtime)
+}
+
+/// Convert a v0.1 function identifier to v0.2 format.
+///
+/// In arrow-udf v0.1 format, struct type is inline in the identifier. e.g.
+///
+/// ```text
+/// keyvalue(varchar,varchar)->struct<key:varchar,value:varchar>
+/// ```
+///
+/// However, since arrow-udf v0.2, struct type is no longer inline.
+/// The above identifier is divided into a function and a type.
+///
+/// ```text
+/// keyvalue(varchar,varchar)->struct KeyValue
+/// KeyValue=key:varchar,value:varchar
+/// ```
+///
+/// For compatibility, we should call `find_wasm_identifier_v2` to
+/// convert v0.1 identifiers to v0.2 format before looking up the function.
+fn find_wasm_identifier_v2(
+    runtime: &arrow_udf_wasm::Runtime,
+    inlined_signature: &str,
+) -> Result<String> {
+    // Inline types in function signature.
+    //
+    // # Example
+    //
+    // ```text
+    // types = { "KeyValue": "key:varchar,value:varchar" }
+    // input = "keyvalue(varchar, varchar) -> struct KeyValue"
+    // output = "keyvalue(varchar, varchar) -> struct<key:varchar,value:varchar>"
+    // ```
+    let inline_types = |s: &str| -> String {
+        let mut inlined = s.to_string();
+        // iteratively replace `struct Xxx` with `struct<...>` until no replacement is made.
+        loop {
+            let replaced = inlined.clone();
+            for (k, v) in runtime.types() {
+                inlined = inlined.replace(&format!("struct {k}"), &format!("struct<{v}>"));
+            }
+            if replaced == inlined {
+                return inlined;
+            }
+        }
+    };
+    // Function signature in arrow-udf is case sensitive.
+    // However, SQL identifiers are usually case insensitive and stored in lowercase.
+    // So we should convert the signature to lowercase before comparison.
+    let identifier = runtime
+        .functions()
+        .find(|f| inline_types(f).to_lowercase() == inlined_signature)
+        .ok_or_else(|| {
+            anyhow!(
+                "function not found in wasm binary: \"{}\"\nHINT: available functions:\n  {}\navailable types:\n  {}",
+                inlined_signature,
+                runtime.functions().join("\n  "),
+                runtime.types().map(|(k, v)| format!("{k}: {v}")).join("\n  "),
+            )
+        })?;
+    Ok(identifier.into())
+}
+
+/// Generate a function identifier in v0.1 format from the function signature.
+fn wasm_identifier_v1(
+    name: &str,
+    args: &[DataType],
+    ret: &DataType,
+    table_function: bool,
+) -> String {
+    format!(
+        "{}({}){}{}",
+        name,
+        args.iter().map(datatype_name).join(","),
+        if table_function { "->>" } else { "->" },
+        datatype_name(ret)
+    )
+}
+
+/// Convert a data type to string used in identifier.
+fn datatype_name(ty: &DataType) -> String {
+    match ty {
+        DataType::Boolean => "boolean".to_string(),
+        DataType::Int16 => "int16".to_string(),
+        DataType::Int32 => "int32".to_string(),
+        DataType::Int64 => "int64".to_string(),
+        DataType::Float32 => "float32".to_string(),
+        DataType::Float64 => "float64".to_string(),
+        DataType::Date => "date32".to_string(),
+        DataType::Time => "time64".to_string(),
+        DataType::Timestamp => "timestamp".to_string(),
+        DataType::Timestamptz => "timestamptz".to_string(),
+        DataType::Interval => "interval".to_string(),
+        DataType::Decimal => "decimal".to_string(),
+        DataType::Jsonb => "json".to_string(),
+        DataType::Serial => "serial".to_string(),
+        DataType::Int256 => "int256".to_string(),
+        DataType::Bytea => "binary".to_string(),
+        DataType::Varchar => "string".to_string(),
+        DataType::List(inner) => format!("{}[]", datatype_name(inner)),
+        DataType::Struct(s) => format!(
+            "struct<{}>",
+            s.iter()
+                .map(|(name, ty)| format!("{}:{}", name, datatype_name(ty)))
+                .join(",")
+        ),
+    }
 }

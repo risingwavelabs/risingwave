@@ -16,12 +16,25 @@
 use anyhow::{Context as _, Result};
 use arrow_array::RecordBatch;
 use futures_util::stream::BoxStream;
-use risingwave_expr::sig::{UdfRuntime, UdfRuntimeDescriptor, UDF_RUNTIMES};
+use risingwave_expr::sig::{
+    CreateFunctionOptions, CreateFunctionOutput, UdfRuntime, UdfRuntimeDescriptor, UDF_RUNTIMES,
+};
 
-// #[cfg(feature = "embedded-deno-udf")]
+#[cfg(feature = "embedded-deno-udf")]
 mod deno;
 mod external;
-// #[cfg(feature = "embedded-python-udf")]
+#[cfg(feature = "embedded-python-udf")]
 mod python;
 mod quickjs;
 mod wasm;
+
+/// Download wasm binary from a link.
+fn read_file_from_link(link: &str) -> Result<Vec<u8>> {
+    // currently only local file system is supported
+    let path = link
+        .strip_prefix("fs://")
+        .context("only 'fs://' is supported")?;
+    let content =
+        std::fs::read(path).context("failed to read wasm binary from local file system")?;
+    Ok(content)
+}

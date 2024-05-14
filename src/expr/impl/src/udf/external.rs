@@ -17,9 +17,12 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, LazyLock, Weak};
 use std::time::Duration;
 
+use anyhow::bail;
+use arrow_schema::Fields;
 use arrow_udf_flight::Client;
 use futures_util::{StreamExt, TryStreamExt};
 use ginepro::{LoadBalancedChannel, ResolutionStrategy};
+use risingwave_common::array::arrow::{ToArrow, UdfArrowConvert};
 use risingwave_common::util::addr::HostAddr;
 use thiserror_ext::AsReport;
 
@@ -27,13 +30,61 @@ use super::*;
 
 #[linkme::distributed_slice(UDF_RUNTIMES)]
 static EXTERNAL: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
-    language: "external",
-    runtime: "",
+    match_: |language, _runtime, link| link.is_some() && matches!(language, "python" | "java" | ""),
+    create: |opts| {
+        let link = opts.using_link.context("USING LINK must be specified")?;
+        let identifier = opts.as_.context("AS must be specified")?.to_string();
+
+        // check UDF server
+        let client = get_or_create_flight_client(link)?;
+        let convert = UdfArrowConvert {
+            legacy: client.protocol_version() == 1,
+        };
+        // A helper function to create a unnamed field from data type.
+        let to_field = |data_type| convert.to_arrow_field("", data_type);
+        let args = arrow_schema::Schema::new(
+            opts.arg_types
+                .iter()
+                .map(to_field)
+                .try_collect::<Fields>()?,
+        );
+        let returns = arrow_schema::Schema::new(if opts.is_table_function {
+            vec![
+                arrow_schema::Field::new("row", arrow_schema::DataType::Int32, true),
+                to_field(&opts.return_type)?,
+            ]
+        } else {
+            vec![to_field(&opts.return_type)?]
+        });
+        let function = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(client.get(&identifier))
+        })
+        .context("failed to check UDF signature")?;
+        if !data_types_match(&function.args, &args) {
+            bail!(
+                "argument type mismatch, expect: {:?}, actual: {:?}",
+                args,
+                function.args,
+            );
+        }
+        if !data_types_match(&function.returns, &returns) {
+            bail!(
+                "return type mismatch, expect: {:?}, actual: {:?}",
+                returns,
+                function.returns,
+            );
+        }
+        Ok(CreateFunctionOutput {
+            identifier,
+            body: None,
+            compressed_binary: None,
+        })
+    },
     build: |opts| {
         let link = opts.link.context("link is required")?;
         let client = get_or_create_flight_client(link)?;
         Ok(Box::new(ExternalFunction {
-            name: opts.name.to_string(),
+            identifier: opts.identifier.to_string(),
             client,
             disable_retry_count: AtomicU8::new(INITIAL_RETRY_COUNT),
             always_retry_on_network_error: opts.always_retry_on_network_error,
@@ -43,7 +94,7 @@ static EXTERNAL: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
 
 #[derive(Debug)]
 struct ExternalFunction {
-    name: String,
+    identifier: String,
     client: Arc<Client>,
     /// Number of remaining successful calls until retry is enabled.
     /// This parameter is designed to prevent continuous retry on every call, which would increase delay.
@@ -78,7 +129,7 @@ impl UdfRuntime for ExternalFunction {
             .await
         } else {
             let result = if disable_retry_count != 0 {
-                self.client.call(&self.name, &input).await
+                self.client.call(&self.identifier, &input).await
             } else {
                 self.call_with_retry(&input).await
             };
@@ -106,7 +157,10 @@ impl UdfRuntime for ExternalFunction {
         &'a self,
         input: &'a RecordBatch,
     ) -> Result<BoxStream<'a, Result<RecordBatch>>> {
-        let stream = self.client.call_table_function(&self.name, input).await?;
+        let stream = self
+            .client
+            .call_table_function(&self.identifier, input)
+            .await?;
         Ok(stream.map_err(|e| e.into()).boxed())
     }
 }
@@ -183,7 +237,7 @@ impl ExternalFunction {
     ) -> Result<RecordBatch, arrow_udf_flight::Error> {
         let mut backoff = Duration::from_millis(100);
         for i in 0..5 {
-            match self.client.call(&self.name, input).await {
+            match self.client.call(&self.identifier, input).await {
                 Err(err) if is_connection_error(&err) && i != 4 => {
                     tracing::error!(error = %err.as_report(), "UDF connection error. retry...");
                 }
@@ -203,7 +257,7 @@ impl ExternalFunction {
     ) -> Result<RecordBatch, arrow_udf_flight::Error> {
         let mut backoff = Duration::from_millis(100);
         loop {
-            match self.client.call(&self.name, input).await {
+            match self.client.call(&self.identifier, input).await {
                 Err(err) if is_tonic_error(&err) => {
                     tracing::error!(error = %err.as_report(), "UDF tonic error. retry...");
                 }
@@ -236,4 +290,16 @@ fn is_tonic_error(err: &arrow_udf_flight::Error) -> bool {
         arrow_udf_flight::Error::Tonic(_)
             | arrow_udf_flight::Error::Flight(arrow_flight::error::FlightError::Tonic(_))
     )
+}
+
+/// Check if two list of data types match, ignoring field names.
+fn data_types_match(a: &arrow_schema::Schema, b: &arrow_schema::Schema) -> bool {
+    if a.fields().len() != b.fields().len() {
+        return false;
+    }
+    #[allow(clippy::disallowed_methods)]
+    a.fields()
+        .iter()
+        .zip(b.fields())
+        .all(|(a, b)| a.data_type().equals_datatype(b.data_type()))
 }

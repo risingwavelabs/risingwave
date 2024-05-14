@@ -132,18 +132,14 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
     let identifier = udtf.get_identifier()?;
     let return_type = DataType::from(prost.get_return_type()?);
 
-    // pre-process "language" for historical reasons
-    let language = match udtf.language.as_str() {
-        _ if udtf.link.is_some() => "external",
-        "rust" => "wasm",
-        l => l,
-    };
-    let runtime = udtf.runtime.as_deref().unwrap_or("");
+    let language = udtf.language.as_str();
+    let runtime = udtf.runtime.as_deref();
+    let link = udtf.link.as_deref();
 
     // lookup UDF builder
     let builder = crate::sig::UDF_RUNTIMES
         .iter()
-        .find(|udf| udf.language == language && udf.runtime == runtime)
+        .find(|udf| (udf.match_)(language, runtime, link))
         .context("language not found")?
         .build;
     let runtime = builder(UdfOptions {
@@ -151,7 +147,7 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
         body: udtf.body.as_deref(),
         compressed_binary: udtf.compressed_binary.as_deref(),
         link: udtf.link.as_deref(),
-        name: &identifier,
+        identifier: &identifier,
         arg_names: &udtf.arg_names,
         return_type: &return_type,
         always_retry_on_network_error: false,

@@ -16,7 +16,6 @@ ignored = ["workspace-hack", "ctor"]
 normal = ["workspace-hack", "ctor"]
 
 [features]
-default = ["embedded-deno-udf", "embedded-python-udf"]
 embedded-deno-udf = ["arrow-udf-js-deno"]
 embedded-python-udf = ["arrow-udf-python"]
 

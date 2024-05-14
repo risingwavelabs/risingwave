@@ -468,9 +468,29 @@ pub static FUNCTIONS: [fn() -> FuncSign];
 pub static UDF_RUNTIMES: [UdfRuntimeDescriptor];
 
 pub struct UdfRuntimeDescriptor {
-    pub language: &'static str,
-    pub runtime: &'static str,
+    /// Returns if the function match this descriptor.
+    pub match_: fn(language: &str, runtime: Option<&str>, link: Option<&str>) -> bool,
+    /// Creates function from options.
+    pub create: fn(opts: CreateFunctionOptions<'_>) -> anyhow::Result<CreateFunctionOutput>,
+    /// Builds UDF runtime from verified options.
     pub build: fn(opts: UdfOptions<'_>) -> anyhow::Result<Box<dyn UdfRuntime>>,
+}
+
+pub struct CreateFunctionOptions<'a> {
+    pub name: &'a str,
+    pub arg_names: &'a [String],
+    pub arg_types: &'a [DataType],
+    pub return_type: &'a DataType,
+    pub is_table_function: bool,
+    pub as_: Option<&'a str>,
+    pub using_link: Option<&'a str>,
+    pub using_base64_decoded: Option<&'a [u8]>,
+}
+
+pub struct CreateFunctionOutput {
+    pub identifier: String,
+    pub body: Option<String>,
+    pub compressed_binary: Option<Vec<u8>>,
 }
 
 pub struct UdfOptions<'a> {
@@ -478,7 +498,7 @@ pub struct UdfOptions<'a> {
     pub body: Option<&'a str>,
     pub compressed_binary: Option<&'a [u8]>,
     pub link: Option<&'a str>,
-    pub name: &'a str,
+    pub identifier: &'a str,
     pub arg_names: &'a [String],
     pub return_type: &'a DataType,
     pub always_retry_on_network_error: bool,

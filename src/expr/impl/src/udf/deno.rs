@@ -23,8 +23,29 @@ use super::*;
 
 #[linkme::distributed_slice(UDF_RUNTIMES)]
 static DENO: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
-    language: "javascript",
-    runtime: "deno",
+    match_: |language, runtime, _link| language == "javascript" && runtime == Some("deno"),
+    create: |opts| {
+        let mut body = None;
+        let mut compressed_binary = None;
+        let identifier = opts.name.to_string();
+        match (opts.using_link, opts.using_base64_decoded, opts.as_) {
+            (None, None, Some(as_)) => body = Some(as_.to_string()),
+            (Some(link), None, None) => {
+                let bytes = read_file_from_link(link)?;
+                compressed_binary = Some(zstd::stream::encode_all(bytes.as_slice(), 0)?);
+            }
+            (None, Some(bytes), None) => {
+                compressed_binary = Some(zstd::stream::encode_all(bytes, 0)?);
+            }
+            (None, None, None) => bail!("Either USING or AS must be specified"),
+            _ => bail!("Both USING and AS cannot be specified"),
+        }
+        Ok(CreateFunctionOutput {
+            identifier,
+            body,
+            compressed_binary,
+        })
+    },
     build: |opts| {
         let runtime = Runtime::new();
         let body = match (opts.body, opts.compressed_binary) {
@@ -47,14 +68,14 @@ static DENO: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
                 _ if opts.table_function => "function*",
                 _ => "function",
             },
-            opts.name,
+            opts.identifier,
             opts.arg_names.join(","),
             body
         );
 
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(runtime.add_function(
-                opts.name,
+                opts.identifier,
                 UdfArrowConvert::default().to_arrow_field("", &opts.return_type)?,
                 CallMode::CalledOnNullInput,
                 &body,
@@ -63,7 +84,7 @@ static DENO: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
 
         Ok(Box::new(DenoFunction {
             runtime,
-            name: opts.name.to_string(),
+            identifier: opts.identifier.to_string(),
         }))
     },
 };
@@ -71,7 +92,7 @@ static DENO: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
 #[derive(Debug)]
 struct DenoFunction {
     runtime: Arc<Runtime>,
-    name: String,
+    identifier: String,
 }
 
 #[async_trait::async_trait]
@@ -79,7 +100,8 @@ impl UdfRuntime for DenoFunction {
     async fn call(&self, input: &RecordBatch) -> Result<RecordBatch> {
         // FIXME(runji): make the future Send
         tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.runtime.call(&self.name, input.clone()))
+            tokio::runtime::Handle::current()
+                .block_on(self.runtime.call(&self.identifier, input.clone()))
         })
     }
 
@@ -87,14 +109,17 @@ impl UdfRuntime for DenoFunction {
         &'a self,
         input: &'a RecordBatch,
     ) -> Result<BoxStream<'a, Result<RecordBatch>>> {
-        Ok(self.call_table_function_inner(&self.name, input.clone()))
+        Ok(self.call_table_function_inner(input.clone()))
     }
 }
 
 impl DenoFunction {
     #[try_stream(boxed, ok = RecordBatch, error = anyhow::Error)]
-    async fn call_table_function_inner<'a>(&'a self, name: &'a str, input: RecordBatch) {
-        let mut stream = self.runtime.call_table_function(name, input, 1024).await?;
+    async fn call_table_function_inner<'a>(&'a self, input: RecordBatch) {
+        let mut stream = self
+            .runtime
+            .call_table_function(&self.identifier, input, 1024)
+            .await?;
         while let Some(batch) = stream.next().await {
             yield batch?;
         }

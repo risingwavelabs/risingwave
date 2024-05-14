@@ -168,18 +168,14 @@ impl Build for UserDefinedFunction {
         let udf = prost.get_rex_node().unwrap().as_udf().unwrap();
         let identifier = udf.get_identifier()?;
 
-        // pre-process "language" for historical reasons
-        let language = match udf.language.as_str() {
-            _ if udf.link.is_some() => "external",
-            "rust" => "wasm",
-            l => l,
-        };
-        let runtime = udf.runtime.as_deref().unwrap_or("");
+        let language = udf.language.as_str();
+        let runtime = udf.runtime.as_deref();
+        let link = udf.link.as_deref();
 
         // lookup UDF builder
         let builder = crate::sig::UDF_RUNTIMES
             .iter()
-            .find(|udf| udf.language == language && udf.runtime == runtime)
+            .find(|udf| (udf.match_)(language, runtime, link))
             .context("language not found")?
             .build;
         let runtime = builder(UdfOptions {
@@ -187,7 +183,7 @@ impl Build for UserDefinedFunction {
             body: udf.body.as_deref(),
             compressed_binary: udf.compressed_binary.as_deref(),
             link: udf.link.as_deref(),
-            name: &identifier,
+            identifier: &identifier,
             arg_names: &udf.arg_names,
             return_type: &return_type,
             always_retry_on_network_error: udf.always_retry_on_network_error,

@@ -20,19 +20,25 @@ use super::*;
 
 #[linkme::distributed_slice(UDF_RUNTIMES)]
 static PYTHON: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
-    language: "python",
-    runtime: "",
+    match_: |language, _runtime, link| language == "python" && link.is_none(),
+    create: |opts| {
+        Ok(CreateFunctionOutput {
+            identifier: opts.name.to_string(),
+            body: Some(opts.as_.context("AS must be specified")?.to_string()),
+            compressed_binary: None,
+        })
+    },
     build: |opts| {
         let mut runtime = Runtime::builder().sandboxed(true).build()?;
         runtime.add_function(
-            opts.name,
+            opts.identifier,
             UdfArrowConvert::default().to_arrow_field("", &opts.return_type)?,
             CallMode::CalledOnNullInput,
             opts.body.context("body is required")?,
         )?;
         Ok(Box::new(PythonFunction {
             runtime,
-            name: opts.name.to_string(),
+            identifier: opts.identifier.to_string(),
         }))
     },
 };
@@ -40,13 +46,13 @@ static PYTHON: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
 #[derive(Debug)]
 struct PythonFunction {
     runtime: Runtime,
-    name: String,
+    identifier: String,
 }
 
 #[async_trait::async_trait]
 impl UdfRuntime for PythonFunction {
     async fn call(&self, input: &RecordBatch) -> Result<RecordBatch> {
-        self.runtime.call(&self.name, input)
+        self.runtime.call(&self.identifier, input)
     }
 
     async fn call_table_function<'a>(
@@ -54,7 +60,7 @@ impl UdfRuntime for PythonFunction {
         input: &'a RecordBatch,
     ) -> Result<BoxStream<'a, Result<RecordBatch>>> {
         self.runtime
-            .call_table_function(&self.name, input, 1024)
+            .call_table_function(&self.identifier, input, 1024)
             .map(|s| futures_util::stream::iter(s).boxed())
     }
 }

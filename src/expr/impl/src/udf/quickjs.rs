@@ -20,26 +20,34 @@ use super::*;
 
 #[linkme::distributed_slice(UDF_RUNTIMES)]
 static QUICKJS: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
-    language: "javascript",
-    runtime: "quickjs",
+    match_: |language, runtime, _link| {
+        language == "javascript" && matches!(runtime, None | Some("quickjs"))
+    },
+    create: |opts| {
+        Ok(CreateFunctionOutput {
+            identifier: opts.name.to_string(),
+            body: Some(opts.as_.context("AS must be specified")?.to_string()),
+            compressed_binary: None,
+        })
+    },
     build: |opts| {
         let body = format!(
             "export function{} {}({}) {{ {} }}",
             if opts.table_function { "*" } else { "" },
-            opts.name,
+            opts.identifier,
             opts.arg_names.join(","),
             opts.body.context("body is required")?,
         );
         let mut runtime = Runtime::new()?;
         runtime.add_function(
-            opts.name,
+            opts.identifier,
             UdfArrowConvert::default().to_arrow_field("", opts.return_type)?,
             CallMode::CalledOnNullInput,
             &body,
         )?;
         Ok(Box::new(QuickJSFunction {
             runtime,
-            name: opts.name.to_string(),
+            identifier: opts.identifier.to_string(),
         }))
     },
 };
@@ -47,13 +55,13 @@ static QUICKJS: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
 #[derive(Debug)]
 struct QuickJSFunction {
     runtime: Runtime,
-    name: String,
+    identifier: String,
 }
 
 #[async_trait::async_trait]
 impl UdfRuntime for QuickJSFunction {
     async fn call(&self, input: &RecordBatch) -> Result<RecordBatch> {
-        self.runtime.call(&self.name, input)
+        self.runtime.call(&self.identifier, input)
     }
 
     async fn call_table_function<'a>(
@@ -61,7 +69,7 @@ impl UdfRuntime for QuickJSFunction {
         input: &'a RecordBatch,
     ) -> Result<BoxStream<'a, Result<RecordBatch>>> {
         self.runtime
-            .call_table_function(&self.name, input, 1024)
+            .call_table_function(&self.identifier, input, 1024)
             .map(|s| futures_util::stream::iter(s).boxed())
     }
 }
