@@ -41,6 +41,7 @@ pub mod execution;
 pub mod executor;
 pub mod monitor;
 pub mod rpc;
+mod spill;
 pub mod task;
 pub mod worker_manager;
 

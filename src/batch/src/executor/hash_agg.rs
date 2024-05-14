@@ -14,7 +14,6 @@
 
 use std::hash::BuildHasher;
 use std::marker::PhantomData;
-use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -22,9 +21,6 @@ use bytes::Bytes;
 use futures_async_stream::try_stream;
 use futures_util::AsyncReadExt;
 use itertools::Itertools;
-use opendal::layers::RetryLayer;
-use opendal::services::Fs;
-use opendal::Operator;
 use prost::Message;
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::buffer::Bitmap;
@@ -48,6 +44,7 @@ use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
     WrapStreamExecutor,
 };
+use crate::spill::spill_op::{SpillOp, DEFAULT_SPILL_PARTITION_NUM};
 use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 
 type AggHashMap<K, A> = hashbrown::HashMap<K, Vec<AggregateState>, PrecomputedBuildHasher, A>;
@@ -232,72 +229,6 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
     }
 }
 
-pub fn new_spill_op(root: String) -> Result<SpillOp> {
-    assert!(root.ends_with('/'));
-    let mut builder = Fs::default();
-    builder.root(&root);
-
-    let op: Operator = Operator::new(builder)?
-        .layer(RetryLayer::default())
-        .finish();
-    Ok(SpillOp { op })
-}
-
-pub struct SpillOp {
-    op: Operator,
-}
-
-const DEFAULT_SPILL_CHUNK_SIZE: usize = 1024;
-const DEFAULT_SPILL_PARTITION_NUM: usize = 20;
-const DEFAULT_SPILL_DIR: &str = "/tmp/";
-const RW_MANAGED_SPILL_DIR: &str = "/rw_batch_spill/";
-const DEFAULT_IO_BUFFER_SIZE: usize = 256 * 1024;
-
-impl SpillOp {
-    pub async fn writer_with(&self, name: &str) -> Result<opendal::Writer> {
-        Ok(self
-            .op
-            .writer_with(name)
-            .append(true)
-            .buffer(DEFAULT_IO_BUFFER_SIZE)
-            .await?)
-    }
-
-    pub async fn reader_with(&self, name: &str) -> Result<opendal::Reader> {
-        Ok(self
-            .op
-            .reader_with(name)
-            .buffer(DEFAULT_IO_BUFFER_SIZE)
-            .await?)
-    }
-}
-
-impl Drop for SpillOp {
-    fn drop(&mut self) {
-        let op = self.op.clone();
-        tokio::task::spawn(async move {
-            let result = op.remove_all("/").await;
-            if let Err(e) = result {
-                error!("Failed to remove spill directory: {}", e);
-            }
-        });
-    }
-}
-
-impl DerefMut for SpillOp {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.op
-    }
-}
-
-impl Deref for SpillOp {
-    type Target = Operator;
-
-    fn deref(&self) -> &Self::Target {
-        &self.op
-    }
-}
-
 #[derive(Default, Clone, Copy)]
 pub struct SpillBuildHasher(u64);
 
@@ -308,6 +239,8 @@ impl BuildHasher for SpillBuildHasher {
         XxHash64::with_seed(self.0)
     }
 }
+
+const DEFAULT_SPILL_CHUNK_SIZE: usize = 1024;
 
 pub struct AggSpillManager {
     op: SpillOp,
@@ -335,13 +268,8 @@ impl AggSpillManager {
         spill_chunk_size: usize,
     ) -> Result<Self> {
         let suffix_uuid = uuid::Uuid::new_v4();
-        let spill_dir =
-            std::env::var("RW_BATCH_SPILL_DIR").unwrap_or_else(|_| DEFAULT_SPILL_DIR.to_string());
-        let dir = format!(
-            "/{}/{}/{}-{}/",
-            spill_dir, RW_MANAGED_SPILL_DIR, agg_identity, suffix_uuid
-        );
-        let op = new_spill_op(dir)?;
+        let dir = format!("/{}-{}/", agg_identity, suffix_uuid);
+        let op = SpillOp::create(dir)?;
         let agg_state_writers = Vec::with_capacity(partition_num);
         let agg_state_readers = Vec::with_capacity(partition_num);
         let agg_state_chunk_builder = Vec::with_capacity(partition_num);
