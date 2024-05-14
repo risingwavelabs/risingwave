@@ -934,7 +934,7 @@ impl StreamingMetrics {
                 &["executor_id", "connector", "sink_id"],
                 registry
             )
-                .unwrap();
+            .unwrap();
 
         let lru_current_watermark_time_ms = register_int_gauge_with_registry!(
             "lru_current_watermark_time_ms",
