@@ -19,7 +19,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::top_n_cache::AppendOnlyTopNCacheTrait;
 use super::utils::*;
-use super::{ManagedTopNState, TopNCache, NO_GROUP_KEY};
+use super::{ManagedTopNState, TopNCache};
 use crate::executor::prelude::*;
 
 /// If the input is append-only, `AppendOnlyGroupTopNExecutor` does not need

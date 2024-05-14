@@ -15,7 +15,7 @@
 use async_trait::async_trait;
 use futures::channel::mpsc;
 use futures::future::{join_all, select, Either};
-use futures::{FutureExt, SinkExt, StreamExt};
+use futures::{FutureExt, SinkExt};
 use itertools::Itertools;
 
 use crate::executor::prelude::*;

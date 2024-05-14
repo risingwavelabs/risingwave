@@ -91,7 +91,7 @@ pub struct ComputeNodeOpts {
     pub total_memory_bytes: usize,
 
     /// Reserved memory for the compute node in bytes.
-    /// If not set, a portion (default to 30%) for the total_memory_bytes will be used as the reserved memory.
+    /// If not set, a portion (default to 30%) for the `total_memory_bytes` will be used as the reserved memory.
     ///
     /// The total memory compute and storage can use is `total_memory_bytes` - `reserved_memory_bytes`.
     #[clap(long, env = "RW_RESERVED_MEMORY_BYTES")]

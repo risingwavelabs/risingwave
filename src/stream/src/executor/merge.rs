@@ -18,7 +18,6 @@ use std::task::{Context, Poll};
 
 use anyhow::Context as _;
 use futures::stream::{FusedStream, FuturesUnordered, StreamFuture};
-use futures::StreamExt;
 use tokio::time::Instant;
 
 use super::exchange::input::BoxedInput;
@@ -27,7 +26,7 @@ use super::*;
 use crate::executor::exchange::input::new_input;
 use crate::executor::prelude::*;
 use crate::executor::utils::ActorInputMetrics;
-use crate::task::{FragmentId, SharedContext};
+use crate::task::SharedContext;
 
 /// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
 /// will be stopped on barrier.

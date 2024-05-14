@@ -17,7 +17,7 @@ use std::ops::Deref;
 
 use futures::future::{try_join, try_join_all};
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::types::{DefaultOrd, ScalarImpl};
+use risingwave_common::types::DefaultOrd;
 use risingwave_common::{bail, row};
 use risingwave_expr::expr::{
     build_func_non_strict, ExpressionBoxExt, InputRefExpression, LiteralExpression,

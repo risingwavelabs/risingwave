@@ -36,6 +36,10 @@
 //! mod arrow_impl;
 //! ```
 
+// Is this a bug? Why do we have these lints?
+#![allow(unused_imports)]
+#![allow(dead_code)]
+
 use std::fmt::Write;
 
 use arrow_buffer::OffsetBuffer;

@@ -23,9 +23,8 @@ use arrow_udf_js_deno::{CallMode as DenoCallMode, Runtime as DenoRuntime};
 #[cfg(feature = "embedded-python-udf")]
 use arrow_udf_python::{CallMode as PythonCallMode, Runtime as PythonRuntime};
 use cfg_or_panic::cfg_or_panic;
-use futures_util::stream;
 use risingwave_common::array::arrow::{FromArrow, ToArrow, UdfArrowConvert};
-use risingwave_common::array::{DataChunk, I32Array};
+use risingwave_common::array::I32Array;
 use risingwave_common::bail;
 
 use super::*;

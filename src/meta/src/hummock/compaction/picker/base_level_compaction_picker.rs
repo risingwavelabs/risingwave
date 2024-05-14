@@ -30,7 +30,7 @@ use crate::hummock::compaction::{create_overlap_strategy, CompactionDeveloperCon
 use crate::hummock::level_handler::LevelHandler;
 
 std::thread_local! {
-    static LOG_COUNTER: RefCell<usize> = RefCell::new(0);
+    static LOG_COUNTER: RefCell<usize> = const { RefCell::new(0) };
 }
 
 pub struct LevelCompactionPicker {

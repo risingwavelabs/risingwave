@@ -94,7 +94,6 @@ pub enum StageEvent {
         reason: SchedulerError,
     },
     /// All tasks in stage finished.
-    #[expect(dead_code)]
     Completed(StageId),
 }
 

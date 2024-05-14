@@ -95,7 +95,7 @@ pub struct ReplaceTablePlan {
     /// We need to reassign splits for it.
     ///
     /// Note that there's no `SourceBackfillExecutor` involved for table with connector, so we don't need to worry about
-    /// backfill_splits.
+    /// `backfill_splits`.
     pub init_split_assignment: SplitAssignment,
 }
 

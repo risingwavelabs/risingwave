@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use multimap::MultiMap;
-use risingwave_common::array::{Op, RowRef};
+use risingwave_common::array::Op;
 use risingwave_common::hash::{HashKey, NullBitmap};
 use risingwave_common::types::{DefaultOrd, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
@@ -30,7 +30,7 @@ use self::builder::JoinChunkBuilder;
 use super::barrier_align::*;
 use super::join::hash_join::*;
 use super::join::row::JoinRow;
-use super::join::{JoinTypePrimitive, SideTypePrimitive, *};
+use super::join::*;
 use super::watermark::*;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::prelude::*;

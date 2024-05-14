@@ -15,7 +15,6 @@
 use std::mem;
 
 use anyhow::anyhow;
-use await_tree::InstrumentAwait;
 use futures::stream::select;
 use futures::{FutureExt, TryFutureExt, TryStreamExt};
 use itertools::Itertools;
