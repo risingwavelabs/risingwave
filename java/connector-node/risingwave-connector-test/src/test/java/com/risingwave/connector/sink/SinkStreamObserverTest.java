@@ -154,6 +154,8 @@ public class SinkStreamObserverTest {
         sinkWriterStreamObserver.onNext(firstSync);
     }
 
+    // WARN! This test is skipped in CI pipeline see
+    // `.github/workflows/connector-node-integration.yml`
     @Test
     public void testOnNext_writeValidation() {
         SinkWriterStreamObserver sinkWriterStreamObserver;
