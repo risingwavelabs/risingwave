@@ -42,7 +42,6 @@ use risingwave_connector::source::monitor::GLOBAL_SOURCE_METRICS;
 use risingwave_dml::dml_manager::DmlManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
-use risingwave_pb::connector_service::SinkPayloadFormat;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
@@ -68,7 +67,9 @@ use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tower::Layer;
 
-use crate::memory::config::{reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB};
+use crate::memory::config::{
+    batch_mem_limit, reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB,
+};
 use crate::memory::manager::{MemoryManager, MemoryManagerConfig};
 use crate::observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::config_service::ConfigServiceImpl;
@@ -103,7 +104,7 @@ pub async fn compute_node_serve(
 
     // Register to the cluster. We're not ready to serve until activate is called.
     let (meta_client, system_params) = MetaClient::register_new(
-        opts.meta_address,
+        opts.meta_address.clone(),
         WorkerType::ComputeNode,
         &advertise_addr,
         Property {
@@ -122,8 +123,7 @@ pub async fn compute_node_serve(
     let embedded_compactor_enabled =
         embedded_compactor_enabled(state_store_url, config.storage.disable_remote_compactor);
 
-    let (reserved_memory_bytes, non_reserved_memory_bytes) =
-        reserve_memory_bytes(opts.total_memory_bytes);
+    let (reserved_memory_bytes, non_reserved_memory_bytes) = reserve_memory_bytes(&opts);
     let storage_memory_config = storage_memory_config(
         non_reserved_memory_bytes,
         embedded_compactor_enabled,
@@ -272,6 +272,7 @@ pub async fn compute_node_serve(
     let batch_mgr = Arc::new(BatchManager::new(
         config.batch.clone(),
         batch_manager_metrics,
+        batch_mem_limit(compute_memory_bytes),
     ));
 
     // NOTE: Due to some limits, we use `compute_memory_bytes + storage_memory_bytes` as
@@ -332,28 +333,9 @@ pub async fn compute_node_serve(
         config.server.metrics_level,
     );
 
-    info!(
-        "connector param: payload_format={:?}",
-        opts.connector_rpc_sink_payload_format
-    );
-
-    let connector_params = risingwave_connector::ConnectorParams {
-        sink_payload_format: match opts.connector_rpc_sink_payload_format.as_deref() {
-            None | Some("stream_chunk") => SinkPayloadFormat::StreamChunk,
-            Some("json") => SinkPayloadFormat::Json,
-            _ => {
-                unreachable!(
-                    "invalid sink payload format: {:?}. Should be either json or stream_chunk",
-                    opts.connector_rpc_sink_payload_format
-                )
-            }
-        },
-    };
-
     // Initialize the streaming environment.
     let stream_env = StreamEnvironment::new(
         advertise_addr.clone(),
-        connector_params,
         stream_config,
         worker_id,
         state_store,

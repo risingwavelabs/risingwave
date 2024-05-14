@@ -46,8 +46,9 @@ use risingwave_connector::sink::{
 use risingwave_connector::source::datagen::{
     DatagenProperties, DatagenSplitEnumerator, DatagenSplitReader,
 };
-use risingwave_connector::source::{Column, DataType, SplitEnumerator, SplitReader};
-use risingwave_pb::connector_service::SinkPayloadFormat;
+use risingwave_connector::source::{
+    Column, DataType, SourceContext, SourceEnumeratorContext, SplitEnumerator, SplitReader,
+};
 use risingwave_stream::executor::test_utils::prelude::ColumnDesc;
 use risingwave_stream::executor::{Barrier, Message, MessageStreamItem, StreamExecutorError};
 use serde::{Deserialize, Deserializer};
@@ -114,7 +115,7 @@ impl LogReader for MockRangeLogReader {
         }
     }
 
-    async fn truncate(&mut self, _offset: TruncateOffset) -> LogStoreResult<()> {
+    fn truncate(&mut self, _offset: TruncateOffset) -> LogStoreResult<()> {
         Ok(())
     }
 
@@ -200,10 +201,12 @@ impl MockDatagenSource {
             rows_per_second,
             fields: HashMap::default(),
         };
-        let mut datagen_enumerator =
-            DatagenSplitEnumerator::new(properties.clone(), Default::default())
-                .await
-                .unwrap();
+        let mut datagen_enumerator = DatagenSplitEnumerator::new(
+            properties.clone(),
+            SourceEnumeratorContext::dummy().into(),
+        )
+        .await
+        .unwrap();
         let parser_config = ParserConfig {
             specific: SpecificParserConfig {
                 key_encoding_config: None,
@@ -220,7 +223,7 @@ impl MockDatagenSource {
                     properties.clone(),
                     vec![splits],
                     parser_config.clone(),
-                    Default::default(),
+                    SourceContext::dummy().into(),
                     Some(source_schema.clone()),
                 )
                 .await
@@ -400,6 +403,7 @@ fn mock_from_legacy_type(
             format,
             encode: SinkEncode::Json,
             options: Default::default(),
+            key_encode: None,
         }))
     } else {
         SinkFormatDesc::from_legacy_type(connector, r#type)
@@ -467,9 +471,8 @@ async fn main() {
             sink_from_name: "not_need_set".to_string(),
         };
         let sink = build_sink(sink_param).unwrap();
-        let mut sink_writer_param = SinkWriterParam::for_test();
+        let sink_writer_param = SinkWriterParam::for_test();
         println!("Start Sink Bench!, Wait {:?}s", BENCH_TIME);
-        sink_writer_param.connector_params.sink_payload_format = SinkPayloadFormat::StreamChunk;
         tokio::spawn(async move {
             dispatch_sink!(sink, sink, {
                 consume_log_stream(sink, mock_range_log_reader, sink_writer_param).boxed()

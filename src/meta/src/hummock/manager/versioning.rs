@@ -35,6 +35,7 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
+use super::check_cg_write_limit;
 use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
@@ -321,20 +322,14 @@ pub(super) fn calc_new_write_limits(
             }
             Some(levels) => levels,
         };
-        // Add write limit conditions here.
-        let threshold = config
-            .compaction_config
-            .level0_stop_write_threshold_sub_level_number as usize;
-        let l0_sub_level_number = levels.l0.as_ref().unwrap().sub_levels.len();
-        if threshold < l0_sub_level_number {
+
+        let write_limit_type = check_cg_write_limit(levels, config.compaction_config.as_ref());
+        if write_limit_type.is_write_stop() {
             new_write_limits.insert(
                 *id,
                 WriteLimit {
                     table_ids: levels.member_table_ids.clone(),
-                    reason: format!(
-                        "too many L0 sub levels: {} > {}",
-                        l0_sub_level_number, threshold
-                    ),
+                    reason: write_limit_type.as_str(),
                 },
             );
             continue;
@@ -352,6 +347,7 @@ pub(super) fn create_init_version(default_compaction_config: CompactionConfig) -
         max_committed_epoch: INVALID_EPOCH,
         safe_epoch: INVALID_EPOCH,
         table_watermarks: HashMap::new(),
+        table_change_log: HashMap::new(),
     };
     for group_id in [
         StaticCompactionGroupId::StateDefault as CompactionGroupId,
@@ -519,7 +515,7 @@ mod tests {
         );
         assert_eq!(
             new_write_limits.get(&1).as_ref().unwrap().reason,
-            "too many L0 sub levels: 11 > 10"
+            "WriteStop(l0_level_count: 11, threshold: 10) too many L0 sub levels"
         );
         assert_eq!(new_write_limits.len(), 2);
 
@@ -540,7 +536,7 @@ mod tests {
         );
         assert_eq!(
             new_write_limits.get(&1).as_ref().unwrap().reason,
-            "too many L0 sub levels: 11 > 5"
+            "WriteStop(l0_level_count: 11, threshold: 5) too many L0 sub levels"
         );
     }
 
@@ -574,6 +570,7 @@ mod tests {
             max_committed_epoch: 0,
             safe_epoch: 0,
             table_watermarks: HashMap::new(),
+            table_change_log: HashMap::new(),
         };
         for cg in 1..3 {
             version.levels.insert(

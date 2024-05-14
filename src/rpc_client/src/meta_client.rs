@@ -37,8 +37,8 @@ use risingwave_common::RW_VERSION;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
-    SstObjectIdRange,
+    CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, SstObjectIdRange,
+    SyncResult,
 };
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
@@ -384,11 +384,9 @@ impl MetaClient {
     pub async fn create_subscription(
         &self,
         subscription: PbSubscription,
-        graph: StreamFragmentGraph,
     ) -> Result<CatalogVersion> {
         let request = CreateSubscriptionRequest {
             subscription: Some(subscription),
-            fragment_graph: Some(graph),
         };
 
         let resp = self.inner.create_subscription(request).await?;
@@ -596,6 +594,21 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    pub async fn list_change_log_epochs(
+        &self,
+        table_id: u32,
+        min_epoch: u64,
+        max_count: u32,
+    ) -> Result<Vec<u64>> {
+        let request = ListChangeLogEpochsRequest {
+            table_id,
+            min_epoch,
+            max_count,
+        };
+        let resp = self.inner.list_change_log_epochs(request).await?;
+        Ok(resp.epochs)
+    }
+
     pub async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<CatalogVersion> {
         let request = DropIndexRequest {
             index_id: index_id.index_id,
@@ -795,6 +808,12 @@ impl MetaClient {
     pub async fn wait(&self) -> Result<()> {
         let request = WaitRequest {};
         self.inner.wait(request).await?;
+        Ok(())
+    }
+
+    pub async fn recover(&self) -> Result<()> {
+        let request = RecoverRequest {};
+        self.inner.recover(request).await?;
         Ok(())
     }
 
@@ -1386,11 +1405,7 @@ impl HummockMetaClient for MetaClient {
         Ok(SstObjectIdRange::new(resp.start_id, resp.end_id))
     }
 
-    async fn commit_epoch(
-        &self,
-        _epoch: HummockEpoch,
-        _sstables: Vec<LocalSstableInfo>,
-    ) -> Result<()> {
+    async fn commit_epoch(&self, _epoch: HummockEpoch, _sync_result: SyncResult) -> Result<()> {
         panic!("Only meta service can commit_epoch in production.")
     }
 
@@ -1903,6 +1918,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_fragment_distribution, ListFragmentDistributionRequest, ListFragmentDistributionResponse }
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }
+            ,{ stream_client, recover, RecoverRequest, RecoverResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
@@ -1973,6 +1989,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, list_compact_task_assignment, ListCompactTaskAssignmentRequest, ListCompactTaskAssignmentResponse }
             ,{ hummock_client, list_compact_task_progress, ListCompactTaskProgressRequest, ListCompactTaskProgressResponse }
             ,{ hummock_client, cancel_compact_task, CancelCompactTaskRequest, CancelCompactTaskResponse}
+            ,{ hummock_client, list_change_log_epochs, ListChangeLogEpochsRequest, ListChangeLogEpochsResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

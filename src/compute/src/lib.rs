@@ -76,10 +76,6 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
     pub meta_address: MetaAddressStrategy,
 
-    /// Payload format of connector sink rpc
-    #[clap(long, env = "RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT")]
-    pub connector_rpc_sink_payload_format: Option<String>,
-
     /// The path of `risingwave.toml` configuration file.
     ///
     /// If empty, default configuration values will be used.
@@ -89,6 +85,13 @@ pub struct ComputeNodeOpts {
     /// Total available memory for the compute node in bytes. Used by both computing and storage.
     #[clap(long, env = "RW_TOTAL_MEMORY_BYTES", default_value_t = default_total_memory_bytes())]
     pub total_memory_bytes: usize,
+
+    /// Reserved memory for the compute node in bytes.
+    /// If not set, a portion (default to 30%) for the total_memory_bytes will be used as the reserved memory.
+    ///
+    /// The total memory compute and storage can use is `total_memory_bytes` - `reserved_memory_bytes`.
+    #[clap(long, env = "RW_RESERVED_MEMORY_BYTES")]
+    pub reserved_memory_bytes: Option<usize>,
 
     /// The parallelism that the compute node will register to the scheduler of the meta service.
     #[clap(long, env = "RW_PARALLELISM", default_value_t = default_parallelism())]

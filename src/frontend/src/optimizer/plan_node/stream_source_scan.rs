@@ -94,13 +94,9 @@ impl StreamSourceScan {
             .expect("source scan should have source cataglog")
     }
 
+    /// The state is different from but similar to `StreamSource`.
+    /// Refer to [`generic::Source::infer_internal_table_catalog`] for more details.
     pub fn infer_internal_table_catalog() -> TableCatalog {
-        // note that source's internal table is to store partition_id -> offset mapping and its
-        // schema is irrelevant to input schema
-        // On the premise of ensuring that the materialized_source data can be cleaned up, keep the
-        // state in source.
-        // Source state doesn't maintain retention_seconds, internal_table_subset function only
-        // returns retention_seconds so default is used here
         let mut builder = TableCatalogBuilder::default();
 
         let key = Field {
@@ -119,7 +115,7 @@ impl StreamSourceScan {
         let ordered_col_idx = builder.add_column(&key);
         builder.add_column(&value);
         builder.add_order_column(ordered_col_idx, OrderType::ascending());
-        // read prefix hint is 0. We need to scan all data in the state table.
+        // Hacky: read prefix hint is 0, because we need to scan all data in the state table.
         builder.build(vec![], 0)
     }
 

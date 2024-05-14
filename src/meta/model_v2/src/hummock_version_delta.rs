@@ -14,7 +14,6 @@
 
 use risingwave_pb::hummock::PbHummockVersionDelta;
 use sea_orm::entity::prelude::*;
-use serde::{Deserialize, Serialize};
 
 use crate::{Epoch, HummockVersionId};
 

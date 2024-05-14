@@ -81,6 +81,7 @@ pub struct HummockStateStoreMetrics {
 
     // memory
     pub mem_table_spill_counts: RelabeledCounterVec,
+    pub old_value_size: IntGauge,
 
     // block statistics
     pub block_efficiency_histogram: RelabeledHistogramVec,
@@ -404,6 +405,13 @@ impl HummockStateStoreMetrics {
             metric_level,
         );
 
+        let old_value_size = register_int_gauge_with_registry!(
+            "state_store_old_value_size",
+            "The size of old value",
+            registry
+        )
+        .unwrap();
+
         let opts = histogram_opts!(
             "block_efficiency_histogram",
             "Access ratio of in-memory block.",
@@ -462,6 +470,7 @@ impl HummockStateStoreMetrics {
             uploader_syncing_epoch_count,
             uploader_wait_poll_latency,
             mem_table_spill_counts,
+            old_value_size,
 
             block_efficiency_histogram,
             event_handler_pending_event,
@@ -478,6 +487,7 @@ pub trait MemoryCollector: Sync + Send {
     fn get_meta_memory_usage(&self) -> u64;
     fn get_data_memory_usage(&self) -> u64;
     fn get_uploading_memory_usage(&self) -> u64;
+    fn get_prefetch_memory_usage(&self) -> usize;
     fn get_meta_cache_memory_usage_ratio(&self) -> f64;
     fn get_block_cache_memory_usage_ratio(&self) -> f64;
     fn get_shared_buffer_usage_ratio(&self) -> f64;
@@ -490,6 +500,7 @@ struct StateStoreCollector {
     block_cache_size: IntGauge,
     meta_cache_size: IntGauge,
     uploading_memory_size: IntGauge,
+    prefetch_memory_size: IntGauge,
     meta_cache_usage_ratio: Gauge,
     block_cache_usage_ratio: Gauge,
     uploading_memory_usage_ratio: Gauge,
@@ -541,12 +552,20 @@ impl StateStoreCollector {
         .unwrap();
         descs.extend(uploading_memory_usage_ratio.desc().into_iter().cloned());
 
+        let prefetch_memory_size = IntGauge::with_opts(Opts::new(
+            "state_store_prefetch_memory_size",
+            "the size of prefetch memory usage",
+        ))
+        .unwrap();
+        descs.extend(prefetch_memory_size.desc().into_iter().cloned());
+
         Self {
             memory_collector,
             descs,
             block_cache_size,
             meta_cache_size,
             uploading_memory_size,
+            prefetch_memory_size,
             meta_cache_usage_ratio,
             block_cache_usage_ratio,
 
@@ -567,6 +586,8 @@ impl Collector for StateStoreCollector {
             .set(self.memory_collector.get_meta_memory_usage() as i64);
         self.uploading_memory_size
             .set(self.memory_collector.get_uploading_memory_usage() as i64);
+        self.prefetch_memory_size
+            .set(self.memory_collector.get_prefetch_memory_usage() as i64);
         self.meta_cache_usage_ratio
             .set(self.memory_collector.get_meta_cache_memory_usage_ratio());
         self.block_cache_usage_ratio

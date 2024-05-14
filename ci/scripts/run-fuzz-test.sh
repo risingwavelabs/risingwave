@@ -38,10 +38,6 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
 
     download_and_prepare_rw "$profile" common
 
-    #    echo "--- Download artifacts"
-    #    download-and-decompress-artifact risingwave_simulation .
-    #    chmod +x ./risingwave_simulation
-
     echo "--- Download sqlsmith e2e bin"
     download-and-decompress-artifact sqlsmith-"$profile" target/debug/
     mv target/debug/sqlsmith-"$profile" target/debug/sqlsmith
@@ -70,9 +66,4 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
     # Use that to reproduce logs on local machine.
     echo "--- Kill cluster"
     risedev kill
-
-    # NOTE(Noel): This is disabled because once it fails, it keeps failing.
-    # That blocks PRs from getting through.
-    # echo "--- deterministic simulation e2e, ci-3cn-2fe, fuzzing (seed)"
-    # seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
 fi

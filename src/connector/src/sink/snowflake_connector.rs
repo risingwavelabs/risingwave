@@ -13,19 +13,15 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use aws_config;
-use aws_config::meta::region::RegionProviderChain;
-use aws_sdk_s3::config::Credentials;
-use aws_sdk_s3::primitives::ByteStream;
-use aws_sdk_s3::Client as S3Client;
-use aws_types::region::Region;
-use bytes::Bytes;
+use anyhow::{anyhow, Context};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use reqwest::{header, Client, RequestBuilder, StatusCode};
+use risingwave_common::config::ObjectStoreConfig;
+use risingwave_object_store::object::*;
 use serde::{Deserialize, Serialize};
-use thiserror_ext::AsReport;
 
 use super::doris_starrocks_connector::POOL_IDLE_TIMEOUT;
 use super::{Result, SinkError};
@@ -35,7 +31,7 @@ const SNOWFLAKE_REQUEST_ID: &str = "RW_SNOWFLAKE_SINK";
 const S3_INTERMEDIATE_FILE_NAME: &str = "RW_SNOWFLAKE_S3_SINK_FILE";
 
 /// The helper function to generate the *global unique* s3 file name.
-fn generate_s3_file_name(s3_path: Option<String>, suffix: String) -> String {
+pub(crate) fn generate_s3_file_name(s3_path: Option<&str>, suffix: &str) -> String {
     match s3_path {
         Some(path) => format!("{}/{}_{}", path, S3_INTERMEDIATE_FILE_NAME, suffix),
         None => format!("{}_{}", S3_INTERMEDIATE_FILE_NAME, suffix),
@@ -131,16 +127,12 @@ impl SnowflakeHttpClient {
         let jwt_token = encode(
             &header,
             &claims,
-            &EncodingKey::from_rsa_pem(self.private_key.as_ref()).map_err(|err| {
-                SinkError::Snowflake(format!(
-                    "failed to encode from provided rsa pem key, error: {}",
-                    err
-                ))
-            })?,
+            &EncodingKey::from_rsa_pem(self.private_key.as_ref())
+                .context("failed to encode from provided rsa pem key")
+                .map_err(SinkError::Snowflake)?,
         )
-        .map_err(|err| {
-            SinkError::Snowflake(format!("failed to encode jwt_token, error: {}", err))
-        })?;
+        .context("failed to encode jwt_token")
+        .map_err(SinkError::Snowflake)?;
         Ok(jwt_token)
     }
 
@@ -155,7 +147,7 @@ impl SnowflakeHttpClient {
 
     /// NOTE: this function should ONLY be called *after*
     /// uploading files to remote external staged storage, i.e., AWS S3
-    pub async fn send_request(&self, file_suffix: String) -> Result<()> {
+    pub async fn send_request(&self, file_suffix: &str) -> Result<()> {
         let builder = self.build_request_and_client();
 
         // Generate the jwt_token
@@ -167,15 +159,15 @@ impl SnowflakeHttpClient {
                 "X-Snowflake-Authorization-Token-Type".to_string(),
                 "KEYPAIR_JWT",
             )
-            .body(generate_s3_file_name(self.s3_path.clone(), file_suffix));
+            .body(generate_s3_file_name(self.s3_path.as_deref(), file_suffix));
 
         let response = builder
             .send()
             .await
-            .map_err(|err| SinkError::Snowflake(err.to_report_string()))?;
+            .map_err(|err| SinkError::Snowflake(anyhow!(err)))?;
 
         if response.status() != StatusCode::OK {
-            return Err(SinkError::Snowflake(format!(
+            return Err(SinkError::Snowflake(anyhow!(
                 "failed to make http request, error code: {}\ndetailed response: {:#?}",
                 response.status(),
                 response,
@@ -190,56 +182,40 @@ impl SnowflakeHttpClient {
 pub struct SnowflakeS3Client {
     s3_bucket: String,
     s3_path: Option<String>,
-    s3_client: S3Client,
+    pub opendal_s3_engine: OpendalObjectStore,
 }
 
 impl SnowflakeS3Client {
-    pub async fn new(
+    pub fn new(
         s3_bucket: String,
         s3_path: Option<String>,
         aws_access_key_id: String,
         aws_secret_access_key: String,
         aws_region: String,
-    ) -> Self {
-        let credentials = Credentials::new(
-            aws_access_key_id,
-            aws_secret_access_key,
-            // we don't allow temporary credentials
-            None,
-            None,
-            "rw_sink_to_s3_credentials",
-        );
+    ) -> Result<Self> {
+        // FIXME: we should use the `ObjectStoreConfig` instead of default
+        // just use default configuration here for opendal s3 engine
+        let config = ObjectStoreConfig::default();
 
-        let region = RegionProviderChain::first_try(Region::new(aws_region)).or_default_provider();
+        // create the s3 engine for streaming upload to the intermediate s3 bucket
+        let opendal_s3_engine = OpendalObjectStore::new_s3_engine_with_credentials(
+            &s3_bucket,
+            Arc::new(config),
+            &aws_access_key_id,
+            &aws_secret_access_key,
+            &aws_region,
+        )
+        .context("failed to create opendal s3 engine")
+        .map_err(SinkError::Snowflake)?;
 
-        let config = aws_config::from_env()
-            .credentials_provider(credentials)
-            .region(region)
-            .load()
-            .await;
-
-        // create the brand new s3 client used to sink files to s3
-        let s3_client = S3Client::new(&config);
-
-        Self {
+        Ok(Self {
             s3_bucket,
             s3_path,
-            s3_client,
-        }
+            opendal_s3_engine,
+        })
     }
 
-    pub async fn sink_to_s3(&self, data: Bytes, file_suffix: String) -> Result<()> {
-        self.s3_client
-            .put_object()
-            .bucket(self.s3_bucket.clone())
-            .key(generate_s3_file_name(self.s3_path.clone(), file_suffix))
-            .body(ByteStream::from(data))
-            .send()
-            .await
-            .map_err(|err| {
-                SinkError::Snowflake(format!("failed to sink data to S3, error: {}", err))
-            })?;
-
-        Ok(())
+    pub fn s3_path(&self) -> Option<&str> {
+        self.s3_path.as_deref()
     }
 }

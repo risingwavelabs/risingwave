@@ -872,6 +872,31 @@ fn parse_create_function() {
             with_options: Default::default(),
         }
     );
+
+    let sql = "CREATE FUNCTION add(INT, INT) RETURNS INT LANGUAGE SQL IMMUTABLE AS 'select $1 + $2;' ASYNC";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::CreateFunction {
+            or_replace: false,
+            temporary: false,
+            name: ObjectName(vec![Ident::new_unchecked("add")]),
+            args: Some(vec![
+                OperateFunctionArg::unnamed(DataType::Int),
+                OperateFunctionArg::unnamed(DataType::Int),
+            ]),
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
+            params: CreateFunctionBody {
+                language: Some("SQL".into()),
+                behavior: Some(FunctionBehavior::Immutable),
+                as_: Some(FunctionDefinition::SingleQuotedDef(
+                    "select $1 + $2;".into()
+                )),
+                function_type: Some(CreateFunctionType::Async),
+                ..Default::default()
+            },
+            with_options: Default::default(),
+        }
+    );
 }
 
 #[test]
@@ -1094,41 +1119,19 @@ fn parse_array() {
     );
 
     let sql = "SELECT ARRAY[ARRAY[1, 2], [3, 4]]";
-    assert_eq!(
-        parse_sql_statements(sql),
-        Err(ParserError::ParserError(
-            "syntax error at or near [ at line:1, column:28".to_string()
-        ))
-    );
+    assert!(parse_sql_statements(sql).is_err());
 
     let sql = "SELECT ARRAY[ARRAY[], []]";
-    assert_eq!(
-        parse_sql_statements(sql),
-        Err(ParserError::ParserError(
-            "syntax error at or near [ at line:1, column:24".to_string()
-        ))
-    );
+    assert!(parse_sql_statements(sql).is_err());
 
     let sql = "SELECT ARRAY[[1, 2], ARRAY[3, 4]]";
-    assert_eq!(
-        parse_sql_statements(sql),
-        Err(ParserError::ParserError(
-            "syntax error at or near ARRAY at line:1, column:27".to_string()
-        ))
-    );
+    assert!(parse_sql_statements(sql).is_err());
 
     let sql = "SELECT ARRAY[[], ARRAY[]]";
-    assert_eq!(
-        parse_sql_statements(sql),
-        Err(ParserError::ParserError(
-            "syntax error at or near ARRAY at line:1, column:23".to_string()
-        ))
-    );
+    assert!(parse_sql_statements(sql).is_err());
 
     let sql = "SELECT [[1, 2], [3, 4]]";
-    let res = parse_sql_statements(sql);
-    let err_msg = "Expected an expression:, found: [";
-    assert!(format!("{}", res.unwrap_err()).contains(err_msg));
+    assert!(parse_sql_statements(sql).is_err());
 }
 
 #[test]

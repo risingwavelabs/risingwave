@@ -17,7 +17,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::Context;
-use hytra::TrAdder;
 use parking_lot::Mutex;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::memory::MemoryContext;
@@ -50,11 +49,6 @@ pub struct BatchManager {
     /// Batch configuration
     config: BatchConfig,
 
-    /// Total batch memory usage in this CN.
-    /// When each task context report their own usage, it will apply the diff into this total mem
-    /// value for all tasks.
-    total_mem_val: Arc<TrAdder<i64>>,
-
     /// Memory context used for batch tasks in cn.
     mem_context: MemoryContext,
 
@@ -63,7 +57,7 @@ pub struct BatchManager {
 }
 
 impl BatchManager {
-    pub fn new(config: BatchConfig, metrics: Arc<BatchManagerMetrics>) -> Self {
+    pub fn new(config: BatchConfig, metrics: Arc<BatchManagerMetrics>, mem_limit: u64) -> Self {
         let runtime = {
             let mut builder = tokio::runtime::Builder::new_multi_thread();
             if let Some(worker_threads_num) = config.worker_threads_num {
@@ -76,12 +70,11 @@ impl BatchManager {
                 .unwrap()
         };
 
-        let mem_context = MemoryContext::root(metrics.batch_total_mem.clone());
+        let mem_context = MemoryContext::root(metrics.batch_total_mem.clone(), mem_limit);
         BatchManager {
             tasks: Arc::new(Mutex::new(HashMap::new())),
             runtime: Arc::new(runtime.into()),
             config,
-            total_mem_val: TrAdder::new().into(),
             metrics,
             mem_context,
         }
@@ -288,45 +281,6 @@ impl BatchManager {
     pub fn config(&self) -> &BatchConfig {
         &self.config
     }
-
-    /// Kill batch queries with larges memory consumption per task. Required to maintain task level
-    /// memory usage in the struct. Will be called by global memory manager.
-    pub fn kill_queries(&self, reason: String) {
-        let mut max_mem_task_id = None;
-        let mut max_mem = usize::MIN;
-        let guard = self.tasks.lock();
-        for (t_id, t) in &*guard {
-            // If the task has been stopped, we should not count this.
-            if t.is_end() {
-                continue;
-            }
-            // Alternatively, we can use a bool flag to indicate end of execution.
-            // Now we use only store 0 bytes in Context after execution ends.
-            let mem_usage = t.mem_usage();
-            if mem_usage > max_mem {
-                max_mem = mem_usage;
-                max_mem_task_id = Some(t_id.clone());
-            }
-        }
-        if let Some(id) = max_mem_task_id {
-            let t = guard.get(&id).unwrap();
-            // FIXME: `Abort` will not report error but truncated results to user. We should
-            // consider throw error.
-            t.abort(reason);
-        }
-    }
-
-    /// Called by global memory manager for total usage of batch tasks. This op is designed to be
-    /// light-weight
-    pub fn total_mem_usage(&self) -> usize {
-        self.total_mem_val.get() as usize
-    }
-
-    /// Calculate the diff between this time and last time memory usage report, apply the diff for
-    /// the global counter. Due to the limitation of hytra, we need to use i64 type here.
-    pub fn apply_mem_diff(&self, diff: i64) {
-        self.total_mem_val.inc(diff)
-    }
 }
 
 #[cfg(test)]
@@ -348,6 +302,7 @@ mod tests {
         let manager = Arc::new(BatchManager::new(
             BatchConfig::default(),
             BatchManagerMetrics::for_test(),
+            u64::MAX,
         ));
         let task_id = TaskId {
             task_id: 0,
@@ -375,6 +330,7 @@ mod tests {
         let manager = Arc::new(BatchManager::new(
             BatchConfig::default(),
             BatchManagerMetrics::for_test(),
+            u64::MAX,
         ));
         let plan = PlanFragment {
             root: Some(PlanNode {
@@ -415,6 +371,7 @@ mod tests {
         let manager = Arc::new(BatchManager::new(
             BatchConfig::default(),
             BatchManagerMetrics::for_test(),
+            u64::MAX,
         ));
         let plan = PlanFragment {
             root: Some(PlanNode {
@@ -445,6 +402,7 @@ mod tests {
         let manager = Arc::new(BatchManager::new(
             BatchConfig::default(),
             BatchManagerMetrics::for_test(),
+            u64::MAX,
         ));
         let plan = PlanFragment {
             root: Some(PlanNode {

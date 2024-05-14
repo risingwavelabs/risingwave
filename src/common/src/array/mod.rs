@@ -14,11 +14,7 @@
 
 //! `Array` defines all in-memory representations of vectorized execution framework.
 
-mod arrow;
-pub use arrow::{
-    iceberg_to_arrow_type, to_deltalake_record_batch_with_schema,
-    to_iceberg_record_batch_with_schema, to_record_batch_with_schema,
-};
+pub mod arrow;
 mod bool_array;
 pub mod bytes_array;
 mod chrono_array;
@@ -63,6 +59,7 @@ pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayI
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::PbArray;
 pub use stream_chunk::{Op, StreamChunk, StreamChunkTestExt};
+pub use stream_chunk_builder::StreamChunkBuilder;
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
 

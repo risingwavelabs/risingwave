@@ -1071,13 +1071,6 @@ impl LogicalJoin {
         // Enforce a shuffle for the temporal join LHS to let the scheduler be able to schedule the join fragment together with the RHS with a `no_shuffle` exchange.
         let left = required_dist.enforce(left, &Order::any());
 
-        if !left.append_only() {
-            return Err(RwError::from(ErrorCode::NotSupported(
-                "Temporal join requires an append-only left input".into(),
-                "Please ensure your left input is append-only".into(),
-            )));
-        }
-
         // Extract the predicate from logical scan. Only pure scan is supported.
         let (new_scan, scan_predicate, project_expr) = logical_scan.predicate_pull_up();
         // Construct output column to require column mapping
@@ -1346,10 +1339,9 @@ impl ToStream for LogicalJoin {
         } else {
             Err(RwError::from(ErrorCode::NotSupported(
                 "streaming nested-loop join".to_string(),
-                // TODO: replace the link with user doc
                 "The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. \
                  Consider rewriting the query to use dynamic filter as a substitute if possible.\n\
-                 See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md".to_owned(),
+                 See also: https://docs.risingwave.com/docs/current/sql-pattern-dynamic-filters/".to_owned(),
             )))
         }
     }

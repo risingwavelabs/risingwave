@@ -21,6 +21,8 @@ use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::TableKey;
 pub use risingwave_hummock_sdk::key::{gen_key_from_bytes, gen_key_from_str};
+#[cfg(test)]
+use risingwave_hummock_sdk::SyncResult;
 use risingwave_meta::hummock::test_utils::{
     register_table_ids_to_compaction_group, setup_compute_env,
 };
@@ -28,6 +30,7 @@ use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::MetaSrvEnv;
 use risingwave_pb::catalog::{PbTable, Table};
 use risingwave_pb::common::WorkerNode;
+use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::error::StorageResult;
 use risingwave_storage::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
@@ -131,7 +134,7 @@ impl HummockStateStoreTestTrait for HummockStorage {
 pub async fn with_hummock_storage_v2(
     table_id: TableId,
 ) -> (HummockStorage, Arc<MockHummockMetaClient>) {
-    let sstable_store = mock_sstable_store();
+    let sstable_store = mock_sstable_store().await;
     let hummock_options = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
@@ -252,17 +255,14 @@ impl HummockTestEnv {
     // On completion of this function call, the provided epoch should be committed and visible.
     pub async fn commit_epoch(&self, epoch: u64) {
         let res = self.storage.seal_and_sync_epoch(epoch).await.unwrap();
-        self.meta_client
-            .commit_epoch_with_watermark(epoch, res.uncommitted_ssts, res.table_watermarks)
-            .await
-            .unwrap();
+        self.meta_client.commit_epoch(epoch, res).await.unwrap();
 
         self.storage.try_wait_epoch_for_test(epoch).await;
     }
 }
 
 pub async fn prepare_hummock_test_env() -> HummockTestEnv {
-    let sstable_store = mock_sstable_store();
+    let sstable_store = mock_sstable_store().await;
     let hummock_options = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;

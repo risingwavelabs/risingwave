@@ -1026,6 +1026,8 @@ impl Binder {
                 ("decrypt", raw_call(ExprType::Decrypt)),
                 ("left", raw_call(ExprType::Left)),
                 ("right", raw_call(ExprType::Right)),
+                ("inet_aton", raw_call(ExprType::InetAton)),
+                ("inet_ntoa", raw_call(ExprType::InetNtoa)),
                 ("int8send", raw_call(ExprType::PgwireSend)),
                 ("int8recv", guard_by_len(1, raw(|_binder, mut inputs| {
                     // Similar to `cast` from string, return type is set explicitly rather than inferred.
@@ -1121,6 +1123,7 @@ impl Binder {
                 ("to_jsonb", raw_call(ExprType::ToJsonb)),
                 ("jsonb_build_array", raw_call(ExprType::JsonbBuildArray)),
                 ("jsonb_build_object", raw_call(ExprType::JsonbBuildObject)),
+                ("jsonb_populate_record", raw_call(ExprType::JsonbPopulateRecord)),
                 ("jsonb_path_match", raw_call(ExprType::JsonbPathMatch)),
                 ("jsonb_path_exists", raw_call(ExprType::JsonbPathExists)),
                 ("jsonb_path_query_array", raw_call(ExprType::JsonbPathQueryArray)),
@@ -1300,6 +1303,51 @@ impl Binder {
                 ("pg_get_partkeydef", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
                 ("pg_encoding_to_char", raw_literal(ExprImpl::literal_varchar("UTF8".into()))),
                 ("has_database_privilege", raw_literal(ExprImpl::literal_bool(true))),
+                ("has_table_privilege", raw(|binder, mut inputs|{
+                    if inputs.len() == 2 {
+                        inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
+                    }
+                    if inputs.len() == 3 {
+                        if inputs[1].return_type() == DataType::Varchar {
+                            inputs[1].cast_to_regclass_mut()?;
+                        }
+                        Ok(FunctionCall::new(ExprType::HasTablePrivilege, inputs)?.into())
+                    } else {
+                        Err(ErrorCode::ExprError(
+                            "Too many/few arguments for pg_catalog.has_table_privilege()".into(),
+                        )
+                        .into())
+                    }
+                })),
+                ("has_any_column_privilege", raw(|binder, mut inputs|{
+                    if inputs.len() == 2 {
+                        inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
+                    }
+                    if inputs.len() == 3 {
+                        if inputs[1].return_type() == DataType::Varchar {
+                            inputs[1].cast_to_regclass_mut()?;
+                        }
+                        Ok(FunctionCall::new(ExprType::HasAnyColumnPrivilege, inputs)?.into())
+                    } else {
+                        Err(ErrorCode::ExprError(
+                            "Too many/few arguments for pg_catalog.has_any_column_privilege()".into(),
+                        )
+                        .into())
+                    }
+                })),
+                ("has_schema_privilege", raw(|binder, mut inputs|{
+                    if inputs.len() == 2 {
+                        inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
+                    }
+                    if inputs.len() == 3 {
+                        Ok(FunctionCall::new(ExprType::HasSchemaPrivilege, inputs)?.into())
+                    } else {
+                        Err(ErrorCode::ExprError(
+                            "Too many/few arguments for pg_catalog.has_schema_privilege()".into(),
+                        )
+                        .into())
+                    }
+                })),
                 ("pg_stat_get_numscans", raw_literal(ExprImpl::literal_bigint(0))),
                 ("pg_backend_pid", raw(|binder, _inputs| {
                     // FIXME: the session id is not global unique in multi-frontend env.

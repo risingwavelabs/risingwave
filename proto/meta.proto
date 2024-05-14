@@ -254,6 +254,7 @@ enum ThrottleTarget {
   THROTTLE_TARGET_UNSPECIFIED = 0;
   SOURCE = 1;
   MV = 2;
+  TABLE_WITH_SOURCE = 3;
 }
 
 message ApplyThrottleRequest {
@@ -266,6 +267,10 @@ message ApplyThrottleResponse {
   common.Status status = 1;
 }
 
+message RecoverRequest {}
+
+message RecoverResponse {}
+
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
   rpc Pause(PauseRequest) returns (PauseResponse);
@@ -277,6 +282,7 @@ service StreamManagerService {
   rpc ListActorStates(ListActorStatesRequest) returns (ListActorStatesResponse);
   rpc ListObjectDependencies(ListObjectDependenciesRequest) returns (ListObjectDependenciesResponse);
   rpc ApplyThrottle(ApplyThrottleRequest) returns (ApplyThrottleResponse);
+  rpc Recover(RecoverRequest) returns (RecoverResponse);
 }
 
 // Below for cluster service.

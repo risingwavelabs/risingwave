@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::convert::TryFrom;
 use std::num::NonZeroU32;
 
-use risingwave_connector::source::kafka::{
+use risingwave_connector::source::kafka::private_link::{
     insert_privatelink_broker_rewrite_map, CONNECTION_NAME_KEY, PRIVATELINK_ENDPOINT_KEY,
 };
 use risingwave_connector::WithPropertiesExt;
@@ -25,6 +25,7 @@ use risingwave_sqlparser::ast::{
     CreateSubscriptionStatement, SqlOption, Statement, Value,
 };
 
+use super::OverwriteOptions;
 use crate::catalog::connection_catalog::resolve_private_link_connection;
 use crate::catalog::ConnectionId;
 use crate::error::{ErrorCode, Result as RwResult, RwError};
@@ -79,6 +80,14 @@ impl WithOptions {
     /// Take the value of the inner map.
     pub fn into_inner(self) -> BTreeMap<String, String> {
         self.inner
+    }
+
+    /// Convert to connector props, remove the key-value pairs used in the top-level.
+    pub fn into_connector_props(self) -> HashMap<String, String> {
+        self.inner
+            .into_iter()
+            .filter(|(key, _)| key != OverwriteOptions::STREAMING_RATE_LIMIT_KEY)
+            .collect()
     }
 
     /// Parse the retention seconds from the options.

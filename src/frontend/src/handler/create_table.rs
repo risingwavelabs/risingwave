@@ -14,7 +14,6 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -25,17 +24,15 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, TableId, TableVersionId, DEFAULT_SCHEMA_NAME,
-    INITIAL_SOURCE_VERSION_ID, INITIAL_TABLE_VERSION_ID, USER_COLUMN_ID_OFFSET,
+    INITIAL_TABLE_VERSION_ID, USER_COLUMN_ID_OFFSET,
 };
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
+use risingwave_connector::source;
 use risingwave_connector::source::cdc::external::{
     DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
-use risingwave_connector::source::cdc::CDC_BACKFILL_ENABLE_KEY;
-use risingwave_connector::{source, WithPropertiesExt};
-use risingwave_pb::catalog::source::OptionalAssociatedTableId;
-use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, Table, WatermarkDesc};
+use risingwave_pb::catalog::{PbSource, PbTable, Table, WatermarkDesc};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{
@@ -44,8 +41,8 @@ use risingwave_pb::plan_common::{
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
-    CdcTableInfo, ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType, Format,
-    ObjectName, OnConflict, SourceWatermark, TableConstraint,
+    CdcTableInfo, ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType,
+    ExplainOptions, Format, ObjectName, OnConflict, SourceWatermark, TableConstraint,
 };
 use risingwave_sqlparser::parser::IncludeOption;
 
@@ -54,21 +51,20 @@ use crate::binder::{bind_data_type, bind_struct_field, Clause};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableVersion;
-use crate::catalog::{check_valid_column_name, ColumnId};
+use crate::catalog::{check_valid_column_name, ColumnId, DatabaseId, SchemaId};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InlineNowProcTime};
 use crate::handler::create_source::{
-    bind_all_columns, bind_columns_from_source, bind_source_pk, bind_source_watermark,
-    check_source_schema, handle_addition_columns, validate_compatibility, UPSTREAM_SOURCE_KEY,
+    bind_columns_from_source, bind_connector_props, bind_create_source, bind_source_watermark,
+    UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::generic::SourceNodeKind;
+use crate::optimizer::plan_node::generic::{CdcScanOptions, SourceNodeKind};
 use crate::optimizer::plan_node::{LogicalCdcScan, LogicalSource};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
-use crate::utils::resolve_privatelink_in_with_option;
 use crate::{Binder, TableCatalog, WithOptions};
 
 /// Column ID generator for a new table or a new version of an existing table to alter.
@@ -456,7 +452,8 @@ pub fn bind_pk_on_relation(
 /// stream source.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn gen_create_table_plan_with_source(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
+    explain_options: ExplainOptions,
     table_name: ObjectName,
     column_defs: Vec<ColumnDef>,
     wildcard_idx: Option<usize>,
@@ -480,84 +477,45 @@ pub(crate) async fn gen_create_table_plan_with_source(
         .into());
     }
 
-    let session = context.session_ctx();
-    let mut with_properties = context.with_options().inner().clone().into_iter().collect();
-    validate_compatibility(&source_schema, &mut with_properties)?;
-
-    ensure_table_constraints_supported(&constraints)?;
-
-    let sql_pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
+    let session = &handler_args.session;
+    let with_properties = bind_connector_props(&handler_args, &source_schema, false)?;
 
     let (columns_from_resolve_source, source_info) =
-        bind_columns_from_source(context.session_ctx(), &source_schema, &with_properties).await?;
-    let columns_from_sql = bind_sql_columns(&column_defs)?;
+        bind_columns_from_source(session, &source_schema, &with_properties).await?;
 
-    let mut columns = bind_all_columns(
-        &source_schema,
-        columns_from_resolve_source,
-        columns_from_sql,
+    let (source_catalog, database_id, schema_id) = bind_create_source(
+        handler_args.clone(),
+        table_name,
+        source_schema,
+        with_properties,
         &column_defs,
+        constraints,
         wildcard_idx,
-    )?;
-
-    // add additional columns before bind pk, because `format upsert` requires the key column
-    handle_addition_columns(&with_properties, include_column_options, &mut columns)?;
-    let pk_names = bind_source_pk(
-        &source_schema,
-        &source_info,
-        &mut columns,
-        sql_pk_names,
-        &with_properties,
+        source_watermarks,
+        columns_from_resolve_source,
+        source_info,
+        include_column_options,
+        &mut col_id_gen,
+        false,
     )
     .await?;
 
-    for c in &mut columns {
-        c.column_desc.column_id = col_id_gen.generate(c.name())
-    }
+    let pb_source = source_catalog.to_prost(schema_id, database_id);
 
-    if with_properties.is_iceberg_connector() {
-        return Err(
-            ErrorCode::BindError("can't create table with iceberg connector".to_string()).into(),
-        );
-    }
-    let (mut columns, pk_column_ids, row_id_index) = bind_pk_on_relation(columns, pk_names, true)?;
+    let context = OptimizerContext::new(handler_args, explain_options);
 
-    let watermark_descs = bind_source_watermark(
-        session,
-        table_name.real_value(),
-        source_watermarks,
-        &columns,
-    )?;
-    // TODO(yuhao): allow multiple watermark on source.
-    assert!(watermark_descs.len() <= 1);
-
-    let definition = context.normalized_sql().to_owned();
-
-    bind_sql_column_constraints(
-        session,
-        table_name.real_value(),
-        &mut columns,
-        column_defs,
-        &pk_column_ids,
-    )?;
-
-    check_source_schema(&with_properties, row_id_index, &columns).await?;
-
-    gen_table_plan_inner(
+    let (plan, table) = gen_table_plan_with_source(
         context.into(),
-        table_name,
-        columns,
-        with_properties,
-        pk_column_ids,
-        row_id_index,
-        Some(source_info),
-        definition,
-        watermark_descs,
+        source_catalog,
         append_only,
         on_conflict,
         with_version_column,
         Some(col_id_gen.into_version()),
-    )
+        database_id,
+        schema_id,
+    )?;
+
+    Ok((plan, Some(pb_source), table))
 }
 
 /// `gen_create_table_plan` generates the plan for creating a table without an external stream
@@ -572,14 +530,14 @@ pub(crate) fn gen_create_table_plan(
     append_only: bool,
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
-) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
+) -> Result<(PlanRef, PbTable)> {
     let definition = context.normalized_sql().to_owned();
     let mut columns = bind_sql_columns(&column_defs)?;
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
     let with_properties = context.with_options().inner().clone().into_iter().collect();
-    gen_create_table_plan_without_bind(
+    gen_create_table_plan_without_source(
         context,
         table_name,
         columns,
@@ -596,7 +554,7 @@ pub(crate) fn gen_create_table_plan(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn gen_create_table_plan_without_bind(
+pub(crate) fn gen_create_table_plan_without_source(
     context: OptimizerContext,
     table_name: ObjectName,
     columns: Vec<ColumnCatalog>,
@@ -609,12 +567,12 @@ pub(crate) fn gen_create_table_plan_without_bind(
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
     version: Option<TableVersion>,
-) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
+) -> Result<(PlanRef, PbTable)> {
     ensure_table_constraints_supported(&constraints)?;
     let pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
     let (mut columns, pk_column_ids, row_id_index) = bind_pk_on_relation(columns, pk_names, true)?;
 
-    let watermark_descs = bind_source_watermark(
+    let watermark_descs: Vec<WatermarkDesc> = bind_source_watermark(
         context.session_ctx(),
         table_name.real_value(),
         source_watermarks,
@@ -628,33 +586,71 @@ pub(crate) fn gen_create_table_plan_without_bind(
         column_defs,
         &pk_column_ids,
     )?;
+    let session = context.session_ctx().clone();
+
+    let db_name = session.database();
+    let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
+    let (database_id, schema_id) =
+        session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
     gen_table_plan_inner(
         context.into(),
-        table_name,
+        name,
         columns,
         with_properties,
         pk_column_ids,
         row_id_index,
-        None,
         definition,
         watermark_descs,
         append_only,
         on_conflict,
         with_version_column,
         version,
+        None,
+        database_id,
+        schema_id,
+    )
+}
+
+fn gen_table_plan_with_source(
+    context: OptimizerContextRef,
+    source_catalog: SourceCatalog,
+    append_only: bool,
+    on_conflict: Option<OnConflict>,
+    with_version_column: Option<String>,
+    version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
+                                    * TABLE` for `CREATE TABLE AS`. */
+    database_id: DatabaseId,
+    schema_id: SchemaId,
+) -> Result<(PlanRef, PbTable)> {
+    let cloned_source_catalog = source_catalog.clone();
+    gen_table_plan_inner(
+        context,
+        source_catalog.name,
+        source_catalog.columns,
+        source_catalog.with_properties.clone().into_iter().collect(),
+        source_catalog.pk_col_ids,
+        source_catalog.row_id_index,
+        source_catalog.definition,
+        source_catalog.watermark_descs,
+        append_only,
+        on_conflict,
+        with_version_column,
+        version,
+        Some(cloned_source_catalog),
+        database_id,
+        schema_id,
     )
 }
 
 #[allow(clippy::too_many_arguments)]
 fn gen_table_plan_inner(
     context: OptimizerContextRef,
-    table_name: ObjectName,
+    table_name: String,
     columns: Vec<ColumnCatalog>,
     with_properties: HashMap<String, String>,
     pk_column_ids: Vec<ColumnId>,
     row_id_index: Option<usize>,
-    source_info: Option<StreamSourceInfo>,
     definition: String,
     watermark_descs: Vec<WatermarkDesc>,
     append_only: bool,
@@ -662,51 +658,16 @@ fn gen_table_plan_inner(
     with_version_column: Option<String>,
     version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
                                     * TABLE` for `CREATE TABLE AS`. */
-) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
+    source_catalog: Option<SourceCatalog>,
+    database_id: DatabaseId,
+    schema_id: SchemaId,
+) -> Result<(PlanRef, PbTable)> {
     let session = context.session_ctx().clone();
-    let db_name = session.database();
-    let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
-    let (database_id, schema_id) =
-        session.get_database_and_schema_id_for_create(schema_name.clone())?;
-
-    // resolve privatelink connection for Table backed by Kafka source
-    let mut with_properties = WithOptions::new(with_properties);
-    let connection_id =
-        resolve_privatelink_in_with_option(&mut with_properties, &schema_name, &session)?;
+    let with_properties = WithOptions::new(with_properties);
     let retention_seconds = with_properties.retention_seconds();
-
-    let is_external_source = source_info.is_some();
-
-    let source = source_info.map(|source_info| PbSource {
-        id: TableId::placeholder().table_id,
-        schema_id,
-        database_id,
-        name: name.clone(),
-        row_id_index: row_id_index.map(|i| i as _),
-        columns: columns
-            .iter()
-            .map(|column| column.to_protobuf())
-            .collect_vec(),
-        pk_column_ids: pk_column_ids.iter().map(Into::into).collect_vec(),
-        with_properties: with_properties.into_inner().into_iter().collect(),
-        info: Some(source_info),
-        owner: session.user_id(),
-        watermark_descs: watermark_descs.clone(),
-        definition: "".to_string(),
-        connection_id,
-        initialized_at_epoch: None,
-        created_at_epoch: None,
-        optional_associated_table_id: Some(OptionalAssociatedTableId::AssociatedTableId(
-            TableId::placeholder().table_id,
-        )),
-        version: INITIAL_SOURCE_VERSION_ID,
-        initialized_at_cluster_version: None,
-        created_at_cluster_version: None,
-    });
-
-    let source_catalog = source.as_ref().map(|source| Rc::new((source).into()));
+    let is_external_source = source_catalog.is_some();
     let source_node: PlanRef = LogicalSource::new(
-        source_catalog.clone(),
+        source_catalog.map(|source| Rc::new(source.clone())),
         columns.clone(),
         row_id_index,
         SourceNodeKind::CreateTable,
@@ -716,7 +677,7 @@ fn gen_table_plan_inner(
     .into();
 
     let required_cols = FixedBitSet::with_capacity(columns.len());
-    let mut plan_root = PlanRoot::new(
+    let plan_root = PlanRoot::new_with_logical_plan(
         source_node,
         RequiredDist::Any,
         Order::any(),
@@ -749,7 +710,7 @@ fn gen_table_plan_inner(
 
     let materialize = plan_root.gen_table_plan(
         context,
-        name,
+        table_name,
         columns,
         definition,
         pk_column_ids,
@@ -766,7 +727,7 @@ fn gen_table_plan_inner(
     let mut table = materialize.table().to_prost(schema_id, database_id);
 
     table.owner = session.user_id();
-    Ok((materialize.into(), source, table))
+    Ok((materialize.into(), table))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -847,25 +808,18 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
 
     tracing::debug!(?cdc_table_desc, "create cdc table");
 
-    // disable backfill if 'snapshot=false'
-    let disable_backfill = match context.with_options().get(CDC_BACKFILL_ENABLE_KEY) {
-        None => false,
-        Some(v) => {
-            !(bool::from_str(v)
-                .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_ENABLE_KEY))?)
-        }
-    };
+    let options = CdcScanOptions::from_with_options(context.with_options())?;
 
     let logical_scan = LogicalCdcScan::create(
         external_table_name,
         Rc::new(cdc_table_desc),
         context.clone(),
-        disable_backfill,
+        options,
     );
 
     let scan_node: PlanRef = logical_scan.into();
     let required_cols = FixedBitSet::with_capacity(columns.len());
-    let mut plan_root = PlanRoot::new(
+    let plan_root = PlanRoot::new_with_logical_plan(
         scan_node,
         RequiredDist::Any,
         Order::any(),
@@ -939,7 +893,8 @@ fn derive_connect_properties(
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_create_table_plan(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
+    explain_options: ExplainOptions,
     col_id_gen: ColumnIdGenerator,
     source_schema: Option<ConnectorSchema>,
     cdc_table_info: Option<CdcTableInfo>,
@@ -954,7 +909,7 @@ pub(super) async fn handle_create_table_plan(
     include_column_options: IncludeOption,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable, TableJobType)> {
     let source_schema = check_create_table_with_source(
-        context.with_options(),
+        &handler_args.with_options,
         source_schema,
         &include_column_options,
     )?;
@@ -963,7 +918,8 @@ pub(super) async fn handle_create_table_plan(
         match (source_schema, cdc_table_info.as_ref()) {
             (Some(source_schema), None) => (
                 gen_create_table_plan_with_source(
-                    context,
+                    handler_args,
+                    explain_options,
                     table_name.clone(),
                     column_defs,
                     wildcard_idx,
@@ -979,8 +935,9 @@ pub(super) async fn handle_create_table_plan(
                 .await?,
                 TableJobType::General,
             ),
-            (None, None) => (
-                gen_create_table_plan(
+            (None, None) => {
+                let context = OptimizerContext::new(handler_args, explain_options);
+                let (plan, table) = gen_create_table_plan(
                     context,
                     table_name.clone(),
                     column_defs,
@@ -990,11 +947,47 @@ pub(super) async fn handle_create_table_plan(
                     append_only,
                     on_conflict,
                     with_version_column,
-                )?,
-                TableJobType::General,
-            ),
+                )?;
+
+                ((plan, None, table), TableJobType::General)
+            }
 
             (None, Some(cdc_table)) => {
+                let context = OptimizerContext::new(handler_args, explain_options);
+                if append_only {
+                    return Err(ErrorCode::NotSupported(
+                        "append only modifier on the table created from a CDC source".into(),
+                        "Remove the APPEND ONLY clause".into(),
+                    )
+                    .into());
+                }
+
+                if !source_watermarks.is_empty() {
+                    return Err(ErrorCode::NotSupported(
+                        "watermark defined on the table created from a CDC source".into(),
+                        "Remove the Watermark definitions".into(),
+                    )
+                    .into());
+                }
+                if wildcard_idx.is_some() {
+                    return Err(ErrorCode::NotSupported(
+                        "star(\"*\") defined on the table created from a CDC source".into(),
+                        "Remove the star(\"*\") in the column list".into(),
+                    )
+                    .into());
+                }
+                for c in &column_defs {
+                    for op in &c.options {
+                        if let ColumnOption::GeneratedColumns(_) = op.option {
+                            return Err(ErrorCode::NotSupported(
+                                "generated column defined on the table created from a CDC source"
+                                    .into(),
+                                "Remove the generated column in the column list".into(),
+                            )
+                            .into());
+                        }
+                    }
+                }
                 let (plan, table) = gen_create_table_plan_for_cdc_source(
                     context.into(),
                     cdc_table.source_name.clone(),
@@ -1050,10 +1043,10 @@ pub async fn handle_create_table(
     }
 
     let (graph, source, table, job_type) = {
-        let context = OptimizerContext::from_handler_args(handler_args);
         let col_id_gen = ColumnIdGenerator::new_initial();
         let (plan, source, table, job_type) = handle_create_table_plan(
-            context,
+            handler_args,
+            ExplainOptions::default(),
             col_id_gen,
             source_schema,
             cdc_table_info,
@@ -1132,11 +1125,11 @@ pub async fn generate_stream_graph_for_table(
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>)> {
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 
-    let context = OptimizerContext::from_handler_args(handler_args);
     let (plan, source, table) = match source_schema {
         Some(source_schema) => {
             gen_create_table_plan_with_source(
-                context,
+                handler_args,
+                ExplainOptions::default(),
                 table_name,
                 columns,
                 wildcard_idx,
@@ -1151,17 +1144,21 @@ pub async fn generate_stream_graph_for_table(
             )
             .await?
         }
-        None => gen_create_table_plan(
-            context,
-            table_name,
-            columns,
-            constraints,
-            col_id_gen,
-            source_watermarks,
-            append_only,
-            on_conflict,
-            with_version_column,
-        )?,
+        None => {
+            let context = OptimizerContext::from_handler_args(handler_args);
+            let (plan, table) = gen_create_table_plan(
+                context,
+                table_name,
+                columns,
+                constraints,
+                col_id_gen,
+                source_watermarks,
+                append_only,
+                on_conflict,
+                with_version_column,
+            )?;
+            (plan, None, table)
+        }
     };
 
     // TODO: avoid this backward conversion.

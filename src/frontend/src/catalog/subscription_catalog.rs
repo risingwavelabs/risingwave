@@ -12,15 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashSet};
+use core::str::FromStr;
+use std::collections::BTreeMap;
 
-use itertools::Itertools;
-use risingwave_common::catalog::{ColumnCatalog, TableId, UserId, OBJECT_ID_PLACEHOLDER};
+use risingwave_common::catalog::{TableId, UserId, OBJECT_ID_PLACEHOLDER};
+use risingwave_common::types::Interval;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::{PbStreamJobStatus, PbSubscription};
+use risingwave_pb::catalog::subscription::PbSubscriptionState;
+use risingwave_pb::catalog::PbSubscription;
+use thiserror_ext::AsReport;
 
 use super::OwnedByUserCatalog;
+use crate::error::{ErrorCode, Result};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(test, derive(Default))]
@@ -34,21 +37,8 @@ pub struct SubscriptionCatalog {
     /// Full SQL definition of the subscription. For debug now.
     pub definition: String,
 
-    /// All columns of the subscription. Note that this is NOT sorted by columnId in the vector.
-    pub columns: Vec<ColumnCatalog>,
-
-    /// Primiary keys of the subscription. Derived by the frontend.
-    pub plan_pk: Vec<ColumnOrder>,
-
-    /// Distribution key indices of the subscription. For example, if `distribution_key = [1, 2]`, then the
-    /// distribution keys will be `columns[1]` and `columns[2]`.
-    pub distribution_key: Vec<usize>,
-
-    /// The properties of the subscription, only `retention`.
-    pub properties: BTreeMap<String, String>,
-
-    /// The upstream table name on which the subscription depends
-    pub subscription_from_name: String,
+    /// The retention seconds of the subscription.
+    pub retention_seconds: u64,
 
     /// The database id
     pub database_id: u32,
@@ -57,7 +47,7 @@ pub struct SubscriptionCatalog {
     pub schema_id: u32,
 
     /// The subscription depends on the upstream list
-    pub dependent_relations: Vec<TableId>,
+    pub dependent_table_id: TableId,
 
     /// The user id
     pub owner: UserId,
@@ -92,10 +82,21 @@ impl SubscriptionId {
 }
 
 impl SubscriptionCatalog {
-    pub fn add_dependent_relations(mut self, mut dependent_relations: HashSet<TableId>) -> Self {
-        dependent_relations.extend(self.dependent_relations);
-        self.dependent_relations = dependent_relations.into_iter().collect();
-        self
+    pub fn set_retention_seconds(&mut self, properties: BTreeMap<String, String>) -> Result<()> {
+        let retention_seconds_str = properties.get("retention").ok_or_else(|| {
+            ErrorCode::InternalError("Subscription retention time not set.".to_string())
+        })?;
+        let retention_seconds = (Interval::from_str(retention_seconds_str)
+            .map_err(|err| {
+                ErrorCode::InternalError(format!(
+                    "Retention needs to be set in Interval format: {:?}",
+                    err.to_report_string()
+                ))
+            })?
+            .epoch_in_micros()
+            / 1000000) as u64;
+        self.retention_seconds = retention_seconds;
+        Ok(())
     }
 
     pub fn create_sql(&self) -> String {
@@ -103,33 +104,20 @@ impl SubscriptionCatalog {
     }
 
     pub fn to_proto(&self) -> PbSubscription {
-        assert!(!self.dependent_relations.is_empty());
         PbSubscription {
             id: self.id.subscription_id,
             name: self.name.clone(),
             definition: self.definition.clone(),
-            column_catalogs: self
-                .columns
-                .iter()
-                .map(|column| column.to_protobuf())
-                .collect_vec(),
-            plan_pk: self.plan_pk.iter().map(|k| k.to_protobuf()).collect_vec(),
-            distribution_key: self.distribution_key.iter().map(|k| *k as _).collect_vec(),
-            subscription_from_name: self.subscription_from_name.clone(),
-            properties: self.properties.clone().into_iter().collect(),
+            retention_seconds: self.retention_seconds,
             database_id: self.database_id,
             schema_id: self.schema_id,
-            dependent_relations: self
-                .dependent_relations
-                .iter()
-                .map(|k| k.table_id)
-                .collect_vec(),
             initialized_at_epoch: self.initialized_at_epoch.map(|e| e.0),
             created_at_epoch: self.created_at_epoch.map(|e| e.0),
             owner: self.owner.into(),
-            stream_job_status: PbStreamJobStatus::Creating.into(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             created_at_cluster_version: self.created_at_cluster_version.clone(),
+            dependent_table_id: self.dependent_table_id.table_id,
+            subscription_state: PbSubscriptionState::Init.into(),
         }
     }
 }
@@ -140,26 +128,10 @@ impl From<&PbSubscription> for SubscriptionCatalog {
             id: SubscriptionId::new(prost.id),
             name: prost.name.clone(),
             definition: prost.definition.clone(),
-            columns: prost
-                .column_catalogs
-                .iter()
-                .map(|c| ColumnCatalog::from(c.clone()))
-                .collect_vec(),
-            plan_pk: prost
-                .plan_pk
-                .iter()
-                .map(ColumnOrder::from_protobuf)
-                .collect_vec(),
-            distribution_key: prost.distribution_key.iter().map(|k| *k as _).collect_vec(),
-            subscription_from_name: prost.subscription_from_name.clone(),
-            properties: prost.properties.clone().into_iter().collect(),
+            retention_seconds: prost.retention_seconds,
             database_id: prost.database_id,
             schema_id: prost.schema_id,
-            dependent_relations: prost
-                .dependent_relations
-                .iter()
-                .map(|k| TableId::new(*k))
-                .collect_vec(),
+            dependent_table_id: TableId::new(prost.dependent_table_id),
             owner: prost.owner.into(),
             created_at_epoch: prost.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: prost.initialized_at_epoch.map(Epoch::from),

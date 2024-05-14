@@ -20,13 +20,16 @@ use futures::future::Shared;
 use itertools::Itertools;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId};
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
+use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::subscribe_compaction_event_request::{
     self, Event as RequestEvent, PullTask,
 };
 use risingwave_pb::hummock::subscribe_compaction_event_response::{
     Event as ResponseEvent, PullTaskAck,
 };
-use risingwave_pb::hummock::{CompactStatus as PbCompactStatus, CompactTaskAssignment};
+use risingwave_pb::hummock::{
+    CompactStatus as PbCompactStatus, CompactTaskAssignment, CompactionConfig,
+};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::oneshot::Receiver as OneShotReceiver;
@@ -122,6 +125,7 @@ impl HummockManager {
         context_id: u32,
         pull_task_count: usize,
         compaction_selectors: &mut HashMap<TaskType, Box<dyn CompactionSelector>>,
+        max_get_task_probe_times: usize,
     ) {
         assert_ne!(0, pull_task_count);
         if let Some(compactor) = self.compactor_manager.get_compactor(context_id) {
@@ -134,8 +138,13 @@ impl HummockManager {
                 let mut existed_groups = groups.clone();
                 let mut no_task_groups: HashSet<CompactionGroupId> = HashSet::default();
                 let mut failed_tasks = vec![];
+                let mut loop_times = 0;
 
-                while generated_task_count < pull_task_count && failed_tasks.is_empty() {
+                while generated_task_count < pull_task_count
+                    && failed_tasks.is_empty()
+                    && loop_times < max_get_task_probe_times
+                {
+                    loop_times += 1;
                     let compact_ret = self
                         .get_compact_tasks(
                             existed_groups.clone(),
@@ -216,7 +225,7 @@ impl HummockManager {
                     let mut skip_times = 0;
                     match event {
                         RequestEvent::PullTask(PullTask { pull_task_count }) => {
-                            hummock_manager.handle_pull_task_event(context_id, pull_task_count as usize, &mut compaction_selectors).await;
+                            hummock_manager.handle_pull_task_event(context_id, pull_task_count as usize, &mut compaction_selectors, hummock_manager.env.opts.max_get_task_probe_times).await;
                         }
 
                         RequestEvent::ReportTask(task) => {
@@ -228,7 +237,7 @@ impl HummockManager {
                     while let Ok((context_id, event)) = rx.try_recv() {
                         match event {
                             RequestEvent::PullTask(PullTask { pull_task_count }) => {
-                                hummock_manager.handle_pull_task_event(context_id, pull_task_count as usize, &mut compaction_selectors).await;
+                                hummock_manager.handle_pull_task_event(context_id, pull_task_count as usize, &mut compaction_selectors, hummock_manager.env.opts.max_get_task_probe_times).await;
                                 if !report_events.is_empty() {
                                     if skip_times > MAX_SKIP_TIMES {
                                         break;
@@ -255,5 +264,43 @@ impl HummockManager {
                 }
             } => {}
         }
+    }
+}
+
+pub fn check_cg_write_limit(
+    levels: &Levels,
+    compaction_config: &CompactionConfig,
+) -> WriteLimitType {
+    let threshold = compaction_config.level0_stop_write_threshold_sub_level_number as usize;
+    let l0_sub_level_number = levels.l0.as_ref().unwrap().sub_levels.len();
+    if threshold < l0_sub_level_number {
+        return WriteLimitType::WriteStop(l0_sub_level_number, threshold);
+    }
+
+    WriteLimitType::Unlimited
+}
+
+pub enum WriteLimitType {
+    Unlimited,
+
+    // (l0_level_count, threshold)
+    WriteStop(usize, usize),
+}
+
+impl WriteLimitType {
+    pub fn as_str(&self) -> String {
+        match self {
+            Self::Unlimited => "Unlimited".to_string(),
+            Self::WriteStop(l0_level_count, threshold) => {
+                format!(
+                    "WriteStop(l0_level_count: {}, threshold: {}) too many L0 sub levels",
+                    l0_level_count, threshold
+                )
+            }
+        }
+    }
+
+    pub fn is_write_stop(&self) -> bool {
+        matches!(self, Self::WriteStop(_, _))
     }
 }

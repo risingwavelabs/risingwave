@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_meta::manager::MetadataManager;
+use risingwave_meta::manager::{LocalNotification, MetadataManager};
 use risingwave_meta::model;
 use risingwave_meta::model::ActorId;
 use risingwave_meta::stream::ThrottleConfig;
@@ -108,7 +108,7 @@ impl StreamManagerService for StreamServiceImpl {
         let request = request.into_inner();
 
         let actor_to_apply = match request.kind() {
-            ThrottleTarget::Source => {
+            ThrottleTarget::Source | ThrottleTarget::TableWithSource => {
                 self.metadata_manager
                     .update_source_rate_limit_by_source_id(request.id as SourceId, request.rate)
                     .await?
@@ -410,5 +410,17 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(ListObjectDependenciesResponse {
             dependencies,
         }))
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn recover(
+        &self,
+        _request: Request<RecoverRequest>,
+    ) -> Result<Response<RecoverResponse>, Status> {
+        self.env
+            .notification_manager()
+            .notify_local_subscribers(LocalNotification::AdhocRecovery)
+            .await;
+        Ok(Response::new(RecoverResponse {}))
     }
 }

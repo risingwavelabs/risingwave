@@ -15,25 +15,22 @@
 use std::ops::{Div, Mul};
 use std::sync::Arc;
 
-use arrow_array::{ArrayRef, StructArray};
-use arrow_schema::DataType;
-use itertools::Itertools;
+use arrow_array::ArrayRef;
 use num_traits::abs;
 
-use super::{ToArrowArrayWithTypeConvert, ToArrowTypeConvert};
-use crate::array::{Array, ArrayError, DataChunk, DecimalArray};
-use crate::util::iter_util::ZipEqFast;
+use super::{FromArrow, ToArrow};
+use crate::array::{Array, ArrayError, DecimalArray};
 
-struct IcebergArrowConvert;
+pub struct IcebergArrowConvert;
 
-impl ToArrowTypeConvert for IcebergArrowConvert {
+impl ToArrow for IcebergArrowConvert {
     #[inline]
-    fn decimal_type_to_arrow(&self) -> arrow_schema::DataType {
-        arrow_schema::DataType::Decimal128(arrow_schema::DECIMAL128_MAX_PRECISION, 0)
+    fn decimal_type_to_arrow(&self, name: &str) -> arrow_schema::Field {
+        let data_type =
+            arrow_schema::DataType::Decimal128(arrow_schema::DECIMAL128_MAX_PRECISION, 0);
+        arrow_schema::Field::new(name, data_type, true)
     }
-}
 
-impl ToArrowArrayWithTypeConvert for IcebergArrowConvert {
     fn decimal_to_arrow(
         &self,
         data_type: &arrow_schema::DataType,
@@ -85,63 +82,7 @@ impl ToArrowArrayWithTypeConvert for IcebergArrowConvert {
     }
 }
 
-/// Converts RisingWave array to Arrow array with the schema.
-/// The behavior is specified for iceberg:
-/// For different struct type, try to use fields in schema to cast.
-pub fn to_iceberg_record_batch_with_schema(
-    schema: arrow_schema::SchemaRef,
-    chunk: &DataChunk,
-) -> Result<arrow_array::RecordBatch, ArrayError> {
-    if !chunk.is_compacted() {
-        let c = chunk.clone();
-        return to_iceberg_record_batch_with_schema(schema, &c.compact());
-    }
-    let columns: Vec<_> = chunk
-        .columns()
-        .iter()
-        .zip_eq_fast(schema.fields().iter())
-        .map(|(column, field)| {
-            let column: arrow_array::ArrayRef =
-                IcebergArrowConvert {}.to_arrow_with_type(field.data_type(), column)?;
-            if column.data_type() == field.data_type() {
-                Ok(column)
-            } else if let DataType::Struct(actual) = column.data_type()
-                && let DataType::Struct(expect) = field.data_type()
-            {
-                // Special case for iceberg
-                if actual.len() != expect.len() {
-                    return Err(ArrayError::to_arrow(format!(
-                        "Struct field count mismatch, expect {}, actual {}",
-                        expect.len(),
-                        actual.len()
-                    )));
-                }
-                let column = column
-                    .as_any()
-                    .downcast_ref::<arrow_array::StructArray>()
-                    .unwrap()
-                    .clone();
-                let (_, struct_columns, nullable) = column.into_parts();
-                Ok(Arc::new(
-                    StructArray::try_new(expect.clone(), struct_columns, nullable)
-                        .map_err(ArrayError::from_arrow)?,
-                ) as ArrayRef)
-            } else {
-                arrow_cast::cast(&column, field.data_type()).map_err(ArrayError::from_arrow)
-            }
-        })
-        .try_collect::<_, _, ArrayError>()?;
-
-    let opts = arrow_array::RecordBatchOptions::default().with_row_count(Some(chunk.capacity()));
-    arrow_array::RecordBatch::try_new_with_options(schema, columns, &opts)
-        .map_err(ArrayError::to_arrow)
-}
-
-pub fn iceberg_to_arrow_type(
-    data_type: &crate::array::DataType,
-) -> Result<arrow_schema::DataType, ArrayError> {
-    IcebergArrowConvert {}.to_arrow_type(data_type)
-}
+impl FromArrow for IcebergArrowConvert {}
 
 #[cfg(test)]
 mod test {
@@ -150,7 +91,7 @@ mod test {
     use arrow_array::ArrayRef;
 
     use crate::array::arrow::arrow_iceberg::IcebergArrowConvert;
-    use crate::array::arrow::ToArrowArrayWithTypeConvert;
+    use crate::array::arrow::ToArrow;
     use crate::array::{Decimal, DecimalArray};
 
     #[test]
