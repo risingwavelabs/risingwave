@@ -185,19 +185,33 @@ recent_filter_layers = 6
 recent_filter_rotate_interval_ms = 10000
 
 [storage.object_store]
-object_store_streaming_read_timeout_ms = 480000
-object_store_streaming_upload_timeout_ms = 480000
-object_store_upload_timeout_ms = 480000
-object_store_read_timeout_ms = 480000
 object_store_set_atomic_write_dir = false
+
+[storage.object_store.retry]
+req_backoff_interval_ms = 1000
+req_backoff_max_delay_ms = 10000
+req_backoff_factor = 2
+upload_attempt_timeout_ms = 8000
+upload_retry_attempts = 3
+streaming_upload_attempt_timeout_ms = 5000
+streaming_upload_retry_attempts = 3
+read_attempt_timeout_ms = 8000
+read_retry_attempts = 3
+streaming_read_attempt_timeout_ms = 3000
+streaming_read_retry_attempts = 3
+metadata_attempt_timeout_ms = 60000
+metadata_retry_attempts = 3
+delete_attempt_timeout_ms = 5000
+delete_retry_attempts = 3
+delete_objects_attempt_timeout_ms = 5000
+delete_objects_retry_attempts = 3
+list_attempt_timeout_ms = 600000
+list_retry_attempts = 3
 
 [storage.object_store.s3]
 object_store_keepalive_ms = 600000
 object_store_recv_buffer_size = 2097152
 object_store_nodelay = true
-object_store_req_retry_interval_ms = 20
-object_store_req_retry_max_delay_ms = 10000
-object_store_req_retry_max_attempts = 8
 retry_unknown_service_error = false
 identity_resolution_timeout_s = 5
 

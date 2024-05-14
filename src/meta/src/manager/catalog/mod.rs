@@ -3608,6 +3608,10 @@ impl CatalogManager {
             .list_dml_table_ids(schema_id)
     }
 
+    pub async fn list_view_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
+        self.core.lock().await.database.list_view_ids(schema_id)
+    }
+
     pub async fn list_sources(&self) -> Vec<Source> {
         self.core.lock().await.database.list_sources()
     }
