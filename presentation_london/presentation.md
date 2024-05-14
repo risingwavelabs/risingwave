@@ -31,6 +31,10 @@ show databases;
 use dev;
 show tables;
 select * from tweet limit 10;
+
+# back to TiDB
+show tables;
+# show that 
 ```
 
 - This is the big streaming demo 
@@ -66,6 +70,7 @@ select * from tweet limit 10;
 
 ```sh 
 # start the setup 
+cd /Users/janmensch/Documents/github/risingwave; git checkout cajan93/presentation-london-tidb 
 docker compose -f presentation_london/docker-compose-debezium.yml up
 
 # We have a mysql source, a debezium connector, and a kafka to transport the change events
@@ -75,6 +80,50 @@ CONTAINER ID   IMAGE                                   COMMAND                  
 a0732e1a8894   quay.io/debezium/kafka:latest           "/docker-entrypoint.…"   11 seconds ago   Up 10 seconds   0.0.0.0:9093->9092/tcp                                                   presentation_london-kafka-1
 8e2a49cb75b0   quay.io/debezium/zookeeper:latest       "/docker-entrypoint.…"   11 seconds ago   Up 10 seconds   0.0.0.0:2888->2888/tcp, 0.0.0.0:3888->3888/tcp, 0.0.0.0:2182->2181/tcp   presentation_london-zookeeper-1
 af3a840a46b4   quay.io/debezium/example-mysql:latest   "docker-entrypoint.s…"   11 seconds ago   Up 10 seconds   0.0.0.0:3306->3306/tcp, 33060/tcp                                        presentation_london-mysql-1
+
+mysql -h localhost --protocol=TCP -u root -P 3306 -p
+# debezium
+
+show databases;
+use inventory;
+show tables;
+select * from customers;
+
+show binary logs;
+
+# let's really see the files
+
+docker exec -it  presentation_london-mysql-1 sh
+cd /var/lib/mysql
+ls
+# show binary logs
+cat mysql-bin.index
+head mysql-bin.000002
+# indeed bin logs 
+
+# insert data
+insert into customers (first_name, last_name, email) values ("evil", "eve", "ee@gmail.com");
+show binary logs;
+delete from customers where last_name = "eve";
+show binary logs; # More or less data in binlog?
+insert into customers (first_name, last_name, email) values ("evil", "eve", "ee@gmail.com");
+update customers set first_name = "good" where last_name = "eve";
+
+# view the log
+docker cp   presentation_london-mysql-1:/var/lib/mysql/mysql-bin.000003 ~/Downloads/binlog
+mysqlbinlog  ~/Downloads/binlog --base64-output=decode-rows --verbose -v
+
+# start CDC
+curl -i -X POST -H "Accept:application/json" -H "Content-Type:application/json" localhost:8083/connectors/ -d '{ "name": "inventory-connector", "config": { "connector.class": "io.debezium.connector.mysql.MySqlConnector", "tasks.max": "1", "database.hostname": "mysql", "database.port": "3306", "database.user": "debezium", "database.password": "dbz", "database.server.id": "184054", "topic.prefix": "dbserver1", "database.include.list": "inventory", "schema.history.internal.kafka.bootstrap.servers": "kafka:9092", "schema.history.internal.kafka.topic": "schemahistory.inventory" } }'
+
+
+docker exec presentation_london-kafka-1 /kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:9092 --from-beginning --topic dbserver1.inventory.customers  | grep good
+echo ... | jq .payload
+# Why does this look like an initial write? Snapshotting
+
+update customers set first_name = "good and very smart" where last_name = "eve";
+echo ... | jq .payload
+# now you also have an update event
 ```
 
 - Lets have a look at the actual the logs which we mentioned earlier
