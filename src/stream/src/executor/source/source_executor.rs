@@ -766,15 +766,11 @@ impl<S: StateStore> WaitEpochWorker<S> {
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
-    use std::time::Duration;
 
-    use futures::StreamExt;
     use maplit::{convert_args, hashmap};
-    use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
+    use risingwave_common::catalog::{ColumnId, Field, TableId};
     use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
@@ -786,7 +782,6 @@ mod tests {
 
     use super::*;
     use crate::executor::source::{default_source_internal_table, SourceStateTableHandler};
-    use crate::executor::ActorContext;
 
     const MOCK_SOURCE_NAME: &str = "mock_source";
 

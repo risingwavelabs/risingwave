@@ -124,11 +124,9 @@ impl FromArrow for UdfArrowConvert {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use super::*;
     use crate::array::*;
-    use crate::buffer::Bitmap;
 
     #[test]
     fn struct_array() {

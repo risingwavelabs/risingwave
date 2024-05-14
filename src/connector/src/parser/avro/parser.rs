@@ -197,9 +197,7 @@ mod test {
     use crate::connector_common::AwsAuthProps;
     use crate::parser::plain_parser::PlainParser;
     use crate::parser::unified::avro::unix_epoch_days;
-    use crate::parser::{
-        AccessBuilderImpl, EncodingType, SourceStreamChunkBuilder, SpecificParserConfig,
-    };
+    use crate::parser::{AccessBuilderImpl, SourceStreamChunkBuilder, SpecificParserConfig};
     use crate::source::{SourceColumnDesc, SourceContext};
 
     fn test_data_path(file_name: &str) -> String {

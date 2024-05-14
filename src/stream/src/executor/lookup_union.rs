@@ -120,10 +120,8 @@ impl LookupUnionExecutor {
 #[cfg(test)]
 mod tests {
     use futures::TryStreamExt;
-    use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::catalog::Field;
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::test_epoch;
 
     use super::*;

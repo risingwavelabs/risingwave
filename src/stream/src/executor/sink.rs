@@ -480,7 +480,6 @@ mod test {
     use super::*;
     use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
     use crate::executor::test_utils::*;
-    use crate::executor::ActorContext;
 
     #[tokio::test]
     async fn test_force_append_only_sink() {

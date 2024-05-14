@@ -305,7 +305,6 @@ mod tests {
 
     use super::*;
     use crate::connector_common::KinesisCommon;
-    use crate::source::kinesis::split::KinesisSplit;
     use crate::source::SourceContext;
 
     #[tokio::test]

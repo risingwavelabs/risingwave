@@ -333,7 +333,6 @@ pub fn merge_chunk_row(stream_chunk: StreamChunk, pk_indices: &[usize]) -> Strea
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::StreamChunk;
     use risingwave_common::test_prelude::StreamChunkTestExt;
 
     use super::*;
