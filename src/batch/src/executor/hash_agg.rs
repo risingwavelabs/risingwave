@@ -36,7 +36,6 @@ use risingwave_expr::aggregate::{AggCall, AggregateState, BoxedAggregateFunction
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
 use risingwave_pb::data::DataChunk as PbDataChunk;
-use twox_hash::XxHash64;
 
 use crate::error::{BatchError, Result};
 use crate::executor::aggregation::build as build_agg;
@@ -44,7 +43,7 @@ use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
     WrapStreamExecutor,
 };
-use crate::spill::spill_op::{SpillOp, DEFAULT_SPILL_PARTITION_NUM};
+use crate::spill::spill_op::{SpillBuildHasher, SpillOp, DEFAULT_SPILL_PARTITION_NUM};
 use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 
 type AggHashMap<K, A> = hashbrown::HashMap<K, Vec<AggregateState>, PrecomputedBuildHasher, A>;
@@ -235,17 +234,6 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute()
-    }
-}
-
-#[derive(Default, Clone, Copy)]
-pub struct SpillBuildHasher(u64);
-
-impl BuildHasher for SpillBuildHasher {
-    type Hasher = XxHash64;
-
-    fn build_hasher(&self) -> Self::Hasher {
-        XxHash64::with_seed(self.0)
     }
 }
 

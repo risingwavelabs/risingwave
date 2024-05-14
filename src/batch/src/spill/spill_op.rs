@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::hash::BuildHasher;
 use std::ops::{Deref, DerefMut};
 use std::result::Result::{Err, Ok};
 
 use opendal::layers::RetryLayer;
 use opendal::services::Fs;
 use opendal::Operator;
+use twox_hash::XxHash64;
 
 use crate::error::Result;
 
@@ -89,5 +91,16 @@ impl Deref for SpillOp {
 
     fn deref(&self) -> &Self::Target {
         &self.op
+    }
+}
+
+#[derive(Default, Clone, Copy)]
+pub struct SpillBuildHasher(pub u64);
+
+impl BuildHasher for SpillBuildHasher {
+    type Hasher = XxHash64;
+
+    fn build_hasher(&self) -> Self::Hasher {
+        XxHash64::with_seed(self.0)
     }
 }
