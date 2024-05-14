@@ -208,7 +208,7 @@ impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
                     tracing::trace!("receive {} cdc events ", events.len());
                     metrics
                         .connector_source_rows_received
-                        .with_label_values(&[source_type.as_str_name(), &source_id])
+                        .with_guarded_label_values(&[source_type.as_str_name(), &source_id])
                         .inc_by(events.len() as u64);
                     let msgs = events.into_iter().map(SourceMessage::from).collect_vec();
                     yield msgs;
