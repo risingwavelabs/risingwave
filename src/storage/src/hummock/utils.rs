@@ -15,17 +15,14 @@
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::fmt::{Debug, Formatter};
-use std::future::Future;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
-use std::task::Poll;
 use std::time::Duration;
 
 use bytes::Bytes;
 use foyer::memory::CacheContext;
-use futures::FutureExt;
 use parking_lot::Mutex;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::key::{
@@ -170,51 +167,10 @@ pub fn prune_nonoverlapping_ssts<'a>(
     ssts[start_table_idx..=end_table_idx].iter()
 }
 
-type RequestQueue = VecDeque<(Sender<MemoryTrackerImpl>, u64)>;
+type RequestQueue = VecDeque<(Sender<MemoryTracker>, u64)>;
 enum MemoryRequest {
-    Ready(MemoryTrackerImpl),
-    Pending(Receiver<MemoryTrackerImpl>),
-}
-
-pub struct PendingRequestCancelGuard {
-    inner: Option<Arc<MemoryLimiterInner>>,
-    rx: Receiver<MemoryTrackerImpl>,
-}
-
-impl Drop for PendingRequestCancelGuard {
-    fn drop(&mut self) {
-        if let Some(limiter) = self.inner.take() {
-            // close rc before calling `try_recv`, it will make `MemoryTrackerImpl` which generates after dropping of `PendingRequestCancelGuard` drop in loop of `may_notify_waiters` in other thread.
-            // If `MemoryTrackerImpl` send before this thread calling `close`, it can still be received by this thread. Once this thread receives the message, it need drop the message and update `total_size` in `MemoryTrackerImpl`'s drop.
-            self.rx.close();
-            if let Ok(msg) = self.rx.try_recv() {
-                drop(msg);
-                // every time `MemoryTrackerImpl` drop, it will update `total_size` and we need to check whether there exist waiters to be notified.
-                limiter.may_notify_waiters();
-            }
-        }
-    }
-}
-
-impl Future for PendingRequestCancelGuard {
-    type Output = Option<MemoryTrackerImpl>;
-
-    fn poll(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Self::Output> {
-        match self.rx.poll_unpin(cx) {
-            Poll::Ready(Ok(msg)) => {
-                self.inner.take();
-                Poll::Ready(Some(msg))
-            }
-            Poll::Ready(Err(_)) => {
-                self.inner.take();
-                Poll::Ready(None)
-            }
-            Poll::Pending => Poll::Pending,
-        }
-    }
+    Ready(MemoryTracker),
+    Pending(Receiver<MemoryTracker>),
 }
 
 struct MemoryLimiterInner {
@@ -238,17 +194,24 @@ impl MemoryLimiterInner {
         if !self.has_waiter.load(AtomicOrdering::Acquire) {
             return;
         }
-        let mut waiters = self.controller.lock();
-        while let Some((_, quota)) = waiters.front() {
-            if !self.try_require_memory(*quota) {
-                break;
+        let mut notify_waiters = vec![];
+        {
+            let mut waiters = self.controller.lock();
+            while let Some((_, quota)) = waiters.front() {
+                if !self.try_require_memory(*quota) {
+                    break;
+                }
+                let (tx, quota) = waiters.pop_front().unwrap();
+                notify_waiters.push((tx, quota));
             }
-            let (tx, quota) = waiters.pop_front().unwrap();
-            let _ = tx.send(MemoryTrackerImpl::new(self.clone(), quota));
+
+            if waiters.is_empty() {
+                self.has_waiter.store(false, AtomicOrdering::Release);
+            }
         }
 
-        if waiters.is_empty() {
-            self.has_waiter.store(false, AtomicOrdering::Release);
+        for (tx, quota) in notify_waiters {
+            let _ = tx.send(MemoryTracker::new(self.clone(), quota));
         }
     }
 
@@ -284,7 +247,7 @@ impl MemoryLimiterInner {
             if first_req {
                 self.has_waiter.store(false, AtomicOrdering::Release);
             }
-            return MemoryRequest::Ready(MemoryTrackerImpl::new(self.clone(), quota));
+            return MemoryRequest::Ready(MemoryTracker::new(self.clone(), quota));
         }
         let (tx, rx) = channel();
         waiters.push_back((tx, quota));
@@ -309,11 +272,11 @@ impl Debug for MemoryLimiter {
     }
 }
 
-pub struct MemoryTrackerImpl {
+pub struct MemoryTracker {
     limiter: Arc<MemoryLimiterInner>,
     quota: Option<u64>,
 }
-impl MemoryTrackerImpl {
+impl MemoryTracker {
     fn new(limiter: Arc<MemoryLimiterInner>, quota: u64) -> Self {
         Self {
             limiter,
@@ -322,14 +285,10 @@ impl MemoryTrackerImpl {
     }
 }
 
-pub struct MemoryTracker {
-    inner: MemoryTrackerImpl,
-}
-
 impl Debug for MemoryTracker {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MemoryTracker")
-            .field("quota", &self.inner.quota)
+            .field("quota", &self.quota)
             .finish()
     }
 }
@@ -352,9 +311,7 @@ impl MemoryLimiter {
 
     pub fn try_require_memory(&self, quota: u64) -> Option<MemoryTracker> {
         if self.inner.try_require_memory(quota) {
-            Some(MemoryTracker {
-                inner: MemoryTrackerImpl::new(self.inner.clone(), quota),
-            })
+            Some(MemoryTracker::new(self.inner.clone(), quota))
         } else {
             None
         }
@@ -373,37 +330,27 @@ impl MemoryLimiter {
             self.inner.add_memory(quota);
         }
 
-        MemoryTracker {
-            inner: MemoryTrackerImpl::new(self.inner.clone(), quota),
-        }
+        MemoryTracker::new(self.inner.clone(), quota)
     }
 }
 
 impl MemoryLimiter {
     pub async fn require_memory(&self, quota: u64) -> MemoryTracker {
         match self.inner.require_memory(quota) {
-            MemoryRequest::Ready(inner) => MemoryTracker { inner },
-            MemoryRequest::Pending(rx) => {
-                let guard = PendingRequestCancelGuard {
-                    inner: Some(self.inner.clone()),
-                    rx,
-                };
-                // We will never clear an exist `require_memory` request. Every request will be return in some time unless it is canceled. So it is safe to await unwrap here.
-                let inner = guard.await.unwrap();
-                MemoryTracker { inner }
-            }
+            MemoryRequest::Ready(tracker) => tracker,
+            MemoryRequest::Pending(rx) => rx.await.unwrap(),
         }
     }
 }
 
 impl MemoryTracker {
     pub fn try_increase_memory(&mut self, target: u64) -> bool {
-        let quota = self.inner.quota.unwrap();
+        let quota = self.quota.unwrap();
         if quota >= target {
             return true;
         }
-        if self.inner.limiter.try_require_memory(target - quota) {
-            self.inner.quota = Some(target);
+        if self.limiter.try_require_memory(target - quota) {
+            self.quota = Some(target);
             true
         } else {
             false
@@ -411,20 +358,12 @@ impl MemoryTracker {
     }
 }
 
-impl Drop for MemoryTrackerImpl {
+// We must notify waiters outside `MemoryTracker` to avoid dead-lock and loop-owner.
+impl Drop for MemoryTracker {
     fn drop(&mut self) {
         if let Some(quota) = self.quota.take() {
             self.limiter.release_quota(quota);
-        }
-    }
-}
-
-// We must notify waiters outside `MemoryTrackerImpl` to avoid dead-lock and loop-owner.
-impl Drop for MemoryTracker {
-    fn drop(&mut self) {
-        if let Some(quota) = self.inner.quota.take() {
-            self.inner.limiter.release_quota(quota);
-            self.inner.limiter.may_notify_waiters();
+            self.limiter.may_notify_waiters();
         }
     }
 }
