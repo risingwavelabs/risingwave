@@ -30,8 +30,8 @@ use risingwave_meta_model_v2::{
     secret, sink, source, streaming_job, subscription, table, user_privilege, view, ActorId,
     ActorUpstreamActors, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId,
     FunctionId, I32Array, IndexId, JobStatus, ObjectId, PrivateLinkService, Property, SchemaId,
-    SecretId, SinkId, SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId,
-    UserId, ViewId,
+    SecretId, SinkId, SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId,
+    TableId, UserId, ViewId,
 };
 use risingwave_pb::catalog::subscription::SubscriptionState;
 use risingwave_pb::catalog::table::PbTableType;
@@ -63,10 +63,10 @@ use crate::controller::rename::{alter_relation_rename, alter_relation_rename_ref
 use crate::controller::utils::{
     check_connection_name_duplicate, check_database_name_duplicate,
     check_function_signature_duplicate, check_relation_name_duplicate, check_schema_name_duplicate,
-    ensure_object_id, ensure_object_not_refer, ensure_schema_empty, ensure_user_id,
-    get_fragment_mappings, get_fragment_mappings_by_jobs, get_referring_objects,
+    check_secret_name_duplicate, ensure_object_id, ensure_object_not_refer, ensure_schema_empty,
+    ensure_user_id, get_fragment_mappings, get_fragment_mappings_by_jobs, get_referring_objects,
     get_referring_objects_cascade, get_user_privilege, list_user_info_by_ids,
-    resolve_source_register_info_for_jobs, PartialObject, check_secret_name_duplicate
+    resolve_source_register_info_for_jobs, PartialObject,
 };
 use crate::controller::ObjectModel;
 use crate::manager::{Catalog, MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};

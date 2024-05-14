@@ -95,7 +95,6 @@ pub struct CreateSourceStatement {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Format {
     Native,
-
     // Keyword::NONE
     None,
     // Keyword::DEBEZIUM
@@ -107,7 +106,9 @@ pub enum Format {
     // Keyword::CANAL
     Canal,
     // Keyword::UPSERT
-    Upsert, // Keyword::PLAINPlain,
+    Upsert,
+    // Keyword::PLAIN
+    Plain,
 }
 
 // TODO: unify with `from_keyword`
@@ -166,7 +167,7 @@ pub enum Encode {
     // Keyword::BYTES
     None,
     // Keyword::None
-    Text,     // Keyword::TEXT
+    Text, // Keyword::TEXT
     Native,
     Template,
 }

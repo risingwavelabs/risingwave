@@ -27,7 +27,7 @@ use risingwave_meta_model_v2::{
     ActorId, DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId,
     PrivilegeId, SchemaId, SourceId, StreamNode, UserId,
 };
-use risingwave_pb::catalog::{PbConnection, PbFunction, PbSubscription, PbSecret};
+use risingwave_pb::catalog::{PbConnection, PbFunction, PbSecret, PbSubscription};
 use risingwave_pb::meta::PbFragmentParallelUnitMapping;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode, StreamSource};

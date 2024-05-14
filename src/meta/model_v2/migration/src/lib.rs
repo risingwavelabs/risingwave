@@ -9,8 +9,8 @@ mod m20240410_082733_with_version_column_migration;
 mod m20240410_154406_session_params;
 mod m20240417_062305_subscription_internal_table_name;
 mod m20240418_142249_function_runtime;
-mod m20240506_112555_subscription_partial_ckpt;
 mod m20240422_090457_secret;
+mod m20240506_112555_subscription_partial_ckpt;
 
 pub struct Migrator;
 
