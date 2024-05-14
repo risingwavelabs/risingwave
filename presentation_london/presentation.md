@@ -11,6 +11,28 @@
 
 ## Demo
 
+```sh
+
+docker volume rm   risingwave-compose_minio-0 risingwave-compose_etcd-0 risingwave-compose_grafana-0 risingwave-compose_prometheus-0
+cd /Users/janmensch/Documents/github/risingwave
+docker compose -f integration_tests/tidb-cdc-sink/docker-compose.yml up
+./integration_tests/tidb-cdc-sink/prepare.sh
+
+# Connect against TiDB
+mysql -h localhost --protocol=TCP -u root -P 4000
+show databases;
+show tables;
+select * from tweet limit 10;
+select count(1) from tweet; 
+
+# connect against RW
+pcon
+show databases;
+use dev;
+show tables;
+select * from tweet limit 10;
+```
+
 - This is the big streaming demo 
 - Showing how to get data from TiDB to RW
     - New files created e.g. if `max_binlog_size` is reached or on restart
@@ -88,7 +110,7 @@ show binary logs;
 ```
 
 - We can see multiple binlogs
-- We can observe that we are writing into binlog, because that is the one where the size increased
+- We can observe that we are writing into binlog 3, because that is the one where the size increased
   - File size will also increase on deletes
 
 ```sh 

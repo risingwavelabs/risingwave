@@ -1,0 +1,159 @@
+# Setup 
+docker compose up
+./prepare.sh
+psql "port=4566 host=localhost user=postgres dbname=dev sslmode=disable" < create_source.sql
+psql "port=4566 host=localhost user=postgres dbname=dev sslmode=disable" < create_mv.sql
+
+# rw
+pcon
+show tables; 
+
+# rw show that data is coming in
+select count(*) from tweets;
+
+# rw Show MV
+# TODO: How can I show this a little bit better? 
+# Can I sort by window?
+select * from hot_hashtags limit 10;
+
+
+# tidb
+mysql -h localhost --protocol=TCP -u root -P 4000
+show databases; 
+select count(1) from tweet;
+
+# questions
+# what are those tables for? 
+# | tidb_cdc_types      |
+# | tidb_sink_datatypes |
+
+
+# tikv binlog 
+cat /data/tikv0/db/*.log
+# binary mixed with json
+
+# binary log in ticdc
+# TODO: what does sorter do?
+/tmp/cdc_data/tmp/sorter/0003/000006.log
+
+docker cp risingwave-compose-ticdc-capturer0-1:/tmp/cdc_data/tmp/sorter/0000/000002.log ~/Downloads/binlog
+
+
+# Start other docker compose file
+docker exec -it  london_presentation_tidb-mysql-1 sh
+cd /var/lib/mysql
+ls -alh *mysql-bin*
+cat mysql-bin.index
+
+# You can also see which binlogs are used 
+mysql -h localhost --protocol=TCP -u root -P 3306 -p
+SHOW bianry logs; 
+use inventory; 
+show tables;
+select * from customers; 
+show binary logs; 
+insert into customers (first_name, last_name, email) values ("evil", "eve", "ee@gmail.com");
+show binary logs;
+update customers set first_name='Sky' where id=1003;
+select * from customers;
+delete from customers where id=1005;
+select * from customers;
+
+
+# Copy the latest binlog file. 
+# The one where we are writing to
+docker cp london_presentation_tidb-mysql-1:/var/lib/mysql/mysql-bin.000007 ~/Downloads/binlog
+# It is indeed gibberish binary
+head ~/Downloads/binlog
+mysqlbinlog  ~/Downloads/binlog --base64-output=decode-rows --verbose
+BEGIN
+/*!*/;
+# at 2067
+#240509 15:19:23 server id 223344  end_log_pos 2141 CRC32 0x541883c0 	Table_map: `inventory`.`customers` mapped to number 93
+# has_generated_invisible_primary_key=0
+# at 2141
+#240509 15:19:23 server id 223344  end_log_pos 2206 CRC32 0x413c8258 	Delete_rows: table id 93 flags: STMT_END_F
+### DELETE FROM `inventory`.`customers`
+### WHERE
+###   @1=1005
+###   @2='evil'
+###   @3='eve'
+###   @4='ee@gmail.com'
+# at 2206
+#240509 15:19:23 server id 223344  end_log_pos 2237 CRC32 0x997d0f65 	Xid = 49
+COMMIT/*!*/;
+
+
+# Original topics in Kafka 
+docker exec   london_presentation_tidb-kafka-1 /kafka/bin/kafka-topics.sh  --bootstrap-server kafka:9092 --list
+# register connector with
+curl -i -X POST -H "Accept:application/json" -H "Content-Type:application/json" localhost:8083/connectors/ -d '{ "name": "inventory-connector", "config": { "connector.class": "io.debezium.connector.mysql.MySqlConnector", "tasks.max": "1", "database.hostname": "mysql", "database.port": "3306", "database.user": "debezium", "database.password": "dbz", "database.server.id": "184054", "topic.prefix": "dbserver1", "database.include.list": "inventory", "schema.history.internal.kafka.bootstrap.servers": "kafka:9093", "schema.history.internal.kafka.topic": "schemahistory.inventory" } }'
+
+
+# We now have new topics
+docker exec   london_presentation_tidb-kafka-1 /kafka/bin/kafka-topics.sh  --bootstrap-server kafka:9092 --list
+# Observe customers events
+docker exec   london_presentation_tidb-kafka-1 /kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:9092 --from-beginning --topic dbserver1.inventory.customers
+# This is not an update event, because we are snapshotting
+docker exec   london_presentation_tidb-kafka-1 /kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:9092 --from-beginning --topic dbserver1.inventory.customers | grep Sky
+
+
+insert into customers (first_name, last_name, email) values ("evil", "eve", "ee@gmail.com");
+update customers set first_name="good" where id=1007;
+docker exec   london_presentation_tidb-kafka-1 /kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:9092 --from-beginning --topic dbserver1.inventory.customers | grep good
+echo ... | jq .payload
+{
+  "before": {
+    "id": 1007,
+    "first_name": "evil",
+    "last_name": "eve",
+    "email": "ee@gmail.com"
+  },
+  "after": {
+    "id": 1007,
+    "first_name": "good",               # actual change
+    "last_name": "eve",
+    "email": "ee@gmail.com"
+  },
+  "source": {
+    "version": "2.6.1.Final",
+    "connector": "mysql",
+    "name": "dbserver1",
+    "snapshot": "false",                # TODO ? 
+    "db": "inventory",      
+    "sequence": null,
+    "ts_ms": 1715263204000,
+    "ts_us": 1715263204000000,
+    "ts_ns": 1715263204000000000,
+    "table": "customers",
+    "server_id": 223344,
+    "gtid": null,
+    "file": "mysql-bin.000010",         # log file
+    "pos": 1394,
+    "row": 0,
+    "thread": 15,
+    "query": null
+  },
+  "op": "u",                            # update operation
+  "ts_ms": 1715263204321,
+  "ts_us": 1715263204321024,
+  "ts_ns": 1715263204321024000,
+  "transaction": null
+}
+
+
+# TODO How does debezium work here?
+# Read https://medium.com/@elifsinem.aktas/capturing-mysql-database-changes-with-debezium-7b4eb45d9356
+# How do I move data into debezium?
+
+
+
+
+
+# TODO: When do we create a new bin file? Why are there so many?
+# TODO: What is debezium snapshotting?
+    At the beginning We have to snapshot the DB state
+        Backfill operation
+
+# What do we see in Kafka?
+
