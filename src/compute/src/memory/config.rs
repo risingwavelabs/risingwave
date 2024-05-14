@@ -72,6 +72,7 @@ pub fn storage_memory_config(
     non_reserved_memory_bytes: usize,
     embedded_compactor_enabled: bool,
     storage_config: &StorageConfig,
+    is_serving: bool,
 ) -> StorageMemoryConfig {
     let (storage_memory_proportion, compactor_memory_proportion) = if embedded_compactor_enabled {
         (STORAGE_MEMORY_PROPORTION, COMPACTOR_MEMORY_PROPORTION)
@@ -113,14 +114,17 @@ pub fn storage_memory_config(
         * STORAGE_SHARED_BUFFER_MEMORY_PROPORTION)
         .ceil() as usize)
         >> 20;
-    let shared_buffer_capacity_mb =
+    let mut shared_buffer_capacity_mb =
         storage_config
             .shared_buffer_capacity_mb
             .unwrap_or(std::cmp::min(
                 default_shared_buffer_capacity_mb,
                 STORAGE_SHARED_BUFFER_MAX_MEMORY_MB,
             ));
-    if shared_buffer_capacity_mb != default_shared_buffer_capacity_mb {
+    if is_serving {
+        default_block_cache_capacity_mb += default_shared_buffer_capacity_mb;
+        shared_buffer_capacity_mb = 0;
+    } else if shared_buffer_capacity_mb != default_shared_buffer_capacity_mb {
         default_block_cache_capacity_mb += default_shared_buffer_capacity_mb;
         default_block_cache_capacity_mb =
             default_block_cache_capacity_mb.saturating_sub(shared_buffer_capacity_mb);
