@@ -203,13 +203,7 @@ async fn connect_tonic(mut addr: &str) -> Result<tonic::transport::Channel> {
     if let Some(s) = addr.strip_prefix("https://") {
         addr = s;
     }
-    let host_addr = addr.parse::<HostAddr>().map_err(|e| {
-        arrow_udf_flight::Error::Service(format!(
-            "invalid address: {}, err: {}",
-            addr,
-            e.as_report()
-        ))
-    })?;
+    let host_addr = addr.parse::<HostAddr>()?;
     let channel = LoadBalancedChannel::builder((host_addr.host.clone(), host_addr.port))
         .dns_probe_interval(std::time::Duration::from_secs(DNS_PROBE_INTERVAL_SECS))
         .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
@@ -219,13 +213,7 @@ async fn connect_tonic(mut addr: &str) -> Result<tonic::transport::Channel> {
         })
         .channel()
         .await
-        .map_err(|e| {
-            arrow_udf_flight::Error::Service(format!(
-                "failed to create LoadBalancedChannel, address: {}, err: {}",
-                host_addr,
-                e.as_report()
-            ))
-        })?;
+        .with_context(|| format!("failed to create LoadBalancedChannel, address: {host_addr}"))?;
     Ok(channel.into())
 }
 
