@@ -24,7 +24,7 @@ either = "1"
 fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hyper = { version = "0.14", features = ["tcp", "client"] } # required by aws sdk
-hyper-rustls = { version = "0.24.2", features = ["webpki-roots"] }
+hyper-rustls = { version = "0.26.0", features = ["webpki-roots"] }
 hyper-tls = "0.5.0"
 itertools = { workspace = true }
 madsim = "0.2.22"
