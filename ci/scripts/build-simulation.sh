@@ -9,7 +9,7 @@ echo "--- Generate RiseDev CI config"
 cp ci/risedev-components.ci.env risedev-components.user.env
 
 echo "--- Build deterministic simulation e2e test runner"
-risedev sslt-build-all --profile ci-sim --timings
+risedev sslt-build-all --profile ci-sim --features js-udf --timings
 
 echo "--- Show sccache stats"
 sccache --show-stats
