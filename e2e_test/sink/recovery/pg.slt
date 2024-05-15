@@ -8,7 +8,7 @@ system ok
 PGPASSWORD=postgres psql -d postgres -h db -p 5432 -U postgres -c "create table t(v1 int primary key);"
 
 system ok
-PGPASSWORD=postgres psql -d postgres -h db -p 5432 -U postgres -c "GRANT SELECT, INSERT, UPDATE, DELETE ON t TO test;"
+PGPASSWORD=postgres psql -d postgres -h db -p 5432 -U postgres -c "GRANT SELECT, INSERT, UPDATE, DELETE ON t TO postgres;"
 
 statement ok
 set background_ddl=true;
