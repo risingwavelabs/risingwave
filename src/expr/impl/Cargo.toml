@@ -16,19 +16,20 @@ ignored = ["workspace-hack", "ctor"]
 normal = ["workspace-hack", "ctor"]
 
 [features]
-default = ["embedded-wasm-udf"]
-embedded-deno-udf = ["arrow-udf-js-deno"]
-embedded-python-udf = ["arrow-udf-python"]
-embedded-wasm-udf = ["arrow-udf-wasm"]
+external-udf = ["arrow-udf-flight", "arrow-flight", "tonic"]
+js-udf = ["arrow-udf-js"]
+deno-udf = ["arrow-udf-js-deno", "zstd"]
+python-udf = ["arrow-udf-python"]
+wasm-udf = ["arrow-udf-wasm", "zstd"]
 
 [dependencies]
 aho-corasick = "1"
 anyhow = "1"
 arrow-array = { workspace = true }
-arrow-flight = { workspace = true }
+arrow-flight = { workspace = true, optional = true }
 arrow-schema = { workspace = true }
-arrow-udf-flight = { workspace = true }
-arrow-udf-js = { workspace = true }
+arrow-udf-flight = { workspace = true, optional = true }
+arrow-udf-js = { workspace = true, optional = true }
 arrow-udf-js-deno = { workspace = true, optional = true }
 arrow-udf-python = { workspace = true, optional = true }
 arrow-udf-wasm = { workspace = true, optional = true }
@@ -67,9 +68,9 @@ sql-json-path = { version = "0.1", features = ["jsonbb"] }
 thiserror = "1"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["time"] }
-tonic = "0.10"
+tonic = { version = "0.10", optional = true }
 tracing = "0.1"
-zstd = { version = "0.13", default-features = false }
+zstd = { version = "0.13", default-features = false, optional = true }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(dead_code, unused_imports)]
+
 // common imports for submodules
 use anyhow::{Context as _, Result};
 use arrow_array::RecordBatch;
@@ -20,13 +22,16 @@ use risingwave_expr::sig::{
     CreateFunctionOptions, CreateFunctionOutput, UdfRuntime, UdfRuntimeDescriptor, UDF_RUNTIMES,
 };
 
-#[cfg(feature = "embedded-deno-udf")]
+#[cfg(feature = "deno-udf")]
 mod deno;
+#[cfg(feature = "external-udf")]
+#[cfg(not(madsim))]
 mod external;
-#[cfg(feature = "embedded-python-udf")]
+#[cfg(feature = "python-udf")]
 mod python;
+#[cfg(feature = "js-udf")]
 mod quickjs;
-#[cfg(feature = "embedded-wasm-udf")]
+#[cfg(feature = "wasm-udf")]
 mod wasm;
 
 /// Download wasm binary from a link.
