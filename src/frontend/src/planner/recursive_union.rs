@@ -12,17 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::binder::statement::RewriteExprsRecursive;
 use crate::binder::{BoundSetExpr, ShareId};
+use crate::error::Result;
+use crate::optimizer::plan_node::LogicalRecursiveUnion;
+use crate::{PlanRef, Planner};
 
-/// A CTE reference, currently only used in the back reference of recursive CTE.
-/// For the non-recursive one, see [`BoundShare`](super::BoundShare).
-#[derive(Debug, Clone)]
-pub struct BoundBackCteRef {
-    pub(crate) share_id: ShareId,
-    pub(crate) base: BoundSetExpr,
-}
-
-impl RewriteExprsRecursive for BoundBackCteRef {
-    fn rewrite_exprs_recursive(&mut self, _rewriter: &mut impl crate::expr::ExprRewriter) {}
+impl Planner {
+    pub(super) fn plan_recursive_union(
+        &mut self,
+        base: BoundSetExpr,
+        recursive: BoundSetExpr,
+        id: ShareId,
+    ) -> Result<PlanRef> {
+        let base = self.plan_set_expr(base, vec![], &[])?;
+        let recursive = self.plan_set_expr(recursive, vec![], &[])?;
+        let plan = LogicalRecursiveUnion::create(base, recursive, id);
+        self.ctx.insert_rcte_cache_plan(id, plan.clone());
+        Ok(plan)
+    }
 }
