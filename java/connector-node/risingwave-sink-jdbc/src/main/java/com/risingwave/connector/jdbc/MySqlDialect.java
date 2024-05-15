@@ -26,14 +26,11 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import org.apache.commons.lang3.StringUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public class MySqlDialect implements JdbcDialect {
 
     private final int[] pkIndices;
     private final int[] pkColumnSqlTypes;
-    static final Logger LOG = LoggerFactory.getLogger(MySqlDialect.class);
 
     public MySqlDialect(List<Integer> columnSqlTypes, List<Integer> pkIndices) {
         var columnSqlTypesArr = columnSqlTypes.stream().mapToInt(i -> i).toArray();
