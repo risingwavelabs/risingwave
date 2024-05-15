@@ -210,13 +210,13 @@ mod test {
 
     #[test]
     fn encrypt_testcase() {
-        let encrypt_wrapper = |data: &[u8], key: &[u8], mode: &str| -> Result<Box<[u8]>> {
-            let config = CipherConfig::parse_cipher_config(key, mode)?;
-            encrypt(data, &config)
+        let encrypt_wrapper = |data: &[u8], key: &[u8], mode: &str| -> Box<[u8]> {
+            let config = CipherConfig::parse_cipher_config(key, mode).unwrap();
+            encrypt(data, &config).unwrap()
         };
-        let decrypt_wrapper = |data: &[u8], key: &[u8], mode: &str| -> Result<Box<[u8]>> {
-            let config = CipherConfig::parse_cipher_config(key, mode)?;
-            decrypt(data, &config)
+        let decrypt_wrapper = |data: &[u8], key: &[u8], mode: &str| -> Box<[u8]> {
+            let config = CipherConfig::parse_cipher_config(key, mode).unwrap();
+            decrypt(data, &config).unwrap()
         };
         let key = b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f";
 
@@ -224,10 +224,9 @@ mod test {
             b"\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff",
             key,
             "aes-ecb/pad:none",
-        )
-        .unwrap();
+        );
 
-        let decrypted = decrypt_wrapper(&encrypted, key, "aes-ecb/pad:none").unwrap();
+        let decrypted = decrypt_wrapper(&encrypted, key, "aes-ecb/pad:none");
         assert_eq!(
             decrypted,
             (*b"\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff").into()
