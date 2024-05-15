@@ -35,6 +35,9 @@ is_release = get_env ENABLE_RELEASE_PROFILE
 is_not_release = not ${is_release}
 is_dynamic_linking = get_env ENABLE_DYNAMIC_LINKING
 is_hummock_trace = get_env ENABLE_HUMMOCK_TRACE
+is_external_udf_enabled = get_env ENABLE_EXTERNAL_UDF
+is_wasm_udf_enabled = get_env ENABLE_WASM_UDF
+is_js_udf_enabled = get_env ENABLE_JS_UDF
 is_deno_udf_enabled = get_env ENABLE_DENO_UDF
 is_python_udf_enabled = get_env ENABLE_PYTHON_UDF
 
@@ -59,14 +62,29 @@ else
   set_env RISINGWAVE_FEATURE_FLAGS "--features rw-static-link"
 end
 
+if ${is_external_udf_enabled}
+  flags = get_env RISINGWAVE_FEATURE_FLAGS
+  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features external-udf"
+end
+
+if ${is_wasm_udf_enabled}
+  flags = get_env RISINGWAVE_FEATURE_FLAGS
+  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features wasm-udf"
+end
+
+if ${is_js_udf_enabled}
+  flags = get_env RISINGWAVE_FEATURE_FLAGS
+  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features js-udf"
+end
+
 if ${is_deno_udf_enabled}
   flags = get_env RISINGWAVE_FEATURE_FLAGS
-  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features embedded-deno-udf"
+  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features deno-udf"
 end
 
 if ${is_python_udf_enabled}
   flags = get_env RISINGWAVE_FEATURE_FLAGS
-  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features embedded-python-udf"
+  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features python-udf"
 end
 
 if ${is_hummock_trace}
