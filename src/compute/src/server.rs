@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
-use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -215,12 +214,6 @@ pub async fn compute_node_serve(
             ));
 
             let compaction_executor = Arc::new(CompactionExecutor::new(Some(1)));
-            let max_task_parallelism = Arc::new(AtomicU32::new(
-                (compaction_executor.worker_num() as f32
-                    * storage_opts.compactor_max_task_multiplier)
-                    .ceil() as u32,
-            ));
-
             let compactor_context = CompactorContext {
                 storage_opts,
                 sstable_store: storage.sstable_store(),
@@ -233,8 +226,6 @@ pub async fn compute_node_serve(
                 await_tree_reg: await_tree_config
                     .clone()
                     .map(new_compaction_await_tree_reg_ref),
-                running_task_parallelism: Arc::new(AtomicU32::new(0)),
-                max_task_parallelism,
             };
 
             let (handle, shutdown_sender) = start_compactor(

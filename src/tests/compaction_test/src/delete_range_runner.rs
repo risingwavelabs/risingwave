@@ -15,7 +15,6 @@
 use std::future::Future;
 use std::ops::{Bound, RangeBounds};
 use std::pin::{pin, Pin};
-use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -600,24 +599,15 @@ fn run_compactor_thread(
 ) {
     let filter_key_extractor_manager =
         FilterKeyExtractorManager::RpcFilterKeyExtractorManager(filter_key_extractor_manager);
-
-    let compaction_executor = Arc::new(CompactionExecutor::new(Some(1)));
-    let max_task_parallelism = Arc::new(AtomicU32::new(
-        (compaction_executor.worker_num() as f32 * storage_opts.compactor_max_task_multiplier)
-            .ceil() as u32,
-    ));
     let compactor_context = CompactorContext {
         storage_opts,
         sstable_store,
         compactor_metrics,
         is_share_buffer_compact: false,
         compaction_executor: Arc::new(CompactionExecutor::new(None)),
-
         memory_limiter: MemoryLimiter::unlimit(),
         task_progress_manager: Default::default(),
         await_tree_reg: None,
-        running_task_parallelism: Arc::new(AtomicU32::new(0)),
-        max_task_parallelism,
     };
 
     start_compactor(

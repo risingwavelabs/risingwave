@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
-use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -242,10 +241,6 @@ pub async fn compactor_serve(
     let compaction_executor = Arc::new(CompactionExecutor::new(
         opts.compaction_worker_threads_number,
     ));
-    let max_task_parallelism = Arc::new(AtomicU32::new(
-        (compaction_executor.worker_num() as f32 * storage_opts.compactor_max_task_multiplier)
-            .ceil() as u32,
-    ));
 
     let compactor_context = CompactorContext {
         storage_opts,
@@ -257,8 +252,6 @@ pub async fn compactor_serve(
 
         task_progress_manager: Default::default(),
         await_tree_reg: await_tree_reg.clone(),
-        running_task_parallelism: Arc::new(AtomicU32::new(0)),
-        max_task_parallelism,
     };
     let mut sub_tasks = vec![
         MetaClient::start_heartbeat_loop(
@@ -378,10 +371,6 @@ pub async fn shared_compactor_serve(
     let compaction_executor = Arc::new(CompactionExecutor::new(
         opts.compaction_worker_threads_number,
     ));
-    let max_task_parallelism = Arc::new(AtomicU32::new(
-        (compaction_executor.worker_num() as f32 * storage_opts.compactor_max_task_multiplier)
-            .ceil() as u32,
-    ));
     let compactor_context = CompactorContext {
         storage_opts,
         sstable_store,
@@ -391,8 +380,6 @@ pub async fn shared_compactor_serve(
         memory_limiter,
         task_progress_manager: Default::default(),
         await_tree_reg,
-        running_task_parallelism: Arc::new(AtomicU32::new(0)),
-        max_task_parallelism,
     };
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
