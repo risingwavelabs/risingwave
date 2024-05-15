@@ -685,7 +685,6 @@ mod tests {
     use std::alloc::{AllocError, Allocator, Global, Layout};
     use std::ptr::NonNull;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
 
     use futures_async_stream::for_await;
     use risingwave_common::metrics::LabelGuardedIntGauge;
@@ -829,6 +828,7 @@ mod tests {
             "HashAggExecutor".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
+            false,
             ShutdownToken::empty(),
         )
         .unwrap();
@@ -943,6 +943,7 @@ mod tests {
             "HashAggExecutor".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
+            false,
             shutdown_rx,
         )
         .unwrap();
