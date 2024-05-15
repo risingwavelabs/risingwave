@@ -235,7 +235,7 @@ impl From<ObjectModel<subscription::Model>> for PbSubscription {
             ),
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
-            dependent_table_id: value.0.dependent_table_id,
+            dependent_table_id: value.0.dependent_table_id as _,
             subscription_state: PbSubscriptionState::Init as _,
         }
     }

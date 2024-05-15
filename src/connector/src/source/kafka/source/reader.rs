@@ -31,7 +31,7 @@ use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
 use crate::source::kafka::{
-    KafkaProperties, KafkaSplit, PrivateLinkConsumerContext, KAFKA_ISOLATION_LEVEL,
+    KafkaContextCommon, KafkaProperties, KafkaSplit, RwConsumerContext, KAFKA_ISOLATION_LEVEL,
 };
 use crate::source::{
     into_chunk_stream, BoxChunkSourceStream, Column, CommonSplitReader, SourceContextRef, SplitId,
@@ -39,7 +39,7 @@ use crate::source::{
 };
 
 pub struct KafkaSplitReader {
-    consumer: StreamConsumer<PrivateLinkConsumerContext>,
+    consumer: StreamConsumer<RwConsumerContext>,
     offsets: HashMap<SplitId, (Option<i64>, Option<i64>)>,
     bytes_per_second: usize,
     max_num_messages: usize,
@@ -78,7 +78,7 @@ impl SplitReader for KafkaSplitReader {
             format!("rw-consumer-{}", source_ctx.fragment_id),
         );
 
-        let client_ctx = PrivateLinkConsumerContext::new(
+        let ctx_common = KafkaContextCommon::new(
             broker_rewrite_map,
             Some(format!(
                 "fragment-{}-source-{}-actor-{}",
@@ -87,8 +87,13 @@ impl SplitReader for KafkaSplitReader {
             // thread consumer will keep polling in the background, we don't need to call `poll`
             // explicitly
             Some(source_ctx.metrics.rdkafka_native_metric.clone()),
-        )?;
-        let consumer: StreamConsumer<PrivateLinkConsumerContext> = config
+            properties.aws_auth_props,
+            properties.common.is_aws_msk_iam(),
+        )
+        .await?;
+
+        let client_ctx = RwConsumerContext::new(ctx_common);
+        let consumer: StreamConsumer<RwConsumerContext> = config
             .set_log_level(RDKafkaLogLevel::Info)
             .create_with_context(client_ctx)
             .await
@@ -101,7 +106,9 @@ impl SplitReader for KafkaSplitReader {
         for split in splits {
             offsets.insert(split.id(), (split.start_offset, split.stop_offset));
 
-            if let Some(offset) = split.start_offset {
+            if split.hack_seek_to_latest {
+                tpl.add_partition_offset(split.topic.as_str(), split.partition, Offset::End)?;
+            } else if let Some(offset) = split.start_offset {
                 tpl.add_partition_offset(
                     split.topic.as_str(),
                     split.partition,
