@@ -199,7 +199,7 @@ impl SubscriptionCursor {
 
     pub async fn next_row(
         &mut self,
-        handle_args: HandlerArgs,
+        handle_args: &HandlerArgs,
     ) -> Result<(Option<Row>, Vec<PgFieldDescriptor>)> {
         loop {
             match &mut self.state {
@@ -313,20 +313,30 @@ impl SubscriptionCursor {
             )
             .into());
         }
-        // `FETCH NEXT` is equivalent to `FETCH 1`.
-        if count != 1 {
-            Err(crate::error::ErrorCode::InternalError(
-                "FETCH count with subscription is not supported".to_string(),
-            )
-            .into())
-        } else {
-            let (row, pg_descs) = self.next_row(handle_args).await?;
-            if let Some(row) = row {
-                Ok((vec![row], pg_descs))
-            } else {
-                Ok((vec![], pg_descs))
+        
+        let mut ans = Vec::with_capacity(std::cmp::min(100, count) as usize);
+        let mut cur = 0;
+        let mut pg_descs_ans = vec![];
+        while cur < count
+        {
+            let (row, pg_descs) = self.next_row(&handle_args).await?;
+            if pg_descs_ans.is_empty(){
+                pg_descs_ans = pg_descs;
+            }else{
+                break;
+            }
+            match row{
+                Some(row) => {
+                    cur += 1;
+                    ans.push(row);
+                }
+                None => {
+                    break;
+                }
             }
         }
+
+        Ok((ans, pg_descs_ans))
     }
 
     async fn get_next_rw_timestamp(
