@@ -289,7 +289,7 @@ public class JDBCSink implements SinkWriter {
                         .asRuntimeException();
             }
             try {
-                jdbcDialect.bindDeleteStatement(deleteStatement, row);
+                jdbcDialect.bindDeleteStatement(deleteStatement, tableSchema, row);
                 deleteStatement.addBatch();
             } catch (SQLException e) {
                 throw Status.INTERNAL

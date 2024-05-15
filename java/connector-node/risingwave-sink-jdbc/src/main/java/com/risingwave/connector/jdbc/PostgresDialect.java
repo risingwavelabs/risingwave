@@ -158,7 +158,8 @@ public class PostgresDialect implements JdbcDialect {
     }
 
     @Override
-    public void bindDeleteStatement(PreparedStatement stmt, SinkRow row) throws SQLException {
+    public void bindDeleteStatement(PreparedStatement stmt, TableSchema tableSchema, SinkRow row)
+            throws SQLException {
         // set the values of primary key fields
         int placeholderIdx = 1;
         for (int colIndex : pkIndices) {
