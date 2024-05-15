@@ -102,10 +102,7 @@ pulsar = { version = "6.2", default-features = false, features = [
 ] }
 rdkafka = { workspace = true, features = [
     "cmake-build",
-    # "ssl",
-    # FIXME: temporary workaround before we find an ideal solution.
-    # See why it's needed and why it's not ideal in https://github.com/risingwavelabs/risingwave/issues/9852
-    "ssl-vendored",
+    "ssl",
     "gssapi",
     "zstd",
 ] }
