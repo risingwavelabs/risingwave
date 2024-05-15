@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::ops::{Deref, DerefMut};
-use std::result::Result::{Err, Ok};
 
 use opendal::layers::RetryLayer;
 use opendal::services::Fs;
@@ -27,6 +26,7 @@ const DEFAULT_SPILL_DIR: &str = "/tmp/";
 const RW_MANAGED_SPILL_DIR: &str = "/rw_batch_spill/";
 const DEFAULT_IO_BUFFER_SIZE: usize = 256 * 1024;
 
+/// `SpillOp` is used to manage the spill directory of the spilling executor and it will drop the directory with a RAII style.
 pub struct SpillOp {
     pub op: Operator,
 }

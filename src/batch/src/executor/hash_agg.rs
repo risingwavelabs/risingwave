@@ -251,6 +251,20 @@ impl BuildHasher for SpillBuildHasher {
 
 const DEFAULT_SPILL_CHUNK_SIZE: usize = 1024;
 
+/// `AggSpillManager` is used to manage how to write spill data file and read them back.
+/// The spill data first need to be partitioned. Each partition contains 2 files: `agg_state_file` and `input_chunks_file`.
+/// The spill file consume a data chunk and serialize the chunk into a protobuf bytes.
+/// Finally, spill file content will look like the below.
+/// The file write pattern is append-only and the read pattern is sequential scan.
+/// This can maximize the disk IO performance.
+///
+/// ```text
+/// [proto_len]
+/// [proto_bytes]
+/// ...
+/// [proto_len]
+/// [proto_bytes]
+/// ```
 pub struct AggSpillManager {
     op: SpillOp,
     partition_num: usize,
@@ -285,6 +299,7 @@ impl AggSpillManager {
         let input_writers = Vec::with_capacity(partition_num);
         let input_readers = Vec::with_capacity(partition_num);
         let input_chunk_builders = Vec::with_capacity(partition_num);
+        // Use uuid to generate an unique hasher so that when recursive spilling happens they would use a different hasher to avoid data skew.
         let spill_build_hasher = SpillBuildHasher(suffix_uuid.as_u64_pair().1);
         Ok(Self {
             op,
@@ -447,6 +462,8 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
         );
 
         if let Some(init_agg_state_executor) = self.init_agg_state_executor {
+            // `init_agg_state_executor` exists which means this is a sub `HashAggExecutor` used to consume spilling data.
+            // The spilled agg states by its parent executor need to be recovered first.
             let mut init_agg_state_stream = init_agg_state_executor.execute();
             #[for_await]
             for chunk in &mut init_agg_state_stream {
@@ -518,6 +535,13 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
         }
 
         if need_to_spill {
+            // A spilling version of aggregation based on the RFC: Spill Hash Aggregation https://github.com/risingwavelabs/rfcs/pull/89
+            // When HashAggExecutor told memory is insufficient, AggSpillManager will start to partition the hash table and spill to disk.
+            // After spilling the hash table, AggSpillManager will consume all chunks from the input executor,
+            // partition and spill to disk with the same hash function as the hash table spilling.
+            // Finally, we would get e.g. 20 partitions. Each partition should contain a portion of the original hash table and input data.
+            // A sub HashAggExecutor would be used to consume each partition one by one.
+            // If memory is still not enough in the sub HashAggExecutor, it will partition its hash table and input recursively.
             let mut agg_spill_manager = AggSpillManager::new(
                 &self.identity,
                 DEFAULT_SPILL_PARTITION_NUM,
