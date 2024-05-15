@@ -287,10 +287,10 @@ impl JoinSpillManager {
                 .await?;
             self.probe_side_writers.push(w);
 
-            let join_right_side_partition_file_name = format!("join-build-side-p{}", i);
+            let join_build_side_partition_file_name = format!("join-build-side-p{}", i);
             let w = self
                 .op
-                .writer_with(&join_right_side_partition_file_name)
+                .writer_with(&join_build_side_partition_file_name)
                 .await?;
             self.build_side_writers.push(w);
             self.probe_side_chunk_builders.push(DataChunkBuilder::new(
@@ -456,7 +456,10 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let build_chunk = build_chunk?;
             if build_chunk.cardinality() > 0 {
                 build_row_count += build_chunk.cardinality();
-                if !self.mem_ctx.add(build_chunk.estimated_heap_size() as i64) {
+                let chunk_estimated_heap_size = build_chunk.estimated_heap_size();
+                // push build_chunk to build_side before checking memory limit, otherwise we will lose that chunk when spilling.
+                build_side.push(build_chunk);
+                if !self.mem_ctx.add(chunk_estimated_heap_size as i64) {
                     if enable_spill {
                         need_to_spill = true;
                         break;
@@ -464,7 +467,6 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         Err(BatchError::OutOfMemory(self.mem_ctx.mem_limit()))?;
                     }
                 }
-                build_side.push(build_chunk);
             }
         }
         let mut hash_map = JoinHashMap::with_capacity_and_hasher_in(
@@ -524,6 +526,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             // Release memory occupied by the hash map
             self.mem_ctx.add(-mem_added_by_hash_table);
             drop(hash_map);
+            drop(next_build_row_with_same_key);
 
             // Spill buffered build side chunks
             for chunk in build_side {
@@ -568,7 +571,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             for chunk in self.probe_side_source.execute() {
                 let chunk = chunk?;
                 let hash_codes = chunk.get_hash_values(
-                    self.build_key_idxs.as_slice(),
+                    self.probe_key_idxs.as_slice(),
                     join_spill_manager.spill_build_hasher,
                 );
                 join_spill_manager
