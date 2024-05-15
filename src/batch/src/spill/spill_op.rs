@@ -17,6 +17,7 @@ use std::ops::{Deref, DerefMut};
 use opendal::layers::RetryLayer;
 use opendal::services::Fs;
 use opendal::Operator;
+use thiserror_ext::AsReport;
 
 use crate::error::Result;
 
@@ -71,8 +72,11 @@ impl Drop for SpillOp {
         let op = self.op.clone();
         tokio::task::spawn(async move {
             let result = op.remove_all("/").await;
-            if let Err(e) = result {
-                error!("Failed to remove spill directory: {}", e);
+            if let Err(error) = result {
+                error!(
+                    error = %error.as_report(),
+                    "Failed to remove spill directory"
+                );
             }
         });
     }
