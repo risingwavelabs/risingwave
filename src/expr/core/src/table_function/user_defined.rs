@@ -147,7 +147,7 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
         body: udtf.body.as_deref(),
         compressed_binary: udtf.compressed_binary.as_deref(),
         link: udtf.link.as_deref(),
-        identifier: &identifier,
+        identifier,
         arg_names: &udtf.arg_names,
         return_type: &return_type,
         always_retry_on_network_error: false,

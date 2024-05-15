@@ -183,7 +183,7 @@ impl Build for UserDefinedFunction {
             body: udf.body.as_deref(),
             compressed_binary: udf.compressed_binary.as_deref(),
             link: udf.link.as_deref(),
-            identifier: &identifier,
+            identifier,
             arg_names: &udf.arg_names,
             return_type: &return_type,
             always_retry_on_network_error: udf.always_retry_on_network_error,
@@ -209,7 +209,7 @@ impl Build for UserDefinedFunction {
         let labels: &[&str; 4] = &[
             udf.link.as_deref().unwrap_or(""),
             language,
-            &identifier,
+            identifier,
             fragment_id.as_str(),
         ];
 
@@ -253,6 +253,7 @@ struct Metrics {
     /// Number of failed UDF calls.
     failure_count: IntCounter,
     /// Total number of retried UDF calls.
+    #[allow(dead_code)]
     retry_count: IntCounter,
     /// Input chunk rows of UDF calls.
     input_chunk_rows: Histogram,

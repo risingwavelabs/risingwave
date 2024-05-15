@@ -13,8 +13,6 @@
 // limitations under the License.
 
 use anyhow::Context;
-use itertools::Itertools;
-use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
 use risingwave_expr::sig::CreateFunctionOptions;
