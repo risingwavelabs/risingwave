@@ -162,9 +162,9 @@ public class PostgresDialect implements JdbcDialect {
             throws SQLException {
         // set the values of primary key fields
         int placeholderIdx = 1;
-        for (int colIndex : pkIndices) {
-            Object pkField = row.get(colIndex);
-            stmt.setObject(placeholderIdx++, pkField, columnSqlTypes[colIndex]);
+        for (int pkIdx : pkIndices) {
+            Object pkField = row.get(pkIdx);
+            stmt.setObject(placeholderIdx++, pkField, columnSqlTypes[pkIdx]);
         }
     }
 }
