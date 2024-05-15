@@ -1346,7 +1346,6 @@ impl CatalogController {
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, HashMap};
-    use std::default::Default;
 
     use itertools::Itertools;
     use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping};

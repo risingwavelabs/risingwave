@@ -182,19 +182,15 @@ impl<S: StateStore> Execute for AppendOnlyDedupExecutor<S> {
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::AtomicU64;
-    use std::sync::Arc;
 
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
-    use crate::common::table::state_table::StateTable;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::ActorContext;
 
     #[tokio::test]
     async fn test_dedup_executor() {

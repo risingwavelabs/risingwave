@@ -734,7 +734,6 @@ impl JoinEntryState {
 mod tests {
     use itertools::Itertools;
     use risingwave_common::array::*;
-    use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::iter_util::ZipEqDebug;
 
     use super::*;

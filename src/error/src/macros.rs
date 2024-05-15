@@ -149,9 +149,6 @@ pub use must_match;
 
 #[cfg(test)]
 mod ensure_tests {
-    use std::convert::Into;
-    use std::result::Result::Err;
-
     use anyhow::anyhow;
     use thiserror::Error;
 

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::default::Default;
 use std::ops::Bound;
 use std::ops::Bound::*;
 use std::sync::Arc;

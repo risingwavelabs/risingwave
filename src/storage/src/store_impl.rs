@@ -223,7 +223,6 @@ pub mod verify {
     use crate::storage_value::StorageValue;
     use crate::store::*;
     use crate::store_impl::AsHummock;
-    use crate::StateStore;
 
     fn assert_result_eq<Item: PartialEq + Debug, E>(
         first: &std::result::Result<Item, E>,
@@ -779,7 +778,6 @@ pub mod boxed_state_store {
     use crate::hummock::HummockStorage;
     use crate::store::*;
     use crate::store_impl::AsHummock;
-    use crate::StateStore;
 
     #[async_trait::async_trait]
     pub trait DynamicDispatchedStateStoreIter<T: IterItem>: Send {

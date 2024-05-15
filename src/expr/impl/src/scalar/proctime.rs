@@ -25,7 +25,6 @@ fn proctime() -> Result<Timestamptz> {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::Timestamptz;
     use risingwave_common::util::epoch::{Epoch, EpochPair};
 
     use super::*;
