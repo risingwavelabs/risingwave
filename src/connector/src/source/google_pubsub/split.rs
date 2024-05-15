@@ -25,11 +25,9 @@ pub struct PubsubSplit {
     pub(crate) index: u32,
     pub(crate) subscription: String,
 
-    /// `start_offset` is a numeric timestamp.
-    /// When not `None`, the `PubsubReader` seeks to the timestamp described by the `start_offset`.
-    /// These offsets are taken from the `offset` property of the `SourceMessage` yielded by the
-    /// pubsub reader.
-    pub(crate) start_offset: Option<String>,
+    #[serde(rename = "start_offset")]
+    #[serde(skip_serializing)]
+    pub(crate) __deprecated_start_offset: Option<String>,
 
     #[serde(rename = "stop_offset")]
     #[serde(skip_serializing)]
@@ -53,7 +51,7 @@ impl SplitMetaData for PubsubSplit {
     /// One subscription is like one Kafka consumer group.
     fn update_offset(&mut self, _last_seen_offset: String) -> ConnectorResult<()> {
         // forcefully set previously persisted start_offset to None
-        self.start_offset = None;
+        self.__deprecated_start_offset = None;
         Ok(())
     }
 }

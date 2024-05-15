@@ -89,7 +89,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
             .map(|i| PubsubSplit {
                 index: i,
                 subscription: self.subscription.to_owned(),
-                start_offset: None,
+                __deprecated_start_offset: None,
                 __deprecated_stop_offset: None,
             })
             .collect();

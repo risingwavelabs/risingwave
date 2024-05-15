@@ -99,19 +99,6 @@ impl SplitReader for PubsubSplitReader {
 
         let subscription = properties.subscription_client().await?;
 
-        if let Some(ref offset) = split.start_offset {
-            let timestamp = offset
-                .as_str()
-                .parse::<i64>()
-                .map(|nanos| Utc.timestamp_nanos(nanos))
-                .context("error parsing offset")?;
-
-            subscription
-                .seek(SeekTo::Timestamp(timestamp.into()), None)
-                .await
-                .context("error seeking to pubsub offset")?;
-        }
-
         Ok(Self {
             subscription,
             split_id: split.id(),
