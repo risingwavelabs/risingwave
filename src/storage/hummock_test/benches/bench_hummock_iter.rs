@@ -32,7 +32,6 @@ use risingwave_storage::hummock::test_utils::default_opts_for_test;
 use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
-use risingwave_storage::StateStore;
 
 fn gen_interleave_shared_buffer_batch_iter(
     batch_size: usize,

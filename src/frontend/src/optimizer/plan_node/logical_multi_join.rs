@@ -871,7 +871,7 @@ mod test {
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
-    use crate::expr::{FunctionCall, InputRef};
+    use crate::expr::InputRef;
     use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::generic::GenericPlanRef;
     use crate::optimizer::plan_node::LogicalValues;

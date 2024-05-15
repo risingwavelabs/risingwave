@@ -108,16 +108,14 @@ impl BoxedExecutorBuilder for ProjectExecutor {
 
 #[cfg(test)]
 mod tests {
-    use futures::stream::StreamExt;
     use risingwave_common::array::{Array, I32Array};
-    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::{InputRefExpression, LiteralExpression};
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
-    use crate::executor::{Executor, ValuesExecutor};
+    use crate::executor::ValuesExecutor;
     use crate::*;
 
     const CHUNK_SIZE: usize = 1024;

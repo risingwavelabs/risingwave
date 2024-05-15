@@ -276,7 +276,9 @@ pub fn partition_overlapping_sstable_infos(
                 &prev_group.max_right_bound,
                 &sst.key_range.as_ref().unwrap().left,
             ) {
-                prev_group.max_right_bound = sst.key_range.as_ref().unwrap().right.clone();
+                prev_group
+                    .max_right_bound
+                    .clone_from(&sst.key_range.as_ref().unwrap().right);
                 prev_group.ssts.push(sst);
                 continue;
             }

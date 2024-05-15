@@ -533,8 +533,6 @@ impl NonOverlapSubLevelPicker {
 pub mod tests {
     use std::collections::BTreeSet;
 
-    pub use risingwave_pb::hummock::{Level, LevelType};
-
     use super::*;
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
     use crate::hummock::compaction::selector::tests::{

@@ -1192,15 +1192,10 @@ pub async fn generate_stream_graph_for_table(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use risingwave_common::catalog::{
-        Field, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_PREFIX,
-    };
+    use risingwave_common::catalog::{Field, DEFAULT_DATABASE_NAME, ROWID_PREFIX};
     use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::catalog::root_catalog::SchemaPath;
     use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
 
     #[test]
@@ -1417,6 +1412,6 @@ mod tests {
         );
 
         // Options are not merged into props.
-        assert!(source.with_properties.get("schema.location").is_none());
+        assert!(!source.with_properties.contains_key("schema.location"));
     }
 }

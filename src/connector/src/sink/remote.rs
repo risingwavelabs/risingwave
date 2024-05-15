@@ -166,7 +166,7 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
 async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorResult<()> {
     if sink_name == ElasticSearchSink::SINK_NAME
         && param.downstream_pk.len() > 1
-        && param.properties.get(ES_OPTION_DELIMITER).is_none()
+        && !param.properties.contains_key(ES_OPTION_DELIMITER)
     {
         bail!("Es sink only support single pk or pk with delimiter option");
     }

@@ -3008,7 +3008,6 @@ impl CatalogControllerInner {
 #[cfg(test)]
 #[cfg(not(madsim))]
 mod tests {
-    use risingwave_meta_model_v2::ViewId;
 
     use super::*;
 

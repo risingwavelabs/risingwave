@@ -1277,13 +1277,7 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
             let mut prev_table_info: Option<&SstableInfo> = None;
             for table_info in &level.table_infos {
                 // Ensure table_ids are sorted and unique
-                if !table_info.table_ids.is_sorted_by(|a, b| {
-                    if a < b {
-                        Some(Ordering::Less)
-                    } else {
-                        Some(Ordering::Greater)
-                    }
-                }) {
+                if !table_info.table_ids.is_sorted_by(|a, b| a < b) {
                     res.push(format!(
                         "{} SST {}: table_ids not sorted",
                         level_identifier, table_info.object_id
