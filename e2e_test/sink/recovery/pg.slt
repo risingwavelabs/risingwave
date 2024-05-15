@@ -16,7 +16,7 @@ set background_ddl=true;
 statement ok
 create sink pg_sink from t with (
     connector = 'jdbc',
-    jdbc.url = 'jdbc:postgresql://localhost:5432/test?user=test&password=connector',
+    jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
     table.name = 't',
     type = 'upsert',
     primary_key = 'v1'
@@ -52,13 +52,14 @@ select count(*) from t;
 # Sink back into RW from PG
 statement ok
 create table t2 (v1 int primary key) with (
- connector = 'postgres-cdc',
- hostname = 'localhost',
- port = '5432',
- username = 'test',
- password = 'connector',
- database.name = 'test',
- table.name = 't',
+  connector = 'postgres-cdc',
+  hostname = '${PGHOST:localhost}',
+  port = '${PGPORT:5432}',
+  username = '${PGUSER:$USER}',
+  password = '${PGPASSWORD:}',
+  database.name = '${PGDATABASE:postgres}',
+  table.name = 't',
+  slot.name = 'pg_recovery_test_slot'
 );
 
 sleep 5s

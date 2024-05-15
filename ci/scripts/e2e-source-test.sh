@@ -58,6 +58,9 @@ echo "--- starting risingwave cluster"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-1cn-1fe-with-recovery
 
+echo "--- postgres recovery test"
+risedev slt './e2e_test/sink/recovery/pg.slt'
+
 echo "--- mongodb cdc test"
 # install the mongo shell
 wget http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2_amd64.deb
