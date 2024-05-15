@@ -1,0 +1,91 @@
+statement ok
+create table t as select generate_series as v1 from generate_series(1, 1000000);
+
+system ok
+PGPASSWORD=connector psql -d test -h localhost -p 5432 -U test -c "drop table if exists t;"
+
+system ok
+PGPASSWORD=connector psql -d test -h localhost -p 5432 -U test -c "create table t(v1 int primary key);"
+
+system ok
+PGPASSWORD=connector psql -d test -h localhost -p 5432 -U test -c "GRANT SELECT, INSERT, UPDATE, DELETE ON t TO test;"
+
+statement ok
+set background_ddl=true;
+
+statement ok
+create sink pg_sink from t with (
+    connector = 'jdbc',
+    jdbc.url = 'jdbc:postgresql://localhost:5432/test?user=test&password=connector',
+    table.name = 't',
+    type = 'upsert',
+    primary_key = 'v1'
+);
+
+sleep 5s
+
+statement ok
+recover;
+
+statement ok
+recover;
+
+statement ok
+recover;
+
+statement ok
+recover;
+
+statement ok
+recover;
+
+sleep 10s
+
+statement ok
+recover;
+
+query I
+select count(*) from t;
+----
+1000000
+
+# Sink back into RW from PG
+statement ok
+create table t2 (v1 int primary key) with (
+ connector = 'postgres-cdc',
+ hostname = 'localhost',
+ port = '5432',
+ username = 'test',
+ password = 'connector',
+ database.name = 'test',
+ table.name = 't',
+);
+
+sleep 5s
+
+statement ok
+recover;
+
+statement ok
+recover;
+
+statement ok
+recover;
+
+statement ok
+recover;
+
+statement ok
+recover;
+
+sleep 1s
+
+statement ok
+recover;
+
+sleep 10s
+
+query I
+select count(*) from t2;
+----
+1000000
