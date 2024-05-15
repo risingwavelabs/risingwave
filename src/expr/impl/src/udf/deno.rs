@@ -60,7 +60,7 @@ static DENO: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
 
         let body = format!(
             "export {} {}({}) {{ {} }}",
-            match opts.function_type.as_deref() {
+            match opts.function_type {
                 Some("sync") => "function",
                 Some("async") => "async function",
                 Some("generator") => "function*",
@@ -76,7 +76,7 @@ static DENO: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(runtime.add_function(
                 opts.identifier,
-                UdfArrowConvert::default().to_arrow_field("", &opts.return_type)?,
+                UdfArrowConvert::default().to_arrow_field("", opts.return_type)?,
                 CallMode::CalledOnNullInput,
                 &body,
             ))

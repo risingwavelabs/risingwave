@@ -45,7 +45,7 @@ static QUICKJS: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
             CallMode::CalledOnNullInput,
             &body,
         )?;
-        Ok(Box::new(QuickJSFunction {
+        Ok(Box::new(QuickJsFunction {
             runtime,
             identifier: opts.identifier.to_string(),
         }))
@@ -53,13 +53,13 @@ static QUICKJS: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
 };
 
 #[derive(Debug)]
-struct QuickJSFunction {
+struct QuickJsFunction {
     runtime: Runtime,
     identifier: String,
 }
 
 #[async_trait::async_trait]
-impl UdfRuntime for QuickJSFunction {
+impl UdfRuntime for QuickJsFunction {
     async fn call(&self, input: &RecordBatch) -> Result<RecordBatch> {
         self.runtime.call(&self.identifier, input)
     }

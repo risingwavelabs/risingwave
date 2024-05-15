@@ -41,7 +41,7 @@ static RUST: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
 
 fn create_wasm(opts: CreateFunctionOptions<'_>) -> Result<CreateFunctionOutput> {
     let wasm_binary: Cow<'_, [u8]> = if let Some(link) = opts.using_link {
-        read_file_from_link(&link)?.into()
+        read_file_from_link(link)?.into()
     } else if let Some(bytes) = opts.using_base64_decoded {
         bytes.into()
     } else {

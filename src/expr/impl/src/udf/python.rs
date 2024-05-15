@@ -32,7 +32,7 @@ static PYTHON: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
         let mut runtime = Runtime::builder().sandboxed(true).build()?;
         runtime.add_function(
             opts.identifier,
-            UdfArrowConvert::default().to_arrow_field("", &opts.return_type)?,
+            UdfArrowConvert::default().to_arrow_field("", opts.return_type)?,
             CallMode::CalledOnNullInput,
             opts.body.context("body is required")?,
         )?;

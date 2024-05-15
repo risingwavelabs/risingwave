@@ -51,10 +51,10 @@ static EXTERNAL: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
         let returns = arrow_schema::Schema::new(if opts.is_table_function {
             vec![
                 arrow_schema::Field::new("row", arrow_schema::DataType::Int32, true),
-                to_field(&opts.return_type)?,
+                to_field(opts.return_type)?,
             ]
         } else {
-            vec![to_field(&opts.return_type)?]
+            vec![to_field(opts.return_type)?]
         });
         let function = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(client.get(&identifier))
@@ -123,15 +123,15 @@ impl UdfRuntime for ExternalFunction {
         let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
         let result = if self.always_retry_on_network_error {
             self.call_with_always_retry_on_network_error(
-                &input,
+                input,
                 // &metrics.udf_retry_count.with_label_values(labels),
             )
             .await
         } else {
             let result = if disable_retry_count != 0 {
-                self.client.call(&self.identifier, &input).await
+                self.client.call(&self.identifier, input).await
             } else {
-                self.call_with_retry(&input).await
+                self.call_with_retry(input).await
             };
             let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
             let connection_error = matches!(&result, Err(e) if is_connection_error(e));
