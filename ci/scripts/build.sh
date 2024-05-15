@@ -44,6 +44,7 @@ if [[ "$profile" == "ci-dev" ]]; then
     RISINGWAVE_FEATURE_FLAGS=(--features rw-dynamic-link --no-default-features)
 else
     RISINGWAVE_FEATURE_FLAGS=(--features rw-static-link)
+    export OPENSSL_STATIC=1
 fi
 
 cargo build \
