@@ -1,4 +1,4 @@
-FROM ubuntu:22.04 AS base
+FROM ubuntu:24.04 AS base
 
 ENV LANG en_US.utf8
 
@@ -142,4 +142,4 @@ ENV CONNECTOR_LIBS_PATH /risingwave/bin/connector-node/libs
 ENV IN_CONTAINER=1
 
 ENTRYPOINT [ "/risingwave/bin/risingwave" ]
-CMD [ "playground" ]
+CMD [ "single_node" ]

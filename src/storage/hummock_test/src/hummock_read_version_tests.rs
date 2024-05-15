@@ -53,7 +53,7 @@ async fn test_read_version_basic() {
     {
         // single imm
         let sorted_items = gen_dummy_batch(1);
-        let size = SharedBufferBatch::measure_batch_size(&sorted_items, None);
+        let size = SharedBufferBatch::measure_batch_size(&sorted_items, None).0;
         let imm = SharedBufferBatch::build_shared_buffer_batch_for_test(
             epoch,
             0,
@@ -86,7 +86,7 @@ async fn test_read_version_basic() {
         for i in 0..5 {
             epoch.inc_epoch();
             let sorted_items = gen_dummy_batch(i + 2);
-            let size = SharedBufferBatch::measure_batch_size(&sorted_items, None);
+            let size = SharedBufferBatch::measure_batch_size(&sorted_items, None).0;
             let imm = SharedBufferBatch::build_shared_buffer_batch_for_test(
                 epoch,
                 0,
@@ -273,7 +273,7 @@ async fn test_read_filter_basic() {
     {
         // single imm
         let sorted_items = gen_dummy_batch(epoch);
-        let size = SharedBufferBatch::measure_batch_size(&sorted_items, None);
+        let size = SharedBufferBatch::measure_batch_size(&sorted_items, None).0;
         let imm = SharedBufferBatch::build_shared_buffer_batch_for_test(
             epoch,
             0,

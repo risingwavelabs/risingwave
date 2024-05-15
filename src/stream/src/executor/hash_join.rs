@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use multimap::MultiMap;
-use risingwave_common::array::{Op, RowRef};
+use risingwave_common::array::Op;
 use risingwave_common::hash::{HashKey, NullBitmap};
 use risingwave_common::types::{DefaultOrd, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
@@ -30,7 +30,7 @@ use self::builder::JoinChunkBuilder;
 use super::barrier_align::*;
 use super::join::hash_join::*;
 use super::join::row::JoinRow;
-use super::join::{JoinTypePrimitive, SideTypePrimitive, *};
+use super::join::*;
 use super::watermark::*;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::prelude::*;
@@ -1051,20 +1051,16 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 mod tests {
     use std::sync::atomic::AtomicU64;
 
-    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::*;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
     use risingwave_common::hash::{Key128, Key64};
-    use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
-    use crate::common::table::state_table::StateTable;
     use crate::executor::test_utils::expr::build_from_pretty;
     use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
-    use crate::executor::{ActorContext, Barrier, EpochPair};
 
     async fn create_in_memory_state_table(
         mem_state: MemoryStateStore,

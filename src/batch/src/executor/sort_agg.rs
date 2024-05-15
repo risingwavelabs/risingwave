@@ -360,14 +360,12 @@ mod tests {
     use futures::StreamExt;
     use futures_async_stream::for_await;
     use risingwave_common::array::{Array as _, I64Array};
-    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::build_from_pretty;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
-    use crate::task::ShutdownToken;
 
     #[tokio::test]
     async fn execute_count_star_int32() -> Result<()> {

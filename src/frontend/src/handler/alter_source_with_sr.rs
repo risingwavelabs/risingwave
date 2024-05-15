@@ -64,6 +64,7 @@ fn encode_type_to_encode(from: EncodeType) -> Option<Encode> {
         EncodeType::Bytes => Encode::Bytes,
         EncodeType::Template => Encode::Template,
         EncodeType::None => Encode::None,
+        EncodeType::Text => Encode::Text,
     })
 }
 

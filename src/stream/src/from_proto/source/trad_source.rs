@@ -118,7 +118,6 @@ pub fn create_source_desc_builder(
         row_id_index.map(|x| x as _),
         with_properties,
         source_info,
-        params.env.connector_params(),
         params.env.config().developer.connector_message_buffer_size,
         // `pk_indices` is used to ensure that a message will be skipped instead of parsed
         // with null pk when the pk column is missing.
@@ -226,6 +225,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     )
                     .boxed()
                 } else {
+                    let is_shared = source.info.as_ref().is_some_and(|info| info.is_shared());
                     SourceExecutor::new(
                         params.actor_context.clone(),
                         Some(stream_source_core),
@@ -233,6 +233,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         barrier_receiver,
                         system_params,
                         source.rate_limit,
+                        is_shared,
                     )
                     .boxed()
                 }
@@ -262,6 +263,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 barrier_receiver,
                 system_params,
                 None,
+                false,
             );
             Ok((params.info, exec).into())
         }

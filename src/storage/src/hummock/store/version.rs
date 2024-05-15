@@ -87,7 +87,6 @@ impl StagingSstableInfo {
         imm_ids: Vec<ImmId>,
         imm_size: usize,
     ) -> Self {
-        // the epochs are sorted from lower epoch to higher epoch
         assert!(epochs.is_sorted());
         Self {
             sstable_infos,

@@ -1,4 +1,5 @@
 # CDC Postgres source validate test
+control substitution on
 
 # invalid username
 statement error
@@ -217,3 +218,28 @@ explain create table enum_to_varchar (
  table.name = 'enum_table',
  slot.name = 'enum_to_varchar'
 );
+
+# generated column
+statement ok
+create table shipments (
+  shipment_id INTEGER,
+  order_id INTEGER,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+  generated_c INTEGER AS shipment_id + order_id,
+ PRIMARY KEY (shipment_id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
+ schema.name = 'public',
+ table.name = 'shipments',
+ slot.name = 'shipments'
+);
+
+statement ok
+drop table shipments;

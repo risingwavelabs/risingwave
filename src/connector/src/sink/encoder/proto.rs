@@ -77,7 +77,7 @@ impl ProtoEncoder {
 }
 
 pub struct ProtoEncoded {
-    message: DynamicMessage,
+    pub message: DynamicMessage,
     header: ProtoHeader,
 }
 
@@ -307,7 +307,6 @@ fn encode_field<D: MaybeData>(
             proto_field.kind()
         )))
     };
-
     let value = match &data_type {
         // Group A: perfect match between RisingWave types and ProtoBuf types
         DataType::Boolean => match (expect_list, proto_field.kind()) {
@@ -364,18 +363,59 @@ fn encode_field<D: MaybeData>(
                     Ok(Value::Message(message.transcode_to_dynamic()))
                 })?
             }
+            (false, Kind::String) => {
+                maybe.on_base(|s| Ok(Value::String(s.into_timestamptz().to_string())))?
+            }
             _ => return no_match_err(),
         },
-        DataType::Jsonb => return no_match_err(), // Value, NullValue, Struct (map), ListValue
-        // Group C: experimental
-        DataType::Int16 => return no_match_err(),
-        DataType::Date => return no_match_err(), // google.type.Date
-        DataType::Time => return no_match_err(), // google.type.TimeOfDay
-        DataType::Timestamp => return no_match_err(), // google.type.DateTime
-        DataType::Decimal => return no_match_err(), // google.type.Decimal
-        DataType::Interval => return no_match_err(),
-        // Group D: unsupported
-        DataType::Serial | DataType::Int256 => {
+        DataType::Jsonb => match (expect_list, proto_field.kind()) {
+            (false, Kind::String) => {
+                maybe.on_base(|s| Ok(Value::String(s.into_jsonb().to_string())))?
+            }
+            _ => return no_match_err(), /* Value, NullValue, Struct (map), ListValue
+                                         * Group C: experimental */
+        },
+        DataType::Int16 => match (expect_list, proto_field.kind()) {
+            (false, Kind::Int64) => maybe.on_base(|s| Ok(Value::I64(s.into_int16() as i64)))?,
+            _ => return no_match_err(),
+        },
+        DataType::Date => match (expect_list, proto_field.kind()) {
+            (false, Kind::Int32) => {
+                maybe.on_base(|s| Ok(Value::I32(s.into_date().get_nums_days_unix_epoch())))?
+            }
+            _ => return no_match_err(), // google.type.Date
+        },
+        DataType::Time => match (expect_list, proto_field.kind()) {
+            (false, Kind::String) => {
+                maybe.on_base(|s| Ok(Value::String(s.into_time().to_string())))?
+            }
+            _ => return no_match_err(), // google.type.TimeOfDay
+        },
+        DataType::Timestamp => match (expect_list, proto_field.kind()) {
+            (false, Kind::String) => {
+                maybe.on_base(|s| Ok(Value::String(s.into_timestamp().to_string())))?
+            }
+            _ => return no_match_err(), // google.type.DateTime
+        },
+        DataType::Decimal => match (expect_list, proto_field.kind()) {
+            (false, Kind::String) => {
+                maybe.on_base(|s| Ok(Value::String(s.into_decimal().to_string())))?
+            }
+            _ => return no_match_err(), // google.type.Decimal
+        },
+        DataType::Interval => match (expect_list, proto_field.kind()) {
+            (false, Kind::String) => {
+                maybe.on_base(|s| Ok(Value::String(s.into_interval().as_iso_8601())))?
+            }
+            _ => return no_match_err(), // Group D: unsupported
+        },
+        DataType::Serial => match (expect_list, proto_field.kind()) {
+            (false, Kind::Int64) => {
+                maybe.on_base(|s| Ok(Value::I64(s.into_serial().as_row_id())))?
+            }
+            _ => return no_match_err(), // Group D: unsupported
+        },
+        DataType::Int256 => {
             return no_match_err();
         }
     };
@@ -398,7 +438,6 @@ mod tests {
         let pool_bytes = std::fs::read(pool_path).unwrap();
         let pool = prost_reflect::DescriptorPool::decode(pool_bytes.as_ref()).unwrap();
         let descriptor = pool.get_message_by_name("recursive.AllTypes").unwrap();
-
         let schema = Schema::new(vec![
             Field::with_name(DataType::Boolean, "bool_field"),
             Field::with_name(DataType::Varchar, "string_field"),

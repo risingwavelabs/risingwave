@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use std::borrow::Cow;
+use std::fmt;
 use std::fmt::Display;
 use std::hash::BuildHasher;
 use std::sync::Arc;
-use std::{fmt, usize};
 
 use bytes::Bytes;
 use either::Either;
@@ -140,11 +140,13 @@ impl DataChunk {
         self.columns.len()
     }
 
+    // TODO(rc): shall we rename this to `visible_size`? I sometimes find this confused with `capacity`.
     /// `cardinality` returns the number of visible tuples
     pub fn cardinality(&self) -> usize {
         self.visibility.count_ones()
     }
 
+    // TODO(rc): shall we rename this to `size`?
     /// `capacity` returns physical length of any chunk column
     pub fn capacity(&self) -> usize {
         self.visibility.len()
@@ -247,6 +249,7 @@ impl DataChunk {
         Self::new(columns, Bitmap::ones(cardinality))
     }
 
+    /// Scatter a compacted chunk to a new chunk with the given visibility.
     pub fn uncompact(self, vis: Bitmap) -> Self {
         let mut uncompact_builders: Vec<_> = self
             .columns

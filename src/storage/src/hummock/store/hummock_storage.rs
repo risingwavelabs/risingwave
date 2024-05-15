@@ -58,7 +58,6 @@ use crate::hummock::{
 use crate::monitor::{CompactorMetrics, HummockStateStoreMetrics, StoreLocalStatistic};
 use crate::opts::StorageOpts;
 use crate::store::*;
-use crate::StateStore;
 
 struct HummockStorageShutdownGuard {
     shutdown_sender: HummockEventSender,

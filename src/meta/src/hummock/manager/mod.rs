@@ -378,7 +378,7 @@ impl HummockManager {
                 state_store_url.strip_prefix("hummock+").unwrap_or("memory"),
                 metrics.object_store_metric.clone(),
                 "Version Checkpoint",
-                object_store_config,
+                Arc::new(object_store_config),
             )
             .await,
         );
@@ -921,13 +921,12 @@ impl HummockManager {
         let developer_config = Arc::new(CompactionDeveloperConfig::new_from_meta_opts(
             &self.env.opts,
         ));
-        const MAX_TRIVIAL_MOVE_TASK_COUNT: usize = 256;
         'outside: for compaction_group_id in compaction_groups {
             if pick_tasks.len() >= max_select_count {
                 break;
             }
 
-            if current_version.levels.get(&compaction_group_id).is_none() {
+            if !current_version.levels.contains_key(&compaction_group_id) {
                 continue;
             }
 
@@ -1059,8 +1058,9 @@ impl HummockManager {
                     compact_task.set_task_status(TaskStatus::Success);
                     compact_status.report_compact_task(&compact_task);
                     if !is_trivial_reclaim {
-                        compact_task.sorted_output_ssts =
-                            compact_task.input_ssts[0].table_infos.clone();
+                        compact_task
+                            .sorted_output_ssts
+                            .clone_from(&compact_task.input_ssts[0].table_infos);
                     }
                     self.metrics
                         .compact_frequency
@@ -1080,7 +1080,7 @@ impl HummockManager {
                     );
                     current_version.apply_version_delta(&version_delta);
                     trivial_tasks.push(compact_task);
-                    if trivial_tasks.len() >= MAX_TRIVIAL_MOVE_TASK_COUNT {
+                    if trivial_tasks.len() >= self.env.opts.max_trivial_move_task_count_per_loop {
                         break 'outside;
                     }
                 } else {
@@ -1098,6 +1098,13 @@ impl HummockManager {
                         .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
                     compact_task.table_watermarks = current_version
                         .safe_epoch_table_watermarks(&compact_task.existing_table_ids);
+
+                    // do not split sst by vnode partition when target_level > base_level
+                    // The purpose of data alignment is mainly to improve the parallelism of base level compaction and reduce write amplification.
+                    // However, at high level, the size of the sst file is often larger and only contains the data of a single table_id, so there is no need to cut it.
+                    if compact_task.target_level > compact_task.base_level {
+                        compact_task.table_vnode_partition.clear();
+                    }
 
                     if self.env.opts.enable_dropped_column_reclaim {
                         // TODO: get all table schemas for all tables in once call to avoid acquiring lock and await.
@@ -3301,6 +3308,26 @@ impl HummockManager {
         }
 
         Ok(())
+    }
+
+    #[named]
+    pub async fn list_change_log_epochs(
+        &self,
+        table_id: u32,
+        min_epoch: u64,
+        max_count: u32,
+    ) -> Vec<u64> {
+        let versioning = read_lock!(self, versioning).await;
+        if let Some(table_change_log) = versioning
+            .current_version
+            .table_change_log
+            .get(&TableId::new(table_id))
+        {
+            let table_change_log = table_change_log.clone();
+            table_change_log.get_epochs(min_epoch, max_count as usize)
+        } else {
+            vec![]
+        }
     }
 }
 

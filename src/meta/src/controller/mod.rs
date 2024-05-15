@@ -19,6 +19,7 @@ use risingwave_meta_model_v2::{
 };
 use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
+use risingwave_pb::catalog::subscription::PbSubscriptionState;
 use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableType};
 use risingwave_pb::catalog::{
     PbConnection, PbCreateType, PbDatabase, PbFunction, PbHandleConflictBehavior, PbIndex,
@@ -223,11 +224,8 @@ impl From<ObjectModel<subscription::Model>> for PbSubscription {
             schema_id: value.1.schema_id.unwrap() as _,
             database_id: value.1.database_id.unwrap() as _,
             name: value.0.name,
-            plan_pk: value.0.plan_pk.to_protobuf(),
-            dependent_relations: vec![], // todo: deprecate it.
-            distribution_key: value.0.distribution_key.0,
             owner: value.1.owner_id as _,
-            properties: value.0.properties.0,
+            retention_seconds: value.0.retention_seconds as _,
             definition: value.0.definition,
             initialized_at_epoch: Some(
                 Epoch::from_unix_millis(value.1.initialized_at.timestamp_millis() as _).0,
@@ -235,12 +233,10 @@ impl From<ObjectModel<subscription::Model>> for PbSubscription {
             created_at_epoch: Some(
                 Epoch::from_unix_millis(value.1.created_at.timestamp_millis() as _).0,
             ),
-            stream_job_status: PbStreamJobStatus::Created as _, // todo: deprecate it.
-            column_catalogs: value.0.columns.to_protobuf(),
-            subscription_from_name: value.0.subscription_from_name,
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
-            subscription_internal_table_name: value.0.subscription_internal_table_name,
+            dependent_table_id: value.0.dependent_table_id as _,
+            subscription_state: PbSubscriptionState::Init as _,
         }
     }
 }

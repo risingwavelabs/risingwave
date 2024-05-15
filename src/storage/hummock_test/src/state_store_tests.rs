@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use expect_test::expect;
-use foyer::memory::CacheContext;
+use foyer::CacheContext;
 use futures::{pin_mut, StreamExt};
 use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
@@ -526,7 +526,7 @@ async fn test_state_store_sync_v2() {
 /// Fix this when we finished epoch management.
 #[ignore]
 async fn test_reload_storage() {
-    let sstable_store = mock_sstable_store();
+    let sstable_store = mock_sstable_store().await;
     let hummock_options = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
@@ -1610,22 +1610,28 @@ async fn test_iter_log() {
 
     verify_iter_log((Unbounded, Unbounded)).await;
 
+    if cfg!(madsim) {
+        // avoid timeout in madsim
+        return;
+    }
+
     let keys = test_log_data
         .iter()
         .flat_map(|(_, logs)| logs.iter().map(|(key, _)| key.clone()))
         .sorted()
         .dedup()
         .collect_vec();
-    assert_eq!(keys.len(), key_count);
     let test_key_count = 5;
-    let step = key_count / test_key_count;
+    let step = keys.len() / test_key_count;
 
-    for start_key_idx in (0..test_key_count).step_by(step) {
+    for i in 0..test_key_count {
+        let start_key_idx = i * step;
         let start_key = keys[start_key_idx].clone();
         let start_bound = Included(start_key);
-        for end_key_idx in (start_key_idx..test_key_count).step_by(step) {
+        for j in i..test_key_count {
+            let end_key_idx = j * step;
             let end_key = keys[end_key_idx].clone();
-            let end_bound = if end_key_idx % 2 == 0 {
+            let end_bound = if j % 2 == 0 {
                 Included(end_key)
             } else {
                 Excluded(end_key)

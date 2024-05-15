@@ -44,7 +44,7 @@ struct RwIcebergFiles {
     /// Total file size in bytes
     pub file_size_in_bytes: i64,
     /// Field ids used to determine row equality in equality delete files.
-    /// Required when content is EqualityDeletes and should be null
+    /// Required when content is `EqualityDeletes` and should be null
     /// otherwise. Fields with ids listed in this column must be present
     /// in the delete file
     pub equality_ids: Option<Vec<i32>>,

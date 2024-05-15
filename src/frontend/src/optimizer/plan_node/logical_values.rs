@@ -205,11 +205,9 @@ impl ToStream for LogicalValues {
 #[cfg(test)]
 mod tests {
 
-    use risingwave_common::catalog::Field;
-    use risingwave_common::types::{DataType, Datum};
+    use risingwave_common::types::Datum;
 
     use super::*;
-    use crate::expr::Literal;
     use crate::optimizer::optimizer_context::OptimizerContext;
 
     fn literal(val: i32) -> ExprImpl {

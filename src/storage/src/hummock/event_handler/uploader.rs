@@ -1300,7 +1300,7 @@ mod tests {
             TableKey(Bytes::from(dummy_table_key())),
             SharedBufferValue::Delete,
         )];
-        let size = SharedBufferBatch::measure_batch_size(&sorted_items, None);
+        let size = SharedBufferBatch::measure_batch_size(&sorted_items, None).0;
         let tracker = match limiter {
             Some(limiter) => Some(limiter.require_memory(size as u64).await),
             None => None,

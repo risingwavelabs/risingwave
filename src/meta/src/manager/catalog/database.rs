@@ -18,6 +18,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableOption;
+use risingwave_pb::catalog::subscription::PbSubscriptionState;
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::{
     Connection, CreateType, Database, Function, Index, PbStreamJobStatus, Schema, Sink, Source,
@@ -123,9 +124,9 @@ impl DatabaseManager {
             (sink.id, sink)
         }));
         let subscriptions = BTreeMap::from_iter(subscriptions.into_iter().map(|subscription| {
-            for depend_relation_id in &subscription.dependent_relations {
-                *relation_ref_count.entry(*depend_relation_id).or_default() += 1;
-            }
+            *relation_ref_count
+                .entry(subscription.dependent_table_id)
+                .or_default() += 1;
             (subscription.id, subscription)
         }));
         let indexes = BTreeMap::from_iter(indexes.into_iter().map(|index| (index.id, index)));
@@ -185,10 +186,7 @@ impl DatabaseManager {
                 .collect_vec(),
             self.subscriptions
                 .values()
-                .filter(|t| {
-                    t.stream_job_status == PbStreamJobStatus::Unspecified as i32
-                        || t.stream_job_status == PbStreamJobStatus::Created as i32
-                })
+                .filter(|t| t.subscription_state == PbSubscriptionState::Created as i32)
                 .cloned()
                 .collect_vec(),
             self.indexes
@@ -298,6 +296,10 @@ impl DatabaseManager {
         self.databases.values().cloned().collect_vec()
     }
 
+    pub fn list_schemas(&self) -> Vec<Schema> {
+        self.schemas.values().cloned().collect_vec()
+    }
+
     pub fn list_creating_background_mvs(&self) -> Vec<Table> {
         self.tables
             .values()
@@ -361,6 +363,14 @@ impl DatabaseManager {
             .collect_vec()
     }
 
+    pub fn list_view_ids(&self, schema_id: SchemaId) -> Vec<ViewId> {
+        self.views
+            .values()
+            .filter(|view| view.schema_id == schema_id)
+            .map(|view| view.id)
+            .collect_vec()
+    }
+
     pub fn list_sources(&self) -> Vec<Source> {
         self.sources.values().cloned().collect_vec()
     }
@@ -398,7 +408,6 @@ impl DatabaseManager {
             .keys()
             .copied()
             .chain(self.sinks.keys().copied())
-            .chain(self.subscriptions.keys().copied())
             .chain(self.indexes.keys().copied())
             .chain(self.sources.keys().copied())
             .chain(

@@ -123,9 +123,7 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for IcebergLogSinkerOf<W> {
                             sink_metrics
                                 .sink_commit_duration_metrics
                                 .observe(start_time.elapsed().as_millis() as f64);
-                            log_reader
-                                .truncate(TruncateOffset::Barrier { epoch })
-                                .await?;
+                            log_reader.truncate(TruncateOffset::Barrier { epoch })?;
                             current_checkpoint = 0;
                         } else {
                             sink_writer.barrier(false).await?;

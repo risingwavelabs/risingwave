@@ -13,14 +13,14 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use anyhow::{anyhow, Context};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use reqwest::{header, Client, RequestBuilder, StatusCode};
-use risingwave_common::config::ObjectStoreConfig;
 use risingwave_object_store::object::*;
 use serde::{Deserialize, Serialize};
-use thiserror_ext::AsReport;
 
 use super::doris_starrocks_connector::POOL_IDLE_TIMEOUT;
 use super::{Result, SinkError};
@@ -126,16 +126,12 @@ impl SnowflakeHttpClient {
         let jwt_token = encode(
             &header,
             &claims,
-            &EncodingKey::from_rsa_pem(self.private_key.as_ref()).map_err(|err| {
-                SinkError::Snowflake(format!(
-                    "failed to encode from provided rsa pem key, error: {}",
-                    err
-                ))
-            })?,
+            &EncodingKey::from_rsa_pem(self.private_key.as_ref())
+                .context("failed to encode from provided rsa pem key")
+                .map_err(SinkError::Snowflake)?,
         )
-        .map_err(|err| {
-            SinkError::Snowflake(format!("failed to encode jwt_token, error: {}", err))
-        })?;
+        .context("failed to encode jwt_token")
+        .map_err(SinkError::Snowflake)?;
         Ok(jwt_token)
     }
 
@@ -167,10 +163,10 @@ impl SnowflakeHttpClient {
         let response = builder
             .send()
             .await
-            .map_err(|err| SinkError::Snowflake(err.to_report_string()))?;
+            .map_err(|err| SinkError::Snowflake(anyhow!(err)))?;
 
         if response.status() != StatusCode::OK {
-            return Err(SinkError::Snowflake(format!(
+            return Err(SinkError::Snowflake(anyhow!(
                 "failed to make http request, error code: {}\ndetailed response: {:#?}",
                 response.status(),
                 response,
@@ -196,23 +192,20 @@ impl SnowflakeS3Client {
         aws_secret_access_key: String,
         aws_region: String,
     ) -> Result<Self> {
+        // FIXME: we should use the `ObjectStoreConfig` instead of default
         // just use default configuration here for opendal s3 engine
         let config = ObjectStoreConfig::default();
 
         // create the s3 engine for streaming upload to the intermediate s3 bucket
         let opendal_s3_engine = OpendalObjectStore::new_s3_engine_with_credentials(
             &s3_bucket,
-            config,
+            Arc::new(config),
             &aws_access_key_id,
             &aws_secret_access_key,
             &aws_region,
         )
-        .map_err(|err| {
-            SinkError::Snowflake(format!(
-                "failed to create opendal s3 engine, error: {}",
-                err
-            ))
-        })?;
+        .context("failed to create opendal s3 engine")
+        .map_err(SinkError::Snowflake)?;
 
         Ok(Self {
             s3_bucket,

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use async_nats;
 use async_nats::jetstream::Message;
 
 use crate::source::base::SourceMessage;

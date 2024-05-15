@@ -67,6 +67,8 @@ pub struct SourceExecutor<S: StateStore> {
 
     /// Rate limit in rows/s.
     rate_limit_rps: Option<u32>,
+
+    is_shared: bool,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -77,6 +79,7 @@ impl<S: StateStore> SourceExecutor<S> {
         barrier_receiver: UnboundedReceiver<Barrier>,
         system_params: SystemParamsReaderRef,
         rate_limit_rps: Option<u32>,
+        is_shared: bool,
     ) -> Self {
         Self {
             actor_ctx,
@@ -85,6 +88,7 @@ impl<S: StateStore> SourceExecutor<S> {
             barrier_receiver: Some(barrier_receiver),
             system_params,
             rate_limit_rps,
+            is_shared,
         }
     }
 
@@ -253,11 +257,11 @@ impl<S: StateStore> SourceExecutor<S> {
             );
 
             core.updated_splits_in_epoch
-                .retain(|split_id, _| target_state.get(split_id).is_some());
+                .retain(|split_id, _| target_state.contains_key(split_id));
 
             let dropped_splits = core
                 .latest_split_info
-                .extract_if(|split_id, _| target_state.get(split_id).is_none())
+                .extract_if(|split_id, _| !target_state.contains_key(split_id))
                 .map(|(_, split)| split)
                 .collect_vec();
 
@@ -424,11 +428,30 @@ impl<S: StateStore> SourceExecutor<S> {
                 .await?
             {
                 *ele = recover_state;
+            } else {
+                // This is a new split, not in state table.
+                if self.is_shared {
+                    // For shared source, we start from latest and let the downstream SourceBackfillExecutors to read historical data.
+                    // It's highly probable that the work of scanning historical data cannot be shared,
+                    // so don't waste work on it.
+                    // For more details, see https://github.com/risingwavelabs/risingwave/issues/16576#issuecomment-2095413297
+                    if ele.is_cdc_split() {
+                        // shared CDC source already starts from latest.
+                        continue;
+                    }
+                    match ele {
+                        SplitImpl::Kafka(split) => {
+                            split.seek_to_latest_offset();
+                        }
+                        _ => unreachable!("only kafka source can be shared, got {:?}", ele),
+                    }
+                }
             }
         }
 
         // init in-memory split states with persisted state if any
         core.init_split_state(boot_state.clone());
+        let mut is_uninitialized = self.actor_ctx.initial_dispatch_num == 0;
 
         // Return the ownership of `stream_source_core` to the source executor.
         self.stream_source_core = Some(core);
@@ -447,11 +470,16 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut stream =
             StreamReaderWithPause::<true, StreamChunk>::new(barrier_stream, source_chunk_reader);
 
-        // If the first barrier requires us to pause on startup, pause the stream.
-        if barrier.is_pause_on_startup() {
+        // - For shared source, pause until there's a MV.
+        // - If the first barrier requires us to pause on startup, pause the stream.
+        if (self.is_shared && is_uninitialized) || barrier.is_pause_on_startup() {
+            tracing::info!(
+                is_shared = self.is_shared,
+                is_uninitialized = is_uninitialized,
+                "source paused on startup"
+            );
             stream.pause_stream();
         }
-        // TODO: for shared source, pause until there's a MV.
 
         yield Message::Barrier(barrier);
 
@@ -482,8 +510,17 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     let epoch = barrier.epoch;
 
+                    if self.is_shared
+                        && is_uninitialized
+                        && barrier.has_more_downstream_fragments(self.actor_ctx.id)
+                    {
+                        stream.resume_stream();
+                        is_uninitialized = false;
+                    }
+
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
+                            // XXX: Is it possible that the stream is self_paused, and we have pause mutation now? In this case, it will panic.
                             Mutation::Pause => stream.pause_stream(),
                             Mutation::Resume => stream.resume_stream(),
                             Mutation::SourceChangeSplit(actor_splits) => {
@@ -729,15 +766,11 @@ impl<S: StateStore> WaitEpochWorker<S> {
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
-    use std::time::Duration;
 
-    use futures::StreamExt;
     use maplit::{convert_args, hashmap};
-    use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
+    use risingwave_common::catalog::{ColumnId, Field, TableId};
     use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
@@ -749,7 +782,6 @@ mod tests {
 
     use super::*;
     use crate::executor::source::{default_source_internal_table, SourceStateTableHandler};
-    use crate::executor::ActorContext;
 
     const MOCK_SOURCE_NAME: &str = "mock_source";
 
@@ -801,6 +833,7 @@ mod tests {
             barrier_rx,
             system_params_manager.get_params(),
             None,
+            false,
         );
         let mut executor = executor.boxed().execute();
 
@@ -889,6 +922,7 @@ mod tests {
             barrier_rx,
             system_params_manager.get_params(),
             None,
+            false,
         );
         let mut handler = executor.boxed().execute();
 
