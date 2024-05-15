@@ -16,7 +16,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ```
 
 use google_cloud_googleapis::pubsub::v1::PubsubMessage;
-use google_cloud_pubsub::client::Client;
+use google_cloud_pubsub::client::{Client, ClientConfig};
 use google_cloud_pubsub::subscription::SubscriptionConfig;
 
 const TOPIC: &str = "test-topic";
@@ -28,9 +28,14 @@ async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let command = args[1].as_str();
 
-    std::env::set_var("PUBSUB_EMULATOR_HOST", "127.0.0.1:5980");
+    let use_emulator = std::env::var("PUBSUB_EMULATOR_HOST").is_ok();
+    let use_cloud = std::env::var("GOOGLE_APPLICATION_CREDENTIALS_JSON").is_ok();
+    if !use_emulator && !use_cloud {
+        panic!("either PUBSUB_EMULATOR_HOST or GOOGLE_APPLICATION_CREDENTIALS_JSON must be set");
+    }
 
-    let client = Client::new(Default::default()).await?;
+    let config = ClientConfig::default().with_auth().await?;
+    let client = Client::new(config).await?;
 
     let topic = client.topic(TOPIC);
 
