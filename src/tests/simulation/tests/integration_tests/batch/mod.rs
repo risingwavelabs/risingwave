@@ -62,7 +62,7 @@ checkpoint_frequency = 1
 
 [server]
 telemetry_enabled = false
-metrics_level = \"Disabled\"\
+metrics_level = \"Disabled\"
 
 [batch]
 mask_worker_temporary_secs = 30
