@@ -53,9 +53,8 @@ public class JDBCSink implements SinkWriter {
         this.config = config;
         try {
             conn = JdbcUtils.getConnection(config.getJdbcUrl());
-            // Retrieve primary keys and column type mappings from the database
-            this.pkColumnNames =
-                    getPkColumnNames(conn, config.getTableName(), config.getSchemaName());
+            // Table schema has been validated before, so we get the PK from it directly
+            this.pkColumnNames = tableSchema.getPrimaryKeys();
             // column name -> java.sql.Types
             Map<String, Integer> columnTypeMapping =
                     getColumnTypeMapping(conn, config.getTableName(), config.getSchemaName());
@@ -72,9 +71,10 @@ public class JDBCSink implements SinkWriter {
                             .collect(Collectors.toList());
 
             LOG.info(
-                    "schema = {}, table = {}, columnSqlTypes = {}, pkIndices = {}",
+                    "schema = {}, table = {}, tableSchema = {}, columnSqlTypes = {}, pkIndices = {}",
                     config.getSchemaName(),
                     config.getTableName(),
+                    tableSchema,
                     columnSqlTypes,
                     pkIndices);
 
@@ -123,28 +123,6 @@ public class JDBCSink implements SinkWriter {
                 tableName,
                 columnTypeMap);
         return columnTypeMap;
-    }
-
-    private static List<String> getPkColumnNames(
-            Connection conn, String tableName, String schemaName) {
-        List<String> pkColumnNames = new ArrayList<>();
-        try {
-            var pks = conn.getMetaData().getPrimaryKeys(null, schemaName, tableName);
-            while (pks.next()) {
-                pkColumnNames.add(pks.getString(JDBC_COLUMN_NAME_KEY));
-            }
-        } catch (SQLException e) {
-            throw Status.INTERNAL
-                    .withDescription(
-                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
-                    .asRuntimeException();
-        }
-        LOG.info(
-                "schema = {}, table = {}: detected pk column = {}",
-                schemaName,
-                tableName,
-                pkColumnNames);
-        return pkColumnNames;
     }
 
     @Override
@@ -362,7 +340,7 @@ public class JDBCSink implements SinkWriter {
             if (stmt == null) {
                 return;
             }
-            LOG.debug("Executing statement: {}", stmt);
+            LOG.info("Executing statement: {}", stmt);
             stmt.executeBatch();
             stmt.clearParameters();
         }
