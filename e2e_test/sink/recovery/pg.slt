@@ -2,13 +2,13 @@ statement ok
 create table t as select generate_series as v1 from generate_series(1, 1000000);
 
 system ok
-PGPASSWORD=connector psql -d test -h db -p 5432 -U test -c "drop table if exists t;"
+PGPASSWORD=postgres psql -d postgres -h db -p 5432 -U postgres -c "drop table if exists t;"
 
 system ok
-PGPASSWORD=connector psql -d test -h db -p 5432 -U test -c "create table t(v1 int primary key);"
+PGPASSWORD=postgres psql -d postgres -h db -p 5432 -U postgres -c "create table t(v1 int primary key);"
 
 system ok
-PGPASSWORD=connector psql -d test -h db -p 5432 -U test -c "GRANT SELECT, INSERT, UPDATE, DELETE ON t TO test;"
+PGPASSWORD=postgres psql -d postgres -h db -p 5432 -U postgres -c "GRANT SELECT, INSERT, UPDATE, DELETE ON t TO test;"
 
 statement ok
 set background_ddl=true;
@@ -16,7 +16,7 @@ set background_ddl=true;
 statement ok
 create sink pg_sink from t with (
     connector = 'jdbc',
-    jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
+    jdbc.url='jdbc:postgresql://db:5432/postgres?user=postgres&password=postgres',
     table.name = 't',
     type = 'upsert',
     primary_key = 'v1'
