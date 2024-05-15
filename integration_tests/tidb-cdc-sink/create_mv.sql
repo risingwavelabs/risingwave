@@ -6,21 +6,20 @@ CREATE MATERIALIZED VIEW hot_hashtags AS WITH tags AS (
         unnest(regexp_matches(tweet.text, '#\w+', 'g')) AS hashtag,
         tweet.created_at AT TIME ZONE 'UTC' AS created_at
     FROM
-        tweet JOIN user
-    ON
-        tweet.author_id = user.id
+        tweet
+        JOIN user ON tweet.author_id = user.id
 )
 SELECT
     hashtag,
-    COUNT(*) AS hashtag_occurrences,
-    window_start
+    COUNT(*) AS hashtag_occurrences
 FROM
-    TUMBLE(tags, created_at, INTERVAL '5 minute')
+    tags
 GROUP BY
-    hashtag,
-    window_start
+    hashtag
 ORDER BY
-    hashtag_occurrences;
+    hashtag_occurrences DESC
+LIMIT
+    10;
 
 CREATE MATERIALIZED VIEW datatype_c0_boolean AS
 SELECT

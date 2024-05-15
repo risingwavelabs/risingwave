@@ -1,0 +1,55 @@
+version: "2.1"
+
+services:
+  pd:
+    image: pingcap/pd:latest
+    ports:
+      - "2379:2379"
+    volumes:
+      - ./config/pd.toml:/pd.toml
+      - ./logs:/logs
+    command:
+      - --client-urls=http://0.0.0.0:2379
+      - --peer-urls=http://0.0.0.0:2380
+      - --advertise-client-urls=http://pd:2379
+      - --advertise-peer-urls=http://pd:2380
+      - --initial-cluster=pd=http://pd:2380
+      - --data-dir=/data/pd
+      - --config=/pd.toml
+      - --log-file=/logs/pd.log
+    restart: on-failure
+
+  tikv:
+    image: pingcap/tikv:latest
+    ports:
+      - "20160:20160"
+    volumes:
+      - ./config/tikv.toml:/tikv.toml 
+      - ./logs:/logs           
+    command:
+      - --addr=0.0.0.0:20160
+      - --advertise-addr=tikv:20160
+      - --data-dir=/data/tikv
+      - --pd=pd:2379
+      - --config=/tikv.toml
+      - --log-file=/logs/tikv.log
+    depends_on:
+      - "pd"
+    restart: on-failure
+
+  tidb:
+    image: pingcap/tidb:latest
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./config/tidb.toml:/tidb.toml
+      - ./logs:/logs
+    command:
+      - --store=tikv
+      - --path=pd:2379
+      - --config=/tidb.toml
+      - --log-file=/logs/tidb.log
+      - --advertise-address=tidb
+    depends_on:
+      - "tikv"
+    restart: on-failure
