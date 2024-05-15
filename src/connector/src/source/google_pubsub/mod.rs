@@ -22,8 +22,8 @@ use serde::Deserialize;
 pub mod enumerator;
 pub mod source;
 pub mod split;
-
 pub use enumerator::*;
+use serde_with::{serde_as, DisplayFromStr};
 pub use source::*;
 pub use split::*;
 use with_options::WithOptions;
@@ -33,12 +33,18 @@ use crate::source::SourceProperties;
 
 pub const GOOGLE_PUBSUB_CONNECTOR: &str = "google_pubsub";
 
+/// # Implementation Notes
+/// Pub/Sub does not rely on persisted state (`SplitImpl`) to start from a position.
+/// It rely on Pub/Sub to load-balance messages between all Readers.
+/// We `ack` received messages after checkpoint (see `WaitCheckpointWorker`) to achieve at-least-once delivery.
+#[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct PubsubProperties {
     /// Pub/Sub subscription to consume messages from.
     ///
     /// Note that we rely on Pub/Sub to load-balance messages between all Readers pulling from
-    /// the same subscription. So one `subscription` (i.e., one `Source`) can only used for one MV.
+    /// the same subscription. So one `subscription` (i.e., one `Source`) can only used for one MV
+    /// (shared between the actors of its fragment).
     /// Otherwise, different MVs on the same Source will both receive part of the messages.
     /// TODO: check and enforce this on Meta.
     #[serde(rename = "pubsub.subscription")]
@@ -77,8 +83,9 @@ pub struct PubsubProperties {
 
     /// `parallelism` is the number of parallel consumers to run for the subscription.
     /// TODO: use system parallelism if not set
+    #[serde_as(as = "Option<DisplayFromStr>")]
     #[serde(rename = "pubsub.parallelism")]
-    pub parallelism: Option<String>,
+    pub parallelism: Option<u32>,
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,

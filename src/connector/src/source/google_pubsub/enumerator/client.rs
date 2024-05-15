@@ -38,17 +38,9 @@ impl SplitEnumerator for PubsubSplitEnumerator {
         properties: Self::Properties,
         _context: SourceEnumeratorContextRef,
     ) -> ConnectorResult<PubsubSplitEnumerator> {
-        let split_count = match &properties.parallelism {
-            Some(parallelism) => {
-                let parallelism = parallelism
-                    .parse::<u32>()
-                    .context("error when parsing parallelism")?;
-                if parallelism < 1 {
-                    bail!("parallelism must be >= 1");
-                }
-                parallelism
-            }
-            None => 1,
+        let split_count = properties.parallelism.unwrap_or(1);
+        if split_count < 1 {
+            bail!("parallelism must be >= 1");
         };
 
         if properties.credentials.is_none() && properties.emulator_host.is_none() {
