@@ -29,7 +29,6 @@ use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
 use crate::store::*;
-use crate::StateStore;
 
 #[derive(Clone)]
 pub struct TracedStateStore<S> {

@@ -80,6 +80,7 @@ RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=i
 cluster_start
 # Please make sure the regression is expected before increasing the timeout.
 sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
+sqllogictest -p 4566 -d dev './e2e_test/backfill/rate_limit/*.slt'
 
 echo "--- Kill cluster"
 cluster_stop

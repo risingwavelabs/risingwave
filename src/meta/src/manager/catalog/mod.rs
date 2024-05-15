@@ -19,7 +19,6 @@ mod utils;
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::iter;
-use std::option::Option::Some;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
@@ -3969,7 +3968,7 @@ impl CatalogManager {
                 id
             )));
         }
-        if user_core.catalog_create_ref_count.get(&id).is_some() {
+        if user_core.catalog_create_ref_count.contains_key(&id) {
             return Err(MetaError::permission_denied(format!(
                 "User {} cannot be dropped because some objects depend on it",
                 user.name

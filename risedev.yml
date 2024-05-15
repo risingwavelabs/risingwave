@@ -1505,7 +1505,7 @@ template:
     database: "risedev"
 
     # The docker image. Can be overridden to use a different version.
-    image: "mysql:8"
+    image: "mysql:8.0"
 
     # If set to true, data will be persisted at data/{id}.
     persist-data: true

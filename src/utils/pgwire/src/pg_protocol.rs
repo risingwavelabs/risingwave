@@ -767,7 +767,7 @@ where
             self.unnamed_portal.replace(portal);
         } else {
             assert!(
-                self.result_cache.get(&portal_name).is_none(),
+                !self.result_cache.contains_key(&portal_name),
                 "Named portal never can be overridden."
             );
             self.portal_store.insert(portal_name.clone(), portal);

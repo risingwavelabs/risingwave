@@ -926,7 +926,7 @@ impl HummockManager {
                 break;
             }
 
-            if current_version.levels.get(&compaction_group_id).is_none() {
+            if !current_version.levels.contains_key(&compaction_group_id) {
                 continue;
             }
 
@@ -1058,8 +1058,9 @@ impl HummockManager {
                     compact_task.set_task_status(TaskStatus::Success);
                     compact_status.report_compact_task(&compact_task);
                     if !is_trivial_reclaim {
-                        compact_task.sorted_output_ssts =
-                            compact_task.input_ssts[0].table_infos.clone();
+                        compact_task
+                            .sorted_output_ssts
+                            .clone_from(&compact_task.input_ssts[0].table_infos);
                     }
                     self.metrics
                         .compact_frequency

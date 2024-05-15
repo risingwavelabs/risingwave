@@ -19,7 +19,7 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use console::style;
-use fs_err::{self, File};
+use fs_err::File;
 use itertools::Itertools;
 use risedev::{
     compose_deploy, generate_risedev_env, Compose, ComposeConfig, ComposeDeployConfig, ComposeFile,
