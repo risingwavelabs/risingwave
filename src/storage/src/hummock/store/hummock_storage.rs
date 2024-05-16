@@ -283,7 +283,7 @@ impl HummockStorage {
         };
 
         self.hummock_version_reader
-            .iter(key_range, epoch, read_options, read_version_tuple)
+            .iter(key_range, epoch, read_options, read_version_tuple, None)
             .await
     }
 
@@ -301,7 +301,7 @@ impl HummockStorage {
         };
 
         self.hummock_version_reader
-            .rev_iter(key_range, epoch, read_options, read_version_tuple)
+            .rev_iter(key_range, epoch, read_options, read_version_tuple, None)
             .await
     }
 
