@@ -969,7 +969,7 @@ impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Bound::{Excluded, Included};
+    use std::ops::Bound::Excluded;
 
     use itertools::{zip_eq, Itertools};
     use risingwave_common::util::epoch::{test_epoch, EpochExt};

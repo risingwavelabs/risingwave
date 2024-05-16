@@ -81,12 +81,12 @@ pub struct LateralBindContext {
 /// WITH RECURSIVE t(n) AS (
 /// # -------------^ => Init
 ///     VALUES (1)
-/// # ----------^ => BaseResolved (after binding the base term)
 ///   UNION ALL
-///     SELECT n+1 FROM t WHERE n < 100
-/// # ------------------^ => Bound (we know exactly what the entire cte looks like)
+///     SELECT n + 1 FROM t WHERE n < 100
+/// # --------------------^ => BaseResolved (after binding the base term, this relation will be bound to `Relation::BackCteRef`)
 /// )
 /// SELECT sum(n) FROM t;
+/// # -----------------^ => Bound (we know exactly what the entire `RecursiveUnion` looks like, and this relation will be bound to `Relation::Share`)
 /// ```
 #[derive(Default, Debug, Clone)]
 pub enum BindingCteState {
@@ -94,7 +94,7 @@ pub enum BindingCteState {
     #[default]
     Init,
     /// We know the schema form after the base term resolved.
-    BaseResolved { schema: Schema },
+    BaseResolved { base: BoundSetExpr },
     /// We get the whole bound result of the (recursive) CTE.
     Bound {
         query: Either<BoundQuery, RecursiveUnion>,

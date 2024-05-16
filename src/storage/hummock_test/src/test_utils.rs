@@ -117,6 +117,7 @@ impl<S: LocalStateStore> TestIngestBatch for S {
 #[cfg(test)]
 #[async_trait::async_trait]
 pub(crate) trait HummockStateStoreTestTrait: StateStore {
+    #[allow(dead_code)]
     fn get_pinned_version(&self) -> PinnedVersion;
     async fn seal_and_sync_epoch(&self, epoch: u64) -> StorageResult<SyncResult> {
         self.seal_epoch(epoch, true);

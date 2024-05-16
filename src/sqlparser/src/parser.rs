@@ -25,12 +25,7 @@ use core::fmt;
 use itertools::Itertools;
 use tracing::{debug, instrument};
 
-use self::ddl::AlterSubscriptionOperation;
-use crate::ast::ddl::{
-    AlterConnectionOperation, AlterDatabaseOperation, AlterFunctionOperation, AlterIndexOperation,
-    AlterSchemaOperation, AlterSinkOperation, AlterViewOperation, SourceWatermark,
-};
-use crate::ast::{ParseTo, *};
+use crate::ast::*;
 use crate::keywords::{self, Keyword};
 use crate::tokenizer::*;
 

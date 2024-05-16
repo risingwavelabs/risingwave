@@ -431,7 +431,7 @@ pub(crate) fn unix_epoch_days() -> i32 {
 #[cfg(test)]
 mod tests {
     use apache_avro::Decimal as AvroDecimal;
-    use risingwave_common::types::{Decimal, Timestamptz};
+    use risingwave_common::types::Decimal;
 
     use super::*;
 

@@ -36,8 +36,11 @@
 //! mod arrow_impl;
 //! ```
 
+// Is this a bug? Why do we have these lints?
+#![allow(unused_imports)]
+#![allow(dead_code)]
+
 use std::fmt::Write;
-use std::sync::Arc;
 
 use arrow_buffer::OffsetBuffer;
 use chrono::{NaiveDateTime, NaiveTime};
@@ -47,7 +50,6 @@ use itertools::Itertools;
 use super::{arrow_array, arrow_buffer, arrow_cast, arrow_schema};
 // Other import should always use the absolute path.
 use crate::array::*;
-use crate::buffer::Bitmap;
 use crate::types::*;
 use crate::util::iter_util::ZipEqFast;
 

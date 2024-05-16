@@ -350,7 +350,6 @@ mod batched_iter {
     #[cfg(test)]
     mod tests {
         use rand::Rng;
-        use risingwave_hummock_sdk::key::FullKey;
 
         use super::*;
         use crate::memory::sled::SledRangeKv;
