@@ -76,7 +76,7 @@ pub struct MetaNodeOpts {
 
     /// Endpoint of the SQL service, make it non-option when SQL service is required.
     #[clap(long, hide = true, env = "RW_SQL_ENDPOINT")]
-    pub sql_endpoint: Option<String>,
+    pub sql_endpoint: Option<Secret<String>>,
 
     /// The HTTP REST-API address of the Prometheus instance associated to this cluster.
     /// This address is used to serve `PromQL` queries to Prometheus.
@@ -221,7 +221,11 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             },
             MetaBackend::Mem => MetaStoreBackend::Mem,
             MetaBackend::Sql => MetaStoreBackend::Sql {
-                endpoint: opts.sql_endpoint.expect("sql endpoint is required"),
+                endpoint: opts
+                    .sql_endpoint
+                    .expect("sql endpoint is required")
+                    .expose_secret()
+                    .to_string(),
             },
         };
 

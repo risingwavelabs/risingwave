@@ -143,7 +143,7 @@ impl Binder {
             // Note: named return value should take precedence over table alias.
             // But we don't support it yet.
             // e.g.,
-            // ```
+            // ```sql
             // > create function foo(ret out int) language sql as 'select 1';
             // > select t.ret from foo() as t;
             // ```

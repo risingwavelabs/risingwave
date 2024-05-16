@@ -14,7 +14,6 @@
 
 //! `Acl` defines all grantable privileges.
 
-use std::convert::Into;
 use std::fmt::Formatter;
 use std::sync::LazyLock;
 

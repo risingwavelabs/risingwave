@@ -32,7 +32,6 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(result_flattening)]
 #![feature(error_generic_member_access)]
-#![feature(round_ties_even)]
 #![feature(iterator_try_collect)]
 #![feature(used_with_arg)]
 #![feature(entry_insert)]

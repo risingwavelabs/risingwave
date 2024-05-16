@@ -378,7 +378,6 @@ mod tests {
     use rand::Rng;
 
     use super::*;
-    use crate::util::iter_util::ZipEqDebug;
 
     struct Test;
     impl VnodeMappingItem for Test {

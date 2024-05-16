@@ -22,7 +22,6 @@ use super::{
 };
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::PhysicalPlanRef;
 use crate::optimizer::plan_node::{utils, ToLocalBatch};
 use crate::optimizer::plan_visitor::DistributedDmlVisitor;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};

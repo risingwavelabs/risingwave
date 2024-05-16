@@ -62,7 +62,6 @@ use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::FragmentId;
 use crate::error::Result;
 use crate::optimizer::property::Order;
-use crate::optimizer::PlanRef;
 
 /// the distribution property provided by a operator.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

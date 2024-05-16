@@ -55,7 +55,7 @@ pub(super) mod handlers {
     use itertools::Itertools;
     use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
     use risingwave_pb::catalog::table::TableType;
-    use risingwave_pb::catalog::{PbDatabase, PbSchema, Sink, Source, Table, View};
+    use risingwave_pb::catalog::{PbDatabase, PbSchema, Sink, Source, Subscription, Table, View};
     use risingwave_pb::common::{WorkerNode, WorkerType};
     use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
     use risingwave_pb::meta::PbTableFragments;
@@ -139,6 +139,21 @@ pub(super) mod handlers {
 
     pub async fn list_indexes(Extension(srv): Extension<Service>) -> Result<Json<Vec<Table>>> {
         list_table_catalogs_inner(&srv.metadata_manager, TableType::Index).await
+    }
+
+    pub async fn list_subscription(
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<Vec<Subscription>>> {
+        let subscriptions = match &srv.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_subscriptions().await,
+            MetadataManager::V2(mgr) => mgr
+                .catalog_controller
+                .list_subscriptions()
+                .await
+                .map_err(err)?,
+        };
+
+        Ok(Json(subscriptions))
     }
 
     pub async fn list_internal_tables(
@@ -417,6 +432,7 @@ impl DashboardService {
             .route("/materialized_views", get(list_materialized_views))
             .route("/tables", get(list_tables))
             .route("/indexes", get(list_indexes))
+            .route("/subscriptions", get(list_subscription))
             .route("/internal_tables", get(list_internal_tables))
             .route("/sources", get(list_sources))
             .route("/sinks", get(list_sinks))

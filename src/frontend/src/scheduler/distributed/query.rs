@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::default::Default;
 use std::fmt::{Debug, Formatter};
 use std::mem;
 use std::sync::Arc;

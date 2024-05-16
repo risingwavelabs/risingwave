@@ -1254,10 +1254,6 @@ impl CatalogController {
                 .exec(&txn)
                 .await?;
 
-            // newly created actor
-            let mut new_actors = vec![];
-            let mut new_actor_dispatchers = vec![];
-
             for (
                 PbStreamActor {
                     actor_id,
@@ -1277,6 +1273,7 @@ impl CatalogController {
             ) in newly_created_actors
             {
                 let mut actor_upstreams = BTreeMap::<FragmentId, BTreeSet<ActorId>>::new();
+                let mut new_actor_dispatchers = vec![];
 
                 if let Some(nodes) = &mut nodes {
                     visit_stream_node(nodes, |node| {
@@ -1315,7 +1312,7 @@ impl CatalogController {
                     .get(&actor_id)
                     .map(|splits| splits.iter().map(PbConnectorSplit::from).collect_vec());
 
-                new_actors.push(actor::ActiveModel {
+                Actor::insert(actor::ActiveModel {
                     actor_id: Set(actor_id as _),
                     fragment_id: Set(fragment_id as _),
                     status: Set(ActorStatus::Running),
@@ -1325,7 +1322,9 @@ impl CatalogController {
                     upstream_actor_ids: Set(actor_upstreams),
                     vnode_bitmap: Set(vnode_bitmap.as_ref().map(|bitmap| bitmap.into())),
                     expr_context: Set(expr_context.as_ref().unwrap().into()),
-                });
+                })
+                .exec(&txn)
+                .await?;
 
                 for PbDispatcher {
                     r#type: dispatcher_type,
@@ -1349,16 +1348,11 @@ impl CatalogController {
                         downstream_actor_ids: Set(downstream_actor_id.into()),
                     })
                 }
-            }
-
-            if !new_actors.is_empty() {
-                Actor::insert_many(new_actors).exec(&txn).await?;
-            }
-
-            if !new_actor_dispatchers.is_empty() {
-                ActorDispatcher::insert_many(new_actor_dispatchers)
-                    .exec(&txn)
-                    .await?;
+                if !new_actor_dispatchers.is_empty() {
+                    ActorDispatcher::insert_many(new_actor_dispatchers)
+                        .exec(&txn)
+                        .await?;
+                }
             }
 
             // actor update

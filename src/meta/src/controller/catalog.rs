@@ -607,6 +607,29 @@ impl CatalogController {
             }
         }));
 
+        let subscription_dependencies: Vec<(SubscriptionId, TableId)> = Subscription::find()
+            .select_only()
+            .columns([
+                subscription::Column::SubscriptionId,
+                subscription::Column::DependentTableId,
+            ])
+            .join(JoinType::InnerJoin, subscription::Relation::Object.def())
+            .filter(
+                subscription::Column::SubscriptionState
+                    .eq(Into::<i32>::into(SubscriptionState::Created))
+                    .and(subscription::Column::DependentTableId.is_not_null()),
+            )
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        obj_dependencies.extend(subscription_dependencies.into_iter().map(
+            |(subscription_id, table_id)| PbObjectDependencies {
+                object_id: subscription_id as _,
+                referenced_object_id: table_id as _,
+            },
+        ));
+
         Ok(obj_dependencies)
     }
 
@@ -3034,7 +3057,6 @@ impl CatalogControllerInner {
 #[cfg(test)]
 #[cfg(not(madsim))]
 mod tests {
-    use risingwave_meta_model_v2::ViewId;
 
     use super::*;
 

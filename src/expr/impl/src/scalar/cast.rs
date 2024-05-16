@@ -244,11 +244,9 @@ fn struct_cast(input: StructRef<'_>, ctx: &Context) -> Result<StructValue> {
 #[cfg(test)]
 mod tests {
     use chrono::NaiveDateTime;
-    use itertools::Itertools;
     use risingwave_common::array::*;
     use risingwave_common::types::*;
     use risingwave_expr::expr::build_from_pretty;
-    use risingwave_pb::expr::expr_node::PbType;
 
     use super::*;
 

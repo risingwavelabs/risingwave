@@ -145,12 +145,9 @@ async fn merge(inputs: Vec<BoxedMessageStream>) {
 mod tests {
     use async_stream::try_stream;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::array::StreamChunk;
-    use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
-    use crate::executor::Watermark;
 
     #[tokio::test]
     async fn union() {
