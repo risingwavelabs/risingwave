@@ -510,7 +510,7 @@ pub fn start_compactor(
                                         &request_sender,
                                     );
 
-                                    continue 'start_stream;
+                                    continue 'consume_stream;
                                 }
 
                                 running_task_parallelism

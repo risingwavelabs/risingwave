@@ -101,6 +101,13 @@ impl Compactor {
         Ok(())
     }
 
+    pub fn cancel_tasks(&self, task_ids: Vec<u64>) -> MetaResult<()> {
+        for task_id in task_ids {
+            self.cancel_task(task_id)?;
+        }
+        Ok(())
+    }
+
     pub fn context_id(&self) -> HummockContextId {
         self.context_id
     }
