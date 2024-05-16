@@ -15,15 +15,12 @@
 use anyhow::Context;
 use arrow_schema::Fields;
 use bytes::Bytes;
-use itertools::Itertools;
-use pgwire::pg_response::StatementType;
 use risingwave_common::array::arrow::{ToArrow, UdfArrowConvert};
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::{get_or_create_flight_client, get_or_create_wasm_runtime};
 use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 use risingwave_pb::catalog::Function;
-use risingwave_sqlparser::ast::{CreateFunctionBody, ObjectName, OperateFunctionArg};
 
 use super::*;
 use crate::catalog::CatalogError;

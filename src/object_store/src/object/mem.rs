@@ -307,7 +307,6 @@ impl Stream for InMemObjectIter {
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
     use futures::TryStreamExt;
     use itertools::enumerate;
 

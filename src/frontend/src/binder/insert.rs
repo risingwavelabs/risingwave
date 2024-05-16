@@ -175,14 +175,14 @@ impl Binder {
         // is given and it is NOT equivalent to assignment cast over potential implicit cast inside.
         // For example, the following is valid:
         //
-        // ```
+        // ```sql
         //   create table t (v1 time);
         //   insert into t values (timestamp '2020-01-01 01:02:03'), (time '03:04:05');
         // ```
         //
         // But the followings are not:
         //
-        // ```
+        // ```sql
         //   values (timestamp '2020-01-01 01:02:03'), (time '03:04:05');
         //   insert into t values (timestamp '2020-01-01 01:02:03'), (time '03:04:05') limit 1;
         // ```
