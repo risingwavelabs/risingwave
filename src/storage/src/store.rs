@@ -66,7 +66,8 @@ pub fn to_owned_item((key, value): StateStoreIterItemRef<'_>) -> StorageResult<S
 }
 
 pub trait StateStoreIterExt<T: IterItem = StateStoreIterItem>: StateStoreIter<T> + Sized {
-    type ItemStream<O: Send, F: Send>: Stream<Item = StorageResult<O>> + Send;
+    type ItemStream<O: Send, F: Send + for<'a> Fn(T::ItemRef<'a>) -> StorageResult<O>>: Stream<Item = StorageResult<O>>
+        + Send;
 
     fn into_stream<O: Send, F: for<'a> Fn(T::ItemRef<'a>) -> StorageResult<O> + Send>(
         self,
@@ -151,7 +152,8 @@ impl<T: IterItem, I: StateStoreIter<T>> FusedStateStoreIter<I, T> {
 }
 
 impl<T: IterItem, I: StateStoreIter<T>> StateStoreIterExt<T> for I {
-    type ItemStream<O: Send, F: Send> = impl Stream<Item = StorageResult<O>> + Send;
+    type ItemStream<O: Send, F: Send + for<'a> Fn(T::ItemRef<'a>) -> StorageResult<O>> =
+        impl Stream<Item = StorageResult<O>> + Send;
 
     fn into_stream<O: Send, F: for<'a> Fn(T::ItemRef<'a>) -> StorageResult<O> + Send>(
         self,

@@ -402,9 +402,13 @@ impl ParseTo for CreateSourceStatement {
             .iter()
             .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
         let connector: String = option.map(|opt| opt.value.to_string()).unwrap_or_default();
-        // The format of cdc source job is fixed to `FORMAT PLAIN ENCODE JSON`
-        let cdc_source_job =
-            connector.contains("-cdc") && columns.is_empty() && constraints.is_empty();
+        let cdc_source_job = connector.contains("-cdc");
+        if cdc_source_job && (!columns.is_empty() || !constraints.is_empty()) {
+            return Err(ParserError::ParserError(
+                "CDC source cannot define columns and constraints".to_string(),
+            ));
+        }
+
         // row format for nexmark source must be native
         // default row format for datagen source is native
         let source_schema = p.parse_source_schema_with_connector(&connector, cdc_source_job)?;
@@ -498,7 +502,6 @@ impl fmt::Display for CreateSink {
         }
     }
 }
-
 // sql_grammar!(CreateSinkStatement {
 //     if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS],
 //     sink_name: Ident,
@@ -543,7 +546,7 @@ impl ParseTo for CreateSinkStatement {
             p.expected("FROM or AS after CREATE SINK sink_name", p.peek_token())?
         };
 
-        let emit_mode = p.parse_emit_mode()?;
+        let emit_mode: Option<EmitMode> = p.parse_emit_mode()?;
 
         // This check cannot be put into the `WithProperties::parse_to`, since other
         // statements may not need the with properties.

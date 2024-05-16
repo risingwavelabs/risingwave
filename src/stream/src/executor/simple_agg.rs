@@ -295,9 +295,7 @@ mod tests {
     use risingwave_common::catalog::Field;
     use risingwave_common::types::*;
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_expr::aggregate::AggCall;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::StateStore;
 
     use super::*;
     use crate::executor::test_utils::agg_executor::new_boxed_simple_agg_executor;

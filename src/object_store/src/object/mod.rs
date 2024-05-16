@@ -1023,7 +1023,7 @@ fn get_attempt_timeout_by_type(config: &ObjectStoreConfig, operation_type: Opera
         }
         OperationType::Metadata => config.retry.metadata_attempt_timeout_ms,
         OperationType::Delete => config.retry.delete_attempt_timeout_ms,
-        OperationType::DeleteObjects => config.retry.delete_attempt_timeout_ms,
+        OperationType::DeleteObjects => config.retry.delete_objects_attempt_timeout_ms,
         OperationType::List => config.retry.list_attempt_timeout_ms,
     }
 }

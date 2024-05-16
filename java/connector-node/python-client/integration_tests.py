@@ -117,7 +117,7 @@ def load_stream_chunk_payload(input_file):
     return payloads
 
 
-def test_sink(prop, format, payload_input, table_schema, is_coordinated=False):
+def test_sink(prop, payload_input, table_schema, is_coordinated=False):
     sink_param = connector_service_pb2.SinkParam(
         sink_id=0,
         properties=prop,
@@ -128,7 +128,6 @@ def test_sink(prop, format, payload_input, table_schema, is_coordinated=False):
     request_list = [
         connector_service_pb2.SinkWriterStreamRequest(
             start=connector_service_pb2.SinkWriterStreamRequest.StartSink(
-                format=format,
                 sink_param=sink_param,
             )
         )
@@ -292,9 +291,6 @@ if __name__ == "__main__":
         "--deltalake_sink", action="store_true", help="run deltalake sink test"
     )
     parser.add_argument(
-        "--input_file", default="./data/sink_input.json", help="input data to run tests"
-    )
-    parser.add_argument(
         "--input_binary_file",
         default="./data/sink_input",
         help="input stream chunk data to run tests",
@@ -302,29 +298,18 @@ if __name__ == "__main__":
     parser.add_argument(
         "--es_sink", action="store_true", help="run elasticsearch sink test"
     )
-    parser.add_argument(
-        "--data_format_use_json", default=True, help="choose json or streamchunk"
-    )
     args = parser.parse_args()
-    use_json = args.data_format_use_json == True or args.data_format_use_json == "True"
-    if use_json:
-        payload = load_json_payload(args.input_file)
-        format = connector_service_pb2.SinkPayloadFormat.JSON
-    else:
-        payload = load_stream_chunk_payload(args.input_binary_file)
-        format = connector_service_pb2.SinkPayloadFormat.STREAM_CHUNK
+    payload = load_stream_chunk_payload(args.input_binary_file)
 
     # stream chunk format
     if args.stream_chunk_format_test:
         param = {
-            "format": format,
             "payload_input": payload,
             "table_schema": make_mock_schema_stream_chunk(),
         }
         test_stream_chunk_data_format(param)
 
     param = {
-        "format": format,
         "payload_input": payload,
         "table_schema": make_mock_schema(),
     }
@@ -337,7 +322,5 @@ if __name__ == "__main__":
         test_deltalake_sink(param)
     if args.es_sink:
         test_elasticsearch_sink(param)
-
-    # json format
     if args.upsert_iceberg_sink:
         test_upsert_iceberg_sink(param)

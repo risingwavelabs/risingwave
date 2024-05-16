@@ -301,6 +301,9 @@ impl Strong {
             | ExprType::PgRelationSize
             | ExprType::PgGetSerialSequence
             | ExprType::IcebergTransform
+            | ExprType::HasTablePrivilege
+            | ExprType::HasAnyColumnPrivilege
+            | ExprType::HasSchemaPrivilege
             | ExprType::InetAton
             | ExprType::InetNtoa => false,
             ExprType::Unspecified => unreachable!(),

@@ -20,11 +20,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use criterion::{criterion_group, criterion_main, Criterion};
+use foyer::HybridCacheBuilder;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use rand::random;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{EvictionConfig, MetricLevel, ObjectStoreConfig};
+use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_object_store::object::{
     InMemObjectStore, ObjectStore, ObjectStoreImpl, S3ObjectStore,
@@ -161,6 +162,7 @@ fn bench_builder(
         .unwrap();
 
     let metrics = Arc::new(ObjectStoreMetrics::unused());
+
     let default_config = Arc::new(ObjectStoreConfig::default());
     let object_store = runtime.block_on(async {
         S3ObjectStore::new_with_config(bucket.to_string(), metrics.clone(), default_config.clone())
@@ -168,7 +170,36 @@ fn bench_builder(
             .monitored(metrics, default_config)
     });
     let object_store = Arc::new(ObjectStoreImpl::S3(object_store));
-    let sstable_store = Arc::new(generate_sstable_store(object_store));
+
+
+    let sstable_store = runtime.block_on(async {
+        let meta_cache_v2 = HybridCacheBuilder::new()
+            .memory(64 << 20)
+            .with_shards(2)
+            .storage()
+            .build()
+            .await
+            .unwrap();
+        let block_cache_v2 = HybridCacheBuilder::new()
+            .memory(128 << 20)
+            .with_shards(2)
+            .storage()
+            .build()
+            .await
+            .unwrap();
+        Arc::new(SstableStore::new(SstableStoreConfig {
+            store: object_store,
+            path: "test".to_string(),
+            prefetch_buffer_capacity: 64 << 20,
+            max_prefetch_block_number: 16,
+            recent_filter: None,
+            state_store_metrics: Arc::new(global_hummock_state_store_metrics(
+                MetricLevel::Disabled,
+            )),
+            meta_cache_v2,
+            block_cache_v2,
+        }))
+    });
 
     let mut group = c.benchmark_group("bench_multi_builder");
     group

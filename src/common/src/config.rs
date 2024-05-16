@@ -24,7 +24,7 @@ use std::num::NonZeroUsize;
 use anyhow::Context;
 use clap::ValueEnum;
 use educe::Educe;
-use foyer::memory::{LfuConfig, LruConfig, S3FifoConfig};
+use foyer::{LfuConfig, LruConfig, S3FifoConfig};
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
@@ -583,6 +583,8 @@ pub enum CacheEvictionConfig {
     },
     S3Fifo {
         small_queue_capacity_ratio_in_percent: Option<usize>,
+        ghost_queue_capacity_ratio_in_percent: Option<usize>,
+        small_to_main_freq_threshold: Option<u8>,
     },
 }
 
@@ -1347,6 +1349,14 @@ pub mod default {
             10
         }
 
+        pub fn ghost_queue_capacity_ratio_in_percent() -> usize {
+            1000
+        }
+
+        pub fn small_to_main_freq_threshold() -> u8 {
+            1
+        }
+
         pub fn meta_cache_capacity_mb() -> usize {
             128
         }
@@ -1889,6 +1899,16 @@ impl EvictionConfig {
     }
 }
 
+impl From<EvictionConfig> for foyer::EvictionConfig {
+    fn from(value: EvictionConfig) -> Self {
+        match value {
+            EvictionConfig::Lru(lru) => foyer::EvictionConfig::Lru(lru),
+            EvictionConfig::Lfu(lfu) => foyer::EvictionConfig::Lfu(lfu),
+            EvictionConfig::S3Fifo(s3fifo) => foyer::EvictionConfig::S3Fifo(s3fifo),
+        }
+    }
+}
+
 pub struct StorageMemoryConfig {
     pub block_cache_capacity_mb: usize,
     pub block_cache_shard_num: usize,
@@ -1975,11 +1995,19 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
             }),
             CacheEvictionConfig::S3Fifo {
                 small_queue_capacity_ratio_in_percent,
+                ghost_queue_capacity_ratio_in_percent,
+                small_to_main_freq_threshold,
             } => EvictionConfig::S3Fifo(S3FifoConfig {
                 small_queue_capacity_ratio: small_queue_capacity_ratio_in_percent
                     .unwrap_or(default::storage::small_queue_capacity_ratio_in_percent())
                     as f64
                     / 100.0,
+                ghost_queue_capacity_ratio: ghost_queue_capacity_ratio_in_percent
+                    .unwrap_or(default::storage::ghost_queue_capacity_ratio_in_percent())
+                    as f64
+                    / 100.0,
+                small_to_main_freq_threshold: small_to_main_freq_threshold
+                    .unwrap_or(default::storage::small_to_main_freq_threshold()),
             }),
         }
     };
@@ -2053,8 +2081,6 @@ pub struct CompactionConfig {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use super::*;
 
     /// This test ensures that `config/example.toml` is up-to-date with the default values specified
