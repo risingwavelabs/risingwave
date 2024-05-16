@@ -1303,6 +1303,51 @@ impl Binder {
                 ("pg_get_partkeydef", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
                 ("pg_encoding_to_char", raw_literal(ExprImpl::literal_varchar("UTF8".into()))),
                 ("has_database_privilege", raw_literal(ExprImpl::literal_bool(true))),
+                ("has_table_privilege", raw(|binder, mut inputs|{
+                    if inputs.len() == 2 {
+                        inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
+                    }
+                    if inputs.len() == 3 {
+                        if inputs[1].return_type() == DataType::Varchar {
+                            inputs[1].cast_to_regclass_mut()?;
+                        }
+                        Ok(FunctionCall::new(ExprType::HasTablePrivilege, inputs)?.into())
+                    } else {
+                        Err(ErrorCode::ExprError(
+                            "Too many/few arguments for pg_catalog.has_table_privilege()".into(),
+                        )
+                        .into())
+                    }
+                })),
+                ("has_any_column_privilege", raw(|binder, mut inputs|{
+                    if inputs.len() == 2 {
+                        inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
+                    }
+                    if inputs.len() == 3 {
+                        if inputs[1].return_type() == DataType::Varchar {
+                            inputs[1].cast_to_regclass_mut()?;
+                        }
+                        Ok(FunctionCall::new(ExprType::HasAnyColumnPrivilege, inputs)?.into())
+                    } else {
+                        Err(ErrorCode::ExprError(
+                            "Too many/few arguments for pg_catalog.has_any_column_privilege()".into(),
+                        )
+                        .into())
+                    }
+                })),
+                ("has_schema_privilege", raw(|binder, mut inputs|{
+                    if inputs.len() == 2 {
+                        inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
+                    }
+                    if inputs.len() == 3 {
+                        Ok(FunctionCall::new(ExprType::HasSchemaPrivilege, inputs)?.into())
+                    } else {
+                        Err(ErrorCode::ExprError(
+                            "Too many/few arguments for pg_catalog.has_schema_privilege()".into(),
+                        )
+                        .into())
+                    }
+                })),
                 ("pg_stat_get_numscans", raw_literal(ExprImpl::literal_bigint(0))),
                 ("pg_backend_pid", raw(|binder, _inputs| {
                     // FIXME: the session id is not global unique in multi-frontend env.
