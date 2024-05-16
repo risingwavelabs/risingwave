@@ -19,7 +19,8 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use bytes::Bytes;
 use futures_async_stream::try_stream;
-use futures_util::AsyncReadExt;
+use futures_util::future::try_join_all;
+use futures_util::{AsyncReadExt, StreamExt};
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::array::{DataChunk, StreamChunk};
@@ -757,6 +758,7 @@ mod tests {
                 "HashAggExecutor".to_string(),
                 CHUNK_SIZE,
                 mem_context.clone(),
+                false,
                 ShutdownToken::empty(),
             )
             .unwrap();

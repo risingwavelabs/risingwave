@@ -26,6 +26,7 @@ pub const DEFAULT_SPILL_PARTITION_NUM: usize = 20;
 const DEFAULT_SPILL_DIR: &str = "/tmp/";
 const RW_MANAGED_SPILL_DIR: &str = "/rw_batch_spill/";
 const DEFAULT_IO_BUFFER_SIZE: usize = 256 * 1024;
+const DEFAULT_IO_CONCURRENT_TASK: usize = 8;
 
 /// `SpillOp` is used to manage the spill directory of the spilling executor and it will drop the directory with a RAII style.
 pub struct SpillOp {
@@ -55,6 +56,7 @@ impl SpillOp {
             .writer_with(name)
             .append(true)
             .buffer(DEFAULT_IO_BUFFER_SIZE)
+            .concurrent(DEFAULT_IO_CONCURRENT_TASK)
             .await?)
     }
 
