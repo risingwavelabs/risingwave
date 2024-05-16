@@ -519,7 +519,7 @@ mod tests {
     use risingwave_common::array::*;
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::test_utils::IntervalTestExt;
-    use risingwave_common::types::{Date, Interval, Scalar};
+    use risingwave_common::types::{Date, Interval};
     use risingwave_pb::expr::expr_node::Type;
 
     use crate::scalar::arithmetic_op::{date_interval_add, date_interval_sub};

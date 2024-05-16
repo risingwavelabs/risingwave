@@ -68,7 +68,7 @@ impl Planner {
             plan.schema().names()
         };
 
-        let root = PlanRoot::new(plan, dist, Order::any(), out_fields, out_names);
+        let root = PlanRoot::new_with_logical_plan(plan, dist, Order::any(), out_fields, out_names);
         Ok(root)
     }
 }

@@ -13,14 +13,13 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::default::Default;
 use std::ops::Bound;
 use std::ops::Bound::*;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use either::Either;
-use foyer::memory::CacheContext;
+use foyer::CacheContext;
 use futures::{pin_mut, FutureExt, Stream, StreamExt, TryStreamExt};
 use futures_async_stream::for_await;
 use itertools::{izip, Itertools};
@@ -165,7 +164,7 @@ pub struct StateTableInner<
     /// 2. Computing output pk indices to used them for backfill state.
     output_indices: Vec<usize>,
 
-    is_consistent_op: bool,
+    op_consistency_level: StateTableOpConsistencyLevel,
 }
 
 /// `StateTable` will use `BasicSerde` as default
@@ -218,32 +217,51 @@ where
     }
 }
 
-fn consistent_old_value_op(row_serde: impl ValueRowSerde) -> OpConsistencyLevel {
-    OpConsistencyLevel::ConsistentOldValue(Arc::new(move |first: &Bytes, second: &Bytes| {
-        if first == second {
-            return true;
-        }
-        let first = match row_serde.deserialize(first) {
-            Ok(rows) => rows,
-            Err(e) => {
-                error!(error = %e.as_report(), value = ?first, "fail to deserialize serialized value");
-                return false;
+fn consistent_old_value_op(
+    row_serde: impl ValueRowSerde,
+    is_log_store: bool,
+) -> OpConsistencyLevel {
+    OpConsistencyLevel::ConsistentOldValue {
+        check_old_value: Arc::new(move |first: &Bytes, second: &Bytes| {
+            if first == second {
+                return true;
             }
-        };
-        let second = match row_serde.deserialize(second) {
-            Ok(rows) => rows,
-            Err(e) => {
-                error!(error = %e.as_report(), value = ?second, "fail to deserialize serialized value");
-                return false;
+            let first = match row_serde.deserialize(first) {
+                Ok(rows) => rows,
+                Err(e) => {
+                    error!(error = %e.as_report(), value = ?first, "fail to deserialize serialized value");
+                    return false;
+                }
+            };
+            let second = match row_serde.deserialize(second) {
+                Ok(rows) => rows,
+                Err(e) => {
+                    error!(error = %e.as_report(), value = ?second, "fail to deserialize serialized value");
+                    return false;
+                }
+            };
+            if first != second {
+                error!(first = ?first, second = ?second, "sanity check fail");
+                false
+            } else {
+                true
             }
-        };
-        if first != second {
-            error!(first = ?first, second = ?second, "sanity check fail");
-            false
-        } else {
-            true
-        }
-    }))
+        }),
+        is_log_store,
+    }
+}
+
+#[derive(Eq, PartialEq, Copy, Clone, Debug)]
+pub enum StateTableOpConsistencyLevel {
+    /// Op is inconsistent
+    Inconsistent,
+    /// Op is consistent.
+    /// - Insert op should ensure that the key does not exist previously
+    /// - Delete and Update op should ensure that the key exists and the previous value matches the passed old value
+    ConsistentOldValue,
+    /// The requirement on operation consistency is the same as `ConsistentOldValue`.
+    /// The difference is that in the `LogStoreEnabled`, the state table should also flush and store and old value.
+    LogStoreEnabled,
 }
 
 // initialize
@@ -258,12 +276,20 @@ where
     W: WatermarkBufferStrategy,
 {
     /// Create state table from table catalog and store.
+    ///
+    /// If `vnodes` is `None`, [`TableDistribution::singleton()`] will be used.
     pub async fn from_table_catalog(
         table_catalog: &Table,
         store: S,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
-        Self::from_table_catalog_inner(table_catalog, store, vnodes, true, vec![]).await
+        Self::from_table_catalog_with_consistency_level(
+            table_catalog,
+            store,
+            vnodes,
+            StateTableOpConsistencyLevel::ConsistentOldValue,
+        )
+        .await
     }
 
     /// Create state table from table catalog and store with sanity check disabled.
@@ -272,7 +298,23 @@ where
         store: S,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
-        Self::from_table_catalog_inner(table_catalog, store, vnodes, false, vec![]).await
+        Self::from_table_catalog_with_consistency_level(
+            table_catalog,
+            store,
+            vnodes,
+            StateTableOpConsistencyLevel::Inconsistent,
+        )
+        .await
+    }
+
+    pub async fn from_table_catalog_with_consistency_level(
+        table_catalog: &Table,
+        store: S,
+        vnodes: Option<Arc<Bitmap>>,
+        consistency_level: StateTableOpConsistencyLevel,
+    ) -> Self {
+        Self::from_table_catalog_inner(table_catalog, store, vnodes, consistency_level, vec![])
+            .await
     }
 
     /// Create state table from table catalog and store.
@@ -280,7 +322,7 @@ where
         table_catalog: &Table,
         store: S,
         vnodes: Option<Arc<Bitmap>>,
-        is_consistent_op: bool,
+        op_consistency_level: StateTableOpConsistencyLevel,
         output_column_ids: Vec<ColumnId>,
     ) -> Self {
         let table_id = TableId::new(table_catalog.id);
@@ -366,18 +408,23 @@ where
             )
         };
 
-        let is_consistent_op = if crate::consistency::insane() {
+        let state_table_op_consistency_level = if crate::consistency::insane() {
             // In insane mode, we will have inconsistent operations applied on the table, even if
             // our executor code do not expect that.
-            false
+            StateTableOpConsistencyLevel::Inconsistent
         } else {
-            is_consistent_op
+            op_consistency_level
         };
-        let op_consistency_level = if is_consistent_op {
-            let row_serde = make_row_serde();
-            consistent_old_value_op(row_serde)
-        } else {
-            OpConsistencyLevel::Inconsistent
+        let op_consistency_level = match state_table_op_consistency_level {
+            StateTableOpConsistencyLevel::Inconsistent => OpConsistencyLevel::Inconsistent,
+            StateTableOpConsistencyLevel::ConsistentOldValue => {
+                let row_serde = make_row_serde();
+                consistent_old_value_op(row_serde, false)
+            }
+            StateTableOpConsistencyLevel::LogStoreEnabled => {
+                let row_serde = make_row_serde();
+                consistent_old_value_op(row_serde, true)
+            }
         };
 
         let table_option = TableOption::new(table_catalog.retention_seconds);
@@ -463,7 +510,7 @@ where
             data_types,
             output_indices,
             i2o_mapping,
-            is_consistent_op,
+            op_consistency_level: state_table_op_consistency_level,
         }
     }
 
@@ -599,7 +646,7 @@ where
         };
         let op_consistency_level = if is_consistent_op {
             let row_serde = make_row_serde();
-            consistent_old_value_op(row_serde)
+            consistent_old_value_op(row_serde, false)
         } else {
             OpConsistencyLevel::Inconsistent
         };
@@ -645,7 +692,11 @@ where
             data_types,
             output_indices: vec![],
             i2o_mapping: ColIndexMapping::new(vec![], 0),
-            is_consistent_op,
+            op_consistency_level: if is_consistent_op {
+                StateTableOpConsistencyLevel::ConsistentOldValue
+            } else {
+                StateTableOpConsistencyLevel::Inconsistent
+            },
         }
     }
 
@@ -708,7 +759,11 @@ where
     }
 
     pub fn is_consistent_op(&self) -> bool {
-        self.is_consistent_op
+        matches!(
+            self.op_consistency_level,
+            StateTableOpConsistencyLevel::ConsistentOldValue
+                | StateTableOpConsistencyLevel::LogStoreEnabled
+        )
     }
 }
 
@@ -725,7 +780,14 @@ where
         vnodes: Option<Arc<Bitmap>>,
         output_column_ids: Vec<ColumnId>,
     ) -> Self {
-        Self::from_table_catalog_inner(table_catalog, store, vnodes, false, output_column_ids).await
+        Self::from_table_catalog_inner(
+            table_catalog,
+            store,
+            vnodes,
+            StateTableOpConsistencyLevel::Inconsistent,
+            output_column_ids,
+        )
+        .await
     }
 }
 
@@ -1081,22 +1143,39 @@ where
     }
 
     pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.commit_with_switch_consistent_op(new_epoch, None).await
+        self.commit_inner(new_epoch, None).await
     }
 
-    pub async fn commit_with_switch_consistent_op(
+    pub async fn commit_may_switch_consistent_op(
         &mut self,
         new_epoch: EpochPair,
-        switch_consistent_op: Option<bool>,
+        op_consistency_level: StateTableOpConsistencyLevel,
+    ) -> StreamExecutorResult<()> {
+        if self.op_consistency_level != op_consistency_level {
+            self.commit_inner(new_epoch, Some(op_consistency_level))
+                .await
+        } else {
+            self.commit_inner(new_epoch, None).await
+        }
+    }
+
+    async fn commit_inner(
+        &mut self,
+        new_epoch: EpochPair,
+        switch_consistent_op: Option<StateTableOpConsistencyLevel>,
     ) -> StreamExecutorResult<()> {
         assert_eq!(self.epoch(), new_epoch.prev);
-        let switch_op_consistency_level = switch_consistent_op.map(|enable_consistent_op| {
-            assert_ne!(self.is_consistent_op, enable_consistent_op);
-            self.is_consistent_op = enable_consistent_op;
-            if enable_consistent_op {
-                consistent_old_value_op(self.row_serde.clone())
-            } else {
-                OpConsistencyLevel::Inconsistent
+        let switch_op_consistency_level = switch_consistent_op.map(|new_consistency_level| {
+            assert_ne!(self.op_consistency_level, new_consistency_level);
+            self.op_consistency_level = new_consistency_level;
+            match new_consistency_level {
+                StateTableOpConsistencyLevel::Inconsistent => OpConsistencyLevel::Inconsistent,
+                StateTableOpConsistencyLevel::ConsistentOldValue => {
+                    consistent_old_value_op(self.row_serde.clone(), false)
+                }
+                StateTableOpConsistencyLevel::LogStoreEnabled => {
+                    consistent_old_value_op(self.row_serde.clone(), true)
+                }
             }
         });
         trace!(
@@ -1356,9 +1435,6 @@ where
     /// This function scans rows from the relational table with specific `prefix` and `sub_range` under the same
     /// `vnode`. If `sub_range` is (Unbounded, Unbounded), it scans rows from the relational table with specific `pk_prefix`.
     /// `pk_prefix` is used to identify the exact vnode the scan should perform on.
-
-    /// This function scans rows from the relational table with specific `prefix` and `pk_sub_range` under the same
-    /// `vnode`.
     pub async fn iter_with_prefix(
         &self,
         pk_prefix: impl Row,

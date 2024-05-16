@@ -50,7 +50,7 @@ pub struct Compaction {
     /// `CompactStatus` of each compaction group
     pub compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus>,
 
-    pub deterministic_mode: bool,
+    pub _deterministic_mode: bool,
 }
 
 impl HummockManager {
@@ -125,6 +125,7 @@ impl HummockManager {
         context_id: u32,
         pull_task_count: usize,
         compaction_selectors: &mut HashMap<TaskType, Box<dyn CompactionSelector>>,
+        max_get_task_probe_times: usize,
     ) {
         assert_ne!(0, pull_task_count);
         if let Some(compactor) = self.compactor_manager.get_compactor(context_id) {
@@ -137,8 +138,13 @@ impl HummockManager {
                 let mut existed_groups = groups.clone();
                 let mut no_task_groups: HashSet<CompactionGroupId> = HashSet::default();
                 let mut failed_tasks = vec![];
+                let mut loop_times = 0;
 
-                while generated_task_count < pull_task_count && failed_tasks.is_empty() {
+                while generated_task_count < pull_task_count
+                    && failed_tasks.is_empty()
+                    && loop_times < max_get_task_probe_times
+                {
+                    loop_times += 1;
                     let compact_ret = self
                         .get_compact_tasks(
                             existed_groups.clone(),
@@ -219,7 +225,7 @@ impl HummockManager {
                     let mut skip_times = 0;
                     match event {
                         RequestEvent::PullTask(PullTask { pull_task_count }) => {
-                            hummock_manager.handle_pull_task_event(context_id, pull_task_count as usize, &mut compaction_selectors).await;
+                            hummock_manager.handle_pull_task_event(context_id, pull_task_count as usize, &mut compaction_selectors, hummock_manager.env.opts.max_get_task_probe_times).await;
                         }
 
                         RequestEvent::ReportTask(task) => {
@@ -231,7 +237,7 @@ impl HummockManager {
                     while let Ok((context_id, event)) = rx.try_recv() {
                         match event {
                             RequestEvent::PullTask(PullTask { pull_task_count }) => {
-                                hummock_manager.handle_pull_task_event(context_id, pull_task_count as usize, &mut compaction_selectors).await;
+                                hummock_manager.handle_pull_task_event(context_id, pull_task_count as usize, &mut compaction_selectors, hummock_manager.env.opts.max_get_task_probe_times).await;
                                 if !report_events.is_empty() {
                                     if skip_times > MAX_SKIP_TIMES {
                                         break;

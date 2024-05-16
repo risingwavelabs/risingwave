@@ -66,7 +66,8 @@ pub fn to_owned_item((key, value): StateStoreIterItemRef<'_>) -> StorageResult<S
 }
 
 pub trait StateStoreIterExt<T: IterItem = StateStoreIterItem>: StateStoreIter<T> + Sized {
-    type ItemStream<O: Send, F: Send>: Stream<Item = StorageResult<O>> + Send;
+    type ItemStream<O: Send, F: Send + for<'a> Fn(T::ItemRef<'a>) -> StorageResult<O>>: Stream<Item = StorageResult<O>>
+        + Send;
 
     fn into_stream<O: Send, F: for<'a> Fn(T::ItemRef<'a>) -> StorageResult<O> + Send>(
         self,
@@ -151,7 +152,8 @@ impl<T: IterItem, I: StateStoreIter<T>> FusedStateStoreIter<I, T> {
 }
 
 impl<T: IterItem, I: StateStoreIter<T>> StateStoreIterExt<T> for I {
-    type ItemStream<O: Send, F: Send> = impl Stream<Item = StorageResult<O>> + Send;
+    type ItemStream<O: Send, F: Send + for<'a> Fn(T::ItemRef<'a>) -> StorageResult<O>> =
+        impl Stream<Item = StorageResult<O>> + Send;
 
     fn into_stream<O: Send, F: for<'a> Fn(T::ItemRef<'a>) -> StorageResult<O> + Send>(
         self,
@@ -547,16 +549,21 @@ pub static CHECK_BYTES_EQUAL: LazyLock<Arc<dyn CheckOldValueEquality>> =
 pub enum OpConsistencyLevel {
     #[default]
     Inconsistent,
-    ConsistentOldValue(Arc<dyn CheckOldValueEquality>),
+    ConsistentOldValue {
+        check_old_value: Arc<dyn CheckOldValueEquality>,
+        /// whether should store the old value
+        is_log_store: bool,
+    },
 }
 
 impl Debug for OpConsistencyLevel {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             OpConsistencyLevel::Inconsistent => f.write_str("OpConsistencyLevel::Inconsistent"),
-            OpConsistencyLevel::ConsistentOldValue(_) => {
-                f.write_str("OpConsistencyLevel::ConsistentOldValue")
-            }
+            OpConsistencyLevel::ConsistentOldValue { is_log_store, .. } => f
+                .debug_struct("OpConsistencyLevel::ConsistentOldValue")
+                .field("is_log_store", is_log_store)
+                .finish(),
         }
     }
 }
@@ -569,8 +576,23 @@ impl PartialEq<Self> for OpConsistencyLevel {
                 OpConsistencyLevel::Inconsistent,
                 OpConsistencyLevel::Inconsistent
             ) | (
-                OpConsistencyLevel::ConsistentOldValue(_),
-                OpConsistencyLevel::ConsistentOldValue(_),
+                OpConsistencyLevel::ConsistentOldValue {
+                    is_log_store: true,
+                    ..
+                },
+                OpConsistencyLevel::ConsistentOldValue {
+                    is_log_store: true,
+                    ..
+                },
+            ) | (
+                OpConsistencyLevel::ConsistentOldValue {
+                    is_log_store: false,
+                    ..
+                },
+                OpConsistencyLevel::ConsistentOldValue {
+                    is_log_store: false,
+                    ..
+                },
             )
         )
     }
@@ -613,7 +635,11 @@ impl From<TracedNewLocalOptions> for NewLocalOptions {
             op_consistency_level: match value.op_consistency_level {
                 TracedOpConsistencyLevel::Inconsistent => OpConsistencyLevel::Inconsistent,
                 TracedOpConsistencyLevel::ConsistentOldValue => {
-                    OpConsistencyLevel::ConsistentOldValue(CHECK_BYTES_EQUAL.clone())
+                    OpConsistencyLevel::ConsistentOldValue {
+                        check_old_value: CHECK_BYTES_EQUAL.clone(),
+                        // TODO: for simplicity, set it to false
+                        is_log_store: false,
+                    }
                 }
             },
             table_option: value.table_option.into(),
@@ -629,7 +655,7 @@ impl From<NewLocalOptions> for TracedNewLocalOptions {
             table_id: value.table_id.into(),
             op_consistency_level: match value.op_consistency_level {
                 OpConsistencyLevel::Inconsistent => TracedOpConsistencyLevel::Inconsistent,
-                OpConsistencyLevel::ConsistentOldValue(_) => {
+                OpConsistencyLevel::ConsistentOldValue { .. } => {
                     TracedOpConsistencyLevel::ConsistentOldValue
                 }
             },
@@ -731,7 +757,7 @@ impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
             }),
             switch_op_consistency_level: value
                 .switch_op_consistency_level
-                .map(|level| matches!(level, OpConsistencyLevel::ConsistentOldValue(_))),
+                .map(|level| matches!(level, OpConsistencyLevel::ConsistentOldValue { .. })),
         }
     }
 }
@@ -758,7 +784,10 @@ impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
             }),
             switch_op_consistency_level: value.switch_op_consistency_level.map(|enable| {
                 if enable {
-                    OpConsistencyLevel::ConsistentOldValue(CHECK_BYTES_EQUAL.clone())
+                    OpConsistencyLevel::ConsistentOldValue {
+                        check_old_value: CHECK_BYTES_EQUAL.clone(),
+                        is_log_store: false,
+                    }
                 } else {
                     OpConsistencyLevel::Inconsistent
                 }

@@ -22,7 +22,6 @@
 #![warn(clippy::map_flatten)]
 #![warn(clippy::await_holding_lock)]
 #![deny(rustdoc::broken_intra_doc_links)]
-#![feature(bound_map)]
 #![feature(register_tool)]
 #![register_tool(rw)]
 #![allow(rw::format_error)] // test code
@@ -45,7 +44,7 @@ pub struct CompactionTestOpts {
     #[clap(long)]
     pub client_address: Option<String>,
 
-    /// The state store string e.g. hummock+s3://test-bucket
+    /// The state store string e.g. `hummock+s3://test-bucket`
     #[clap(short, long)]
     pub state_store: String,
 

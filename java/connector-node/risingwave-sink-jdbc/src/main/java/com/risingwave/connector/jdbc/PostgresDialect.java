@@ -30,9 +30,11 @@ import org.postgresql.util.PGobject;
 public class PostgresDialect implements JdbcDialect {
 
     private final int[] columnSqlTypes;
+    private final int[] pkIndices;
 
-    public PostgresDialect(int[] columnSqlTypes) {
-        this.columnSqlTypes = columnSqlTypes;
+    public PostgresDialect(List<Integer> columnSqlTypes, List<Integer> pkIndices) {
+        this.columnSqlTypes = columnSqlTypes.stream().mapToInt(i -> i).toArray();
+        this.pkIndices = pkIndices.stream().mapToInt(i -> i).toArray();
     }
 
     private static final HashMap<TypeName, String> RW_TYPE_TO_JDBC_TYPE_NAME;
@@ -152,6 +154,17 @@ public class PostgresDialect implements JdbcDialect {
                     stmt.setObject(placeholderIdx++, row.get(columnIdx));
                     break;
             }
+        }
+    }
+
+    @Override
+    public void bindDeleteStatement(PreparedStatement stmt, TableSchema tableSchema, SinkRow row)
+            throws SQLException {
+        // set the values of primary key fields
+        int placeholderIdx = 1;
+        for (int pkIdx : pkIndices) {
+            Object pkField = row.get(pkIdx);
+            stmt.setObject(placeholderIdx++, pkField, columnSqlTypes[pkIdx]);
         }
     }
 }

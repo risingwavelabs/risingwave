@@ -47,7 +47,7 @@ use crate::hummock::event_handler::hummock_event_handler::{BufferTracker, Hummoc
 use crate::hummock::event_handler::{
     HummockEvent, HummockEventHandler, HummockVersionUpdate, ReadOnlyReadVersionMapping,
 };
-use crate::hummock::iterator::ChangeLogIterator;
+use crate::hummock::iterator::change_log::ChangeLogIterator;
 use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
 use crate::hummock::observer_manager::HummockObserverNode;
 use crate::hummock::utils::{validate_safe_epoch, wait_for_epoch};
@@ -60,7 +60,6 @@ use crate::mem_table::ImmutableMemtable;
 use crate::monitor::{CompactorMetrics, HummockStateStoreMetrics, StoreLocalStatistic};
 use crate::opts::StorageOpts;
 use crate::store::*;
-use crate::StateStore;
 
 struct HummockStorageShutdownGuard {
     shutdown_sender: HummockEventSender,

@@ -23,11 +23,11 @@ use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
-    object_dependency, schema, sink, source, table, user, user_privilege, view, ActorId,
-    DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId, PrivilegeId,
-    SchemaId, SourceId, StreamNode, UserId,
+    object_dependency, schema, sink, source, subscription, table, user, user_privilege, view,
+    ActorId, DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId,
+    PrivilegeId, SchemaId, SourceId, StreamNode, UserId,
 };
-use risingwave_pb::catalog::{PbConnection, PbFunction};
+use risingwave_pb::catalog::{PbConnection, PbFunction, PbSubscription};
 use risingwave_pb::meta::PbFragmentParallelUnitMapping;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode, StreamSource};
@@ -410,6 +410,33 @@ where
     Ok(())
 }
 
+pub async fn check_subscription_name_duplicate<C>(
+    pb_subscription: &PbSubscription,
+    db: &C,
+) -> MetaResult<()>
+where
+    C: ConnectionTrait,
+{
+    let count = Subscription::find()
+        .inner_join(Object)
+        .filter(
+            object::Column::DatabaseId
+                .eq(pb_subscription.database_id as DatabaseId)
+                .and(object::Column::SchemaId.eq(pb_subscription.schema_id as SchemaId))
+                .and(subscription::Column::Name.eq(&pb_subscription.name)),
+        )
+        .count(db)
+        .await?;
+    if count > 0 {
+        assert_eq!(count, 1);
+        return Err(MetaError::catalog_duplicated(
+            "subscription",
+            &pb_subscription.name,
+        ));
+    }
+    Ok(())
+}
+
 /// `check_user_name_duplicate` checks whether the user is already existed in the cluster.
 pub async fn check_user_name_duplicate<C>(name: &str, db: &C) -> MetaResult<()>
 where
@@ -727,12 +754,11 @@ where
             let obj = match object.obj_type {
                 ObjectType::Database => PbObject::DatabaseId(oid),
                 ObjectType::Schema => PbObject::SchemaId(oid),
-                ObjectType::Table => PbObject::TableId(oid),
+                ObjectType::Table | ObjectType::Index => PbObject::TableId(oid),
                 ObjectType::Source => PbObject::SourceId(oid),
                 ObjectType::Sink => PbObject::SinkId(oid),
                 ObjectType::View => PbObject::ViewId(oid),
                 ObjectType::Function => PbObject::FunctionId(oid),
-                ObjectType::Index => unreachable!("index is not supported yet"),
                 ObjectType::Connection => unreachable!("connection is not supported yet"),
                 ObjectType::Subscription => PbObject::SubscriptionId(oid),
             };

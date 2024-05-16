@@ -182,8 +182,8 @@ mod test {
     use std::path::PathBuf;
 
     use apache_avro::schema::RecordSchema;
-    use apache_avro::types::{Record, Value};
-    use apache_avro::{Codec, Days, Duration, Millis, Months, Reader, Schema, Writer};
+    use apache_avro::types::Record;
+    use apache_avro::{Codec, Days, Duration, Millis, Months, Writer};
     use itertools::Itertools;
     use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
@@ -195,12 +195,9 @@ mod test {
 
     use super::*;
     use crate::connector_common::AwsAuthProps;
-    use crate::error::ConnectorResult;
     use crate::parser::plain_parser::PlainParser;
     use crate::parser::unified::avro::unix_epoch_days;
-    use crate::parser::{
-        AccessBuilderImpl, EncodingType, SourceStreamChunkBuilder, SpecificParserConfig,
-    };
+    use crate::parser::{AccessBuilderImpl, SourceStreamChunkBuilder, SpecificParserConfig};
     use crate::source::{SourceColumnDesc, SourceContext};
 
     fn test_data_path(file_name: &str) -> String {

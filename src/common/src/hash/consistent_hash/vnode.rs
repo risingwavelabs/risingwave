@@ -169,7 +169,6 @@ mod tests {
     use super::*;
     use crate::array::DataChunkTestExt;
     use crate::row::OwnedRow;
-    use crate::types::ScalarImpl;
     use crate::util::row_id::RowIdGenerator;
 
     #[test]

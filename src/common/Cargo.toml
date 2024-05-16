@@ -34,7 +34,7 @@ chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",
 ] }
-chrono-tz = { version = "0.8", features = ["case-insensitive"] }
+chrono-tz = { version = "0.9", features = ["case-insensitive"] }
 clap = { workspace = true }
 comfy-table = "7"
 crc32fast = "1"
@@ -54,7 +54,7 @@ humantime = "2.1"
 hytra = { workspace = true }
 itertools = { workspace = true }
 itoa = "1.0"
-jsonbb = "0.1.2"
+jsonbb = { workspace = true }
 lru = { workspace = true }
 memcomparable = { version = "0.2", features = ["decimal"] }
 num-integer = "0.1"

@@ -110,4 +110,8 @@ public interface JdbcDialect {
     void bindInsertIntoStatement(
             PreparedStatement stmt, Connection conn, TableSchema tableSchema, SinkRow row)
             throws SQLException;
+
+    /** Bind the values of primary key fields to the {@code DELETE} statement. */
+    void bindDeleteStatement(PreparedStatement stmt, TableSchema tableSchema, SinkRow row)
+            throws SQLException;
 }

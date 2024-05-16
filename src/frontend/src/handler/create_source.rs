@@ -21,6 +21,7 @@ use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::array::arrow::{FromArrow, IcebergArrowConvert};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     is_column_ids_dedup, ColumnCatalog, ColumnDesc, ColumnId, Schema, TableId,
@@ -40,7 +41,8 @@ use risingwave_connector::schema::schema_registry::{
 use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::cdc::{
     CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY,
-    CITUS_CDC_CONNECTOR, MONGODB_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
+    CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CITUS_CDC_CONNECTOR, MONGODB_CDC_CONNECTOR,
+    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
@@ -52,15 +54,13 @@ use risingwave_connector::source::{
     POSIX_FS_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR,
 };
 use risingwave_connector::WithPropertiesExt;
-use risingwave_pb::catalog::{
-    PbSchemaRegistryNameStrategy, PbSource, StreamSourceInfo, WatermarkDesc,
-};
+use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     get_delimiter, AstString, ColumnDef, ConnectorSchema, CreateSourceStatement, Encode, Format,
-    ProtobufSchema, SourceWatermark,
+    ObjectName, ProtobufSchema, SourceWatermark, TableConstraint,
 };
 use risingwave_sqlparser::parser::IncludeOption;
 use thiserror_ext::AsReport;
@@ -68,6 +68,7 @@ use thiserror_ext::AsReport;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::source_catalog::SourceCatalog;
+use crate::catalog::{DatabaseId, SchemaId};
 use crate::error::ErrorCode::{self, Deprecated, InvalidInputSyntax, NotSupported, ProtocolError};
 use crate::error::{Result, RwError};
 use crate::expr::Expr;
@@ -502,7 +503,6 @@ pub(crate) async fn bind_columns_from_source(
 fn bind_columns_from_source_for_cdc(
     session: &SessionImpl,
     source_schema: &ConnectorSchema,
-    _with_properties: &HashMap<String, String>,
 ) -> Result<(Option<Vec<ColumnCatalog>>, StreamSourceInfo)> {
     let format_encode_options = WithOptions::try_from(source_schema.row_options())?.into_inner();
     let mut format_encode_options_to_consume = format_encode_options.clone();
@@ -1219,11 +1219,10 @@ pub async fn extract_iceberg_columns(
             .iter()
             .enumerate()
             .map(|(i, field)| {
-                let data_type = field.data_type().clone();
                 let column_desc = ColumnDesc::named(
                     field.name(),
                     ColumnId::new((i as u32).try_into().unwrap()),
-                    data_type.into(),
+                    IcebergArrowConvert.from_field(field).unwrap(),
                 );
                 ColumnCatalog {
                     column_desc,
@@ -1288,13 +1287,170 @@ pub async fn check_iceberg_source(
         .collect::<Vec<_>>();
     let new_iceberg_schema = arrow_schema::Schema::new(new_iceberg_field);
 
-    risingwave_connector::sink::iceberg::try_matches_arrow_schema(
-        &schema,
-        &new_iceberg_schema,
-        true,
-    )?;
+    risingwave_connector::sink::iceberg::try_matches_arrow_schema(&schema, &new_iceberg_schema)?;
 
     Ok(())
+}
+
+pub fn bind_connector_props(
+    handler_args: &HandlerArgs,
+    source_schema: &ConnectorSchema,
+    is_create_source: bool,
+) -> Result<HashMap<String, String>> {
+    let mut with_properties = handler_args.with_options.clone().into_connector_props();
+    validate_compatibility(source_schema, &mut with_properties)?;
+    let create_cdc_source_job = with_properties.is_shareable_cdc_connector();
+    if is_create_source && create_cdc_source_job {
+        // set connector to backfill mode
+        with_properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_SNAPSHOT_BACKFILL.into());
+        // enable cdc sharing mode, which will capture all tables in the given `database.name`
+        with_properties.insert(CDC_SHARING_MODE_KEY.into(), "true".into());
+        // enable transactional cdc
+        with_properties.insert(CDC_TRANSACTIONAL_KEY.into(), "true".into());
+        with_properties.insert(
+            CDC_WAIT_FOR_STREAMING_START_TIMEOUT.into(),
+            handler_args
+                .session
+                .config()
+                .cdc_source_wait_streaming_start_timeout()
+                .to_string(),
+        );
+    }
+    Ok(with_properties)
+}
+#[allow(clippy::too_many_arguments)]
+pub async fn bind_create_source(
+    handler_args: HandlerArgs,
+    full_name: ObjectName,
+    source_schema: ConnectorSchema,
+    with_properties: HashMap<String, String>,
+    sql_columns_defs: &[ColumnDef],
+    constraints: Vec<TableConstraint>,
+    wildcard_idx: Option<usize>,
+    source_watermarks: Vec<SourceWatermark>,
+    columns_from_resolve_source: Option<Vec<ColumnCatalog>>,
+    source_info: StreamSourceInfo,
+    include_column_options: IncludeOption,
+    col_id_gen: &mut ColumnIdGenerator,
+    // `true` for "create source", `false` for "create table with connector"
+    is_create_source: bool,
+) -> Result<(SourceCatalog, DatabaseId, SchemaId)> {
+    let session = &handler_args.session;
+    let db_name: &str = session.database();
+    let (schema_name, source_name) = Binder::resolve_schema_qualified_name(db_name, full_name)?;
+    let (database_id, schema_id) =
+        session.get_database_and_schema_id_for_create(schema_name.clone())?;
+
+    if !is_create_source && with_properties.is_iceberg_connector() {
+        return Err(
+            ErrorCode::BindError("can't create table with iceberg connector".to_string()).into(),
+        );
+    }
+
+    ensure_table_constraints_supported(&constraints)?;
+    let sql_pk_names = bind_sql_pk_names(sql_columns_defs, &constraints)?;
+
+    let columns_from_sql = bind_sql_columns(sql_columns_defs)?;
+
+    let mut columns = bind_all_columns(
+        &source_schema,
+        columns_from_resolve_source,
+        columns_from_sql,
+        sql_columns_defs,
+        wildcard_idx,
+    )?;
+
+    // add additional columns before bind pk, because `format upsert` requires the key column
+    handle_addition_columns(&with_properties, include_column_options, &mut columns)?;
+    // compatible with the behavior that add a hidden column `_rw_kafka_timestamp` to each message from Kafka source
+    if is_create_source {
+        // must behind `handle_addition_columns`
+        check_and_add_timestamp_column(&with_properties, &mut columns);
+    }
+
+    let pk_names = bind_source_pk(
+        &source_schema,
+        &source_info,
+        &mut columns,
+        sql_pk_names,
+        &with_properties,
+    )
+    .await?;
+
+    if is_create_source && !pk_names.is_empty() {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "Source does not support PRIMARY KEY constraint, please use \"CREATE TABLE\" instead"
+                .to_owned(),
+        )
+        .into());
+    }
+
+    for c in &mut columns {
+        c.column_desc.column_id = col_id_gen.generate(c.name())
+    }
+    debug_assert!(is_column_ids_dedup(&columns));
+
+    let must_need_pk = if is_create_source {
+        with_properties.connector_need_pk()
+    } else {
+        // For those connectors that do not need generate a `row_id`` column in the source schema such as iceberg.
+        // But in such case, we can not create mv or table on the source because there is not a pk.
+        assert!(with_properties.connector_need_pk());
+
+        true
+    };
+
+    let (mut columns, pk_col_ids, row_id_index) =
+        bind_pk_on_relation(columns, pk_names, must_need_pk)?;
+
+    let watermark_descs =
+        bind_source_watermark(session, source_name.clone(), source_watermarks, &columns)?;
+    // TODO(yuhao): allow multiple watermark on source.
+    assert!(watermark_descs.len() <= 1);
+
+    bind_sql_column_constraints(
+        session,
+        source_name.clone(),
+        &mut columns,
+        // TODO(st1page): pass the ref
+        sql_columns_defs.to_vec(),
+        &pk_col_ids,
+    )?;
+    check_source_schema(&with_properties, row_id_index, &columns).await?;
+
+    // resolve privatelink connection for Kafka
+    let mut with_properties = WithOptions::new(with_properties);
+    let connection_id =
+        resolve_privatelink_in_with_option(&mut with_properties, &schema_name, session)?;
+
+    let definition: String = handler_args.normalized_sql.clone();
+
+    let associated_table_id = if is_create_source {
+        None
+    } else {
+        Some(TableId::placeholder())
+    };
+    let source = SourceCatalog {
+        id: TableId::placeholder().table_id,
+        name: source_name,
+        columns,
+        pk_col_ids,
+        append_only: row_id_index.is_some(),
+        owner: session.user_id(),
+        info: source_info,
+        row_id_index,
+        with_properties: with_properties.into_inner().into_iter().collect(),
+        watermark_descs,
+        associated_table_id,
+        definition,
+        connection_id,
+        created_at_epoch: None,
+        initialized_at_epoch: None,
+        version: INITIAL_SOURCE_VERSION_ID,
+        created_at_cluster_version: None,
+        initialized_at_cluster_version: None,
+    };
+    Ok((source, database_id, schema_id))
 }
 
 pub async fn handle_create_source(
@@ -1311,11 +1467,6 @@ pub async fn handle_create_source(
         return Ok(resp);
     }
 
-    let db_name = session.database();
-    let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, stmt.source_name)?;
-    let (database_id, schema_id) =
-        session.get_database_and_schema_id_for_create(schema_name.clone())?;
-
     if handler_args.with_options.is_empty() {
         return Err(RwError::from(InvalidInputSyntax(
             "missing WITH clause".to_string(),
@@ -1323,19 +1474,14 @@ pub async fn handle_create_source(
     }
 
     let source_schema = stmt.source_schema.into_v2_with_warning();
-
-    let mut with_properties = handler_args.with_options.clone().into_connector_props();
-    validate_compatibility(&source_schema, &mut with_properties)?;
-
-    ensure_table_constraints_supported(&stmt.constraints)?;
-    let sql_pk_names = bind_sql_pk_names(&stmt.columns, &stmt.constraints)?;
+    let with_properties = bind_connector_props(&handler_args, &source_schema, true)?;
 
     let create_cdc_source_job = with_properties.is_shareable_cdc_connector();
     let is_shared = create_cdc_source_job
         || (with_properties.is_kafka_connector() && session.config().rw_enable_shared_source());
 
     let (columns_from_resolve_source, mut source_info) = if create_cdc_source_job {
-        bind_columns_from_source_for_cdc(&session, &source_schema, &with_properties)?
+        bind_columns_from_source_for_cdc(&session, &source_schema)?
     } else {
         bind_columns_from_source(&session, &source_schema, &with_properties).await?
     };
@@ -1344,99 +1490,26 @@ pub async fn handle_create_source(
         source_info.cdc_source_job = true;
         source_info.is_distributed = !create_cdc_source_job;
     }
-    let columns_from_sql = bind_sql_columns(&stmt.columns)?;
+    let mut col_id_gen = ColumnIdGenerator::new_initial();
 
-    let mut columns = bind_all_columns(
-        &source_schema,
-        columns_from_resolve_source,
-        columns_from_sql,
+    let (source_catalog, database_id, schema_id) = bind_create_source(
+        handler_args.clone(),
+        stmt.source_name,
+        source_schema,
+        with_properties,
         &stmt.columns,
+        stmt.constraints,
         stmt.wildcard_idx,
-    )?;
-    // add additional columns before bind pk, because `format upsert` requires the key column
-    handle_addition_columns(&with_properties, stmt.include_column_options, &mut columns)?;
-    let pk_names = bind_source_pk(
-        &source_schema,
-        &source_info,
-        &mut columns,
-        sql_pk_names,
-        &with_properties,
+        stmt.source_watermarks,
+        columns_from_resolve_source,
+        source_info,
+        stmt.include_column_options,
+        &mut col_id_gen,
+        true,
     )
     .await?;
 
-    if create_cdc_source_job {
-        // set connector to backfill mode
-        with_properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_SNAPSHOT_BACKFILL.into());
-        // enable cdc sharing mode, which will capture all tables in the given `database.name`
-        with_properties.insert(CDC_SHARING_MODE_KEY.into(), "true".into());
-        // enable transactional cdc
-        with_properties.insert(CDC_TRANSACTIONAL_KEY.into(), "true".into());
-    }
-
-    // must behind `handle_addition_columns`
-    check_and_add_timestamp_column(&with_properties, &mut columns);
-
-    let mut col_id_gen = ColumnIdGenerator::new_initial();
-    for c in &mut columns {
-        c.column_desc.column_id = col_id_gen.generate(c.name())
-    }
-
-    if !pk_names.is_empty() {
-        return Err(ErrorCode::InvalidInputSyntax(
-            "Source does not support PRIMARY KEY constraint, please use \"CREATE TABLE\" instead"
-                .to_owned(),
-        )
-        .into());
-    }
-    let (mut columns, pk_column_ids, row_id_index) =
-        bind_pk_on_relation(columns, pk_names, with_properties.connector_need_pk())?;
-
-    debug_assert!(is_column_ids_dedup(&columns));
-
-    let watermark_descs =
-        bind_source_watermark(&session, name.clone(), stmt.source_watermarks, &columns)?;
-    // TODO(yuhao): allow multiple watermark on source.
-    assert!(watermark_descs.len() <= 1);
-
-    bind_sql_column_constraints(
-        &session,
-        name.clone(),
-        &mut columns,
-        stmt.columns,
-        &pk_column_ids,
-    )?;
-
-    check_source_schema(&with_properties, row_id_index, &columns).await?;
-
-    let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
-
-    let mut with_options = WithOptions::new(with_properties);
-    // resolve privatelink connection for Kafka source
-    let connection_id =
-        resolve_privatelink_in_with_option(&mut with_options, &schema_name, &session)?;
-    let definition = handler_args.normalized_sql.clone();
-
-    let source = PbSource {
-        id: TableId::placeholder().table_id,
-        schema_id,
-        database_id,
-        name,
-        row_id_index: row_id_index.map(|idx| idx as u32),
-        columns: columns.iter().map(|c| c.to_protobuf()).collect_vec(),
-        pk_column_ids,
-        with_properties: with_options.into_inner().into_iter().collect(),
-        info: Some(source_info),
-        owner: session.user_id(),
-        watermark_descs,
-        definition,
-        connection_id,
-        initialized_at_epoch: None,
-        created_at_epoch: None,
-        optional_associated_table_id: None,
-        version: INITIAL_SOURCE_VERSION_ID,
-        initialized_at_cluster_version: None,
-        created_at_cluster_version: None,
-    };
+    let source = source_catalog.to_prost(schema_id, database_id);
 
     let catalog_writer = session.catalog_writer()?;
 
@@ -1444,7 +1517,7 @@ pub async fn handle_create_source(
         let graph = {
             let context = OptimizerContext::from_handler_args(handler_args);
             let source_node = LogicalSource::with_catalog(
-                Rc::new(SourceCatalog::from(&source)),
+                Rc::new(source_catalog),
                 SourceNodeKind::CreateSharedSource,
                 context.into(),
                 None,
@@ -1494,6 +1567,7 @@ fn row_encode_to_prost(row_encode: &Encode) -> EncodeType {
         Encode::Bytes => EncodeType::Bytes,
         Encode::Template => EncodeType::Template,
         Encode::None => EncodeType::None,
+        Encode::Text => EncodeType::Text,
     }
 }
 
@@ -1631,7 +1705,7 @@ pub mod tests {
         );
 
         // Options are not merged into props.
-        assert!(source.with_properties.get("schema.location").is_none());
+        assert!(!source.with_properties.contains_key("schema.location"));
     }
 
     #[tokio::test]

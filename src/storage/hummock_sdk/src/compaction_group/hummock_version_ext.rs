@@ -31,6 +31,7 @@ use risingwave_pb::hummock::{
 use tracing::warn;
 
 use super::StateTableId;
+use crate::change_log::TableChangeLog;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
 use crate::prost_key_range::KeyRangeExt;
@@ -126,7 +127,7 @@ pub struct SstDeltaInfo {
     pub delete_sst_object_ids: Vec<HummockSstableObjectId>,
 }
 
-pub type BranchedSstInfo = HashMap<CompactionGroupId, /* SST Id */ HummockSstableId>;
+pub type BranchedSstInfo = HashMap<CompactionGroupId, Vec<HummockSstableId>>;
 
 impl HummockVersion {
     pub fn get_compaction_group_levels(&self, compaction_group_id: CompactionGroupId) -> &Levels {
@@ -165,6 +166,15 @@ impl HummockVersion {
                     .iter()
                     .map(|table_info| table_info.get_object_id())
             })
+            .chain(self.table_change_log.values().flat_map(|change_log| {
+                change_log.0.iter().flat_map(|epoch_change_log| {
+                    epoch_change_log
+                        .old_value
+                        .iter()
+                        .map(|sst| sst.object_id)
+                        .chain(epoch_change_log.new_value.iter().map(|sst| sst.object_id))
+                })
+            }))
             .collect()
     }
 
@@ -480,6 +490,7 @@ impl HummockVersion {
         &mut self,
         version_delta: &HummockVersionDelta,
     ) -> Vec<SstSplitInfo> {
+        let new_committed_epoch = version_delta.max_committed_epoch > self.max_committed_epoch;
         let mut sst_split_info = vec![];
         for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
             let summary = summarize_group_deltas(group_deltas);
@@ -585,9 +596,6 @@ impl HummockVersion {
         }
         self.id = version_delta.id;
         self.max_committed_epoch = version_delta.max_committed_epoch;
-        for table_id in &version_delta.removed_table_ids {
-            let _ = self.table_watermarks.remove(table_id);
-        }
 
         let mut modified_table_watermarks: HashMap<TableId, TableWatermarks> = HashMap::new();
 
@@ -616,6 +624,52 @@ impl HummockVersion {
                 .insert(table_id, Arc::new(table_watermarks));
         }
 
+        for (table_id, change_log_delta) in &version_delta.change_log_delta {
+            let new_change_log = change_log_delta.new_log.as_ref().unwrap();
+            match self.table_change_log.entry(*table_id) {
+                Entry::Occupied(entry) => {
+                    let change_log = entry.into_mut();
+                    if let Some(prev_log) = change_log.0.last() {
+                        assert!(
+                            prev_log.epochs.last().expect("non-empty")
+                                < new_change_log.epochs.first().expect("non-empty")
+                        );
+                    }
+                    change_log.0.push(new_change_log.clone());
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(TableChangeLog(vec![new_change_log.clone()]));
+                }
+            };
+        }
+
+        for table_id in &version_delta.removed_table_ids {
+            let _ = self.table_watermarks.remove(table_id);
+            let _ = self.table_change_log.remove(table_id);
+        }
+
+        // If a table has no new change log entry (even an empty one), it means we have stopped maintained
+        // the change log for the table
+        if new_committed_epoch {
+            self.table_change_log.retain(|table_id, _| {
+                let contains = version_delta.change_log_delta.contains_key(table_id);
+                if !contains {
+                    warn!(
+                        ?table_id,
+                        max_committed_epoch = version_delta.max_committed_epoch,
+                        "table change log dropped due to no further change log at newly committed epoch",
+                    );
+                }
+                contains
+            });
+        }
+
+        for (table_id, change_log_delta) in &version_delta.change_log_delta {
+            if let Some(change_log) = self.table_change_log.get_mut(table_id) {
+                change_log.truncate(change_log_delta.truncate_epoch);
+            }
+        }
+
         sst_split_info
     }
 
@@ -642,10 +696,10 @@ impl HummockVersion {
                     }
                     let object_id = table_info.get_object_id();
                     let entry: &mut BranchedSstInfo = ret.entry(object_id).or_default();
-                    if let Some(exist_sst_id) = entry.get(compaction_group_id) {
-                        panic!("we do not allow more than one sst with the same object id in one grou. object-id: {}, duplicated sst id: {:?} and {}", object_id, exist_sst_id, table_info.sst_id);
-                    }
-                    entry.insert(*compaction_group_id, table_info.sst_id);
+                    entry
+                        .entry(*compaction_group_id)
+                        .or_default()
+                        .push(table_info.sst_id)
                 }
             }
         }
@@ -1067,6 +1121,7 @@ pub fn build_version_delta_after_version(version: &HummockVersion) -> HummockVer
         group_deltas: Default::default(),
         new_table_watermarks: HashMap::new(),
         removed_table_ids: vec![],
+        change_log_delta: HashMap::new(),
     }
 }
 
@@ -1222,13 +1277,7 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
             let mut prev_table_info: Option<&SstableInfo> = None;
             for table_info in &level.table_infos {
                 // Ensure table_ids are sorted and unique
-                if !table_info.table_ids.is_sorted_by(|a, b| {
-                    if a < b {
-                        Some(Ordering::Less)
-                    } else {
-                        Some(Ordering::Greater)
-                    }
-                }) {
+                if !table_info.table_ids.is_sorted_by(|a, b| a < b) {
                     res.push(format!(
                         "{} SST {}: table_ids not sorted",
                         level_identifier, table_info.object_id

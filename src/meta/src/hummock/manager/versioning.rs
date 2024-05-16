@@ -21,7 +21,7 @@ use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_initial_compaction_group_levels, get_compaction_group_ids, BranchedSstInfo,
 };
-use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_stats::add_prost_table_stats_map;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
@@ -79,12 +79,6 @@ pub struct Versioning {
     /// Objects that waits to be deleted from object store. It comes from either compaction, or
     /// full GC (listing object store).
     pub objects_to_delete: HashSet<HummockSstableObjectId>,
-    /// SST whose `object_id` != `sst_id`
-    pub branched_ssts: BTreeMap<
-        // SST object id
-        HummockSstableObjectId,
-        BranchedSstInfo,
-    >,
     /// `version_safe_points` is similar to `pinned_versions` expect for being a transient state.
     pub version_safe_points: Vec<HummockVersionId>,
     /// Tables that write limit is trigger for.
@@ -124,46 +118,6 @@ impl Versioning {
                 .filter(|(version_id, _)| **version_id <= min_pinned_version_id)
                 .flat_map(|(_, stale_objects)| stale_objects.id.clone()),
         );
-    }
-
-    /// If there is some sst in the target group which is just split but we have not compact it, we
-    ///  can not split or move state-table to those group, because it may cause data overlap.
-    pub fn check_branched_sst_in_target_group(
-        &self,
-        table_ids: &[StateTableId],
-        source_group_id: &CompactionGroupId,
-        target_group_id: &CompactionGroupId,
-    ) -> bool {
-        for groups in self.branched_ssts.values() {
-            if groups.contains_key(target_group_id) && groups.contains_key(source_group_id) {
-                return false;
-            }
-        }
-        let mut found_sstable_repeated = false;
-        let moving_table_ids: HashSet<&u32> = HashSet::from_iter(table_ids);
-        if let Some(group) = self.current_version.levels.get(target_group_id) {
-            let target_member_table_ids: HashSet<u32> =
-                HashSet::from_iter(group.member_table_ids.clone());
-            self.current_version.level_iter(*source_group_id, |level| {
-                for sst in &level.table_infos {
-                    if sst
-                        .table_ids
-                        .iter()
-                        .all(|table_id| !moving_table_ids.contains(table_id))
-                    {
-                        continue;
-                    }
-                    for table_id in &sst.table_ids {
-                        if target_member_table_ids.contains(table_id) {
-                            found_sstable_repeated = true;
-                            return false;
-                        }
-                    }
-                }
-                true
-            });
-        }
-        !found_sstable_repeated
     }
 }
 
@@ -286,7 +240,7 @@ impl HummockManager {
     #[named]
     pub async fn list_branched_objects(&self) -> BTreeMap<HummockSstableObjectId, BranchedSstInfo> {
         let guard = read_lock!(self, versioning).await;
-        guard.branched_ssts.clone()
+        guard.current_version.build_branched_sst_info()
     }
 
     #[named]

@@ -85,7 +85,7 @@ use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::{
-    check_schema_writable, CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId,
+    check_schema_writable, CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId, TableId,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::describe::infer_describe;
@@ -111,7 +111,7 @@ use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
-use crate::{FrontendOpts, PgResponseStream};
+use crate::{FrontendOpts, PgResponseStream, TableCatalog};
 
 pub(crate) mod current;
 pub(crate) mod cursor_manager;
@@ -163,6 +163,9 @@ pub struct FrontendEnv {
 
 /// Session map identified by `(process_id, secret_key)`
 type SessionMapRef = Arc<RwLock<HashMap<(i32, i32), Arc<SessionImpl>>>>;
+
+/// The proportion of frontend memory used for batch processing.
+const FRONTEND_BATCH_MEMORY_PROPORTION: f64 = 0.5;
 
 impl FrontendEnv {
     pub fn mock() -> Self {
@@ -338,10 +341,6 @@ impl FrontendEnv {
             MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
         }
 
-        let mem_context = risingwave_common::memory::MemoryContext::root(
-            frontend_metrics.batch_total_mem.clone(),
-        );
-
         let health_srv = HealthServiceImpl::new();
         let host = opts.health_check_listener_addr.clone();
 
@@ -407,6 +406,11 @@ impl FrontendEnv {
             HeapProfiler::new(total_memory_bytes, config.server.heap_profiling.clone());
         // Run a background heap profiler
         heap_profiler.start();
+
+        let mem_context = risingwave_common::memory::MemoryContext::root(
+            frontend_metrics.batch_total_mem.clone(),
+            (total_memory_bytes as f64 * FRONTEND_BATCH_MEMORY_PROPORTION) as u64,
+        );
 
         Ok((
             Self {
@@ -903,6 +907,42 @@ impl SessionImpl {
                 )))
             })?;
         Ok(subscription.clone())
+    }
+
+    pub fn get_table_by_id(&self, table_id: &TableId) -> Result<Arc<TableCatalog>> {
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        Ok(catalog_reader.get_table_by_id(table_id)?.clone())
+    }
+
+    pub fn get_table_by_name(
+        &self,
+        table_name: &str,
+        db_id: u32,
+        schema_id: u32,
+    ) -> Result<Arc<TableCatalog>> {
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        let table = catalog_reader
+            .get_schema_by_id(&DatabaseId::from(db_id), &SchemaId::from(schema_id))?
+            .get_table_by_name(table_name)
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("table \"{}\" does not exist", table_name),
+                )
+            })?;
+        Ok(table.clone())
+    }
+
+    pub async fn list_change_log_epochs(
+        &self,
+        table_id: u32,
+        min_epoch: u64,
+        max_count: u32,
+    ) -> Result<Vec<u64>> {
+        self.env
+            .catalog_writer
+            .list_change_log_epochs(table_id, min_epoch, max_count)
+            .await
     }
 
     pub fn clear_cancel_query_flag(&self) {

@@ -13,21 +13,17 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::num::NonZeroU32;
 use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use either::Either;
 use futures::TryStreamExt;
-use governor::clock::MonotonicClock;
-use governor::{Quota, RateLimiter};
 use itertools::Itertools;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
-use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::cdc::jni_source;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
@@ -41,11 +37,12 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
-use crate::executor::prelude::*;
-use crate::executor::source::{
-    barrier_to_message_stream, get_split_offset_col_idx, get_split_offset_mapping_from_chunk,
-    prune_additional_cols,
+use super::{
+    apply_rate_limit, barrier_to_message_stream, get_split_offset_col_idx,
+    get_split_offset_mapping_from_chunk, prune_additional_cols,
 };
+use crate::common::rate_limit::limited_chunk_size;
+use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::{AddMutation, UpdateMutation};
 
@@ -68,56 +65,10 @@ pub struct SourceExecutor<S: StateStore> {
     /// System parameter reader to read barrier interval
     system_params: SystemParamsReaderRef,
 
-    // control options for connector level
-    source_ctrl_opts: SourceCtrlOpts,
-}
+    /// Rate limit in rows/s.
+    rate_limit_rps: Option<u32>,
 
-#[try_stream(ok = StreamChunk, error = ConnectorError)]
-pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit: Option<u32>) {
-    if let Some(limit) = rate_limit
-        && limit == 0
-    {
-        // block the stream until the rate limit is reset
-        let future = futures::future::pending::<()>();
-        future.await;
-    }
-    let get_rate_limiter = |rate_limit: u32| {
-        let quota = Quota::per_second(NonZeroU32::new(rate_limit).unwrap());
-        let clock = MonotonicClock;
-        RateLimiter::direct_with_clock(quota, &clock)
-    };
-    let limiter = rate_limit.map(get_rate_limiter);
-    if rate_limit.is_some() {
-        tracing::info!(rate_limit = ?rate_limit, "applied rate limit");
-    }
-    #[for_await]
-    for batch in stream {
-        let chunk: StreamChunk = batch?;
-        let chunk_cardinality = chunk.cardinality();
-        let Some(n) = NonZeroU32::new(chunk_cardinality as u32) else {
-            // pass empty chunk
-            yield chunk;
-            continue;
-        };
-        if let Some(limiter) = &limiter {
-            let limit = NonZeroU32::new(rate_limit.unwrap()).unwrap();
-            if n <= limit {
-                // `InsufficientCapacity` should never happen because we have done the check
-                limiter.until_n_ready(n).await.unwrap();
-                yield chunk;
-            } else {
-                // Cut the chunk into smaller chunks
-                for chunk in chunk.split(limit.get() as usize) {
-                    let n = NonZeroU32::new(chunk.cardinality() as u32).unwrap();
-                    // Ditto.
-                    limiter.until_n_ready(n).await.unwrap();
-                    yield chunk;
-                }
-            }
-        } else {
-            yield chunk;
-        }
-    }
+    is_shared: bool,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -127,7 +78,8 @@ impl<S: StateStore> SourceExecutor<S> {
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
         system_params: SystemParamsReaderRef,
-        source_ctrl_opts: SourceCtrlOpts,
+        rate_limit_rps: Option<u32>,
+        is_shared: bool,
     ) -> Self {
         Self {
             actor_ctx,
@@ -135,7 +87,8 @@ impl<S: StateStore> SourceExecutor<S> {
             metrics,
             barrier_receiver: Some(barrier_receiver),
             system_params,
-            source_ctrl_opts,
+            rate_limit_rps,
+            is_shared,
         }
     }
 
@@ -171,7 +124,10 @@ impl<S: StateStore> SourceExecutor<S> {
                 .source_name
                 .clone(),
             source_desc.metrics.clone(),
-            self.source_ctrl_opts.clone(),
+            SourceCtrlOpts {
+                chunk_size: limited_chunk_size(self.rate_limit_rps),
+                rate_limit: self.rate_limit_rps,
+            },
             source_desc.source.config.clone(),
         );
         let stream = source_desc
@@ -180,7 +136,7 @@ impl<S: StateStore> SourceExecutor<S> {
             .await
             .map_err(StreamExecutorError::connector_error);
 
-        Ok(apply_rate_limit(stream?, self.source_ctrl_opts.rate_limit).boxed())
+        Ok(apply_rate_limit(stream?, self.rate_limit_rps).boxed())
     }
 
     /// `source_id | source_name | actor_id | fragment_id`
@@ -301,11 +257,11 @@ impl<S: StateStore> SourceExecutor<S> {
             );
 
             core.updated_splits_in_epoch
-                .retain(|split_id, _| target_state.get(split_id).is_some());
+                .retain(|split_id, _| target_state.contains_key(split_id));
 
             let dropped_splits = core
                 .latest_split_info
-                .extract_if(|split_id, _| target_state.get(split_id).is_none())
+                .extract_if(|split_id, _| !target_state.contains_key(split_id))
                 .map(|(_, split)| split)
                 .collect_vec();
 
@@ -472,11 +428,30 @@ impl<S: StateStore> SourceExecutor<S> {
                 .await?
             {
                 *ele = recover_state;
+            } else {
+                // This is a new split, not in state table.
+                if self.is_shared {
+                    // For shared source, we start from latest and let the downstream SourceBackfillExecutors to read historical data.
+                    // It's highly probable that the work of scanning historical data cannot be shared,
+                    // so don't waste work on it.
+                    // For more details, see https://github.com/risingwavelabs/risingwave/issues/16576#issuecomment-2095413297
+                    if ele.is_cdc_split() {
+                        // shared CDC source already starts from latest.
+                        continue;
+                    }
+                    match ele {
+                        SplitImpl::Kafka(split) => {
+                            split.seek_to_latest_offset();
+                        }
+                        _ => unreachable!("only kafka source can be shared, got {:?}", ele),
+                    }
+                }
             }
         }
 
         // init in-memory split states with persisted state if any
         core.init_split_state(boot_state.clone());
+        let mut is_uninitialized = self.actor_ctx.initial_dispatch_num == 0;
 
         // Return the ownership of `stream_source_core` to the source executor.
         self.stream_source_core = Some(core);
@@ -495,11 +470,16 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut stream =
             StreamReaderWithPause::<true, StreamChunk>::new(barrier_stream, source_chunk_reader);
 
-        // If the first barrier requires us to pause on startup, pause the stream.
-        if barrier.is_pause_on_startup() {
+        // - For shared source, pause until there's a MV.
+        // - If the first barrier requires us to pause on startup, pause the stream.
+        if (self.is_shared && is_uninitialized) || barrier.is_pause_on_startup() {
+            tracing::info!(
+                is_shared = self.is_shared,
+                is_uninitialized = is_uninitialized,
+                "source paused on startup"
+            );
             stream.pause_stream();
         }
-        // TODO: for shared source, pause until there's a MV.
 
         yield Message::Barrier(barrier);
 
@@ -530,8 +510,17 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     let epoch = barrier.epoch;
 
+                    if self.is_shared
+                        && is_uninitialized
+                        && barrier.has_more_downstream_fragments(self.actor_ctx.id)
+                    {
+                        stream.resume_stream();
+                        is_uninitialized = false;
+                    }
+
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
+                            // XXX: Is it possible that the stream is self_paused, and we have pause mutation now? In this case, it will panic.
                             Mutation::Pause => stream.pause_stream(),
                             Mutation::Resume => stream.resume_stream(),
                             Mutation::SourceChangeSplit(actor_splits) => {
@@ -560,8 +549,10 @@ impl<S: StateStore> SourceExecutor<S> {
                                 .await?;
                             }
                             Mutation::Throttle(actor_to_apply) => {
-                                if let Some(throttle) = actor_to_apply.get(&self.actor_ctx.id) {
-                                    self.source_ctrl_opts.rate_limit = *throttle;
+                                if let Some(new_rate_limit) = actor_to_apply.get(&self.actor_ctx.id)
+                                    && *new_rate_limit != self.rate_limit_rps
+                                {
+                                    self.rate_limit_rps = *new_rate_limit;
                                     // recreate from latest_split_info
                                     self.rebuild_stream_reader(&source_desc, &mut stream)
                                         .await?;
@@ -775,15 +766,11 @@ impl<S: StateStore> WaitEpochWorker<S> {
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
-    use std::time::Duration;
 
-    use futures::StreamExt;
     use maplit::{convert_args, hashmap};
-    use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
+    use risingwave_common::catalog::{ColumnId, Field, TableId};
     use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
@@ -795,7 +782,6 @@ mod tests {
 
     use super::*;
     use crate::executor::source::{default_source_internal_table, SourceStateTableHandler};
-    use crate::executor::ActorContext;
 
     const MOCK_SOURCE_NAME: &str = "mock_source";
 
@@ -846,10 +832,8 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
             system_params_manager.get_params(),
-            SourceCtrlOpts {
-                chunk_size: 1024,
-                rate_limit: None,
-            },
+            None,
+            false,
         );
         let mut executor = executor.boxed().execute();
 
@@ -937,10 +921,8 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
             system_params_manager.get_params(),
-            SourceCtrlOpts {
-                chunk_size: 1024,
-                rate_limit: None,
-            },
+            None,
+            false,
         );
         let mut handler = executor.boxed().execute();
 

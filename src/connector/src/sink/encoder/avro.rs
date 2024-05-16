@@ -526,7 +526,7 @@ mod tests {
 
         test_ok(
             &DataType::Int64,
-            Some(ScalarImpl::Int64(std::i64::MAX)),
+            Some(ScalarImpl::Int64(i64::MAX)),
             r#""long""#,
             Value::Long(i64::MAX),
         );

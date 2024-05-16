@@ -22,15 +22,15 @@ use risingwave_common::types::{DataType, Interval, ScalarImpl};
 use risingwave_sqlparser::ast::AsOf;
 
 use crate::binder::{
-    BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
-    BoundWindowTableFunction, Relation, WindowTableFunctionKind,
+    BoundBackCteRef, BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable,
+    BoundWatermark, BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{
-    LogicalApply, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalShare,
-    LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalValues, PlanRef,
+    LogicalApply, LogicalCteRef, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan,
+    LogicalShare, LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalValues, PlanRef,
 };
 use crate::optimizer::property::Cardinality;
 use crate::planner::Planner;
@@ -57,9 +57,7 @@ impl Planner {
             Relation::Watermark(tf) => self.plan_watermark(*tf),
             // note that rcte (i.e., RecursiveUnion) is included *implicitly* in share.
             Relation::Share(share) => self.plan_share(*share),
-            Relation::BackCteRef(..) => {
-                bail_not_implemented!(issue = 15135, "recursive CTE is not supported")
-            }
+            Relation::BackCteRef(cte_ref) => self.plan_cte_ref(*cte_ref),
         }
     }
 
@@ -197,46 +195,66 @@ impl Planner {
                 Ok(LogicalTableFunction::new(*tf, with_ordinality, self.ctx()).into())
             }
             expr => {
-                let mut schema = Schema {
+                let schema = Schema {
                     // TODO: should be named
                     fields: vec![Field::unnamed(expr.return_type())],
                 };
-                if with_ordinality {
-                    schema
-                        .fields
-                        .push(Field::with_name(DataType::Int64, "ordinality"));
-                    Ok(LogicalValues::create(
-                        vec![vec![expr, ExprImpl::literal_bigint(1)]],
-                        schema,
-                        self.ctx(),
-                    ))
+                let expr_return_type = expr.return_type();
+                let root = LogicalValues::create(vec![vec![expr]], schema, self.ctx());
+                let input_ref = ExprImpl::from(InputRef::new(0, expr_return_type.clone()));
+                let mut exprs = if let DataType::Struct(st) = expr_return_type {
+                    st.iter()
+                        .enumerate()
+                        .map(|(i, (_, ty))| {
+                            let idx = ExprImpl::literal_int(i.try_into().unwrap());
+                            let args = vec![input_ref.clone(), idx];
+                            FunctionCall::new_unchecked(ExprType::Field, args, ty.clone()).into()
+                        })
+                        .collect()
                 } else {
-                    Ok(LogicalValues::create(vec![vec![expr]], schema, self.ctx()))
+                    vec![input_ref]
+                };
+                if with_ordinality {
+                    exprs.push(ExprImpl::literal_bigint(1));
                 }
+                Ok(LogicalProject::create(root, exprs))
             }
         }
     }
 
     pub(super) fn plan_share(&mut self, share: BoundShare) -> Result<PlanRef> {
-        let Either::Left(nonrecursive_query) = share.input else {
-            bail_not_implemented!(issue = 15135, "recursive CTE is not supported");
-        };
-        let id = share.share_id;
-        match self.share_cache.get(&id) {
-            None => {
-                let result = self
-                    .plan_query(nonrecursive_query)?
-                    .into_unordered_subplan();
-                let logical_share = LogicalShare::create(result);
-                self.share_cache.insert(id, logical_share.clone());
-                Ok(logical_share)
+        match share.input {
+            Either::Left(nonrecursive_query) => {
+                let id = share.share_id;
+                match self.share_cache.get(&id) {
+                    None => {
+                        let result = self
+                            .plan_query(nonrecursive_query)?
+                            .into_unordered_subplan();
+                        let logical_share = LogicalShare::create(result);
+                        self.share_cache.insert(id, logical_share.clone());
+                        Ok(logical_share)
+                    }
+                    Some(result) => Ok(result.clone()),
+                }
             }
-            Some(result) => Ok(result.clone()),
+            // for the recursive union in rcte
+            Either::Right(recursive_union) => self.plan_recursive_union(
+                *recursive_union.base,
+                *recursive_union.recursive,
+                share.share_id,
+            ),
         }
     }
 
     pub(super) fn plan_watermark(&mut self, _watermark: BoundWatermark) -> Result<PlanRef> {
         todo!("plan watermark");
+    }
+
+    pub(super) fn plan_cte_ref(&mut self, cte_ref: BoundBackCteRef) -> Result<PlanRef> {
+        // TODO: this is actually duplicated from `plan_recursive_union`, refactor?
+        let base = self.plan_set_expr(cte_ref.base, vec![], &[])?;
+        Ok(LogicalCteRef::create(cte_ref.share_id, base))
     }
 
     fn collect_col_data_types_for_tumble_window(relation: &Relation) -> Result<Vec<DataType>> {

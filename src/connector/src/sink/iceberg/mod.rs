@@ -41,9 +41,8 @@ use icelake::transaction::Transaction;
 use icelake::types::{data_file_from_json, data_file_to_json, Any, DataFile};
 use icelake::{Table, TableIdentifier};
 use itertools::Itertools;
-use risingwave_common::array::{
-    iceberg_to_arrow_type, to_iceberg_record_batch_with_schema, Op, StreamChunk,
-};
+use risingwave_common::array::arrow::{IcebergArrowConvert, ToArrow};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
@@ -475,7 +474,7 @@ impl IcebergSink {
             .try_into()
             .map_err(|err: icelake::Error| SinkError::Iceberg(anyhow!(err)))?;
 
-        try_matches_arrow_schema(&sink_schema, &iceberg_schema, false)
+        try_matches_arrow_schema(&sink_schema, &iceberg_schema)
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
         Ok(table)
@@ -797,14 +796,15 @@ impl SinkWriter for IcebergWriter {
                 let filters =
                     chunk.visibility() & ops.iter().map(|op| *op == Op::Insert).collect::<Bitmap>();
                 chunk.set_visibility(filters);
-                let chunk =
-                    to_iceberg_record_batch_with_schema(self.schema.clone(), &chunk.compact())
-                        .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+                let chunk = IcebergArrowConvert
+                    .to_record_batch(self.schema.clone(), &chunk.compact())
+                    .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
                 writer.write(chunk).await?;
             }
             IcebergWriterEnum::Upsert(writer) => {
-                let chunk = to_iceberg_record_batch_with_schema(self.schema.clone(), &chunk)
+                let chunk = IcebergArrowConvert
+                    .to_record_batch(self.schema.clone(), &chunk)
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
                 writer
@@ -1002,11 +1002,9 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
 }
 
 /// Try to match our schema with iceberg schema.
-/// `for_source` = true means the schema is used for source, otherwise it's used for sink.
 pub fn try_matches_arrow_schema(
     rw_schema: &Schema,
     arrow_schema: &ArrowSchema,
-    for_source: bool,
 ) -> anyhow::Result<()> {
     if rw_schema.fields.len() != arrow_schema.fields().len() {
         bail!(
@@ -1029,17 +1027,11 @@ pub fn try_matches_arrow_schema(
             .ok_or_else(|| anyhow!("Field {} not found in our schema", arrow_field.name()))?;
 
         // Iceberg source should be able to read iceberg decimal type.
-        // Since the arrow type default conversion is used by udf, in udf, decimal is converted to
-        // large binary type which is not compatible with iceberg decimal type,
-        // so we need to convert it to decimal type manually.
-        let converted_arrow_data_type = if for_source
-            && matches!(our_field_type, risingwave_common::types::DataType::Decimal)
-        {
-            // RisingWave decimal type cannot specify precision and scale, so we use the default value.
-            ArrowDataType::Decimal128(38, 0)
-        } else {
-            iceberg_to_arrow_type(our_field_type).map_err(|e| anyhow!(e))?
-        };
+        let converted_arrow_data_type = IcebergArrowConvert
+            .to_arrow_field("", our_field_type)
+            .map_err(|e| anyhow!(e))?
+            .data_type()
+            .clone();
 
         let compatible = match (&converted_arrow_data_type, arrow_field.data_type()) {
             (ArrowDataType::Decimal128(_, _), ArrowDataType::Decimal128(_, _)) => true,
@@ -1080,7 +1072,7 @@ mod test {
             ArrowField::new("c", ArrowDataType::Int32, false),
         ]);
 
-        try_matches_arrow_schema(&risingwave_schema, &arrow_schema, false).unwrap();
+        try_matches_arrow_schema(&risingwave_schema, &arrow_schema).unwrap();
 
         let risingwave_schema = Schema::new(vec![
             Field::with_name(DataType::Int32, "d"),
@@ -1094,7 +1086,7 @@ mod test {
             ArrowField::new("d", ArrowDataType::Int32, false),
             ArrowField::new("c", ArrowDataType::Int32, false),
         ]);
-        try_matches_arrow_schema(&risingwave_schema, &arrow_schema, false).unwrap();
+        try_matches_arrow_schema(&risingwave_schema, &arrow_schema).unwrap();
     }
 
     #[test]

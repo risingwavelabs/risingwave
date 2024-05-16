@@ -32,7 +32,6 @@
 #![feature(lazy_cell)]
 #![feature(error_generic_member_access)]
 #![feature(btree_extract_if)]
-#![feature(bound_map)]
 #![feature(iter_order_by)]
 #![feature(exact_size_is_empty)]
 #![feature(impl_trait_in_assoc_type)]
@@ -61,6 +60,18 @@ risingwave_expr_impl::enable!();
 
 tokio::task_local! {
     pub(crate) static CONFIG: Arc<StreamingConfig>;
+}
+
+mod config {
+    use risingwave_common::config::default;
+
+    pub(crate) fn chunk_size() -> usize {
+        let res = crate::CONFIG.try_with(|config| config.developer.chunk_size);
+        if res.is_err() && cfg!(not(test)) {
+            tracing::warn!("streaming CONFIG is not set, which is probably a bug")
+        }
+        res.unwrap_or_else(|_| default::developer::stream_chunk_size())
+    }
 }
 
 mod consistency {

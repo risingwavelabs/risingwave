@@ -88,3 +88,15 @@ insert into numeric_table values(7, 'Infinity'::numeric);
 create table numeric_list(id int primary key, num numeric[]);
 insert into numeric_list values(1, '{3.14, 6, 57896044618658097711785492504343953926634992332820282019728792003956564819967, 57896044618658097711785492504343953926634992332820282019728792003956564819968, 115792089237316195423570985008687907853269984665640564039457584007913129639936.555555}');
 insert into numeric_list values(2, '{nan, infinity, -infinity}');
+
+--- for https://github.com/risingwavelabs/risingwave/issues/16392
+CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy');
+CREATE TABLE enum_table (
+    id int PRIMARY KEY,
+    current_mood mood
+);
+INSERT INTO enum_table VALUES (1, 'happy');
+
+CREATE TABLE list_with_null(id int primary key, my_int int[], my_num numeric[], my_num_1 numeric[], my_num_2 numeric[], my_mood mood[], my_uuid uuid[], my_bytea bytea[]);
+INSERT INTO list_with_null VALUES (1, '{1,2,NULL}', '{1.1,inf,NULL}', '{1.1,inf,NULL}', '{1.1,inf,NULL}', '{happy,ok,NULL}', '{bb488f9b-330d-4012-b849-12adeb49e57e,bb488f9b-330d-4012-b849-12adeb49e57f, NULL}', '{\\x00,\\x01,NULL}');
+INSERT INTO list_with_null VALUES (2, '{NULL,3,4}', '{2.2,0,NULL}' , '{2.2,0,NULL}', '{2.2,0,NULL}', '{happy,ok,sad}', '{2de296df-eda7-4202-a81f-1036100ef4f6,2977afbc-0b12-459c-a36f-f623fc9e9840}', '{\\x00,\\x01,\\x02}');

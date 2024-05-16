@@ -22,7 +22,6 @@ use thiserror_ext::AsReport;
 use super::create_index::{gen_create_index_plan, resolve_index_schema};
 use super::create_mv::gen_create_mv_plan;
 use super::create_sink::{gen_sink_plan, get_partition_compute_info};
-use super::create_subscription::gen_subscription_plan;
 use super::create_table::ColumnIdGenerator;
 use super::query::gen_batch_plan_by_statement;
 use super::util::SourceSchemaCompatExt;
@@ -135,9 +134,11 @@ async fn do_handle_explain(
                         ).into());
                     }
 
-                    Statement::CreateSubscription { stmt } => {
-                        gen_subscription_plan(&session, context.clone(), stmt)
-                            .map(|plan| plan.subscription_plan)
+                    Statement::CreateSubscription { .. } => {
+                        return Err(ErrorCode::NotSupported(
+                            "EXPLAIN CREATE SUBSCRIPTION".into(),
+                            "A created SUBSCRIPTION only incremental data queries on the table, not supported EXPLAIN".into()
+                        ).into());
                     }
                     Statement::CreateIndex {
                         name,

@@ -1,19 +1,13 @@
-FROM ubuntu:22.04 AS base
+FROM ubuntu:24.04 AS base
 
 ENV LANG en_US.utf8
 
 RUN apt-get update \
-  && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-11-jdk software-properties-common
-
-# Install Python 3.12
-RUN add-apt-repository ppa:deadsnakes/ppa -y && \
-    apt-get update -yy && \
-    DEBIAN_FRONTEND=noninteractive apt-get install python3.12 python3.12-dev -yy
-ENV PYO3_PYTHON=python3.12
+  && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-11-jdk software-properties-common python3.12 python3.12-dev
 
 FROM base AS rust-base
 
-RUN apt-get update && apt-get -y install make cmake protobuf-compiler curl bash lld unzip
+RUN apt-get update && apt-get -y install make cmake protobuf-compiler curl bash lld unzip rsync
 
 # Install Node.js as dependency for building the dashboard.
 # Bump version together with `dashboard/.node-version`.
@@ -142,4 +136,4 @@ ENV CONNECTOR_LIBS_PATH /risingwave/bin/connector-node/libs
 ENV IN_CONTAINER=1
 
 ENTRYPOINT [ "/risingwave/bin/risingwave" ]
-CMD [ "playground" ]
+CMD [ "single_node" ]
