@@ -285,16 +285,6 @@ fn get_name_strategy_or_default(name_strategy: Option<AstString>) -> Result<Opti
     }
 }
 
-pub fn schema_has_schema_registry(schema: &ConnectorSchema) -> bool {
-    match schema.row_encode {
-        Encode::Avro | Encode::Protobuf => true,
-        Encode::Json => {
-            let mut options: WithOptions = WithOptions::try_from(schema.row_options()).unwrap();
-            matches!(get_json_schema_location(options.inner_mut()), Ok(Some(_)))
-        }
-        _ => false,
-    }
-}
 /// resolve the schema of the source from external schema file, return the relation's columns. see <https://www.risingwave.dev/docs/current/sql-create-source> for more information.
 /// return `(columns, source info)`
 pub(crate) async fn bind_columns_from_source(
