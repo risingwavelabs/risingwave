@@ -318,6 +318,19 @@ impl WorkerNodeSelector {
         }
     }
 
+    pub fn schedule_unit_count_map(&self) -> HashMap<u32, usize> {
+        let worker_nodes = if self.enable_barrier_read {
+            self.manager.list_streaming_worker_nodes()
+        } else {
+            self.apply_worker_node_mask(self.manager.list_serving_worker_nodes())
+        };
+
+        worker_nodes
+            .iter()
+            .map(|node| (node.id, node.parallel_units.len()))
+            .collect()
+    }
+
     pub fn schedule_unit_count(&self) -> usize {
         let worker_nodes = if self.enable_barrier_read {
             self.manager.list_streaming_worker_nodes()

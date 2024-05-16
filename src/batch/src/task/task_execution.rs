@@ -400,6 +400,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         )
         .await?;
 
+        println!("plan {:?}", self.plan);
+
         let sender = self.sender.clone();
         let _failure = self.failure.clone();
         let task_id = self.task_id.clone();

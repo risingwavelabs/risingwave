@@ -887,10 +887,19 @@ impl BatchPlanFragmenter {
             }
             _ => {
                 if let Some(table_scan_info) = &table_scan_info {
+                    let parallelism_map = self.worker_node_manager.schedule_unit_count_map();
                     table_scan_info
                         .partitions
                         .as_ref()
-                        .map(|m| m.len())
+                        .map(|partitions| {
+                            partitions
+                                .keys()
+                                .map(|worker_id| {
+                                    parallelism_map.get(worker_id).cloned().unwrap_or(0)
+                                })
+                                .sum::<usize>()
+                                .max(1)
+                        })
                         .unwrap_or(1)
                 } else if let Some(lookup_join_parallelism) =
                     self.collect_stage_lookup_join_parallelism(root.clone())?
@@ -904,6 +913,8 @@ impl BatchPlanFragmenter {
                 }
             }
         };
+
+        println!("parallelism {}", parallelism);
         if source_info.is_none() && parallelism == 0 {
             return Err(BatchError::EmptyWorkerNodes.into());
         }
