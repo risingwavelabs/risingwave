@@ -29,9 +29,10 @@ use crate::common::table::state_table::ReplicatedStateTable;
 #[cfg(debug_assertions)]
 use crate::executor::backfill::utils::METADATA_STATE_LEN;
 use crate::executor::backfill::utils::{
-    compute_bounds, create_builder, create_limiter, get_progress_per_vnode, mapping_chunk,
-    mapping_message, mark_chunk_ref_by_vnode, owned_row_iter, persist_state_per_vnode,
-    update_pos_by_vnode, BackfillProgressPerVnode, BackfillRateLimiter, BackfillState,
+    compute_bounds, create_builder, create_limiter, create_limiter_with_state,
+    get_progress_per_vnode, mapping_chunk, mapping_message, mark_chunk_ref_by_vnode,
+    owned_row_iter, persist_state_per_vnode, update_pos_by_vnode, BackfillProgressPerVnode,
+    BackfillRateLimiter, BackfillState,
 };
 use crate::executor::prelude::*;
 use crate::task::CreateMviewProgress;
@@ -555,13 +556,14 @@ where
 
                 // Adapt Rate Limit
                 if adaptive_rate_limit {
-                    Self::adapt_rate_limit(
+                    let rate_limiter_curr = rate_limiter.take();
+                    rate_limiter = Self::adapt_rate_limit(
                         &self.actor_id,
                         &self.metrics,
                         baseline_barrier_latency,
                         &mut total_barrier_latency,
                         &mut rate_limit,
-                        &mut rate_limiter,
+                        rate_limiter_curr,
                     )
                 }
 
@@ -641,8 +643,8 @@ where
         baseline_barrier_latency: f64,
         total_barrier_latency: &mut f64,
         rate_limit: &mut Option<usize>,
-        rate_limiter: &mut Option<BackfillRateLimiter>,
-    ) {
+        rate_limiter: Option<BackfillRateLimiter>,
+    ) -> Option<BackfillRateLimiter> {
         let new_total_barrier_latency = Self::get_total_barrier_latency(metrics);
         let new_barrier_latency = new_total_barrier_latency - *total_barrier_latency;
         *total_barrier_latency = new_total_barrier_latency;
@@ -665,7 +667,7 @@ where
             Some(INITIAL_ADAPTIVE_RATE_LIMIT)
         } else if let Some(rate_limit_set) = rate_limit {
             let barrier_latency_diff = baseline_barrier_latency - new_barrier_latency;
-            let scaling_factor = 1 + barrier_latency_diff / baseline_barrier_latency;
+            let scaling_factor = 1_f64 + barrier_latency_diff / baseline_barrier_latency;
             let scaled_rate_limit = (*rate_limit_set as f64) * scaling_factor;
             let new_rate_limit = f64::max(1_f64, scaled_rate_limit).round() as usize;
             tracing::debug!(
@@ -688,7 +690,14 @@ where
                 ?rate_limit,
                 "adjusted rate limit"
             );
-            *rate_limiter = rate_limit.and_then(create_limiter);
+        }
+        if let Some(rate_limit) = rate_limit
+            && let Some(rate_limiter) = rate_limiter
+        {
+            let store = rate_limiter.into_state_store();
+            create_limiter_with_state(*rate_limit, store)
+        } else {
+            None
         }
     }
 
