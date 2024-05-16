@@ -110,6 +110,10 @@ DeltaLakeConfig:
   - name: r#type
     field_type: String
     required: true
+  - name: commit_checkpoint_interval
+    field_type: u64
+    required: false
+    default: Default::default
 DorisConfig:
   fields:
   - name: doris.url
