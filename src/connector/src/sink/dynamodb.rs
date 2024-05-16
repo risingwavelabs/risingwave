@@ -19,7 +19,12 @@ use anyhow::{anyhow, Context};
 use aws_sdk_dynamodb as dynamodb;
 use aws_sdk_dynamodb::client::Client;
 use aws_smithy_types::Blob;
-use dynamodb::types::{AttributeValue, TableStatus};
+use dynamodb::types::{
+    AttributeValue, DeleteRequest, PutRequest, ReturnConsumedCapacity, ReturnItemCollectionMetrics,
+    TableStatus, WriteRequest,
+};
+use itertools::Itertools;
+use maplit::hashmap;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row as _;
@@ -90,12 +95,6 @@ impl Sink for DynamoDbSink {
             )));
         }
 
-        let all_set: HashSet<String> = self
-            .schema
-            .fields()
-            .iter()
-            .map(|f| f.name.clone())
-            .collect();
         let pk_set: HashSet<String> = self
             .schema
             .fields()
@@ -106,23 +105,12 @@ impl Sink for DynamoDbSink {
             .collect();
         let key_schema = table.key_schema();
 
-        // 1. validate all DynamoDb key element are in RisingWave schema and are primary key
         for key_element in key_schema.iter().map(|x| x.attribute_name()) {
             if !pk_set.iter().any(|x| x == key_element) {
                 return Err(SinkError::DynamoDb(anyhow!(
                     "table {} key field {} not found in schema or not primary key",
                     table_name,
                     key_element
-                )));
-            }
-        }
-        // 2. validate RisingWave schema fields are subset of dynamodb key fields
-        for ref field in all_set {
-            if !key_schema.iter().any(|x| x.attribute_name() == field) {
-                return Err(SinkError::DynamoDb(anyhow!(
-                    "table {} field {} not found in dynamodb key",
-                    table_name,
-                    field
                 )));
             }
         }
@@ -154,50 +142,91 @@ impl TryFrom<SinkParam> for DynamoDbSink {
     }
 }
 
+#[derive(Debug)]
+struct DynamoDbRequest {
+    inner: WriteRequest,
+    key_items: Vec<String>,
+}
+
+impl DynamoDbRequest {
+    fn extract_pkey_values(&self) -> Option<Vec<AttributeValue>> {
+        let key = match (&self.inner.put_request(), &self.inner.delete_request()) {
+            (Some(put_req), None) => &put_req.item,
+            (None, Some(del_req)) => &del_req.key,
+            _ => return None,
+        };
+        let vs = key
+            .into_iter()
+            .filter(|(k, _)| self.key_items.contains(k))
+            .map(|(_, v)| v.clone())
+            .collect();
+        Some(vs)
+    }
+}
+
 struct DynamoDbPayloadWriter {
-    insert_items: HashMap<String, AttributeValue>,
-    delete_items: HashMap<String, AttributeValue>,
+    request_items: Vec<DynamoDbRequest>,
     client: Client,
     table: String,
+    dynamodb_keys: Vec<String>,
 }
 
 impl DynamoDbPayloadWriter {
-    fn write_one_insert(&mut self, key: String, value: AttributeValue) {
-        self.insert_items.insert(key, value);
+    fn write_one_insert(&mut self, item: HashMap<String, AttributeValue>) {
+        let put_req = PutRequest::builder().set_item(Some(item)).build().unwrap();
+        let req = WriteRequest::builder().put_request(put_req).build();
+        self.write_one_req(req);
     }
 
-    fn write_one_delete(&mut self, key: String, value: AttributeValue) {
-        self.delete_items.insert(key, value);
+    fn write_one_delete(&mut self, key: HashMap<String, AttributeValue>) {
+        let key = key
+            .into_iter()
+            .filter(|(k, _)| self.dynamodb_keys.contains(k))
+            .collect();
+        let del_req = DeleteRequest::builder().set_key(Some(key)).build().unwrap();
+        let req = WriteRequest::builder().delete_request(del_req).build();
+        self.write_one_req(req);
+    }
+
+    fn write_one_req(&mut self, req: WriteRequest) {
+        let r_req = DynamoDbRequest {
+            inner: req,
+            key_items: self.dynamodb_keys.clone(),
+        };
+        if let Some(v) = r_req.extract_pkey_values() {
+            self.request_items.retain(|item| {
+                !item
+                    .extract_pkey_values()
+                    .unwrap_or_default()
+                    .iter()
+                    .all(|x| v.contains(x))
+            });
+        }
+        self.request_items.push(r_req);
     }
 
     async fn write_chunk(&mut self) -> Result<()> {
-        if !self.insert_items.is_empty() {
-            let new_items = std::mem::take(&mut self.insert_items);
+        if !self.request_items.is_empty() {
+            let table = self.table.clone();
+            let req_items = std::mem::take(&mut self.request_items)
+                .into_iter()
+                .map(|r| r.inner)
+                .collect();
+            let reqs = hashmap! {
+                table => req_items,
+            };
             self.client
-                .put_item()
-                .table_name(self.table.clone())
-                .set_item(Some(new_items))
-                .send()
-                .await
-                .map_err(|e| {
-                    SinkError::DynamoDb(anyhow!(e).context("failed to put item to DynamoDB sink"))
-                })
-                .map(|_| ())?
-        }
-        if !self.delete_items.is_empty() {
-            let new_items = std::mem::take(&mut self.delete_items);
-            self.client
-                .delete_item()
-                .table_name(self.table.clone())
-                .set_key(Some(new_items))
+                .batch_write_item()
+                .set_request_items(Some(reqs))
+                .return_consumed_capacity(ReturnConsumedCapacity::None)
+                .return_item_collection_metrics(ReturnItemCollectionMetrics::None)
                 .send()
                 .await
                 .map_err(|e| {
                     SinkError::DynamoDb(
                         anyhow!(e).context("failed to delete item from DynamoDB sink"),
                     )
-                })
-                .map(|_| ())?
+                })?;
         }
 
         Ok(())
@@ -212,12 +241,31 @@ pub struct DynamoDbSinkWriter {
 impl DynamoDbSinkWriter {
     pub async fn new(config: DynamoDbConfig, schema: Schema) -> Result<Self> {
         let client = config.common.build_client().await?;
+        let table_name = &config.common.table;
+        let output = client
+            .describe_table()
+            .table_name(table_name)
+            .send()
+            .await
+            .map_err(|e| anyhow!(e))?;
+        let Some(table) = output.table else {
+            return Err(SinkError::DynamoDb(anyhow!(
+                "table {} not found",
+                table_name
+            )));
+        };
+        let dynamodb_keys = table
+            .key_schema
+            .unwrap_or_default()
+            .into_iter()
+            .map(|k| k.attribute_name)
+            .collect_vec();
 
         let payload_writer = DynamoDbPayloadWriter {
-            insert_items: HashMap::new(),
-            delete_items: HashMap::new(),
+            request_items: Vec::new(),
             client,
             table: config.common.table,
+            dynamodb_keys,
         };
 
         Ok(Self {
@@ -228,17 +276,15 @@ impl DynamoDbSinkWriter {
 
     async fn write_chunk_inner(&mut self, chunk: StreamChunk) -> Result<()> {
         for (op, row) in chunk.rows() {
+            let items = self.formatter.format_row(row)?;
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    for (k, v) in self.formatter.format_row(row)? {
-                        self.payload_writer.write_one_insert(k, v);
-                    }
+                    self.payload_writer.write_one_insert(items);
                 }
-                Op::Delete | Op::UpdateDelete => {
-                    for (k, v) in self.formatter.format_row(row)? {
-                        self.payload_writer.write_one_delete(k, v);
-                    }
+                Op::Delete => {
+                    self.payload_writer.write_one_delete(items);
                 }
+                Op::UpdateDelete => {}
             }
         }
         self.payload_writer.write_chunk().await
@@ -260,7 +306,7 @@ struct DynamoDbFormatter {
 }
 
 impl DynamoDbFormatter {
-    fn format_row(&self, row: RowRef<'_>) -> Result<Vec<(String, AttributeValue)>> {
+    fn format_row(&self, row: RowRef<'_>) -> Result<HashMap<String, AttributeValue>> {
         row.iter()
             .zip_eq_debug((self.schema.clone()).into_fields())
             .map(|(scalar, field)| {
