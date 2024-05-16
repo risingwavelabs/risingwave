@@ -29,8 +29,8 @@ use crate::hummock::sstable::filter::FilterBuilder;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    BatchUploadWriter, BlockMeta, CachePolicy, HummockResult, MemoryLimiter, SstableBuilder,
-    SstableBuilderOptions, SstableWriter, SstableWriterOptions, Xor16FilterBuilder,
+    BatchUploadWriter, BlockMeta, CachePolicy, HummockError, HummockResult, MemoryLimiter,
+    SstableBuilder, SstableBuilderOptions, SstableWriter, SstableWriterOptions, Xor16FilterBuilder,
 };
 use crate::monitor::CompactorMetrics;
 
@@ -45,7 +45,7 @@ pub trait TableBuilderFactory {
 
 pub struct SplitTableOutput {
     pub sst_info: LocalSstableInfo,
-    pub upload_join_handle: UploadJoinHandle,
+    // pub upload_join_handle: UploadJoinHandle,
 }
 
 /// A wrapper for [`SstableBuilder`] which automatically split key-value pairs into multiple tables,
@@ -264,6 +264,7 @@ where
     /// If there's no builder created, or current one is already sealed before, then this function
     /// will be no-op.
     pub async fn seal_current(&mut self) -> HummockResult<()> {
+        use await_tree::InstrumentAwait;
         if let Some(builder) = self.current_builder.take() {
             let builder_output = builder.finish().await?;
             {
@@ -302,8 +303,16 @@ where
                         .observe(builder_output.epoch_count as _);
                 }
             }
+
+            // TEST join upload handle before push
+            builder_output
+                .writer_output
+                .verbose_instrument_await("upload")
+                .await
+                .map_err(HummockError::sstable_upload_error)??;
+
             self.sst_outputs.push(SplitTableOutput {
-                upload_join_handle: builder_output.writer_output,
+                // upload_join_handle: builder_output.writer_output,
                 sst_info: builder_output.sst_info,
             });
         }

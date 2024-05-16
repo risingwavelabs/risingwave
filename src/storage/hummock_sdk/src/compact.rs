@@ -223,12 +223,14 @@ pub fn estimate_memory_for_compact_task(
     // output
     // builder will maintain SstableInfo + block_builder(block) + writer (block to vec)
     let estimated_meta_size = sst_capacity * task_max_sst_meta_ratio / 100;
-    if support_streaming_upload {
-        result += estimated_meta_size + 2 * block_size
-    } else {
-        result += estimated_meta_size + sst_capacity; // Use sst_capacity to avoid BatchUploader
-                                                      // memory bursts.
-    }
+    // if support_streaming_upload {
+    //     result += estimated_meta_size + 2 * block_size
+    // } else {
+    //     result += estimated_meta_size + sst_capacity; // Use sst_capacity to avoid BatchUploader
+    //                                                   // memory bursts.
+    // }
+
+    result += estimated_meta_size + sst_capacity;
 
     result
 }

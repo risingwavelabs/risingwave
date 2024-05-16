@@ -211,20 +211,20 @@ impl Compactor {
         is_share_buffer_compact: bool,
     ) -> HummockResult<Vec<LocalSstableInfo>> {
         let mut ssts = Vec::with_capacity(split_table_outputs.len());
-        let mut rets = vec![];
+        // let mut rets = vec![];
 
         for SplitTableOutput {
             sst_info,
-            upload_join_handle,
+            // upload_join_handle,
         } in split_table_outputs
         {
             let sst_size = sst_info.file_size();
             ssts.push(sst_info);
-            let ret = upload_join_handle
-                .verbose_instrument_await("upload")
-                .await
-                .map_err(HummockError::sstable_upload_error);
-            rets.push(ret);
+            // let ret = upload_join_handle
+            //     .verbose_instrument_await("upload")
+            //     .await
+            //     .map_err(HummockError::sstable_upload_error);
+            // rets.push(ret);
             if let Some(tracker) = &task_progress {
                 tracker.inc_ssts_uploaded();
                 tracker.dec_num_pending_write_io();
@@ -235,9 +235,9 @@ impl Compactor {
                 metrics.compaction_upload_sst_counts.inc();
             }
         }
-        for ret in rets {
-            ret??;
-        }
+        // for ret in rets {
+        //     ret??;
+        // }
         Ok(ssts)
     }
 
