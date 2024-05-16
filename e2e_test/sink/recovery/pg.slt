@@ -53,7 +53,7 @@ select count(*) from t;
 statement ok
 create table t2 (v1 int primary key) with (
   connector = 'postgres-cdc',
-  hostname = 'db'
+  hostname = 'db',
   port = '5432',
   username = 'postgres'
   password = 'postgres',
