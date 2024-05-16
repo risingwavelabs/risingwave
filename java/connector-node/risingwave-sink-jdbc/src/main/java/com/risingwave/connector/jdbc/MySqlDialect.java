@@ -19,9 +19,6 @@ import com.risingwave.connector.api.sink.SinkRow;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
-import java.time.LocalDateTime;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -124,25 +121,8 @@ public class MySqlDialect implements JdbcDialect {
             throws SQLException {
         // set the values of primary key fields
         int placeholderIdx = 1;
-        var columnDescs = tableSchema.getColumnDescs();
         for (int i = 0; i < pkIndices.length; ++i) {
-            int pkIdx = pkIndices[i];
-            Object pkField = row.get(pkIdx);
-            // remove the milliseconds part from the timestamp/timestamptz
-            switch (columnDescs.get(pkIdx).getDataType().getTypeName()) {
-                case TIMESTAMP:
-                    LocalDateTime ldt = (LocalDateTime) pkField;
-                    pkField =
-                            LocalDateTime.ofEpochSecond(
-                                    ldt.toEpochSecond(ZoneOffset.UTC), 0, ZoneOffset.UTC);
-                    break;
-                case TIMESTAMPTZ:
-                    OffsetDateTime odt = (OffsetDateTime) pkField;
-                    pkField = LocalDateTime.ofEpochSecond(odt.toEpochSecond(), 0, ZoneOffset.UTC);
-                    break;
-                default:
-                    break;
-            }
+            Object pkField = row.get(pkIndices[i]);
             stmt.setObject(placeholderIdx++, pkField, pkColumnSqlTypes[i]);
         }
     }
