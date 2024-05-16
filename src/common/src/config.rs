@@ -1751,7 +1751,7 @@ pub mod default {
     pub mod object_store_config {
         const DEFAULT_REQ_BACKOFF_INTERVAL_MS: u64 = 1000; // 1s
         const DEFAULT_REQ_BACKOFF_MAX_DELAY_MS: u64 = 10 * 1000; // 10s
-        const DEFAULT_REQ_MAX_RETRY_ATTEMPTS: usize = 5;
+        const DEFAULT_REQ_MAX_RETRY_ATTEMPTS: usize = 3;
 
         pub fn object_store_set_atomic_write_dir() -> bool {
             false
@@ -1779,7 +1779,7 @@ pub mod default {
 
         // init + upload_part + finish
         pub fn object_store_streaming_upload_attempt_timeout_ms() -> u64 {
-            10 * 1000 // 10s
+            5 * 1000 // 5s
         }
 
         pub fn object_store_streaming_upload_retry_attempts() -> usize {
@@ -1788,7 +1788,7 @@ pub mod default {
 
         // tips: depend on block_size
         pub fn object_store_read_attempt_timeout_ms() -> u64 {
-            16 * 1000 // 16s
+            8 * 1000 // 8s
         }
 
         pub fn object_store_read_retry_attempts() -> usize {
