@@ -35,8 +35,8 @@ use risingwave_storage::hummock::iterator::{ConcatIterator, ConcatIteratorInner,
 use risingwave_storage::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    BackwardSstableIterator, BatchSstableWriterFactory, CachePolicy, HummockResult,
-    MemoryLimiter, SstableBuilder, SstableBuilderOptions, SstableIteratorReadOptions, SstableStore,
+    BackwardSstableIterator, BatchSstableWriterFactory, CachePolicy, HummockResult, MemoryLimiter,
+    SstableBuilder, SstableBuilderOptions, SstableIteratorReadOptions, SstableStore,
     SstableStoreConfig, SstableWriterFactory, SstableWriterOptions, StreamingSstableWriterFactory,
     Xor16FilterBuilder,
 };
@@ -152,9 +152,7 @@ async fn generate_sstable_store(object_store: Arc<ObjectStoreImpl>) -> Arc<Sstab
         prefetch_buffer_capacity: 64 << 20,
         max_prefetch_block_number: 16,
         recent_filter: None,
-        state_store_metrics: Arc::new(global_hummock_state_store_metrics(
-            MetricLevel::Disabled,
-        )),
+        state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
         meta_cache_v2,
         block_cache_v2,
     }))
@@ -181,9 +179,7 @@ fn bench_builder(
     });
     let object_store = Arc::new(ObjectStoreImpl::S3(object_store));
 
-    let sstable_store = runtime.block_on(async {
-        generate_sstable_store(object_store).await
-    });
+    let sstable_store = runtime.block_on(async { generate_sstable_store(object_store).await });
 
     let mut group = c.benchmark_group("bench_multi_builder");
     group
@@ -239,9 +235,7 @@ fn bench_table_scan(c: &mut Criterion) {
         Arc::new(ObjectStoreConfig::default()),
     );
     let object_store = Arc::new(ObjectStoreImpl::InMem(store));
-    let sstable_store = runtime.block_on(async {
-        generate_sstable_store(object_store).await
-    });
+    let sstable_store = runtime.block_on(async { generate_sstable_store(object_store).await });
 
     let ssts = runtime.block_on(async {
         build_tables(CapacitySplitTableBuilder::for_test(
