@@ -55,9 +55,9 @@ create table t2 (v1 int primary key) with (
   connector = 'postgres-cdc',
   hostname = 'db',
   port = '5432',
-  username = 'postgres'
+  username = 'postgres',
   password = 'postgres',
-  database.name = 'postgres'.
+  database.name = 'postgres',
   table.name = 't',
   slot.name = 'pg_recovery_test_slot'
 );
