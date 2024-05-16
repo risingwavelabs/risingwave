@@ -480,12 +480,15 @@ impl HummockEventHandler {
                 total_count, "cannot acquire lock for all read version"
             );
         }
+
+        const TRY_LOCK_TIMEOUT: Duration = Duration::from_millis(1);
+
         while let Some(instance_id) = pending.pop_front() {
             let read_version = self
                 .local_read_version_mapping
                 .get(&instance_id)
                 .expect("have checked exist before");
-            if let Some(mut write_guard) = read_version.try_write_for(Duration::from_millis(10)) {
+            if let Some(mut write_guard) = read_version.try_write_for(TRY_LOCK_TIMEOUT) {
                 f(instance_id, &mut write_guard);
             } else {
                 warn!(instance_id, "failed to get lock again for instance");
