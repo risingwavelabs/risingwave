@@ -27,7 +27,7 @@ use risingwave_common::config::StorageMemoryConfig;
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
-    ObjectError, ObjectMetadataIter, ObjectStoreRef, ObjectStreamingUploader,
+    ObjectError, ObjectMetadataIter, ObjectStoreRef, ObjectStreamingUploader, StreamingUploader,
 };
 use risingwave_pb::hummock::SstableInfo;
 use serde::{Deserialize, Serialize};

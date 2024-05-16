@@ -47,9 +47,7 @@ use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use self::sim::SimObjectStore;
 
 pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
-pub type ObjectStreamingUploader = MonitoredStreamingUploader;
-
-type BoxedStreamingUploader = Box<dyn StreamingUploader>;
+pub type ObjectStreamingUploader = impl StreamingUploader;
 
 pub trait ObjectRangeBounds = RangeBounds<usize> + Clone + Send + Sync + std::fmt::Debug + 'static;
 
@@ -76,11 +74,10 @@ pub struct ObjectMetadata {
     pub total_size: usize,
 }
 
-#[async_trait::async_trait]
 pub trait StreamingUploader: Send {
-    async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()>;
+    fn write_bytes(&mut self, data: Bytes) -> impl Future<Output = ObjectResult<()>> + Send + '_;
 
-    async fn finish(self: Box<Self>) -> ObjectResult<()>;
+    fn finish(self) -> impl Future<Output = ObjectResult<()>> + Send;
 
     fn get_memory_usage(&self) -> u64;
 }
@@ -88,13 +85,14 @@ pub trait StreamingUploader: Send {
 /// The implementation must be thread-safe.
 #[async_trait::async_trait]
 pub trait ObjectStore: Send + Sync {
+    type StreamingUploader: StreamingUploader;
     /// Get the key prefix for object
     fn get_object_prefix(&self, obj_id: u64) -> String;
 
     /// Uploads the object to `ObjectStore`.
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()>;
 
-    async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader>;
+    async fn streaming_upload(&self, path: &str) -> ObjectResult<Self::StreamingUploader>;
 
     /// If objects are PUT using a multipart upload, it's a good practice to GET them in the same
     /// part sizes (or at least aligned to part boundaries) for best performance.
@@ -136,12 +134,149 @@ pub trait ObjectStore: Send + Sync {
     fn store_media_type(&self) -> &'static str;
 }
 
-pub enum ObjectStoreImpl {
-    InMem(MonitoredObjectStore<InMemObjectStore>),
-    Opendal(MonitoredObjectStore<OpendalObjectStore>),
-    S3(MonitoredObjectStore<S3ObjectStore>),
-    #[cfg(madsim)]
-    Sim(MonitoredObjectStore<SimObjectStore>),
+#[cfg(not(madsim))]
+macro_rules! for_all_object_store {
+    ($macro:ident $($args:tt)*) => {
+        $macro! {
+            {
+                { InMem, InMemObjectStore },
+                { Opendal, OpendalObjectStore },
+                { S3, S3ObjectStore }
+            }
+            $($args)*
+        }
+    }
+}
+
+#[cfg(madsim)]
+macro_rules! for_all_object_store {
+    ($macro:ident $($args:tt)*) => {
+        $macro! {
+            {
+                { InMem, InMemObjectStore },
+                { Opendal, OpendalObjectStore },
+                { S3, S3ObjectStore },
+                { Sim, SimObjectStore }
+            }
+            $($args)*
+        }
+    }
+}
+
+macro_rules! define_object_store_impl {
+    () => {
+        for_all_object_store! {
+            define_object_store_impl
+        }
+    };
+    (
+        {$(
+            {$variant:ident, $type_name:ty}
+        ),*}
+    ) => {
+        pub enum ObjectStoreImpl {
+            $(
+                $variant(MonitoredObjectStore<$type_name>),
+            )*
+        }
+    };
+}
+
+define_object_store_impl!();
+
+macro_rules! define_streaming_uploader_impl {
+    () => {
+        for_all_object_store! {
+            define_streaming_uploader_impl
+        }
+    };
+    (
+        {$(
+            {$variant:ident, $_type_name:ty}
+        ),*}
+    ) => {
+        enum StreamingUploaderImpl<
+            $($variant),*
+        > {
+            $(
+                $variant($variant),
+            )*
+        }
+
+        impl<
+            $($variant: StreamingUploader),*
+        > StreamingUploader for StreamingUploaderImpl<
+            $($variant),*
+        > {
+            async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
+                match self {
+                    $(
+                        StreamingUploaderImpl::$variant(uploader) => {
+                            uploader.write_bytes(data).await
+                        },
+                    )*
+                }
+            }
+
+            async fn finish(self) -> ObjectResult<()> {
+                match self {
+                    $(
+                        StreamingUploaderImpl::$variant(uploader) => {
+                            uploader.finish().await
+                        },
+                    )*
+                }
+            }
+
+            fn get_memory_usage(&self) -> u64 {
+                match self {
+                    $(
+                        StreamingUploaderImpl::$variant(uploader) => {
+                            uploader.get_memory_usage()
+                        },
+                    )*
+                }
+            }
+        }
+
+        impl ObjectStoreImpl {
+            async fn streaming_upload_inner(&self, path: &str) -> ObjectResult<ObjectStreamingUploader> {
+                Ok(match self {
+                    $(
+                        ObjectStoreImpl::$variant(object_store) => StreamingUploaderImpl::$variant(object_store.streaming_upload(path).await?),
+                    )*
+                })
+            }
+        }
+    };
+}
+
+define_streaming_uploader_impl!();
+
+macro_rules! dispatch_object_store {
+    (
+        {
+            $(
+                {$variant:ident, $_type_name:ty}
+            ),*
+        },
+        $object_store:expr,
+        $var_name:ident,
+        $func:expr
+    ) => {
+        match $object_store {
+            $(
+                ObjectStoreImpl::$variant($var_name) => {
+                    $func
+                },
+            )*
+        }
+    };
+    ($object_store:expr, |$var_name:ident| $func:expr) => {
+        for_all_object_store! {
+            dispatch_object_store, $object_store, $var_name, $func
+        }
+    };
 }
 
 macro_rules! dispatch_async {
@@ -158,22 +293,9 @@ macro_rules! object_store_impl_method_body {
     ($object_store:expr, $method_name:ident, $dispatch_macro:ident, $path:expr $(, $args:expr)*) => {
         {
             let path = $path;
-            match $object_store {
-                ObjectStoreImpl::InMem(in_mem) => {
-                    $dispatch_macro!(in_mem, $method_name, path $(, $args)*)
-                },
-                ObjectStoreImpl::Opendal(opendal) => {
-                    $dispatch_macro!(opendal, $method_name, path $(, $args)*)
-                },
-                ObjectStoreImpl::S3(s3) => {
-                    $dispatch_macro!(s3, $method_name, path $(, $args)*)
-                },
-                #[cfg(madsim)]
-                ObjectStoreImpl::Sim(in_mem) => {
-                    $dispatch_macro!(in_mem, $method_name, path $(, $args)*)
-                },
-            }
-
+            dispatch_object_store! {$object_store, |os| {
+                $dispatch_macro!(os, $method_name, path $(, $args)*)
+            }}
         }
     };
 }
@@ -187,21 +309,10 @@ macro_rules! object_store_impl_method_body_slice {
     ($object_store:expr, $method_name:ident, $dispatch_macro:ident, $paths:expr $(, $args:expr)*) => {
         {
             let paths_rem = partition_object_store_paths($paths);
-
-            match $object_store {
-                ObjectStoreImpl::InMem(in_mem) => {
-                    $dispatch_macro!(in_mem, $method_name, &paths_rem $(, $args)*)
-                },
-                ObjectStoreImpl::Opendal(opendal) => {
-                    $dispatch_macro!(opendal, $method_name, &paths_rem $(, $args)*)
-                },
-                ObjectStoreImpl::S3(s3) => {
-                    $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*)
-                },
-                #[cfg(madsim)]
-                ObjectStoreImpl::Sim(in_mem) => {
-                    $dispatch_macro!(in_mem, $method_name, &paths_rem $(, $args)*)
-                },
+            dispatch_object_store! {
+                $object_store, |os| {
+                    $dispatch_macro!(os, $method_name, &paths_rem $(, $args)*)
+                }
             }
         }
     };
@@ -212,8 +323,8 @@ impl ObjectStoreImpl {
         object_store_impl_method_body!(self, upload, dispatch_async, path, obj)
     }
 
-    pub async fn streaming_upload(&self, path: &str) -> ObjectResult<MonitoredStreamingUploader> {
-        object_store_impl_method_body!(self, streaming_upload, dispatch_async, path)
+    pub async fn streaming_upload(&self, path: &str) -> ObjectResult<ObjectStreamingUploader> {
+        self.streaming_upload_inner(path).await
     }
 
     pub async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
@@ -253,16 +364,9 @@ impl ObjectStoreImpl {
     }
 
     pub fn get_object_prefix(&self, obj_id: u64) -> String {
-        // FIXME: ObjectStoreImpl lacks flexibility for adding new interface to ObjectStore
-        // trait. Macro object_store_impl_method_body routes to local or remote only depending on
-        // the path
-        match self {
-            ObjectStoreImpl::InMem(store) => store.inner.get_object_prefix(obj_id),
-            ObjectStoreImpl::Opendal(store) => store.inner.get_object_prefix(obj_id),
-            ObjectStoreImpl::S3(store) => store.inner.get_object_prefix(obj_id),
-            #[cfg(madsim)]
-            ObjectStoreImpl::Sim(store) => store.inner.get_object_prefix(obj_id),
-        }
+        dispatch_object_store!(self, |store| {
+            store.inner.get_object_prefix(obj_id)
+        })
     }
 
     pub fn support_streaming_upload(&self) -> bool {
@@ -303,18 +407,18 @@ fn try_update_failure_metric<T>(
 ///   - `streaming_upload_finish`: The time spent calling `finish`.
 /// - `failure_count`: `streaming_upload_start`, `streaming_upload_write_bytes`,
 ///   `streaming_upload_finish`
-pub struct MonitoredStreamingUploader {
-    inner: BoxedStreamingUploader,
+pub struct MonitoredStreamingUploader<U: StreamingUploader> {
+    inner: U,
     object_store_metrics: Arc<ObjectStoreMetrics>,
     /// Length of data uploaded with this uploader.
     operation_size: usize,
     media_type: &'static str,
 }
 
-impl MonitoredStreamingUploader {
+impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
     pub fn new(
         media_type: &'static str,
-        handle: BoxedStreamingUploader,
+        handle: U,
         object_store_metrics: Arc<ObjectStoreMetrics>,
     ) -> Self {
         Self {
@@ -326,8 +430,8 @@ impl MonitoredStreamingUploader {
     }
 }
 
-impl MonitoredStreamingUploader {
-    pub async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
+impl<U: StreamingUploader> StreamingUploader for MonitoredStreamingUploader<U> {
+    async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
         let operation_type = OperationType::StreamingUpload;
         let operation_type_str = operation_type.as_str();
         let data_len = data.len();
@@ -358,7 +462,7 @@ impl MonitoredStreamingUploader {
         res
     }
 
-    pub async fn finish(self) -> ObjectResult<()> {
+    async fn finish(self) -> ObjectResult<()> {
         let operation_type = OperationType::StreamingUploadFinish;
         let operation_type_str = operation_type.as_str();
         let _timer = self
@@ -381,7 +485,7 @@ impl MonitoredStreamingUploader {
         res
     }
 
-    pub fn get_memory_usage(&self) -> u64 {
+    fn get_memory_usage(&self) -> u64 {
         self.inner.get_memory_usage()
     }
 }
@@ -544,7 +648,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         res
     }
 
-    pub async fn streaming_upload(&self, path: &str) -> ObjectResult<MonitoredStreamingUploader> {
+    pub async fn streaming_upload(
+        &self,
+        path: &str,
+    ) -> ObjectResult<MonitoredStreamingUploader<OS::StreamingUploader>> {
         let operation_type = OperationType::StreamingUploadInit;
         let operation_type_str = operation_type.as_str();
         let media_type = self.media_type();
