@@ -33,7 +33,7 @@ use tracing::warn;
 use crate::hummock::error::Result;
 use crate::hummock::manager::versioning::Versioning;
 use crate::hummock::manager::{read_lock, write_lock};
-use crate::hummock::metrics_utils::trigger_gc_stat;
+use crate::hummock::metrics_utils::{trigger_gc_stat, trigger_split_stat};
 use crate::hummock::HummockManager;
 
 #[derive(Default)]
@@ -235,6 +235,7 @@ impl HummockManager {
 
         let min_pinned_version_id = versioning.min_pinned_version_id();
         trigger_gc_stat(&self.metrics, &versioning.checkpoint, min_pinned_version_id);
+        trigger_split_stat(&self.metrics, &versioning.current_version);
         drop(versioning_guard);
         timer.observe_duration();
         self.metrics

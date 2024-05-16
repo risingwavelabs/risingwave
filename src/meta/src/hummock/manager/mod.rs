@@ -83,8 +83,8 @@ use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
     build_compact_task_level_type_metrics_label, get_or_create_local_table_stat,
     trigger_delta_log_stats, trigger_local_table_stat, trigger_lsm_stat, trigger_mv_stat,
-    trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state, trigger_split_stat,
-    trigger_sst_stat, trigger_version_stat, trigger_write_stop_stats,
+    trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state, trigger_sst_stat,
+    trigger_version_stat, trigger_write_stop_stats,
 };
 use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
@@ -2566,8 +2566,6 @@ impl HummockManager {
                                             compaction_group_config.group_id(),
                                         )
                                     }
-
-                                    trigger_split_stat(&hummock_manager.metrics, &current_version);
                                 }
 
                                 HummockTimerEvent::CompactionHeartBeatExpiredCheck => {
