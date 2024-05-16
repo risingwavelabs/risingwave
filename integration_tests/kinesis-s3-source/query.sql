@@ -1,6 +1,6 @@
 SELECT
     *
 FROM
-    ad_ctr_5min_mv
+    ad_ctr_5min
 limit
     10;
