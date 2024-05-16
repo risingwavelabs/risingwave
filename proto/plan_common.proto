@@ -198,6 +198,10 @@ message AdditionalColumnOffset {}
 
 message AdditionalColumnFilename {}
 
+message AdditionalColumnTableName {}
+
+message AdditionalColumnDatabaseName {}
+
 message AdditionalColumnHeader {
   string inner_field = 1;
   data.DataType data_type = 2;
@@ -215,6 +219,8 @@ message AdditionalColumn {
     AdditionalColumnHeader header_inner = 5;
     AdditionalColumnFilename filename = 6;
     AdditionalColumnHeaders headers = 7;
+    AdditionalColumnTableName table_name = 8;
+    AdditionalColumnDatabaseName database_name = 9;
   }
 }
 

@@ -22,12 +22,13 @@ use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType as PbDataType;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{
-    AdditionalColumn, AdditionalColumnFilename, AdditionalColumnHeader, AdditionalColumnHeaders,
-    AdditionalColumnKey, AdditionalColumnOffset, AdditionalColumnPartition,
-    AdditionalColumnTimestamp,
+    AdditionalColumn, AdditionalColumnDatabaseName, AdditionalColumnFilename,
+    AdditionalColumnHeader, AdditionalColumnHeaders, AdditionalColumnKey, AdditionalColumnOffset,
+    AdditionalColumnPartition, AdditionalColumnTableName, AdditionalColumnTimestamp,
 };
 
 use crate::error::ConnectorResult;
+use crate::source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR};
 use crate::source::{
     GCS_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, OPENDAL_S3_CONNECTOR, PULSAR_CONNECTOR,
     S3_CONNECTOR,
@@ -55,6 +56,14 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
             (OPENDAL_S3_CONNECTOR, HashSet::from(["file", "offset"])),
             (S3_CONNECTOR, HashSet::from(["file", "offset"])),
             (GCS_CONNECTOR, HashSet::from(["file", "offset"])),
+            (
+                MYSQL_CDC_CONNECTOR,
+                HashSet::from(["database_name", "table_name", "timestamp"]),
+            ),
+            (
+                POSTGRES_CDC_CONNECTOR,
+                HashSet::from(["database_name", "table_name", "timestamp"]),
+            ),
         ])
     });
 
@@ -179,6 +188,34 @@ pub fn build_additional_column_catalog(
             is_hidden: false,
         },
         "header" => build_header_catalog(column_id, &column_name, inner_field_name, data_type),
+
+        "table_name" => ColumnCatalog {
+            column_desc: ColumnDesc::named_with_additional_column(
+                column_name,
+                column_id,
+                DataType::Varchar,
+                AdditionalColumn {
+                    column_type: Some(AdditionalColumnType::TableName(
+                        AdditionalColumnTableName {},
+                    )),
+                },
+            ),
+            is_hidden: false,
+        },
+        "database_name" => ColumnCatalog {
+            column_desc: ColumnDesc::named_with_additional_column(
+                column_name,
+                column_id,
+                DataType::Varchar,
+                AdditionalColumn {
+                    column_type: Some(AdditionalColumnType::DatabaseName(
+                        AdditionalColumnDatabaseName {},
+                    )),
+                },
+            ),
+            is_hidden: false,
+        },
+
         _ => unreachable!(),
     };
 

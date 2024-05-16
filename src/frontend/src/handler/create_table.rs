@@ -56,7 +56,7 @@ use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InlineNowProcTime};
 use crate::handler::create_source::{
     bind_columns_from_source, bind_connector_props, bind_create_source, bind_source_watermark,
-    UPSTREAM_SOURCE_KEY,
+    handle_addition_columns, UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::{CdcScanOptions, SourceNodeKind};
@@ -741,6 +741,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
     mut col_id_gen: ColumnIdGenerator,
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
+    include_column_options: IncludeOption,
 ) -> Result<(PlanRef, PbTable)> {
     let session = context.session_ctx().clone();
     let db_name = session.database();
@@ -766,6 +767,10 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
     };
 
     let mut columns = bind_sql_columns(&column_defs)?;
+    let with_properties = source.with_properties.clone().into_iter().collect();
+    // add additional columns before bind pk, because `format upsert` requires the key column
+    handle_addition_columns(&with_properties, include_column_options, &mut columns)?;
+    tracing::debug!(?columns, "columns w/ added cols");
 
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(c.name())
@@ -998,6 +1003,7 @@ pub(super) async fn handle_create_table_plan(
                     col_id_gen,
                     on_conflict,
                     with_version_column,
+                    include_column_options,
                 )?;
 
                 ((plan, None, table), TableJobType::SharedCdcSource)
