@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::convert::TryFrom;
 use std::num::NonZeroU32;
 
+use risingwave_common::bail_not_implemented;
 use risingwave_connector::source::kafka::private_link::{
     insert_privatelink_broker_rewrite_map, CONNECTION_NAME_KEY, PRIVATELINK_ENDPOINT_KEY,
 };
@@ -122,9 +123,12 @@ impl WithOptions {
 }
 
 pub(crate) fn resolve_secret_in_with_options(
-    with_options: &mut WithOptions,
+    _with_options: &mut WithOptions,
+    session: &SessionImpl,
 ) -> RwResult<HashMap<String, u32>> {
-    todo!()
+    // todo: implement the function and take `resolve_privatelink_in_with_option` as reference
+
+    Ok(HashMap::new())
 }
 
 pub(crate) fn resolve_privatelink_in_with_option(

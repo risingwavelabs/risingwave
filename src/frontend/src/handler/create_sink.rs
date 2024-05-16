@@ -145,7 +145,7 @@ pub fn gen_sink_plan(
             resolve_privatelink_in_with_option(&mut with_options, &sink_schema_name, session)?;
         conn_id.map(ConnectionId)
     };
-    let secret_ref = resolve_secret_in_with_options(&mut with_options)?;
+    let secret_ref = resolve_secret_in_with_options(&mut with_options, session)?;
 
     let emit_on_window_close = stmt.emit_mode == Some(EmitMode::OnWindowClose);
     if emit_on_window_close {

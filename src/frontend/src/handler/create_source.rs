@@ -81,7 +81,7 @@ use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
 use crate::session::SessionImpl;
-use crate::utils::resolve_privatelink_in_with_option;
+use crate::utils::{resolve_privatelink_in_with_option, resolve_secret_in_with_options};
 use crate::{bind_data_type, build_graph, OptimizerContext, WithOptions};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
@@ -1412,6 +1412,7 @@ pub async fn bind_create_source(
     let mut with_properties = WithOptions::new(with_properties);
     let connection_id =
         resolve_privatelink_in_with_option(&mut with_properties, &schema_name, session)?;
+    let _secret_ref = resolve_secret_in_with_options(&mut with_properties, session)?;
 
     let definition: String = handler_args.normalized_sql.clone();
 
