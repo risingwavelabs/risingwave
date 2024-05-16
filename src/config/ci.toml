@@ -20,7 +20,7 @@ imm_merge_threshold = 2
 streaming_upload_attempt_timeout_ms = 10000
 upload_retry_attempts = 5
 read_attempt_timeout_ms = 16000
-read_retry_attempts = 5
+read_retry_attempts = 6
 
 [system]
 barrier_interval_ms = 250
