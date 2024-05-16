@@ -111,7 +111,7 @@ where
         let upstream_table_id = self.upstream_table.table_id();
         let mut upstream_table = self.upstream_table;
         let vnodes = upstream_table.vnodes().clone();
-        let mut rate_limit = self.rate_limit;
+        let rate_limit = self.rate_limit;
 
         // These builders will build data chunks.
         // We must supply them with the full datatypes which correspond to
@@ -139,19 +139,15 @@ where
         // Permit a +10% fluctuation in barrier latency. Set baseline to 5s.
         let mut total_barrier_latency = Self::get_total_barrier_latency(&self.metrics);
         let initial_barrier_latency = Self::get_barrier_latency(&self.metrics);
-        let mut barrier_latency = initial_barrier_latency;
         let baseline_barrier_latency = {
-            let fluctuation = barrier_latency * 0.1;
-            if barrier_latency < 5.0 {
+            if initial_barrier_latency < 5.0 {
                 5.0
             } else {
-                barrier_latency + fluctuation
+                initial_barrier_latency * 2.0
             }
         };
         let adaptive_rate_limit = true;
         let mut rate_limit = Some(INITIAL_ADAPTIVE_RATE_LIMIT);
-        let mut threshold_rate_limit = 50_000;
-        let mut rate_limit_linear_offset = 1000;
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
@@ -564,12 +560,8 @@ where
                         &self.metrics,
                         baseline_barrier_latency,
                         &mut total_barrier_latency,
-                        initial_barrier_latency,
-                        &mut barrier_latency,
                         &mut rate_limit,
                         &mut rate_limiter,
-                        &mut threshold_rate_limit,
-                        rate_limit_linear_offset,
                     )
                 }
 
@@ -648,84 +640,51 @@ where
         metrics: &StreamingMetrics,
         baseline_barrier_latency: f64,
         total_barrier_latency: &mut f64,
-        initial_barrier_latency: f64,
-        barrier_latency: &mut f64,
         rate_limit: &mut Option<usize>,
         rate_limiter: &mut Option<BackfillRateLimiter>,
-        threshold_rate_limit: &mut usize,
-        rate_limit_linear_offset: usize,
     ) {
-        // First, check if we exceed the barrier latency
         let new_total_barrier_latency = Self::get_total_barrier_latency(metrics);
         let new_barrier_latency = new_total_barrier_latency - *total_barrier_latency;
-        let barrier_latency_delta = f64::max(0.0, new_barrier_latency - initial_barrier_latency);
-        let scaling_factor = 1.0 - (barrier_latency_delta / initial_barrier_latency);
-        let scaling_factor = f64::max(0.1, scaling_factor);
-        assert!(
-            scaling_factor <= 1.0,
-            "scaling factor should be less than 1, {barrier_latency_delta}, {initial_barrier_latency}"
-        );
-        // If it's the same as the previous_barrier_latency it either implies:
-        // 1. The previous barriers have not been collected yet,
-        //    the latency numbers are not updated.
-        // 2. There's some small chance that the barrier latency is the same
-        //    (unlikely because it's down to fractional seconds).
-        // In case of 1, we don't adapt the rate limit at all.
-        // We must measure the outcome of the barrier latency first.
-        // TODO(kwannoel): We can adjust the rate limit using barrier_latency as an input,
-        // where we decrease the rate at which it increases, with barrier_latency_delta as a scaling factor.
-        // It also depends if barrier_latency undergoes a sudden increase or regular increase.
+        *total_barrier_latency = new_total_barrier_latency;
         let new_rate_limit = if new_barrier_latency == 0.0 {
             tracing::trace!(
                 target: "adaptive_rate_limit",
                 actor_id,
-                barrier_latency,
                 ?rate_limit,
                 "waiting for barrier latency"
             );
             *rate_limit
             // do nothing
         } else if new_barrier_latency > baseline_barrier_latency {
-            // Exceed
-            *threshold_rate_limit /= 2;
             tracing::debug!(
                 target: "adaptive_rate_limit",
                 actor_id,
                 new_barrier_latency,
-                threshold_rate_limit,
-                "barrier latency exceeds threshold"
+                "barrier latency exceeds threshold, reset to initial rate limit"
             );
             Some(INITIAL_ADAPTIVE_RATE_LIMIT)
         } else if let Some(rate_limit_set) = rate_limit {
-            let new_rate_limit = if rate_limit_set < threshold_rate_limit {
-                let scaled = (*rate_limit_set as f64) * (1.0 + scaling_factor);
-                tracing::debug!(
-                    target: "adaptive_rate_limit",
-                    actor_id,
-                    scaled,
-                    scaling_factor,
-                    "scaling rate limit"
-                );
-                f64::max(1_f64, scaled).round() as usize
-            } else {
-                // rate_limit_set >= threshold_rate_limit
-                // FIXME: For linear offset,
-                // it must not be such that adding it immediately exceeds the threshold.
-                // Can we just get rid of the linear offset?
-                *rate_limit_set + rate_limit_linear_offset
-            };
+            let barrier_latency_diff = baseline_barrier_latency - new_barrier_latency;
+            let scaling_factor = barrier_latency_diff / baseline_barrier_latency;
+            let scaled = (*rate_limit_set as f64) * scaling_factor;
+            tracing::debug!(
+                target: "adaptive_rate_limit",
+                actor_id,
+                scaled,
+                scaling_factor,
+                "scaling rate limit"
+            );
+            let new_rate_limit = f64::max(1_f64, scaled).round() as usize;
             Some(new_rate_limit)
         } else {
             *rate_limit
         };
-        *total_barrier_latency = new_total_barrier_latency;
         if *rate_limit != new_rate_limit {
             *rate_limit = new_rate_limit;
-            *barrier_latency = new_barrier_latency;
             tracing::trace!(
                 target: "adaptive_rate_limit",
                 actor_id,
-                barrier_latency,
+                new_barrier_latency,
                 ?rate_limit,
                 "adjusted rate limit"
             );
