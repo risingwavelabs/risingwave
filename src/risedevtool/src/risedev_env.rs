@@ -91,6 +91,22 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 // It's expected to create another dedicated user for the source.
                 writeln!(env, r#"RISEDEV_MYSQL_WITH_OPTIONS_COMMON="connector='mysql-cdc',hostname='{host}',port='{port}'""#,).unwrap();
             }
+            ServiceConfig::Pubsub(c) => {
+                let address = &c.address;
+                let port = &c.port;
+                writeln!(env, r#"RISEDEV_PUBSUB_WITH_OPTIONS_COMMON="connector='google_pubsub',pubsub.emulator_host='{address}:{port}'""#,).unwrap();
+            }
+            ServiceConfig::Postgres(c) => {
+                let host = &c.address;
+                let port = &c.port;
+                let user = &c.user;
+                let password = &c.password;
+                // These envs are used by `postgres` cli.
+                writeln!(env, r#"PGHOST="{host}""#,).unwrap();
+                writeln!(env, r#"PGPORT="{port}""#,).unwrap();
+                writeln!(env, r#"PGUSER="{user}""#,).unwrap();
+                writeln!(env, r#"PGPASSWORD="{password}""#,).unwrap();
+            }
             _ => {}
         }
     }

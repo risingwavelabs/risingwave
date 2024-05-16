@@ -99,7 +99,7 @@ pub enum ExprError {
     Udf(
         #[from]
         #[backtrace]
-        risingwave_udf::Error,
+        Box<arrow_udf_flight::Error>,
     ),
 
     #[error("not a constant")]
@@ -119,6 +119,10 @@ pub enum ExprError {
 
     #[error("error in cryptography: {0}")]
     Cryptography(Box<CryptographyError>),
+
+    /// Function error message returned by UDF.
+    #[error("{0}")]
+    Custom(String),
 }
 
 #[derive(Debug)]
@@ -152,6 +156,12 @@ impl From<PbFieldNotFound> for ExprError {
     }
 }
 
+impl From<arrow_udf_flight::Error> for ExprError {
+    fn from(err: arrow_udf_flight::Error) -> Self {
+        Self::Udf(Box::new(err))
+    }
+}
+
 /// A collection of multiple errors.
 #[derive(Error, Debug)]
 pub struct MultiExprError(Box<[ExprError]>);
@@ -175,6 +185,12 @@ impl Display for MultiExprError {
 impl From<Vec<ExprError>> for MultiExprError {
     fn from(v: Vec<ExprError>) -> Self {
         Self(v.into_boxed_slice())
+    }
+}
+
+impl FromIterator<ExprError> for MultiExprError {
+    fn from_iter<T: IntoIterator<Item = ExprError>>(iter: T) -> Self {
+        Self(iter.into_iter().collect())
     }
 }
 

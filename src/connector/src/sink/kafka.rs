@@ -35,7 +35,9 @@ use with_options::WithOptions;
 
 use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam};
-use crate::connector_common::{KafkaCommon, KafkaPrivateLinkCommon, RdKafkaPropertiesCommon};
+use crate::connector_common::{
+    AwsAuthProps, KafkaCommon, KafkaPrivateLinkCommon, RdKafkaPropertiesCommon,
+};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
@@ -43,7 +45,9 @@ use crate::sink::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt, FormattedSink,
 };
 use crate::sink::{DummySinkCommitCoordinator, Result, SinkWriterParam};
-use crate::source::kafka::{KafkaProperties, KafkaSplitEnumerator, PrivateLinkProducerContext};
+use crate::source::kafka::{
+    KafkaContextCommon, KafkaProperties, KafkaSplitEnumerator, RwProducerContext,
+};
 use crate::source::{SourceEnumeratorContext, SplitEnumerator};
 use crate::{
     deserialize_duration_from_string, deserialize_u32_from_string, dispatch_sink_formatter_impl,
@@ -244,6 +248,9 @@ pub struct KafkaConfig {
 
     #[serde(flatten)]
     pub privatelink_common: KafkaPrivateLinkCommon,
+
+    #[serde(flatten)]
+    pub aws_auth_props: AwsAuthProps,
 }
 
 impl KafkaConfig {
@@ -274,6 +281,7 @@ impl From<KafkaConfig> for KafkaProperties {
             rdkafka_properties_common: val.rdkafka_properties_common,
             rdkafka_properties_consumer: Default::default(),
             privatelink_common: val.privatelink_common,
+            aws_auth_props: val.aws_auth_props,
             unknown_fields: Default::default(),
         }
     }
@@ -393,7 +401,7 @@ const KAFKA_WRITER_MAX_QUEUE_SIZE_RATIO: f32 = 1.2;
 const KAFKA_WRITER_MAX_QUEUE_SIZE: usize = 100000;
 
 struct KafkaPayloadWriter<'a> {
-    inner: &'a FutureProducer<PrivateLinkProducerContext>,
+    inner: &'a FutureProducer<RwProducerContext>,
     add_future: DeliveryFutureManagerAddFuture<'a, KafkaSinkDeliveryFuture>,
     config: &'a KafkaConfig,
 }
@@ -402,13 +410,13 @@ pub type KafkaSinkDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError> + 
 
 pub struct KafkaSinkWriter {
     formatter: SinkFormatterImpl,
-    inner: FutureProducer<PrivateLinkProducerContext>,
+    inner: FutureProducer<RwProducerContext>,
     config: KafkaConfig,
 }
 
 impl KafkaSinkWriter {
     async fn new(config: KafkaConfig, formatter: SinkFormatterImpl) -> Result<Self> {
-        let inner: FutureProducer<PrivateLinkProducerContext> = {
+        let inner: FutureProducer<RwProducerContext> = {
             let mut c = ClientConfig::new();
 
             // KafkaConfig configuration
@@ -419,13 +427,16 @@ impl KafkaSinkWriter {
             c.set("bootstrap.servers", &config.common.brokers);
 
             // Create the producer context, will be used to create the producer
-            let producer_ctx = PrivateLinkProducerContext::new(
-                config.privatelink_common.broker_rewrite_map.clone(),
-                // fixme: enable kafka native metrics for sink
+            let broker_rewrite_map = config.privatelink_common.broker_rewrite_map.clone();
+            let ctx_common = KafkaContextCommon::new(
+                broker_rewrite_map,
                 None,
                 None,
-            )?;
-
+                config.aws_auth_props.clone(),
+                config.common.is_aws_msk_iam(),
+            )
+            .await?;
+            let producer_ctx = RwProducerContext::new(ctx_common);
             // Generate the producer
             c.create_with_context(producer_ctx).await?
         };

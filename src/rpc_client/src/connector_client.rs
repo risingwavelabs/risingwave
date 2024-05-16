@@ -278,7 +278,6 @@ impl ConnectorClient {
         &self,
         payload_schema: Option<TableSchema>,
         sink_proto: PbSinkParam,
-        sink_payload_format: SinkPayloadFormat,
     ) -> Result<SinkWriterStreamHandle> {
         let mut rpc_client = self.rpc_client.clone();
         let (handle, first_rsp) = SinkWriterStreamHandle::initialize(
@@ -286,7 +285,6 @@ impl ConnectorClient {
                 request: Some(SinkRequest::Start(StartSink {
                     payload_schema,
                     sink_param: Some(sink_proto),
-                    format: sink_payload_format as i32,
                 })),
             },
             |rx| async move {
