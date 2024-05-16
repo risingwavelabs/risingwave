@@ -161,23 +161,21 @@ macro_rules! enum_map {
                 {$variant:ident, $_type_name:ty}
             ),*
         },
-        $source_enum_type:ident,
-        $target_enum_type:ident,
         $object_store:expr,
         $var_name:ident,
         $func:expr
     ) => {
         match $object_store {
             $(
-                $source_enum_type::$variant($var_name) => $target_enum_type::$variant({
+                ObjectStoreEnum::$variant($var_name) => ObjectStoreEnum::$variant({
                     $func
                 }),
             )*
         }
     };
-    ($source_enum_type:ident, $target_enum_type:ident, $object_store:expr, |$var_name:ident| $func:expr) => {
+    ($object_store:expr, |$var_name:ident| $func:expr) => {
         for_all_object_store! {
-            enum_map, $source_enum_type, $target_enum_type, $object_store, $var_name, $func
+            enum_map, $object_store, $var_name, $func
         }
     };
 }
@@ -286,7 +284,7 @@ impl ObjectStoreImpl {
     }
 
     pub async fn streaming_upload(&self, path: &str) -> ObjectResult<ObjectStreamingUploader> {
-        Ok(enum_map!(Self, StreamingUploaderImpl, self, |store| {
+        Ok(enum_map!(self, |store| {
             store.streaming_upload(path).await?
         }))
     }
