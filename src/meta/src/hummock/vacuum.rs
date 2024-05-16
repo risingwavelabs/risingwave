@@ -95,7 +95,7 @@ impl VacuumManager {
                 pending_object_ids
             } else {
                 // 2. If no pending SST objects, then fetch new ones.
-                let mut objects_to_delete = self.hummock_manager.get_objects_to_delete().await;
+                let mut objects_to_delete = self.hummock_manager.get_objects_to_delete();
                 self.filter_out_pinned_ssts(&mut objects_to_delete).await?;
                 if objects_to_delete.is_empty() {
                     return Ok(vec![]);
@@ -237,13 +237,13 @@ mod tests {
         assert_eq!(vacuum.vacuum_metadata().await.unwrap(), 6);
         assert_eq!(vacuum.vacuum_metadata().await.unwrap(), 0);
 
-        assert!(hummock_manager.get_objects_to_delete().await.is_empty());
+        assert!(hummock_manager.get_objects_to_delete().is_empty());
         hummock_manager
             .unpin_version_before(context_id, HummockVersionId::MAX)
             .await
             .unwrap();
         hummock_manager.create_version_checkpoint(0).await.unwrap();
-        assert!(!hummock_manager.get_objects_to_delete().await.is_empty());
+        assert!(!hummock_manager.get_objects_to_delete().is_empty());
         // No SST deletion is scheduled because no available worker.
         assert_eq!(vacuum.vacuum_object().await.unwrap().len(), 0);
         let _receiver = compactor_manager.add_compactor(context_id);
