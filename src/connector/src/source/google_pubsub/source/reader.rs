@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Context;
 use async_trait::async_trait;
-use chrono::{TimeZone, Utc};
 use futures_async_stream::try_stream;
-use google_cloud_pubsub::subscription::{SeekTo, Subscription};
+use google_cloud_pubsub::subscription::Subscription;
 use risingwave_common::{bail, ensure};
 use tonic::Code;
 
