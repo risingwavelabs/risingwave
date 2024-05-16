@@ -150,7 +150,6 @@ impl HummockJavaBindingIterator {
                         ..Default::default()
                     },
                     read_version_tuple,
-                    None,
                 )
                 .await?;
             streams.push(to_deserialized_stream(iter, row_serde.clone()));

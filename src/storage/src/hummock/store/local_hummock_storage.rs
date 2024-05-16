@@ -153,7 +153,7 @@ impl LocalHummockStorage {
         let table_key_range = table_key_range;
 
         self.hummock_version_reader
-            .iter(table_key_range, epoch, read_options, read_snapshot, None)
+            .iter(table_key_range, epoch, read_options, read_snapshot)
             .await
     }
 
@@ -207,7 +207,7 @@ impl LocalHummockStorage {
         )?;
 
         self.hummock_version_reader
-            .iter(
+            .iter_with_memtable(
                 table_key_range,
                 epoch,
                 read_options,

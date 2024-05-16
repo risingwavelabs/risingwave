@@ -53,8 +53,9 @@ use crate::hummock::utils::{
 };
 use crate::hummock::{
     get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, BackwardIteratorFactory,
-    ForwardIteratorFactory, HummockError, HummockResult, HummockStorageIteratorInner,
-    HummockStorageRevIteratorInner, ReadVersionTuple, Sstable, SstableIterator,
+    ForwardIteratorFactory, HummockError, HummockResult, HummockStorageIterator,
+    HummockStorageIteratorInner, HummockStorageRevIteratorInner, ReadVersionTuple, Sstable,
+    SstableIterator,
 };
 use crate::mem_table::{
     ImmId, ImmutableMemtable, MemTableHummockIterator, MemTableHummockRevIterator,
@@ -756,7 +757,24 @@ impl HummockVersionReader {
         Ok(None)
     }
 
-    pub async fn iter<'a, 'b>(
+    pub async fn iter(
+        &self,
+        table_key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+        read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
+    ) -> StorageResult<HummockStorageIterator> {
+        self.iter_with_memtable(
+            table_key_range,
+            epoch,
+            read_options,
+            read_version_tuple,
+            None,
+        )
+        .await
+    }
+
+    pub async fn iter_with_memtable<'a, 'b>(
         &'a self,
         table_key_range: TableKeyRange,
         epoch: u64,
