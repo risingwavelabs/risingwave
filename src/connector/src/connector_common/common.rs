@@ -20,7 +20,6 @@ use std::time::Duration;
 use anyhow::{anyhow, Context};
 use async_nats::jetstream::consumer::DeliverPolicy;
 use async_nats::jetstream::{self};
-use aws_sdk_dynamodb::client::Client as DynamoDBClient;
 use aws_sdk_kinesis::Client as KinesisClient;
 use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
 use pulsar::{Authentication, Pulsar, TokioExecutor};
@@ -702,48 +701,6 @@ impl NatsCommon {
             jwt, seed
         );
         Ok(creds)
-    }
-}
-
-#[derive(Deserialize, Debug, Clone, WithOptions)]
-pub struct DynamoDbCommon {
-    #[serde(rename = "table", alias = "dynamodb.table")]
-    pub table: String,
-    // #[serde(rename = "primary_key", alias = "dynamodb.primary_key")]
-    // pub primary_key: String,
-    // #[serde(rename = "sort_key", alias = "dynamodb.sort_key")]
-    // pub sort_key: Option<String>,
-    #[serde(rename = "aws.region")]
-    pub stream_region: String,
-    #[serde(rename = "aws.endpoint")]
-    pub endpoint: Option<String>,
-    #[serde(rename = "aws.credentials.access_key_id")]
-    pub credentials_access_key: Option<String>,
-    #[serde(rename = "aws.credentials.secret_access_key")]
-    pub credentials_secret_access_key: Option<String>,
-    #[serde(rename = "aws.credentials.session_token")]
-    pub session_token: Option<String>,
-    #[serde(rename = "aws.credentials.role.arn")]
-    pub assume_role_arn: Option<String>,
-    #[serde(rename = "aws.credentials.role.external_id")]
-    pub assume_role_external_id: Option<String>,
-}
-
-impl DynamoDbCommon {
-    pub(crate) async fn build_client(&self) -> ConnectorResult<DynamoDBClient> {
-        let config = AwsAuthProps {
-            region: Some(self.stream_region.clone()),
-            endpoint: self.endpoint.clone(),
-            access_key: self.credentials_access_key.clone(),
-            secret_key: self.credentials_secret_access_key.clone(),
-            session_token: self.session_token.clone(),
-            arn: self.assume_role_arn.clone(),
-            external_id: self.assume_role_external_id.clone(),
-            profile: Default::default(),
-        };
-        let aws_config = config.build_config().await?;
-
-        Ok(DynamoDBClient::new(&aws_config))
     }
 }
 
