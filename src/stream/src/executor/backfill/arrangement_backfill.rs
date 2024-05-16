@@ -665,16 +665,16 @@ where
             Some(INITIAL_ADAPTIVE_RATE_LIMIT)
         } else if let Some(rate_limit_set) = rate_limit {
             let barrier_latency_diff = baseline_barrier_latency - new_barrier_latency;
-            let scaling_factor = barrier_latency_diff / baseline_barrier_latency;
-            let scaled = (*rate_limit_set as f64) * scaling_factor;
+            let scaling_factor = 1 + barrier_latency_diff / baseline_barrier_latency;
+            let scaled_rate_limit = (*rate_limit_set as f64) * scaling_factor;
+            let new_rate_limit = f64::max(1_f64, scaled_rate_limit).round() as usize;
             tracing::debug!(
                 target: "adaptive_rate_limit",
                 actor_id,
-                scaled,
+                new_rate_limit,
                 scaling_factor,
                 "scaling rate limit"
             );
-            let new_rate_limit = f64::max(1_f64, scaled).round() as usize;
             Some(new_rate_limit)
         } else {
             *rate_limit
