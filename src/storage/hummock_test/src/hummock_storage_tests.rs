@@ -16,7 +16,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes};
-use foyer::memory::CacheContext;
+use foyer::CacheContext;
 use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::buffer::BitmapBuilder;
@@ -37,7 +37,6 @@ use risingwave_storage::hummock::store::version::read_filter_for_version;
 use risingwave_storage::hummock::{CachePolicy, HummockStorage, LocalHummockStorage};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
-use risingwave_storage::StateStore;
 
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
 use crate::test_utils::{gen_key_from_str, prepare_hummock_test_env, TestIngestBatch};

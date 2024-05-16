@@ -125,16 +125,13 @@ impl StatelessSimpleAggExecutor {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::schema_test_utils;
     use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
     use crate::executor::test_utils::agg_executor::generate_agg_schema;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{Execute, StatelessSimpleAggExecutor};
 
     #[tokio::test]
     async fn test_no_chunk() {

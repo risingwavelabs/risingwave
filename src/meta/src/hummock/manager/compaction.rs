@@ -49,7 +49,7 @@ pub struct Compaction {
     /// `CompactStatus` of each compaction group
     pub compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus>,
 
-    pub deterministic_mode: bool,
+    pub _deterministic_mode: bool,
 }
 
 impl HummockManager {

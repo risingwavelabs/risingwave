@@ -13,14 +13,13 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::default::Default;
 use std::ops::Bound;
 use std::ops::Bound::*;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use either::Either;
-use foyer::memory::CacheContext;
+use foyer::CacheContext;
 use futures::{pin_mut, FutureExt, Stream, StreamExt, TryStreamExt};
 use futures_async_stream::for_await;
 use itertools::{izip, Itertools};

@@ -31,6 +31,7 @@ either = "1"
 enum-as-inner = "0.6"
 etcd-client = { workspace = true }
 fail = "0.5"
+function_name = "0.3.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
 hyper = "0.14" # required by tonic

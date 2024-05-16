@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use pgwire::pg_response::StatementType;
-use risingwave_sqlparser::ast::{FunctionDesc, ReferentialAction};
-
 use super::*;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::CatalogError;

@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::convert::AsRef;
-
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{BoxedError, NotImplemented};
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
@@ -113,7 +111,7 @@ pub enum ErrorKind {
     NotImplemented(#[from] NotImplemented),
 
     #[error(transparent)]
-    Internal(
+    Uncategorized(
         #[from]
         #[backtrace]
         anyhow::Error,
@@ -150,7 +148,7 @@ impl From<PbFieldNotFound> for StreamExecutorError {
 
 impl From<String> for StreamExecutorError {
     fn from(s: String) -> Self {
-        ErrorKind::Internal(anyhow::anyhow!(s)).into()
+        ErrorKind::Uncategorized(anyhow::anyhow!(s)).into()
     }
 }
 

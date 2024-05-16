@@ -195,8 +195,6 @@ mod tests {
     use std::sync::Arc;
 
     use futures::StreamExt;
-    use itertools::Itertools;
-    use risingwave_common::array::Array;
     use risingwave_common::catalog::{
         schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
     };
