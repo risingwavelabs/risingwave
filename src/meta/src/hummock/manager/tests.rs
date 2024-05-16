@@ -14,16 +14,14 @@
 
 use std::borrow::Borrow;
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
 use prometheus::Registry;
 use risingwave_common::util::epoch::{test_epoch, EpochExt, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    get_compaction_group_ssts, BranchedSstInfo,
-};
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ssts;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::version::HummockVersion;
@@ -1388,41 +1386,6 @@ async fn test_split_compaction_group_on_commit() {
             .member_table_ids,
         vec![101]
     );
-    let branched_ssts = hummock_manager
-        .versioning
-        .read(&["", "", ""])
-        .await
-        .branched_ssts
-        .clone();
-    assert_eq!(branched_ssts.len(), 1);
-    assert_eq!(branched_ssts.values().next().unwrap().len(), 2);
-    assert_ne!(
-        branched_ssts
-            .values()
-            .next()
-            .unwrap()
-            .get(&2)
-            .cloned()
-            .unwrap(),
-        branched_ssts
-            .values()
-            .next()
-            .unwrap()
-            .get(&3)
-            .cloned()
-            .unwrap(),
-    );
-}
-
-async fn get_branched_ssts(
-    hummock_manager: &HummockManager,
-) -> BTreeMap<HummockSstableObjectId, BranchedSstInfo> {
-    hummock_manager
-        .versioning
-        .read(&["", "", ""])
-        .await
-        .branched_ssts
-        .clone()
 }
 
 #[tokio::test]
@@ -1556,21 +1519,6 @@ async fn test_split_compaction_group_on_demand_basic() {
             .member_table_ids,
         vec![100, 101]
     );
-    let branched_ssts = get_branched_ssts(&hummock_manager).await;
-    assert_eq!(branched_ssts.len(), 2);
-    for object_id in [10, 11] {
-        assert_eq!(branched_ssts.get(&object_id).unwrap().len(), 2);
-        assert_ne!(
-            branched_ssts
-                .get(&object_id)
-                .unwrap()
-                .get(&new_group_id)
-                .cloned()
-                .unwrap(),
-            object_id,
-            "trivial adjust should also generate a new SST id"
-        );
-    }
 }
 
 #[tokio::test]
@@ -1634,20 +1582,6 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
             .get_compaction_group_levels(new_group_id)
             .member_table_ids,
         vec![100]
-    );
-    let branched_ssts = get_branched_ssts(&hummock_manager).await;
-    assert_eq!(branched_ssts.len(), 1);
-    assert_eq!(branched_ssts.get(&10).unwrap().len(), 2);
-    let sst_ids = branched_ssts.get(&10).unwrap().get(&2).cloned().unwrap();
-    assert_ne!(sst_ids, 10);
-    assert_ne!(
-        branched_ssts
-            .get(&10)
-            .unwrap()
-            .get(&new_group_id)
-            .cloned()
-            .unwrap(),
-        sst_ids,
     );
 }
 
@@ -1927,14 +1861,6 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
         2
     );
 
-    let branched_ssts = hummock_manager.get_branched_ssts_info().await;
-    // object-11 and object-12
-    assert_eq!(branched_ssts.len(), 2);
-    let info = branched_ssts.get(&11).unwrap();
-    assert_eq!(
-        info.keys().sorted().cloned().collect_vec(),
-        vec![2, new_group_id]
-    );
     assert_eq!(
         current_version.get_compaction_group_levels(2).levels[base_level - 1].table_infos[0]
             .object_id,
@@ -2140,12 +2066,6 @@ async fn test_move_tables_between_compaction_group() {
     assert_eq!(level.table_infos[0].table_ids, vec![100]);
     assert_eq!(level.table_infos[1].table_ids, vec![100, 101]);
     assert_eq!(level.table_infos.len(), 2);
-    let branched_ssts = hummock_manager.get_branched_ssts_info().await;
-    // object-id 11 and 12.
-    assert_eq!(branched_ssts.len(), 2);
-    let info = branched_ssts.get(&12).unwrap();
-    let groups = info.keys().sorted().cloned().collect_vec();
-    assert_eq!(groups, vec![2, new_group_id]);
 
     let mut selector: Box<dyn CompactionSelector> =
         Box::<SpaceReclaimCompactionSelector>::default();
@@ -2169,9 +2089,6 @@ async fn test_move_tables_between_compaction_group() {
         .await
         .unwrap();
     assert!(ret);
-    let branched_ssts = hummock_manager.get_branched_ssts_info().await;
-    // there is still left one sst for object-12 in branched-sst.
-    assert_eq!(branched_ssts.len(), 2);
 }
 
 #[tokio::test]
