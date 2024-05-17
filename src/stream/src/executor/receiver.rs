@@ -19,7 +19,6 @@ use tokio::time::Instant;
 use super::exchange::input::BoxedInput;
 use crate::executor::exchange::input::new_input;
 use crate::executor::prelude::*;
-use crate::executor::utils::ActorInputMetrics;
 use crate::task::{FragmentId, SharedContext};
 
 /// `ReceiverExecutor` is used along with a channel. After creating a mpsc channel,
@@ -93,8 +92,7 @@ impl Execute for ReceiverExecutor {
     fn execute(mut self: Box<Self>) -> BoxedMessageStream {
         let actor_id = self.actor_context.id;
 
-        let mut metrics = ActorInputMetrics::new(
-            &self.metrics,
+        let mut metrics = self.metrics.new_actor_input_metrics(
             actor_id,
             self.fragment_id,
             self.upstream_fragment_id,
@@ -169,8 +167,7 @@ impl Execute for ReceiverExecutor {
                             self.input = new_upstream;
 
                             self.upstream_fragment_id = new_upstream_fragment_id;
-                            metrics = ActorInputMetrics::new(
-                                &self.metrics,
+                            metrics = self.metrics.new_actor_input_metrics(
                                 actor_id,
                                 self.fragment_id,
                                 self.upstream_fragment_id,

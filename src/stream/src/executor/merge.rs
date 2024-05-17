@@ -26,7 +26,6 @@ use super::watermark::*;
 use super::*;
 use crate::executor::exchange::input::new_input;
 use crate::executor::prelude::*;
-use crate::executor::utils::ActorInputMetrics;
 use crate::task::{FragmentId, SharedContext};
 
 /// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
@@ -98,8 +97,7 @@ impl MergeExecutor {
         let select_all = SelectReceivers::new(self.actor_context.id, self.upstreams);
         let actor_id = self.actor_context.id;
 
-        let mut metrics = ActorInputMetrics::new(
-            &self.metrics,
+        let mut metrics = self.metrics.new_actor_input_metrics(
             actor_id,
             self.fragment_id,
             self.upstream_fragment_id,
@@ -214,8 +212,7 @@ impl MergeExecutor {
                         }
 
                         self.upstream_fragment_id = new_upstream_fragment_id;
-                        metrics = ActorInputMetrics::new(
-                            &self.metrics,
+                        metrics = self.metrics.new_actor_input_metrics(
                             actor_id,
                             self.fragment_id,
                             self.upstream_fragment_id,
