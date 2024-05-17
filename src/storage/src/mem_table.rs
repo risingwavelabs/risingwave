@@ -1106,7 +1106,7 @@ mod tests {
         .unwrap();
         check_data(&mut iter, &ordered_test_data).await;
 
-        // Test seek with a later epoch, the first key is not skipped
+        // Test seek with a later epoch, the first key is skipped
         let later_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH.next_epoch());
         let seek_idx = 500;
         iter.seek(FullKey {
@@ -1119,9 +1119,9 @@ mod tests {
         .await
         .unwrap();
         let rev_seek_idx = ordered_test_data.len() - seek_idx - 1;
-        check_data(&mut iter, &ordered_test_data[rev_seek_idx..]).await;
+        check_data(&mut iter, &ordered_test_data[rev_seek_idx + 1..]).await;
 
-        // Test seek with a earlier epoch, the first key is skipped
+        // Test seek with a earlier epoch, the first key is not skipped
         let early_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH.prev_epoch());
         let seek_idx = 500;
         iter.seek(FullKey {
@@ -1134,7 +1134,7 @@ mod tests {
         .await
         .unwrap();
         let rev_seek_idx = ordered_test_data.len() - seek_idx - 1;
-        check_data(&mut iter, &ordered_test_data[(rev_seek_idx + 1)..]).await;
+        check_data(&mut iter, &ordered_test_data[rev_seek_idx..]).await;
 
         drop(iter);
         mem_table.insert(get_key(10001), "value1".into()).unwrap();

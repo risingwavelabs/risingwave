@@ -379,6 +379,82 @@ impl<'a, B: RustIteratorBuilder> FromRustIterator<'a, B> {
             table_id,
         }
     }
+
+    async fn seek_inner<'b>(&'b mut self, key: FullKey<&'b [u8]>) -> HummockResult<()> {
+        match self.table_id.cmp(&key.user_key.table_id) {
+            std::cmp::Ordering::Less => {
+                self.iter = None;
+                return Ok(());
+            }
+            std::cmp::Ordering::Greater => {
+                return self.rewind().await;
+            }
+            _ => {}
+        }
+        let mut iter = B::seek(self.inner, key.user_key.table_key);
+        match iter.next() {
+            Some((first_key, first_value)) => {
+                if first_key.eq(&key.user_key.table_key) && self.epoch > key.epoch_with_gap {
+                    // The semantic of `seek_fn` will ensure that `first_key` >= table_key of `key`.
+                    // At the beginning we have checked that `self.table_id` >= table_id of `key`.
+                    match iter.next() {
+                        Some((next_key, next_value)) => {
+                            assert_gt!(next_key, first_key);
+                            self.iter =
+                                Some((RustIteratorOfBuilder::Seek(iter), next_key, next_value));
+                        }
+                        None => {
+                            self.iter = None;
+                        }
+                    }
+                } else {
+                    self.iter = Some((RustIteratorOfBuilder::Seek(iter), first_key, first_value));
+                }
+            }
+            None => {
+                self.iter = None;
+            }
+        }
+        Ok(())
+    }
+
+    async fn rev_seek_inner<'b>(&'b mut self, key: FullKey<&'b [u8]>) -> HummockResult<()> {
+        match self.table_id.cmp(&key.user_key.table_id) {
+            std::cmp::Ordering::Less => {
+                return self.rewind().await;
+            }
+            std::cmp::Ordering::Greater => {
+                self.iter = None;
+                return Ok(());
+            }
+            _ => {}
+        }
+        let mut iter = B::seek(self.inner, key.user_key.table_key);
+        match iter.next() {
+            Some((first_key, first_value)) => {
+                if first_key.eq(&key.user_key.table_key) && self.epoch < key.epoch_with_gap {
+                    // The semantic of `seek_fn` will ensure that `first_key` >= table_key of `key`.
+                    // At the beginning we have checked that `self.table_id` >= table_id of `key`.
+                    match iter.next() {
+                        Some((next_key, next_value)) => {
+                            assert_lt!(next_key, first_key);
+                            self.iter =
+                                Some((RustIteratorOfBuilder::Seek(iter), next_key, next_value));
+                        }
+                        None => {
+                            self.iter = None;
+                        }
+                    }
+                } else {
+                    self.iter = Some((RustIteratorOfBuilder::Seek(iter), first_key, first_value));
+                }
+            }
+            None => {
+                self.iter = None;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
@@ -426,59 +502,10 @@ impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
     }
 
     async fn seek<'b>(&'b mut self, key: FullKey<&'b [u8]>) -> HummockResult<()> {
-        match self.table_id.cmp(&key.user_key.table_id) {
-            std::cmp::Ordering::Less => match Self::Direction::direction() {
-                DirectionEnum::Forward => {
-                    self.iter = None;
-                    return Ok(());
-                }
-                DirectionEnum::Backward => {
-                    return self.rewind().await;
-                }
-            },
-            std::cmp::Ordering::Greater => match Self::Direction::direction() {
-                DirectionEnum::Forward => {
-                    return self.rewind().await;
-                }
-                DirectionEnum::Backward => {
-                    self.iter = None;
-                    return Ok(());
-                }
-            },
-            _ => {}
+        match Self::Direction::direction() {
+            DirectionEnum::Forward => self.seek_inner(key).await,
+            DirectionEnum::Backward => self.rev_seek_inner(key).await,
         }
-        let mut iter = B::seek(self.inner, key.user_key.table_key);
-        match iter.next() {
-            Some((first_key, first_value)) => {
-                if first_key.eq(&key.user_key.table_key) && self.epoch > key.epoch_with_gap {
-                    // The semantic of `seek_fn` will ensure that `first_key` >= table_key of `key`.
-                    // At the beginning we have checked that `self.table_id` >= table_id of `key`.
-                    match iter.next() {
-                        Some((next_key, next_value)) => {
-                            match Self::Direction::direction() {
-                                DirectionEnum::Forward => {
-                                    assert_gt!(next_key, first_key);
-                                }
-                                DirectionEnum::Backward => {
-                                    assert_lt!(next_key, first_key);
-                                }
-                            }
-                            self.iter =
-                                Some((RustIteratorOfBuilder::Seek(iter), next_key, next_value));
-                        }
-                        None => {
-                            self.iter = None;
-                        }
-                    }
-                } else {
-                    self.iter = Some((RustIteratorOfBuilder::Seek(iter), first_key, first_value));
-                }
-            }
-            None => {
-                self.iter = None;
-            }
-        }
-        Ok(())
     }
 
     fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
