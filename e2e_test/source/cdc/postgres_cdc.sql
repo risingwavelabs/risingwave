@@ -31,8 +31,8 @@ INSERT INTO person VALUES (1001, 'peter white', 'myckhsp@xpmpe.com', '1781 2313 
 INSERT INTO person VALUES (1002, 'sarah spencer', 'wipvdbm@dkaap.com', '3453 4987 9481 6270', 'los angeles');
 
 create schema abs;
-create table abs.t1 (v1 int primary key, v2 double precision, v3 varchar, v4 numeric);
-create publication my_publicaton for table abs.t1 (v1, v3);
+create table abs.t1 (V1 int primary key, v2 double precision, v3 varchar, v4 numeric);
+create publication my_publicaton for table abs.t1 (V1, v3);
 insert into abs.t1 values (1, 1.1, 'aaa', '5431.1234');
 
 
