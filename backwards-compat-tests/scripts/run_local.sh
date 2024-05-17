@@ -14,7 +14,7 @@ source backwards-compat-tests/scripts/utils.sh
 
 configure_rw() {
   echo "--- Setting up cluster config"
-  if version_le "$OLD_VERSION" "1.8.5"; then
+  if version_le "$OLD_VERSION" "1.9.0"; then
     cat <<EOF > risedev-profiles.user.yml
 full-without-monitoring:
   steps:
