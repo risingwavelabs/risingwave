@@ -112,12 +112,7 @@ async fn build_tables<F: SstableWriterFactory>(
             .await
             .unwrap();
     }
-    let split_table_outputs = builder.finish().await.unwrap();
-    let join_handles = split_table_outputs
-        .into_iter()
-        .map(|o| o.upload_join_handle)
-        .collect_vec();
-    try_join_all(join_handles).await.unwrap();
+    builder.finish().await.unwrap();
 }
 
 fn bench_builder(
