@@ -830,6 +830,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             if let Some(rows) = &matched_rows {
                 join_matched_join_keys.observe(rows.len() as _);
                 if rows.len() > 10000 {
+                    let join_key_data_types = side_update.ht.join_key_data_types();
+                    let key = key.deserialize(join_key_data_types)?;
                     tracing::debug!(target: "hash_join_amplification",
                         matched_rows_len = rows.len(),
                         update_table_id = side_update.ht.table_id(),
