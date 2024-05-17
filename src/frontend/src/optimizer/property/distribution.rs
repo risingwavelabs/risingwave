@@ -51,7 +51,7 @@ use generic::PhysicalPlanRef;
 use itertools::Itertools;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::catalog::{FieldDisplay, Schema, TableId};
-use risingwave_common::hash::WorkerId;
+use risingwave_common::hash::WorkerSlotId;
 use risingwave_pb::batch_plan::exchange_info::{
     ConsistentHashInfo, Distribution as DistributionPb, DistributionMode, HashInfo,
 };
@@ -148,7 +148,7 @@ impl Distribution {
                     let vnode_mapping = worker_node_manager
                         .fragment_mapping(Self::get_fragment_id(catalog_reader, table_id)?)?;
 
-                    let worker_to_id_map: HashMap<WorkerId, u32> = vnode_mapping
+                    let worker_to_id_map: HashMap<WorkerSlotId, u32> = vnode_mapping
                         .iter_unique()
                         .enumerate()
                         .map(|(i, worker_id)| (worker_id, i as u32))

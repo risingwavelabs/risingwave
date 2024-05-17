@@ -30,7 +30,7 @@ use risingwave_batch::task::{ShutdownToken, TaskId};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
-use risingwave_common::hash::WorkerMapping;
+use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::tracing::{InstrumentStream, TracingContext};
 use risingwave_connector::source::SplitMetaData;
@@ -343,7 +343,7 @@ impl LocalQueryExecution {
                         let exchange_source = ExchangeSource {
                             task_output_id: Some(TaskOutputId {
                                 task_id: Some(PbTaskId {
-                                    task_id: idx as u32,
+                                    task_id: idx as u64,
                                     stage_id: exchange_source_stage_id,
                                     query_id: self.query.query_id.id.clone(),
                                 }),
@@ -389,7 +389,7 @@ impl LocalQueryExecution {
                         let exchange_source = ExchangeSource {
                             task_output_id: Some(TaskOutputId {
                                 task_id: Some(PbTaskId {
-                                    task_id: id as u32,
+                                    task_id: id as u64,
                                     stage_id: exchange_source_stage_id,
                                     query_id: self.query.query_id.id.clone(),
                                 }),
@@ -429,7 +429,7 @@ impl LocalQueryExecution {
                             let exchange_source = ExchangeSource {
                                 task_output_id: Some(TaskOutputId {
                                     task_id: Some(PbTaskId {
-                                        task_id: idx as u32,
+                                        task_id: idx as u64,
                                         stage_id: exchange_source_stage_id,
                                         query_id: self.query.query_id.id.clone(),
                                     }),
@@ -531,7 +531,8 @@ impl LocalQueryExecution {
                         )?;
 
                         // TODO: should we use `pb::ParallelUnitMapping` here?
-                        node.inner_side_vnode_mapping = mapping.to_expanded();
+                        node.inner_side_vnode_mapping =
+                            mapping.to_expanded().into_iter().map(u64::from).collect();
                         node.worker_nodes = self.worker_node_manager.manager.list_worker_nodes();
                     }
                     _ => unreachable!(),
@@ -583,7 +584,10 @@ impl LocalQueryExecution {
     }
 
     #[inline(always)]
-    fn get_table_dml_vnode_mapping(&self, table_id: &TableId) -> SchedulerResult<WorkerMapping> {
+    fn get_table_dml_vnode_mapping(
+        &self,
+        table_id: &TableId,
+    ) -> SchedulerResult<WorkerSlotMapping> {
         let guard = self.front_env.catalog_reader().read_guard();
 
         let table = guard

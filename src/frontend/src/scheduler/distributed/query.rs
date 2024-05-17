@@ -392,12 +392,12 @@ impl QueryRunner {
             let root_task_id_prost = TaskIdPb {
                 query_id: self.query.query_id.clone().id,
                 stage_id: self.query.root_stage_id(),
-                task_id: ROOT_TASK_ID,
+                task_id: ROOT_TASK_ID as u64,
             };
 
             TaskOutputIdPb {
                 task_id: Some(root_task_id_prost),
-                output_id: ROOT_TASK_OUTPUT_ID,
+                output_id: ROOT_TASK_OUTPUT_ID as u64,
             }
         };
 
@@ -476,7 +476,7 @@ pub(crate) mod tests {
         ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, StreamJobStatus,
         DEFAULT_SUPER_USER_ID,
     };
-    use risingwave_common::hash::WorkerMapping;
+    use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
     use risingwave_common::types::DataType;
     use risingwave_pb::common::worker_node::Property;
     use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
@@ -721,9 +721,12 @@ pub(crate) mod tests {
         let workers = vec![worker1, worker2, worker3];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
         let worker_node_selector = WorkerNodeSelector::new(worker_node_manager.clone(), false);
-        worker_node_manager.insert_streaming_fragment_mapping(0, WorkerMapping::new_single(0));
+        worker_node_manager.insert_streaming_fragment_mapping(
+            0,
+            WorkerSlotMapping::new_single(WorkerSlotId::new(0, 0)),
+        );
         worker_node_manager.set_serving_fragment_mapping(
-            vec![(0, WorkerMapping::new_single(0))]
+            vec![(0, WorkerSlotMapping::new_single(WorkerSlotId::new(0, 0)))]
                 .into_iter()
                 .collect(),
         );

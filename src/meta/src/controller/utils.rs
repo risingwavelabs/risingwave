@@ -836,7 +836,7 @@ where
             fragment_id: fragment_id as _,
             mapping: Some(
                 ParallelUnitMapping::from_protobuf(&mapping.to_protobuf())
-                    .to_worker(&parallel_unit_to_worker)
+                    .to_worker_slot(&parallel_unit_to_worker)
                     .to_protobuf(),
             ),
         })

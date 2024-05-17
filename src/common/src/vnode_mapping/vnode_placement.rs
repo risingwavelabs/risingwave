@@ -17,35 +17,35 @@ use std::ops::BitOrAssign;
 
 use itertools::Itertools;
 use num_integer::Integer;
-use risingwave_common::hash::WorkerId;
+use risingwave_common::hash::WorkerSlotId;
 use risingwave_pb::common::WorkerNode;
 
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::hash::{VirtualNode, WorkerMapping};
+use crate::hash::{VirtualNode, WorkerSlotMapping};
 
 /// Calculate a new vnode mapping, keeping locality and balance on a best effort basis.
 /// The strategy is similar to `rebalance_actor_vnode` used in meta node, but is modified to
 /// consider `max_parallelism` too.
 pub fn place_vnode(
-    hint_worker_mapping: Option<&WorkerMapping>,
+    hint_worker_mapping: Option<&WorkerSlotMapping>,
     workers: &[WorkerNode],
     max_parallelism: Option<usize>,
-) -> Option<WorkerMapping> {
-    #[derive(Copy, Clone, Hash, Eq, PartialEq, Debug)]
-    struct WorkerSlot(WorkerId, usize);
-
-    impl WorkerSlot {
-        fn worker_id(&self) -> WorkerId {
-            self.0
-        }
-    }
+) -> Option<WorkerSlotMapping> {
+    // #[derive(Copy, Clone, Hash, Eq, PartialEq, Debug)]
+    // struct WorkerSlot(u32, usize);
+    //
+    // impl WorkerSlot {
+    //     fn worker_id(&self) -> u32 {
+    //         self.0
+    //     }
+    // }
     // Get all serving worker slots from all available workers, grouped by worker id and ordered
     // by worker slot id in each group.
     let mut worker_slots: LinkedList<_> = workers
         .iter()
         .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
         .sorted_by_key(|w| w.id)
-        .map(|w| (0..w.parallel_units.len()).map(|idx| WorkerSlot(w.id, idx)))
+        .map(|w| (0..w.parallel_units.len()).map(|idx| WorkerSlotId::new(w.id, idx)))
         .collect();
 
     // Set serving parallelism to the minimum of total number of worker slots, specified
@@ -71,7 +71,7 @@ pub fn place_vnode(
             .for_each(drop);
     }
     selected_slots.drain(serving_parallelism..);
-    let selected_slots_set: HashSet<WorkerSlot> = selected_slots.iter().cloned().collect();
+    let selected_slots_set: HashSet<WorkerSlotId> = selected_slots.iter().cloned().collect();
     if selected_slots_set.is_empty() {
         return None;
     }
@@ -81,14 +81,14 @@ pub fn place_vnode(
     // `is_temp` is a mark for a special temporary worker slot, only to simplify implementation.
     #[derive(Debug)]
     struct Balance {
-        slot: WorkerSlot,
+        slot: WorkerSlotId,
         balance: i32,
         builder: BitmapBuilder,
         is_temp: bool,
     }
 
     let (expected, mut remain) = VirtualNode::COUNT.div_rem(&selected_slots.len());
-    let mut balances: HashMap<WorkerSlot, Balance> = HashMap::default();
+    let mut balances: HashMap<WorkerSlotId, Balance> = HashMap::default();
 
     for slot in &selected_slots {
         let mut balance = Balance {
@@ -108,16 +108,14 @@ pub fn place_vnode(
     // Now to maintain affinity, if a hint has been provided via `hint_pu_mapping`, follow
     // that mapping to adjust balances.
     let mut temp_slot = Balance {
-        slot: WorkerSlot(0, usize::MAX), /* This id doesn't matter for `temp_pu`. It's distinguishable via `is_temp`. */
+        slot: WorkerSlotId::new(0u32, usize::MAX), /* This id doesn't matter for `temp_pu`. It's distinguishable via `is_temp`. */
         balance: 0,
         builder: BitmapBuilder::zeroed(VirtualNode::COUNT),
         is_temp: true,
     };
     match hint_worker_mapping {
         Some(hint_worker_mapping) => {
-            for (vnode, worker_id) in hint_worker_mapping.iter_with_vnode() {
-                let worker_slot = WorkerSlot(worker_id, 0);
-
+            for (vnode, worker_slot) in hint_worker_mapping.iter_with_vnode() {
                 let b = if selected_slots_set.contains(&worker_slot) {
                     // Assign vnode to the same worker slot as hint.
                     balances.get_mut(&worker_slot).unwrap()
@@ -153,7 +151,7 @@ pub fn place_vnode(
         .rev()
         .collect();
 
-    let mut results: HashMap<WorkerSlot, Bitmap> = HashMap::default();
+    let mut results: HashMap<WorkerSlotId, Bitmap> = HashMap::default();
 
     while !balances.is_empty() {
         if balances.len() == 1 {
@@ -197,21 +195,20 @@ pub fn place_vnode(
     let mut worker_result = HashMap::new();
 
     for (worker_slot, bitmap) in results {
-        let worker_id = worker_slot.worker_id();
         worker_result
-            .entry(worker_id)
+            .entry(worker_slot)
             .or_insert(BitmapBuilder::zeroed(VirtualNode::COUNT).finish())
             .bitor_assign(&bitmap);
     }
 
-    Some(WorkerMapping::from_bitmaps(&worker_result))
+    Some(WorkerSlotMapping::from_bitmaps(&worker_result))
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 
-    use risingwave_common::hash::WorkerMapping;
+    use risingwave_common::hash::WorkerSlotMapping;
     use risingwave_pb::common::worker_node::Property;
     use risingwave_pb::common::{ParallelUnit, WorkerNode};
 
@@ -245,7 +242,7 @@ mod tests {
                 results
             };
 
-        let count_same_vnode_mapping = |wm1: &WorkerMapping, wm2: &WorkerMapping| {
+        let count_same_vnode_mapping = |wm1: &WorkerSlotMapping, wm2: &WorkerSlotMapping| {
             assert_eq!(wm1.len(), 256);
             assert_eq!(wm2.len(), 256);
             let mut count: usize = 0;

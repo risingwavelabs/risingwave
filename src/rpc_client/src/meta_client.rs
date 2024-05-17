@@ -25,7 +25,7 @@ use futures::stream::BoxStream;
 use lru::LruCache;
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
 use risingwave_common::config::{MetaConfig, MAX_CONNECTION_WINDOW_SIZE};
-use risingwave_common::hash::WorkerMapping;
+use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
@@ -1169,7 +1169,9 @@ impl MetaClient {
         Ok(resp.tables)
     }
 
-    pub async fn list_serving_vnode_mappings(&self) -> Result<HashMap<u32, (u32, WorkerMapping)>> {
+    pub async fn list_serving_vnode_mappings(
+        &self,
+    ) -> Result<HashMap<u32, (u32, WorkerSlotMapping)>> {
         let req = GetServingVnodeMappingsRequest {};
         let resp = self.inner.get_serving_vnode_mappings(req).await?;
         let mappings = resp
@@ -1183,7 +1185,7 @@ impl MetaClient {
                             .get(&p.fragment_id)
                             .cloned()
                             .unwrap_or(0),
-                        WorkerMapping::from_protobuf(p.mapping.as_ref().unwrap()),
+                        WorkerSlotMapping::from_protobuf(p.mapping.as_ref().unwrap()),
                     ),
                 )
             })

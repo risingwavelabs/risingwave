@@ -32,7 +32,7 @@ use risingwave_batch::executor::ExecutorBuilder;
 use risingwave_batch::task::{ShutdownMsg, ShutdownSender, ShutdownToken, TaskId as TaskIdBatch};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
-use risingwave_common::hash::WorkerMapping;
+use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::source::SplitMetaData;
@@ -172,7 +172,7 @@ impl StageExecution {
         ctx: ExecutionContextRef,
     ) -> Self {
         let tasks = (0..stage.parallelism.unwrap())
-            .map(|task_id| (task_id, TaskStatusHolder::new(task_id)))
+            .map(|task_id| (task_id as u64, TaskStatusHolder::new(task_id as u64)))
             .collect();
 
         Self {
@@ -289,7 +289,7 @@ impl StageExecution {
     ///
     /// When this method is called, all tasks should have been scheduled, and their `worker_node`
     /// should have been set.
-    pub fn all_exchange_sources_for(&self, output_id: u32) -> Vec<ExchangeSource> {
+    pub fn all_exchange_sources_for(&self, output_id: u64) -> Vec<ExchangeSource> {
         self.tasks
             .iter()
             .map(|(task_id, status_holder)| {
@@ -367,11 +367,11 @@ impl StageRunner {
                 let task_id = TaskIdPb {
                     query_id: self.stage.query_id.id.clone(),
                     stage_id: self.stage.id,
-                    task_id: i as u32,
+                    task_id: i as u64,
                 };
                 let vnode_ranges = vnode_bitmaps[&worker_id].clone();
                 let plan_fragment =
-                    self.create_plan_fragment(i as u32, Some(PartitionInfo::Table(vnode_ranges)));
+                    self.create_plan_fragment(i as u64, Some(PartitionInfo::Table(vnode_ranges)));
                 futures.push(self.schedule_task(
                     task_id,
                     plan_fragment,
@@ -392,10 +392,10 @@ impl StageRunner {
                 let task_id = TaskIdPb {
                     query_id: self.stage.query_id.id.clone(),
                     stage_id: self.stage.id,
-                    task_id: id as u32,
+                    task_id: id as u64,
                 };
                 let plan_fragment = self
-                    .create_plan_fragment(id as u32, Some(PartitionInfo::Source(split.to_vec())));
+                    .create_plan_fragment(id as u64, Some(PartitionInfo::Source(split.to_vec())));
                 let worker =
                     self.choose_worker(&plan_fragment, id as u32, self.stage.dml_table_id)?;
                 futures.push(self.schedule_task(
@@ -410,9 +410,9 @@ impl StageRunner {
                 let task_id = TaskIdPb {
                     query_id: self.stage.query_id.id.clone(),
                     stage_id: self.stage.id,
-                    task_id: id,
+                    task_id: id as u64,
                 };
-                let plan_fragment = self.create_plan_fragment(id, None);
+                let plan_fragment = self.create_plan_fragment(id as u64, None);
                 let worker = self.choose_worker(&plan_fragment, id, self.stage.dml_table_id)?;
                 futures.push(self.schedule_task(
                     task_id,
@@ -584,7 +584,7 @@ impl StageRunner {
         let root_stage_id = self.stage.id;
         // Currently, the dml or table scan should never be root fragment, so the partition is None.
         // And root fragment only contain one task.
-        let plan_fragment = self.create_plan_fragment(ROOT_TASK_ID, None);
+        let plan_fragment = self.create_plan_fragment(ROOT_TASK_ID as u64, None);
         let plan_node = plan_fragment.root.unwrap();
         let task_id = TaskIdBatch {
             query_id: self.stage.query_id.id.clone(),
@@ -680,7 +680,10 @@ impl StageRunner {
     }
 
     #[inline(always)]
-    fn get_table_dml_vnode_mapping(&self, table_id: &TableId) -> SchedulerResult<WorkerMapping> {
+    fn get_table_dml_vnode_mapping(
+        &self,
+        table_id: &TableId,
+    ) -> SchedulerResult<WorkerSlotMapping> {
         let guard = self.catalog_reader.read_guard();
 
         let table = guard

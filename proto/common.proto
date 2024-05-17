@@ -93,9 +93,9 @@ message ParallelUnitMapping {
 }
 
 // Vnode mapping for stream fragments. Stores mapping from virtual node to worker id.
-message WorkerMapping {
+message WorkerSlotMapping {
   repeated uint32 original_indices = 1;
-  repeated uint32 data = 2;
+  repeated uint64 data = 2;
 }
 
 message BatchQueryEpoch {

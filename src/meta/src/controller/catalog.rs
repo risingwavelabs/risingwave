@@ -294,7 +294,7 @@ impl CatalogController {
                         fragment_id,
                         mapping: Some(
                             ParallelUnitMapping::from_protobuf(&mapping.unwrap())
-                                .to_worker(&parallel_unit_to_worker)
+                                .to_worker_slot(&parallel_unit_to_worker)
                                 .to_protobuf(),
                         ),
                     }
@@ -2114,7 +2114,7 @@ impl CatalogController {
                         fragment_id,
                         mapping: Some(
                             ParallelUnitMapping::from_protobuf(&mapping.unwrap())
-                                .to_worker(&parallel_unit_to_worker)
+                                .to_worker_slot(&parallel_unit_to_worker)
                                 .to_protobuf(),
                         ),
                     }

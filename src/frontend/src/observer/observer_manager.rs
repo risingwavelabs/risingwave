@@ -19,7 +19,7 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::catalog::CatalogVersion;
-use risingwave_common::hash::WorkerMapping;
+use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeFrontend};
@@ -391,7 +391,9 @@ impl FrontendObserverNode {
             Info::StreamingWorkerMapping(streaming_worker_mapping) => {
                 let fragment_id = streaming_worker_mapping.fragment_id;
                 let mapping = || {
-                    WorkerMapping::from_protobuf(streaming_worker_mapping.mapping.as_ref().unwrap())
+                    WorkerSlotMapping::from_protobuf(
+                        streaming_worker_mapping.mapping.as_ref().unwrap(),
+                    )
                 };
 
                 match resp.operation() {
@@ -471,7 +473,7 @@ impl FrontendObserverNode {
 
 fn convert_worker_mapping(
     worker_mappings: &[FragmentWorkerMapping],
-) -> HashMap<FragmentId, WorkerMapping> {
+) -> HashMap<FragmentId, WorkerSlotMapping> {
     worker_mappings
         .iter()
         .map(
@@ -479,7 +481,7 @@ fn convert_worker_mapping(
                  fragment_id,
                  mapping,
              }| {
-                let mapping = WorkerMapping::from_protobuf(mapping.as_ref().unwrap());
+                let mapping = WorkerSlotMapping::from_protobuf(mapping.as_ref().unwrap());
                 (*fragment_id, mapping)
             },
         )

@@ -114,7 +114,7 @@ message FragmentParallelUnitMappings {
 /// Worker mapping with fragment id, used for notification.
 message FragmentWorkerMapping {
   uint32 fragment_id = 1;
-  common.WorkerMapping mapping = 2;
+  common.WorkerSlotMapping mapping = 2;
 }
 
 message FragmentWorkerMappings {

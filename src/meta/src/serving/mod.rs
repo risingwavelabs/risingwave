@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
-use risingwave_common::hash::WorkerMapping;
+use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -31,11 +31,11 @@ pub type ServingVnodeMappingRef = Arc<ServingVnodeMapping>;
 
 #[derive(Default)]
 pub struct ServingVnodeMapping {
-    serving_vnode_mappings: RwLock<HashMap<FragmentId, WorkerMapping>>,
+    serving_vnode_mappings: RwLock<HashMap<FragmentId, WorkerSlotMapping>>,
 }
 
 impl ServingVnodeMapping {
-    pub fn all(&self) -> HashMap<FragmentId, WorkerMapping> {
+    pub fn all(&self) -> HashMap<FragmentId, WorkerSlotMapping> {
         self.serving_vnode_mappings.read().clone()
     }
 
@@ -45,9 +45,9 @@ impl ServingVnodeMapping {
         &self,
         streaming_parallelisms: HashMap<FragmentId, usize>,
         workers: &[WorkerNode],
-    ) -> (HashMap<FragmentId, WorkerMapping>, Vec<FragmentId>) {
+    ) -> (HashMap<FragmentId, WorkerSlotMapping>, Vec<FragmentId>) {
         let mut serving_vnode_mappings = self.serving_vnode_mappings.write();
-        let mut upserted: HashMap<FragmentId, WorkerMapping> = HashMap::default();
+        let mut upserted: HashMap<FragmentId, WorkerSlotMapping> = HashMap::default();
         let mut failed: Vec<FragmentId> = vec![];
         for (fragment_id, streaming_parallelism) in streaming_parallelisms {
             let new_mapping = {
@@ -82,7 +82,7 @@ impl ServingVnodeMapping {
 }
 
 pub(crate) fn to_fragment_worker_mapping(
-    mappings: &HashMap<FragmentId, WorkerMapping>,
+    mappings: &HashMap<FragmentId, WorkerSlotMapping>,
 ) -> Vec<FragmentWorkerMapping> {
     mappings
         .iter()
