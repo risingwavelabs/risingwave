@@ -2152,10 +2152,22 @@ impl Parser {
 
     pub fn parse_create_schema(&mut self) -> Result<Statement, ParserError> {
         let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
-        let schema_name = self.parse_object_name()?;
+        let (schema_name, user_specified) = if self.parse_keyword(Keyword::AUTHORIZATION) {
+            let user_specified = self.parse_object_name()?;
+            (user_specified.clone(), Some(user_specified))
+        } else {
+            let schema_name = self.parse_object_name()?;
+            let user_specified = if self.parse_keyword(Keyword::AUTHORIZATION) {
+                Some(self.parse_object_name()?)
+            } else {
+                None
+            };
+            (schema_name, user_specified)
+        };
         Ok(Statement::CreateSchema {
             schema_name,
             if_not_exists,
+            user_specified,
         })
     }
 
