@@ -13,14 +13,14 @@ trap on_exit EXIT
 source backwards-compat-tests/scripts/utils.sh
 
 configure_rw() {
-echo "--- Setting up cluster config"
-cat <<EOF > risedev-profiles.user.yml
+  echo "--- Setting up cluster config"
+  if version_le "$OLD_VERSION" "1.8.5"; then
+    cat <<EOF > risedev-profiles.user.yml
 full-without-monitoring:
   steps:
     - use: minio
     - use: etcd
     - use: meta-node
-      meta-backend: etcd
     - use: compute-node
     - use: frontend
     - use: compactor
@@ -29,6 +29,23 @@ full-without-monitoring:
       address: message_queue
       port: 29092
 EOF
+  else
+    cat <<EOF > risedev-profiles.user.yml
+ full-without-monitoring:
+   steps:
+     - use: minio
+     - use: etcd
+     - use: meta-node
+       meta-backend: etcd
+     - use: compute-node
+     - use: frontend
+     - use: compactor
+     - use: kafka
+       user-managed: true
+       address: message_queue
+       port: 29092
+EOF
+  fi
 
 cat <<EOF > risedev-components.user.env
 RISEDEV_CONFIGURED=false

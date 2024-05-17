@@ -41,17 +41,30 @@ VERSION="$1"
 ENABLE_BUILD="$2"
 
 echo "--- Setting up cluster config"
-cat <<EOF > risedev-profiles.user.yml
+  if version_le "$OLD_VERSION" "1.8.5"; then
+    cat <<EOF > risedev-profiles.user.yml
 full-without-monitoring:
   steps:
     - use: minio
     - use: etcd
     - use: meta-node
-      meta-backend: etcd
     - use: compute-node
     - use: frontend
     - use: compactor
 EOF
+  else
+     cat <<EOF > risedev-profiles.user.yml
+full-without-monitoring:
+ steps:
+   - use: minio
+   - use: etcd
+   - use: meta-node
+     meta-backend: etcd
+   - use: compute-node
+   - use: frontend
+   - use: compactor
+EOF
+  fi
 
 cat <<EOF > risedev-components.user.env
 RISEDEV_CONFIGURED=true
