@@ -387,8 +387,6 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             })
             .collect();
 
-        assert_eq!(worker_slot_mapping.len(), worker_nodes.len());
-
         let inner_side_builder = InnerSideExecutorBuilder {
             table_desc: table_desc.clone(),
             table_distribution: TableDistribution::new_from_storage_table_desc(
