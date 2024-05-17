@@ -58,7 +58,6 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
             );
         }
 
-
         if let Some(assume_role) = assume_role {
             builder.role_arn(&assume_role);
         }
