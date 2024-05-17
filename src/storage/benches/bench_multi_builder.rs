@@ -21,8 +21,6 @@ use std::time::Duration;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use foyer::HybridCacheBuilder;
-use futures::future::try_join_all;
-use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
