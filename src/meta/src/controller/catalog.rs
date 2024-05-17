@@ -2994,8 +2994,6 @@ impl CatalogControllerInner {
     async fn list_subscriptions(&self) -> MetaResult<Vec<PbSubscription>> {
         let subscription_objs = Subscription::find()
             .find_also_related(Object)
-            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
-            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
             .all(&self.db)
             .await?;
 
