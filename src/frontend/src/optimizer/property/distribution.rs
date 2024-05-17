@@ -309,6 +309,21 @@ impl RequiredDist {
         }
     }
 
+    pub fn enforce_if_not_satisfies_add_no_shuffle(
+        &self,
+        mut plan: PlanRef,
+        required_order: &Order,
+    ) -> Result<PlanRef> {
+        if let Convention::Batch = plan.convention() {
+            plan = required_order.enforce_if_not_satisfies(plan)?;
+        }
+        if !plan.distribution().satisfies(self) {
+            Ok(self.enforce(plan, required_order))
+        } else {
+            return Ok(StreamExchange::new_no_shuffle(plan).into());
+        }
+    }
+
     pub fn no_shuffle(plan: PlanRef) -> PlanRef {
         match plan.convention() {
             Convention::Stream => StreamExchange::new_no_shuffle(plan).into(),

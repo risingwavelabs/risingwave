@@ -843,10 +843,11 @@ impl LogicalJoin {
         use super::stream::prelude::*;
 
         assert!(predicate.has_eq());
-        let mut right = self.right().to_stream_with_dist_required(
-            &RequiredDist::shard_by_key(self.right().schema().len(), &predicate.right_eq_indexes()),
-            ctx,
-        )?;
+        let right_dist =
+            RequiredDist::shard_by_key(self.right().schema().len(), &predicate.right_eq_indexes());
+        // let mut right = self.right().to_stream_with_dist_required(&right_dist, ctx)?;
+        let mut right = self.right().to_stream(ctx)?;
+        right = right_dist.enforce_if_not_satisfies_add_no_shuffle(right, &Order::any())?;
         let mut left = self.left();
 
         let r2l = predicate.r2l_eq_columns_mapping(left.schema().len(), right.schema().len());
@@ -857,7 +858,9 @@ impl LogicalJoin {
             Distribution::HashShard(_) => {
                 let left_dist = r2l
                     .rewrite_required_distribution(&RequiredDist::PhysicalDist(right_dist.clone()));
-                left = left.to_stream_with_dist_required(&left_dist, ctx)?;
+                // left = left.to_stream_with_dist_required(&left_dist, ctx)?;
+                left = left.to_stream(ctx)?;
+                left = left_dist.enforce_if_not_satisfies_add_no_shuffle(left, &Order::any())?;
             }
             Distribution::UpstreamHashShard(_, _) => {
                 left = left.to_stream_with_dist_required(
