@@ -106,7 +106,9 @@ impl SplitReader for KafkaSplitReader {
         for split in splits {
             offsets.insert(split.id(), (split.start_offset, split.stop_offset));
 
-            if let Some(offset) = split.start_offset {
+            if split.hack_seek_to_latest {
+                tpl.add_partition_offset(split.topic.as_str(), split.partition, Offset::End)?;
+            } else if let Some(offset) = split.start_offset {
                 tpl.add_partition_offset(
                     split.topic.as_str(),
                     split.partition,

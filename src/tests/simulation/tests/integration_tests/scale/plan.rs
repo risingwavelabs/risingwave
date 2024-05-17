@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::default::Default;
 
 use anyhow::Result;
 use itertools::Itertools;

@@ -37,12 +37,11 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::SinkLogStoreType;
 
 use super::derive::{derive_columns, derive_pk};
-use super::generic::{self, GenericPlanRef};
 use super::stream::prelude::*;
 use super::utils::{
     childless_record, infer_kv_log_store_table_catalog_inner, Distill, IndicesDisplay,
 };
-use super::{ExprRewritable, PlanBase, PlanRef, StreamNode, StreamProject};
+use super::{generic, ExprRewritable, PlanBase, PlanRef, StreamNode, StreamProject};
 use crate::error::{ErrorCode, Result};
 use crate::expr::{ExprImpl, FunctionCall, InputRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;

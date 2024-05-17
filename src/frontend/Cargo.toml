@@ -41,7 +41,7 @@ futures-async-stream = { workspace = true }
 iana-time-zone = "0.1"
 icelake = { workspace = true }
 itertools = { workspace = true }
-jsonbb = "0.1.2"
+jsonbb = { workspace = true }
 linkme = { version = "0.3", features = ["used_linker"] }
 maplit = "1"
 md5 = "0.7.0"

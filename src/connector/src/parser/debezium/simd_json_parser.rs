@@ -99,8 +99,6 @@ impl AccessBuilder for DebeziumMongoJsonAccessBuilder {
 
 #[cfg(test)]
 mod tests {
-    use std::convert::TryInto;
-
     use chrono::{NaiveDate, NaiveTime};
     use risingwave_common::array::{Op, StructValue};
     use risingwave_common::catalog::ColumnId;

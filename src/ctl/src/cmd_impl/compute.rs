@@ -11,12 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::convert::TryFrom;
 
 use risingwave_common::config::{BatchConfig, StreamingConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_rpc_client::ComputeClient;
-use serde_json;
 
 pub async fn show_config(host: &str) -> anyhow::Result<()> {
     let listen_addr = HostAddr::try_from(host)?;

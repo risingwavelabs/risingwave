@@ -210,7 +210,7 @@ impl NexmarkSplitReader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::nexmark::{NexmarkProperties, NexmarkSplitEnumerator};
+    use crate::source::nexmark::NexmarkSplitEnumerator;
     use crate::source::{SourceContext, SourceEnumeratorContext, SplitEnumerator};
 
     #[tokio::test]

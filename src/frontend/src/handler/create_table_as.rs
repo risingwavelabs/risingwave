@@ -22,7 +22,7 @@ use risingwave_sqlparser::ast::{ColumnDef, ObjectName, OnConflict, Query, Statem
 use super::{HandlerArgs, RwPgResponse};
 use crate::binder::BoundStatement;
 use crate::error::{ErrorCode, Result};
-use crate::handler::create_table::{gen_create_table_plan_without_bind, ColumnIdGenerator};
+use crate::handler::create_table::{gen_create_table_plan_without_source, ColumnIdGenerator};
 use crate::handler::query::handle_query;
 use crate::{build_graph, Binder, OptimizerContext};
 pub async fn handle_create_as(
@@ -96,7 +96,7 @@ pub async fn handle_create_as(
             .clone()
             .into_iter()
             .collect();
-        let (plan, source, table) = gen_create_table_plan_without_bind(
+        let (plan, table) = gen_create_table_plan_without_source(
             context,
             table_name.clone(),
             columns,
@@ -118,7 +118,7 @@ pub async fn handle_create_as(
                 .map(|parallelism| Parallelism {
                     parallelism: parallelism.get(),
                 });
-        (graph, source, table)
+        (graph, None, table)
     };
 
     tracing::trace!(

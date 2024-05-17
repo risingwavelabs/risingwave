@@ -600,6 +600,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     pub fn table_id(&self) -> u32 {
         self.state.table.table_id()
     }
+
+    pub fn join_key_data_types(&self) -> &[DataType] {
+        &self.join_key_data_types
+    }
 }
 
 use risingwave_common_estimate_size::KvSize;
@@ -708,7 +712,6 @@ impl JoinEntryState {
 mod tests {
     use itertools::Itertools;
     use risingwave_common::array::*;
-    use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::iter_util::ZipEqDebug;
 
     use super::*;

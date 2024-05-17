@@ -256,7 +256,7 @@ macro_rules! derive_array_from_blob {
     };
 }
 
-pub(crate) use {derive_array_from_blob, derive_from_blob, derive_from_json_struct};
+pub(crate) use {derive_array_from_blob, derive_from_blob};
 
 derive_from_json_struct!(I32Array, Vec<i32>);
 

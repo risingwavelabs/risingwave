@@ -16,7 +16,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use anyhow::Context as _;
-use futures::{pin_mut, Stream};
+use futures::pin_mut;
 use futures_async_stream::try_stream;
 use pin_project::pin_project;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
@@ -25,9 +25,6 @@ use risingwave_rpc_client::ComputeClientPool;
 
 use super::error::ExchangeChannelClosed;
 use super::permit::Receiver;
-use crate::error::StreamResult;
-use crate::executor::error::StreamExecutorError;
-use crate::executor::monitor::StreamingMetrics;
 use crate::executor::prelude::*;
 use crate::task::{
     FragmentId, LocalBarrierManager, SharedContext, UpDownActorIds, UpDownFragmentIds,
