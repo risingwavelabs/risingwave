@@ -26,9 +26,9 @@ use risedev::util::{complete_spin, fail_spin};
 use risedev::{
     generate_risedev_env, preflight_check, CompactorService, ComputeNodeService, ConfigExpander,
     ConfigureTmuxTask, DummyService, EnsureStopService, ExecuteContext, FrontendService,
-    GrafanaService, KafkaService, MetaNodeService, MinioService, MySqlService, PrometheusService,
-    PubsubService, RedisService, ServiceConfig, SqliteConfig, Task, TempoService, ZooKeeperService,
-    RISEDEV_NAME,
+    GrafanaService, KafkaService, MetaNodeService, MinioService, MySqlService, PostgresService,
+    PrometheusService, PubsubService, RedisService, ServiceConfig, SqliteConfig, Task,
+    TempoService, ZooKeeperService, RISEDEV_NAME,
 };
 use tempfile::tempdir;
 use thiserror_ext::AsReport;
@@ -325,6 +325,16 @@ fn task_main(
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("mysql {}:{}", c.address, c.port));
+            }
+            ServiceConfig::Postgres(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+                PostgresService::new(c.clone()).execute(&mut ctx)?;
+                let mut task =
+                    risedev::ConfigureTcpNodeTask::new(c.address.clone(), c.port, c.user_managed)?;
+                task.execute(&mut ctx)?;
+                ctx.pb
+                    .set_message(format!("postgres {}:{}", c.address, c.port));
             }
         }
 
