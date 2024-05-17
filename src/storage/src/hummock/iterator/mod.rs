@@ -450,20 +450,9 @@ impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
         let mut iter = B::seek(self.inner, key.user_key.table_key);
         match iter.next() {
             Some((first_key, first_value)) => {
-                let first_full_key = FullKey {
-                    epoch_with_gap: self.epoch,
-                    user_key: UserKey {
-                        table_id: self.table_id,
-                        table_key: first_key,
-                    },
-                };
-                if first_full_key < key {
+                if first_key.eq(&key.user_key.table_key) && self.epoch > key.epoch_with_gap {
                     // The semantic of `seek_fn` will ensure that `first_key` >= table_key of `key`.
                     // At the beginning we have checked that `self.table_id` >= table_id of `key`.
-                    // Therefore, when `first_full_key` < `key`, the only possibility is that
-                    // `first_key` == table_key of `key`, and `self.table_id` == table_id of `key`,
-                    // the `self.epoch` < epoch of `key`.
-                    assert_eq!(first_key, key.user_key.table_key);
                     match iter.next() {
                         Some((next_key, next_value)) => {
                             match Self::Direction::direction() {

@@ -1069,6 +1069,7 @@ mod tests {
 
         // check reverse iterator
         ordered_test_data.reverse();
+        drop(iter);
         let mut iter = MemTableHummockRevIterator::new(
             &mem_table.buffer,
             EpochWithGap::new_from_epoch(TEST_EPOCH),
@@ -1134,5 +1135,40 @@ mod tests {
         .unwrap();
         let rev_seek_idx = ordered_test_data.len() - seek_idx - 1;
         check_data(&mut iter, &ordered_test_data[(rev_seek_idx + 1)..]).await;
+
+        drop(iter);
+        mem_table.insert(get_key(10001), "value1".into()).unwrap();
+
+        let mut iter = MemTableHummockRevIterator::new(
+            &mem_table.buffer,
+            EpochWithGap::new_from_epoch(TEST_EPOCH),
+            TEST_TABLE_ID,
+        );
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: TEST_TABLE_ID,
+                table_key: TableKey(&get_key(10000)),
+            },
+            epoch_with_gap: early_epoch,
+        })
+        .await
+        .unwrap();
+        assert_eq!(iter.key().user_key.table_key, get_key(9999).to_ref());
+
+        let mut iter = MemTableHummockIterator::new(
+            &mem_table.buffer,
+            EpochWithGap::new_from_epoch(TEST_EPOCH),
+            TEST_TABLE_ID,
+        );
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: TEST_TABLE_ID,
+                table_key: TableKey(&get_key(10000)),
+            },
+            epoch_with_gap: later_epoch,
+        })
+        .await
+        .unwrap();
+        assert_eq!(iter.key().user_key.table_key, get_key(10001).to_ref());
     }
 }
