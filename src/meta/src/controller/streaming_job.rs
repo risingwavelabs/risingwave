@@ -1400,13 +1400,13 @@ impl CatalogController {
             fragment.vnode_mapping = Set((&vnode_mapping).into());
             fragment.update(&txn).await?;
 
-            let worker_mapping = ParallelUnitMapping::from_protobuf(&vnode_mapping)
+            let worker_slot_mapping = ParallelUnitMapping::from_protobuf(&vnode_mapping)
                 .to_worker_slot(&parallel_unit_to_worker)
                 .to_protobuf();
 
             fragment_mapping_to_notify.push(FragmentWorkerSlotMapping {
                 fragment_id: fragment_id as u32,
-                mapping: Some(worker_mapping),
+                mapping: Some(worker_slot_mapping),
             });
 
             // for downstream and upstream

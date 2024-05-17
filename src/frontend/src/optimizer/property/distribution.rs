@@ -148,16 +148,16 @@ impl Distribution {
                     let vnode_mapping = worker_node_manager
                         .fragment_mapping(Self::get_fragment_id(catalog_reader, table_id)?)?;
 
-                    let worker_to_id_map: HashMap<WorkerSlotId, u32> = vnode_mapping
+                    let worker_slot_to_id_map: HashMap<WorkerSlotId, u32> = vnode_mapping
                         .iter_unique()
                         .enumerate()
-                        .map(|(i, worker_id)| (worker_id, i as u32))
+                        .map(|(i, worker_slot_id)| (worker_slot_id, i as u32))
                         .collect();
 
                     Some(DistributionPb::ConsistentHashInfo(ConsistentHashInfo {
                         vmap: vnode_mapping
                             .iter()
-                            .map(|x| worker_to_id_map[&x])
+                            .map(|id| worker_slot_to_id_map[&id])
                             .collect_vec(),
                         key: key.iter().map(|num| *num as u32).collect(),
                     }))

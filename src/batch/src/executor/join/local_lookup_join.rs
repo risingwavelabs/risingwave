@@ -117,7 +117,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
         let worker = self
             .worker_slot_mapping
             .get(id)
-            .context("No worker node found for the given worker id.")?;
+            .context("No worker node found for the given worker slot id.")?;
 
         let local_execute_plan = LocalExecutePlan {
             plan: Some(PlanFragment {

@@ -388,11 +388,11 @@ impl FrontendObserverNode {
             return;
         };
         match info {
-            Info::StreamingWorkerSlotMapping(streaming_worker_mapping) => {
-                let fragment_id = streaming_worker_mapping.fragment_id;
+            Info::StreamingWorkerSlotMapping(streaming_worker_slot_mapping) => {
+                let fragment_id = streaming_worker_slot_mapping.fragment_id;
                 let mapping = || {
                     WorkerSlotMapping::from_protobuf(
-                        streaming_worker_mapping.mapping.as_ref().unwrap(),
+                        streaming_worker_slot_mapping.mapping.as_ref().unwrap(),
                     )
                 };
 
@@ -472,9 +472,9 @@ impl FrontendObserverNode {
 }
 
 fn convert_worker_slot_mapping(
-    worker_mappings: &[FragmentWorkerSlotMapping],
+    worker_slot_mappings: &[FragmentWorkerSlotMapping],
 ) -> HashMap<FragmentId, WorkerSlotMapping> {
-    worker_mappings
+    worker_slot_mappings
         .iter()
         .map(
             |FragmentWorkerSlotMapping {

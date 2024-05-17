@@ -97,10 +97,10 @@ pub fn place_vnode(
         balances.insert(*slot, balance);
     }
 
-    // Now to maintain affinity, if a hint has been provided via `hint_pu_mapping`, follow
+    // Now to maintain affinity, if a hint has been provided via `hint_worker_slot_mapping`, follow
     // that mapping to adjust balances.
     let mut temp_slot = Balance {
-        slot: WorkerSlotId::new(0u32, usize::MAX), /* This id doesn't matter for `temp_pu`. It's distinguishable via `is_temp`. */
+        slot: WorkerSlotId::new(0u32, usize::MAX), /* This id doesn't matter for `temp_slot`. It's distinguishable via `is_temp`. */
         balance: 0,
         builder: BitmapBuilder::zeroed(VirtualNode::COUNT),
         is_temp: true,
@@ -112,7 +112,7 @@ pub fn place_vnode(
                     // Assign vnode to the same worker slot as hint.
                     balances.get_mut(&worker_slot).unwrap()
                 } else {
-                    // Assign vnode that doesn't belong to any worker slot to `temp_pu`
+                    // Assign vnode that doesn't belong to any worker slot to `temp_slot`
                     // temporarily. They will be reassigned later.
                     &mut temp_slot
                 };

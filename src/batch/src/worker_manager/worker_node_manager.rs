@@ -143,7 +143,7 @@ impl WorkerNodeManager {
         write_guard.serving_fragment_vnode_mapping = serving_mapping;
     }
 
-    /// If worker ids is empty, the scheduler may fail to schedule any task and stuck at
+    /// If worker slot ids is empty, the scheduler may fail to schedule any task and stuck at
     /// schedule next stage. If we do not return error in this case, needs more complex control
     /// logic above. Report in this function makes the schedule root fail reason more clear.
     pub fn get_workers_by_worker_slot_ids(

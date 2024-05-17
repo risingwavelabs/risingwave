@@ -353,13 +353,13 @@ impl StageRunner {
             // We let each task read one partition by setting the `vnode_ranges` of the scan node in
             // the task.
             // We schedule the task to the worker node that owns the data partition.
-            let worker_ids = vnode_bitmaps.keys().cloned().collect_vec();
+            let worker_slot_ids = vnode_bitmaps.keys().cloned().collect_vec();
             let workers = self
                 .worker_node_manager
                 .manager
-                .get_workers_by_worker_slot_ids(&worker_ids)?;
+                .get_workers_by_worker_slot_ids(&worker_slot_ids)?;
 
-            for (i, (worker_id, worker)) in worker_ids
+            for (i, (worker_slot_id, worker)) in worker_slot_ids
                 .into_iter()
                 .zip_eq_fast(workers.into_iter())
                 .enumerate()
@@ -369,7 +369,7 @@ impl StageRunner {
                     stage_id: self.stage.id,
                     task_id: i as u64,
                 };
-                let vnode_ranges = vnode_bitmaps[&worker_id].clone();
+                let vnode_ranges = vnode_bitmaps[&worker_slot_id].clone();
                 let plan_fragment =
                     self.create_plan_fragment(i as u64, Some(PartitionInfo::Table(vnode_ranges)));
                 futures.push(self.schedule_task(
@@ -742,17 +742,17 @@ impl StageRunner {
                     .table_id
                     .into(),
             )?;
-            let id_to_workers = self
+            let id_to_worker_slots = self
                 .worker_node_manager
                 .fragment_mapping(fragment_id)?
                 .iter_unique()
                 .collect_vec();
 
-            let worker_id = id_to_workers[task_id as usize];
+            let worker_slot_id = id_to_worker_slots[task_id as usize];
             let candidates = self
                 .worker_node_manager
                 .manager
-                .get_workers_by_worker_slot_ids(&[worker_id])?;
+                .get_workers_by_worker_slot_ids(&[worker_slot_id])?;
             if candidates.is_empty() {
                 return Err(BatchError::EmptyWorkerNodes.into());
             }
