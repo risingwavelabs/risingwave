@@ -829,6 +829,17 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
             if let Some(rows) = &matched_rows {
                 join_matched_join_keys.observe(rows.len() as _);
+                if rows.len() > 10000 {
+                    tracing::debug!(target: "hash_join_amplification",
+                        matched_rows_len = rows.len(),
+                        update_table_id = side_update.ht.table_id(),
+                        match_table_id = side_match.ht.table_id(),
+                        join_key = ?key,
+                        actor_id = ctx.id,
+                        fragment_id = ctx.fragment_id,
+                        "large rows matched for join key"
+                    );
+                }
             } else {
                 join_matched_join_keys.observe(0.0)
             }
