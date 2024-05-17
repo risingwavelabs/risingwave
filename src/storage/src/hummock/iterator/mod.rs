@@ -426,8 +426,8 @@ impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
     }
 
     async fn seek<'b>(&'b mut self, key: FullKey<&'b [u8]>) -> HummockResult<()> {
-        if self.table_id < key.user_key.table_id {
-            match Self::Direction::direction() {
+        match self.table_id.cmp(&key.user_key.table_id) {
+            std::cmp::Ordering::Less => match Self::Direction::direction() {
                 DirectionEnum::Forward => {
                     self.iter = None;
                     return Ok(());
@@ -435,9 +435,8 @@ impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
                 DirectionEnum::Backward => {
                     return self.rewind().await;
                 }
-            }
-        } else if self.table_id > key.user_key.table_id {
-            match Self::Direction::direction() {
+            },
+            std::cmp::Ordering::Greater => match Self::Direction::direction() {
                 DirectionEnum::Forward => {
                     return self.rewind().await;
                 }
@@ -445,7 +444,8 @@ impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
                     self.iter = None;
                     return Ok(());
                 }
-            }
+            },
+            _ => {}
         }
         let mut iter = B::seek(self.inner, key.user_key.table_key);
         match iter.next() {
