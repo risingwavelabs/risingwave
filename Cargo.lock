@@ -10148,7 +10148,7 @@ dependencies = [
 name = "risingwave_common"
 version = "1.9.1"
 dependencies = [
- "ahash 0.8.11",
+ "ahash 0.8.6",
  "anyhow",
  "arc-swap",
  "arrow-array 48.0.1",
