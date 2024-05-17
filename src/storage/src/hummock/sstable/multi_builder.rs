@@ -45,7 +45,6 @@ pub trait TableBuilderFactory {
 
 pub struct SplitTableOutput {
     pub sst_info: LocalSstableInfo,
-    // pub upload_join_handle: UploadJoinHandle,
 }
 
 /// A wrapper for [`SstableBuilder`] which automatically split key-value pairs into multiple tables,
@@ -304,7 +303,6 @@ where
                 }
             }
 
-            // TEST join upload handle before push
             builder_output
                 .writer_output
                 .verbose_instrument_await("upload")
@@ -312,7 +310,6 @@ where
                 .map_err(HummockError::sstable_upload_error)??;
 
             self.sst_outputs.push(SplitTableOutput {
-                // upload_join_handle: builder_output.writer_output,
                 sst_info: builder_output.sst_info,
             });
         }

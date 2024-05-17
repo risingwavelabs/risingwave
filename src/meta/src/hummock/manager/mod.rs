@@ -2612,22 +2612,7 @@ impl HummockManager {
                                     // progress (meta + compactor)
                                     // 2. meta periodically scans the task and performs a cancel on
                                     // the meta side for tasks that are not updated by heartbeat
-                                    // for task in compactor_manager.get_heartbeat_expired_tasks() {
-                                    //     if let Err(e) = hummock_manager
-                                    //         .cancel_compact_task(
-                                    //             task.task_id,
-                                    //             TaskStatus::HeartbeatCanceled,
-                                    //         )
-                                    //         .await
-                                    //     {
-                                    //         tracing::error!(
-                                    //             task_id = task.task_id,
-                                    //             error = %e.as_report(),
-                                    //             "Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
-                                    //             until we can successfully report its status",
-                                    //         );
-                                    //     }
-                                    // }
+
                                     let expired_tasks: Vec<u64> = compactor_manager
                                         .get_heartbeat_expired_tasks()
                                         .into_iter()
@@ -3048,38 +3033,6 @@ impl HummockManager {
                                             context_id
                                         );
                                     }
-
-                                    // for task in cancel_tasks {
-                                    //     tracing::info!(
-                                    //         "Task cancel with group_id {} task_id {} with context_id {} has expired due to lack of visible progress",
-                                    //         task.compaction_group_id,
-                                    //         task.task_id,
-                                    //         context_id,
-                                    //     );
-
-                                    //     if let Err(e) =
-                                    //         hummock_manager
-                                    //         .cancel_compact_task(task.task_id, TaskStatus::HeartbeatProgressCanceled)
-                                    //         .await
-                                    //     {
-                                    //         tracing::error!(
-                                    //             task_id = task.task_id,
-                                    //             error = %e.as_report(),
-                                    //             "Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
-                                    //             until we can successfully report its status."
-                                    //         );
-                                    //     }
-
-                                    //     // Forcefully cancel the task so that it terminates
-                                    //     // early on the compactor
-                                    //     // node.
-                                    //     let _ = compactor.cancel_task(task.task_id);
-                                    //     tracing::info!(
-                                    //         "CancelTask operation for task_id {} has been sent to node with context_id {}",
-                                    //         context_id,
-                                    //         task.task_id
-                                    //     );
-                                    // }
                                 } else {
                                     // Determine the validity of the compactor streaming rpc. When the compactor no longer exists in the manager, the stream will be removed.
                                     // Tip: Connectivity to the compactor will be determined through the `send_event` operation. When send fails, it will be removed from the manager

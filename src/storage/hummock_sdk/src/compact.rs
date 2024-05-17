@@ -185,7 +185,6 @@ pub fn estimate_memory_for_compact_task(
     block_size: u64,
     recv_buffer_size: u64,
     sst_capacity: u64,
-    support_streaming_upload: bool,
 ) -> u64 {
     let mut result = 0;
     // When building the SstableStreamIterator, sstable_syncable will fetch the SstableMeta and seek
@@ -223,13 +222,9 @@ pub fn estimate_memory_for_compact_task(
     // output
     // builder will maintain SstableInfo + block_builder(block) + writer (block to vec)
     let estimated_meta_size = sst_capacity * task_max_sst_meta_ratio / 100;
-    // if support_streaming_upload {
-    //     result += estimated_meta_size + 2 * block_size
-    // } else {
-    //     result += estimated_meta_size + sst_capacity; // Use sst_capacity to avoid BatchUploader
-    //                                                   // memory bursts.
-    // }
 
+    // FIXME: sst_capacity is the upper bound of the memory usage of the streaming sstable uploader
+    // A more reasonable memory limit method needs to be adopted, this is just a temporary fix.
     result += estimated_meta_size + sst_capacity;
 
     result

@@ -383,7 +383,6 @@ pub async fn compact(
             .object_store_recv_buffer_size
             .unwrap_or(6 * 1024 * 1024) as u64,
         capacity as u64,
-        context.sstable_store.store().support_streaming_upload(),
     ) * compact_task.splits.len() as u64;
 
     tracing::info!(

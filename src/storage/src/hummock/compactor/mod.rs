@@ -86,8 +86,8 @@ use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::SplitTableOutput;
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
-    validate_ssts, BlockedXor16FilterBuilder, FilterBuilder, HummockError,
-    SharedComapctorObjectIdManager, SstableWriterFactory, UnifiedSstableWriterFactory,
+    validate_ssts, BlockedXor16FilterBuilder, FilterBuilder, SharedComapctorObjectIdManager,
+    SstableWriterFactory, UnifiedSstableWriterFactory,
 };
 use crate::monitor::CompactorMetrics;
 
@@ -175,13 +175,17 @@ impl Compactor {
 
         compact_timer.observe_duration();
 
-        let ssts = Self::report_progress(
+        let ssts = split_table_outputs
+            .into_iter()
+            .map(|x| x.sst_info)
+            .collect();
+
+        Self::report_progress(
             self.context.compactor_metrics.clone(),
             task_progress,
-            split_table_outputs,
+            &ssts,
             self.context.is_share_buffer_compact,
-        )
-        .await?;
+        );
 
         self.context
             .compactor_metrics
@@ -204,27 +208,14 @@ impl Compactor {
         Ok((ssts, table_stats_map))
     }
 
-    pub async fn report_progress(
+    pub fn report_progress(
         metrics: Arc<CompactorMetrics>,
         task_progress: Option<Arc<TaskProgress>>,
-        split_table_outputs: Vec<SplitTableOutput>,
+        ssts: &Vec<LocalSstableInfo>,
         is_share_buffer_compact: bool,
-    ) -> HummockResult<Vec<LocalSstableInfo>> {
-        let mut ssts = Vec::with_capacity(split_table_outputs.len());
-        // let mut rets = vec![];
-
-        for SplitTableOutput {
-            sst_info,
-            // upload_join_handle,
-        } in split_table_outputs
-        {
+    ) {
+        for sst_info in ssts {
             let sst_size = sst_info.file_size();
-            ssts.push(sst_info);
-            // let ret = upload_join_handle
-            //     .verbose_instrument_await("upload")
-            //     .await
-            //     .map_err(HummockError::sstable_upload_error);
-            // rets.push(ret);
             if let Some(tracker) = &task_progress {
                 tracker.inc_ssts_uploaded();
                 tracker.dec_num_pending_write_io();
@@ -235,10 +226,6 @@ impl Compactor {
                 metrics.compaction_upload_sst_counts.inc();
             }
         }
-        // for ret in rets {
-        //     ret??;
-        // }
-        Ok(ssts)
     }
 
     async fn compact_key_range_impl<F: SstableWriterFactory, B: FilterBuilder>(

@@ -505,17 +505,26 @@ impl CompactorRunner {
         );
 
         let statistic = self.executor.take_statistics();
-        let outputs = self.executor.builder.finish().await?;
-        let ssts = Compactor::report_progress(
+        let output_ssts = self
+            .executor
+            .builder
+            .finish()
+            .await?
+            .into_iter()
+            .map(|split_table_output| split_table_output.sst_info)
+            .collect();
+        Compactor::report_progress(
             self.metrics.clone(),
             Some(self.executor.task_progress.clone()),
-            outputs,
+            &output_ssts,
             false,
-        )
-        .await?;
-        let sst_infos = ssts.iter().map(|sst| sst.sst_info.clone()).collect_vec();
+        );
+        let sst_infos = output_ssts
+            .iter()
+            .map(|sst| sst.sst_info.clone())
+            .collect_vec();
         assert!(can_concat(&sst_infos));
-        Ok((ssts, statistic))
+        Ok((output_ssts, statistic))
     }
 }
 
