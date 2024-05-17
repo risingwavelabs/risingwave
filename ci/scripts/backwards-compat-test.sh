@@ -41,7 +41,7 @@ VERSION="$1"
 ENABLE_BUILD="$2"
 
 echo "--- Setting up cluster config"
-  if version_le "$OLD_VERSION" "1.9.0"; then
+  if version_le "$VERSION" "1.9.0"; then
     cat <<EOF > risedev-profiles.user.yml
 full-without-monitoring:
   steps:

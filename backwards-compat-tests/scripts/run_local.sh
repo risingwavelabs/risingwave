@@ -13,8 +13,10 @@ trap on_exit EXIT
 source backwards-compat-tests/scripts/utils.sh
 
 configure_rw() {
+  VERSION="$1"
+
   echo "--- Setting up cluster config"
-  if version_le "$OLD_VERSION" "1.9.0"; then
+  if version_le "$VERSION" "1.9.0"; then
     cat <<EOF > risedev-profiles.user.yml
 full-without-monitoring:
   steps:
@@ -76,11 +78,11 @@ main() {
   set -euo pipefail
   get_rw_versions
   setup_old_cluster
-  configure_rw
+  configure_rw "$OLD_VERSION"
   seed_old_cluster "$OLD_VERSION"
 
   setup_new_cluster
-  configure_rw
+  configure_rw "99.99.99"
   validate_new_cluster "$NEW_VERSION"
 }
 
