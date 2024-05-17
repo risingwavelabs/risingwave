@@ -253,6 +253,7 @@ impl BuildHasher for SpillBuildHasher {
 }
 
 const DEFAULT_SPILL_CHUNK_SIZE: usize = 1024;
+const DEFAULT_IO_CHANNEL_SIZE: usize = 8;
 
 /// `AggSpillManager` is used to manage how to write spill data file and read them back.
 /// The spill data first need to be partitioned. Each partition contains 2 files: `agg_state_file` and `input_chunks_file`.
@@ -340,7 +341,7 @@ impl AggSpillManager {
         for i in 0..self.partition_num {
             let agg_state_partition_file_name = format!("agg-state-p{}", i);
             let agg_state_writer = self.op.writer_with(&agg_state_partition_file_name).await?;
-            let (tx,rx) = channel(1);
+            let (tx,rx) = channel(DEFAULT_IO_CHANNEL_SIZE);
             self.agg_state_writer_txs.push(tx);
             self.agg_state_chunk_builders.push(DataChunkBuilder::new(
                 self.group_key_types
@@ -355,7 +356,7 @@ impl AggSpillManager {
 
             let partition_file_name = format!("input-chunks-p{}", i);
             let input_writer = self.op.writer_with(&partition_file_name).await?;
-            let (tx, rx) = channel(1);
+            let (tx, rx) = channel(DEFAULT_IO_CHANNEL_SIZE);
             self.input_writer_txs.push(tx);
             self.input_chunk_builders.push(DataChunkBuilder::new(
                 self.child_data_types.clone(),
@@ -618,12 +619,14 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
 
             agg_spill_manager.close_writers().await?;
 
-            debug!("spill write time = {}ms", start_time.elapsed().as_millis());
+            debug!("agg {} spill write time = {}ms", self.identity, start_time.elapsed().as_millis());
 
             // Process each partition one by one.
             for i in 0..agg_spill_manager.partition_num {
                 let agg_state_stream = agg_spill_manager.read_agg_state_partition(i).await?;
                 let input_stream = agg_spill_manager.read_input_partition(i).await?;
+
+                let sub_hash_agg_identity = format!("{}-sub{}", self.identity.clone(), i);
 
                 let sub_hash_agg_executor: HashAggExecutor<K> = HashAggExecutor::new(
                     self.aggs.clone(),
@@ -635,7 +638,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                         self.schema.clone(),
                         agg_state_stream,
                     ))),
-                    format!("{}-sub{}", self.identity.clone(), i),
+                    sub_hash_agg_identity.clone(),
                     self.chunk_size,
                     self.mem_context.clone(),
                     self.enable_spill,
@@ -647,6 +650,8 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     sub_hash_agg_executor.identity, self.identity
                 );
 
+                let start_time = Instant::now();
+
                 let sub_hash_agg_stream = Box::new(sub_hash_agg_executor).execute();
 
                 #[for_await]
@@ -654,6 +659,8 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     let chunk = chunk?;
                     yield chunk;
                 }
+
+                debug!("agg {} spill read time = {}ms", sub_hash_agg_identity, start_time.elapsed().as_millis());
 
                 // Clear files of the current partition.
                 agg_spill_manager.clear_partition(i).await?;
