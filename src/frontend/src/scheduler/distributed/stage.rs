@@ -584,7 +584,7 @@ impl StageRunner {
         let root_stage_id = self.stage.id;
         // Currently, the dml or table scan should never be root fragment, so the partition is None.
         // And root fragment only contain one task.
-        let plan_fragment = self.create_plan_fragment(ROOT_TASK_ID as u64, None);
+        let plan_fragment = self.create_plan_fragment(ROOT_TASK_ID, None);
         let plan_node = plan_fragment.root.unwrap();
         let task_id = TaskIdBatch {
             query_id: self.stage.query_id.id.clone(),

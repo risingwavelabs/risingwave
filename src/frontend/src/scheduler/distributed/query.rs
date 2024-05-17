@@ -392,12 +392,12 @@ impl QueryRunner {
             let root_task_id_prost = TaskIdPb {
                 query_id: self.query.query_id.clone().id,
                 stage_id: self.query.root_stage_id(),
-                task_id: ROOT_TASK_ID as u64,
+                task_id: ROOT_TASK_ID,
             };
 
             TaskOutputIdPb {
                 task_id: Some(root_task_id_prost),
-                output_id: ROOT_TASK_OUTPUT_ID as u64,
+                output_id: ROOT_TASK_OUTPUT_ID,
             }
         };
 
