@@ -24,7 +24,8 @@ use risingwave_pb::hummock::WriteLimits;
 use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::{
-    FragmentWorkerMapping, GetSessionParamsResponse, MetaSnapshot, SubscribeRequest, SubscribeType,
+    FragmentWorkerSlotMapping, GetSessionParamsResponse, MetaSnapshot, SubscribeRequest,
+    SubscribeType,
 };
 use risingwave_pb::user::UserInfo;
 use tokio::sync::mpsc;
@@ -137,9 +138,9 @@ impl NotificationServiceImpl {
         }
     }
 
-    async fn get_worker_mapping_snapshot(
+    async fn get_worker_slot_mapping_snapshot(
         &self,
-    ) -> MetaResult<(Vec<FragmentWorkerMapping>, NotificationVersion)> {
+    ) -> MetaResult<(Vec<FragmentWorkerSlotMapping>, NotificationVersion)> {
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
                 let fragment_guard = mgr.fragment_manager.get_fragment_read_guard().await;
@@ -160,11 +161,11 @@ impl NotificationServiceImpl {
         }
     }
 
-    fn get_serving_vnode_mappings(&self) -> Vec<FragmentWorkerMapping> {
+    fn get_serving_vnode_mappings(&self) -> Vec<FragmentWorkerSlotMapping> {
         self.serving_vnode_mapping
             .all()
             .iter()
-            .map(|(fragment_id, mapping)| FragmentWorkerMapping {
+            .map(|(fragment_id, mapping)| FragmentWorkerSlotMapping {
                 fragment_id: *fragment_id,
                 mapping: Some(mapping.to_protobuf()),
             })
@@ -241,9 +242,9 @@ impl NotificationServiceImpl {
             catalog_version,
         ) = self.get_catalog_snapshot().await?;
 
-        let (streaming_worker_mappings, streaming_worker_mapping_version) =
-            self.get_worker_mapping_snapshot().await?;
-        let serving_worker_mappings = self.get_serving_vnode_mappings();
+        let (streaming_worker_slot_mappings, streaming_worker_slot_mapping_version) =
+            self.get_worker_slot_mapping_snapshot().await?;
+        let serving_worker_slot_mappings = self.get_serving_vnode_mappings();
 
         let (nodes, worker_node_version) = self.get_worker_node_snapshot().await?;
 
@@ -276,10 +277,10 @@ impl NotificationServiceImpl {
             version: Some(SnapshotVersion {
                 catalog_version,
                 worker_node_version,
-                streaming_worker_mapping_version,
+                streaming_worker_slot_mapping_version,
             }),
-            serving_worker_mappings,
-            streaming_worker_mappings,
+            serving_worker_slot_mappings,
+            streaming_worker_slot_mappings,
             session_params,
             ..Default::default()
         })

@@ -43,8 +43,8 @@ use risingwave_pb::meta::subscribe_response::{
 };
 use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::{
-    FragmentWorkerMapping, PbFragmentWorkerMapping, PbRelation, PbRelationGroup, PbTableFragments,
-    Relation,
+    FragmentWorkerSlotMapping, PbFragmentWorkerSlotMapping, PbRelation, PbRelationGroup,
+    PbTableFragments, Relation,
 };
 use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
@@ -803,7 +803,7 @@ impl CatalogController {
         dropping_sink_id: Option<SinkId>,
         txn: &DatabaseTransaction,
         streaming_job: StreamingJob,
-    ) -> MetaResult<(Vec<Relation>, Vec<PbFragmentWorkerMapping>)> {
+    ) -> MetaResult<(Vec<Relation>, Vec<PbFragmentWorkerSlotMapping>)> {
         // Question: The source catalog should be remain unchanged?
         let StreamingJob::Table(_, table, ..) = streaming_job else {
             unreachable!("unexpected job: {streaming_job:?}")
@@ -1404,7 +1404,7 @@ impl CatalogController {
                 .to_worker_slot(&parallel_unit_to_worker)
                 .to_protobuf();
 
-            fragment_mapping_to_notify.push(FragmentWorkerMapping {
+            fragment_mapping_to_notify.push(FragmentWorkerSlotMapping {
                 fragment_id: fragment_id as u32,
                 mapping: Some(worker_mapping),
             });

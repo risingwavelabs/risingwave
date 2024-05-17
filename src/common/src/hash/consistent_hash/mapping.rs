@@ -33,8 +33,6 @@ use crate::util::iter_util::ZipEqDebug;
 // TODO: find a better place for this.
 pub type ActorId = u32;
 
-// pub type WorkerSlotId = u64;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct WorkerSlotId(u64);
 

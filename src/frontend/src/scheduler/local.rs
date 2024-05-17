@@ -318,7 +318,7 @@ impl LocalQueryExecution {
                     let workers = self
                         .worker_node_manager
                         .manager
-                        .get_workers_by_worker_ids(&worker_ids)?;
+                        .get_workers_by_worker_slot_ids(&worker_ids)?;
                     for (idx, (worker_node, partition)) in
                         (workers.into_iter().zip_eq_fast(vnode_bitmaps.into_iter())).enumerate()
                     {
@@ -615,7 +615,7 @@ impl LocalQueryExecution {
                 let candidates = self
                     .worker_node_manager
                     .manager
-                    .get_workers_by_worker_ids(&worker_ids)?;
+                    .get_workers_by_worker_slot_ids(&worker_ids)?;
                 if candidates.is_empty() {
                     return Err(BatchError::EmptyWorkerNodes.into());
                 }

@@ -61,7 +61,7 @@ struct InnerSideExecutorBuilder<C> {
     task_id: TaskId,
     epoch: BatchQueryEpoch,
     worker_slot_mapping: HashMap<WorkerSlotId, WorkerNode>,
-    worker_to_scan_range_mapping: HashMap<WorkerSlotId, Vec<(ScanRange, VirtualNode)>>,
+    worker_slot_to_scan_range_mapping: HashMap<WorkerSlotId, Vec<(ScanRange, VirtualNode)>>,
     chunk_size: usize,
     shutdown_rx: ShutdownToken,
     next_stage_id: usize,
@@ -91,7 +91,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
     /// Creates the `RowSeqScanNode` that will be used for scanning the inner side table
     /// based on the passed `scan_range` and virtual node.
     fn create_row_seq_scan_node(&self, id: &WorkerSlotId) -> Result<NodeBody> {
-        let list = self.worker_to_scan_range_mapping.get(id).unwrap();
+        let list = self.worker_slot_to_scan_range_mapping.get(id).unwrap();
         let mut scan_ranges = vec![];
         let mut vnode_bitmap = BitmapBuilder::zeroed(self.vnode_mapping.len());
 
@@ -159,7 +159,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
 #[async_trait::async_trait]
 impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> {
     fn reset(&mut self) {
-        self.worker_to_scan_range_mapping = HashMap::new();
+        self.worker_slot_to_scan_range_mapping = HashMap::new();
     }
 
     /// Adds the scan range made from the given `kwy_scalar_impls` into the parallel unit id
@@ -190,11 +190,11 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
         }
 
         let vnode = self.get_virtual_node(&scan_range)?;
-        let worker_id = self.vnode_mapping[vnode.to_index()];
+        let worker_slot_id = self.vnode_mapping[vnode.to_index()];
 
         let list = self
-            .worker_to_scan_range_mapping
-            .entry(worker_id)
+            .worker_slot_to_scan_range_mapping
+            .entry(worker_slot_id)
             .or_default();
         list.push((scan_range, vnode));
 
@@ -206,7 +206,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
     async fn build_executor(&mut self) -> Result<BoxedExecutor> {
         self.next_stage_id += 1;
         let mut sources = vec![];
-        for id in self.worker_to_scan_range_mapping.keys() {
+        for id in self.worker_slot_to_scan_range_mapping.keys() {
             sources.push(self.build_prost_exchange_source(id)?);
         }
 
@@ -402,7 +402,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             context: source.context().clone(),
             task_id: source.task_id.clone(),
             epoch: source.epoch(),
-            worker_to_scan_range_mapping: HashMap::new(),
+            worker_slot_to_scan_range_mapping: HashMap::new(),
             chunk_size,
             shutdown_rx: source.shutdown_rx.clone(),
             next_stage_id: 0,

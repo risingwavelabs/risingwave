@@ -41,7 +41,7 @@ use risingwave_pb::meta::table_fragments::fragment::{
     FragmentDistributionType, PbFragmentDistributionType,
 };
 use risingwave_pb::meta::table_fragments::{self, ActorStatus, PbFragment, State};
-use risingwave_pb::meta::FragmentWorkerMappings;
+use risingwave_pb::meta::FragmentWorkerSlotMappings;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, PbStreamActor, StreamNode,
@@ -61,7 +61,7 @@ use crate::manager::{
 };
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::serving::{
-    to_deleted_fragment_worker_mapping, to_fragment_worker_mapping, ServingVnodeMapping,
+    to_deleted_fragment_worker_slot_mapping, to_fragment_worker_slot_mapping, ServingVnodeMapping,
 };
 use crate::storage::{MetaStore, MetaStoreError, MetaStoreRef, Transaction, DEFAULT_COLUMN_FAMILY};
 use crate::stream::{GlobalStreamManager, SourceManagerRef};
@@ -1724,8 +1724,8 @@ impl ScaleController {
                     .notification_manager()
                     .notify_frontend_without_version(
                         Operation::Update,
-                        Info::ServingWorkerMappings(FragmentWorkerMappings {
-                            mappings: to_fragment_worker_mapping(&upserted),
+                        Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings {
+                            mappings: to_fragment_worker_slot_mapping(&upserted),
                         }),
                     );
             }
@@ -1738,8 +1738,8 @@ impl ScaleController {
                     .notification_manager()
                     .notify_frontend_without_version(
                         Operation::Delete,
-                        Info::ServingWorkerMappings(FragmentWorkerMappings {
-                            mappings: to_deleted_fragment_worker_mapping(&failed),
+                        Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings {
+                            mappings: to_deleted_fragment_worker_slot_mapping(&failed),
                         }),
                     );
             }

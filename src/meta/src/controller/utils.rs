@@ -29,7 +29,7 @@ use risingwave_meta_model_v2::{
     I32Array, ObjectId, PrivilegeId, SchemaId, SourceId, StreamNode, UserId, WorkerId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction, PbSubscription};
-use risingwave_pb::meta::{PbFragmentParallelUnitMapping, PbFragmentWorkerMapping};
+use risingwave_pb::meta::{PbFragmentParallelUnitMapping, PbFragmentWorkerSlotMapping};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode, StreamSource};
 use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
@@ -816,7 +816,7 @@ where
 pub async fn get_fragment_mappings<C>(
     db: &C,
     job_id: ObjectId,
-) -> MetaResult<Vec<PbFragmentWorkerMapping>>
+) -> MetaResult<Vec<PbFragmentWorkerSlotMapping>>
 where
     C: ConnectionTrait,
 {
@@ -832,7 +832,7 @@ where
 
     Ok(fragment_mappings
         .into_iter()
-        .map(|(fragment_id, mapping)| PbFragmentWorkerMapping {
+        .map(|(fragment_id, mapping)| PbFragmentWorkerSlotMapping {
             fragment_id: fragment_id as _,
             mapping: Some(
                 ParallelUnitMapping::from_protobuf(&mapping.to_protobuf())

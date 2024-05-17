@@ -47,7 +47,7 @@ use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
 use risingwave_pb::meta::{
-    FragmentParallelUnitMapping, PbFragmentWorkerMapping, PbRelation, PbRelationGroup,
+    FragmentParallelUnitMapping, PbFragmentWorkerSlotMapping, PbRelation, PbRelationGroup,
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
@@ -290,7 +290,7 @@ impl CatalogController {
                      fragment_id,
                      mapping,
                  }| {
-                    PbFragmentWorkerMapping {
+                    PbFragmentWorkerSlotMapping {
                         fragment_id,
                         mapping: Some(
                             ParallelUnitMapping::from_protobuf(&mapping.unwrap())
@@ -2110,7 +2110,7 @@ impl CatalogController {
                      fragment_id,
                      mapping,
                  }| {
-                    PbFragmentWorkerMapping {
+                    PbFragmentWorkerSlotMapping {
                         fragment_id,
                         mapping: Some(
                             ParallelUnitMapping::from_protobuf(&mapping.unwrap())

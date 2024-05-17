@@ -27,7 +27,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{FragmentWorkerMapping, MetaSnapshot, SubscribeResponse};
+use risingwave_pb::meta::{FragmentWorkerSlotMapping, MetaSnapshot, SubscribeResponse};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::watch::Sender;
 
@@ -102,8 +102,8 @@ impl ObserverState for FrontendObserverNode {
             Info::HummockStats(stats) => {
                 self.handle_table_stats_notification(stats);
             }
-            Info::StreamingWorkerMapping(_) => self.handle_fragment_mapping_notification(resp),
-            Info::ServingWorkerMappings(m) => {
+            Info::StreamingWorkerSlotMapping(_) => self.handle_fragment_mapping_notification(resp),
+            Info::ServingWorkerSlotMappings(m) => {
                 self.handle_fragment_serving_mapping_notification(m.mappings, resp.operation())
             }
             Info::Recovery(_) => {
@@ -138,8 +138,8 @@ impl ObserverState for FrontendObserverNode {
             hummock_version: _,
             meta_backup_manifest_id: _,
             hummock_write_limits: _,
-            streaming_worker_mappings,
-            serving_worker_mappings,
+            streaming_worker_slot_mappings,
+            serving_worker_slot_mappings,
             session_params,
             version,
         } = snapshot;
@@ -180,8 +180,8 @@ impl ObserverState for FrontendObserverNode {
 
         self.worker_node_manager.refresh(
             nodes,
-            convert_worker_mapping(&streaming_worker_mappings),
-            convert_worker_mapping(&serving_worker_mappings),
+            convert_worker_slot_mapping(&streaming_worker_slot_mappings),
+            convert_worker_slot_mapping(&serving_worker_slot_mappings),
         );
         self.hummock_snapshot_manager
             .update(hummock_snapshot.unwrap());
@@ -388,7 +388,7 @@ impl FrontendObserverNode {
             return;
         };
         match info {
-            Info::StreamingWorkerMapping(streaming_worker_mapping) => {
+            Info::StreamingWorkerSlotMapping(streaming_worker_mapping) => {
                 let fragment_id = streaming_worker_mapping.fragment_id;
                 let mapping = || {
                     WorkerSlotMapping::from_protobuf(
@@ -418,20 +418,20 @@ impl FrontendObserverNode {
 
     fn handle_fragment_serving_mapping_notification(
         &mut self,
-        mappings: Vec<FragmentWorkerMapping>,
+        mappings: Vec<FragmentWorkerSlotMapping>,
         op: Operation,
     ) {
         match op {
             Operation::Add | Operation::Update => {
                 self.worker_node_manager
-                    .upsert_serving_fragment_mapping(convert_worker_mapping(&mappings));
+                    .upsert_serving_fragment_mapping(convert_worker_slot_mapping(&mappings));
             }
             Operation::Delete => self.worker_node_manager.remove_serving_fragment_mapping(
                 &mappings.into_iter().map(|m| m.fragment_id).collect_vec(),
             ),
             Operation::Snapshot => {
                 self.worker_node_manager
-                    .set_serving_fragment_mapping(convert_worker_mapping(&mappings));
+                    .set_serving_fragment_mapping(convert_worker_slot_mapping(&mappings));
             }
             _ => panic!("receive an unsupported notify {:?}", op),
         }
@@ -471,13 +471,13 @@ impl FrontendObserverNode {
     }
 }
 
-fn convert_worker_mapping(
-    worker_mappings: &[FragmentWorkerMapping],
+fn convert_worker_slot_mapping(
+    worker_mappings: &[FragmentWorkerSlotMapping],
 ) -> HashMap<FragmentId, WorkerSlotMapping> {
     worker_mappings
         .iter()
         .map(
-            |FragmentWorkerMapping {
+            |FragmentWorkerSlotMapping {
                  fragment_id,
                  mapping,
              }| {

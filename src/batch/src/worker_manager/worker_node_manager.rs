@@ -146,7 +146,7 @@ impl WorkerNodeManager {
     /// If worker ids is empty, the scheduler may fail to schedule any task and stuck at
     /// schedule next stage. If we do not return error in this case, needs more complex control
     /// logic above. Report in this function makes the schedule root fail reason more clear.
-    pub fn get_workers_by_worker_ids(
+    pub fn get_workers_by_worker_slot_ids(
         &self,
         worker_slot_ids: &[WorkerSlotId],
     ) -> Result<Vec<WorkerNode>> {
@@ -156,7 +156,6 @@ impl WorkerNodeManager {
 
         let guard = self.inner.read().unwrap();
 
-        // TODO: Does the return order of this function need to match the order of the parameters?
         let worker_slot_index: HashMap<_, _> = guard
             .worker_nodes
             .iter()
@@ -171,7 +170,10 @@ impl WorkerNodeManager {
         for worker_slot_id in worker_slot_ids {
             match worker_slot_index.get(worker_slot_id) {
                 Some(worker) => workers.push((*worker).clone()),
-                None => bail!("No worker node found for worker id: {}", worker_slot_id),
+                None => bail!(
+                    "No worker node found for worker slot id: {}",
+                    worker_slot_id
+                ),
             }
         }
 

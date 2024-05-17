@@ -27,18 +27,10 @@ use crate::hash::{VirtualNode, WorkerSlotMapping};
 /// The strategy is similar to `rebalance_actor_vnode` used in meta node, but is modified to
 /// consider `max_parallelism` too.
 pub fn place_vnode(
-    hint_worker_mapping: Option<&WorkerSlotMapping>,
+    hint_worker_slot_mapping: Option<&WorkerSlotMapping>,
     workers: &[WorkerNode],
     max_parallelism: Option<usize>,
 ) -> Option<WorkerSlotMapping> {
-    // #[derive(Copy, Clone, Hash, Eq, PartialEq, Debug)]
-    // struct WorkerSlot(u32, usize);
-    //
-    // impl WorkerSlot {
-    //     fn worker_id(&self) -> u32 {
-    //         self.0
-    //     }
-    // }
     // Get all serving worker slots from all available workers, grouped by worker id and ordered
     // by worker slot id in each group.
     let mut worker_slots: LinkedList<_> = workers
@@ -113,9 +105,9 @@ pub fn place_vnode(
         builder: BitmapBuilder::zeroed(VirtualNode::COUNT),
         is_temp: true,
     };
-    match hint_worker_mapping {
-        Some(hint_worker_mapping) => {
-            for (vnode, worker_slot) in hint_worker_mapping.iter_with_vnode() {
+    match hint_worker_slot_mapping {
+        Some(hint_worker_slot_mapping) => {
+            for (vnode, worker_slot) in hint_worker_slot_mapping.iter_with_vnode() {
                 let b = if selected_slots_set.contains(&worker_slot) {
                     // Assign vnode to the same worker slot as hint.
                     balances.get_mut(&worker_slot).unwrap()

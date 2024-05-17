@@ -357,7 +357,7 @@ impl StageRunner {
             let workers = self
                 .worker_node_manager
                 .manager
-                .get_workers_by_worker_ids(&worker_ids)?;
+                .get_workers_by_worker_slot_ids(&worker_ids)?;
 
             for (i, (worker_id, worker)) in worker_ids
                 .into_iter()
@@ -716,7 +716,7 @@ impl StageRunner {
             let candidates = self
                 .worker_node_manager
                 .manager
-                .get_workers_by_worker_ids(&worker_ids)?;
+                .get_workers_by_worker_slot_ids(&worker_ids)?;
             if candidates.is_empty() {
                 return Err(BatchError::EmptyWorkerNodes.into());
             }
@@ -752,7 +752,7 @@ impl StageRunner {
             let candidates = self
                 .worker_node_manager
                 .manager
-                .get_workers_by_worker_ids(&[worker_id])?;
+                .get_workers_by_worker_slot_ids(&[worker_id])?;
             if candidates.is_empty() {
                 return Err(BatchError::EmptyWorkerNodes.into());
             }
