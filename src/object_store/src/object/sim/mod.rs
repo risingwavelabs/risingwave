@@ -35,8 +35,8 @@ use risingwave_common::range::RangeBoundsExt;
 use self::client::Client;
 use self::service::Response;
 use super::{
-    BoxedStreamingUploader, Bytes, ObjectDataStream, ObjectError, ObjectMetadata,
-    ObjectMetadataIter, ObjectRangeBounds, ObjectResult, ObjectStore, StreamingUploader,
+    Bytes, ObjectDataStream, ObjectError, ObjectMetadata, ObjectMetadataIter, ObjectRangeBounds,
+    ObjectResult, ObjectStore, StreamingUploader,
 };
 
 pub struct SimStreamingUploader {
