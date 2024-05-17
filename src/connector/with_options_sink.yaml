@@ -152,9 +152,6 @@ GooglePubSubConfig:
     field_type: String
     comments: A JSON string containing the service account credentials for authorization,  see the [service-account](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account) credentials guide.  The provided account credential must have the  `pubsub.publisher` [role](https://cloud.google.com/pubsub/docs/access-control#roles)
     required: false
-  - name: r#type
-    field_type: String
-    required: true
 IcebergConfig:
   fields:
   - name: connector
