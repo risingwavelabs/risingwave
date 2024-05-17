@@ -1012,6 +1012,8 @@ impl Binder {
                 ("to_ascii", raw_call(ExprType::ToAscii)),
                 ("to_hex", raw_call(ExprType::ToHex)),
                 ("quote_ident", raw_call(ExprType::QuoteIdent)),
+                ("quote_literal", raw_call(ExprType::QuoteLiteral)),
+                ("quote_nullable", raw_call(ExprType::QuoteNullable)),
                 ("string_to_array", raw_call(ExprType::StringToArray)),
                 ("encode", raw_call(ExprType::Encode)),
                 ("decode", raw_call(ExprType::Decode)),
