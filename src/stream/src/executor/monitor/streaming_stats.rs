@@ -1190,10 +1190,10 @@ impl StreamingMetrics {
             jemalloc_metadata_bytes,
             jvm_allocated_bytes,
             jvm_active_bytes,
+            stream_memory_usage,
             materialize_cache_hit_count,
             materialize_cache_total_count,
             materialize_input_row_count,
-            stream_memory_usage,
         }
     }
 
