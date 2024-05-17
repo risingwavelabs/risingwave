@@ -47,6 +47,7 @@ full-without-monitoring:
     - use: minio
     - use: etcd
     - use: meta-node
+      meta-backend: etcd
     - use: compute-node
     - use: frontend
     - use: compactor
