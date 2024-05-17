@@ -88,13 +88,33 @@ impl HummockServiceOpts {
     }
 
     fn get_storage_opts(&self) -> StorageOpts {
+        let meta_cache_capacity_mb = std::env::var("RW_CTL_META_CACHE_CAPACITY_MB")
+            .unwrap_or("2048".into())
+            .parse()
+            .unwrap();
+        let block_cache_capacity_mb = std::env::var("RW_CTL_BLOCK_CACHE_CAPACITY_MB")
+            .unwrap_or("1".into())
+            .parse()
+            .unwrap();
+        let max_prefetch_block_number = std::env::var("RW_CTL_MAX_PREFETCH_BLOCK_NUM")
+            .unwrap_or("16".into())
+            .parse()
+            .unwrap();
+        let meta_cache_shard_num = std::env::var("RW_CTL_META_CACHE_SHARD_NUM")
+            .unwrap_or("4".into())
+            .parse()
+            .unwrap();
+        let block_cache_shard_num = std::env::var("RW_CTL_BLOCK_CACHE_SHARD_NUM")
+            .unwrap_or("6".into())
+            .parse()
+            .unwrap();
         let mut opts = StorageOpts {
             share_buffer_compaction_worker_threads_number: 0,
-            meta_cache_capacity_mb: 2048,
-            block_cache_capacity_mb: 1,
-            max_prefetch_block_number: 16,
-            meta_cache_shard_num: 4,
-            block_cache_shard_num: 6,
+            meta_cache_capacity_mb,
+            block_cache_capacity_mb,
+            max_prefetch_block_number,
+            meta_cache_shard_num,
+            block_cache_shard_num,
             ..Default::default()
         };
 
