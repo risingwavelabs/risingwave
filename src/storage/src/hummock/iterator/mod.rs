@@ -17,7 +17,7 @@ use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-use more_asserts::assert_gt;
+use more_asserts::{assert_gt, assert_lt};
 
 use super::{
     HummockResult, HummockValue, SstableIteratorReadOptions, SstableIteratorType, SstableStoreRef,
@@ -379,89 +379,6 @@ impl<'a, B: RustIteratorBuilder> FromRustIterator<'a, B> {
             table_id,
         }
     }
-
-    async fn seek_inner<'b>(&'b mut self, key: FullKey<&'b [u8]>) -> HummockResult<()> {
-        if self.table_id < key.user_key.table_id {
-            // returns None when the range of self.table_id must not include the given key
-            self.iter = None;
-            return Ok(());
-        }
-        if self.table_id > key.user_key.table_id {
-            return self.rewind().await;
-        }
-        let mut iter = B::seek(self.inner, key.user_key.table_key);
-        match iter.next() {
-            Some((first_key, first_value)) => {
-                let first_full_key = FullKey {
-                    epoch_with_gap: self.epoch,
-                    user_key: UserKey {
-                        table_id: self.table_id,
-                        table_key: first_key,
-                    },
-                };
-                if first_full_key < key {
-                    // The semantic of `seek_fn` will ensure that `first_key` >= table_key of `key`.
-                    // At the beginning we have checked that `self.table_id` >= table_id of `key`.
-                    // Therefore, when `first_full_key` < `key`, the only possibility is that
-                    // `first_key` == table_key of `key`, and `self.table_id` == table_id of `key`,
-                    // the `self.epoch` < epoch of `key`.
-                    assert_eq!(first_key, key.user_key.table_key);
-                    match iter.next() {
-                        Some((next_key, next_value)) => {
-                            assert_gt!(next_key, first_key);
-                            self.iter =
-                                Some((RustIteratorOfBuilder::Seek(iter), next_key, next_value));
-                        }
-                        None => {
-                            self.iter = None;
-                        }
-                    }
-                } else {
-                    self.iter = Some((RustIteratorOfBuilder::Seek(iter), first_key, first_value));
-                }
-            }
-            None => {
-                self.iter = None;
-            }
-        }
-        Ok(())
-    }
-
-    async fn rev_seek_inner<'b>(&'b mut self, key: FullKey<&'b [u8]>) -> HummockResult<()> {
-        if self.table_id > key.user_key.table_id {
-            // returns None when the range of self.table_id must not include the given key
-            self.iter = None;
-            return Ok(());
-        }
-        if self.table_id < key.user_key.table_id {
-            return self.rewind().await;
-        }
-        let mut iter = B::seek(self.inner, key.user_key.table_key);
-        match iter.next() {
-            Some((first_key, first_value)) => {
-                let first_full_key = FullKey {
-                    epoch_with_gap: self.epoch,
-                    user_key: UserKey {
-                        table_id: self.table_id,
-                        table_key: first_key,
-                    },
-                };
-                if first_full_key > key {
-                    // The semantic of `seek_fn` will ensure that `first_key` <= table_key of `key`.
-                    // At the beginning we have checked that `self.table_id` <= table_id of `key`.
-                    // Therefore, when `first_full_key` > `key`, the only possibility is that
-                    // `first_key` == table_key of `key`, and `self.table_id` == table_id of `key`,
-                    // the `self.epoch` > epoch of `key`.
-                    assert_eq!(first_key, key.user_key.table_key);
-                }
-                self.iter = Some((RustIteratorOfBuilder::Seek(iter), first_key, first_value));
-            }
-            None => {
-                self.iter = None;
-            }
-        }
-        Ok(())
-    }
 }
 
 impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
@@ -509,10 +426,70 @@ impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
     }
 
     async fn seek<'b>(&'b mut self, key: FullKey<&'b [u8]>) -> HummockResult<()> {
-        match Self::Direction::direction() {
-            DirectionEnum::Forward => self.seek_inner(key).await,
-            DirectionEnum::Backward => self.rev_seek_inner(key).await,
+        if self.table_id < key.user_key.table_id {
+            match Self::Direction::direction() {
+                DirectionEnum::Forward => {
+                    self.iter = None;
+                    return Ok(());
+                }
+                DirectionEnum::Backward => {
+                    return self.rewind().await;
+                }
+            }
+        } else if self.table_id > key.user_key.table_id {
+            match Self::Direction::direction() {
+                DirectionEnum::Forward => {
+                    return self.rewind().await;
+                }
+                DirectionEnum::Backward => {
+                    self.iter = None;
+                    return Ok(());
+                }
+            }
         }
+        let mut iter = B::seek(self.inner, key.user_key.table_key);
+        match iter.next() {
+            Some((first_key, first_value)) => {
+                let first_full_key = FullKey {
+                    epoch_with_gap: self.epoch,
+                    user_key: UserKey {
+                        table_id: self.table_id,
+                        table_key: first_key,
+                    },
+                };
+                if first_full_key < key {
+                    // The semantic of `seek_fn` will ensure that `first_key` >= table_key of `key`.
+                    // At the beginning we have checked that `self.table_id` >= table_id of `key`.
+                    // Therefore, when `first_full_key` < `key`, the only possibility is that
+                    // `first_key` == table_key of `key`, and `self.table_id` == table_id of `key`,
+                    // the `self.epoch` < epoch of `key`.
+                    assert_eq!(first_key, key.user_key.table_key);
+                    match iter.next() {
+                        Some((next_key, next_value)) => {
+                            match Self::Direction::direction() {
+                                DirectionEnum::Forward => {
+                                    assert_gt!(next_key, first_key);
+                                }
+                                DirectionEnum::Backward => {
+                                    assert_lt!(next_key, first_key);
+                                }
+                            }
+                            self.iter =
+                                Some((RustIteratorOfBuilder::Seek(iter), next_key, next_value));
+                        }
+                        None => {
+                            self.iter = None;
+                        }
+                    }
+                } else {
+                    self.iter = Some((RustIteratorOfBuilder::Seek(iter), first_key, first_value));
+                }
+            }
+            None => {
+                self.iter = None;
+            }
+        }
+        Ok(())
     }
 
     fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}

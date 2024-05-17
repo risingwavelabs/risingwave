@@ -968,7 +968,14 @@ mod tests {
                 let (expected_key, expected_value) = test_data[idx].clone();
                 assert_eq!(key.epoch_with_gap, EpochWithGap::new_from_epoch(TEST_EPOCH));
                 assert_eq!(key.user_key.table_id, TEST_TABLE_ID);
-                assert_eq!(key.user_key.table_key.0, expected_key.0.as_ref());
+                assert_eq!(
+                    key.user_key.table_key.0,
+                    expected_key.0.as_ref(),
+                    "failed at {}, {:?} != {:?}",
+                    idx,
+                    String::from_utf8(key.user_key.table_key.key_part().to_vec()).unwrap(),
+                    String::from_utf8(expected_key.key_part().to_vec()).unwrap(),
+                );
                 match expected_value {
                     KeyOp::Insert(expected_value) | KeyOp::Update((_, expected_value)) => {
                         assert_eq!(value, HummockValue::Put(expected_value.as_ref()));
@@ -1097,5 +1104,35 @@ mod tests {
         .await
         .unwrap();
         check_data(&mut iter, &ordered_test_data).await;
+
+        // Test seek with a later epoch, the first key is not skipped
+        let later_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH.next_epoch());
+        let seek_idx = 500;
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: TEST_TABLE_ID,
+                table_key: TableKey(&get_key(seek_idx)),
+            },
+            epoch_with_gap: later_epoch,
+        })
+        .await
+        .unwrap();
+        let rev_seek_idx = ordered_test_data.len() - seek_idx - 1;
+        check_data(&mut iter, &ordered_test_data[rev_seek_idx..]).await;
+
+        // Test seek with a earlier epoch, the first key is skipped
+        let early_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH.prev_epoch());
+        let seek_idx = 500;
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: TEST_TABLE_ID,
+                table_key: TableKey(&get_key(seek_idx)),
+            },
+            epoch_with_gap: early_epoch,
+        })
+        .await
+        .unwrap();
+        let rev_seek_idx = ordered_test_data.len() - seek_idx - 1;
+        check_data(&mut iter, &ordered_test_data[(rev_seek_idx + 1)..]).await;
     }
 }
