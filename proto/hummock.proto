@@ -577,7 +577,10 @@ message ReportFullScanTaskRequest {
   uint64 total_object_count = 2;
   // Total size of objects before filtered by conditions specified by FullScanTask.
   uint64 total_object_size = 3;
+  // Start key of the next page.
   optional string next_start_after = 4;
+  // Start key of this page.
+  optional string start_after = 5;
 }
 
 message ReportFullScanTaskResponse {

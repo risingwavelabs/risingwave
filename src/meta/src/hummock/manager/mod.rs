@@ -43,7 +43,7 @@ use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::context::ContextInfo;
-use crate::hummock::manager::gc::{DeleteObjectTracker, FullGcState};
+use crate::hummock::manager::gc::{DeleteObjectTracker, FullGcState, PagedMetrics};
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{MetaSrvEnv, MetaStoreImpl, MetadataManager};
 use crate::model::{ClusterId, MetadataModel, MetadataModelError};
@@ -110,6 +110,9 @@ pub struct HummockManager {
     // and suggest types with a certain priority.
     pub compaction_state: CompactionState,
     full_gc_state: FullGcState,
+    /// Gather metrics that require accumulation across multiple operations.
+    /// For example, to get the total number of objects in object store, multiple LISTs are required because a single LIST can visit at most `full_gc_object_limit` objects.
+    paged_metrics: parking_lot::Mutex<PagedMetrics>,
     now: Mutex<u64>,
 }
 
@@ -281,6 +284,7 @@ impl HummockManager {
             compactor_streams_change_tx,
             compaction_state: CompactionState::new(),
             full_gc_state: FullGcState::new(Some(full_gc_object_limit)),
+            paged_metrics: parking_lot::Mutex::new(PagedMetrics::new()),
             now: Mutex::new(0),
         };
         let instance = Arc::new(instance);
