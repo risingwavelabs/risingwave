@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::InputLevel;
 
@@ -25,6 +26,7 @@ pub struct TombstoneReclaimCompactionPicker {
     overlap_strategy: Arc<dyn OverlapStrategy>,
     delete_ratio: u64,
     range_delete_ratio: u64,
+    min_keep_alive_time_secs: u64,
 }
 
 #[derive(Default)]
@@ -37,11 +39,13 @@ impl TombstoneReclaimCompactionPicker {
         overlap_strategy: Arc<dyn OverlapStrategy>,
         delete_ratio: u64,
         range_delete_ratio: u64,
+        min_keep_alive_time_secs: u64,
     ) -> Self {
         Self {
             overlap_strategy,
             delete_ratio,
             range_delete_ratio,
+            min_keep_alive_time_secs,
         }
     }
 
@@ -55,6 +59,7 @@ impl TombstoneReclaimCompactionPicker {
         if state.last_level == 0 {
             state.last_level = 1;
         }
+        let current_time = Epoch::physical_now() / 1000;
 
         while state.last_level <= levels.levels.len() {
             let mut select_input_ssts = vec![];
@@ -62,7 +67,10 @@ impl TombstoneReclaimCompactionPicker {
                 let need_reclaim = (sst.range_tombstone_count * 100
                     >= sst.total_key_count * self.range_delete_ratio)
                     || (sst.stale_key_count * 100 >= sst.total_key_count * self.delete_ratio);
-                if !need_reclaim || level_handlers[state.last_level].is_pending_compact(&sst.sst_id)
+                let shall_keep = sst.create_time + self.min_keep_alive_time_secs > current_time;
+                if !need_reclaim
+                    || shall_keep
+                    || level_handlers[state.last_level].is_pending_compact(&sst.sst_id)
                 {
                     continue;
                 }

@@ -1425,6 +1425,15 @@ impl HummockManager {
         let versioning = versioning_guard.deref_mut();
         let _timer = start_measure_real_process_timer!(self, "report_compact_tasks");
 
+        let task_end_time = Epoch::physical_now() / 1000;
+        {
+            // apply result
+            compact_task.set_task_status(task_status);
+            compact_task.sorted_output_ssts = sorted_output_ssts;
+            for sst in &mut compact_task.sorted_output_ssts {
+                sst.create_time = task_end_time;
+            }
+        }
         let mut current_version = versioning.current_version.clone();
         // purge stale compact_status
         for group_id in original_keys {
