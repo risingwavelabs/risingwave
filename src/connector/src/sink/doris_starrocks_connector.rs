@@ -584,6 +584,7 @@ impl StarrocksTxnRequestBuilder {
                 .execute(request_for_redirection)
                 .await
                 .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
+
             let status = response.status();
             let raw = response
                 .bytes()

@@ -538,7 +538,10 @@ impl SinkWriter for StarrocksSinkWriter {
     }
 
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        if self.client.is_none() {
+        // We check whether start a new transaction in `write_batch`. Therefore, if no data has been written
+        // within the `commit_checkpoint_interval` period, no meta requests will be made. Otherwise if we request 
+        // `prepare` against an empty transaction, the `StarRocks` will report a `hasn't send any data yet` error.
+        if self.curr_txn_label.is_none() {
             let txn_label = self.new_txn_label();
             tracing::debug!(?txn_label, "begin transaction");
             let txn_label_res = self.txn_client.begin(txn_label.clone()).await?;
@@ -547,9 +550,12 @@ impl SinkWriter for StarrocksSinkWriter {
                 "label responding from StarRocks: {} differ from generated one: {}",
                 txn_label, txn_label_res
             );
-
             self.curr_txn_label = Some(txn_label.clone());
-            self.client = Some(StarrocksClient::new(self.txn_client.load(txn_label).await?));
+        }
+        if self.client.is_none() {
+            let txn_label = self.curr_txn_label.clone();
+            assert!(txn_label.is_some(), "transaction label is none during load");
+            self.client = Some(StarrocksClient::new(self.txn_client.load(txn_label.unwrap()).await?));
         }
         if self.is_append_only {
             self.append_only(chunk).await
@@ -570,9 +576,10 @@ impl SinkWriter for StarrocksSinkWriter {
                 .take()
                 .ok_or_else(|| SinkError::Starrocks("Can't find starrocks inserter".to_string()))?;
             client.finish().await?;
+        }
 
-            if is_checkpoint {
-                assert!(self.curr_txn_label.is_some(), "no txn label during prepare");
+        if is_checkpoint {
+            if self.curr_txn_label.is_some() {
                 let txn_label = self.curr_txn_label.take().unwrap();
                 tracing::debug!(?txn_label, "prepare transaction");
                 let txn_label_res = self.txn_client.prepare(txn_label.clone()).await?;
@@ -580,15 +587,18 @@ impl SinkWriter for StarrocksSinkWriter {
                     txn_label, txn_label_res,
                     "label responding from StarRocks differs from the current one"
                 );
-                return Ok(Some(StarrocksWriteResult(txn_label).try_into()?));
+                Ok(Some(StarrocksWriteResult(Some(txn_label)).try_into()?))
+            } else {
+                // no data was written within previous epoch
+                Ok(Some(StarrocksWriteResult(None).try_into()?))
             }
+        } else {
+            Ok(None)
         }
-        Ok(None)
     }
 
     async fn abort(&mut self) -> Result<()> {
-        if self.client.is_some() && self.curr_txn_label.is_some() {
-            self.client.take();
+        if self.curr_txn_label.is_some() {
             let txn_label = self.curr_txn_label.take().unwrap();
             tracing::debug!(?txn_label, "rollback transaction");
             self.txn_client.rollback(txn_label).await?;
@@ -811,21 +821,21 @@ impl StarrocksTxnClient {
     }
 }
 
-struct StarrocksWriteResult(String);
+struct StarrocksWriteResult(Option<String>);
 
 impl TryFrom<StarrocksWriteResult> for SinkMetadata {
     type Error = SinkError;
 
     fn try_from(value: StarrocksWriteResult) -> std::result::Result<Self, Self::Error> {
-        if value.0.is_empty() {
-            return Err(SinkError::DorisStarrocksConnect(anyhow!(
-                "txn label is empty during serialization"
-            )));
+        match value.0 {
+            Some(label) => {
+                let metadata = label.into_bytes();
+                Ok(SinkMetadata {
+                    metadata: Some(Serialized(SerializedMetadata { metadata })),
+                })
+            }
+            None => Ok(SinkMetadata { metadata: None }),
         }
-        let metadata = value.0.into_bytes();
-        Ok(SinkMetadata {
-            metadata: Some(Serialized(SerializedMetadata { metadata })),
-        })
     }
 }
 
@@ -834,14 +844,12 @@ impl TryFrom<SinkMetadata> for StarrocksWriteResult {
 
     fn try_from(value: SinkMetadata) -> std::result::Result<Self, Self::Error> {
         if let Some(Serialized(v)) = value.metadata {
-            Ok(StarrocksWriteResult(
+            Ok(StarrocksWriteResult(Some(
                 String::from_utf8(v.metadata)
                     .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?,
-            ))
-        } else {
-            Err(SinkError::DorisStarrocksConnect(anyhow!(
-                "no metadata found during deserialization"
             )))
+        } else {
+            Ok(StarrocksWriteResult(None))
         }
     }
 }
@@ -854,24 +862,30 @@ impl SinkCommitCoordinator for StarrocksSinkCommitter {
     }
 
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
-        let txn_labels = metadata
+        let write_results = metadata
             .into_iter()
             .map(TryFrom::try_from)
-            .map(|r| r.map(|v: StarrocksWriteResult| v.0))
-            .collect::<Result<Vec<String>>>()?;
+            .collect::<Result<Vec<StarrocksWriteResult>>>()?;
+
+        let txn_labels = write_results
+            .into_iter()
+            .filter_map(|v| v.0)
+            .collect::<Vec<String>>();
+
         tracing::debug!(?epoch, ?txn_labels, "commit transaction");
 
-        let join_handles = txn_labels
-            .into_iter()
-            .map(|txn_label| {
-                let client = self.client.clone();
-                tokio::spawn(async move { client.commit(txn_label).await })
-            })
-            .collect::<Vec<JoinHandle<Result<String>>>>();
-        futures::future::try_join_all(join_handles)
-            .await
-            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
-
+        if !txn_labels.is_empty() {
+            let join_handles = txn_labels
+                .into_iter()
+                .map(|txn_label| {
+                    let client = self.client.clone();
+                    tokio::spawn(async move { client.commit(txn_label).await })
+                })
+                .collect::<Vec<JoinHandle<Result<String>>>>();
+            futures::future::try_join_all(join_handles)
+                .await
+                .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
+        }
         Ok(())
     }
 }
