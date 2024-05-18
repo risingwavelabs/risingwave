@@ -229,7 +229,10 @@ impl KinesisSinkPayloadWriter {
                     .expect("should have set stream name")
             );
             Retry::spawn(
-                ExponentialBackoff::from_millis(100).map(jitter).take(3),
+                ExponentialBackoff::from_millis(100)
+                    .max_delay(std::time::Duration::from_secs(1))
+                    .map(jitter)
+                    .take(60),
                 || builder.clone().send(),
             )
             .await
