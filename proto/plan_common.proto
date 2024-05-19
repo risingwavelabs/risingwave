@@ -221,6 +221,8 @@ message AdditionalColumn {
     AdditionalColumnHeader header_inner = 5;
     AdditionalColumnFilename filename = 6;
     AdditionalColumnHeaders headers = 7;
+    AdditionalColumnTableName table_name = 8;
+    AdditionalColumnDatabaseName database_name = 9;
   }
 }
 

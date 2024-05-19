@@ -58,23 +58,11 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
             (GCS_CONNECTOR, HashSet::from(["file", "offset"])),
             (
                 MYSQL_CDC_CONNECTOR,
-                HashSet::from([
-                    "database_name",
-                    "table_name",
-                    "timestamp",
-                    "partition",
-                    "offset",
-                ]),
+                HashSet::from(["timestamp", "partition", "offset"]),
             ),
             (
                 POSTGRES_CDC_CONNECTOR,
-                HashSet::from([
-                    "database_name",
-                    "table_name",
-                    "timestamp",
-                    "partition",
-                    "offset",
-                ]),
+                HashSet::from(["timestamp", "partition", "offset"]),
             ),
         ])
     });
