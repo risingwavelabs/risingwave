@@ -733,8 +733,19 @@ StarrocksConfig:
     field_type: String
     comments: The `StarRocks` table you want to sink data to.
     required: true
+  - name: starrocks.stream_load.http.timeout.ms
+    field_type: u64
+    comments: The timeout in milliseconds for stream load http request, defaults to 10 seconds.
+    required: false
+    default: 10 * 1000
+  - name: commit_checkpoint_interval
+    field_type: u64
+    comments: Set this option to a positive integer n, RisingWave will try to commit data  to Starrocks at every n checkpoints by leveraging the  [StreamLoad Transaction API](https://docs.starrocks.io/docs/loading/Stream_Load_transaction_interface/),  also, in this time, the `sink_decouple` option should be enabled as well.  Defaults to 1 if commit_checkpoint_interval <= 0
+    required: false
+    default: Default::default
   - name: starrocks.partial_update
     field_type: String
+    comments: Enable partial update
     required: false
   - name: r#type
     field_type: String
