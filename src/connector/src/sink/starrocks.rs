@@ -539,7 +539,7 @@ impl SinkWriter for StarrocksSinkWriter {
 
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         // We check whether start a new transaction in `write_batch`. Therefore, if no data has been written
-        // within the `commit_checkpoint_interval` period, no meta requests will be made. Otherwise if we request 
+        // within the `commit_checkpoint_interval` period, no meta requests will be made. Otherwise if we request
         // `prepare` against an empty transaction, the `StarRocks` will report a `hasn't send any data yet` error.
         if self.curr_txn_label.is_none() {
             let txn_label = self.new_txn_label();
@@ -555,7 +555,9 @@ impl SinkWriter for StarrocksSinkWriter {
         if self.client.is_none() {
             let txn_label = self.curr_txn_label.clone();
             assert!(txn_label.is_some(), "transaction label is none during load");
-            self.client = Some(StarrocksClient::new(self.txn_client.load(txn_label.unwrap()).await?));
+            self.client = Some(StarrocksClient::new(
+                self.txn_client.load(txn_label.unwrap()).await?,
+            ));
         }
         if self.is_append_only {
             self.append_only(chunk).await
