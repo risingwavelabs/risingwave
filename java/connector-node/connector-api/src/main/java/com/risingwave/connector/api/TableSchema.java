@@ -80,11 +80,14 @@ public class TableSchema {
     }
 
     public static TableSchema fromProto(ConnectorServiceProto.TableSchema tableSchema) {
+        // filter out additional columns
+        var columns =
+                tableSchema.getColumnsList().stream()
+                        .filter(col -> !col.hasAdditionalColumn())
+                        .collect(Collectors.toList());
         return new TableSchema(
-                tableSchema.getColumnsList().stream()
-                        .map(PlanCommon.ColumnDesc::getName)
-                        .collect(Collectors.toList()),
-                tableSchema.getColumnsList().stream()
+                columns.stream().map(PlanCommon.ColumnDesc::getName).collect(Collectors.toList()),
+                columns.stream()
                         .map(PlanCommon.ColumnDesc::getColumnType)
                         .collect(Collectors.toList()),
                 tableSchema.getPkIndicesList().stream()

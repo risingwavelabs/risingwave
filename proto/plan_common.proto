@@ -108,6 +108,8 @@ message ExternalTableDesc {
   map<string, string> connect_properties = 6;
   // upstream cdc source job id
   uint32 source_id = 7;
+  // Indices to the additional columns in the columns list.
+  repeated uint32 additional_column_indices = 8;
 }
 
 enum JoinType {
@@ -197,6 +199,10 @@ message AdditionalColumnPartition {}
 message AdditionalColumnOffset {}
 
 message AdditionalColumnFilename {}
+
+message AdditionalColumnTableName {}
+
+message AdditionalColumnDatabaseName {}
 
 message AdditionalColumnHeader {
   string inner_field = 1;

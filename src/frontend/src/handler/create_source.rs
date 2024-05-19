@@ -571,6 +571,7 @@ pub fn handle_addition_columns(
         .max()
         .unwrap(); // there must be at least one column in the column catalog
 
+    let mut additional_column_indices = Vec::new();
     while let Some(item) = additional_columns.pop() {
         {
             // only allow header column have inner field
@@ -587,6 +588,7 @@ pub fn handle_addition_columns(
         let data_type_name: Option<String> = item
             .header_inner_expect_type
             .map(|dt| format!("{:?}", dt).to_lowercase());
+        additional_column_indices.push(columns.len());
         columns.push(build_additional_column_catalog(
             latest_col_id.next(),
             connector_name.as_str(),

@@ -46,19 +46,19 @@ pub trait UpstreamTableRead {
 pub struct SnapshotReadArgs {
     pub current_pos: Option<OwnedRow>,
     pub rate_limit_rps: Option<u32>,
-    pub pk_in_output_indices: Vec<usize>,
+    pub pk_indices: Vec<usize>,
 }
 
 impl SnapshotReadArgs {
     pub fn new(
         current_pos: Option<OwnedRow>,
         rate_limit_rps: Option<u32>,
-        pk_in_output_indices: Vec<usize>,
+        pk_indices: Vec<usize>,
     ) -> Self {
         Self {
             current_pos,
             rate_limit_rps,
-            pk_in_output_indices,
+            pk_indices,
         }
     }
 }
@@ -139,7 +139,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
                 let chunk = chunk?;
                 let chunk_size = chunk.capacity();
                 read_count += chunk.cardinality();
-                current_pk_pos = get_new_pos(&chunk, &read_args.pk_in_output_indices);
+                current_pk_pos = get_new_pos(&chunk, &read_args.pk_indices);
 
                 if read_args.rate_limit_rps.is_none() || chunk_size == 0 {
                     // no limit, or empty chunk

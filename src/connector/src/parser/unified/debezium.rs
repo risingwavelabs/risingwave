@@ -13,11 +13,45 @@
 // limitations under the License.
 
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_pb::plan_common::additional_column::ColumnType;
 
 use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation};
 use crate::parser::TransactionControl;
 use crate::source::{ConnectorProperties, SourceColumnDesc};
 
+// Example of Debezium JSON value:
+// {
+//     "payload":
+//     {
+//         "before": null,
+//         "after":
+//         {
+//             "O_ORDERKEY": 5,
+//             "O_CUSTKEY": 44485,
+//             "O_ORDERSTATUS": "F",
+//             "O_TOTALPRICE": "144659.20",
+//             "O_ORDERDATE": "1994-07-30"
+//         },
+//         "source":
+//         {
+//             "version": "1.9.7.Final",
+//             "connector": "mysql",
+//             "name": "RW_CDC_1002",
+//             "ts_ms": 1695277757000,
+//             "db": "mydb",
+//             "sequence": null,
+//             "table": "orders",
+//             "server_id": 0,
+//             "gtid": null,
+//             "file": "binlog.000008",
+//             "pos": 3693,
+//             "row": 0,
+//         },
+//         "op": "r",
+//         "ts_ms": 1695277757017,
+//         "transaction": null
+//     }
+// }
 pub struct DebeziumChangeEvent<A> {
     value_accessor: Option<A>,
     key_accessor: Option<A>,
@@ -26,6 +60,8 @@ pub struct DebeziumChangeEvent<A> {
 
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
+const SOURCE: &str = "source";
+const SOURCE_TS_MS: &str = "ts_ms";
 const OP: &str = "op";
 pub const TRANSACTION_STATUS: &str = "status";
 pub const TRANSACTION_ID: &str = "id";
@@ -150,11 +186,31 @@ where
             }
 
             // value should not be None.
-            ChangeEventOperation::Upsert => self
-                .value_accessor
-                .as_ref()
-                .unwrap()
-                .access(&[AFTER, &desc.name], Some(&desc.data_type)),
+            ChangeEventOperation::Upsert => {
+                // For upsert operation, if desc is an additional column, access field in the `SOURCE` field.
+                desc.additional_column.column_type.as_ref().map_or_else(
+                    || {
+                        self.value_accessor
+                            .as_ref()
+                            .expect("value_accessor must be provided for upsert operation")
+                            .access(&[AFTER, &desc.name], Some(&desc.data_type))
+                    },
+                    |additional_column_type| {
+                        match additional_column_type {
+                            &ColumnType::Timestamp(_) => {
+                                // access payload.source.ts_ms
+                                self.value_accessor
+                                    .as_ref()
+                                    .expect("value_accessor must be provided for upsert operation")
+                                    .access(&[SOURCE, &SOURCE_TS_MS], Some(&desc.data_type))
+                            }
+                            _ => Err(AccessError::UnsupportedAdditionalColumn {
+                                name: desc.name.clone(),
+                            }),
+                        }
+                    },
+                )
+            }
         }
     }
 

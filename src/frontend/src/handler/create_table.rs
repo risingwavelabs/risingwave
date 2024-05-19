@@ -56,7 +56,7 @@ use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InlineNowProcTime};
 use crate::handler::create_source::{
     bind_columns_from_source, bind_connector_props, bind_create_source, bind_source_watermark,
-    UPSTREAM_SOURCE_KEY,
+    handle_addition_columns, UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::{CdcScanOptions, SourceNodeKind};
@@ -741,6 +741,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
     mut col_id_gen: ColumnIdGenerator,
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
+    include_column_options: IncludeOption,
 ) -> Result<(PlanRef, PbTable)> {
     let session = context.session_ctx().clone();
     let db_name = session.database();
@@ -766,13 +767,21 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
     };
 
     let mut columns = bind_sql_columns(&column_defs)?;
+    let table_columns_len = columns.len();
+    let with_properties = source.with_properties.clone().into_iter().collect();
+    // append additional columns to the end
+    handle_addition_columns(&with_properties, include_column_options, &mut columns)?;
 
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
 
     let pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
-    let (columns, pk_column_ids, _) = bind_pk_on_relation(columns, pk_names, true)?;
+    let (columns, pk_column_ids, row_id_index) = bind_pk_on_relation(columns, pk_names, true)?;
+    assert_eq!(
+        None, row_id_index,
+        "cdc table should not have row_id column"
+    );
 
     let definition = context.normalized_sql().to_owned();
 
@@ -801,8 +810,8 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
         external_table_name: external_table_name.clone(),
         pk: table_pk,
         columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
+        additional_column_indices: (table_columns_len..columns.len()).collect(),
         stream_key: pk_column_indices,
-        value_indices: (0..columns.len()).collect_vec(),
         connect_properties,
     };
 
@@ -912,6 +921,7 @@ pub(super) async fn handle_create_table_plan(
         &handler_args.with_options,
         source_schema,
         &include_column_options,
+        &cdc_table_info,
     )?;
 
     let ((plan, source, table), job_type) =
@@ -998,6 +1008,7 @@ pub(super) async fn handle_create_table_plan(
                     col_id_gen,
                     on_conflict,
                     with_version_column,
+                    include_column_options,
                 )?;
 
                 ((plan, None, table), TableJobType::SharedCdcSource)
@@ -1091,7 +1102,11 @@ pub fn check_create_table_with_source(
     with_options: &WithOptions,
     source_schema: Option<ConnectorSchema>,
     include_column_options: &IncludeOption,
+    cdc_table_info: &Option<CdcTableInfo>,
 ) -> Result<Option<ConnectorSchema>> {
+    if cdc_table_info.is_some() {
+        return Ok(source_schema);
+    }
     let defined_source = with_options.inner().contains_key(UPSTREAM_SOURCE_KEY);
     if !include_column_options.is_empty() && !defined_source {
         return Err(ErrorCode::InvalidInputSyntax(

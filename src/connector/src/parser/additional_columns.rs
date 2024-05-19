@@ -28,6 +28,7 @@ use risingwave_pb::plan_common::{
 };
 
 use crate::error::ConnectorResult;
+use crate::source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR};
 use crate::source::{
     GCS_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, OPENDAL_S3_CONNECTOR, PULSAR_CONNECTOR,
     S3_CONNECTOR,
@@ -55,6 +56,26 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
             (OPENDAL_S3_CONNECTOR, HashSet::from(["file", "offset"])),
             (S3_CONNECTOR, HashSet::from(["file", "offset"])),
             (GCS_CONNECTOR, HashSet::from(["file", "offset"])),
+            (
+                MYSQL_CDC_CONNECTOR,
+                HashSet::from([
+                    "database_name",
+                    "table_name",
+                    "timestamp",
+                    "partition",
+                    "offset",
+                ]),
+            ),
+            (
+                POSTGRES_CDC_CONNECTOR,
+                HashSet::from([
+                    "database_name",
+                    "table_name",
+                    "timestamp",
+                    "partition",
+                    "offset",
+                ]),
+            ),
         ])
     });
 

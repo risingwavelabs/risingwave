@@ -37,10 +37,9 @@ pub struct CdcTableDesc {
     /// All columns in the table, noticed it is NOT sorted by columnId in the vec.
     pub columns: Vec<ColumnDesc>,
 
+    pub additional_column_indices: Vec<usize>,
     /// Column indices for primary keys.
     pub stream_key: Vec<usize>,
-
-    pub value_indices: Vec<usize>,
 
     /// properties will be passed into the `StreamScanNode`
     pub connect_properties: BTreeMap<String, String>,
@@ -67,6 +66,11 @@ impl CdcTableDesc {
             table_name: self.external_table_name.clone(),
             stream_key: self.stream_key.iter().map(|k| *k as _).collect(),
             connect_properties: self.connect_properties.clone(),
+            additional_column_indices: self
+                .additional_column_indices
+                .iter()
+                .map(|k| *k as _)
+                .collect(),
         }
     }
 
