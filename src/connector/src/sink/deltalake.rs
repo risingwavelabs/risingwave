@@ -69,7 +69,7 @@ pub struct DeltaLakeCommon {
     pub s3_endpoint: Option<String>,
     #[serde(rename = "gcs.service.account")]
     pub gcs_service_account: Option<String>,
-    // Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
+    /// Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
     #[serde(default, deserialize_with = "deserialize_optional_u64_from_string")]
     pub commit_checkpoint_interval: Option<u64>,
 }
