@@ -54,7 +54,7 @@ full-without-monitoring:
 EOF
   else
      # For versions >= 1.9.0, the default config will default to sql backend,
-     # breaking backwards compat
+     # breaking backwards compat, so we must specify meta-backend: etcd
      cat <<EOF > risedev-profiles.user.yml
 full-without-monitoring:
  steps:
