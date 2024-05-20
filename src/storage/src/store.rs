@@ -602,6 +602,7 @@ impl Eq for OpConsistencyLevel {}
 
 impl OpConsistencyLevel {
     pub fn update(&mut self, new_level: &OpConsistencyLevel) {
+        assert_ne!(self, new_level);
         *self = new_level.clone()
     }
 }

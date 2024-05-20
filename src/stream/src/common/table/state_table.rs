@@ -1152,6 +1152,12 @@ where
         new_epoch: EpochPair,
         op_consistency_level: StateTableOpConsistencyLevel,
     ) -> StreamExecutorResult<()> {
+        let op_consistency_level = if enable_strict_consistency() {
+            op_consistency_level
+        } else {
+            // disable sanity check in non-strict mode
+            StateTableOpConsistencyLevel::Inconsistent
+        };
         if self.op_consistency_level != op_consistency_level {
             self.commit_inner(new_epoch, Some(op_consistency_level))
                 .await
@@ -1168,13 +1174,8 @@ where
         assert_eq!(self.epoch(), new_epoch.prev);
         let switch_op_consistency_level = switch_consistent_op.map(|new_consistency_level| {
             assert_ne!(self.op_consistency_level, new_consistency_level);
-            self.op_consistency_level = if enable_strict_consistency() {
-                new_consistency_level
-            } else {
-                // disable sanity check in non-strict mode
-                StateTableOpConsistencyLevel::Inconsistent
-            };
-            match self.op_consistency_level {
+            self.op_consistency_level = new_consistency_level;
+            match new_consistency_level {
                 StateTableOpConsistencyLevel::Inconsistent => OpConsistencyLevel::Inconsistent,
                 StateTableOpConsistencyLevel::ConsistentOldValue => {
                     consistent_old_value_op(self.row_serde.clone(), false)
