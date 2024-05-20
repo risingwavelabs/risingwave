@@ -4424,9 +4424,9 @@ dependencies = [
 
 [[package]]
 name = "either"
-version = "1.11.0"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a47c1c47d2f5964e29c61246e81db715514cd532db6b5116a25ea3c03d6780a2"
+checksum = "3dca9240753cf90908d7e4aac30f630662b02aebaa1b58a3cadabdb23385b58b"
 dependencies = [
  "serde",
 ]
@@ -9245,9 +9245,9 @@ checksum = "106dd99e98437432fed6519dedecfade6a06a73bb7b2a1e019fdd2bee5778d94"
 
 [[package]]
 name = "protobuf-native"
-version = "0.2.1+3.19.1"
+version = "0.2.2+3.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86df76d0f2a6933036e8a9f28f1adc8b48081fa681dba07eaa30ac75663f7f4e"
+checksum = "577feb02952883f2348ee6f36afeeb4e0ee22be0e5b707d60bdc2f5aab038e8f"
 dependencies = [
  "cxx",
  "cxx-build",
