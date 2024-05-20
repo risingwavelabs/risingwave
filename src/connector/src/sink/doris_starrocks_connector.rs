@@ -162,7 +162,6 @@ impl HeaderBuilder {
     }
 
     pub fn build(self) -> HashMap<String, String> {
-        println!("{:?}", self.header);
         self.header
     }
 }

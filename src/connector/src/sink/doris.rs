@@ -129,7 +129,7 @@ impl DorisSink {
         let rw_fields_name = self.schema.fields();
         if rw_fields_name.len().gt(&doris_columns_desc.len()) {
             return Err(SinkError::Doris(
-                "The length of the RisingWave column must be le the length of the doris column"
+                "The columns of the sink must be equal to or a superset of the target table's columns."
                     .to_string(),
             ));
         }

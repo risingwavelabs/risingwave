@@ -127,6 +127,9 @@ DorisConfig:
   - name: doris.table
     field_type: String
     required: true
+  - name: doris.partial_columns
+    field_type: String
+    required: false
   - name: r#type
     field_type: String
     required: true
