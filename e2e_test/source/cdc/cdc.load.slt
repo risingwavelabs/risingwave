@@ -161,7 +161,7 @@ create table shipments_2 (
 # Test user-provided publication
 statement ok
 create table t1_rw (
-    v1 int primary key,
+    "V1" int primary key,
     v3 varchar
 ) with (
   connector = 'postgres-cdc',

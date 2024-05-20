@@ -20,14 +20,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use itertools::{enumerate, Itertools};
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::IntGauge;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    object_size_map, BranchedSstInfo,
-};
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::object_size_map;
 use risingwave_hummock_sdk::table_stats::PbTableStatsMap;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
-};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId, HummockEpoch, HummockVersionId};
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
@@ -555,36 +551,31 @@ pub fn trigger_write_stop_stats(
     }
 }
 
-pub fn trigger_split_stat(
-    metrics: &MetaMetrics,
-    compaction_group_id: CompactionGroupId,
-    member_table_id_len: usize,
-    branched_ssts: &BTreeMap<
-        // SST object id
-        HummockSstableObjectId,
-        BranchedSstInfo,
-    >,
-) {
-    let group_label = compaction_group_id.to_string();
-    metrics
-        .state_table_count
-        .with_label_values(&[&group_label])
-        .set(member_table_id_len as _);
+pub fn trigger_split_stat(metrics: &MetaMetrics, version: &HummockVersion) {
+    let branched_ssts = version.build_branched_sst_info();
 
-    let branched_sst_count: usize = branched_ssts
-        .values()
-        .map(|branched_map| {
-            branched_map
-                .keys()
-                .filter(|group_id| **group_id == compaction_group_id)
-                .count()
-        })
-        .sum();
+    for (compaction_group_id, group) in &version.levels {
+        let group_label = compaction_group_id.to_string();
+        metrics
+            .state_table_count
+            .with_label_values(&[&group_label])
+            .set(group.member_table_ids.len() as _);
 
-    metrics
-        .branched_sst_count
-        .with_label_values(&[&group_label])
-        .set(branched_sst_count as _);
+        let branched_sst_count: usize = branched_ssts
+            .values()
+            .map(|branched_map| {
+                branched_map
+                    .keys()
+                    .filter(|group_id| *group_id == compaction_group_id)
+                    .count()
+            })
+            .sum();
+
+        metrics
+            .branched_sst_count
+            .with_label_values(&[&group_label])
+            .set(branched_sst_count as _);
+    }
 }
 
 pub fn build_level_metrics_label(compaction_group_id: u64, level_idx: usize) -> String {

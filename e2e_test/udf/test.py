@@ -19,9 +19,7 @@ import time
 from typing import Iterator, List, Optional, Tuple, Any
 from decimal import Decimal
 
-sys.path.append("src/expr/udf/python")  # noqa
-
-from risingwave.udf import udf, udtf, UdfServer
+from arrow_udf import udf, udtf, UdfServer
 
 
 @udf(input_types=[], result_type="INT")
@@ -47,13 +45,21 @@ def gcd3(x: int, y: int, z: int) -> int:
     return gcd(gcd(x, y), z)
 
 
-@udf(input_types=["BYTEA"], result_type="STRUCT<VARCHAR, VARCHAR, SMALLINT, SMALLINT>")
+@udf(
+    input_types=["BYTEA"],
+    result_type="STRUCT<src_addr: VARCHAR, dst_addr: VARCHAR, src_port: SMALLINT, dst_port: SMALLINT>",
+)
 def extract_tcp_info(tcp_packet: bytes):
     src_addr, dst_addr = struct.unpack("!4s4s", tcp_packet[12:20])
     src_port, dst_port = struct.unpack("!HH", tcp_packet[20:24])
     src_addr = socket.inet_ntoa(src_addr)
     dst_addr = socket.inet_ntoa(dst_addr)
-    return src_addr, dst_addr, src_port, dst_port
+    return {
+        "src_addr": src_addr,
+        "dst_addr": dst_addr,
+        "src_port": src_port,
+        "dst_port": dst_port,
+    }
 
 
 @udtf(input_types="INT", result_types="INT")
@@ -84,7 +90,7 @@ def hex_to_dec(hex: Optional[str]) -> Optional[Decimal]:
     return dec
 
 
-@udf(input_types=["FLOAT8"], result_type="DECIMAL")
+@udf(input_types=["FLOAT64"], result_type="DECIMAL")
 def float_to_decimal(f: float) -> Decimal:
     return Decimal(f)
 
@@ -120,21 +126,49 @@ def jsonb_array_identity(list: List[Any]) -> List[Any]:
     return list
 
 
-@udf(input_types="STRUCT<JSONB[], INT>", result_type="STRUCT<JSONB[], INT>")
+@udf(
+    input_types="STRUCT<v: JSONB[], len: INT>",
+    result_type="STRUCT<v: JSONB[], len: INT>",
+)
 def jsonb_array_struct_identity(v: Tuple[List[Any], int]) -> Tuple[List[Any], int]:
     return v
 
 
-ALL_TYPES = "BOOLEAN,SMALLINT,INT,BIGINT,FLOAT4,FLOAT8,DECIMAL,DATE,TIME,TIMESTAMP,INTERVAL,VARCHAR,BYTEA,JSONB".split(
-    ","
-) + [
-    "STRUCT<INT,INT>"
-]
-
-
 @udf(
-    input_types=ALL_TYPES,
-    result_type=f"struct<{','.join(ALL_TYPES)}>",
+    input_types=[
+        "boolean",
+        "int16",
+        "int32",
+        "int64",
+        "float32",
+        "float64",
+        "decimal",
+        "date32",
+        "time64",
+        "timestamp",
+        "interval",
+        "string",
+        "binary",
+        "json",
+        "struct<f1:int, f2:int>",
+    ],
+    result_type="""struct<
+        boolean: boolean,
+        int16: int16,
+        int32: int32,
+        int64: int64,
+        float32: float32,
+        float64: float64,
+        decimal: decimal,
+        date32: date32,
+        time64: time64,
+        timestamp: timestamp,
+        interval: interval,
+        string: string,
+        binary: binary,
+        json: json,
+        struct: struct<f1:int, f2:int>,
+    >""",
 )
 def return_all(
     bool,
@@ -153,28 +187,60 @@ def return_all(
     jsonb,
     struct,
 ):
-    return (
-        bool,
-        i16,
-        i32,
-        i64,
-        f32,
-        f64,
-        decimal,
-        date,
-        time,
-        timestamp,
-        interval,
-        varchar,
-        bytea,
-        jsonb,
-        struct,
-    )
+    return {
+        "boolean": bool,
+        "int16": i16,
+        "int32": i32,
+        "int64": i64,
+        "float32": f32,
+        "float64": f64,
+        "decimal": decimal,
+        "date32": date,
+        "time64": time,
+        "timestamp": timestamp,
+        "interval": interval,
+        "string": varchar,
+        "binary": bytea,
+        "json": jsonb,
+        "struct": struct,
+    }
 
 
 @udf(
-    input_types=[t + "[]" for t in ALL_TYPES],
-    result_type=f"struct<{','.join(t + '[]' for t in ALL_TYPES)}>",
+    input_types=[
+        "boolean[]",
+        "int16[]",
+        "int32[]",
+        "int64[]",
+        "float32[]",
+        "float64[]",
+        "decimal[]",
+        "date32[]",
+        "time64[]",
+        "timestamp[]",
+        "interval[]",
+        "string[]",
+        "binary[]",
+        "json[]",
+        "struct<f1:int, f2:int>[]",
+    ],
+    result_type="""struct<
+        boolean: boolean[],
+        int16: int16[],
+        int32: int32[],
+        int64: int64[],
+        float32: float32[],
+        float64: float64[],
+        decimal: decimal[],
+        date32: date32[],
+        time64: time64[],
+        timestamp: timestamp[],
+        interval: interval[],
+        string: string[],
+        binary: binary[],
+        json: json[],
+        struct: struct<f1:int, f2:int>[],
+    >""",
 )
 def return_all_arrays(
     bool,
@@ -193,23 +259,23 @@ def return_all_arrays(
     jsonb,
     struct,
 ):
-    return (
-        bool,
-        i16,
-        i32,
-        i64,
-        f32,
-        f64,
-        decimal,
-        date,
-        time,
-        timestamp,
-        interval,
-        varchar,
-        bytea,
-        jsonb,
-        struct,
-    )
+    return {
+        "boolean": bool,
+        "int16": i16,
+        "int32": i32,
+        "int64": i64,
+        "float32": f32,
+        "float64": f64,
+        "decimal": decimal,
+        "date32": date,
+        "time64": time,
+        "timestamp": timestamp,
+        "interval": interval,
+        "string": varchar,
+        "binary": bytea,
+        "json": jsonb,
+        "struct": struct,
+    }
 
 
 if __name__ == "__main__":

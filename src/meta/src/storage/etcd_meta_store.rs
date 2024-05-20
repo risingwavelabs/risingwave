@@ -14,7 +14,6 @@
 
 use std::sync::atomic::{self, AtomicI64};
 
-use anyhow;
 use async_trait::async_trait;
 use etcd_client::{Compare, CompareOp, Error as EtcdError, GetOptions, Txn, TxnOp};
 use futures::Future;

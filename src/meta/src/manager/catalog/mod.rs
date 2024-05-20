@@ -19,7 +19,6 @@ mod utils;
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::iter;
-use std::option::Option::Some;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
@@ -3608,6 +3607,10 @@ impl CatalogManager {
             .list_dml_table_ids(schema_id)
     }
 
+    pub async fn list_view_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
+        self.core.lock().await.database.list_view_ids(schema_id)
+    }
+
     pub async fn list_sources(&self) -> Vec<Source> {
         self.core.lock().await.database.list_sources()
     }
@@ -3696,6 +3699,13 @@ impl CatalogManager {
                     referenced_object_id: *referenced,
                 });
             }
+        }
+
+        for subscription in core.subscriptions.values() {
+            dependencies.push(PbObjectDependencies {
+                object_id: subscription.id,
+                referenced_object_id: subscription.dependent_table_id,
+            });
         }
 
         dependencies
@@ -3958,7 +3968,7 @@ impl CatalogManager {
                 id
             )));
         }
-        if user_core.catalog_create_ref_count.get(&id).is_some() {
+        if user_core.catalog_create_ref_count.contains_key(&id) {
             return Err(MetaError::permission_denied(format!(
                 "User {} cannot be dropped because some objects depend on it",
                 user.name

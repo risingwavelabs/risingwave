@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// for derived code of `Message`
 #![expect(clippy::all)]
 #![expect(clippy::doc_markdown)]
-#![allow(non_snake_case)] // for derived code of `Message`
 #![feature(lint_reasons)]
 
 use std::str::FromStr;

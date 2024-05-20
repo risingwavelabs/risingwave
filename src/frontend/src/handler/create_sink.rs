@@ -556,7 +556,7 @@ fn check_cycle_for_sink(
                     path.push(table.name.clone());
                     self.visit_table(table.as_ref(), target_table_id, path)?;
                     path.pop();
-                } else if self.source_index.get(&table_id.table_id).is_some() {
+                } else if self.source_index.contains_key(&table_id.table_id) {
                     continue;
                 } else {
                     bail!("streaming job not found: {:?}", table_id);
@@ -718,7 +718,7 @@ fn derive_default_column_project_for_sink(
 
         // If users specified the columns to be inserted e.g. `CREATE SINK s INTO t(a, b)`, the expressions of `Project` will be generated accordingly.
         // The missing columns will be filled with default value (`null` if not explicitly defined).
-        // Otherwhise, e.g. `CREATE SINK s INTO t`, the columns will be matched by their order in `select` query and the target table.
+        // Otherwise, e.g. `CREATE SINK s INTO t`, the columns will be matched by their order in `select` query and the target table.
         #[allow(clippy::collapsible_else_if)]
         if user_specified_columns {
             if let Some(idx) = sink_visible_col_idxes_by_name.get(table_column.name()) {

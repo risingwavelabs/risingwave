@@ -32,7 +32,7 @@ futures-util = "0.3"
 hex = "0.4"
 icelake = { workspace = true }
 itertools = { workspace = true }
-jsonbb = "0.1.2"
+jsonbb = { workspace = true }
 linkme = { version = "0.3", features = ["used_linker"] }
 md5 = "0.7"
 num-traits = "0.2"

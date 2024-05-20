@@ -19,7 +19,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{anyhow, Context};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use reqwest::{header, Client, RequestBuilder, StatusCode};
-use risingwave_common::config::ObjectStoreConfig;
 use risingwave_object_store::object::*;
 use serde::{Deserialize, Serialize};
 

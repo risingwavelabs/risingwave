@@ -778,13 +778,12 @@ impl GlobalStreamManager {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, HashMap, HashSet};
+    use std::collections::BTreeMap;
     use std::net::SocketAddr;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Mutex;
     use std::time::Duration;
 
     use futures::{Stream, TryStreamExt};
-    use risingwave_common::catalog::TableId;
     use risingwave_common::hash::ParallelUnitMapping;
     use risingwave_common::system_param::reader::SystemParamsRead;
     use risingwave_pb::common::{HostAddress, WorkerType};
@@ -797,10 +796,7 @@ mod tests {
         StreamService, StreamServiceServer,
     };
     use risingwave_pb::stream_service::streaming_control_stream_response::InitResponse;
-    use risingwave_pb::stream_service::{
-        BroadcastActorInfoTableResponse, BuildActorsResponse, DropActorsRequest,
-        DropActorsResponse, UpdateActorsResponse, *,
-    };
+    use risingwave_pb::stream_service::*;
     use tokio::spawn;
     use tokio::sync::mpsc::unbounded_channel;
     use tokio::sync::oneshot::Sender;
@@ -812,14 +808,14 @@ mod tests {
     use tonic::{Request, Response, Status, Streaming};
 
     use super::*;
-    use crate::barrier::{GlobalBarrierManager, StreamRpcManager};
+    use crate::barrier::GlobalBarrierManager;
     use crate::hummock::{CompactorManager, HummockManager};
     use crate::manager::sink_coordination::SinkCoordinatorManager;
     use crate::manager::{
         CatalogManager, CatalogManagerRef, ClusterManager, FragmentManager, FragmentManagerRef,
-        MetaSrvEnv, RelationIdEnum, StreamingClusterInfo,
+        RelationIdEnum, StreamingClusterInfo,
     };
-    use crate::model::{ActorId, FragmentId};
+    use crate::model::FragmentId;
     use crate::rpc::ddl_controller::DropMode;
     use crate::rpc::metrics::MetaMetrics;
     use crate::stream::{ScaleController, SourceManager};
