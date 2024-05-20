@@ -25,7 +25,6 @@ use futures::future::{try_join, try_join_all};
 use futures::{stream, FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, UserKey, EPOCH_LEN};
 use risingwave_hummock_sdk::key_range::KeyRange;
@@ -533,27 +532,6 @@ fn generate_splits(
                 && *table_size > min_sstable_size
             {
                 table_vnode_partition.insert(*table_id, 1);
-            }
-        }
-    } else {
-        // Collect vnodes in imm
-        let mut vnodes = vec![];
-        for imm in payload {
-            vnodes.extend(imm.collect_vnodes());
-        }
-        vnodes.sort();
-        vnodes.dedup();
-
-        // Based on the estimated `vnode_avg_size`, calculate the required `vnode_partition_count` to avoid small files and further align
-        if compact_data_size >= min_sstable_size && !vnodes.is_empty() {
-            let mut avg_vnode_size = compact_data_size / (vnodes.len() as u64);
-            let mut vnode_partition_count = VirtualNode::COUNT;
-            while avg_vnode_size < min_sstable_size && vnode_partition_count > 0 {
-                vnode_partition_count /= 2;
-                avg_vnode_size *= 2;
-            }
-            if let Some(table_id) = existing_table_ids.iter().next() {
-                table_vnode_partition.insert(*table_id, vnode_partition_count as u32);
             }
         }
     }

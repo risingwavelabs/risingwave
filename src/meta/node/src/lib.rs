@@ -343,8 +343,12 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 table_write_throughput_threshold: config.meta.table_write_throughput_threshold,
                 min_table_split_write_throughput: config.meta.min_table_split_write_throughput,
                 partition_vnode_count: config.meta.partition_vnode_count,
-                hybrid_few_partition_threshold: config.meta.hybrid_few_partition_threshold,
-                hybrid_more_partition_threshold: config.meta.hybrid_more_partition_threshold,
+                compact_task_table_size_partition_threshold_low: config
+                    .meta
+                    .compact_task_table_size_partition_threshold_low,
+                compact_task_table_size_partition_threshold_high: config
+                    .meta
+                    .compact_task_table_size_partition_threshold_high,
                 do_not_config_object_storage_lifecycle: config
                     .meta
                     .do_not_config_object_storage_lifecycle,
@@ -354,7 +358,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 compaction_task_max_progress_interval_secs,
                 compaction_config: Some(config.meta.compaction_config),
                 cut_table_size_limit: config.meta.cut_table_size_limit,
-                hybrid_partition_node_count: config.meta.hybird_partition_vnode_count,
+                hybrid_partition_node_count: config.meta.hybrid_partition_vnode_count,
                 event_log_enabled: config.meta.event_log_enabled,
                 event_log_channel_max_size: config.meta.event_log_channel_max_size,
                 advertise_addr: opts.advertise_addr,

@@ -292,8 +292,14 @@ impl HummockManager {
             let hybrid_vnode_count = self.env.opts.hybrid_partition_node_count;
             let default_partition_count = self.env.opts.partition_vnode_count;
             // We must ensure the partition threshold large enough to avoid too many small files.
-            let less_partition_threshold = self.env.opts.hybrid_few_partition_threshold;
-            let several_partition_threshold = self.env.opts.hybrid_more_partition_threshold;
+            let compact_task_table_size_partition_threshold_low = self
+                .env
+                .opts
+                .compact_task_table_size_partition_threshold_low;
+            let compact_task_table_size_partition_threshold_high = self
+                .env
+                .opts
+                .compact_task_table_size_partition_threshold_high;
             let params = self.env.system_params_reader().await;
             let barrier_interval_ms = params.barrier_interval_ms() as u64;
             let checkpoint_secs = std::cmp::max(
@@ -308,13 +314,16 @@ impl HummockManager {
                     .map(|que| que.back().cloned().unwrap_or(0))
                     .unwrap_or(0)
                     / checkpoint_secs;
-                if compact_table_size > several_partition_threshold {
+                if compact_table_size > compact_task_table_size_partition_threshold_high
+                    && default_partition_count > 0
+                {
                     compact_task
                         .table_vnode_partition
                         .insert(table_id, default_partition_count);
-                } else if compact_table_size > less_partition_threshold
+                } else if (compact_table_size > compact_task_table_size_partition_threshold_low
                     || (write_throughput > self.env.opts.table_write_throughput_threshold
-                        && compact_table_size > compaction_config.target_file_size_base)
+                        && compact_table_size > compaction_config.target_file_size_base))
+                    && hybrid_vnode_count > 0
                 {
                     // partition for large write throughput table. But we also need to make sure that it can not be too small.
                     compact_task
