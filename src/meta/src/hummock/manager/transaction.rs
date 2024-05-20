@@ -67,7 +67,7 @@ impl<'a> HummockVersionTransaction<'a> {
         let delta = build_version_delta_after_version(self.version());
         SingleDeltaTransaction {
             version_txn: self,
-            delta,
+            delta: Some(delta),
         }
     }
 
@@ -112,7 +112,7 @@ where
 
 pub(super) struct SingleDeltaTransaction<'a, 'b> {
     version_txn: &'b mut HummockVersionTransaction<'a>,
-    delta: HummockVersionDelta,
+    delta: Option<HummockVersionDelta>,
 }
 
 impl<'a, 'b> SingleDeltaTransaction<'a, 'b> {
@@ -120,8 +120,8 @@ impl<'a, 'b> SingleDeltaTransaction<'a, 'b> {
         self.version_txn.version()
     }
 
-    pub(super) fn pre_apply(self) {
-        self.version_txn.pre_apply(self.delta);
+    pub(super) fn pre_apply(mut self) {
+        self.version_txn.pre_apply(self.delta.take().unwrap());
     }
 }
 
@@ -129,12 +129,20 @@ impl<'a, 'b> Deref for SingleDeltaTransaction<'a, 'b> {
     type Target = HummockVersionDelta;
 
     fn deref(&self) -> &Self::Target {
-        &self.delta
+        self.delta.as_ref().expect("should exist")
     }
 }
 
 impl<'a, 'b> DerefMut for SingleDeltaTransaction<'a, 'b> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.delta
+        self.delta.as_mut().expect("should exist")
+    }
+}
+
+impl<'a, 'b> Drop for SingleDeltaTransaction<'a, 'b> {
+    fn drop(&mut self) {
+        if let Some(delta) = self.delta.take() {
+            self.version_txn.pre_apply(delta);
+        }
     }
 }
