@@ -99,22 +99,29 @@ impl WaitCheckpointTask {
                 }
             }
             WaitCheckpointTask::AckPubsubMessage(subscription, ack_id_arrs) => {
+                async fn ack(subscription: &Subscription, ack_ids: Vec<String>) {
+                    tracing::trace!("acking pubsub messages {:?}", ack_ids);
+                    match subscription.ack(ack_ids).await {
+                        Ok(()) => {}
+                        Err(e) => {
+                            tracing::error!(
+                                error = %e.as_report(),
+                                "failed to ack pubsub messages",
+                            )
+                        }
+                    }
+                }
+                const MAX_ACK_BATCH_SIZE: usize = 1000;
                 let mut ack_ids: Vec<String> = vec![];
                 for arr in ack_id_arrs {
                     for ack_id in arr.as_utf8().iter().flatten() {
-                        ack_ids.push(ack_id.to_string())
+                        ack_ids.push(ack_id.to_string());
+                        if ack_ids.len() >= MAX_ACK_BATCH_SIZE {
+                            ack(&subscription, std::mem::take(&mut ack_ids)).await;
+                        }
                     }
                 }
-                tracing::trace!("acking pubsub messages {:?}", ack_ids);
-                match subscription.ack(ack_ids).await {
-                    Ok(()) => {}
-                    Err(e) => {
-                        tracing::error!(
-                            error = %e.as_report(),
-                            "failed to ack pubsub messages",
-                        )
-                    }
-                }
+                ack(&subscription, ack_ids).await;
             }
         }
     }
