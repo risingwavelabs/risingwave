@@ -326,21 +326,21 @@ impl ActorMapping {
     }
 
     pub fn to_worker_slot(&self, to_map: &HashMap<ActorId, u32>) -> WorkerSlotMapping {
-        todo!()
-        // let actor_location: HashMap<_, _> =
-        //     self.iter()
-        //         .map(|actor_id| (to_map.get(&actor_id).cloned().unwrap(), actor_id))
-        //         .into_group_map()
-        //         .into_iter()
-        //         .flat_map(|(worker_id, mut actors)| {
-        //             actors.sort();
-        //             actors.into_iter().enumerate().map(move |(slot, actor_id)| {
-        //                 (actor_id, WorkerSlotId(worker_id, slot as u32))
-        //             })
-        //         })
-        //         .collect();
-        //
-        // self.transform(&actor_location)
+        let actor_location: HashMap<_, _> = self
+            .iter()
+            .map(|actor_id| (to_map.get(&actor_id).cloned().unwrap(), actor_id))
+            .into_group_map()
+            .into_iter()
+            .flat_map(|(worker_id, mut actors)| {
+                actors.sort();
+                actors
+                    .into_iter()
+                    .enumerate()
+                    .map(move |(slot, actor_id)| (actor_id, WorkerSlotId::new(worker_id, slot)))
+            })
+            .collect();
+
+        self.transform(&actor_location)
     }
 
     /// Create an actor mapping from the protobuf representation.
@@ -432,13 +432,17 @@ impl WorkerSlotMapping {
     }
 
     pub fn to_fake_mapping(&self) -> ParallelUnitMapping {
-        todo!()
-        // let map: HashMap<_, _> = self
-        //     .iter()
-        //     .map(|x @ WorkerSlotId(worker, slot)| (x, worker << 10 | slot as ParallelUnitId))
-        //     .collect();
-        //
-        // self.transform(&map)
+        let map: HashMap<_, _> = self
+            .iter()
+            .map(|worker_slot_id: WorkerSlotId| {
+                (
+                    worker_slot_id,
+                    worker_slot_id.worker_id() << 10 | worker_slot_id.slot_idx() as ParallelUnitId,
+                )
+            })
+            .collect();
+
+        self.transform(&map)
     }
 
     /// Create a worker mapping from the protobuf representation.
