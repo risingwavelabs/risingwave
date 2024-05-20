@@ -1452,6 +1452,7 @@ pub enum Statement {
     CreateSchema {
         schema_name: ObjectName,
         if_not_exists: bool,
+        user_specified: Option<ObjectName>,
     },
     /// CREATE DATABASE
     CreateDatabase {
@@ -1980,12 +1981,19 @@ impl fmt::Display for Statement {
             Statement::CreateSchema {
                 schema_name,
                 if_not_exists,
-            } => write!(
-                f,
-                "CREATE SCHEMA {if_not_exists}{name}",
-                if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
-                name = schema_name
-            ),
+                user_specified,
+            } => {
+                write!(
+                    f,
+                    "CREATE SCHEMA {if_not_exists}{name}",
+                    if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
+                    name = schema_name
+                )?;
+                if let Some(user) = user_specified {
+                    write!(f, " AUTHORIZATION {}", user)?;
+                }
+                Ok(())
+            },
             Statement::Grant {
                 privileges,
                 objects,
