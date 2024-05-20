@@ -39,8 +39,8 @@ use url::form_urlencoded;
 use with_options::WithOptions;
 
 use super::doris_starrocks_connector::{
-    HeaderBuilder, InserterInner, StarrocksTxnRequestBuilder, DORIS_SUCCESS_STATUS,
-    STARROCKS_DELETE_SIGN,
+    HeaderBuilder, InserterInner, StarrocksTxnRequestBuilder, STARROCKS_DELETE_SIGN,
+    STARROCKS_SUCCESS_STATUS,
 };
 use super::encoder::{JsonEncoder, RowEncoder};
 use super::{
@@ -745,7 +745,7 @@ impl StarrocksClient {
         let res: StarrocksInsertResultResponse = serde_json::from_slice(&raw)
             .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
 
-        if !DORIS_SUCCESS_STATUS.contains(&res.status.as_str()) {
+        if !STARROCKS_SUCCESS_STATUS.contains(&res.status.as_str()) {
             return Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!(
                 "Insert error: {:?}",
                 res.message,
@@ -771,7 +771,7 @@ impl StarrocksTxnClient {
     fn check_response_and_extract_label(&self, res: Bytes) -> Result<String> {
         let res: StarrocksInsertResultResponse = serde_json::from_slice(&res)
             .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
-        if !DORIS_SUCCESS_STATUS.contains(&res.status.as_str()) {
+        if !STARROCKS_SUCCESS_STATUS.contains(&res.status.as_str()) {
             return Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!(
                 "transaction error: {:?}",
                 res.message,

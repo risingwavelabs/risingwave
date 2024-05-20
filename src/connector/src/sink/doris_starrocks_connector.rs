@@ -33,7 +33,8 @@ use super::{Result, SinkError};
 
 const BUFFER_SIZE: usize = 64 * 1024;
 const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 1024;
-pub(crate) const DORIS_SUCCESS_STATUS: [&str; 1] = ["OK"];
+pub(crate) const DORIS_SUCCESS_STATUS: [&str; 2] = ["Success", "Publish Timeout"];
+pub(crate) const STARROCKS_SUCCESS_STATUS: [&str; 1] = ["OK"];
 pub(crate) const DORIS_DELETE_SIGN: &str = "__DORIS_DELETE_SIGN__";
 pub(crate) const STARROCKS_DELETE_SIGN: &str = "__op";
 
