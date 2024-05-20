@@ -208,7 +208,7 @@ mod tests {
             .boxed(),
         ];
         let mut output = vec![];
-        let mut merged = merge(streams, Arc::new(StreamingMetrics::unused())).boxed();
+        let mut merged = merge(streams, Arc::new(StreamingMetrics::unused()), 0, 0).boxed();
 
         let result = vec![
             Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
