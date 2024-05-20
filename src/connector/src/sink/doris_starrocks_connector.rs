@@ -16,7 +16,6 @@ use core::mem;
 use core::time::Duration;
 use std::collections::HashMap;
 use std::convert::Infallible;
-use std::sync::Arc;
 
 use anyhow::Context;
 use base64::engine::general_purpose;
@@ -381,13 +380,13 @@ impl InserterInner {
 }
 
 pub struct MetaRequestSender {
-    client: Arc<Client>,
+    client: Client,
     request: Request,
     fe_host: String,
 }
 
 impl MetaRequestSender {
-    pub fn new(client: Arc<Client>, request: Request, fe_host: String) -> Self {
+    pub fn new(client: Client, request: Request, fe_host: String) -> Self {
         Self {
             client,
             request,
@@ -445,9 +444,9 @@ pub struct StarrocksTxnRequestBuilder {
     header: HashMap<String, String>,
     fe_host: String,
     stream_load_http_timeout: Duration,
-    // `client` needs to be shared with `MetaRequestSender` and `TxnInserterInner`, There's no need to
-    // build an HTTP client every time a request is made, so we use `Arc`.
-    client: Arc<Client>,
+    // The `reqwest` crate suggests us reuse the Client, and we don't need make it Arc, because it
+    // already uses an Arc internally.
+    client: Client,
 }
 
 impl StarrocksTxnRequestBuilder {
@@ -487,7 +486,7 @@ impl StarrocksTxnRequestBuilder {
             header,
             fe_host,
             stream_load_http_timeout,
-            client: Arc::new(client),
+            client,
         })
     }
 
