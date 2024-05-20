@@ -650,154 +650,6 @@ impl<'a, K: Ord, V: PartialEq + Transactional<TXN>, TXN> ValTransaction<TXN>
     }
 }
 
-// pub enum ValTransactionEnum<V1, V2> {
-//     V1(V1),
-//     V2(V2),
-// }
-//
-// impl<V1, V2> ValTransactionEnum<V1, V2> {
-//     pub fn into_v1(self) -> V1 {
-//         match self {
-//             ValTransactionEnum::V1(v) => v,
-//             ValTransactionEnum::V2(_) => panic!("expect V1, found V2"),
-//         }
-//     }
-//
-//     pub fn as_v1_ref(&self) -> &V1 {
-//         match self {
-//             ValTransactionEnum::V1(v) => v,
-//             ValTransactionEnum::V2(_) => panic!("expect V1, found V2"),
-//         }
-//     }
-//
-//     pub fn into_v2(self) -> V2 {
-//         match self {
-//             ValTransactionEnum::V1(_) => panic!("expect V2, found V1"),
-//             ValTransactionEnum::V2(v) => v,
-//         }
-//     }
-//
-//     pub fn as_v2_ref(&self) -> &V2 {
-//         match self {
-//             ValTransactionEnum::V1(_) => panic!("expect V2, found V1"),
-//             ValTransactionEnum::V2(v) => v,
-//         }
-//     }
-// }
-//
-// impl<V1: Deref, V2> Deref for ValTransactionEnum<V1, V2>
-// where
-//     V2: Deref<Target = V1::Target>,
-// {
-//     type Target = V1::Target;
-//
-//     fn deref(&self) -> &Self::Target {
-//         match self {
-//             ValTransactionEnum::V1(v) => v.deref(),
-//             ValTransactionEnum::V2(v) => v.deref(),
-//         }
-//     }
-// }
-//
-// impl<V1: DerefMut, V2> DerefMut for ValTransactionEnum<V1, V2>
-// where
-//     V2: DerefMut<Target = V1::Target>,
-// {
-//     fn deref_mut(&mut self) -> &mut Self::Target {
-//         match self {
-//             ValTransactionEnum::V1(v) => v.deref_mut(),
-//             ValTransactionEnum::V2(v) => v.deref_mut(),
-//         }
-//     }
-// }
-//
-// pub type BTreeMapTransactionWrapper<'a, K, V> = ValTransactionEnum<
-//     BTreeMapTransaction<'a, K, V, Transaction>,
-//     BTreeMapTransaction<'a, K, V, TransactionV2>,
-// >;
-//
-// impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransactionWrapper<'a, K, V> {
-//     pub fn tree_ref(&self) -> &BTreeMap<K, V> {
-//         match self {
-//             BTreeMapTransactionWrapper::V1(v) => v.tree_ref,
-//             BTreeMapTransactionWrapper::V2(v) => v.tree_ref,
-//         }
-//     }
-//
-//     /// Get the value of the provided key by merging the staging value and the original value
-//     pub fn get(&self, key: &K) -> Option<&V> {
-//         match self {
-//             BTreeMapTransactionWrapper::V1(v) => v.get(key),
-//             BTreeMapTransactionWrapper::V2(v) => v.get(key),
-//         }
-//     }
-//
-//     pub fn contains_key(&self, key: &K) -> bool {
-//         match self {
-//             BTreeMapTransactionWrapper::V1(v) => v.contains_key(key),
-//             BTreeMapTransactionWrapper::V2(v) => v.contains_key(key),
-//         }
-//     }
-//
-//     pub fn get_mut(&mut self, key: K) -> Option<BTreeMapTransactionValueGuard<'_, K, V>> {
-//         match self {
-//             BTreeMapTransactionWrapper::V1(v) => v.get_mut(key),
-//             BTreeMapTransactionWrapper::V2(v) => v.get_mut(key),
-//         }
-//     }
-//
-//     pub fn insert(&mut self, key: K, value: V) {
-//         match self {
-//             BTreeMapTransactionWrapper::V1(v) => v.insert(key, value),
-//             BTreeMapTransactionWrapper::V2(v) => v.insert(key, value),
-//         }
-//     }
-//
-//     pub fn remove(&mut self, key: K) -> Option<V> {
-//         match self {
-//             BTreeMapTransactionWrapper::V1(v) => v.remove(key),
-//             BTreeMapTransactionWrapper::V2(v) => v.remove(key),
-//         }
-//     }
-//
-//     pub fn new_entry_txn_or_default(
-//         &mut self,
-//         key: K,
-//         default_val: V,
-//     ) -> BTreeMapEntryTransactionWrapper<'_, K, V> {
-//         match self {
-//             BTreeMapTransactionWrapper::V1(v) => BTreeMapEntryTransactionWrapper::V1(
-//                 BTreeMapEntryTransaction::new(v.tree_ref, key, Some(default_val))
-//                     .expect("default value is provided and should return `Some`"),
-//             ),
-//             BTreeMapTransactionWrapper::V2(v) => BTreeMapEntryTransactionWrapper::V2(
-//                 BTreeMapEntryTransaction::new(v.tree_ref, key, Some(default_val))
-//                     .expect("default value is provided and should return `Some`"),
-//             ),
-//         }
-//     }
-//
-//     pub fn new_entry_insert_txn(
-//         &mut self,
-//         key: K,
-//         val: V,
-//     ) -> BTreeMapEntryTransactionWrapper<'_, K, V> {
-//         match self {
-//             BTreeMapTransactionWrapper::V1(v) => BTreeMapEntryTransactionWrapper::V1(
-//                 BTreeMapEntryTransaction::new_insert(v.tree_ref, key, val),
-//             ),
-//             BTreeMapTransactionWrapper::V2(v) => BTreeMapEntryTransactionWrapper::V2(
-//                 BTreeMapEntryTransaction::new_insert(v.tree_ref, key, val),
-//             ),
-//         }
-//     }
-// }
-//
-// pub type BTreeMapEntryTransactionWrapper<'a, K, V> = ValTransactionEnum<
-//     BTreeMapEntryTransaction<'a, K, V, Transaction>,
-//     BTreeMapEntryTransaction<'a, K, V, TransactionV2>,
-// >;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -854,6 +706,17 @@ mod tests {
         );
         num_txn.commit();
         assert_eq!("modified", kv.value);
+    }
+
+    #[test]
+    fn test_simple_var_transaction_abort() {
+        let mut kv = TestTransactional {
+            key: "key",
+            value: "original",
+        };
+        let mut num_txn = VarTransaction::new(&mut kv);
+        num_txn.value = "modified";
+        assert_eq!("original", kv.value);
     }
 
     #[tokio::test]
