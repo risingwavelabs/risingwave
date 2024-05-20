@@ -54,8 +54,8 @@ pub struct DorisCommon {
     pub database: String,
     #[serde(rename = "doris.table")]
     pub table: String,
-    #[serde(rename = "doris.partial_update")]
-    pub partial_update: Option<String>,
+    #[serde(rename = "doris.partial_columns")]
+    pub partial_columns: Option<String>,
 }
 
 impl DorisCommon {
@@ -276,7 +276,7 @@ impl DorisSinkWriter {
             .add_common_header()
             .set_user_password(config.common.user.clone(), config.common.password.clone())
             .add_json_format()
-            .set_partial_update(config.common.partial_update.clone())
+            .set_partial_columns(config.common.partial_columns.clone())
             .add_read_json_by_line();
         let header = if !is_append_only {
             header_builder.add_hidden_column().build()
