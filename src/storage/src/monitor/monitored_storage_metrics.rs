@@ -23,9 +23,9 @@ use prometheus::{
 };
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
-    LabelGuardedIntCounterVec, LabelGuardedIntGauge, LabelGuardedIntGaugeVec,
-    LabelGuardedLocalHistogram, LabelGuardedLocalIntCounter, RelabeledGuardedHistogramVec,
-    RelabeledGuardedIntCounterVec, RelabeledHistogramVec,
+    LabelGuardedIntCounterVec, LabelGuardedIntGauge, LabelGuardedLocalHistogram,
+    LabelGuardedLocalIntCounter, RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec,
+    RelabeledGuardedIntGaugeVec, RelabeledHistogramVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
@@ -51,7 +51,7 @@ pub struct MonitoredStorageMetrics {
     pub iter_init_duration: RelabeledGuardedHistogramVec<2>,
     pub iter_scan_duration: RelabeledGuardedHistogramVec<2>,
     pub iter_counts: RelabeledGuardedIntCounterVec<2>,
-    pub iter_in_progress_counts: LabelGuardedIntGaugeVec<2>,
+    pub iter_in_progress_counts: RelabeledGuardedIntGaugeVec<2>,
 
     // [table_id, op_type]
     pub iter_log_op_type_counts: LabelGuardedIntCounterVec<2>,
@@ -224,6 +224,12 @@ impl MonitoredStorageMetrics {
             registry
         )
         .unwrap();
+        let iter_in_progress_counts = RelabeledGuardedIntGaugeVec::with_metric_level_relabel_n(
+            MetricLevel::Debug,
+            iter_in_progress_counts,
+            metric_level,
+            1,
+        );
 
         let iter_log_op_type_counts = register_guarded_int_counter_vec_with_registry!(
             "state_store_iter_log_op_type_counts",
@@ -316,7 +322,7 @@ impl MonitoredStorageMetrics {
             .local();
         let iter_in_progress_counts = self
             .iter_in_progress_counts
-            .with_guarded_label_values(&[table_label, iter_type]);
+            .with_label_values(&[table_label, iter_type]);
 
         LocalIterMetricsInner {
             iter_init_duration,
