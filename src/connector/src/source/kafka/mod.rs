@@ -17,16 +17,17 @@ use std::collections::HashMap;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 
-use crate::connector_common::KafkaPrivateLinkCommon;
+use crate::connector_common::{AwsAuthProps, KafkaPrivateLinkCommon};
 
+mod client_context;
 pub mod enumerator;
 pub mod private_link;
 pub mod source;
 pub mod split;
 pub mod stats;
 
+pub use client_context::*;
 pub use enumerator::*;
-pub use private_link::*;
 pub use source::*;
 pub use split::*;
 use with_options::WithOptions;
@@ -138,6 +139,9 @@ pub struct KafkaProperties {
     pub privatelink_common: KafkaPrivateLinkCommon,
 
     #[serde(flatten)]
+    pub aws_auth_props: AwsAuthProps,
+
+    #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
 }
 
@@ -191,8 +195,6 @@ impl RdKafkaPropertiesConsumer {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
-
     use maplit::hashmap;
 
     use super::*;

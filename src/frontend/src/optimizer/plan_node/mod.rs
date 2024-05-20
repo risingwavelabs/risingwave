@@ -33,7 +33,7 @@ use std::ops::Deref;
 use std::rc::Rc;
 
 use downcast_rs::{impl_downcast, Downcast};
-use dyn_clone::{self, DynClone};
+use dyn_clone::DynClone;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use paste::paste;
@@ -848,6 +848,7 @@ mod batch_values;
 mod logical_agg;
 mod logical_apply;
 mod logical_cdc_scan;
+mod logical_cte_ref;
 mod logical_dedup;
 mod logical_delete;
 mod logical_except;
@@ -865,6 +866,7 @@ mod logical_now;
 mod logical_over_window;
 mod logical_project;
 mod logical_project_set;
+mod logical_recursive_union;
 mod logical_scan;
 mod logical_share;
 mod logical_source;
@@ -947,6 +949,7 @@ pub use batch_values::BatchValues;
 pub use logical_agg::LogicalAgg;
 pub use logical_apply::LogicalApply;
 pub use logical_cdc_scan::LogicalCdcScan;
+pub use logical_cte_ref::LogicalCteRef;
 pub use logical_dedup::LogicalDedup;
 pub use logical_delete::LogicalDelete;
 pub use logical_except::LogicalExcept;
@@ -965,6 +968,7 @@ pub use logical_now::LogicalNow;
 pub use logical_over_window::LogicalOverWindow;
 pub use logical_project::LogicalProject;
 pub use logical_project_set::LogicalProjectSet;
+pub use logical_recursive_union::LogicalRecursiveUnion;
 pub use logical_scan::LogicalScan;
 pub use logical_share::LogicalShare;
 pub use logical_source::LogicalSource;
@@ -1063,6 +1067,8 @@ macro_rules! for_all_plan_nodes {
             , { Logical, MaxOneRow }
             , { Logical, KafkaScan }
             , { Logical, IcebergScan }
+            , { Logical, RecursiveUnion }
+            , { Logical, CteRef }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -1165,6 +1171,8 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, MaxOneRow }
             , { Logical, KafkaScan }
             , { Logical, IcebergScan }
+            , { Logical, RecursiveUnion }
+            , { Logical, CteRef }
         }
     };
 }

@@ -117,6 +117,7 @@ impl<S: LocalStateStore> TestIngestBatch for S {
 #[cfg(test)]
 #[async_trait::async_trait]
 pub(crate) trait HummockStateStoreTestTrait: StateStore {
+    #[allow(dead_code)]
     fn get_pinned_version(&self) -> PinnedVersion;
     async fn seal_and_sync_epoch(&self, epoch: u64) -> StorageResult<SyncResult> {
         self.seal_epoch(epoch, true);
@@ -134,7 +135,7 @@ impl HummockStateStoreTestTrait for HummockStorage {
 pub async fn with_hummock_storage_v2(
     table_id: TableId,
 ) -> (HummockStorage, Arc<MockHummockMetaClient>) {
-    let sstable_store = mock_sstable_store();
+    let sstable_store = mock_sstable_store().await;
     let hummock_options = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
@@ -262,7 +263,7 @@ impl HummockTestEnv {
 }
 
 pub async fn prepare_hummock_test_env() -> HummockTestEnv {
-    let sstable_store = mock_sstable_store();
+    let sstable_store = mock_sstable_store().await;
     let hummock_options = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;

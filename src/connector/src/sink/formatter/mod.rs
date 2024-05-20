@@ -24,10 +24,12 @@ mod upsert;
 pub use append_only::AppendOnlyFormatter;
 pub use debezium_json::{DebeziumAdapterOpts, DebeziumJsonFormatter};
 use risingwave_common::catalog::Schema;
+use risingwave_common::types::DataType;
 pub use upsert::UpsertFormatter;
 
 use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
 use super::encoder::template::TemplateEncoder;
+use super::encoder::text::TextEncoder;
 use super::encoder::{
     DateHandlingMode, KafkaConnectParams, TimeHandlingMode, TimestamptzHandlingMode,
 };
@@ -68,13 +70,22 @@ macro_rules! tri {
 }
 
 pub enum SinkFormatterImpl {
+    // append-only
     AppendOnlyJson(AppendOnlyFormatter<JsonEncoder, JsonEncoder>),
+    AppendOnlyTextJson(AppendOnlyFormatter<TextEncoder, JsonEncoder>),
     AppendOnlyProto(AppendOnlyFormatter<JsonEncoder, ProtoEncoder>),
-    UpsertJson(UpsertFormatter<JsonEncoder, JsonEncoder>),
-    UpsertAvro(UpsertFormatter<AvroEncoder, AvroEncoder>),
-    DebeziumJson(DebeziumJsonFormatter),
+    AppendOnlyTextProto(AppendOnlyFormatter<TextEncoder, ProtoEncoder>),
     AppendOnlyTemplate(AppendOnlyFormatter<TemplateEncoder, TemplateEncoder>),
+    AppendOnlyTextTemplate(AppendOnlyFormatter<TextEncoder, TemplateEncoder>),
+    // upsert
+    UpsertJson(UpsertFormatter<JsonEncoder, JsonEncoder>),
+    UpsertTextJson(UpsertFormatter<TextEncoder, JsonEncoder>),
+    UpsertAvro(UpsertFormatter<AvroEncoder, AvroEncoder>),
+    UpsertTextAvro(UpsertFormatter<TextEncoder, AvroEncoder>),
     UpsertTemplate(UpsertFormatter<TemplateEncoder, TemplateEncoder>),
+    UpsertTextTemplate(UpsertFormatter<TextEncoder, TemplateEncoder>),
+    // debezium
+    DebeziumJson(DebeziumJsonFormatter),
 }
 
 #[derive(Debug, Clone)]
@@ -144,6 +155,51 @@ impl EncoderBuild for ProtoEncoder {
             Some(sid) => ProtoHeader::ConfluentSchemaRegistry(sid),
         };
         ProtoEncoder::new(b.schema, None, descriptor, header)
+    }
+}
+
+impl EncoderBuild for TextEncoder {
+    async fn build(params: EncoderParams<'_>, pk_indices: Option<Vec<usize>>) -> Result<Self> {
+        let Some(pk_indices) = pk_indices else {
+            return Err(SinkError::Config(anyhow!(
+                "TextEncoder requires primary key columns to be specified"
+            )));
+        };
+        if pk_indices.len() != 1 {
+            return Err(SinkError::Config(anyhow!(
+                    "The key encode is TEXT, but the primary key has {} columns. The key encode TEXT requires the primary key to be a single column",
+                    pk_indices.len()
+                )));
+        }
+
+        let schema_ref = params.schema.fields().get(pk_indices[0]).ok_or_else(|| {
+            SinkError::Config(anyhow!(
+                "The primary key column index {} is out of bounds in schema {:?}",
+                pk_indices[0],
+                params.schema
+            ))
+        })?;
+        match &schema_ref.data_type() {
+            DataType::Varchar
+            | DataType::Boolean
+            | DataType::Int16
+            | DataType::Int32
+            | DataType::Int64
+            | DataType::Int256
+            | DataType::Serial => {}
+            _ => {
+                // why we don't allow float as text for key encode: https://github.com/risingwavelabs/risingwave/pull/16377#discussion_r1591864960
+                return Err(SinkError::Config(
+                    anyhow!(
+                            "The key encode is TEXT, but the primary key column {} has type {}. The key encode TEXT requires the primary key column to be of type varchar, bool, small int, int, big int, serial or rw_int256.",
+                            schema_ref.name,
+                            schema_ref.data_type
+                        ),
+                ));
+            }
+        }
+
+        Ok(Self::new(params.schema, pk_indices[0]))
     }
 }
 
@@ -269,24 +325,53 @@ impl SinkFormatterImpl {
             T::build(p).await
         }
 
-        Ok(match (&format_desc.format, &format_desc.encode) {
-            (F::AppendOnly, E::Json) => Impl::AppendOnlyJson(build(p).await?),
-            (F::AppendOnly, E::Protobuf) => Impl::AppendOnlyProto(build(p).await?),
-            (F::AppendOnly, E::Template) => Impl::AppendOnlyTemplate(build(p).await?),
-            (F::Upsert, E::Json) => Impl::UpsertJson(build(p).await?),
-            (F::Upsert, E::Avro) => Impl::UpsertAvro(build(p).await?),
-            (F::Upsert, E::Template) => Impl::UpsertTemplate(build(p).await?),
-            (F::Debezium, E::Json) => Impl::DebeziumJson(build(p).await?),
-            (F::AppendOnly, E::Avro)
-            | (F::Upsert, E::Protobuf)
-            | (F::Debezium, E::Avro | E::Protobuf | E::Template) => {
-                return Err(SinkError::Config(anyhow!(
-                    "sink format/encode unsupported: {:?} {:?}",
-                    format_desc.format,
-                    format_desc.encode,
-                )));
-            }
-        })
+        Ok(
+            match (
+                &format_desc.format,
+                &format_desc.encode,
+                &format_desc.key_encode,
+            ) {
+                (F::AppendOnly, E::Json, Some(E::Text)) => {
+                    Impl::AppendOnlyTextJson(build(p).await?)
+                }
+                (F::AppendOnly, E::Json, None) => Impl::AppendOnlyJson(build(p).await?),
+                (F::AppendOnly, E::Protobuf, Some(E::Text)) => {
+                    Impl::AppendOnlyTextProto(build(p).await?)
+                }
+                (F::AppendOnly, E::Protobuf, None) => Impl::AppendOnlyProto(build(p).await?),
+                (F::AppendOnly, E::Template, Some(E::Text)) => {
+                    Impl::AppendOnlyTextTemplate(build(p).await?)
+                }
+                (F::AppendOnly, E::Template, None) => Impl::AppendOnlyTemplate(build(p).await?),
+                (F::Upsert, E::Json, Some(E::Text)) => Impl::UpsertTextJson(build(p).await?),
+                (F::Upsert, E::Json, None) => Impl::UpsertJson(build(p).await?),
+                (F::Upsert, E::Avro, Some(E::Text)) => Impl::UpsertTextAvro(build(p).await?),
+                (F::Upsert, E::Avro, None) => Impl::UpsertAvro(build(p).await?),
+                (F::Upsert, E::Template, Some(E::Text)) => {
+                    Impl::UpsertTextTemplate(build(p).await?)
+                }
+                (F::Upsert, E::Template, None) => Impl::UpsertTemplate(build(p).await?),
+                (F::Debezium, E::Json, None) => Impl::DebeziumJson(build(p).await?),
+                (F::AppendOnly | F::Upsert, E::Text, _) => {
+                    return Err(SinkError::Config(anyhow!(
+                        "ENCODE TEXT is only valid as key encode."
+                    )));
+                }
+                (F::AppendOnly, E::Avro, _)
+                | (F::Upsert, E::Protobuf, _)
+                | (F::Debezium, E::Json, Some(_))
+                | (F::Debezium, E::Avro | E::Protobuf | E::Template | E::Text, _)
+                | (F::AppendOnly | F::Upsert, _, Some(E::Template) | Some(E::Json) | Some(E::Avro) | Some(E::Protobuf)) // reject other encode as key encode
+                => {
+                    return Err(SinkError::Config(anyhow!(
+                        "sink format/encode/key_encode unsupported: {:?} {:?} {:?}",
+                        format_desc.format,
+                        format_desc.encode,
+                        format_desc.key_encode
+                    )));
+                }
+            },
+        )
     }
 }
 
@@ -295,11 +380,18 @@ macro_rules! dispatch_sink_formatter_impl {
     ($impl:expr, $name:ident, $body:expr) => {
         match $impl {
             SinkFormatterImpl::AppendOnlyJson($name) => $body,
+            SinkFormatterImpl::AppendOnlyTextJson($name) => $body,
             SinkFormatterImpl::AppendOnlyProto($name) => $body,
+            SinkFormatterImpl::AppendOnlyTextProto($name) => $body,
+
             SinkFormatterImpl::UpsertJson($name) => $body,
+            SinkFormatterImpl::UpsertTextJson($name) => $body,
             SinkFormatterImpl::UpsertAvro($name) => $body,
+            SinkFormatterImpl::UpsertTextAvro($name) => $body,
             SinkFormatterImpl::DebeziumJson($name) => $body,
+            SinkFormatterImpl::AppendOnlyTextTemplate($name) => $body,
             SinkFormatterImpl::AppendOnlyTemplate($name) => $body,
+            SinkFormatterImpl::UpsertTextTemplate($name) => $body,
             SinkFormatterImpl::UpsertTemplate($name) => $body,
         }
     };
@@ -310,11 +402,18 @@ macro_rules! dispatch_sink_formatter_str_key_impl {
     ($impl:expr, $name:ident, $body:expr) => {
         match $impl {
             SinkFormatterImpl::AppendOnlyJson($name) => $body,
+            SinkFormatterImpl::AppendOnlyTextJson($name) => $body,
             SinkFormatterImpl::AppendOnlyProto($name) => $body,
+            SinkFormatterImpl::AppendOnlyTextProto($name) => $body,
+
             SinkFormatterImpl::UpsertJson($name) => $body,
+            SinkFormatterImpl::UpsertTextJson($name) => $body,
             SinkFormatterImpl::UpsertAvro(_) => unreachable!(),
+            SinkFormatterImpl::UpsertTextAvro($name) => $body,
             SinkFormatterImpl::DebeziumJson($name) => $body,
+            SinkFormatterImpl::AppendOnlyTextTemplate($name) => $body,
             SinkFormatterImpl::AppendOnlyTemplate($name) => $body,
+            SinkFormatterImpl::UpsertTextTemplate($name) => $body,
             SinkFormatterImpl::UpsertTemplate($name) => $body,
         }
     };

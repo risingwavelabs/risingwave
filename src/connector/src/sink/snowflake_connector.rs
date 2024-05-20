@@ -13,12 +13,12 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use reqwest::{header, Client, RequestBuilder, StatusCode};
-use risingwave_common::config::ObjectStoreConfig;
 use risingwave_object_store::object::*;
 use serde::{Deserialize, Serialize};
 
@@ -192,13 +192,14 @@ impl SnowflakeS3Client {
         aws_secret_access_key: String,
         aws_region: String,
     ) -> Result<Self> {
+        // FIXME: we should use the `ObjectStoreConfig` instead of default
         // just use default configuration here for opendal s3 engine
         let config = ObjectStoreConfig::default();
 
         // create the s3 engine for streaming upload to the intermediate s3 bucket
         let opendal_s3_engine = OpendalObjectStore::new_s3_engine_with_credentials(
             &s3_bucket,
-            config,
+            Arc::new(config),
             &aws_access_key_id,
             &aws_secret_access_key,
             &aws_region,

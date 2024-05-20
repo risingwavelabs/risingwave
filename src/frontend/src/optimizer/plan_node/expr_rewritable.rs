@@ -12,10 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Deref;
-
 use super::*;
-use crate::expr::ExprRewriter;
 
 /// Rewrites expressions in a `PlanRef`. Due to `Share` operator,
 /// the `ExprRewriter` needs to be idempotent i.e., applying it more than once

@@ -209,10 +209,8 @@ impl HopWindowExecutor {
 #[cfg(test)]
 mod tests {
     use futures::stream::StreamExt;
-    use risingwave_common::array::{DataChunk, DataChunkTestExt};
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::array::DataChunkTestExt;
     use risingwave_common::types::test_utils::IntervalTestExt;
-    use risingwave_common::types::DataType;
     use risingwave_expr::expr::test_utils::make_hop_window_expression;
 
     use super::*;

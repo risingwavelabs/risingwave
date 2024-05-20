@@ -75,7 +75,7 @@ pub async fn epoch_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use futures::{pin_mut, StreamExt};
+    use futures::pin_mut;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::util::epoch::test_epoch;
 

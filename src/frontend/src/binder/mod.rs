@@ -49,8 +49,9 @@ pub use insert::BoundInsert;
 use pgwire::pg_server::{Session, SessionId};
 pub use query::BoundQuery;
 pub use relation::{
-    BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
-    BoundWindowTableFunction, Relation, ResolveQualifiedNameError, WindowTableFunctionKind,
+    BoundBackCteRef, BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable,
+    BoundWatermark, BoundWindowTableFunction, Relation, ResolveQualifiedNameError,
+    WindowTableFunctionKind,
 };
 pub use select::{BoundDistinct, BoundSelect};
 pub use set_expr::*;
@@ -649,6 +650,41 @@ mod tests {
                                                             BackCteRef(
                                                                 BoundBackCteRef {
                                                                     share_id: 0,
+                                                                    base: Select(
+                                                                        BoundSelect {
+                                                                            distinct: All,
+                                                                            select_items: [
+                                                                                Literal(
+                                                                                    Literal {
+                                                                                        data: Some(
+                                                                                            Int32(
+                                                                                                1,
+                                                                                            ),
+                                                                                        ),
+                                                                                        data_type: Some(
+                                                                                            Int32,
+                                                                                        ),
+                                                                                    },
+                                                                                ),
+                                                                            ],
+                                                                            aliases: [
+                                                                                Some(
+                                                                                    "a",
+                                                                                ),
+                                                                            ],
+                                                                            from: None,
+                                                                            where_clause: None,
+                                                                            group_by: GroupKey(
+                                                                                [],
+                                                                            ),
+                                                                            having: None,
+                                                                            schema: Schema {
+                                                                                fields: [
+                                                                                    a:Int32,
+                                                                                ],
+                                                                            },
+                                                                        },
+                                                                    ),
                                                                 },
                                                             ),
                                                         ),

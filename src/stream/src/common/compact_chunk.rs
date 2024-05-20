@@ -105,7 +105,7 @@ type OpRowMap<'a, 'b> =
 pub enum RowOp<'a> {
     Insert(RowRef<'a>),
     Delete(RowRef<'a>),
-    /// (old_value, new_value)
+    /// (`old_value`, `new_value`)
     Update((RowRef<'a>, RowRef<'a>)),
 }
 static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
@@ -333,7 +333,6 @@ pub fn merge_chunk_row(stream_chunk: StreamChunk, pk_indices: &[usize]) -> Strea
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::StreamChunk;
     use risingwave_common::test_prelude::StreamChunkTestExt;
 
     use super::*;

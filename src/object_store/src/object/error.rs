@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::io;
-use std::marker::{Send, Sync};
 
 use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_sdk_s3::operation::head_object::HeadObjectError;
@@ -27,8 +26,13 @@ use tokio::sync::oneshot::error::RecvError;
 #[derive(Error, thiserror_ext::ReportDebug, thiserror_ext::Box, thiserror_ext::Construct)]
 #[thiserror_ext(newtype(name = ObjectError, backtrace))]
 pub enum ObjectErrorInner {
-    #[error("s3 error: {0}")]
-    S3(#[source] BoxedError),
+    #[error("s3 error: {inner}")]
+    S3 {
+        // TODO: remove this after switch s3 backend to opendal
+        should_retry: bool,
+        #[source]
+        inner: BoxedError,
+    },
     #[error("disk error: {msg}")]
     Disk {
         msg: String,
@@ -45,6 +49,9 @@ pub enum ObjectErrorInner {
     #[cfg(madsim)]
     #[error(transparent)]
     Sim(#[from] crate::object::sim::SimError),
+
+    #[error("Timeout error: {0}")]
+    Timeout(String),
 }
 
 impl ObjectError {
@@ -55,17 +62,20 @@ impl ObjectError {
     /// Tells whether the error indicates the target object is not found.
     pub fn is_object_not_found_error(&self) -> bool {
         match self.inner() {
-            ObjectErrorInner::S3(e) => {
-                if let Some(aws_smithy_runtime_api::client::result::SdkError::ServiceError(err)) = e
-                    .downcast_ref::<aws_smithy_runtime_api::client::result::SdkError<
+            ObjectErrorInner::S3 {
+                inner,
+                should_retry: _,
+            } => {
+                if let Some(aws_smithy_runtime_api::client::result::SdkError::ServiceError(err)) =
+                    inner.downcast_ref::<aws_smithy_runtime_api::client::result::SdkError<
                         GetObjectError,
                         aws_smithy_runtime_api::http::Response<SdkBody>,
                     >>()
                 {
                     return matches!(err.err(), GetObjectError::NoSuchKey(_));
                 }
-                if let Some(aws_smithy_runtime_api::client::result::SdkError::ServiceError(err)) = e
-                    .downcast_ref::<aws_smithy_runtime_api::client::result::SdkError<
+                if let Some(aws_smithy_runtime_api::client::result::SdkError::ServiceError(err)) =
+                    inner.downcast_ref::<aws_smithy_runtime_api::client::result::SdkError<
                         HeadObjectError,
                         aws_smithy_runtime_api::http::Response<SdkBody>,
                     >>()
@@ -90,6 +100,21 @@ impl ObjectError {
         };
         false
     }
+
+    pub fn should_retry(&self) -> bool {
+        match self.inner() {
+            ObjectErrorInner::S3 {
+                inner: _,
+                should_retry,
+            } => *should_retry,
+
+            ObjectErrorInner::Opendal(e) => e.is_temporary(),
+
+            ObjectErrorInner::Timeout(_) => true,
+
+            _ => false,
+        }
+    }
 }
 
 impl<E, R> From<aws_smithy_runtime_api::client::result::SdkError<E, R>> for ObjectError
@@ -98,7 +123,11 @@ where
     R: Send + Sync + 'static + std::fmt::Debug,
 {
     fn from(e: aws_smithy_runtime_api::client::result::SdkError<E, R>) -> Self {
-        ObjectErrorInner::S3(e.into()).into()
+        ObjectErrorInner::S3 {
+            inner: e.into(),
+            should_retry: false,
+        }
+        .into()
     }
 }
 
@@ -110,7 +139,11 @@ impl From<RecvError> for ObjectError {
 
 impl From<ByteStreamError> for ObjectError {
     fn from(e: ByteStreamError) -> Self {
-        ObjectErrorInner::Internal(e.to_report_string()).into()
+        ObjectErrorInner::S3 {
+            inner: e.into(),
+            should_retry: true,
+        }
+        .into()
     }
 }
 

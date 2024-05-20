@@ -29,82 +29,110 @@ use crate::array::{ArrayError, ArrayImpl, DataType, DecimalArray, JsonbArray};
 #[path = "./arrow_impl.rs"]
 mod arrow_impl;
 
-/// Arrow conversion for the current version of UDF. This is in use but will be deprecated soon.
-///
-/// In the current version of UDF protocol, decimal and jsonb types are mapped to Arrow `LargeBinary` and `LargeUtf8` types.
-pub struct UdfArrowConvert;
+/// Arrow conversion for UDF.
+#[derive(Default, Debug)]
+pub struct UdfArrowConvert {
+    /// Whether the UDF talks in legacy mode.
+    ///
+    /// If true, decimal and jsonb types are mapped to Arrow `LargeBinary` and `LargeUtf8` types.
+    /// Otherwise, they are mapped to Arrow extension types.
+    /// See <https://github.com/risingwavelabs/arrow-udf/tree/main#extension-types>.
+    pub legacy: bool,
+}
 
 impl ToArrow for UdfArrowConvert {
-    // Decimal values are stored as ASCII text representation in a large binary array.
     fn decimal_to_arrow(
         &self,
         _data_type: &arrow_schema::DataType,
         array: &DecimalArray,
     ) -> Result<arrow_array::ArrayRef, ArrayError> {
-        Ok(Arc::new(arrow_array::LargeBinaryArray::from(array)))
+        if self.legacy {
+            // Decimal values are stored as ASCII text representation in a large binary array.
+            Ok(Arc::new(arrow_array::LargeBinaryArray::from(array)))
+        } else {
+            Ok(Arc::new(arrow_array::StringArray::from(array)))
+        }
     }
 
-    // JSON values are stored as text representation in a large string array.
     fn jsonb_to_arrow(&self, array: &JsonbArray) -> Result<arrow_array::ArrayRef, ArrayError> {
-        Ok(Arc::new(arrow_array::LargeStringArray::from(array)))
+        if self.legacy {
+            // JSON values are stored as text representation in a large string array.
+            Ok(Arc::new(arrow_array::LargeStringArray::from(array)))
+        } else {
+            Ok(Arc::new(arrow_array::StringArray::from(array)))
+        }
     }
 
     fn jsonb_type_to_arrow(&self, name: &str) -> arrow_schema::Field {
-        arrow_schema::Field::new(name, arrow_schema::DataType::LargeUtf8, true)
+        if self.legacy {
+            arrow_schema::Field::new(name, arrow_schema::DataType::LargeUtf8, true)
+        } else {
+            arrow_schema::Field::new(name, arrow_schema::DataType::Utf8, true)
+                .with_metadata([("ARROW:extension:name".into(), "arrowudf.json".into())].into())
+        }
     }
 
     fn decimal_type_to_arrow(&self, name: &str) -> arrow_schema::Field {
-        arrow_schema::Field::new(name, arrow_schema::DataType::LargeBinary, true)
+        if self.legacy {
+            arrow_schema::Field::new(name, arrow_schema::DataType::LargeBinary, true)
+        } else {
+            arrow_schema::Field::new(name, arrow_schema::DataType::Utf8, true)
+                .with_metadata([("ARROW:extension:name".into(), "arrowudf.decimal".into())].into())
+        }
     }
 }
 
 impl FromArrow for UdfArrowConvert {
     fn from_large_utf8(&self) -> Result<DataType, ArrayError> {
-        Ok(DataType::Jsonb)
+        if self.legacy {
+            Ok(DataType::Jsonb)
+        } else {
+            Ok(DataType::Varchar)
+        }
     }
 
     fn from_large_binary(&self) -> Result<DataType, ArrayError> {
-        Ok(DataType::Decimal)
+        if self.legacy {
+            Ok(DataType::Decimal)
+        } else {
+            Ok(DataType::Bytea)
+        }
     }
 
     fn from_large_utf8_array(
         &self,
         array: &arrow_array::LargeStringArray,
     ) -> Result<ArrayImpl, ArrayError> {
-        Ok(ArrayImpl::Jsonb(array.try_into()?))
+        if self.legacy {
+            Ok(ArrayImpl::Jsonb(array.try_into()?))
+        } else {
+            Ok(ArrayImpl::Utf8(array.into()))
+        }
     }
 
     fn from_large_binary_array(
         &self,
         array: &arrow_array::LargeBinaryArray,
     ) -> Result<ArrayImpl, ArrayError> {
-        Ok(ArrayImpl::Decimal(array.try_into()?))
+        if self.legacy {
+            Ok(ArrayImpl::Decimal(array.try_into()?))
+        } else {
+            Ok(ArrayImpl::Bytea(array.into()))
+        }
     }
 }
 
-/// Arrow conversion for the next version of UDF. This is unused for now.
-///
-/// In the next version of UDF protocol, decimal and jsonb types will be mapped to Arrow extension types.
-/// See <https://github.com/risingwavelabs/arrow-udf/tree/main#extension-types>.
-pub struct NewUdfArrowConvert;
-
-impl ToArrow for NewUdfArrowConvert {}
-impl FromArrow for NewUdfArrowConvert {}
-
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
     use crate::array::*;
-    use crate::buffer::Bitmap;
 
     #[test]
     fn struct_array() {
         // Empty array - risingwave to arrow conversion.
         let test_arr = StructArray::new(StructType::empty(), vec![], Bitmap::ones(0));
         assert_eq!(
-            UdfArrowConvert
+            UdfArrowConvert::default()
                 .struct_to_arrow(
                     &arrow_schema::DataType::Struct(arrow_schema::Fields::empty()),
                     &test_arr
@@ -117,7 +145,7 @@ mod tests {
         // Empty array - arrow to risingwave conversion.
         let test_arr_2 = arrow_array::StructArray::from(vec![]);
         assert_eq!(
-            UdfArrowConvert
+            UdfArrowConvert::default()
                 .from_struct_array(&test_arr_2)
                 .unwrap()
                 .len(),
@@ -146,7 +174,7 @@ mod tests {
             ),
         ])
         .unwrap();
-        let actual_risingwave_struct_array = UdfArrowConvert
+        let actual_risingwave_struct_array = UdfArrowConvert::default()
             .from_struct_array(&test_arrow_struct_array)
             .unwrap()
             .into_struct();
@@ -168,8 +196,10 @@ mod tests {
     fn list() {
         let array = ListArray::from_iter([None, Some(vec![0, -127, 127, 50]), Some(vec![0; 0])]);
         let data_type = arrow_schema::DataType::new_list(arrow_schema::DataType::Int32, true);
-        let arrow = UdfArrowConvert.list_to_arrow(&data_type, &array).unwrap();
-        let rw_array = UdfArrowConvert
+        let arrow = UdfArrowConvert::default()
+            .list_to_arrow(&data_type, &array)
+            .unwrap();
+        let rw_array = UdfArrowConvert::default()
             .from_list_array(arrow.as_any().downcast_ref().unwrap())
             .unwrap();
         assert_eq!(rw_array.as_list(), &array);
