@@ -15,8 +15,9 @@
 use std::fmt;
 use std::hash::Hash;
 
-use bytes::Buf;
+use bytes::{Buf, BytesMut};
 use jsonbb::{Value, ValueRef};
+use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
 use risingwave_common_estimate_size::EstimateSize;
 
 use super::{Datum, IntoOrdered, ListValue, ScalarImpl, StructRef, ToOwnedDatum, F64};
@@ -537,5 +538,36 @@ impl<F: std::fmt::Write> std::io::Write for FmtToIoUnchecked<F> {
 
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
+    }
+}
+
+impl ToSql for JsonbVal {
+    accepts!(JSONB);
+
+    to_sql_checked!();
+
+    fn to_sql(
+        &self,
+        ty: &Type,
+        out: &mut BytesMut,
+    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>>
+    where
+        Self: Sized,
+    {
+        serde_json::Value::from(self.0.clone()).to_sql(ty, out)
+    }
+}
+
+impl<'a> FromSql<'a> for JsonbVal {
+    fn from_sql(
+        ty: &Type,
+        raw: &'a [u8],
+    ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        let instant = serde_json::Value::from_sql(ty, raw)?;
+        Ok(JsonbVal::from(instant))
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(*ty, Type::JSONB)
     }
 }

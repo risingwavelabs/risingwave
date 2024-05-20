@@ -193,6 +193,8 @@ CREATE TABLE IF NOT EXISTS postgres_all_types(
  c_timestamptz timestamptz,
  c_interval interval,
  c_jsonb jsonb,
+ c_uuid varchar,
+ c_enum varchar,
  c_boolean_array boolean[],
  c_smallint_array smallint[],
  c_integer_array integer[],
@@ -208,7 +210,8 @@ CREATE TABLE IF NOT EXISTS postgres_all_types(
  c_timestamptz_array timestamptz[],
  c_interval_array interval[],
  c_jsonb_array jsonb[],
- c_uuid varchar,
+ c_uuid_array varchar[],
+ c_enum_array varchar[],
  PRIMARY KEY (c_boolean,c_bigint,c_date)
 ) from pg_source table 'public.postgres_all_types';
 

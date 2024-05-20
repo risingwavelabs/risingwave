@@ -14,7 +14,7 @@
 
 use std::sync::LazyLock;
 
-use chrono::{NaiveDate, Utc};
+use chrono::NaiveDate;
 use risingwave_common::catalog::Schema;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::row::OwnedRow;
@@ -46,22 +46,6 @@ macro_rules! handle_list_data_type {
             }
         }
     }};
-    ($row:expr, $i:expr, $name:expr, $dtype:expr, $type:ty, $rw_type:ty) => {{
-        let res = $row.try_get::<_, Option<Vec<Option<$type>>>>($i);
-        match res {
-            Ok(val) => val.map(|v| {
-                let mut builder = $dtype.create_array_builder(0);
-                v.into_iter().for_each(|val| {
-                    builder.append(val.map(|v| ScalarImpl::from(<$rw_type>::from(v))))
-                });
-                ScalarImpl::from(ListValue::new(builder.finish()))
-            }),
-            Err(err) => {
-                log_error!($name, err, "parse column failed");
-                None
-            }
-        }
-    }};
 }
 
 macro_rules! handle_data_type {
@@ -69,16 +53,6 @@ macro_rules! handle_data_type {
         let res = $row.try_get::<_, Option<$type>>($i);
         match res {
             Ok(val) => val.map(|v| ScalarImpl::from(v)),
-            Err(err) => {
-                log_error!($name, err, "parse column failed");
-                None
-            }
-        }
-    }};
-    ($row:expr, $i:expr, $name:expr, $type:ty, $rw_type:ty) => {{
-        let res = $row.try_get::<_, Option<$type>>($i);
-        match res {
-            Ok(val) => val.map(|v| ScalarImpl::from(<$rw_type>::from(v))),
             Err(err) => {
                 log_error!($name, err, "parse column failed");
                 None
@@ -181,16 +155,16 @@ fn postgres_cell_to_scalar_impl(
             }
         }
         DataType::Date => {
-            handle_data_type!(row, i, name, NaiveDate, Date)
+            handle_data_type!(row, i, name, Date)
         }
         DataType::Time => {
-            handle_data_type!(row, i, name, chrono::NaiveTime, Time)
+            handle_data_type!(row, i, name, Time)
         }
         DataType::Timestamp => {
-            handle_data_type!(row, i, name, chrono::NaiveDateTime, Timestamp)
+            handle_data_type!(row, i, name, Timestamp)
         }
         DataType::Timestamptz => {
-            handle_data_type!(row, i, name, chrono::DateTime<Utc>, Timestamptz)
+            handle_data_type!(row, i, name, Timestamptz)
         }
         DataType::Bytea => {
             let res = row.try_get::<_, Option<Vec<u8>>>(i);
@@ -203,7 +177,7 @@ fn postgres_cell_to_scalar_impl(
             }
         }
         DataType::Jsonb => {
-            handle_data_type!(row, i, name, serde_json::Value, JsonbVal)
+            handle_data_type!(row, i, name, JsonbVal)
         }
         DataType::Interval => {
             handle_data_type!(row, i, name, Interval)
@@ -258,7 +232,7 @@ fn postgres_cell_to_scalar_impl(
                         }
                     }
                     DataType::Date => {
-                        handle_list_data_type!(row, i, name, dtype, NaiveDate, Date)
+                        handle_list_data_type!(row, i, name, dtype, Date)
                     }
                     DataType::Varchar => {
                         match *row.columns()[i].type_() {
@@ -302,33 +276,19 @@ fn postgres_cell_to_scalar_impl(
                         }
                     }
                     DataType::Time => {
-                        handle_list_data_type!(row, i, name, dtype, chrono::NaiveTime, Time)
+                        handle_list_data_type!(row, i, name, dtype, Time)
                     }
                     DataType::Timestamp => {
-                        handle_list_data_type!(
-                            row,
-                            i,
-                            name,
-                            dtype,
-                            chrono::NaiveDateTime,
-                            Timestamp
-                        )
+                        handle_list_data_type!(row, i, name, dtype, Timestamp)
                     }
                     DataType::Timestamptz => {
-                        handle_list_data_type!(
-                            row,
-                            i,
-                            name,
-                            dtype,
-                            chrono::DateTime<Utc>,
-                            Timestamptz
-                        )
+                        handle_list_data_type!(row, i, name, dtype, Timestamptz)
                     }
                     DataType::Interval => {
                         handle_list_data_type!(row, i, name, dtype, Interval)
                     }
                     DataType::Jsonb => {
-                        handle_list_data_type!(row, i, name, dtype, serde_json::Value, JsonbVal)
+                        handle_list_data_type!(row, i, name, dtype, JsonbVal)
                     }
                     DataType::Bytea => {
                         let res = row.try_get::<_, Option<Vec<Option<Vec<u8>>>>>(i);

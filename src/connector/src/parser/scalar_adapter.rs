@@ -83,6 +83,7 @@ pub(crate) enum ScalarAdapter<'a> {
     Numeric(PgNumeric),
     Enum(EnumString),
     NumericList(Vec<Option<PgNumeric>>),
+    List(Vec<Option<ScalarAdapter<'a>>>),
 }
 
 impl ToSql for ScalarAdapter<'_> {
@@ -99,6 +100,7 @@ impl ToSql for ScalarAdapter<'_> {
             ScalarAdapter::Numeric(v) => v.to_sql(ty, out),
             ScalarAdapter::Enum(v) => v.to_sql(ty, out),
             ScalarAdapter::NumericList(v) => v.to_sql(ty, out),
+            ScalarAdapter::List(v) => v.to_sql(ty, out),
         }
     }
 
@@ -123,6 +125,7 @@ impl<'a> FromSql<'a> for ScalarAdapter<'_> {
             Kind::Array(Type::NUMERIC) => {
                 Ok(ScalarAdapter::NumericList(FromSql::from_sql(ty, raw)?))
             }
+            Kind::Array(_) => Ok(ScalarAdapter::List(FromSql::from_sql(ty, raw)?)),
             _ => Err(anyhow!("failed to convert type {:?} to ScalarAdapter", ty).into()),
         }
     }
@@ -130,6 +133,7 @@ impl<'a> FromSql<'a> for ScalarAdapter<'_> {
     fn accepts(ty: &Type) -> bool {
         matches!(ty, &Type::UUID | &Type::NUMERIC | &Type::NUMERIC_ARRAY)
             || <EnumString as FromSql>::accepts(ty)
+            || matches!(ty.kind(), Kind::Array(_))
     }
 }
 
@@ -141,6 +145,7 @@ impl ScalarAdapter<'_> {
             ScalarAdapter::Numeric(_) => "Numeric",
             ScalarAdapter::Enum(_) => "Enum",
             ScalarAdapter::NumericList(_) => "NumericList",
+            ScalarAdapter::List(_) => "List",
         }
     }
 
@@ -174,6 +179,17 @@ impl ScalarAdapter<'_> {
                     }.transpose()?)
                 }
                 ScalarAdapter::NumericList(vec)
+            }
+            (ScalarRefImpl::List(list), _, Kind::Array(inner_type)) => {
+                let mut vec = vec![];
+                for scalar in list.iter() {
+                    vec.push(
+                        scalar
+                            .map(|s| ScalarAdapter::from_scalar(s, inner_type))
+                            .transpose()?,
+                    );
+                }
+                ScalarAdapter::List(vec)
             }
             _ => ScalarAdapter::Builtin(scalar),
         })
@@ -232,6 +248,14 @@ impl ScalarAdapter<'_> {
                         ),
                         (None, _) => None,
                     };
+                    builder.append(scalar);
+                }
+                Some(ScalarImpl::from(ListValue::new(builder.finish())))
+            }
+            (ScalarAdapter::List(vec), &DataType::List(dtype)) => {
+                let mut builder = dtype.create_array_builder(0);
+                for val in vec {
+                    let scalar = val.and_then(|v| v.into_scalar(&dtype));
                     builder.append(scalar);
                 }
                 Some(ScalarImpl::from(ListValue::new(builder.finish())))
