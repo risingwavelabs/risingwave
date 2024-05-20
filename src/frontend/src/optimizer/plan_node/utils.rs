@@ -372,6 +372,8 @@ pub fn infer_kv_log_store_table_catalog_inner(
     table_catalog_builder.build(dist_key, read_prefix_len_hint)
 }
 
+/// Check that all leaf nodes must be stream table scan,
+/// since that plan node maps to `backfill` executor, which supports recovery.
 pub(crate) fn plan_has_backfill_leaf_nodes(plan: &PlanRef) -> bool {
     if plan.inputs().is_empty() {
         if let Some(scan) = plan.as_stream_table_scan() {

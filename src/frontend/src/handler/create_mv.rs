@@ -185,7 +185,6 @@ It only indicates the physical clustering of the data, which may improve the per
 
         let (plan, table) =
             gen_create_mv_plan(&session, context.into(), query, name, columns, emit_mode)?;
-        // All leaf nodes must be stream table scan, no other scan operators support recovery.
 
         let context = plan.plan_base().ctx().clone();
         let mut graph = build_graph(plan)?;
