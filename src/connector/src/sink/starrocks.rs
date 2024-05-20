@@ -755,10 +755,6 @@ impl StarrocksClient {
     }
 }
 
-pub struct StarrocksSinkCommitter {
-    client: Arc<StarrocksTxnClient>,
-}
-
 pub struct StarrocksTxnClient {
     request_builder: StarrocksTxnRequestBuilder,
 }
@@ -854,6 +850,10 @@ impl TryFrom<SinkMetadata> for StarrocksWriteResult {
             Ok(StarrocksWriteResult(None))
         }
     }
+}
+
+pub struct StarrocksSinkCommitter {
+    client: Arc<StarrocksTxnClient>,
 }
 
 #[async_trait::async_trait]

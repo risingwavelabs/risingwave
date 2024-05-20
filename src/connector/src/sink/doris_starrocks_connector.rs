@@ -354,7 +354,6 @@ impl InserterInner {
 
     pub async fn write(&mut self, data: Bytes) -> Result<()> {
         self.buffer.put_slice(&data);
-        // Should we check
         if self.buffer.len() >= MIN_CHUNK_SIZE {
             self.send_chunk().await?;
         }
