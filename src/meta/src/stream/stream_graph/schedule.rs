@@ -169,27 +169,31 @@ impl Distribution {
         fragment: &risingwave_pb::meta::table_fragments::Fragment,
         actor_location: &HashMap<u32, u32>,
     ) -> Self {
-        let actor_bitmaps: HashMap<_, _> = fragment
-            .actors
-            .iter()
-            .map(|actor| {
-                (
-                    actor.actor_id as hash::ActorId,
-                    Bitmap::from(actor.vnode_bitmap.as_ref().unwrap()),
-                )
-            })
-            .collect();
-
-        let actor_mapping = ActorMapping::from_bitmaps(&actor_bitmaps);
-        let mapping = actor_mapping.to_worker_slot(actor_location);
-
         match fragment.get_distribution_type().unwrap() {
             FragmentDistributionType::Unspecified => unreachable!(),
             FragmentDistributionType::Single => {
-                let worker_slot_id = mapping.to_single().unwrap();
+                let actor_id = fragment.actors.iter().exactly_one().unwrap().actor_id;
+                let location = actor_location.get(&actor_id).unwrap();
+                let worker_slot_id = WorkerSlotId::new(*location, 0);
                 Distribution::Singleton(worker_slot_id)
             }
-            FragmentDistributionType::Hash => Distribution::Hash(mapping),
+            FragmentDistributionType::Hash => {
+                let actor_bitmaps: HashMap<_, _> = fragment
+                    .actors
+                    .iter()
+                    .map(|actor| {
+                        (
+                            actor.actor_id as hash::ActorId,
+                            Bitmap::from(actor.vnode_bitmap.as_ref().unwrap()),
+                        )
+                    })
+                    .collect();
+
+                let actor_mapping = ActorMapping::from_bitmaps(&actor_bitmaps);
+                let mapping = actor_mapping.to_worker_slot(actor_location);
+
+                Distribution::Hash(mapping)
+            }
         }
     }
 
@@ -444,7 +448,7 @@ mod tests {
             Fact::Fragment(103.into()),
             Fact::Fragment(104.into()),
             Fact::ExternalReq { id: 1.into(), dist: DistId::Hash(1) },
-            Fact::ExternalReq { id: 2.into(), dist: DistId::Singleton(WorkerSlotId(0, 2)) },
+            Fact::ExternalReq { id: 2.into(), dist: DistId::Singleton(WorkerSlotId::new(0, 2)) },
             Fact::Edge { from: 1.into(), to: 101.into(), dt: NoShuffle },
             Fact::Edge { from: 2.into(), to: 102.into(), dt: NoShuffle },
             Fact::Edge { from: 101.into(), to: 103.into(), dt: Hash },
@@ -454,7 +458,7 @@ mod tests {
 
         let expected = maplit::hashmap! {
             101.into() => Result::Required(DistId::Hash(1)),
-            102.into() => Result::Required(DistId::Singleton(WorkerSlotId(0, 2))),
+            102.into() => Result::Required(DistId::Singleton(WorkerSlotId::new(0, 2))),
             103.into() => Result::DefaultHash,
             104.into() => Result::DefaultSingleton,
         };

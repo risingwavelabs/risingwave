@@ -539,7 +539,7 @@ pub struct CompleteStreamFragmentGraph {
     /// The required information of existing fragments.
     existing_fragments: HashMap<GlobalFragmentId, Fragment>,
 
-    ///
+    /// The location of the actors in the existing fragments.
     existing_actor_location: HashMap<u32, u32>,
 
     /// Extra edges between existing fragments and the building fragments.

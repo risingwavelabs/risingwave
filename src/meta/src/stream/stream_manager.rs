@@ -784,8 +784,7 @@ mod tests {
     use std::time::Duration;
 
     use futures::{Stream, TryStreamExt};
-    use risingwave_common::catalog::TableId;
-    use risingwave_common::hash::{ParallelUnitMapping, WorkerSlotId, WorkerSlotMapping};
+    use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
     use risingwave_common::system_param::reader::SystemParamsRead;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::add_worker_node_request::Property;
@@ -1105,7 +1104,7 @@ mod tests {
                     .flat_map(|f| &f.actors)
                     .sorted_by(|a, b| a.actor_id.cmp(&b.actor_id))
                     .enumerate()
-                    .map(|(idx, a)| (a.actor_id, WorkerSlotId(*worker_id, idx as u32)))
+                    .map(|(idx, a)| (a.actor_id, WorkerSlotId::new(*worker_id, idx)))
                     .collect();
 
                 Locations {
@@ -1204,7 +1203,7 @@ mod tests {
             .iter()
             .flat_map(|(worker_id, worker)| {
                 (0..worker.get_parallel_units().len())
-                    .map(|slot_id| WorkerSlotId(*worker_id, slot_id as u32))
+                    .map(|slot_id| WorkerSlotId::new(*worker_id, slot_id))
             })
             .collect_vec();
 
