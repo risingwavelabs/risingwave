@@ -37,7 +37,7 @@ enum ComputeVnode {
         dist_key_in_pk_indices: Vec<usize>,
     },
     VnodeColumnIndex {
-        /// Indices of vnode columns.
+        /// Index of vnode column.
         vnode_col_idx_in_pk: usize,
     },
 }
