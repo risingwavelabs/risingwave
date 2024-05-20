@@ -464,7 +464,6 @@ impl SourceStreamChunkRowWriter<'_> {
         let result = (self.descs.iter())
             .zip_eq_fast(self.builders.iter_mut())
             .try_for_each(|(desc, builder)| {
-                println!("desc: name = {}", desc.name);
                 wrapped_f(desc).map(|output| {
                     A::apply(builder, output);
                     applied_columns.push(builder);

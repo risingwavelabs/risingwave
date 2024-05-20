@@ -1102,6 +1102,7 @@ pub fn check_create_table_with_source(
     include_column_options: &IncludeOption,
     cdc_table_info: &Option<CdcTableInfo>,
 ) -> Result<Option<ConnectorSchema>> {
+    // skip check for cdc table
     if cdc_table_info.is_some() {
         return Ok(source_schema);
     }

@@ -76,7 +76,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             });
         let table_type = CdcTableType::from_properties(&properties);
 
-        // filter out additional columns
+        // Filter out additional columns to construct the external table schema
         let table_schema: Schema = table_desc
             .columns
             .iter()

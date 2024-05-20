@@ -90,12 +90,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         rate_limit_rps: Option<u32>,
         options: CdcScanOptions,
     ) -> Self {
-        let pk_in_output_indices = external_table.pk_indices();
+        let pk_indices = external_table.pk_indices();
         let upstream_table_id = external_table.table_id().table_id;
         let state_impl = CdcBackfillState::new(
             upstream_table_id,
             state_table,
-            pk_in_output_indices.len() + METADATA_STATE_LEN,
+            pk_indices.len() + METADATA_STATE_LEN,
         );
 
         Self {
