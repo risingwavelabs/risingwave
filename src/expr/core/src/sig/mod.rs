@@ -30,6 +30,10 @@ use crate::expr::BoxedExpression;
 use crate::table_function::BoxedTableFunction;
 use crate::ExprError;
 
+mod udf;
+
+pub use self::udf::*;
+
 /// The global registry of all function signatures.
 pub static FUNCTION_REGISTRY: LazyLock<FunctionRegistry> = LazyLock::new(|| {
     let mut map = FunctionRegistry::default();
