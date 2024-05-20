@@ -274,7 +274,7 @@ mod tests {
             &[worker_1.clone(), worker_2.clone()],
             None,
         )
-            .unwrap();
+        .unwrap();
 
         assert_eq!(re_worker_mapping.iter_unique().count(), 51);
         // 1 * 256 + 0 -> 51 * 5 + 1
@@ -292,7 +292,7 @@ mod tests {
             &[worker_1.clone(), worker_2.clone(), worker_3.clone()],
             None,
         )
-            .unwrap();
+        .unwrap();
 
         // limited by total pu number
         assert_eq!(re_pu_mapping_2.iter_unique().count(), 111);
@@ -304,7 +304,7 @@ mod tests {
             &[worker_1.clone(), worker_2.clone(), worker_3.clone()],
             Some(50),
         )
-            .unwrap();
+        .unwrap();
         // limited by max_parallelism
         assert_eq!(re_pu_mapping.iter_unique().count(), 50);
         // 111 * 2 + 34 -> 50 * 5 + 6
@@ -315,7 +315,7 @@ mod tests {
             &[worker_1.clone(), worker_2, worker_3.clone()],
             None,
         )
-            .unwrap();
+        .unwrap();
         assert_eq!(re_pu_mapping_2.iter_unique().count(), 111);
         // 50 * 5 + 6 -> 111 * 2 + 34
         let score = count_same_vnode_mapping(&re_pu_mapping_2, &re_pu_mapping);
