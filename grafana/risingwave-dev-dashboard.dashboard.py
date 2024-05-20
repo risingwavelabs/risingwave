@@ -2006,26 +2006,26 @@ def section_hummock_read(outer_panels):
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({table_metric('state_store_iter_init_duration_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}, table_id))",
-                                f"create_iter_time p{legend} - {{{{table_id}}}} @ {{{{{COMPONENT_LABEL}}}}} @ {{{{{NODE_LABEL}}}}}",
+                                f"histogram_quantile({quantile}, sum(rate({table_metric('state_store_iter_init_duration_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}, table_id, iter_type))",
+                                f"create_iter_time p{legend} - {{{{iter_type}}}} {{{{table_id}}}} @ {{{{{COMPONENT_LABEL}}}}} @ {{{{{NODE_LABEL}}}}}",
                             ),
                             [50, 99, "max"],
                         ),
                         panels.target(
-                            f"sum by(le, {COMPONENT_LABEL}, {NODE_LABEL})(rate({metric('state_store_iter_init_duration_sum')}[$__rate_interval])) / sum by(le, {COMPONENT_LABEL}, {NODE_LABEL}) (rate({metric('state_store_iter_init_duration_count')}[$__rate_interval])) > 0",
-                            "create_iter_time avg - {{%s}} @ {{%s}}"
+                            f"sum by(le, {COMPONENT_LABEL}, {NODE_LABEL})(rate({metric('state_store_iter_init_duration_sum')}[$__rate_interval])) / sum by(le, {COMPONENT_LABEL}, {NODE_LABEL}, iter_type) (rate({metric('state_store_iter_init_duration_count')}[$__rate_interval])) > 0",
+                            "create_iter_time avg - {{iter_type}} {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({table_metric('state_store_iter_scan_duration_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}, table_id))",
-                                f"pure_scan_time p{legend} - {{{{table_id}}}} @ {{{{{COMPONENT_LABEL}}}}} @ {{{{{NODE_LABEL}}}}}",
+                                f"histogram_quantile({quantile}, sum(rate({table_metric('state_store_iter_scan_duration_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}, table_id, iter_type))",
+                                f"pure_scan_time p{legend} - {{{{iter_type}}}} {{{{table_id}}}} @ {{{{{COMPONENT_LABEL}}}}} @ {{{{{NODE_LABEL}}}}}",
                             ),
                             [50, 99, "max"],
                         ),
                         panels.target(
-                            f"sum by(le, {COMPONENT_LABEL}, {NODE_LABEL})(rate({metric('state_store_iter_scan_duration_sum')}[$__rate_interval])) / sum by(le, {COMPONENT_LABEL}, {NODE_LABEL}) (rate({metric('state_store_iter_scan_duration_count')}[$__rate_interval])) > 0",
-                            "pure_scan_time avg - {{%s}} @ {{%s}}"
+                            f"sum by(le, {COMPONENT_LABEL}, {NODE_LABEL})(rate({metric('state_store_iter_scan_duration_sum')}[$__rate_interval])) / sum by(le, {COMPONENT_LABEL}, {NODE_LABEL}, iter_type) (rate({metric('state_store_iter_scan_duration_count')}[$__rate_interval])) > 0",
+                            "pure_scan_time avg - {{iter_type}} {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
@@ -2093,8 +2093,8 @@ def section_hummock_read(outer_panels):
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                         panels.target(
-                            f"sum(rate({table_metric('state_store_iter_in_process_counts')}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)",
-                            "iter - {{table_id}} @ {{%s}} @ {{%s}}"
+                            f"sum(rate({table_metric('state_store_iter_counts')}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id, iter_type)",
+                            "{{iter_type}} - {{table_id}} @ {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
@@ -2118,8 +2118,8 @@ def section_hummock_read(outer_panels):
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({table_metric('state_store_iter_size_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}, table_id))",
-                                f"p{legend} - {{{{table_id}}}} @ {{{{{COMPONENT_LABEL}}}}} @ {{{{{NODE_LABEL}}}}}",
+                                f"histogram_quantile({quantile}, sum(rate({table_metric('state_store_iter_size_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}, table_id, iter_type))",
+                                f"p{legend} - {{{{iter_type}}}} {{{{table_id}}}} @ {{{{{COMPONENT_LABEL}}}}} @ {{{{{NODE_LABEL}}}}}",
                             ),
                             [50, 99, "max"],
                         ),
@@ -2144,10 +2144,18 @@ def section_hummock_read(outer_panels):
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({table_metric('state_store_iter_item_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}, table_id))",
-                                f"p{legend} - {{{{table_id}}}} @ {{{{{COMPONENT_LABEL}}}}} @ {{{{{NODE_LABEL}}}}}",
+                                f"histogram_quantile({quantile}, sum(rate({table_metric('state_store_iter_item_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}, table_id, iter_type))",
+                                f"p{legend} - {{{{iter_type}}}} {{{{table_id}}}} @ {{{{{COMPONENT_LABEL}}}}} @ {{{{{NODE_LABEL}}}}}",
                             ),
                             [50, 99, "max"],
+                        ),
+                        panels.target(
+                            f"{metric('state_store_iter_in_progress_counts')}",
+                            "Existing {{iter_type}} count @ {{table_id}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('state_store_iter_log_op_type_counts')}[$__rate_interval])) by (table_id, op_type)",
+                            "iter_log op count @ {{table_id}} {{op_type}}",
                         ),
                     ],
                 ),
