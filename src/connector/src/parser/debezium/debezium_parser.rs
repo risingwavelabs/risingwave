@@ -292,7 +292,7 @@ mod tests {
 
         let columns = columns
             .iter()
-            .map(|c| SourceColumnDesc::from(c))
+            .map(SourceColumnDesc::from)
             .collect::<Vec<_>>();
 
         let props = SpecificParserConfig {
