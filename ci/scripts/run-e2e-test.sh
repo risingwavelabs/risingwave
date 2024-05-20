@@ -81,6 +81,7 @@ cluster_start
 # Please make sure the regression is expected before increasing the timeout.
 sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
 sqllogictest -p 4566 -d dev './e2e_test/backfill/rate_limit/*.slt'
+sqllogictest -p 4566 -d dev './e2e_test/backfill/sink/different_pk_and_dist_key.slt'
 
 echo "--- Kill cluster"
 cluster_stop
