@@ -18,9 +18,7 @@
 
 use std::fmt::Write;
 
-use risingwave_common::types::ScalarRefImpl;
-use risingwave_expr::{function, ExprError, Result};
-use thiserror_ext::AsReport;
+use risingwave_expr::function;
 
 /// Returns the character with the specified Unicode code point.
 ///
@@ -475,6 +473,7 @@ pub fn right(s: &str, n: i32, writer: &mut impl Write) {
 }
 
 /// `quote_literal(string text)`
+/// `quote_literal(value anyelement)`
 ///
 /// Return the given string suitably quoted to be used as a string literal in an SQL statement
 /// string. Embedded single-quotes and backslashes are properly doubled.
@@ -495,6 +494,21 @@ pub fn right(s: &str, n: i32, writer: &mut impl Write) {
 /// select quote_literal(E'C:\\Windows\\')
 /// ----
 /// E'C:\\Windows\\'
+///
+/// query T
+/// select quote_literal(42.5)
+/// ----
+/// '42.5'
+///
+/// query T
+/// select quote_literal('hello'::bytea);
+/// ----
+/// E'\\x68656c6c6f'
+///
+/// query T
+/// select quote_literal('{"hello":"world","foo":233}'::jsonb);
+/// ----
+/// '{"foo": 233, "hello": "world"}'
 /// ```
 #[function("quote_literal(varchar) -> varchar")]
 pub fn quote_literal(s: &str, writer: &mut impl Write) {
@@ -513,74 +527,6 @@ pub fn quote_literal(s: &str, writer: &mut impl Write) {
     write!(writer, "'").unwrap();
 }
 
-/// `quote_literal(value anyelement)`
-///
-/// Coerce the given value to text and then quote it as a literal.
-/// Embedded single-quotes and backslashes are properly doubled.
-///
-/// # Example
-///
-/// ```slt
-/// select quote_literal(42.5)
-/// ----
-/// 42.5
-///
-/// select quote_literal('hello'::bytea);
-/// --------------
-/// E'\\x68656c6c6f'
-///
-/// select quote_literal('{"hello":"world","foo":233}'::jsonb);
-/// ----
-/// '{"foo": 233, "hello": "world"}'
-/// ```
-#[function("quote_literal(any) -> varchar")]
-pub fn quote_literal_any(v: ScalarRefImpl<'_>, writer: &mut impl Write) -> Result<()> {
-    use risingwave_common::types::ToText;
-    match v {
-        ScalarRefImpl::Utf8(s) => quote_literal(s, writer),
-        ScalarRefImpl::Bytea(s) => {
-            // `bytea` hex format
-            write!(writer, "E'\\\\x").unwrap();
-            for b in s.iter() {
-                write!(writer, "{:02x}", b).unwrap();
-            }
-            write!(writer, "'").unwrap();
-        }
-        // Types that can be directly written without quoting
-        ScalarRefImpl::Int16(_)
-        | ScalarRefImpl::Int32(_)
-        | ScalarRefImpl::Int64(_)
-        | ScalarRefImpl::Int256(_)
-        | ScalarRefImpl::Float32(_)
-        | ScalarRefImpl::Float64(_)
-        | ScalarRefImpl::Decimal(_)
-        | ScalarRefImpl::Bool(_)
-        | ScalarRefImpl::Serial(_) => {
-            v.write(writer).map_err(|e| ExprError::InvalidParam {
-                name: "value",
-                reason: e.to_report_string().into(),
-            })?;
-        }
-        // Types that need to be quoted
-        ScalarRefImpl::Date(_)
-        | ScalarRefImpl::Time(_)
-        | ScalarRefImpl::Timestamp(_)
-        | ScalarRefImpl::Timestamptz(_)
-        | ScalarRefImpl::Interval(_)
-        | ScalarRefImpl::List(_)
-        | ScalarRefImpl::Jsonb(_) => {
-            quote_literal(v.to_text().as_str(), writer);
-        }
-        ScalarRefImpl::Struct(_) => {
-            return Err(ExprError::InvalidParam {
-                name: "value",
-                reason: "quote_literal does not support struct".into(),
-            })
-        }
-    }
-    Ok(())
-}
-
 /// `quote_nullable(string text)`
 ///
 /// Return the given string suitably quoted to be used as a string literal in an SQL statement
@@ -592,19 +538,6 @@ pub fn quote_nullable(s: Option<&str>, writer: &mut impl Write) {
         Some(s) => quote_literal(s, writer),
         None => write!(writer, "NULL").unwrap(),
     }
-}
-
-/// `quote_nullable(value anyelement)`
-///
-/// Coerce the given value to text and then quote it as a literal; or, if the argument is null,
-/// return NULL. Embedded single-quotes and backslashes are properly doubled.
-#[function("quote_nullable(any) -> varchar")]
-pub fn quote_nullable_any(v: Option<ScalarRefImpl<'_>>, writer: &mut impl Write) -> Result<()> {
-    match v {
-        Some(v) => quote_literal_any(v, writer)?,
-        None => write!(writer, "NULL").unwrap(),
-    }
-    Ok(())
 }
 
 #[cfg(test)]

@@ -40,8 +40,8 @@ use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, UdfContext};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
-    AggCall, Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, Literal, Now, OrderBy,
-    TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
+    AggCall, CastContext, Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, Literal,
+    Now, OrderBy, TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
 };
 use crate::utils::Condition;
 
@@ -1012,8 +1012,26 @@ impl Binder {
                 ("to_ascii", raw_call(ExprType::ToAscii)),
                 ("to_hex", raw_call(ExprType::ToHex)),
                 ("quote_ident", raw_call(ExprType::QuoteIdent)),
-                ("quote_literal", raw_call(ExprType::QuoteLiteral)),
-                ("quote_nullable", raw_call(ExprType::QuoteNullable)),
+                ("quote_literal", guard_by_len(1, raw(|_binder, mut inputs| {
+                    if inputs[0].return_type() != DataType::Varchar {
+                        // Support `quote_literal(any)` by converting it to `quote_literal(any::text)`
+                        // Ref. https://github.com/postgres/postgres/blob/REL_16_1/src/include/catalog/pg_proc.dat#L4641
+                        FunctionCall::cast_mut(&mut inputs[0], DataType::Varchar, CastContext::Explicit).map_err(|e| {
+                            ErrorCode::BindError(format!("{} in `quote_literal`", e.as_report()))
+                        })?;
+                    }
+                    Ok(FunctionCall::new_unchecked(ExprType::QuoteLiteral, inputs, DataType::Varchar).into())
+                }))),
+                ("quote_nullable", guard_by_len(1, raw(|_binder, mut inputs| {
+                    if inputs[0].return_type() != DataType::Varchar {
+                        // Support `quote_nullable(any)` by converting it to `quote_nullable(any::text)`
+                        // Ref. https://github.com/postgres/postgres/blob/REL_16_1/src/include/catalog/pg_proc.dat#L4650
+                        FunctionCall::cast_mut(&mut inputs[0], DataType::Varchar, CastContext::Explicit).map_err(|e| {
+                            ErrorCode::BindError(format!("{} in `quote_nullable`", e.as_report()))
+                        })?;
+                    }
+                    Ok(FunctionCall::new_unchecked(ExprType::QuoteNullable, inputs, DataType::Varchar).into())
+                }))),
                 ("string_to_array", raw_call(ExprType::StringToArray)),
                 ("encode", raw_call(ExprType::Encode)),
                 ("decode", raw_call(ExprType::Decode)),
