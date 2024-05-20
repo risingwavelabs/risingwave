@@ -19,8 +19,6 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::LazyLock;
 
-use arrow_array::RecordBatch;
-use futures::stream::BoxStream;
 use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_pb::expr::expr_node::PbType as ScalarFunctionType;
@@ -31,6 +29,10 @@ use crate::error::Result;
 use crate::expr::BoxedExpression;
 use crate::table_function::BoxedTableFunction;
 use crate::ExprError;
+
+mod udf;
+
+pub use self::udf::*;
 
 /// The global registry of all function signatures.
 pub static FUNCTION_REGISTRY: LazyLock<FunctionRegistry> = LazyLock::new(|| {
@@ -463,65 +465,3 @@ pub enum FuncBuilder {
 /// A static distributed slice of functions defined by `#[function]`.
 #[linkme::distributed_slice]
 pub static FUNCTIONS: [fn() -> FuncSign];
-
-#[linkme::distributed_slice]
-pub static UDF_RUNTIMES: [UdfRuntimeDescriptor];
-
-pub struct UdfRuntimeDescriptor {
-    /// Returns if the function match this descriptor.
-    pub match_: fn(language: &str, runtime: Option<&str>, link: Option<&str>) -> bool,
-    /// Creates function from options.
-    pub create: fn(opts: CreateFunctionOptions<'_>) -> anyhow::Result<CreateFunctionOutput>,
-    /// Builds UDF runtime from verified options.
-    pub build: fn(opts: UdfOptions<'_>) -> anyhow::Result<Box<dyn UdfRuntime>>,
-}
-
-pub struct CreateFunctionOptions<'a> {
-    pub name: &'a str,
-    pub arg_names: &'a [String],
-    pub arg_types: &'a [DataType],
-    pub return_type: &'a DataType,
-    pub is_table_function: bool,
-    pub as_: Option<&'a str>,
-    pub using_link: Option<&'a str>,
-    pub using_base64_decoded: Option<&'a [u8]>,
-}
-
-pub struct CreateFunctionOutput {
-    pub identifier: String,
-    pub body: Option<String>,
-    pub compressed_binary: Option<Vec<u8>>,
-}
-
-pub struct UdfOptions<'a> {
-    pub table_function: bool,
-    pub body: Option<&'a str>,
-    pub compressed_binary: Option<&'a [u8]>,
-    pub link: Option<&'a str>,
-    pub identifier: &'a str,
-    pub arg_names: &'a [String],
-    pub return_type: &'a DataType,
-    pub always_retry_on_network_error: bool,
-    pub function_type: Option<&'a str>,
-}
-
-#[async_trait::async_trait]
-pub trait UdfRuntime: std::fmt::Debug + Send + Sync {
-    /// Call the scalar function.
-    async fn call(&self, input: &RecordBatch) -> anyhow::Result<RecordBatch>;
-
-    /// Call the table function.
-    async fn call_table_function<'a>(
-        &'a self,
-        input: &'a RecordBatch,
-    ) -> anyhow::Result<BoxStream<'a, anyhow::Result<RecordBatch>>>;
-
-    /// Whether the UDF talks in legacy mode.
-    ///
-    /// If true, decimal and jsonb types are mapped to Arrow `LargeBinary` and `LargeUtf8` types.
-    /// Otherwise, they are mapped to Arrow extension types.
-    /// See <https://github.com/risingwavelabs/arrow-udf/tree/main#extension-types>.
-    fn is_legacy(&self) -> bool {
-        false
-    }
-}

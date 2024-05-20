@@ -32,7 +32,7 @@ use risingwave_pb::expr::ExprNode;
 
 use super::{BoxedExpression, Build};
 use crate::expr::Expression;
-use crate::sig::{UdfOptions, UdfRuntime};
+use crate::sig::{UdfImpl, UdfOptions};
 use crate::{bail, ExprError, Result};
 
 #[derive(Debug)]
@@ -41,7 +41,7 @@ pub struct UserDefinedFunction {
     arg_types: Vec<DataType>,
     return_type: DataType,
     arg_schema: SchemaRef,
-    runtime: Box<dyn UdfRuntime>,
+    runtime: Box<dyn UdfImpl>,
     arrow_convert: UdfArrowConvert,
     span: await_tree::Span,
     metrics: Metrics,
@@ -173,12 +173,8 @@ impl Build for UserDefinedFunction {
         let link = udf.link.as_deref();
 
         // lookup UDF builder
-        let builder = crate::sig::UDF_RUNTIMES
-            .iter()
-            .find(|udf| (udf.match_)(language, runtime, link))
-            .context("language not found")?
-            .build;
-        let runtime = builder(UdfOptions {
+        let build_fn = crate::sig::find_udf_impl(language, runtime, link)?.build_fn;
+        let runtime = build_fn(UdfOptions {
             table_function: false,
             body: udf.body.as_deref(),
             compressed_binary: udf.compressed_binary.as_deref(),

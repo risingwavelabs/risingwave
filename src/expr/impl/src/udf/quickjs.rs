@@ -18,19 +18,19 @@ use risingwave_common::array::arrow::{ToArrow, UdfArrowConvert};
 
 use super::*;
 
-#[linkme::distributed_slice(UDF_RUNTIMES)]
-static QUICKJS: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
-    match_: |language, runtime, _link| {
+#[linkme::distributed_slice(UDF_IMPLS)]
+static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
+    match_fn: |language, runtime, _link| {
         language == "javascript" && matches!(runtime, None | Some("quickjs"))
     },
-    create: |opts| {
+    create_fn: |opts| {
         Ok(CreateFunctionOutput {
             identifier: opts.name.to_string(),
             body: Some(opts.as_.context("AS must be specified")?.to_string()),
             compressed_binary: None,
         })
     },
-    build: |opts| {
+    build_fn: |opts| {
         let body = format!(
             "export function{} {}({}) {{ {} }}",
             if opts.table_function { "*" } else { "" },
@@ -59,7 +59,7 @@ struct QuickJsFunction {
 }
 
 #[async_trait::async_trait]
-impl UdfRuntime for QuickJsFunction {
+impl UdfImpl for QuickJsFunction {
     async fn call(&self, input: &RecordBatch) -> Result<RecordBatch> {
         self.runtime.call(&self.identifier, input)
     }

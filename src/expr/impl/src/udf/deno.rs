@@ -21,10 +21,10 @@ use risingwave_common::array::arrow::{ToArrow, UdfArrowConvert};
 
 use super::*;
 
-#[linkme::distributed_slice(UDF_RUNTIMES)]
-static DENO: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
-    match_: |language, runtime, _link| language == "javascript" && runtime == Some("deno"),
-    create: |opts| {
+#[linkme::distributed_slice(UDF_IMPLS)]
+static DENO: UdfImplDescriptor = UdfImplDescriptor {
+    match_fn: |language, runtime, _link| language == "javascript" && runtime == Some("deno"),
+    create_fn: |opts| {
         let mut body = None;
         let mut compressed_binary = None;
         let identifier = opts.name.to_string();
@@ -46,7 +46,7 @@ static DENO: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
             compressed_binary,
         })
     },
-    build: |opts| {
+    build_fn: |opts| {
         let runtime = Runtime::new();
         let body = match (opts.body, opts.compressed_binary) {
             (Some(body), _) => body.to_string(),
@@ -96,7 +96,7 @@ struct DenoFunction {
 }
 
 #[async_trait::async_trait]
-impl UdfRuntime for DenoFunction {
+impl UdfImpl for DenoFunction {
     async fn call(&self, input: &RecordBatch) -> Result<RecordBatch> {
         // FIXME(runji): make the future Send
         tokio::task::block_in_place(|| {

@@ -22,14 +22,14 @@ use risingwave_common::array::I32Array;
 use risingwave_common::bail;
 
 use super::*;
-use crate::sig::{UdfOptions, UdfRuntime};
+use crate::sig::{UdfImpl, UdfOptions};
 
 #[derive(Debug)]
 pub struct UserDefinedTableFunction {
     children: Vec<BoxedExpression>,
     arg_schema: SchemaRef,
     return_type: DataType,
-    runtime: Box<dyn UdfRuntime>,
+    runtime: Box<dyn UdfImpl>,
     arrow_convert: UdfArrowConvert,
     #[allow(dead_code)]
     chunk_size: usize,
@@ -136,13 +136,8 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
     let runtime = udtf.runtime.as_deref();
     let link = udtf.link.as_deref();
 
-    // lookup UDF builder
-    let builder = crate::sig::UDF_RUNTIMES
-        .iter()
-        .find(|udf| (udf.match_)(language, runtime, link))
-        .context("language not found")?
-        .build;
-    let runtime = builder(UdfOptions {
+    let build_fn = crate::sig::find_udf_impl(language, runtime, link)?.build_fn;
+    let runtime = build_fn(UdfOptions {
         table_function: true,
         body: udtf.body.as_deref(),
         compressed_binary: udtf.compressed_binary.as_deref(),

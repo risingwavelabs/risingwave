@@ -19,7 +19,7 @@ use anyhow::{Context as _, Result};
 use arrow_array::RecordBatch;
 use futures_util::stream::BoxStream;
 use risingwave_expr::sig::{
-    CreateFunctionOptions, CreateFunctionOutput, UdfRuntime, UdfRuntimeDescriptor, UDF_RUNTIMES,
+    CreateFunctionOptions, CreateFunctionOutput, UdfImpl, UdfImplDescriptor, UDF_IMPLS,
 };
 
 #[cfg(feature = "deno-udf")]

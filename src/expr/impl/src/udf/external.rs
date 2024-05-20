@@ -28,10 +28,12 @@ use thiserror_ext::AsReport;
 
 use super::*;
 
-#[linkme::distributed_slice(UDF_RUNTIMES)]
-static EXTERNAL: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
-    match_: |language, _runtime, link| link.is_some() && matches!(language, "python" | "java" | ""),
-    create: |opts| {
+#[linkme::distributed_slice(UDF_IMPLS)]
+static EXTERNAL: UdfImplDescriptor = UdfImplDescriptor {
+    match_fn: |language, _runtime, link| {
+        link.is_some() && matches!(language, "python" | "java" | "")
+    },
+    create_fn: |opts| {
         let link = opts.using_link.context("USING LINK must be specified")?;
         let identifier = opts.as_.context("AS must be specified")?.to_string();
 
@@ -80,7 +82,7 @@ static EXTERNAL: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
             compressed_binary: None,
         })
     },
-    build: |opts| {
+    build_fn: |opts| {
         let link = opts.link.context("link is required")?;
         let client = get_or_create_flight_client(link)?;
         Ok(Box::new(ExternalFunction {
@@ -113,7 +115,7 @@ struct ExternalFunction {
 const INITIAL_RETRY_COUNT: u8 = 16;
 
 #[async_trait::async_trait]
-impl UdfRuntime for ExternalFunction {
+impl UdfImpl for ExternalFunction {
     fn is_legacy(&self) -> bool {
         // see <https://github.com/risingwavelabs/risingwave/pull/16619> for details
         self.client.protocol_version() == 1

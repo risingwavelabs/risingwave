@@ -25,18 +25,18 @@ use risingwave_expr::sig::UdfOptions;
 
 use super::*;
 
-#[linkme::distributed_slice(UDF_RUNTIMES)]
-static WASM: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
-    match_: |language, _runtime, _link| language == "wasm",
-    create: create_wasm,
-    build,
+#[linkme::distributed_slice(UDF_IMPLS)]
+static WASM: UdfImplDescriptor = UdfImplDescriptor {
+    match_fn: |language, _runtime, _link| language == "wasm",
+    create_fn: create_wasm,
+    build_fn: build,
 };
 
-#[linkme::distributed_slice(UDF_RUNTIMES)]
-static RUST: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
-    match_: |language, _runtime, _link| language == "rust",
-    create: create_rust,
-    build,
+#[linkme::distributed_slice(UDF_IMPLS)]
+static RUST: UdfImplDescriptor = UdfImplDescriptor {
+    match_fn: |language, _runtime, _link| language == "rust",
+    create_fn: create_rust,
+    build_fn: build,
 };
 
 fn create_wasm(opts: CreateFunctionOptions<'_>) -> Result<CreateFunctionOutput> {
@@ -114,7 +114,7 @@ fn create_rust(opts: CreateFunctionOptions<'_>) -> Result<CreateFunctionOutput> 
     })
 }
 
-fn build(opts: UdfOptions<'_>) -> Result<Box<dyn UdfRuntime>> {
+fn build(opts: UdfOptions<'_>) -> Result<Box<dyn UdfImpl>> {
     let compressed_binary = opts
         .compressed_binary
         .context("compressed binary is required")?;
@@ -134,7 +134,7 @@ struct WasmFunction {
 }
 
 #[async_trait::async_trait]
-impl UdfRuntime for WasmFunction {
+impl UdfImpl for WasmFunction {
     async fn call(&self, input: &RecordBatch) -> Result<RecordBatch> {
         self.runtime.call(&self.identifier, input)
     }

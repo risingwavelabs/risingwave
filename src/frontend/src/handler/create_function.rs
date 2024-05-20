@@ -149,12 +149,9 @@ pub async fn handle_create_function(
         None => None,
     };
 
-    let create = risingwave_expr::sig::UDF_RUNTIMES
-        .iter()
-        .find(|udf| (udf.match_)(&language, runtime.as_deref(), link))
-        .context("language not found")?
-        .create;
-    let opts = CreateFunctionOptions {
+    let create_fn =
+        risingwave_expr::sig::find_udf_impl(&language, runtime.as_deref(), link)?.create_fn;
+    let output = create_fn(CreateFunctionOptions {
         name: &function_name,
         arg_names: &arg_names,
         arg_types: &arg_types,
@@ -163,8 +160,7 @@ pub async fn handle_create_function(
         as_: params.as_.as_ref().map(|s| s.as_str()),
         using_link: link,
         using_base64_decoded: base64_decoded.as_deref(),
-    };
-    let output = create(opts)?;
+    })?;
 
     let function = Function {
         id: FunctionId::placeholder().0,

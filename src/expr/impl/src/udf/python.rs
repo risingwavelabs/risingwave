@@ -18,17 +18,17 @@ use risingwave_common::array::arrow::{ToArrow, UdfArrowConvert};
 
 use super::*;
 
-#[linkme::distributed_slice(UDF_RUNTIMES)]
-static PYTHON: UdfRuntimeDescriptor = UdfRuntimeDescriptor {
-    match_: |language, _runtime, link| language == "python" && link.is_none(),
-    create: |opts| {
+#[linkme::distributed_slice(UDF_IMPLS)]
+static PYTHON: UdfImplDescriptor = UdfImplDescriptor {
+    match_fn: |language, _runtime, link| language == "python" && link.is_none(),
+    create_fn: |opts| {
         Ok(CreateFunctionOutput {
             identifier: opts.name.to_string(),
             body: Some(opts.as_.context("AS must be specified")?.to_string()),
             compressed_binary: None,
         })
     },
-    build: |opts| {
+    build_fn: |opts| {
         let mut runtime = Runtime::builder().sandboxed(true).build()?;
         runtime.add_function(
             opts.identifier,
@@ -50,7 +50,7 @@ struct PythonFunction {
 }
 
 #[async_trait::async_trait]
-impl UdfRuntime for PythonFunction {
+impl UdfImpl for PythonFunction {
     async fn call(&self, input: &RecordBatch) -> Result<RecordBatch> {
         self.runtime.call(&self.identifier, input)
     }
