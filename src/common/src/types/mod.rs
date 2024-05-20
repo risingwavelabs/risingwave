@@ -49,6 +49,7 @@ use crate::{
 mod datetime;
 mod decimal;
 mod fields;
+mod from_sql;
 mod interval;
 mod jsonb;
 mod macros;

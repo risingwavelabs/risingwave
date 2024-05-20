@@ -15,9 +15,9 @@
 use std::error::Error;
 
 use bytes::BytesMut;
-use postgres_types::{accepts, to_sql_checked, IsNull, ToSql, Type};
+use postgres_types::{to_sql_checked, IsNull, ToSql, Type};
 
-use crate::types::{JsonbRef, ScalarRefImpl};
+use crate::types::ScalarRefImpl;
 
 impl ToSql for ScalarRefImpl<'_> {
     to_sql_checked!();
@@ -57,20 +57,5 @@ impl ToSql for ScalarRefImpl<'_> {
         Self: Sized,
     {
         true
-    }
-}
-
-impl ToSql for JsonbRef<'_> {
-    accepts!(JSONB);
-
-    to_sql_checked!();
-
-    fn to_sql(&self, _: &Type, out: &mut BytesMut) -> Result<IsNull, Box<dyn Error + Sync + Send>>
-    where
-        Self: Sized,
-    {
-        let buf = self.value_serialize();
-        out.extend(buf);
-        Ok(IsNull::No)
     }
 }

@@ -82,23 +82,20 @@ fn postgres_cell_to_scalar_impl(
     // Issue #1. The null of enum list is not supported in Debezium. An enum list contains `NULL` will fallback to `NULL`.
     // Issue #2. In our parser, when there's inf, -inf, nan or invalid item in a list, the whole list will fallback null.
     match data_type {
-        DataType::Boolean => {
-            handle_data_type!(row, i, name, bool)
-        }
-        DataType::Int16 => {
-            handle_data_type!(row, i, name, i16)
-        }
-        DataType::Int32 => {
-            handle_data_type!(row, i, name, i32)
-        }
-        DataType::Int64 => {
-            handle_data_type!(row, i, name, i64)
-        }
-        DataType::Float32 => {
-            handle_data_type!(row, i, name, f32)
-        }
-        DataType::Float64 => {
-            handle_data_type!(row, i, name, f64)
+        DataType::Boolean
+        | DataType::Int16
+        | DataType::Int32
+        | DataType::Int64
+        | DataType::Float32
+        | DataType::Float64 => {
+            let res = row.try_get::<_, Option<ScalarImpl>>(i);
+            match res {
+                Ok(val) => val,
+                Err(err) => {
+                    log_error!(name, err, "parse column failed");
+                    None
+                }
+            }
         }
         DataType::Decimal => {
             handle_data_type!(row, i, name, Decimal)
