@@ -272,6 +272,9 @@ impl HummockManager {
         compact_task: &mut CompactTask,
         compaction_config: &CompactionConfig,
     ) {
+        if compact_task.target_level > compact_task.base_level {
+            return;
+        }
         if compaction_config.split_weight_by_vnode > 0 {
             for table_id in &compact_task.existing_table_ids {
                 compact_task
@@ -284,8 +287,8 @@ impl HummockManager {
             for input_ssts in &compact_task.input_ssts {
                 for sst in &input_ssts.table_infos {
                     existing_table_ids.extend(sst.table_ids.iter());
-                    if sst.table_ids.len() > 0 {
-                        *table_size_info.entry(sst.table_ids[0]).or_default() +=
+                    for table_id in &sst.table_ids {
+                        *table_size_info.entry(*table_id).or_default() +=
                             sst.file_size / (sst.table_ids.len() as u64);
                     }
                 }
@@ -294,14 +297,18 @@ impl HummockManager {
                 .existing_table_ids
                 .retain(|table_id| existing_table_ids.contains(table_id));
 
-            let hybrid_vnode_count = self.env.opts.hybird_partition_vnode_count;
+            let hybrid_vnode_count = self.env.opts.hybrid_partition_node_count;
             let default_partition_count = self.env.opts.partition_vnode_count;
+            // We must ensure the partition threshold large enough to avoid too many small files.
+            let less_partition_threshold = self.env.opts.hybrid_few_partition_threshold;
+            let several_partition_threshold = self.env.opts.hybrid_more_partition_threshold;
             let params = self.env.system_params_reader().await;
             let barrier_interval_ms = params.barrier_interval_ms() as u64;
             let checkpoint_secs = std::cmp::max(
                 1,
                 params.checkpoint_frequency() * barrier_interval_ms / 1000,
             );
+            // check latest write throughput
             let history_table_throughput = self.history_table_throughput.read();
             for (table_id, compact_table_size) in table_size_info {
                 let write_throughput = history_table_throughput
@@ -309,17 +316,23 @@ impl HummockManager {
                     .map(|que| que.back().cloned().unwrap_or(0))
                     .unwrap_or(0)
                     / checkpoint_secs;
-                if compact_table_size > compaction_config.max_compaction_bytes / 2 {
+                if compact_table_size > several_partition_threshold {
                     compact_task
                         .table_vnode_partition
                         .insert(table_id, default_partition_count);
-                } else if compact_table_size > compaction_config.sub_level_max_compaction_bytes
-                    || (compact_table_size > compaction_config.target_file_size_base
-                        && write_throughput > self.env.opts.table_write_throughput_threshold)
-                {
-                    compact_task
-                        .table_vnode_partition
-                        .insert(table_id, hybrid_vnode_count);
+                } else {
+                    if compact_table_size > less_partition_threshold
+                        || (write_throughput > self.env.opts.table_write_throughput_threshold
+                            && compact_table_size > compaction_config.target_file_size_base)
+                    {
+                        // partition for large write throughput table. But we also need to make sure that it can not be too small.
+                        compact_task
+                            .table_vnode_partition
+                            .insert(table_id, hybrid_vnode_count);
+                    } else if compact_table_size > compaction_config.target_file_size_base {
+                        // partition for small table
+                        compact_task.table_vnode_partition.insert(table_id, 1);
+                    }
                 }
             }
             compact_task

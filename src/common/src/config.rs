@@ -336,6 +336,12 @@ pub struct MetaConfig {
 
     #[serde(default = "default::meta::hybird_partition_vnode_count")]
     pub hybird_partition_vnode_count: u32,
+
+    #[serde(default = "default::meta::hybrid_few_partition_threshold")]
+    pub hybrid_few_partition_threshold: u64,
+    #[serde(default = "default::meta::hybrid_more_partition_threshold")]
+    pub hybrid_more_partition_threshold: u64,
+
     #[serde(default = "default::meta::event_log_enabled")]
     pub event_log_enabled: bool,
     /// Keeps the latest N events per channel.
@@ -671,6 +677,9 @@ pub struct StorageConfig {
     /// Number of SST ids fetched from meta per RPC
     #[serde(default = "default::storage::sstable_id_remote_fetch_number")]
     pub sstable_id_remote_fetch_number: u32,
+
+    #[serde(default = "default::storage::min_sstable_size_mb")]
+    pub min_sstable_size_mb: u32,
 
     #[serde(default)]
     pub data_file_cache: FileCacheConfig,
@@ -1191,6 +1200,14 @@ pub mod default {
             4
         }
 
+        pub fn hybrid_few_partition_threshold() -> u64 {
+            128 * 1024 * 1024 // 128MB
+        }
+
+        pub fn hybrid_more_partition_threshold() -> u64 {
+            512 * 1024 * 1024 // 512MB
+        }
+
         pub fn event_log_enabled() -> bool {
             true
         }
@@ -1318,6 +1335,10 @@ pub mod default {
 
         pub fn sstable_id_remote_fetch_number() -> u32 {
             10
+        }
+
+        pub fn min_sstable_size_mb() -> u32 {
+            32
         }
 
         pub fn min_sst_size_for_streaming_upload() -> u64 {
