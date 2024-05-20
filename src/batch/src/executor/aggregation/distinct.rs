@@ -62,12 +62,12 @@ impl AggregateFunction for Distinct {
         self.inner.return_type()
     }
 
-    fn create_state(&self) -> AggregateState {
-        AggregateState::Any(Box::new(State {
-            inner: self.inner.create_state(),
+    fn create_state(&self) -> Result<AggregateState> {
+        Ok(AggregateState::Any(Box::new(State {
+            inner: self.inner.create_state()?,
             exists: HashSet::new(),
             exists_estimated_heap_size: 0,
-        }))
+        })))
     }
 
     async fn update(&self, state: &mut AggregateState, input: &StreamChunk) -> Result<()> {

@@ -93,11 +93,11 @@ impl AggregateFunction for ProjectionOrderBy {
         self.inner.return_type()
     }
 
-    fn create_state(&self) -> AggregateState {
-        AggregateState::Any(Box::new(State {
+    fn create_state(&self) -> Result<AggregateState> {
+        Ok(AggregateState::Any(Box::new(State {
             unordered_values: vec![],
             unordered_values_estimated_heap_size: 0,
-        }))
+        })))
     }
 
     async fn update(&self, state: &mut AggregateState, input: &StreamChunk) -> Result<()> {
@@ -127,7 +127,7 @@ impl AggregateFunction for ProjectionOrderBy {
 
     async fn get_result(&self, state: &AggregateState) -> Result<Datum> {
         let state = state.downcast_ref::<State>();
-        let mut inner_state = self.inner.create_state();
+        let mut inner_state = self.inner.create_state()?;
         // sort
         let mut rows = state.unordered_values.clone();
         rows.sort_unstable_by(|(key_a, _), (key_b, _)| key_a.cmp(key_b));

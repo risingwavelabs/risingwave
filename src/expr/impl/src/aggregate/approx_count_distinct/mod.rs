@@ -60,8 +60,8 @@ impl AggregateFunction for UpdatableApproxCountDistinct {
         DataType::Int64
     }
 
-    fn create_state(&self) -> AggregateState {
-        AggregateState::Any(Box::<UpdatableRegisters>::default())
+    fn create_state(&self) -> Result<AggregateState> {
+        Ok(AggregateState::Any(Box::<UpdatableRegisters>::default()))
     }
 
     async fn update(&self, state: &mut AggregateState, input: &StreamChunk) -> Result<()> {
@@ -122,8 +122,8 @@ impl AggregateFunction for AppendOnlyApproxCountDistinct {
         DataType::Int64
     }
 
-    fn create_state(&self) -> AggregateState {
-        AggregateState::Any(Box::<AppendOnlyRegisters>::default())
+    fn create_state(&self) -> Result<AggregateState> {
+        Ok(AggregateState::Any(Box::<AppendOnlyRegisters>::default()))
     }
 
     async fn update(&self, state: &mut AggregateState, input: &StreamChunk) -> Result<()> {

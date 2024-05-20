@@ -19,7 +19,7 @@
 //! See expr/impl/src/udf for the implementations.
 
 use anyhow::{bail, Context, Result};
-use arrow_array::RecordBatch;
+use arrow_array::{ArrayRef, BooleanArray, RecordBatch};
 use futures::stream::BoxStream;
 use risingwave_common::types::DataType;
 
@@ -81,6 +81,7 @@ pub struct CreateFunctionOptions<'a> {
     pub arg_names: &'a [String],
     pub arg_types: &'a [DataType],
     pub return_type: &'a DataType,
+    pub state_type: Option<&'a DataType>,
     pub is_table_function: bool,
     pub as_: Option<&'a str>,
     pub using_link: Option<&'a str>,
@@ -103,6 +104,7 @@ pub struct UdfOptions<'a> {
     pub identifier: &'a str,
     pub arg_names: &'a [String],
     pub return_type: &'a DataType,
+    pub state_type: Option<&'a DataType>,
     pub always_retry_on_network_error: bool,
     pub function_type: Option<&'a str>,
 }
@@ -118,6 +120,26 @@ pub trait UdfImpl: std::fmt::Debug + Send + Sync {
         &'a self,
         input: &'a RecordBatch,
     ) -> Result<BoxStream<'a, Result<RecordBatch>>>;
+
+    /// For aggregate function, create the initial state.
+    fn create_state(&self) -> Result<ArrayRef> {
+        bail!("aggregate function not supported");
+    }
+
+    /// For aggregate function, accumulate or retract the state.
+    fn accumulate_or_retract(
+        &self,
+        _state: &ArrayRef,
+        _ops: &BooleanArray,
+        _input: &RecordBatch,
+    ) -> Result<ArrayRef> {
+        bail!("aggregate function not supported");
+    }
+
+    /// For aggregate function, get aggregate result from the state.
+    fn finish(&self, _state: &ArrayRef) -> Result<ArrayRef> {
+        bail!("aggregate function not supported");
+    }
 
     /// Whether the UDF talks in legacy mode.
     ///

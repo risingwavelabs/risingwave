@@ -17,9 +17,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::types::DataType;
 pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
-use risingwave_pb::expr::{
-    TableFunction as TableFunctionPb, UserDefinedTableFunction as UserDefinedTableFunctionPb,
-};
+use risingwave_pb::expr::{PbTableFunction, PbUserDefinedFunctionMetadata};
 
 use super::{infer_type, Expr, ExprImpl, ExprRewriter, RwResult};
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
@@ -59,22 +57,23 @@ impl TableFunction {
         TableFunction {
             args,
             return_type: catalog.return_type.clone(),
-            function_type: TableFunctionType::Udtf,
+            function_type: TableFunctionType::UserDefined,
             udtf_catalog: Some(catalog),
         }
     }
 
-    pub fn to_protobuf(&self) -> TableFunctionPb {
-        TableFunctionPb {
+    pub fn to_protobuf(&self) -> PbTableFunction {
+        PbTableFunction {
             function_type: self.function_type as i32,
             args: self.args.iter().map(|c| c.to_expr_proto()).collect_vec(),
             return_type: Some(self.return_type.to_protobuf()),
-            udtf: self
+            udf: self
                 .udtf_catalog
                 .as_ref()
-                .map(|c| UserDefinedTableFunctionPb {
+                .map(|c| PbUserDefinedFunctionMetadata {
                     arg_names: c.arg_names.clone(),
                     arg_types: c.arg_types.iter().map(|t| t.to_protobuf()).collect(),
+                    state_type: None,
                     language: c.language.clone(),
                     link: c.link.clone(),
                     identifier: c.identifier.clone(),
@@ -89,7 +88,7 @@ impl TableFunction {
     /// Get the name of the table function.
     pub fn name(&self) -> String {
         match self.function_type {
-            TableFunctionType::Udtf => self.udtf_catalog.as_ref().unwrap().name.clone(),
+            TableFunctionType::UserDefined => self.udtf_catalog.as_ref().unwrap().name.clone(),
             t => t.as_str_name().to_lowercase(),
         }
     }

@@ -16,7 +16,6 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use arrow_schema::{Fields, Schema, SchemaRef};
-use cfg_or_panic::cfg_or_panic;
 use risingwave_common::array::arrow::{FromArrow, ToArrow, UdfArrowConvert};
 use risingwave_common::array::I32Array;
 use risingwave_common::bail;
@@ -41,13 +40,11 @@ impl TableFunction for UserDefinedTableFunction {
         self.return_type.clone()
     }
 
-    #[cfg_or_panic(not(madsim))]
     async fn eval<'a>(&'a self, input: &'a DataChunk) -> BoxStream<'a, Result<DataChunk>> {
         self.eval_inner(input)
     }
 }
 
-#[cfg(not(madsim))]
 impl UserDefinedTableFunction {
     #[try_stream(boxed, ok = DataChunk, error = ExprError)]
     async fn eval_inner<'a>(&'a self, input: &'a DataChunk) {
@@ -123,30 +120,28 @@ impl UserDefinedTableFunction {
     }
 }
 
-#[cfg_or_panic(not(madsim))]
 pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<BoxedTableFunction> {
-    let Some(udtf) = &prost.udtf else {
-        bail!("expect UDTF");
-    };
+    let udf = prost.get_udf()?;
 
-    let identifier = udtf.get_identifier()?;
+    let identifier = udf.get_identifier()?;
     let return_type = DataType::from(prost.get_return_type()?);
 
-    let language = udtf.language.as_str();
-    let runtime = udtf.runtime.as_deref();
-    let link = udtf.link.as_deref();
+    let language = udf.language.as_str();
+    let runtime = udf.runtime.as_deref();
+    let link = udf.link.as_deref();
 
     let build_fn = crate::sig::find_udf_impl(language, runtime, link)?.build_fn;
     let runtime = build_fn(UdfOptions {
         table_function: true,
-        body: udtf.body.as_deref(),
-        compressed_binary: udtf.compressed_binary.as_deref(),
-        link: udtf.link.as_deref(),
+        body: udf.body.as_deref(),
+        compressed_binary: udf.compressed_binary.as_deref(),
+        link: udf.link.as_deref(),
         identifier,
-        arg_names: &udtf.arg_names,
+        arg_names: &udf.arg_names,
         return_type: &return_type,
+        state_type: None,
         always_retry_on_network_error: false,
-        function_type: udtf.function_type.as_deref(),
+        function_type: udf.function_type.as_deref(),
     })
     .context("failed to build UDF runtime")?;
 
@@ -154,7 +149,7 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
         legacy: runtime.is_legacy(),
     };
     let arg_schema = Arc::new(Schema::new(
-        udtf.arg_types
+        udf.arg_types
             .iter()
             .map(|t| arrow_convert.to_arrow_field("", &DataType::from(t)))
             .try_collect::<Fields>()?,

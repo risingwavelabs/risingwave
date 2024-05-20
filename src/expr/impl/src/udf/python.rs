@@ -63,4 +63,22 @@ impl UdfImpl for PythonFunction {
             .call_table_function(&self.identifier, input, 1024)
             .map(|s| futures_util::stream::iter(s).boxed())
     }
+
+    fn create_state(&self) -> Result<ArrayRef> {
+        self.runtime.create_state(&self.identifier)
+    }
+
+    fn accumulate_or_retract(
+        &self,
+        state: &ArrayRef,
+        ops: &BooleanArray,
+        input: &RecordBatch,
+    ) -> Result<ArrayRef> {
+        self.runtime
+            .accumulate_or_retract(&self.identifier, state, ops, input)
+    }
+
+    fn finish(&self, state: &ArrayRef) -> Result<ArrayRef> {
+        self.runtime.finish(&self.identifier, state)
+    }
 }

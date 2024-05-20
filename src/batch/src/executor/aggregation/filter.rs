@@ -41,7 +41,7 @@ impl AggregateFunction for Filter {
         self.inner.return_type()
     }
 
-    fn create_state(&self) -> AggregateState {
+    fn create_state(&self) -> Result<AggregateState> {
         self.inner.create_state()
     }
 

@@ -338,13 +338,13 @@ message TableFunction {
     JSONB_POPULATE_RECORDSET = 16;
     JSONB_TO_RECORDSET = 17;
     // User defined table function
-    UDTF = 100;
+    USER_DEFINED = 100;
   }
   Type function_type = 1;
   repeated expr.ExprNode args = 2;
   data.DataType return_type = 3;
-  // optional. only used when the type is UDTF.
-  UserDefinedTableFunction udtf = 4;
+  // optional. only used when the type is USER_DEFINED.
+  UserDefinedFunctionMetadata udf = 4;
 }
 
 // Reference to an upstream column, containing its index and data type.
@@ -426,6 +426,8 @@ message AggCall {
     LAST_VALUE = 25;
     GROUPING = 26;
     INTERNAL_LAST_SEEN_VALUE = 27;
+    // user defined aggregate function
+    USER_DEFINED = 100;
   }
   Type type = 1;
   repeated InputRef args = 2;
@@ -434,6 +436,8 @@ message AggCall {
   repeated common.ColumnOrder order_by = 5;
   ExprNode filter = 6;
   repeated Constant direct_args = 7;
+  // optional. only used when the type is USER_DEFINED.
+  UserDefinedFunctionMetadata udf = 8;
 }
 
 message WindowFrame {
@@ -526,7 +530,7 @@ message WindowFunction {
 }
 
 // Note: due to historic reasons, UserDefinedFunction is a oneof variant parallel to FunctionCall,
-// while UserDefinedTableFunction is embedded as a field in TableFunction.
+// while UserDefinedFunctionMetadata is embedded as a field in TableFunction and AggCall.
 
 message UserDefinedFunction {
   repeated ExprNode children = 1;
@@ -552,10 +556,12 @@ message UserDefinedFunction {
   optional string function_type = 12;
 }
 
-// Additional information for user defined table functions.
-message UserDefinedTableFunction {
+// Additional information for user defined table/aggregate functions.
+message UserDefinedFunctionMetadata {
   repeated string arg_names = 8;
   repeated data.DataType arg_types = 3;
+  // The state type of aggregate function.
+  optional data.DataType state_type = 2;
   string language = 4;
   optional string link = 5;
   optional string identifier = 6;

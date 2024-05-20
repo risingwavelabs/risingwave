@@ -182,6 +182,7 @@ impl Build for UserDefinedFunction {
             identifier,
             arg_names: &udf.arg_names,
             return_type: &return_type,
+            state_type: None,
             always_retry_on_network_error: udf.always_retry_on_network_error,
             function_type: udf.function_type.as_deref(),
         })

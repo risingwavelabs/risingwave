@@ -170,6 +170,43 @@ wave   4
 statement ok
 drop function split;
 
+
+statement ok
+create aggregate weighted_avg(value int, weight int) returns int language python as $$
+class State:
+    def __init__(self):
+        self.sum = 0
+        self.weight = 0
+
+def create_state():
+    return State()
+
+def accumulate(state, value, weight):
+    state.sum += value * weight
+    state.weight += weight
+    return state
+
+def retract(state, value, weight):
+    state.sum -= value * weight
+    state.weight -= weight
+    return state
+
+def finish(state):
+    if state.weight == 0:
+        return None
+    else:
+        return state.sum / state.weight
+$$;
+
+query F
+select weighted_avg(value, weight) from (values (1, 1), (2, 2), (3, 3)) as t(value, weight);
+----
+2
+
+statement ok
+drop function weighted_avg;
+
+
 statement ok
 create function mismatched_arguments() returns int language python as $$
 def mismatched_arguments(x):
