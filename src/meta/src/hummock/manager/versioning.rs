@@ -37,16 +37,16 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use super::check_cg_write_limit;
 use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
+use crate::hummock::manager::commit_multi_var;
 use crate::hummock::manager::context::ContextInfo;
 use crate::hummock::manager::gc::DeleteObjectTracker;
 use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
-use crate::hummock::manager::{commit_multi_var, create_trx_wrapper};
 use crate::hummock::metrics_utils::{
     trigger_safepoint_stat, trigger_write_stop_stats, LocalTableMetrics,
 };
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::HummockManager;
-use crate::model::{VarTransaction, VarTransactionWrapper};
+use crate::model::VarTransaction;
 use crate::storage::MetaStore;
 use crate::MetaResult;
 
@@ -237,14 +237,9 @@ impl HummockManager {
     }
 
     pub async fn rebuild_table_stats(&self) -> Result<()> {
-        use crate::model::ValTransaction;
         let mut versioning = self.versioning.write().await;
         let new_stats = rebuild_table_stats(&versioning.current_version);
-        let mut version_stats = create_trx_wrapper!(
-            self.meta_store_ref(),
-            VarTransactionWrapper,
-            VarTransaction::new(&mut versioning.version_stats)
-        );
+        let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
         // version_stats.hummock_version_id is always 0 in meta store.
         version_stats.table_stats = new_stats.table_stats;
         commit_multi_var!(self.meta_store_ref(), version_stats)?;
