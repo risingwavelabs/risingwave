@@ -284,11 +284,16 @@ where
         store: S,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
+        let consistency_level = if enable_strict_consistency() {
+            StateTableOpConsistencyLevel::ConsistentOldValue
+        } else {
+            StateTableOpConsistencyLevel::Inconsistent
+        };
         Self::from_table_catalog_with_consistency_level(
             table_catalog,
             store,
             vnodes,
-            StateTableOpConsistencyLevel::ConsistentOldValue,
+            consistency_level,
         )
         .await
     }
@@ -409,13 +414,8 @@ where
             )
         };
 
-        let state_table_op_consistency_level = if enable_strict_consistency() {
-            op_consistency_level
-        } else {
-            // disable sanity check in non-strict mode
-            StateTableOpConsistencyLevel::Inconsistent
-        };
-        let op_consistency_level = match state_table_op_consistency_level {
+        let state_table_op_consistency_level = op_consistency_level;
+        let op_consistency_level = match op_consistency_level {
             StateTableOpConsistencyLevel::Inconsistent => OpConsistencyLevel::Inconsistent,
             StateTableOpConsistencyLevel::ConsistentOldValue => {
                 let row_serde = make_row_serde();
@@ -563,7 +563,7 @@ where
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
     ) -> Self {
-        Self::new_with_distribution_inner(
+        Self::new_with_distribution_inner_for_test(
             store,
             table_id,
             columns,
@@ -587,7 +587,7 @@ where
         distribution: TableDistribution,
         value_indices: Option<Vec<usize>>,
     ) -> Self {
-        Self::new_with_distribution_inner(
+        Self::new_with_distribution_inner_for_test(
             store,
             table_id,
             table_columns,
@@ -600,6 +600,7 @@ where
         .await
     }
 
+    /// Create a state table with distribution and without sanity check, used for unit tests.
     pub async fn new_with_distribution_inconsistent_op(
         store: S,
         table_id: TableId,
@@ -609,7 +610,7 @@ where
         distribution: TableDistribution,
         value_indices: Option<Vec<usize>>,
     ) -> Self {
-        Self::new_with_distribution_inner(
+        Self::new_with_distribution_inner_for_test(
             store,
             table_id,
             table_columns,
@@ -623,7 +624,7 @@ where
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn new_with_distribution_inner(
+    async fn new_with_distribution_inner_for_test(
         store: S,
         table_id: TableId,
         table_columns: Vec<ColumnDesc>,
@@ -644,11 +645,10 @@ where
                 Arc::from(table_columns.clone().into_boxed_slice()),
             )
         };
-        let op_consistency_level = if is_consistent_op && enable_strict_consistency() {
+        let op_consistency_level = if is_consistent_op {
             let row_serde = make_row_serde();
             consistent_old_value_op(row_serde, false)
         } else {
-            // disable sanity check in non-strict mode
             OpConsistencyLevel::Inconsistent
         };
         let local_state_store = store
@@ -1152,12 +1152,6 @@ where
         new_epoch: EpochPair,
         op_consistency_level: StateTableOpConsistencyLevel,
     ) -> StreamExecutorResult<()> {
-        let op_consistency_level = if enable_strict_consistency() {
-            op_consistency_level
-        } else {
-            // disable sanity check in non-strict mode
-            StateTableOpConsistencyLevel::Inconsistent
-        };
         if self.op_consistency_level != op_consistency_level {
             self.commit_inner(new_epoch, Some(op_consistency_level))
                 .await
