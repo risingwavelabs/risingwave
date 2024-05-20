@@ -545,11 +545,10 @@ fn generate_splits(
         vnodes.dedup();
 
         // Based on the estimated `vnode_avg_size`, calculate the required `vnode_partition_count` to avoid small files and further align
-        const MIN_SSTABLE_SIZE: u64 = 16 * 1024 * 1024;
-        if compact_data_size >= MIN_SSTABLE_SIZE && !vnodes.is_empty() {
+        if compact_data_size >= min_sstable_size && !vnodes.is_empty() {
             let mut avg_vnode_size = compact_data_size / (vnodes.len() as u64);
             let mut vnode_partition_count = VirtualNode::COUNT;
-            while avg_vnode_size < MIN_SSTABLE_SIZE && vnode_partition_count > 0 {
+            while avg_vnode_size < min_sstable_size && vnode_partition_count > 0 {
                 vnode_partition_count /= 2;
                 avg_vnode_size *= 2;
             }
