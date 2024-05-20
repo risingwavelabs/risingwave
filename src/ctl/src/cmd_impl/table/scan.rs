@@ -121,17 +121,7 @@ pub async fn scan(
         .hummock_store(HummockServiceOpts::from_env(data_dir)?)
         .await?;
     let table = get_table_catalog(meta_client, mv_name).await?;
-    for _ in 0..count {
-        do_scan(
-            &table,
-            hummock.clone(),
-            output_columns_ids.clone(),
-            vnodes.clone(),
-            silent,
-        )
-        .await?;
-    }
-    Ok(())
+    do_scan(&table, hummock, output_columns_ids, vnodes, count, silent).await
 }
 
 pub async fn scan_id(
@@ -148,17 +138,7 @@ pub async fn scan_id(
         .hummock_store(HummockServiceOpts::from_env(data_dir)?)
         .await?;
     let table = get_table_catalog_by_id(meta_client, table_id).await?;
-    for _ in 0..count {
-        do_scan(
-            &table,
-            hummock.clone(),
-            output_columns_ids.clone(),
-            vnodes.clone(),
-            silent,
-        )
-        .await?;
-    }
-    Ok(())
+    do_scan(&table, hummock, output_columns_ids, vnodes, count, silent).await
 }
 
 async fn do_scan(
@@ -166,10 +146,11 @@ async fn do_scan(
     hummock: MonitoredStateStore<HummockStorage>,
     output_columns_ids: Option<Vec<i32>>,
     vnodes: Option<Vec<i32>>,
+    count: u32,
     silent: bool,
 ) -> Result<()> {
     print_table_catalog(table);
-
+    println!("{:?}", vnodes);
     if let Some(ref output_columns_ids) = output_columns_ids {
         println!(
             "output column ids: {}",
@@ -186,28 +167,30 @@ async fn do_scan(
     }
     let read_epoch = hummock.inner().get_pinned_version().max_committed_epoch();
     let storage_table = make_storage_table(hummock, table, output_columns_ids, vnodes)?;
-    let instant = Instant::now();
-    let stream = storage_table
-        .batch_iter(
-            HummockReadEpoch::Committed(read_epoch),
-            true,
-            PrefetchOptions::prefetch_for_large_range_scan(),
-        )
-        .await?;
-    let create_duration = instant.elapsed();
-    let mut counter = 0;
-    pin_mut!(stream);
-    while let Some(item) = stream.next().await {
-        if !silent {
-            println!("{:?}", item?.into_owned_row());
+    for _ in 0..count {
+        let instant = Instant::now();
+        let stream = storage_table
+            .batch_iter(
+                HummockReadEpoch::Committed(read_epoch),
+                true,
+                PrefetchOptions::prefetch_for_large_range_scan(),
+            )
+            .await?;
+        let create_duration = instant.elapsed();
+        let mut counter = 0;
+        pin_mut!(stream);
+        while let Some(item) = stream.next().await {
+            if !silent {
+                println!("{:?}", item?.into_owned_row());
+            }
+            counter += 1;
         }
-        counter += 1;
+        let scan_duration = instant.elapsed();
+        println!(
+            "{counter} rows in total. create={}ms, scan={}ms",
+            create_duration.as_millis(),
+            scan_duration.as_millis()
+        );
     }
-    let scan_duration = instant.elapsed();
-    println!(
-        "{counter} rows in total. create={}ms, scan={}ms",
-        create_duration.as_millis(),
-        scan_duration.as_millis()
-    );
     Ok(())
 }
