@@ -255,24 +255,40 @@ pub async fn pg_serve(
     let listener = Listener::bind(addr).await?;
     tracing::info!(addr, "server started");
 
-    loop {
-        let conn_ret = listener.accept().await;
-        match conn_ret {
-            Ok((stream, peer_addr)) => {
-                tracing::info!(%peer_addr, "accept connection");
-                tokio::spawn(handle_connection(
-                    stream,
-                    session_mgr.clone(),
-                    tls_config.clone(),
-                    Arc::new(peer_addr),
-                ));
-            }
+    let worker_runtime = tokio::runtime::Handle::current();
 
-            Err(e) => {
-                tracing::error!(error = %e.as_report(), "failed to accept connection",);
+    let accept_runtime = {
+        let mut builder = tokio::runtime::Builder::new_multi_thread();
+        builder.worker_threads(1);
+        builder
+            .thread_name("rw-acceptor")
+            .enable_all()
+            .build()
+            .unwrap()
+    };
+
+    let f = async move {
+        loop {
+            let conn_ret = listener.accept().await;
+            match conn_ret {
+                Ok((stream, peer_addr)) => {
+                    tracing::info!(%peer_addr, "accept connection");
+                    worker_runtime.spawn(handle_connection(
+                        stream,
+                        session_mgr.clone(),
+                        tls_config.clone(),
+                        Arc::new(peer_addr),
+                    ));
+                }
+
+                Err(e) => {
+                    tracing::error!(error = %e.as_report(), "failed to accept connection",);
+                }
             }
         }
-    }
+    };
+    accept_runtime.spawn(f).await?;
+    Ok(())
 }
 
 pub async fn handle_connection<S, SM>(
