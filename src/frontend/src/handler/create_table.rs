@@ -767,7 +767,6 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
     };
 
     let mut columns = bind_sql_columns(&column_defs)?;
-    let table_columns_len = columns.len();
     let with_properties = source.with_properties.clone().into_iter().collect();
     // append additional columns to the end
     handle_addition_columns(&with_properties, include_column_options, &mut columns)?;
@@ -810,7 +809,6 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
         external_table_name: external_table_name.clone(),
         pk: table_pk,
         columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
-        additional_column_indices: (table_columns_len..columns.len()).collect(),
         stream_key: pk_column_indices,
         connect_properties,
     };

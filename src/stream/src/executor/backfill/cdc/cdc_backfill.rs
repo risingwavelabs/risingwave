@@ -144,7 +144,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
         let upstream_table_id = self.external_table.table_id().table_id;
         let upstream_table_name = self.external_table.qualified_table_name();
-        // let upstream_table_schema = self.external_table.schema().clone();
         let upstream_table_reader = UpstreamTableReader::new(self.external_table);
 
         let additional_columns = self
