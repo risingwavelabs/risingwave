@@ -213,13 +213,15 @@ impl TableFragments {
     ) -> Self {
         let actor_status = actor_locations
             .iter()
-            .map(|(&actor_id, WorkerSlotId(worker_id, slot_id))| {
+            .map(|(&actor_id, worker_slot_id)| {
+                let worker_id = worker_slot_id.worker_id();
+                let slot_id = worker_slot_id.slot_idx();
                 (
                     actor_id,
                     ActorStatus {
                         parallel_unit: Some(ParallelUnit {
-                            id: *worker_id << 10 | *slot_id,
-                            worker_node_id: *worker_id,
+                            id: worker_id << 10 | slot_id,
+                            worker_node_id: worker_id,
                         }),
                         state: ActorState::Inactive as i32,
                     },

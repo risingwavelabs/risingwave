@@ -237,7 +237,7 @@ impl Scheduler {
         let scheduled_worker_slots = scheduled
             .into_iter()
             .flat_map(|(worker_id, size)| {
-                (0..size).map(move |slot| WorkerSlotId(worker_id, slot as u32))
+                (0..size).map(move |slot| WorkerSlotId::new(worker_id, slot))
             })
             .collect_vec();
 
@@ -249,7 +249,7 @@ impl Scheduler {
         let single_scheduled = schedule_units_for_slots_v2(&slots, 1, streaming_job_id)?;
         let default_single_worker_id = single_scheduled.keys().exactly_one().cloned().unwrap();
 
-        let default_singleton_worker_slot = WorkerSlotId(default_single_worker_id, 0);
+        let default_singleton_worker_slot = WorkerSlotId::new(default_single_worker_id, 0);
 
         Ok(Self {
             default_hash_mapping,
@@ -357,7 +357,7 @@ impl Locations {
     pub fn worker_actors(&self) -> HashMap<WorkerId, Vec<ActorId>> {
         self.actor_locations
             .iter()
-            .map(|(actor_id, WorkerSlotId(worker_id, _))| (*worker_id, *actor_id))
+            .map(|(actor_id, worker_slot_id)| (worker_slot_id.worker_id(), *actor_id))
             .into_group_map()
     }
 
@@ -365,9 +365,11 @@ impl Locations {
     pub fn actor_infos(&self) -> impl Iterator<Item = ActorInfo> + '_ {
         self.actor_locations
             .iter()
-            .map(|(actor_id, WorkerSlotId(worker_id, _))| ActorInfo {
+            .map(|(actor_id, worker_slot_id)| ActorInfo {
                 actor_id: *actor_id,
-                host: self.worker_locations[worker_id].host.clone(),
+                host: self.worker_locations[&worker_slot_id.worker_id()]
+                    .host
+                    .clone(),
             })
     }
 }
