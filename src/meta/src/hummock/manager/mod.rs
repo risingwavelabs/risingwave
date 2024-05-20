@@ -2986,7 +2986,7 @@ impl HummockManager {
                                         // Forcefully cancel the task so that it terminates
                                         // early on the compactor
                                         // node.
-                                        let _ = compactor.cancel_tasks(cancel_tasks.clone());
+                                        let _ = compactor.cancel_tasks(&cancel_tasks);
                                         tracing::info!(
                                             "CancelTask operation for task_id {:?} has been sent to node with context_id {}",
                                             cancel_tasks,

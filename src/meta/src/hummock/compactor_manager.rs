@@ -101,9 +101,9 @@ impl Compactor {
         Ok(())
     }
 
-    pub fn cancel_tasks(&self, task_ids: Vec<u64>) -> MetaResult<()> {
+    pub fn cancel_tasks(&self, task_ids: &Vec<u64>) -> MetaResult<()> {
         for task_id in task_ids {
-            self.cancel_task(task_id)?;
+            self.cancel_task(*task_id)?;
         }
         Ok(())
     }

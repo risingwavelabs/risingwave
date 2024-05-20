@@ -1060,75 +1060,75 @@ pub struct ObjectStoreRetryConfig {
     #[serde(default = "default::object_store_config::object_store_req_backoff_factor")]
     pub req_backoff_factor: u64,
 
-    /// Maximum timeout for upload operation
+    /// Maximum timeout for `upload` operation
     #[serde(default = "default::object_store_config::object_store_upload_attempt_timeout_ms")]
     pub upload_attempt_timeout_ms: u64,
 
-    /// Total counts of upload operation retries
+    /// Total counts of `upload` operation retries
     #[serde(default = "default::object_store_config::object_store_upload_retry_attempts")]
     pub upload_retry_attempts: usize,
 
-    /// Maximum timeout for streaming_upload_init and streaming_upload
+    /// Maximum timeout for `streaming_upload_init` and `streaming_upload`
     #[serde(
         default = "default::object_store_config::object_store_streaming_upload_attempt_timeout_ms"
     )]
     pub streaming_upload_attempt_timeout_ms: u64,
 
-    /// Total counts of streaming_upload operation retries
+    /// Total counts of `streaming_upload` operation retries
     #[serde(
         default = "default::object_store_config::object_store_streaming_upload_retry_attempts"
     )]
     pub streaming_upload_retry_attempts: usize,
 
-    /// Maximum timeout for read operation
+    /// Maximum timeout for `read` operation
     #[serde(default = "default::object_store_config::object_store_read_attempt_timeout_ms")]
     pub read_attempt_timeout_ms: u64,
 
-    /// Total counts of read operation retries
+    /// Total counts of `read` operation retries
     #[serde(default = "default::object_store_config::object_store_read_retry_attempts")]
     pub read_retry_attempts: usize,
 
-    /// Maximum timeout for streaming_read_init and streaming_read operation
+    /// Maximum timeout for `streaming_read_init` and `streaming_read` operation
     #[serde(
         default = "default::object_store_config::object_store_streaming_read_attempt_timeout_ms"
     )]
     pub streaming_read_attempt_timeout_ms: u64,
 
-    /// Total counts of streaming_read operation retries
+    /// Total counts of `streaming_read operation` retries
     #[serde(default = "default::object_store_config::object_store_streaming_read_retry_attempts")]
     pub streaming_read_retry_attempts: usize,
 
-    /// Maximum timeout for metadata operation
+    /// Maximum timeout for `metadata` operation
     #[serde(default = "default::object_store_config::object_store_metadata_attempt_timeout_ms")]
     pub metadata_attempt_timeout_ms: u64,
 
-    /// Total counts of metadata operation retries
+    /// Total counts of `metadata` operation retries
     #[serde(default = "default::object_store_config::object_store_metadata_retry_attempts")]
     pub metadata_retry_attempts: usize,
 
-    /// Maximum timeout for delete operation
+    /// Maximum timeout for `delete` operation
     #[serde(default = "default::object_store_config::object_store_delete_attempt_timeout_ms")]
     pub delete_attempt_timeout_ms: u64,
 
-    /// Total counts of delete operation retries
+    /// Total counts of `delete` operation retries
     #[serde(default = "default::object_store_config::object_store_delete_retry_attempts")]
     pub delete_retry_attempts: usize,
 
-    /// Maximum timeout for delete_object operation
+    /// Maximum timeout for `delete_object` operation
     #[serde(
         default = "default::object_store_config::object_store_delete_objects_attempt_timeout_ms"
     )]
     pub delete_objects_attempt_timeout_ms: u64,
 
-    /// Total counts of delete_object operation retries
+    /// Total counts of `delete_object` operation retries
     #[serde(default = "default::object_store_config::object_store_delete_objects_retry_attempts")]
     pub delete_objects_retry_attempts: usize,
 
-    /// Maximum timeout for list operation
+    /// Maximum timeout for `list` operation
     #[serde(default = "default::object_store_config::object_store_list_attempt_timeout_ms")]
     pub list_attempt_timeout_ms: u64,
 
-    /// Total counts of list operation retries
+    /// Total counts of `list` operation retries
     #[serde(default = "default::object_store_config::object_store_list_retry_attempts")]
     pub list_retry_attempts: usize,
 }
