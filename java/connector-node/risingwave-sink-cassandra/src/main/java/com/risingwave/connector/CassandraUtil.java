@@ -79,7 +79,7 @@ public class CassandraUtil {
     public static void checkSchema(
             List<ColumnDesc> columnDescs,
             Map<CqlIdentifier, ColumnMetadata> cassandraColumnDescMap) {
-        if (columnDescs.size() != cassandraColumnDescMap.size()) {
+        if (columnDescs.size() > cassandraColumnDescMap.size()) {
             throw Status.FAILED_PRECONDITION
                     .withDescription("Don't match in the number of columns in the table")
                     .asRuntimeException();
