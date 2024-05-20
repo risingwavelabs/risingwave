@@ -18,7 +18,7 @@
 //!
 //! See expr/impl/src/udf for the implementations.
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use arrow_array::RecordBatch;
 use futures::stream::BoxStream;
 use risingwave_common::types::DataType;
@@ -40,12 +40,16 @@ pub fn find_udf_impl(
     runtime: Option<&str>,
     link: Option<&str>,
 ) -> Result<&'static UdfImplDescriptor> {
-    UDF_IMPLS
+    let mut impls = UDF_IMPLS
         .iter()
-        .find(|desc| (desc.match_fn)(language, runtime, link))
-        .context(
-            "language not found.\nHINT: UDF feature flag may not be enabled during compilation",
-        )
+        .filter(|desc| (desc.match_fn)(language, runtime, link));
+    let impl_ = impls.next().context(
+        "language not found.\nHINT: UDF feature flag may not be enabled during compilation",
+    )?;
+    if impls.next().is_some() {
+        bail!("multiple UDF implementations found for language: {language}");
+    }
+    Ok(impl_)
 }
 
 /// UDF implementation descriptor.
