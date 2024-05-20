@@ -340,7 +340,7 @@ public class JDBCSink implements SinkWriter {
             if (stmt == null) {
                 return;
             }
-            LOG.info("Executing statement: {}", stmt);
+            LOG.debug("Executing statement: {}", stmt);
             stmt.executeBatch();
             stmt.clearParameters();
         }
