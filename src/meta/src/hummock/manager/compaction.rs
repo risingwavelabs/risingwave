@@ -312,19 +312,17 @@ impl HummockManager {
                     compact_task
                         .table_vnode_partition
                         .insert(table_id, default_partition_count);
-                } else {
-                    if compact_table_size > less_partition_threshold
-                        || (write_throughput > self.env.opts.table_write_throughput_threshold
-                            && compact_table_size > compaction_config.target_file_size_base)
-                    {
-                        // partition for large write throughput table. But we also need to make sure that it can not be too small.
-                        compact_task
-                            .table_vnode_partition
-                            .insert(table_id, hybrid_vnode_count);
-                    } else if compact_table_size > compaction_config.target_file_size_base {
-                        // partition for small table
-                        compact_task.table_vnode_partition.insert(table_id, 1);
-                    }
+                } else if compact_table_size > less_partition_threshold
+                    || (write_throughput > self.env.opts.table_write_throughput_threshold
+                        && compact_table_size > compaction_config.target_file_size_base)
+                {
+                    // partition for large write throughput table. But we also need to make sure that it can not be too small.
+                    compact_task
+                        .table_vnode_partition
+                        .insert(table_id, hybrid_vnode_count);
+                } else if compact_table_size > compaction_config.target_file_size_base {
+                    // partition for small table
+                    compact_task.table_vnode_partition.insert(table_id, 1);
                 }
             }
             compact_task
