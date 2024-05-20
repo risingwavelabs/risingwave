@@ -34,6 +34,8 @@ pub type ActorId = u32;
 #[derive(Debug, Hash, Ord, Copy, Clone, PartialOrd, PartialEq, Eq)]
 pub struct WorkerSlotId(pub u32, pub u32);
 
+pub type WorkerId = u32;
+
 /// Trait for items that can be used as keys in [`VnodeMapping`].
 pub trait VnodeMappingItem {
     /// The type of the item.
