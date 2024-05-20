@@ -136,7 +136,7 @@ async fn merge(
                     }
                     Message::Barrier(barrier) => {
                         // Block this upstream by pushing it to `blocked`.
-                        if blocked.len() == 0 {
+                        if blocked.is_empty() {
                             start_time = Instant::now();
                         }
                         blocked.push(remaining);
