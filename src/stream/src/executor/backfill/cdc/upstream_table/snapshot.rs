@@ -21,6 +21,7 @@ use governor::clock::MonotonicClock;
 use governor::{Quota, RateLimiter};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReader};
@@ -47,6 +48,7 @@ pub struct SnapshotReadArgs {
     pub current_pos: Option<OwnedRow>,
     pub rate_limit_rps: Option<u32>,
     pub pk_indices: Vec<usize>,
+    pub additional_columns: Vec<ColumnDesc>,
 }
 
 impl SnapshotReadArgs {
@@ -54,11 +56,13 @@ impl SnapshotReadArgs {
         current_pos: Option<OwnedRow>,
         rate_limit_rps: Option<u32>,
         pk_indices: Vec<usize>,
+        additional_columns: Vec<ColumnDesc>,
     ) -> Self {
         Self {
             current_pos,
             rate_limit_rps,
             pk_indices,
+            additional_columns,
         }
     }
 }
@@ -78,6 +82,20 @@ impl<T> UpstreamTableReader<T> {
     pub fn new(table: T) -> Self {
         Self { inner: table }
     }
+}
+
+/// Append additional columns with value as null to the snapshot chunk
+fn with_additional_columns(
+    snapshot_chunk: StreamChunk,
+    additional_columns: &[ColumnDesc],
+) -> StreamChunk {
+    let (ops, mut columns, visibility) = snapshot_chunk.into_inner();
+    for desc in additional_columns {
+        let mut builder = desc.data_type.create_array_builder(visibility.len());
+        builder.append_n_null(visibility.len());
+        columns.push(builder.finish().into());
+    }
+    StreamChunk::with_visibility(ops, columns, visibility)
 }
 
 impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
@@ -143,7 +161,10 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
 
                 if read_args.rate_limit_rps.is_none() || chunk_size == 0 {
                     // no limit, or empty chunk
-                    yield Some(chunk);
+                    yield Some(with_additional_columns(
+                        chunk,
+                        &read_args.additional_columns,
+                    ));
                     continue;
                 } else {
                     // Apply rate limit, see `risingwave_stream::executor::source::apply_rate_limit` for more.
@@ -160,7 +181,10 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
                         .until_n_ready(NonZeroU32::new(chunk_size as u32).unwrap())
                         .await
                         .unwrap();
-                    yield Some(chunk);
+                    yield Some(with_additional_columns(
+                        chunk,
+                        &read_args.additional_columns,
+                    ));
                 }
             }
 

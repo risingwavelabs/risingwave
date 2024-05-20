@@ -345,6 +345,35 @@ impl SourceStreamChunkRowWriter<'_> {
         &mut self,
         mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<A::Output>,
     ) -> AccessResult<()> {
+        let mut parse_field = |desc: &SourceColumnDesc| {
+            match f(desc) {
+                Ok(output) => Ok(output),
+
+                // Throw error for failed access to primary key columns.
+                Err(e) if desc.is_pk => Err(e),
+                // Ignore error for other columns and fill in `NULL` instead.
+                Err(error) => {
+                    // TODO: figure out a way to fill in not-null default value if user specifies one
+                    // TODO: decide whether the error should not be ignored (e.g., even not a valid Debezium message)
+                    // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
+                    //       see #13105
+                    static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
+                        LazyLock::new(LogSuppresser::default);
+                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                        tracing::warn!(
+                            error = %error.as_report(),
+                            split_id = self.row_meta.as_ref().map(|m| m.split_id),
+                            offset = self.row_meta.as_ref().map(|m| m.offset),
+                            column = desc.name,
+                            suppressed_count,
+                            "failed to parse non-pk column, padding with `NULL`"
+                        );
+                    }
+                    Ok(A::output_for(Datum::None))
+                }
+            }
+        };
+
         let mut wrapped_f = |desc: &SourceColumnDesc| {
             match (&desc.column_type, &desc.additional_column.column_type) {
                 (&SourceColumnType::Offset | &SourceColumnType::RowId, _) => {
@@ -370,14 +399,12 @@ impl SourceStreamChunkRowWriter<'_> {
                             .unwrap(), // handled all match cases in internal match, unwrap is safe
                     ));
                 }
-                (_, &Some(AdditionalColumnType::Timestamp(_))) => {
-                    return Ok(A::output_for(
-                        self.row_meta
-                            .as_ref()
-                            .and_then(|ele| extreact_timestamp_from_meta(ele.meta))
-                            .unwrap_or(None),
-                    ))
-                }
+                (_, &Some(AdditionalColumnType::Timestamp(_))) => match self.row_meta {
+                    Some(row_meta) => Ok(A::output_for(
+                        extreact_timestamp_from_meta(row_meta.meta).unwrap_or(None),
+                    )),
+                    None => parse_field(desc), // parse from payload
+                },
                 (_, &Some(AdditionalColumnType::Partition(_))) => {
                     // the meta info does not involve spec connector
                     return Ok(A::output_for(
@@ -426,32 +453,7 @@ impl SourceStreamChunkRowWriter<'_> {
                 }
                 (_, _) => {
                     // For normal columns, call the user provided closure.
-                    match f(desc) {
-                        Ok(output) => Ok(output),
-
-                        // Throw error for failed access to primary key columns.
-                        Err(e) if desc.is_pk => Err(e),
-                        // Ignore error for other columns and fill in `NULL` instead.
-                        Err(error) => {
-                            // TODO: figure out a way to fill in not-null default value if user specifies one
-                            // TODO: decide whether the error should not be ignored (e.g., even not a valid Debezium message)
-                            // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
-                            //       see #13105
-                            static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
-                                LazyLock::new(LogSuppresser::default);
-                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                tracing::warn!(
-                                    error = %error.as_report(),
-                                    split_id = self.row_meta.as_ref().map(|m| m.split_id),
-                                    offset = self.row_meta.as_ref().map(|m| m.offset),
-                                    column = desc.name,
-                                    suppressed_count,
-                                    "failed to parse non-pk column, padding with `NULL`"
-                                );
-                            }
-                            Ok(A::output_for(Datum::None))
-                        }
-                    }
+                    parse_field(desc)
                 }
             }
         };
@@ -462,6 +464,7 @@ impl SourceStreamChunkRowWriter<'_> {
         let result = (self.descs.iter())
             .zip_eq_fast(self.builders.iter_mut())
             .try_for_each(|(desc, builder)| {
+                println!("desc: name = {}", desc.name);
                 wrapped_f(desc).map(|output| {
                     A::apply(builder, output);
                     applied_columns.push(builder);

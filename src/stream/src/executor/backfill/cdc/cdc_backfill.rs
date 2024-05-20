@@ -20,7 +20,7 @@ use futures::stream::select_with_strategy;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::parser::{
@@ -56,8 +56,6 @@ pub struct CdcBackfillExecutor<S: StateStore> {
     upstream: Executor,
 
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
-    /// User may select a subset of columns from the upstream table.
-    /// TODO: the output_indices always be all columns of the output schema
     output_indices: Vec<usize>,
 
     /// The schema of output chunk, including additional columns if any
@@ -148,6 +146,13 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let upstream_table_name = self.external_table.qualified_table_name();
         // let upstream_table_schema = self.external_table.schema().clone();
         let upstream_table_reader = UpstreamTableReader::new(self.external_table);
+
+        let additional_columns = self
+            .output_columns
+            .iter()
+            .filter(|col| col.additional_column.column_type.is_some())
+            .cloned()
+            .collect_vec();
 
         let mut upstream = self.upstream.execute();
 
@@ -266,6 +271,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     current_pk_pos.clone(),
                     self.rate_limit_rps,
                     pk_indices.clone(),
+                    additional_columns.clone(),
                 );
 
                 let right_snapshot = pin!(upstream_table_reader
@@ -655,7 +661,7 @@ pub async fn transform_upstream(upstream: BoxedMessageStream, output_columns: &[
     // convert to source column desc to feed into parser
     let columns_with_meta = output_columns
         .iter()
-        .map(|col| SourceColumnDesc::from(col))
+        .map(SourceColumnDesc::from)
         .collect_vec();
 
     let mut parser = DebeziumParser::new(

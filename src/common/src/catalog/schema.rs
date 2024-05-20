@@ -15,7 +15,7 @@
 use std::ops::Index;
 
 use itertools::Itertools;
-use risingwave_pb::plan_common::{AdditionalColumn, PbColumnDesc, PbField};
+use risingwave_pb::plan_common::{PbColumnDesc, PbField};
 
 use super::ColumnDesc;
 use crate::array::ArrayBuilderImpl;

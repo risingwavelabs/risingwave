@@ -198,11 +198,18 @@ where
                     |additional_column_type| {
                         match additional_column_type {
                             &ColumnType::Timestamp(_) => {
+                                tracing::info!(
+                                    "access timestamp field: `{}, type: {:?}, column_type: {:?}`",
+                                    desc.name,
+                                    desc.data_type,
+                                    desc.additional_column.column_type
+                                );
+
                                 // access payload.source.ts_ms
                                 self.value_accessor
                                     .as_ref()
                                     .expect("value_accessor must be provided for upsert operation")
-                                    .access(&[SOURCE, &SOURCE_TS_MS], Some(&desc.data_type))
+                                    .access(&[SOURCE, SOURCE_TS_MS], Some(&desc.data_type))
                             }
                             _ => Err(AccessError::UnsupportedAdditionalColumn {
                                 name: desc.name.clone(),

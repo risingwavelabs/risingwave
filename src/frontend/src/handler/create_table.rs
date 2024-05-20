@@ -56,7 +56,7 @@ use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InlineNowProcTime};
 use crate::handler::create_source::{
     bind_columns_from_source, bind_connector_props, bind_create_source, bind_source_watermark,
-    UPSTREAM_SOURCE_KEY,
+    handle_addition_columns, UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::{CdcScanOptions, SourceNodeKind};
