@@ -26,12 +26,14 @@ arrow-row = { workspace = true }
 arrow-schema = { workspace = true }
 arrow-select = { workspace = true }
 assert_matches = "1"
-async-nats = "0.34"
+async-nats = "0.35"
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
+await-tree = { workspace = true }
 aws-config = { workspace = true }
 aws-credential-types = { workspace = true }
+aws-msk-iam-sasl-signer = "1.0.0"
 aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-smithy-http = { workspace = true }
@@ -42,6 +44,7 @@ aws-types = { workspace = true }
 base64 = "0.22"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
+cfg-or-panic = "0.2"
 chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",
@@ -58,6 +61,9 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 gcp-bigquery-client = "0.18.0"
 glob = "0.3"
+google-cloud-bigquery = { version = "0.8.0", features = ["auth"] }
+google-cloud-gax = "0.17.0"
+google-cloud-googleapis = { version = "0.12", features = ["pubsub"] }
 google-cloud-pubsub = "0.24"
 http = "0.2"
 icelake = { workspace = true }
@@ -86,8 +92,8 @@ prometheus = { version = "0.13", features = ["process"] }
 prost = { version = "0.12", features = ["no-recursion-limit"] }
 prost-reflect = "0.13"
 prost-types = "0.12"
-protobuf-native = "0.2.1"
-pulsar = { version = "6.1", default-features = false, features = [
+protobuf-native = "0.2.2"
+pulsar = { version = "6.2", default-features = false, features = [
     "tokio-runtime",
     "telemetry",
     "auth-oauth2",

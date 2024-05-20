@@ -127,7 +127,7 @@ pub struct SstDeltaInfo {
     pub delete_sst_object_ids: Vec<HummockSstableObjectId>,
 }
 
-pub type BranchedSstInfo = HashMap<CompactionGroupId, /* SST Id */ HummockSstableId>;
+pub type BranchedSstInfo = HashMap<CompactionGroupId, Vec<HummockSstableId>>;
 
 impl HummockVersion {
     pub fn get_compaction_group_levels(&self, compaction_group_id: CompactionGroupId) -> &Levels {
@@ -490,6 +490,7 @@ impl HummockVersion {
         &mut self,
         version_delta: &HummockVersionDelta,
     ) -> Vec<SstSplitInfo> {
+        let new_committed_epoch = version_delta.max_committed_epoch > self.max_committed_epoch;
         let mut sst_split_info = vec![];
         for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
             let summary = summarize_group_deltas(group_deltas);
@@ -649,8 +650,19 @@ impl HummockVersion {
 
         // If a table has no new change log entry (even an empty one), it means we have stopped maintained
         // the change log for the table
-        self.table_change_log
-            .retain(|table_id, _| version_delta.change_log_delta.contains_key(table_id));
+        if new_committed_epoch {
+            self.table_change_log.retain(|table_id, _| {
+                let contains = version_delta.change_log_delta.contains_key(table_id);
+                if !contains {
+                    warn!(
+                        ?table_id,
+                        max_committed_epoch = version_delta.max_committed_epoch,
+                        "table change log dropped due to no further change log at newly committed epoch",
+                    );
+                }
+                contains
+            });
+        }
 
         for (table_id, change_log_delta) in &version_delta.change_log_delta {
             if let Some(change_log) = self.table_change_log.get_mut(table_id) {
@@ -684,10 +696,10 @@ impl HummockVersion {
                     }
                     let object_id = table_info.get_object_id();
                     let entry: &mut BranchedSstInfo = ret.entry(object_id).or_default();
-                    if let Some(exist_sst_id) = entry.get(compaction_group_id) {
-                        panic!("we do not allow more than one sst with the same object id in one grou. object-id: {}, duplicated sst id: {:?} and {}", object_id, exist_sst_id, table_info.sst_id);
-                    }
-                    entry.insert(*compaction_group_id, table_info.sst_id);
+                    entry
+                        .entry(*compaction_group_id)
+                        .or_default()
+                        .push(table_info.sst_id)
                 }
             }
         }
@@ -1265,13 +1277,7 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
             let mut prev_table_info: Option<&SstableInfo> = None;
             for table_info in &level.table_infos {
                 // Ensure table_ids are sorted and unique
-                if !table_info.table_ids.is_sorted_by(|a, b| {
-                    if a < b {
-                        Some(Ordering::Less)
-                    } else {
-                        Some(Ordering::Greater)
-                    }
-                }) {
+                if !table_info.table_ids.is_sorted_by(|a, b| a < b) {
                     res.push(format!(
                         "{} SST {}: table_ids not sorted",
                         level_identifier, table_info.object_id

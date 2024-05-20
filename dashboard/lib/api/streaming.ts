@@ -17,12 +17,21 @@
 
 import _ from "lodash"
 import sortBy from "lodash/sortBy"
-import { Sink, Source, Table, View } from "../../proto/gen/catalog"
+import {
+  Database,
+  Schema,
+  Sink,
+  Source,
+  Subscription,
+  Table,
+  View,
+} from "../../proto/gen/catalog"
 import {
   ListObjectDependenciesResponse_ObjectDependencies as ObjectDependencies,
   TableFragments,
 } from "../../proto/gen/meta"
 import { ColumnCatalog, Field } from "../../proto/gen/plan_common"
+import { UserInfo } from "../../proto/gen/user"
 import api from "./api"
 
 export async function getFragments(): Promise<TableFragments[]> {
@@ -37,7 +46,14 @@ export interface Relation {
   id: number
   name: string
   owner: number
-  columns: (ColumnCatalog | Field)[]
+  schemaId: number
+  databaseId: number
+
+  // For display
+  columns?: (ColumnCatalog | Field)[]
+  ownerName?: string
+  schemaName?: string
+  databaseName?: string
 }
 
 export interface StreamingJob extends Relation {
@@ -51,6 +67,8 @@ export function relationType(x: Relation) {
     return "SINK"
   } else if ((x as Source).info !== undefined) {
     return "SOURCE"
+  } else if ((x as Subscription).dependentTableId !== undefined) {
+    return "SUBSCRIPTION"
   } else {
     return "UNKNOWN"
   }
@@ -83,7 +101,8 @@ export async function getRelations() {
     await getTables(),
     await getIndexes(),
     await getSinks(),
-    await getSources()
+    await getSources(),
+    await getSubscriptions()
   )
   relations = sortBy(relations, (x) => x.id)
   return relations
@@ -133,6 +152,34 @@ export async function getViews() {
   let views: View[] = (await api.get("/views")).map(View.fromJSON)
   views = sortBy(views, (x) => x.id)
   return views
+}
+
+export async function getSubscriptions() {
+  let subscriptions: Subscription[] = (await api.get("/subscriptions")).map(
+    Subscription.fromJSON
+  )
+  subscriptions = sortBy(subscriptions, (x) => x.id)
+  return subscriptions
+}
+
+export async function getUsers() {
+  let users: UserInfo[] = (await api.get("/users")).map(UserInfo.fromJSON)
+  users = sortBy(users, (x) => x.id)
+  return users
+}
+
+export async function getDatabases() {
+  let databases: Database[] = (await api.get("/databases")).map(
+    Database.fromJSON
+  )
+  databases = sortBy(databases, (x) => x.id)
+  return databases
+}
+
+export async function getSchemas() {
+  let schemas: Schema[] = (await api.get("/schemas")).map(Schema.fromJSON)
+  schemas = sortBy(schemas, (x) => x.id)
+  return schemas
 }
 
 export async function getObjectDependencies() {

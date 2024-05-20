@@ -18,7 +18,8 @@ use std::pin::Pin;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use foyer::memory::CacheContext;
+use await_tree::InstrumentAwait;
+use foyer::CacheContext;
 use futures::future::{try_join_all, BoxFuture};
 use futures::{FutureExt, TryFutureExt};
 use risingwave_common::array::StreamChunk;
@@ -167,7 +168,7 @@ impl<S: StateStore> KvLogStoreReader<S> {
         &mut self,
     ) -> LogStoreResult<Option<(ChunkId, StreamChunk, u64)>> {
         if let Some(future) = self.read_flushed_chunk_future.as_mut() {
-            let result = future.await;
+            let result = future.instrument_await("Read Flushed Chunk").await;
             let _fut = self
                 .read_flushed_chunk_future
                 .take()
@@ -256,11 +257,16 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
             info!("next_item of {} get blocked by is_pause", self.identity);
             self.is_paused
                 .changed()
+                .instrument_await("Wait for Pause Resume")
                 .await
                 .map_err(|_| anyhow!("unable to subscribe resume"))?;
         }
         if let Some(state_store_stream) = &mut self.state_store_stream {
-            match state_store_stream.try_next().await? {
+            match state_store_stream
+                .try_next()
+                .instrument_await("Try Next for Historical Stream")
+                .await?
+            {
                 Some((epoch, item)) => {
                     if let Some(latest_offset) = &self.latest_offset {
                         latest_offset.check_next_item_epoch(epoch)?;
@@ -307,7 +313,11 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
         }
 
         // Now the historical state store has been consumed.
-        let (item_epoch, item) = self.rx.next_item().await;
+        let (item_epoch, item) = self
+            .rx
+            .next_item()
+            .instrument_await("Wait Next Item from Buffer")
+            .await;
         if let Some(latest_offset) = &self.latest_offset {
             latest_offset.check_next_item_epoch(item_epoch)?;
         }
@@ -367,6 +377,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                                 )
                             }
                         }))
+                            .instrument_await("Wait Create Iter Stream")
                         .await?;
 
                         let chunk = serde
@@ -377,6 +388,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                                 item_epoch,
                                 &read_metrics,
                             )
+                            .instrument_await("Deserialize Stream Chunk")
                             .await?;
 
                         Ok((chunk_id, chunk, item_epoch))
@@ -435,7 +447,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
         })
     }
 
-    async fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
+    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
         if offset > self.latest_offset.expect("should exist before truncation") {
             return Err(anyhow!(
                 "truncate at a later offset {:?} than the current latest offset {:?}",

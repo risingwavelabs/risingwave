@@ -34,13 +34,13 @@
 #![feature(error_generic_member_access)]
 #![feature(negative_impls)]
 #![feature(register_tool)]
+#![feature(assert_matches)]
 #![register_tool(rw)]
 #![recursion_limit = "256"]
 
 use std::time::Duration;
 
 use duration_str::parse_std;
-use risingwave_pb::connector_service::SinkPayloadFormat;
 use serde::de;
 
 pub mod aws_utils;
@@ -62,19 +62,6 @@ pub use with_options::WithPropertiesExt;
 
 #[cfg(test)]
 mod with_options_test;
-
-#[derive(Clone, Debug, Default)]
-pub struct ConnectorParams {
-    pub sink_payload_format: SinkPayloadFormat,
-}
-
-impl ConnectorParams {
-    pub fn new(sink_payload_format: SinkPayloadFormat) -> Self {
-        Self {
-            sink_payload_format,
-        }
-    }
-}
 
 pub(crate) fn deserialize_u32_from_string<'de, D>(deserializer: D) -> Result<u32, D::Error>
 where

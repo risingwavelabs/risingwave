@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::ops::Bound;
 use std::sync::Arc;
 
@@ -26,6 +27,7 @@ use risingwave_hummock_sdk::key::{key_with_epoch, map_table_key_range};
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
+use risingwave_storage::hummock::event_handler::TEST_LOCAL_INSTANCE_ID;
 use risingwave_storage::hummock::iterator::test_utils::{
     iterator_test_table_key_of, iterator_test_user_key_of,
 };
@@ -48,12 +50,17 @@ async fn test_read_version_basic() {
     let mut epoch = test_epoch(1);
     let table_id = 0;
     let vnodes = Arc::new(Bitmap::ones(VirtualNode::COUNT));
-    let mut read_version = HummockReadVersion::new(TableId::from(table_id), pinned_version, vnodes);
+    let mut read_version = HummockReadVersion::new(
+        TableId::from(table_id),
+        TEST_LOCAL_INSTANCE_ID,
+        pinned_version,
+        vnodes,
+    );
 
     {
         // single imm
         let sorted_items = gen_dummy_batch(1);
-        let size = SharedBufferBatch::measure_batch_size(&sorted_items, None);
+        let size = SharedBufferBatch::measure_batch_size(&sorted_items, None).0;
         let imm = SharedBufferBatch::build_shared_buffer_batch_for_test(
             epoch,
             0,
@@ -87,7 +94,7 @@ async fn test_read_version_basic() {
         for i in 0..5 {
             epoch.inc_epoch();
             let sorted_items = gen_dummy_batch(i + 2);
-            let size = SharedBufferBatch::measure_batch_size(&sorted_items, None);
+            let size = SharedBufferBatch::measure_batch_size(&sorted_items, None).0;
             let imm = SharedBufferBatch::build_shared_buffer_batch_for_test(
                 epoch,
                 0,
@@ -178,7 +185,7 @@ async fn test_read_version_basic() {
             ],
             vec![],
             epoch_id_vec_for_clear,
-            batch_id_vec_for_clear,
+            HashMap::from_iter([(TEST_LOCAL_INSTANCE_ID, batch_id_vec_for_clear)]),
             1,
         ));
 
@@ -267,6 +274,7 @@ async fn test_read_filter_basic() {
     let vnodes = Arc::new(Bitmap::ones(VirtualNode::COUNT));
     let read_version = Arc::new(RwLock::new(HummockReadVersion::new(
         TableId::from(table_id),
+        TEST_LOCAL_INSTANCE_ID,
         pinned_version,
         vnodes.clone(),
     )));
@@ -275,7 +283,7 @@ async fn test_read_filter_basic() {
     {
         // single imm
         let sorted_items = gen_dummy_batch(epoch);
-        let size = SharedBufferBatch::measure_batch_size(&sorted_items, None);
+        let size = SharedBufferBatch::measure_batch_size(&sorted_items, None).0;
         let imm = SharedBufferBatch::build_shared_buffer_batch_for_test(
             epoch,
             0,

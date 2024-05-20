@@ -33,7 +33,13 @@ import Link from "next/link"
 import { Fragment } from "react"
 import Title from "../components/Title"
 import useFetch from "../lib/api/fetch"
-import { Relation, StreamingJob } from "../lib/api/streaming"
+import {
+  Relation,
+  StreamingJob,
+  getDatabases,
+  getSchemas,
+  getUsers,
+} from "../lib/api/streaming"
 import extractColumnInfo from "../lib/extractInfo"
 import {
   Sink as RwSink,
@@ -114,7 +120,22 @@ export function Relations<R extends Relation>(
   getRelations: () => Promise<R[]>,
   extraColumns: Column<R>[]
 ) {
-  const { response: relationList } = useFetch(getRelations)
+  const { response: relationList } = useFetch(async () => {
+    const relations = await getRelations()
+    const users = await getUsers()
+    const databases = await getDatabases()
+    const schemas = await getSchemas()
+    return relations.map((r) => {
+      // Add owner, schema, and database names. It's linear search but the list is small.
+      const owner = users.find((u) => u.id === r.owner)
+      const ownerName = owner?.name
+      const schema = schemas.find((s) => s.id === r.schemaId)
+      const schemaName = schema?.name
+      const database = databases.find((d) => d.id === r.databaseId)
+      const databaseName = database?.name
+      return { ...r, ownerName, schemaName, databaseName }
+    })
+  })
   const [modalData, setModalId] = useCatalogModal(relationList)
 
   const modal = (
@@ -129,6 +150,8 @@ export function Relations<R extends Relation>(
           <Thead>
             <Tr>
               <Th width={3}>Id</Th>
+              <Th width={5}>Database</Th>
+              <Th width={5}>Schema</Th>
               <Th width={5}>Name</Th>
               <Th width={3}>Owner</Th>
               {extraColumns.map((c) => (
@@ -153,17 +176,23 @@ export function Relations<R extends Relation>(
                     {r.id}
                   </Button>
                 </Td>
+                <Td>{r.databaseName}</Td>
+                <Td>{r.schemaName}</Td>
                 <Td>{r.name}</Td>
-                <Td>{r.owner}</Td>
+                <Td>{r.ownerName}</Td>
                 {extraColumns.map((c) => (
                   <Td key={c.name}>{c.content(r)}</Td>
                 ))}
-                <Td overflowWrap="normal">
-                  {r.columns
-                    .filter((col) => ("isHidden" in col ? !col.isHidden : true))
-                    .map((col) => extractColumnInfo(col))
-                    .join(", ")}
-                </Td>
+                {r.columns && r.columns.length > 0 && (
+                  <Td overflowWrap="normal">
+                    {r.columns
+                      .filter((col) =>
+                        "isHidden" in col ? !col.isHidden : true
+                      )
+                      .map((col) => extractColumnInfo(col))
+                      .join(", ")}
+                  </Td>
+                )}
               </Tr>
             ))}
           </Tbody>

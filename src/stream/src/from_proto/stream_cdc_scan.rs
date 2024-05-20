@@ -23,7 +23,7 @@ use risingwave_pb::stream_plan::StreamCdcScanNode;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::{CdcBackfillExecutor, Executor, ExternalStorageTable};
+use crate::executor::{CdcBackfillExecutor, CdcScanOptions, ExternalStorageTable};
 
 pub struct StreamCdcScanExecutorBuilder;
 
@@ -44,7 +44,6 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             .collect_vec();
 
         let table_desc: &ExternalTableDesc = node.get_cdc_table_desc()?;
-        let disable_backfill = node.disable_backfill;
 
         let table_schema: Schema = table_desc.columns.iter().map(Into::into).collect();
         assert_eq!(output_indices, (0..table_schema.len()).collect_vec());
@@ -55,10 +54,6 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-        let table_type = CdcTableType::from_properties(&properties);
-        let table_reader = table_type
-            .create_table_reader(properties.clone(), table_schema.clone())
-            .await?;
 
         let table_pk_order_types = table_desc
             .pk
@@ -70,6 +65,24 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             .iter()
             .map(|k| k.column_index as usize)
             .collect_vec();
+
+        let scan_options = node
+            .options
+            .as_ref()
+            .map(CdcScanOptions::from_proto)
+            .unwrap_or(CdcScanOptions {
+                disable_backfill: node.disable_backfill,
+                ..Default::default()
+            });
+        let table_type = CdcTableType::from_properties(&properties);
+        let table_reader = table_type
+            .create_table_reader(
+                properties.clone(),
+                table_schema.clone(),
+                table_pk_indices.clone(),
+                scan_options.snapshot_batch_size,
+            )
+            .await?;
 
         let schema_table_name = SchemaTableName::from_properties(&properties);
         let external_table = ExternalStorageTable::new(
@@ -97,7 +110,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             params.executor_stats,
             state_table,
             node.rate_limit,
-            disable_backfill,
+            scan_options,
         );
         Ok((params.info, exec).into())
     }

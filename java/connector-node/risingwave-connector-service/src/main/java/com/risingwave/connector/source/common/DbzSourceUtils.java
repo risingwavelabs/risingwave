@@ -103,31 +103,30 @@ public class DbzSourceUtils {
         return "\"" + identifier + "\"";
     }
 
-    public static boolean waitForStreamingRunning(SourceTypeE sourceType, String dbServerName) {
+    public static boolean waitForStreamingRunning(
+            SourceTypeE sourceType, String dbServerName, int waitStreamingStartTimeout) {
         // Wait for streaming source of source that supported backfill
         LOG.info("Waiting for streaming source of {} to start", dbServerName);
         if (sourceType == SourceTypeE.MYSQL) {
-            return waitForStreamingRunningInner("mysql", dbServerName);
+            return waitForStreamingRunningInner("mysql", dbServerName, waitStreamingStartTimeout);
         } else if (sourceType == SourceTypeE.POSTGRES) {
-            return waitForStreamingRunningInner("postgres", dbServerName);
+            return waitForStreamingRunningInner(
+                    "postgres", dbServerName, waitStreamingStartTimeout);
         } else {
             LOG.info("Unsupported backfill source, just return true for {}", dbServerName);
             return true;
         }
     }
 
-    private static boolean waitForStreamingRunningInner(String connector, String dbServerName) {
-        int timeoutSecs =
-                Integer.parseInt(
-                        System.getProperty(
-                                DbzConnectorConfig.WAIT_FOR_STREAMING_START_BEFORE_EXIT_SECS));
+    private static boolean waitForStreamingRunningInner(
+            String connector, String dbServerName, int waitStreamingStartTimeout) {
         int pollCount = 0;
         while (!isStreamingRunning(connector, dbServerName, "streaming")) {
-            if (pollCount > timeoutSecs) {
+            if (pollCount > waitStreamingStartTimeout) {
                 LOG.error(
                         "Debezium streaming source of {} failed to start in timeout {}",
                         dbServerName,
-                        timeoutSecs);
+                        waitStreamingStartTimeout);
                 return false;
             }
             try {

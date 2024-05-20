@@ -356,7 +356,6 @@ mod test {
                                     http://127.0.0.1:5690/,
                                 ],
                             ),
-                            connector_rpc_sink_payload_format: None,
                             config_path: "src/config/test.toml",
                             total_memory_bytes: 34359738368,
                             reserved_memory_bytes: None,
@@ -372,7 +371,7 @@ mod test {
                     ),
                     frontend_opts: Some(
                         FrontendOpts {
-                            listen_addr: "127.0.0.1:4566",
+                            listen_addr: "0.0.0.0:4566",
                             advertise_addr: None,
                             meta_addr: List(
                                 [

@@ -560,13 +560,11 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         let subscription_models: Vec<subscription::ActiveModel> = subscriptions
             .into_iter()
             .map(|s| {
-                object_dependencies.extend(s.dependent_relations.iter().map(|id| {
-                    object_dependency::ActiveModel {
-                        id: NotSet,
-                        oid: Set(*id as _),
-                        used_by: Set(s.id as _),
-                    }
-                }));
+                object_dependencies.push(object_dependency::ActiveModel {
+                    id: NotSet,
+                    oid: Set(s.dependent_table_id as _),
+                    used_by: Set(s.id as _),
+                });
                 s.into()
             })
             .collect();

@@ -45,7 +45,7 @@ use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     connection, Comment, Connection, CreateType, Database, Function, PbSource, PbTable, Schema,
-    Sink, Source, Table, View,
+    Sink, Source, Subscription, Table, View,
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
@@ -101,7 +101,6 @@ pub enum StreamingJobId {
     Sink(SinkId),
     Table(Option<SourceId>, TableId),
     Index(IndexId),
-    Subscription(SubscriptionId),
 }
 
 impl StreamingJobId {
@@ -110,7 +109,6 @@ impl StreamingJobId {
         match self {
             StreamingJobId::MaterializedView(id)
             | StreamingJobId::Sink(id)
-            | StreamingJobId::Subscription(id)
             | StreamingJobId::Table(_, id)
             | StreamingJobId::Index(id) => *id,
         }
@@ -150,6 +148,8 @@ pub enum DdlCommand {
     CreateConnection(Connection),
     DropConnection(ConnectionId),
     CommentOn(Comment),
+    CreateSubscription(Subscription),
+    DropSubscription(SubscriptionId, DropMode),
 }
 
 impl DdlCommand {
@@ -332,6 +332,12 @@ impl DdlController {
                 }
                 DdlCommand::AlterSourceColumn(source) => ctrl.alter_source_column(source).await,
                 DdlCommand::CommentOn(comment) => ctrl.comment_on(comment).await,
+                DdlCommand::CreateSubscription(subscription) => {
+                    ctrl.create_subscription(subscription).await
+                }
+                DdlCommand::DropSubscription(subscription_id, drop_mode) => {
+                    ctrl.drop_subscription(subscription_id, drop_mode).await
+                }
             }
         }
         .in_current_span();
@@ -632,6 +638,114 @@ impl DdlController {
             }
         }
         Ok(())
+    }
+
+    async fn create_subscription(
+        &self,
+        mut subscription: Subscription,
+    ) -> MetaResult<NotificationVersion> {
+        tracing::debug!("create subscription");
+        let _permit = self
+            .creating_streaming_job_permits
+            .semaphore
+            .acquire()
+            .await
+            .unwrap();
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
+                let initialized_at_epoch = Some(Epoch::now().0);
+                let initialized_at_cluster_version = Some(current_cluster_version());
+                subscription.initialized_at_epoch = initialized_at_epoch;
+                subscription.initialized_at_cluster_version = initialized_at_cluster_version;
+                subscription.id = id;
+
+                mgr.catalog_manager
+                    .start_create_subscription_procedure(&subscription)
+                    .await?;
+                match self.stream_manager.create_subscription(&subscription).await {
+                    Ok(_) => {
+                        let version = mgr
+                            .catalog_manager
+                            .notify_create_subscription(subscription.id)
+                            .await?;
+                        tracing::debug!("finish create subscription");
+                        Ok(version)
+                    }
+                    Err(e) => {
+                        tracing::debug!("cancel create subscription");
+                        Err(e)
+                    }
+                }
+            }
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
+                    .create_subscription_catalog(&mut subscription)
+                    .await?;
+                match self.stream_manager.create_subscription(&subscription).await {
+                    Ok(_) => {
+                        let version = mgr
+                            .catalog_controller
+                            .notify_create_subscription(subscription.id)
+                            .await?;
+                        tracing::debug!("finish create subscription");
+                        Ok(version)
+                    }
+                    Err(e) => {
+                        tracing::debug!("cancel create subscription");
+                        Err(e)
+                    }
+                }
+            }
+        }
+    }
+
+    async fn drop_subscription(
+        &self,
+        subscription_id: SubscriptionId,
+        drop_mode: DropMode,
+    ) -> MetaResult<NotificationVersion> {
+        tracing::debug!("preparing drop subscription");
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                let table_id = mgr
+                    .catalog_manager
+                    .get_subscription_by_id(subscription_id)
+                    .await?
+                    .dependent_table_id;
+                let (version, _) = mgr
+                    .catalog_manager
+                    .drop_relation(
+                        RelationIdEnum::Subscription(subscription_id),
+                        mgr.fragment_manager.clone(),
+                        drop_mode,
+                    )
+                    .await?;
+                self.stream_manager
+                    .drop_subscription(subscription_id, table_id)
+                    .await;
+                tracing::debug!("finish drop subscription");
+                Ok(version)
+            }
+            MetadataManager::V2(mgr) => {
+                let table_id = mgr
+                    .catalog_controller
+                    .get_subscription_by_id(subscription_id as i32)
+                    .await?
+                    .dependent_table_id;
+                let (_, version) = mgr
+                    .catalog_controller
+                    .drop_relation(ObjectType::Subscription, subscription_id as _, drop_mode)
+                    .await?;
+                self.stream_manager
+                    .drop_subscription(subscription_id, table_id)
+                    .await;
+                tracing::debug!("finish drop subscription");
+                Ok(version)
+            }
+        }
     }
 
     async fn create_streaming_job(
@@ -1159,7 +1273,6 @@ impl DdlController {
                     StreamingJobId::Sink(id) => (id as _, ObjectType::Sink),
                     StreamingJobId::Table(_, id) => (id as _, ObjectType::Table),
                     StreamingJobId::Index(idx) => (idx as _, ObjectType::Index),
-                    StreamingJobId::Subscription(id) => (id as _, ObjectType::Subscription),
                 };
 
                 let version = self
@@ -1212,15 +1325,6 @@ impl DdlController {
                 mgr.catalog_manager
                     .drop_relation(
                         RelationIdEnum::Index(index_id),
-                        mgr.fragment_manager.clone(),
-                        drop_mode,
-                    )
-                    .await?
-            }
-            StreamingJobId::Subscription(subscription_id) => {
-                mgr.catalog_manager
-                    .drop_relation(
-                        RelationIdEnum::Subscription(subscription_id),
                         mgr.fragment_manager.clone(),
                         drop_mode,
                     )
@@ -1544,11 +1648,6 @@ impl DdlController {
                     .cancel_create_sink_procedure(sink, target_table)
                     .await;
             }
-            StreamingJob::Subscription(subscription) => {
-                mgr.catalog_manager
-                    .cancel_create_subscription_procedure(subscription)
-                    .await;
-            }
             StreamingJob::Table(source, table, ..) => {
                 if let Some(source) = source {
                     mgr.catalog_manager
@@ -1634,11 +1733,6 @@ impl DdlController {
                 }
 
                 version
-            }
-            StreamingJob::Subscription(subscription) => {
-                mgr.catalog_manager
-                    .finish_create_subscription_procedure(internal_tables, subscription)
-                    .await?
             }
             StreamingJob::Table(source, table, ..) => {
                 creating_internal_table_ids.push(table.id);

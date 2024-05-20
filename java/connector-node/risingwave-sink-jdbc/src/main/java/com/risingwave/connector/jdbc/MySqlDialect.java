@@ -26,6 +26,21 @@ import org.apache.commons.lang3.StringUtils;
 
 public class MySqlDialect implements JdbcDialect {
 
+    private final int[] pkIndices;
+    private final int[] pkColumnSqlTypes;
+
+    public MySqlDialect(List<Integer> columnSqlTypes, List<Integer> pkIndices) {
+        var columnSqlTypesArr = columnSqlTypes.stream().mapToInt(i -> i).toArray();
+        this.pkIndices = pkIndices.stream().mapToInt(i -> i).toArray();
+
+        // derive sql types for pk columns
+        var pkColumnSqlTypes = new int[pkIndices.size()];
+        for (int i = 0; i < pkIndices.size(); i++) {
+            pkColumnSqlTypes[i] = columnSqlTypesArr[this.pkIndices[i]];
+        }
+        this.pkColumnSqlTypes = pkColumnSqlTypes;
+    }
+
     @Override
     public SchemaTableName createSchemaTableName(String schemaName, String tableName) {
         return new SchemaTableName(schemaName, tableName);
@@ -98,6 +113,17 @@ public class MySqlDialect implements JdbcDialect {
                     stmt.setObject(placeholderIdx++, row.get(i));
                     break;
             }
+        }
+    }
+
+    @Override
+    public void bindDeleteStatement(PreparedStatement stmt, TableSchema tableSchema, SinkRow row)
+            throws SQLException {
+        // set the values of primary key fields
+        int placeholderIdx = 1;
+        for (int i = 0; i < pkIndices.length; ++i) {
+            Object pkField = row.get(pkIndices[i]);
+            stmt.setObject(placeholderIdx++, pkField, pkColumnSqlTypes[i]);
         }
     }
 }

@@ -25,7 +25,7 @@ use futures::stream::BoxStream;
 use lru::LruCache;
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
 use risingwave_common::config::{MetaConfig, MAX_CONNECTION_WINDOW_SIZE};
-use risingwave_common::hash::WorkerMapping;
+use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
@@ -384,11 +384,9 @@ impl MetaClient {
     pub async fn create_subscription(
         &self,
         subscription: PbSubscription,
-        graph: StreamFragmentGraph,
     ) -> Result<CatalogVersion> {
         let request = CreateSubscriptionRequest {
             subscription: Some(subscription),
-            fragment_graph: Some(graph),
         };
 
         let resp = self.inner.create_subscription(request).await?;
@@ -594,6 +592,21 @@ impl MetaClient {
         };
         let resp = self.inner.drop_subscription(request).await?;
         Ok(resp.version)
+    }
+
+    pub async fn list_change_log_epochs(
+        &self,
+        table_id: u32,
+        min_epoch: u64,
+        max_count: u32,
+    ) -> Result<Vec<u64>> {
+        let request = ListChangeLogEpochsRequest {
+            table_id,
+            min_epoch,
+            max_count,
+        };
+        let resp = self.inner.list_change_log_epochs(request).await?;
+        Ok(resp.epochs)
     }
 
     pub async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<CatalogVersion> {
@@ -1156,11 +1169,13 @@ impl MetaClient {
         Ok(resp.tables)
     }
 
-    pub async fn list_serving_vnode_mappings(&self) -> Result<HashMap<u32, (u32, WorkerMapping)>> {
+    pub async fn list_serving_vnode_mappings(
+        &self,
+    ) -> Result<HashMap<u32, (u32, ParallelUnitMapping)>> {
         let req = GetServingVnodeMappingsRequest {};
         let resp = self.inner.get_serving_vnode_mappings(req).await?;
         let mappings = resp
-            .worker_mappings
+            .mappings
             .into_iter()
             .map(|p| {
                 (
@@ -1170,7 +1185,7 @@ impl MetaClient {
                             .get(&p.fragment_id)
                             .cloned()
                             .unwrap_or(0),
-                        WorkerMapping::from_protobuf(p.mapping.as_ref().unwrap()),
+                        ParallelUnitMapping::from_protobuf(p.mapping.as_ref().unwrap()),
                     ),
                 )
             })
@@ -1974,6 +1989,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, list_compact_task_assignment, ListCompactTaskAssignmentRequest, ListCompactTaskAssignmentResponse }
             ,{ hummock_client, list_compact_task_progress, ListCompactTaskProgressRequest, ListCompactTaskProgressResponse }
             ,{ hummock_client, cancel_compact_task, CancelCompactTaskRequest, CancelCompactTaskResponse}
+            ,{ hummock_client, list_change_log_epochs, ListChangeLogEpochsRequest, ListChangeLogEpochsResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

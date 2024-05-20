@@ -51,12 +51,16 @@ pub struct SourceStateTableHandler<S: StateStore> {
 }
 
 impl<S: StateStore> SourceStateTableHandler<S> {
+    /// Creates a state table with singleton distribution (only one vnode 0).
+    ///
+    /// Refer to `infer_internal_table_catalog` in `src/frontend/src/optimizer/plan_node/generic/source.rs` for more details.
     pub async fn from_table_catalog(table_catalog: &PbTable, store: S) -> Self {
         Self {
             state_table: StateTable::from_table_catalog(table_catalog, store, None).await,
         }
     }
 
+    /// For [`super::FsFetchExecutor`], each actor accesses splits according to the `vnode` computed from `partition_id`.
     pub async fn from_table_catalog_with_vnodes(
         table_catalog: &PbTable,
         store: S,
@@ -253,11 +257,9 @@ pub fn default_source_internal_table(id: u32) -> PbTable {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::sync::Arc;
 
-    use risingwave_common::row::OwnedRow;
-    use risingwave_common::types::{Datum, ScalarImpl};
-    use risingwave_common::util::epoch::{test_epoch, EpochPair};
+    use risingwave_common::types::Datum;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_connector::source::kafka::KafkaSplit;
     use risingwave_storage::memory::MemoryStateStore;
     use serde_json::Value;

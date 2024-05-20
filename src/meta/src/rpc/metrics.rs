@@ -449,7 +449,7 @@ impl MetaMetrics {
         let hummock_manager_lock_time = register_histogram_vec_with_registry!(
             "hummock_manager_lock_time",
             "latency for hummock manager to acquire the rwlock",
-            &["method", "lock_name", "lock_type"],
+            &["lock_name", "lock_type"],
             registry
         )
         .unwrap();

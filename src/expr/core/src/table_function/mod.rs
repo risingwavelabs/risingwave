@@ -16,7 +16,6 @@ use either::Either;
 use futures_async_stream::try_stream;
 use futures_util::stream::BoxStream;
 use futures_util::StreamExt;
-use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk};
 use risingwave_common::types::{DataType, DatumRef};
 use risingwave_pb::expr::project_set_select_item::SelectItem;
@@ -129,6 +128,7 @@ pub fn build(
     chunk_size: usize,
     children: Vec<BoxedExpression>,
 ) -> Result<BoxedTableFunction> {
+    use itertools::Itertools;
     let args = children.iter().map(|t| t.return_type()).collect_vec();
     let desc = crate::sig::FUNCTION_REGISTRY
         .get(func, &args, &return_type)
