@@ -66,6 +66,7 @@ use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
 use crate::cache::cache_may_stale;
 use crate::common::cache::{StateCache, StateCacheFiller};
 use crate::common::table::state_table_cache::StateTableWatermarkCache;
+use crate::consistency::enable_strict_consistency;
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 /// This num is arbitrary and we may want to improve this choice in the future.
@@ -408,12 +409,11 @@ where
             )
         };
 
-        let state_table_op_consistency_level = if crate::consistency::insane() {
-            // In insane mode, we will have inconsistent operations applied on the table, even if
-            // our executor code do not expect that.
-            StateTableOpConsistencyLevel::Inconsistent
-        } else {
+        let state_table_op_consistency_level = if enable_strict_consistency() {
             op_consistency_level
+        } else {
+            // disable sanity check in non-strict mode
+            StateTableOpConsistencyLevel::Inconsistent
         };
         let op_consistency_level = match state_table_op_consistency_level {
             StateTableOpConsistencyLevel::Inconsistent => OpConsistencyLevel::Inconsistent,
@@ -644,10 +644,11 @@ where
                 Arc::from(table_columns.clone().into_boxed_slice()),
             )
         };
-        let op_consistency_level = if is_consistent_op {
+        let op_consistency_level = if is_consistent_op && enable_strict_consistency() {
             let row_serde = make_row_serde();
             consistent_old_value_op(row_serde, false)
         } else {
+            // disable sanity check in non-strict mode
             OpConsistencyLevel::Inconsistent
         };
         let local_state_store = store
@@ -1167,8 +1168,13 @@ where
         assert_eq!(self.epoch(), new_epoch.prev);
         let switch_op_consistency_level = switch_consistent_op.map(|new_consistency_level| {
             assert_ne!(self.op_consistency_level, new_consistency_level);
-            self.op_consistency_level = new_consistency_level;
-            match new_consistency_level {
+            self.op_consistency_level = if enable_strict_consistency() {
+                new_consistency_level
+            } else {
+                // disable sanity check in non-strict mode
+                StateTableOpConsistencyLevel::Inconsistent
+            };
+            match self.op_consistency_level {
                 StateTableOpConsistencyLevel::Inconsistent => OpConsistencyLevel::Inconsistent,
                 StateTableOpConsistencyLevel::ConsistentOldValue => {
                     consistent_old_value_op(self.row_serde.clone(), false)

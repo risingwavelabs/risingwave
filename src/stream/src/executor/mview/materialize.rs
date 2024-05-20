@@ -37,6 +37,7 @@ use risingwave_storage::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{StateTableInner, StateTableOpConsistencyLevel};
+use crate::consistency::enable_strict_consistency;
 use crate::executor::prelude::*;
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
@@ -68,7 +69,10 @@ fn get_op_consistency_level(
     may_have_downstream: bool,
     depended_subscriptions: &HashSet<u32>,
 ) -> StateTableOpConsistencyLevel {
-    if !depended_subscriptions.is_empty() {
+    if !enable_strict_consistency() {
+        // disable sanity check in non-strict mode
+        StateTableOpConsistencyLevel::Inconsistent
+    } else if !depended_subscriptions.is_empty() {
         StateTableOpConsistencyLevel::LogStoreEnabled
     } else if !may_have_downstream && matches!(conflict_behavior, ConflictBehavior::Overwrite) {
         // Table with overwrite conflict behavior could disable conflict check
@@ -274,7 +278,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     self.state_table
                         .commit_may_switch_consistent_op(b.epoch, op_consistency_level)
                         .await?;
-                    if !self.state_table.is_consistent_op() {
+                    if enable_strict_consistency() && !self.state_table.is_consistent_op() {
                         assert_eq!(self.conflict_behavior, ConflictBehavior::Overwrite);
                     }
 
