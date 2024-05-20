@@ -110,26 +110,13 @@ pub enum ExprError {
     #[error("invalid state: {0}")]
     InvalidState(String),
 
-    #[error("error in cryptography: {0}")]
-    Cryptography(Box<CryptographyError>),
-
     /// Function error message returned by UDF.
     #[error("{0}")]
     Custom(String),
-}
 
-#[derive(Debug)]
-pub enum CryptographyStage {
-    Encrypt,
-    Decrypt,
-}
-
-#[derive(Debug, Error)]
-#[error("{stage:?} stage, reason: {reason}")]
-pub struct CryptographyError {
-    pub stage: CryptographyStage,
-    #[source]
-    pub reason: openssl::error::ErrorStack,
+    /// Error from a function call.
+    #[error("{0}")]
+    Function(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
 static_assertions::const_assert_eq!(std::mem::size_of::<ExprError>(), 40);

@@ -10715,7 +10715,6 @@ dependencies = [
  "linkme",
  "madsim-tokio",
  "num-traits",
- "openssl",
  "parse-display",
  "paste",
  "prometheus",
