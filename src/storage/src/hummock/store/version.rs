@@ -14,8 +14,7 @@
 
 use std::cmp::Ordering;
 use std::collections::vec_deque::VecDeque;
-use std::collections::HashSet;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::iter::once;
 use std::ops::Bound::Included;
 use std::sync::Arc;
