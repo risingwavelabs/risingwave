@@ -32,7 +32,7 @@ use tracing::info;
 
 use self::model::SystemParamsModel;
 use super::NotificationManagerRef;
-use crate::model::{ValTransaction, VarTransaction};
+use crate::model::{InMemValTransaction, ValTransaction, VarTransaction};
 use crate::storage::{MetaStore, MetaStoreRef, Transaction};
 use crate::{MetaError, MetaResult};
 
