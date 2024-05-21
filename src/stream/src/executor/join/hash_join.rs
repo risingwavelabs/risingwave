@@ -37,7 +37,7 @@ use super::row::{DegreeType, EncodedJoinRow};
 use crate::cache::{new_with_hasher_in, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
-use crate::consistency::{consistency_error, enable_strict_consistency};
+use crate::consistency::{consistency_error, consistency_panic, enable_strict_consistency};
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::join::row::JoinRow;
 use crate::executor::monitor::StreamingMetrics;
@@ -603,9 +603,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         join_row: &mut JoinRow<OwnedRow>,
     ) {
         self.manipulate_degree(join_row_ref, join_row, |d| {
-            *d = d
-                .checked_sub(1)
-                .expect("Tried to decrement zero join row degree")
+            *d = d.checked_sub(1).unwrap_or_else(|| {
+                consistency_panic!("Tried to decrement zero join row degree");
+                0
+            });
         })
     }
 
