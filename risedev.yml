@@ -881,11 +881,10 @@ profile:
         address: message_queue
         port: 29092
       - use: mysql
-        port: 3306
-        address: mysql
+        port: 33306
+        address: host.docker.internal
         user: root
         password: 123456
-        user-managed: true
 
   ci-redis:
     config-path: src/config/ci.toml

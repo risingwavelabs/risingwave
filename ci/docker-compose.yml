@@ -72,6 +72,8 @@ services:
 
   source-test-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240514-1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - mysql
       - db
@@ -81,10 +83,14 @@ services:
       - mongodb-setup
       - mongo_data_generator
     volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/bin/docker:/usr/bin/docker
       - ..:/risingwave
 
   sink-test-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240514-1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - mysql
       - db
@@ -99,12 +105,18 @@ services:
       - starrocks-fe-server
       - starrocks-be-server
     volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/bin/docker:/usr/bin/docker
       - ..:/risingwave
 
 
   rw-build-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240514-1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/bin/docker:/usr/bin/docker
       - ..:/risingwave
 
   ci-flamegraph-env:
