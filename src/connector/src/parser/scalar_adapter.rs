@@ -138,8 +138,7 @@ impl<'a> FromSql<'a> for ScalarAdapter {
     fn accepts(ty: &Type) -> bool {
         match ty.kind() {
             Kind::Simple => {
-                matches!(ty, &Type::UUID | &Type::NUMERIC | &Type::NUMERIC_ARRAY)
-                    || <ScalarImpl as FromSql>::accepts(ty)
+                matches!(ty, &Type::UUID | &Type::NUMERIC) || <ScalarImpl as FromSql>::accepts(ty)
             }
             Kind::Enum(_) => true,
             Kind::Array(inner_type) => <ScalarAdapter as FromSql>::accepts(inner_type),

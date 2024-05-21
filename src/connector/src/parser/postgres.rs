@@ -71,8 +71,7 @@ fn postgres_cell_to_scalar_impl(
         | DataType::Timestamptz
         | DataType::Jsonb
         | DataType::Interval
-        | DataType::Bytea
-        | DataType::Int256 => {
+        | DataType::Bytea => {
             // ScalarAdapter is also fine. But ScalarImpl is more efficient
             let res = row.try_get::<_, Option<ScalarImpl>>(i);
             match res {
@@ -87,7 +86,7 @@ fn postgres_cell_to_scalar_impl(
             // Decimal is more efficient than PgNumeric in ScalarAdapter
             handle_data_type!(row, i, name, Decimal)
         }
-        DataType::Varchar => {
+        DataType::Varchar | DataType::Int256 => {
             let res = row.try_get::<_, Option<ScalarAdapter>>(i);
             match res {
                 Ok(val) => val.and_then(|v| v.into_scalar(data_type)),
