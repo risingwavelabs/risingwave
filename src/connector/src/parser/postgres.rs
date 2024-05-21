@@ -14,14 +14,10 @@
 
 use std::sync::LazyLock;
 
-use chrono::NaiveDate;
 use risingwave_common::catalog::Schema;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{
-    DataType, Date, Decimal, Interval, JsonbVal, ListValue, ScalarImpl, Time, Timestamp,
-    Timestamptz,
-};
+use risingwave_common::types::{DataType, Decimal, ListValue, ScalarImpl};
 use thiserror_ext::AsReport;
 use tokio_postgres::types::{Kind, Type};
 
@@ -87,7 +83,15 @@ fn postgres_cell_to_scalar_impl(
         | DataType::Int32
         | DataType::Int64
         | DataType::Float32
-        | DataType::Float64 => {
+        | DataType::Float64
+        | DataType::Date
+        | DataType::Time
+        | DataType::Timestamp
+        | DataType::Timestamptz
+        | DataType::Jsonb
+        | DataType::Interval
+        | DataType::Bytea
+        | DataType::Int256 => {
             let res = row.try_get::<_, Option<ScalarImpl>>(i);
             match res {
                 Ok(val) => val,
@@ -100,92 +104,23 @@ fn postgres_cell_to_scalar_impl(
         DataType::Decimal => {
             handle_data_type!(row, i, name, Decimal)
         }
-        DataType::Int256 => {
-            let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
+        DataType::Varchar => {
+            let res = row.try_get::<_, Option<ScalarAdapter>>(i);
             match res {
                 Ok(val) => val.and_then(|v| v.into_scalar(data_type)),
-                Err(err) => {
-                    log_error!(name, err, "parse numeric column as pg_numeric failed");
-                    None
-                }
-            }
-        }
-        DataType::Varchar => {
-            if let Kind::Enum(_) = row.columns()[i].type_().kind() {
-                // enum type needs to be handled separately
-                let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
-                match res {
-                    Ok(val) => val.and_then(|v| v.into_scalar(data_type)),
-                    Err(err) => {
-                        log_error!(name, err, "parse enum column failed");
-                        None
-                    }
-                }
-            } else {
-                match *row.columns()[i].type_() {
-                    // Since we don't support UUID natively, adapt it to a VARCHAR column
-                    Type::UUID => {
-                        let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
-                        match res {
-                            Ok(val) => val.and_then(|v| v.into_scalar(data_type)),
-                            Err(err) => {
-                                log_error!(name, err, "parse uuid column failed");
-                                None
-                            }
-                        }
-                    }
-                    // we support converting NUMERIC to VARCHAR implicitly
-                    Type::NUMERIC => {
-                        let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
-                        match res {
-                            Ok(val) => val.and_then(|v| v.into_scalar(data_type)),
-                            Err(err) => {
-                                log_error!(name, err, "parse numeric column as pg_numeric failed");
-                                None
-                            }
-                        }
-                    }
-                    _ => {
-                        handle_data_type!(row, i, name, String)
-                    }
-                }
-            }
-        }
-        DataType::Date => {
-            handle_data_type!(row, i, name, Date)
-        }
-        DataType::Time => {
-            handle_data_type!(row, i, name, Time)
-        }
-        DataType::Timestamp => {
-            handle_data_type!(row, i, name, Timestamp)
-        }
-        DataType::Timestamptz => {
-            handle_data_type!(row, i, name, Timestamptz)
-        }
-        DataType::Bytea => {
-            let res = row.try_get::<_, Option<Vec<u8>>>(i);
-            match res {
-                Ok(val) => val.map(|v| ScalarImpl::from(v.into_boxed_slice())),
                 Err(err) => {
                     log_error!(name, err, "parse column failed");
                     None
                 }
             }
         }
-        DataType::Jsonb => {
-            handle_data_type!(row, i, name, JsonbVal)
-        }
-        DataType::Interval => {
-            handle_data_type!(row, i, name, Interval)
-        }
         DataType::List(dtype) => {
             // enum list needs to be handled separately
             if let Kind::Array(item_type) = row.columns()[i].type_().kind()
                 && let Kind::Enum(_) = item_type.kind()
             {
-                // Issue #1, we use ScalarAdapter instead of Option<ScalarAdapter>
-                let res = row.try_get::<_, Option<Vec<ScalarAdapter<'_>>>>(i);
+                // Issue #1, we use ScalarAdaptertead of Option<ScalarAdapter
+                let res = row.try_get::<_, Option<Vec<ScalarAdapter>>>(i);
                 match res {
                     Ok(val) => val.map(|val| {
                         let mut builder = dtype.create_array_builder(0);
@@ -200,120 +135,27 @@ fn postgres_cell_to_scalar_impl(
                 }
             } else {
                 match **dtype {
-                    DataType::Boolean => {
-                        handle_list_data_type!(row, i, name, dtype, bool)
-                    }
-                    DataType::Int16 => {
-                        handle_list_data_type!(row, i, name, dtype, i16)
-                    }
-                    DataType::Int32 => {
-                        handle_list_data_type!(row, i, name, dtype, i32)
-                    }
-                    DataType::Int64 => {
-                        handle_list_data_type!(row, i, name, dtype, i64)
-                    }
-                    DataType::Float32 => {
-                        handle_list_data_type!(row, i, name, dtype, f32)
-                    }
-                    DataType::Float64 => {
-                        handle_list_data_type!(row, i, name, dtype, f64)
-                    }
-                    DataType::Decimal => {
-                        let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
+                    DataType::Boolean
+                    | DataType::Int16
+                    | DataType::Int32
+                    | DataType::Int64
+                    | DataType::Float32
+                    | DataType::Float64
+                    | DataType::Date
+                    | DataType::Time
+                    | DataType::Timestamp
+                    | DataType::Timestamptz
+                    | DataType::Jsonb
+                    | DataType::Interval
+                    | DataType::Bytea
+                    | DataType::Int256
+                    | DataType::Decimal
+                    | DataType::Varchar => {
+                        let res = row.try_get::<_, Option<ScalarAdapter>>(i);
                         match res {
                             Ok(val) => val.and_then(|v| v.into_scalar(data_type)),
                             Err(err) => {
-                                log_error!(name, err, "parse uuid column failed");
-                                None
-                            }
-                        }
-                    }
-                    DataType::Date => {
-                        handle_list_data_type!(row, i, name, dtype, Date)
-                    }
-                    DataType::Varchar => {
-                        match *row.columns()[i].type_() {
-                            // Since we don't support UUID natively, adapt it to a VARCHAR column
-                            Type::UUID_ARRAY => {
-                                let res =
-                                    row.try_get::<_, Option<Vec<Option<ScalarAdapter<'_>>>>>(i);
-                                match res {
-                                    Ok(val) => val.map(|val| {
-                                        let mut builder = dtype.create_array_builder(0);
-                                        val.into_iter().for_each(|val| {
-                                            builder.append(
-                                                val.and_then(|v| v.into_scalar(&DataType::Varchar)),
-                                            )
-                                        });
-                                        ScalarImpl::from(ListValue::new(builder.finish()))
-                                    }),
-                                    Err(err) => {
-                                        log_error!(name, err, "parse uuid column failed");
-                                        None
-                                    }
-                                }
-                            }
-                            Type::NUMERIC_ARRAY => {
-                                let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
-                                match res {
-                                    Ok(val) => val.and_then(|v| v.into_scalar(data_type)),
-                                    Err(err) => {
-                                        log_error!(
-                                            name,
-                                            err,
-                                            "parse numeric list column as pg_numeric list failed"
-                                        );
-                                        None
-                                    }
-                                }
-                            }
-                            _ => {
-                                handle_list_data_type!(row, i, name, dtype, String)
-                            }
-                        }
-                    }
-                    DataType::Time => {
-                        handle_list_data_type!(row, i, name, dtype, Time)
-                    }
-                    DataType::Timestamp => {
-                        handle_list_data_type!(row, i, name, dtype, Timestamp)
-                    }
-                    DataType::Timestamptz => {
-                        handle_list_data_type!(row, i, name, dtype, Timestamptz)
-                    }
-                    DataType::Interval => {
-                        handle_list_data_type!(row, i, name, dtype, Interval)
-                    }
-                    DataType::Jsonb => {
-                        handle_list_data_type!(row, i, name, dtype, JsonbVal)
-                    }
-                    DataType::Bytea => {
-                        let res = row.try_get::<_, Option<Vec<Option<Vec<u8>>>>>(i);
-                        match res {
-                            Ok(val) => val.map(|val| {
-                                let mut builder = dtype.create_array_builder(0);
-                                val.into_iter().for_each(|val| {
-                                    builder
-                                        .append(val.map(|v| ScalarImpl::from(v.into_boxed_slice())))
-                                });
-                                ScalarImpl::from(ListValue::new(builder.finish()))
-                            }),
-                            Err(err) => {
-                                log_error!(name, err, "parse column failed");
-                                None
-                            }
-                        }
-                    }
-                    DataType::Int256 => {
-                        let res = row.try_get::<_, Option<ScalarAdapter<'_>>>(i);
-                        match res {
-                            Ok(val) => val.and_then(|v| v.into_scalar(data_type)),
-                            Err(err) => {
-                                log_error!(
-                                    name,
-                                    err,
-                                    "parse numeric list column as pg_numeric list failed"
-                                );
+                                log_error!(name, err, "parse list column failed");
                                 None
                             }
                         }

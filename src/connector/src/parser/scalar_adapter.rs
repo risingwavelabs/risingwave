@@ -75,18 +75,19 @@ impl ToSql for EnumString {
 /// Adapter for `ScalarImpl` to Postgres data type,
 /// which can be used to encode/decode to/from Postgres value.
 #[derive(Debug)]
-pub(crate) enum ScalarAdapter<'a> {
-    Builtin(ScalarRefImpl<'a>),
+pub(crate) enum ScalarAdapter {
+    Builtin(ScalarImpl),
     Uuid(uuid::Uuid),
     // Currently in order to handle the decimal beyond RustDecimal,
     // we use the PgNumeric type to convert the decimal to a string/decimal/rw_int256.
     Numeric(PgNumeric),
     Enum(EnumString),
+    EnumList(Vec<Option<EnumString>>),
     NumericList(Vec<Option<PgNumeric>>),
-    List(Vec<Option<ScalarAdapter<'a>>>),
+    List(Vec<Option<ScalarAdapter>>),
 }
 
-impl ToSql for ScalarAdapter<'_> {
+impl ToSql for ScalarAdapter {
     to_sql_checked!();
 
     fn to_sql(
@@ -99,6 +100,7 @@ impl ToSql for ScalarAdapter<'_> {
             ScalarAdapter::Uuid(v) => v.to_sql(ty, out),
             ScalarAdapter::Numeric(v) => v.to_sql(ty, out),
             ScalarAdapter::Enum(v) => v.to_sql(ty, out),
+            ScalarAdapter::EnumList(v) => v.to_sql(ty, out),
             ScalarAdapter::NumericList(v) => v.to_sql(ty, out),
             ScalarAdapter::List(v) => v.to_sql(ty, out),
         }
@@ -110,7 +112,7 @@ impl ToSql for ScalarAdapter<'_> {
 }
 
 /// convert from Postgres uuid, numeric and enum to `ScalarAdapter`
-impl<'a> FromSql<'a> for ScalarAdapter<'_> {
+impl<'a> FromSql<'a> for ScalarAdapter {
     fn from_sql(
         ty: &Type,
         raw: &'a [u8],
@@ -119,31 +121,41 @@ impl<'a> FromSql<'a> for ScalarAdapter<'_> {
             Kind::Simple => match *ty {
                 Type::UUID => Ok(ScalarAdapter::Uuid(uuid::Uuid::from_sql(ty, raw)?)),
                 Type::NUMERIC => Ok(ScalarAdapter::Numeric(PgNumeric::from_sql(ty, raw)?)),
-                _ => Err(anyhow!("failed to convert type {:?} to ScalarAdapter", ty).into()),
+                _ => Ok(ScalarAdapter::Builtin(ScalarImpl::from_sql(ty, raw)?)),
             },
             Kind::Enum(_) => Ok(ScalarAdapter::Enum(EnumString::from_sql(ty, raw)?)),
             Kind::Array(Type::NUMERIC) => {
                 Ok(ScalarAdapter::NumericList(FromSql::from_sql(ty, raw)?))
             }
-            Kind::Array(_) => Ok(ScalarAdapter::List(FromSql::from_sql(ty, raw)?)),
+            Kind::Array(inner_type) if let Kind::Enum(_) = inner_type.kind() => {
+                Ok(ScalarAdapter::EnumList(FromSql::from_sql(ty, raw)?))
+            }
+            Kind::Array(inner_type) => Ok(ScalarAdapter::List(FromSql::from_sql(ty, raw)?)),
             _ => Err(anyhow!("failed to convert type {:?} to ScalarAdapter", ty).into()),
         }
     }
 
     fn accepts(ty: &Type) -> bool {
-        matches!(ty, &Type::UUID | &Type::NUMERIC | &Type::NUMERIC_ARRAY)
-            || <EnumString as FromSql>::accepts(ty)
-            || matches!(ty.kind(), Kind::Array(_))
+        match ty.kind() {
+            Kind::Simple => {
+                matches!(ty, &Type::UUID | &Type::NUMERIC | &Type::NUMERIC_ARRAY)
+                    || <ScalarImpl as FromSql>::accepts(ty)
+            }
+            Kind::Enum(_) => true,
+            Kind::Array(inner_type) => <ScalarAdapter as FromSql>::accepts(inner_type),
+            _ => false,
+        }
     }
 }
 
-impl ScalarAdapter<'_> {
+impl ScalarAdapter {
     pub fn name(&self) -> &'static str {
         match self {
             ScalarAdapter::Builtin(_) => "Builtin",
             ScalarAdapter::Uuid(_) => "Uuid",
             ScalarAdapter::Numeric(_) => "Numeric",
             ScalarAdapter::Enum(_) => "Enum",
+            ScalarAdapter::EnumList(_) => "EnumList",
             ScalarAdapter::NumericList(_) => "NumericList",
             ScalarAdapter::List(_) => "List",
         }
@@ -153,7 +165,7 @@ impl ScalarAdapter<'_> {
     pub(crate) fn from_scalar<'a>(
         scalar: ScalarRefImpl<'a>,
         ty: &Type,
-    ) -> ConnectorResult<ScalarAdapter<'a>> {
+    ) -> ConnectorResult<ScalarAdapter> {
         Ok(match (scalar, ty, ty.kind()) {
             (ScalarRefImpl::Utf8(s), &Type::UUID, _) => ScalarAdapter::Uuid(s.parse()?),
             (ScalarRefImpl::Utf8(s), &Type::NUMERIC, _) => {
@@ -180,24 +192,38 @@ impl ScalarAdapter<'_> {
                 }
                 ScalarAdapter::NumericList(vec)
             }
-            (ScalarRefImpl::List(list), _, Kind::Array(inner_type)) => {
-                let mut vec = vec![];
-                for scalar in list.iter() {
-                    vec.push(
-                        scalar
-                            .map(|s| ScalarAdapter::from_scalar(s, inner_type))
-                            .transpose()?,
-                    );
+            (ScalarRefImpl::List(list), _, Kind::Array(inner_type)) => match inner_type.kind() {
+                Kind::Enum(_) => {
+                    let mut vec = vec![];
+                    for scalar in list.iter() {
+                        vec.push(match scalar {
+                            Some(ScalarRefImpl::Utf8(s)) => Some(EnumString(s.to_owned())),
+                            _ => unreachable!(
+                                "Only non-null varchar[] is supported to convert to enum[]"
+                            ),
+                        })
+                    }
+                    ScalarAdapter::EnumList(vec)
                 }
-                ScalarAdapter::List(vec)
-            }
-            _ => ScalarAdapter::Builtin(scalar),
+                _ => {
+                    let mut vec = vec![];
+                    for scalar in list.iter() {
+                        vec.push(
+                            scalar
+                                .map(|s| ScalarAdapter::from_scalar(s, inner_type))
+                                .transpose()?,
+                        );
+                    }
+                    ScalarAdapter::List(vec)
+                }
+            },
+            _ => ScalarAdapter::Builtin(scalar.into_scalar_impl()),
         })
     }
 
     pub fn into_scalar(self, ty: &DataType) -> Option<ScalarImpl> {
         match (self, &ty) {
-            (ScalarAdapter::Builtin(scalar), _) => Some(scalar.into_scalar_impl()),
+            (ScalarAdapter::Builtin(scalar), _) => Some(scalar),
             (ScalarAdapter::Uuid(uuid), &DataType::Varchar) => {
                 Some(ScalarImpl::from(uuid.to_string()))
             }
@@ -249,6 +275,20 @@ impl ScalarAdapter<'_> {
                         (None, _) => None,
                     };
                     builder.append(scalar);
+                }
+                Some(ScalarImpl::from(ListValue::new(builder.finish())))
+            }
+            (ScalarAdapter::EnumList(vec), &DataType::List(dtype)) => {
+                let mut builder = dtype.create_array_builder(0);
+                for val in vec {
+                    match val {
+                        Some(EnumString(s)) => {
+                            builder.append(Some(ScalarImpl::from(s)));
+                        }
+                        None => {
+                            return None;
+                        }
+                    }
                 }
                 Some(ScalarImpl::from(ListValue::new(builder.finish())))
             }

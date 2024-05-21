@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use postgres_types::{to_sql_checked, FromSql, IsNull, Kind, Type};
+use postgres_types::{FromSql, Kind, Type};
+use risingwave_common::types::{
+    Date, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
+};
 
-use crate::types::{ScalarImpl, ScalarRefImpl};
-
-impl<'a> FromSql<'a> for ScalarRefImpl<'_> {
+impl<'a> FromSql<'a> for ScalarImpl {
     fn from_sql(
         ty: &Type,
         raw: &'a [u8],
@@ -27,8 +28,19 @@ impl<'a> FromSql<'a> for ScalarRefImpl<'_> {
                 Type::INT2 => ScalarImpl::from(i16::from_sql(ty, raw)?),
                 Type::INT4 => ScalarImpl::from(i32::from_sql(ty, raw)?),
                 Type::INT8 => ScalarImpl::from(i64::from_sql(ty, raw)?),
-                Type::FLOAT4 => ScalarImpl::from(f32::from_sql(ty, raw)?).as_scalar_ref_impl(),
-                Type::FLOAT8 => ScalarImpl::from(f64::from_sql(ty, raw)?).as_scalar_ref_impl(),
+                Type::FLOAT4 => ScalarImpl::from(f32::from_sql(ty, raw)?),
+                Type::FLOAT8 => ScalarImpl::from(f64::from_sql(ty, raw)?),
+                Type::DATE => ScalarImpl::from(Date::from_sql(ty, raw)?),
+                Type::TIME => ScalarImpl::from(Time::from_sql(ty, raw)?),
+                Type::TIMESTAMP => ScalarImpl::from(Timestamp::from_sql(ty, raw)?),
+                Type::TIMESTAMPTZ => ScalarImpl::from(Timestamptz::from_sql(ty, raw)?),
+                Type::JSONB => ScalarImpl::from(JsonbVal::from_sql(ty, raw)?),
+                Type::INTERVAL => ScalarImpl::from(Interval::from_sql(ty, raw)?),
+                Type::BYTEA => ScalarImpl::from(Vec::<u8>::from_sql(ty, raw)?.into_boxed_slice()),
+                Type::VARCHAR | Type::TEXT | Type::BPCHAR | Type::NAME | Type::UNKNOWN => {
+                    ScalarImpl::from(String::from_sql(ty, raw)?)
+                }
+                // Serial Int256 Struct List Decimal are not supported here
                 _ => bail_not_implemented!("the postgres decoding for {ty} is unsupported"),
             },
             _ => bail_not_implemented!("the postgres decoding for {ty} is unsupported"),
@@ -36,6 +48,26 @@ impl<'a> FromSql<'a> for ScalarRefImpl<'_> {
     }
 
     fn accepts(ty: &Type) -> bool {
-        matches!(*ty, Type::TIMESTAMPTZ)
+        matches!(
+            *ty,
+            Type::BOOL
+                | Type::INT2
+                | Type::INT4
+                | Type::INT8
+                | Type::FLOAT4
+                | Type::FLOAT8
+                | Type::DATE
+                | Type::TIME
+                | Type::TIMESTAMP
+                | Type::TIMESTAMPTZ
+                | Type::JSONB
+                | Type::INTERVAL
+                | Type::BYTEA
+                | Type::VARCHAR
+                | Type::TEXT
+                | Type::BPCHAR
+                | Type::NAME
+                | Type::UNKNOWN
+        )
     }
 }
