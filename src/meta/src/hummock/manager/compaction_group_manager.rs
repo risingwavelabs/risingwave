@@ -42,8 +42,11 @@ use crate::hummock::compaction::compaction_config::{
     validate_compaction_config, CompactionConfigBuilder,
 };
 use crate::hummock::error::{Error, Result};
+use crate::hummock::manager::versioning::{calc_new_write_limits, Versioning};
 use crate::hummock::manager::{commit_multi_var, HummockManager};
-use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
+use crate::hummock::metrics_utils::{
+    remove_compaction_group_in_sst_stat, trigger_write_stop_stats,
+};
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
 use crate::manager::{MetaSrvEnv, MetaStoreImpl};
@@ -52,18 +55,16 @@ use crate::model::{
 };
 use crate::storage::MetaStore;
 
-impl HummockManager {
-    pub(super) async fn build_compaction_group_manager(
-        env: &MetaSrvEnv,
-    ) -> Result<CompactionGroupManager> {
+impl CompactionGroupManager {
+    pub(super) async fn new(env: &MetaSrvEnv) -> Result<CompactionGroupManager> {
         let default_config = match env.opts.compaction_config.as_ref() {
             None => CompactionConfigBuilder::new().build(),
             Some(opt) => CompactionConfigBuilder::with_opt(opt).build(),
         };
-        Self::build_compaction_group_manager_with_config(env, default_config).await
+        Self::new_with_config(env, default_config).await
     }
 
-    pub(super) async fn build_compaction_group_manager_with_config(
+    pub(super) async fn new_with_config(
         env: &MetaSrvEnv,
         default_config: CompactionConfig,
     ) -> Result<CompactionGroupManager> {
@@ -76,7 +77,9 @@ impl HummockManager {
         compaction_group_manager.init().await?;
         Ok(compaction_group_manager)
     }
+}
 
+impl HummockManager {
     /// Should not be called inside [`HummockManager`], because it requests locks internally.
     /// The implementation acquires `versioning` lock.
     pub async fn compaction_group_ids(&self) -> Vec<CompactionGroupId> {
@@ -613,6 +616,90 @@ impl HummockManager {
         }
         infos
     }
+
+    pub(super) async fn initial_compaction_group_config_after_load(
+        &self,
+        versioning_guard: &Versioning,
+        compaction_group_manager: &mut CompactionGroupManager,
+    ) -> Result<()> {
+        // 1. Due to version compatibility, we fix some of the configuration of older versions after hummock starts.
+        let current_version = &versioning_guard.current_version;
+        let all_group_ids = get_compaction_group_ids(current_version);
+        let mut configs = compaction_group_manager
+            .get_or_insert_compaction_group_configs(&all_group_ids.collect_vec())
+            .await?;
+
+        // We've already lowered the default limit for write limit in PR-12183, and to prevent older clusters from continuing to use the outdated configuration, we've introduced a new logic to rewrite it in a uniform way.
+        let mut rewrite_cg_ids = vec![];
+        let mut restore_cg_to_partition_vnode: HashMap<u64, BTreeMap<u32, u32>> =
+            HashMap::default();
+        for (cg_id, compaction_group_config) in &mut configs {
+            // update write limit
+            let relaxed_default_write_stop_level_count = 1000;
+            if compaction_group_config
+                .compaction_config
+                .level0_sub_level_compact_level_count
+                == relaxed_default_write_stop_level_count
+            {
+                rewrite_cg_ids.push(*cg_id);
+            }
+
+            if let Some(levels) = current_version.levels.get(cg_id) {
+                if levels.member_table_ids.len() == 1 {
+                    restore_cg_to_partition_vnode.insert(
+                        *cg_id,
+                        vec![(
+                            levels.member_table_ids[0],
+                            compaction_group_config
+                                .compaction_config
+                                .split_weight_by_vnode,
+                        )]
+                        .into_iter()
+                        .collect(),
+                    );
+                }
+            }
+        }
+
+        if !rewrite_cg_ids.is_empty() {
+            tracing::info!("Compaction group {:?} configs rewrite ", rewrite_cg_ids);
+
+            // update meta store
+            let result = compaction_group_manager
+                .update_compaction_config(
+                    &rewrite_cg_ids,
+                    &[
+                        MutableConfig::Level0StopWriteThresholdSubLevelNumber(
+                            risingwave_common::config::default::compaction_config::level0_stop_write_threshold_sub_level_number(),
+                        ),
+                    ],
+                )
+                .await?;
+
+            // update memory
+            for new_config in result {
+                configs.insert(new_config.group_id(), new_config);
+            }
+        }
+
+        compaction_group_manager.write_limit =
+            calc_new_write_limits(configs, HashMap::new(), &versioning_guard.current_version);
+        trigger_write_stop_stats(&self.metrics, &compaction_group_manager.write_limit);
+        tracing::debug!(
+            "Hummock stopped write: {:#?}",
+            compaction_group_manager.write_limit
+        );
+
+        {
+            // 2. Restore the memory data structure according to the memory of the compaction group config.
+            let mut group_to_table_vnode_partition = self.group_to_table_vnode_partition.write();
+            for (cg_id, table_vnode_partition) in restore_cg_to_partition_vnode {
+                group_to_table_vnode_partition.insert(cg_id, table_vnode_partition);
+            }
+        }
+
+        Ok(())
+    }
 }
 
 /// We muse ensure there is an entry exists in [`CompactionGroupManager`] for any
@@ -630,6 +717,7 @@ pub(super) struct CompactionGroupManager {
     meta_store_impl: MetaStoreImpl,
 }
 
+// init method
 impl CompactionGroupManager {
     async fn init(&mut self) -> Result<()> {
         let loaded_compaction_groups: BTreeMap<CompactionGroupId, CompactionGroup> =
@@ -656,8 +744,29 @@ impl CompactionGroupManager {
         Ok(())
     }
 
+    /// Initializes the config for a group.
+    /// Should only be used by compaction test.
+    pub(super) async fn init_compaction_config_for_replay(
+        &mut self,
+        group_id: CompactionGroupId,
+        config: CompactionConfig,
+    ) -> Result<()> {
+        let insert = BTreeMapEntryTransaction::new_insert(
+            &mut self.compaction_groups,
+            group_id,
+            CompactionGroup {
+                group_id,
+                compaction_config: Arc::new(config),
+            },
+        );
+        commit_multi_var!(self.meta_store_impl, insert)?;
+        Ok(())
+    }
+}
+
+impl CompactionGroupManager {
     /// Gets compaction group config for `compaction_group_id`, inserts default one if missing.
-    pub(super) async fn get_or_insert_compaction_group_config(
+    async fn get_or_insert_compaction_group_config(
         &mut self,
         compaction_group_id: CompactionGroupId,
     ) -> Result<CompactionGroup> {
@@ -668,7 +777,7 @@ impl CompactionGroupManager {
     }
 
     /// Gets compaction group configs for `compaction_group_ids`, inserts default one if missing.
-    pub(super) async fn get_or_insert_compaction_group_configs(
+    async fn get_or_insert_compaction_group_configs(
         &mut self,
         compaction_group_ids: &[CompactionGroupId],
     ) -> Result<HashMap<CompactionGroupId, CompactionGroup>> {
@@ -701,7 +810,7 @@ impl CompactionGroupManager {
         self.default_config.clone()
     }
 
-    pub async fn update_compaction_config(
+    pub(super) async fn update_compaction_config(
         &mut self,
         compaction_group_ids: &[CompactionGroupId],
         config_to_update: &[MutableConfig],
@@ -724,25 +833,6 @@ impl CompactionGroupManager {
         }
         commit_multi_var!(self.meta_store_impl, compaction_groups)?;
         Ok(result)
-    }
-
-    /// Initializes the config for a group.
-    /// Should only be used by compaction test.
-    pub async fn init_compaction_config_for_replay(
-        &mut self,
-        group_id: CompactionGroupId,
-        config: CompactionConfig,
-    ) -> Result<()> {
-        let insert = BTreeMapEntryTransaction::new_insert(
-            &mut self.compaction_groups,
-            group_id,
-            CompactionGroup {
-                group_id,
-                compaction_config: Arc::new(config),
-            },
-        );
-        commit_multi_var!(self.meta_store_impl, insert)?;
-        Ok(())
     }
 
     /// Removes stale group configs.
@@ -826,16 +916,14 @@ mod tests {
     use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
     use risingwave_pb::meta::table_fragments::Fragment;
 
+    use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
     use crate::hummock::test_utils::setup_compute_env;
-    use crate::hummock::HummockManager;
     use crate::model::TableFragments;
 
     #[tokio::test]
     async fn test_inner() {
         let (env, ..) = setup_compute_env(8080).await;
-        let mut inner = HummockManager::build_compaction_group_manager(&env)
-            .await
-            .unwrap();
+        let mut inner = CompactionGroupManager::new(&env).await.unwrap();
         assert_eq!(inner.compaction_groups.len(), 2);
         inner
             .update_compaction_config(&[100, 200], &[])
@@ -846,9 +934,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(inner.compaction_groups.len(), 4);
-        let mut inner = HummockManager::build_compaction_group_manager(&env)
-            .await
-            .unwrap();
+        let mut inner = CompactionGroupManager::new(&env).await.unwrap();
         assert_eq!(inner.compaction_groups.len(), 4);
         inner
             .update_compaction_config(&[100, 200], &[MutableConfig::MaxSubCompaction(123)])

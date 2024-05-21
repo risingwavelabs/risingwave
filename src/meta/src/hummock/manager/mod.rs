@@ -30,7 +30,6 @@ use parking_lot::Mutex;
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::default::compaction_config;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
@@ -51,7 +50,6 @@ use risingwave_meta_model_v2::{
 };
 use risingwave_pb::hummock::compact_task::{self, TaskStatus, TaskType};
 use risingwave_pb::hummock::group_delta::DeltaType;
-use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config;
 use risingwave_pb::hummock::subscribe_compaction_event_request::{
     Event as RequestEvent, HeartBeat, ReportTask,
 };
@@ -81,7 +79,7 @@ use crate::hummock::metrics_utils::{
     build_compact_task_level_type_metrics_label, get_or_create_local_table_stat,
     trigger_delta_log_stats, trigger_local_table_stat, trigger_lsm_stat, trigger_mv_stat,
     trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state, trigger_sst_stat,
-    trigger_version_stat, trigger_write_stop_stats,
+    trigger_version_stat,
 };
 use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
@@ -277,7 +275,7 @@ impl HummockManager {
             Streaming<SubscribeCompactionEventRequest>,
         )>,
     ) -> Result<HummockManagerRef> {
-        let compaction_group_manager = Self::build_compaction_group_manager(&env).await?;
+        let compaction_group_manager = CompactionGroupManager::new(&env).await?;
         Self::new_impl(
             env,
             metadata_manager,
@@ -303,10 +301,9 @@ impl HummockManager {
         )>,
     ) -> HummockManagerRef {
         use crate::manager::CatalogManager;
-        let compaction_group_manager =
-            Self::build_compaction_group_manager_with_config(&env, config)
-                .await
-                .unwrap();
+        let compaction_group_manager = CompactionGroupManager::new_with_config(&env, config)
+            .await
+            .unwrap();
         let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
         let metadata_manager =
             MetadataManager::new_v1(cluster_manager, catalog_manager, fragment_manager);
@@ -3124,90 +3121,6 @@ impl HummockManager {
         }
 
         TableAlignRule::NoOptimization
-    }
-
-    async fn initial_compaction_group_config_after_load(
-        &self,
-        versioning_guard: &Versioning,
-        compaction_group_manager: &mut CompactionGroupManager,
-    ) -> Result<()> {
-        // 1. Due to version compatibility, we fix some of the configuration of older versions after hummock starts.
-        let current_version = &versioning_guard.current_version;
-        let all_group_ids = get_compaction_group_ids(current_version);
-        let mut configs = compaction_group_manager
-            .get_or_insert_compaction_group_configs(&all_group_ids.collect_vec())
-            .await?;
-
-        // We've already lowered the default limit for write limit in PR-12183, and to prevent older clusters from continuing to use the outdated configuration, we've introduced a new logic to rewrite it in a uniform way.
-        let mut rewrite_cg_ids = vec![];
-        let mut restore_cg_to_partition_vnode: HashMap<u64, BTreeMap<u32, u32>> =
-            HashMap::default();
-        for (cg_id, compaction_group_config) in &mut configs {
-            // update write limit
-            let relaxed_default_write_stop_level_count = 1000;
-            if compaction_group_config
-                .compaction_config
-                .level0_sub_level_compact_level_count
-                == relaxed_default_write_stop_level_count
-            {
-                rewrite_cg_ids.push(*cg_id);
-            }
-
-            if let Some(levels) = current_version.levels.get(cg_id) {
-                if levels.member_table_ids.len() == 1 {
-                    restore_cg_to_partition_vnode.insert(
-                        *cg_id,
-                        vec![(
-                            levels.member_table_ids[0],
-                            compaction_group_config
-                                .compaction_config
-                                .split_weight_by_vnode,
-                        )]
-                        .into_iter()
-                        .collect(),
-                    );
-                }
-            }
-        }
-
-        if !rewrite_cg_ids.is_empty() {
-            tracing::info!("Compaction group {:?} configs rewrite ", rewrite_cg_ids);
-
-            // update meta store
-            let result = compaction_group_manager
-                .update_compaction_config(
-                    &rewrite_cg_ids,
-                    &[
-                        mutable_config::MutableConfig::Level0StopWriteThresholdSubLevelNumber(
-                            compaction_config::level0_stop_write_threshold_sub_level_number(),
-                        ),
-                    ],
-                )
-                .await?;
-
-            // update memory
-            for new_config in result {
-                configs.insert(new_config.group_id(), new_config);
-            }
-        }
-
-        compaction_group_manager.write_limit =
-            calc_new_write_limits(configs, HashMap::new(), &versioning_guard.current_version);
-        trigger_write_stop_stats(&self.metrics, &compaction_group_manager.write_limit);
-        tracing::debug!(
-            "Hummock stopped write: {:#?}",
-            compaction_group_manager.write_limit
-        );
-
-        {
-            // 2. Restore the memory data structure according to the memory of the compaction group config.
-            let mut group_to_table_vnode_partition = self.group_to_table_vnode_partition.write();
-            for (cg_id, table_vnode_partition) in restore_cg_to_partition_vnode {
-                group_to_table_vnode_partition.insert(cg_id, table_vnode_partition);
-            }
-        }
-
-        Ok(())
     }
 
     pub async fn list_change_log_epochs(
