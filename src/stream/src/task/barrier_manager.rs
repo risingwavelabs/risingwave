@@ -678,8 +678,9 @@ impl LocalBarrierWorker {
                 // The failure actors could exit before the barrier is issued, while their
                 // up-downstream actors could be stuck somehow. Return error directly to trigger the
                 // recovery.
-                // try_find_root_failure is not used merely because it requires async.
-                return Err(self.root_failure.clone().unwrap_or(e.clone()));
+                return Err(
+                    try_find_root_actor_failure(self.failure_actors.values()).unwrap_or(e.clone())
+                );
             }
         }
 
