@@ -279,7 +279,7 @@ impl OpendalStreamingUploader {
                 config.retry.streaming_upload_attempt_timeout_ms,
             )))
             .writer_with(&path)
-            .concurrent(8)
+            .concurrent(config.s3.developer.upload_concurrency)
             .await?;
         Ok(Self { writer, buf: vec![], not_uploaded_len: 0, is_valid: true })
     }
