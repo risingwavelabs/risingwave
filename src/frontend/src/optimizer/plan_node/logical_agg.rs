@@ -519,8 +519,16 @@ impl LogicalAggBuilder {
     /// Return an `InputRef` to that agg call.
     /// For existing agg calls, return an `InputRef` to the existing one.
     fn push_agg_call(&mut self, agg_call: AggCall) -> Result<InputRef> {
-        let return_type = agg_call.return_type();
-        let (kind, args, distinct, order_by, filter, direct_args) = agg_call.decompose();
+        let AggCall {
+            agg_kind,
+            return_type,
+            args,
+            distinct,
+            order_by,
+            filter,
+            direct_args,
+            user_defined,
+        } = agg_call;
 
         self.is_in_filter_clause = true;
         // filter expr is not added to `input_proj_builder` as a whole. Special exprs incl
@@ -550,13 +558,14 @@ impl LogicalAggBuilder {
             })?;
 
         let plan_agg_call = PlanAggCall {
-            agg_kind: kind,
+            agg_kind,
             return_type: return_type.clone(),
             inputs: args,
             distinct,
             order_by,
             filter,
             direct_args,
+            user_defined,
         };
 
         if let Some((pos, existing)) = self

@@ -560,8 +560,6 @@ message UserDefinedFunction {
 message UserDefinedFunctionMetadata {
   repeated string arg_names = 8;
   repeated data.DataType arg_types = 3;
-  // The state type of aggregate function.
-  optional data.DataType state_type = 2;
   string language = 4;
   optional string link = 5;
   optional string identifier = 6;

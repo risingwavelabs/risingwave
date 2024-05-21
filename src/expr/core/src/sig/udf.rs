@@ -20,6 +20,7 @@
 
 use anyhow::{bail, Context, Result};
 use arrow_array::{ArrayRef, BooleanArray, RecordBatch};
+use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
 use risingwave_common::types::DataType;
 
@@ -77,12 +78,11 @@ pub struct UdfImplDescriptor {
 /// These information are parsed from `CREATE FUNCTION` statement.
 /// Implementations should verify the options and return a `CreateFunctionOutput` in `create_fn`.
 pub struct CreateFunctionOptions<'a> {
+    pub kind: UdfKind,
     pub name: &'a str,
     pub arg_names: &'a [String],
     pub arg_types: &'a [DataType],
     pub return_type: &'a DataType,
-    pub state_type: Option<&'a DataType>,
-    pub is_table_function: bool,
     pub as_: Option<&'a str>,
     pub using_link: Option<&'a str>,
     pub using_base64_decoded: Option<&'a [u8]>,
@@ -97,16 +97,22 @@ pub struct CreateFunctionOutput {
 
 /// Options for building a UDF runtime.
 pub struct UdfOptions<'a> {
-    pub table_function: bool,
+    pub kind: UdfKind,
     pub body: Option<&'a str>,
     pub compressed_binary: Option<&'a [u8]>,
     pub link: Option<&'a str>,
     pub identifier: &'a str,
     pub arg_names: &'a [String],
     pub return_type: &'a DataType,
-    pub state_type: Option<&'a DataType>,
     pub always_retry_on_network_error: bool,
     pub function_type: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumAsInner)]
+pub enum UdfKind {
+    Scalar,
+    Table,
+    Aggregate,
 }
 
 /// UDF implementation.

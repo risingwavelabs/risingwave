@@ -14,37 +14,32 @@
 
 use anyhow::Context;
 use risingwave_common::catalog::FunctionId;
-use risingwave_common::types::DataType;
 use risingwave_expr::sig::{CreateFunctionOptions, UdfKind};
-use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
+use risingwave_pb::catalog::function::{AggregateFunction, Kind};
 use risingwave_pb::catalog::Function;
+use risingwave_sqlparser::ast::DataType as AstDataType;
 
 use super::*;
 use crate::catalog::CatalogError;
 use crate::{bind_data_type, Binder};
 
-pub async fn handle_create_function(
+pub async fn handle_create_aggregate(
     handler_args: HandlerArgs,
     or_replace: bool,
-    temporary: bool,
     name: ObjectName,
-    args: Option<Vec<OperateFunctionArg>>,
-    returns: Option<CreateFunctionReturns>,
+    args: Vec<OperateFunctionArg>,
+    returns: AstDataType,
     params: CreateFunctionBody,
-    with_options: CreateFunctionWithOptions,
 ) -> Result<RwPgResponse> {
     if or_replace {
-        bail_not_implemented!("CREATE OR REPLACE FUNCTION");
-    }
-    if temporary {
-        bail_not_implemented!("CREATE TEMPORARY FUNCTION");
+        bail_not_implemented!("CREATE OR REPLACE AGGREGATE");
     }
     // e.g., `language [ python / java / ...etc]`
     let language = match params.language {
         Some(lang) => {
             let lang = lang.real_value().to_lowercase();
             match &*lang {
-                "python" | "java" | "wasm" | "rust" | "javascript" => lang,
+                "python" => lang,
                 _ => {
                     return Err(ErrorCode::InvalidParameterValue(format!(
                         "language {} is not supported",
@@ -54,56 +49,14 @@ pub async fn handle_create_function(
                 }
             }
         }
-        // Empty language is acceptable since we only require the external server implements the
-        // correct protocol.
-        None => "".to_string(),
+        None => return Err(ErrorCode::InvalidParameterValue("no language".into()).into()),
     };
 
-    let runtime = match params.runtime {
-        Some(runtime) => {
-            if language == "javascript" {
-                Some(runtime.real_value())
-            } else {
-                return Err(ErrorCode::InvalidParameterValue(
-                    "runtime is only supported for javascript".to_string(),
-                )
-                .into());
-            }
-        }
-        None => None,
-    };
-
-    let return_type;
-    let kind = match returns {
-        Some(CreateFunctionReturns::Value(data_type)) => {
-            return_type = bind_data_type(&data_type)?;
-            Kind::Scalar(ScalarFunction {})
-        }
-        Some(CreateFunctionReturns::Table(columns)) => {
-            if columns.len() == 1 {
-                // return type is the original type for single column
-                return_type = bind_data_type(&columns[0].data_type)?;
-            } else {
-                // return type is a struct for multiple columns
-                let it = columns
-                    .into_iter()
-                    .map(|c| bind_data_type(&c.data_type).map(|ty| (ty, c.name.real_value())));
-                let (datatypes, names) = itertools::process_results(it, |it| it.unzip())?;
-                return_type = DataType::new_struct(datatypes, names);
-            }
-            Kind::Table(TableFunction {})
-        }
-        None => {
-            return Err(ErrorCode::InvalidParameterValue(
-                "return type must be specified".to_string(),
-            )
-            .into())
-        }
-    };
+    let return_type = bind_data_type(&returns)?;
 
     let mut arg_names = vec![];
     let mut arg_types = vec![];
-    for arg in args.unwrap_or_default() {
+    for arg in args {
         arg_names.push(arg.name.map_or("".to_string(), |n| n.real_value()));
         arg_types.push(bind_data_type(&arg.data_type)?);
     }
@@ -149,14 +102,9 @@ pub async fn handle_create_function(
         None => None,
     };
 
-    let create_fn =
-        risingwave_expr::sig::find_udf_impl(&language, runtime.as_deref(), link)?.create_fn;
+    let create_fn = risingwave_expr::sig::find_udf_impl(&language, None, link)?.create_fn;
     let output = create_fn(CreateFunctionOptions {
-        kind: match kind {
-            Kind::Scalar(_) => UdfKind::Scalar,
-            Kind::Table(_) => UdfKind::Table,
-            Kind::Aggregate(_) => unreachable!(),
-        },
+        kind: UdfKind::Aggregate,
         name: &function_name,
         arg_names: &arg_names,
         arg_types: &arg_types,
@@ -171,7 +119,7 @@ pub async fn handle_create_function(
         schema_id,
         database_id,
         name: function_name,
-        kind: Some(kind),
+        kind: Some(Kind::Aggregate(AggregateFunction {})),
         arg_names,
         arg_types: arg_types.into_iter().map(|t| t.into()).collect(),
         return_type: Some(return_type.into()),
@@ -181,15 +129,13 @@ pub async fn handle_create_function(
         body: output.body,
         compressed_binary: output.compressed_binary,
         owner: session.user_id(),
-        always_retry_on_network_error: with_options
-            .always_retry_on_network_error
-            .unwrap_or_default(),
-        runtime,
+        always_retry_on_network_error: false,
+        runtime: None,
         function_type,
     };
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer.create_function(function).await?;
 
-    Ok(PgResponse::empty_result(StatementType::CREATE_FUNCTION))
+    Ok(PgResponse::empty_result(StatementType::CREATE_AGGREGATE))
 }

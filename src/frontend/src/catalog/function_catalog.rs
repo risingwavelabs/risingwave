@@ -17,6 +17,7 @@ use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
 use risingwave_pb::catalog::function::PbKind;
 use risingwave_pb::catalog::PbFunction;
+use risingwave_pb::expr::PbUserDefinedFunctionMetadata;
 
 use crate::catalog::OwnedByUserCatalog;
 
@@ -76,6 +77,22 @@ impl From<&PbFunction> for FunctionCatalog {
             always_retry_on_network_error: prost.always_retry_on_network_error,
             function_type: prost.function_type.clone(),
             runtime: prost.runtime.clone(),
+        }
+    }
+}
+
+impl From<&FunctionCatalog> for PbUserDefinedFunctionMetadata {
+    fn from(c: &FunctionCatalog) -> Self {
+        PbUserDefinedFunctionMetadata {
+            arg_names: c.arg_names.clone(),
+            arg_types: c.arg_types.iter().map(|t| t.to_protobuf()).collect(),
+            language: c.language.clone(),
+            link: c.link.clone(),
+            identifier: c.identifier.clone(),
+            body: c.body.clone(),
+            compressed_binary: c.compressed_binary.clone(),
+            function_type: c.function_type.clone(),
+            runtime: c.runtime.clone(),
         }
     }
 }

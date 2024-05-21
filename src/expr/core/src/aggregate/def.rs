@@ -439,6 +439,7 @@ pub mod agg_kinds {
                 | AggKind::BoolOr
                 | AggKind::ApproxCountDistinct
                 | AggKind::InternalLastSeenValue
+                | AggKind::UserDefined
         };
     }
     pub use single_value_state;

@@ -32,7 +32,7 @@ use risingwave_pb::expr::ExprNode;
 
 use super::{BoxedExpression, Build};
 use crate::expr::Expression;
-use crate::sig::{UdfImpl, UdfOptions};
+use crate::sig::{UdfImpl, UdfKind, UdfOptions};
 use crate::{bail, ExprError, Result};
 
 #[derive(Debug)]
@@ -175,14 +175,13 @@ impl Build for UserDefinedFunction {
         // lookup UDF builder
         let build_fn = crate::sig::find_udf_impl(language, runtime, link)?.build_fn;
         let runtime = build_fn(UdfOptions {
-            table_function: false,
+            kind: UdfKind::Scalar,
             body: udf.body.as_deref(),
             compressed_binary: udf.compressed_binary.as_deref(),
             link: udf.link.as_deref(),
             identifier,
             arg_names: &udf.arg_names,
             return_type: &return_type,
-            state_type: None,
             always_retry_on_network_error: udf.always_retry_on_network_error,
             function_type: udf.function_type.as_deref(),
         })

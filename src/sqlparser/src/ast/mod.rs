@@ -1283,8 +1283,8 @@ pub enum Statement {
         or_replace: bool,
         name: ObjectName,
         args: Vec<OperateFunctionArg>,
+        returns: DataType,
         /// Optional parameters.
-        returns: Option<DataType>,
         append_only: bool,
         params: CreateFunctionBody,
     },
@@ -1698,9 +1698,7 @@ impl fmt::Display for Statement {
                     or_replace = if *or_replace { "OR REPLACE " } else { "" },
                 )?;
                 write!(f, "({})", display_comma_separated(args))?;
-                if let Some(return_type) = returns {
-                    write!(f, " RETURNS {}", return_type)?;
-                }
+                write!(f, " RETURNS {}", returns)?;
                 if *append_only {
                     write!(f, " APPEND ONLY")?;
                 }

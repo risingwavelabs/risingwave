@@ -21,13 +21,12 @@ use risingwave_common::array::arrow::{FromArrow, ToArrow, UdfArrowConvert};
 use risingwave_common::array::Op;
 
 use super::*;
-use crate::sig::{UdfImpl, UdfOptions};
+use crate::sig::{UdfImpl, UdfKind, UdfOptions};
 
 #[derive(Debug)]
 pub struct UserDefinedAggregateFunction {
     arg_schema: SchemaRef,
     return_type: DataType,
-    state_type: DataType,
     return_field: Field,
     state_field: Field,
     runtime: Box<dyn UdfImpl>,
@@ -91,7 +90,7 @@ impl AggregateFunction for UserDefinedAggregateFunction {
     /// Decode the state from a datum in state table.
     fn decode_state(&self, datum: Datum) -> Result<AggregateState> {
         let array = {
-            let mut builder = self.state_type.create_array_builder(1);
+            let mut builder = DataType::Bytea.create_array_builder(1);
             builder.append(datum);
             builder.finish()
         };
@@ -125,18 +124,16 @@ pub fn new_user_defined(agg: &AggCall) -> Result<BoxedAggregateFunction> {
     let language = udf.language.as_str();
     let runtime = udf.runtime.as_deref();
     let link = udf.link.as_deref();
-    let state_type = DataType::from(udf.state_type.as_ref().context("missing state type")?);
 
     let build_fn = crate::sig::find_udf_impl(language, runtime, link)?.build_fn;
     let runtime = build_fn(UdfOptions {
-        table_function: true,
+        kind: UdfKind::Aggregate,
         body: udf.body.as_deref(),
         compressed_binary: udf.compressed_binary.as_deref(),
         link: udf.link.as_deref(),
         identifier,
         arg_names: &udf.arg_names,
         return_type: &agg.return_type,
-        state_type: Some(&state_type),
         always_retry_on_network_error: false,
         function_type: udf.function_type.as_deref(),
     })
@@ -154,9 +151,8 @@ pub fn new_user_defined(agg: &AggCall) -> Result<BoxedAggregateFunction> {
 
     Ok(Box::new(UserDefinedAggregateFunction {
         return_field: arrow_convert.to_arrow_field("", &agg.return_type)?,
-        state_field: arrow_convert.to_arrow_field("", &state_type)?,
+        state_field: Field::new("state", arrow_schema::DataType::Binary, true),
         return_type: agg.return_type.clone(),
-        state_type,
         arg_schema,
         runtime,
     }))

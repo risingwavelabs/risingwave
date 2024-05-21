@@ -296,6 +296,7 @@ pub(crate) fn sum_affected_row(dml: PlanRef) -> Result<PlanRef> {
         order_by: vec![],
         filter: Condition::true_cond(),
         direct_args: vec![],
+        user_defined: None,
     };
     let agg = Agg::new(vec![sum_agg], IndexSet::empty(), dml);
     let batch_agg = BatchSimpleAgg::new(agg);

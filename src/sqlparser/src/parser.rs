@@ -2323,11 +2323,8 @@ impl Parser {
         let args = self.parse_comma_separated(Parser::parse_function_arg)?;
         self.expect_token(&Token::RParen)?;
 
-        let return_type = if self.parse_keyword(Keyword::RETURNS) {
-            Some(self.parse_data_type()?)
-        } else {
-            None
-        };
+        self.expect_keyword(Keyword::RETURNS)?;
+        let returns = self.parse_data_type()?;
 
         let append_only = self.parse_keywords(&[Keyword::APPEND, Keyword::ONLY]);
         let params = self.parse_create_function_body()?;
@@ -2336,7 +2333,7 @@ impl Parser {
             or_replace,
             name,
             args,
-            returns: return_type,
+            returns,
             append_only,
             params,
         })

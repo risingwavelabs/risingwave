@@ -21,7 +21,7 @@ use risingwave_common::array::I32Array;
 use risingwave_common::bail;
 
 use super::*;
-use crate::sig::{UdfImpl, UdfOptions};
+use crate::sig::{UdfImpl, UdfKind, UdfOptions};
 
 #[derive(Debug)]
 pub struct UserDefinedTableFunction {
@@ -132,14 +132,13 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
 
     let build_fn = crate::sig::find_udf_impl(language, runtime, link)?.build_fn;
     let runtime = build_fn(UdfOptions {
-        table_function: true,
+        kind: UdfKind::Table,
         body: udf.body.as_deref(),
         compressed_binary: udf.compressed_binary.as_deref(),
         link: udf.link.as_deref(),
         identifier,
         arg_names: &udf.arg_names,
         return_type: &return_type,
-        state_type: None,
         always_retry_on_network_error: false,
         function_type: udf.function_type.as_deref(),
     })

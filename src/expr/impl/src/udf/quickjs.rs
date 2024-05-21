@@ -33,7 +33,7 @@ static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
     build_fn: |opts| {
         let body = format!(
             "export function{} {}({}) {{ {} }}",
-            if opts.table_function { "*" } else { "" },
+            if opts.kind.is_table() { "*" } else { "" },
             opts.identifier,
             opts.arg_names.join(","),
             opts.body.context("body is required")?,

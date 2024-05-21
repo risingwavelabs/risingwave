@@ -799,7 +799,7 @@ dependencies = [
 [[package]]
 name = "arrow-udf-python"
 version = "0.1.0"
-source = "git+https://github.com/risingwavelabs/arrow-udf.git?rev=970455e#970455e49bcd04ae3f1f36f6915fbb4c5a4ae437"
+source = "git+https://github.com/risingwavelabs/arrow-udf.git?rev=fe348e9#fe348e96abf0a7862eb796b4707043078846cd73"
 dependencies = [
  "anyhow",
  "arrow-array 50.0.0",

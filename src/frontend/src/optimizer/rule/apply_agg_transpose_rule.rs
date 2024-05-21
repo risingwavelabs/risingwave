@@ -147,7 +147,8 @@ impl Rule for ApplyAggTransposeRule {
                         }
                         AggKind::ArrayAgg
                         | AggKind::JsonbAgg
-                        | AggKind::JsonbObjectAgg => {
+                        | AggKind::JsonbObjectAgg
+                        | AggKind::UserDefined => {
                             let input_ref = InputRef::new(pos_of_constant_column, DataType::Int32);
                             let cond = FunctionCall::new(ExprType::IsNotNull, vec![input_ref.into()]).unwrap();
                             agg_call.filter.conjunctions.push(cond.into());
