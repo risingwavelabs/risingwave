@@ -123,7 +123,8 @@ pub fn storage_memory_config(
             ));
     if is_serving {
         default_block_cache_capacity_mb += default_shared_buffer_capacity_mb;
-        shared_buffer_capacity_mb = 0;
+        // set 1 to pass internal check
+        shared_buffer_capacity_mb = 1;
     } else if shared_buffer_capacity_mb != default_shared_buffer_capacity_mb {
         default_block_cache_capacity_mb += default_shared_buffer_capacity_mb;
         default_block_cache_capacity_mb =
