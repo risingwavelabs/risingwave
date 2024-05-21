@@ -145,7 +145,6 @@ mod tests {
     use std::collections::HashSet;
 
     use risingwave_common::catalog::ColumnId;
-    use risingwave_common::row::OwnedRow;
     use risingwave_common::types::ScalarImpl::*;
     use risingwave_common::util::value_encoding::column_aware_row_encoding;
     use risingwave_common::util::value_encoding::column_aware_row_encoding::try_drop_invalid_columns;

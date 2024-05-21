@@ -154,7 +154,7 @@ impl Binder {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::util::iter_util::{zip_eq_fast, ZipEqFast};
+    use risingwave_common::util::iter_util::zip_eq_fast;
     use risingwave_sqlparser::ast::{Expr, Value};
 
     use super::*;

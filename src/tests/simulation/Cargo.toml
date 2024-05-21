@@ -24,7 +24,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 glob = "0.3"
 itertools = { workspace = true }
 lru = { workspace = true }
-madsim = "0.2.22"
+madsim = "0.2.27"
 paste = "1"
 pin-project = "1.1"
 pretty_assertions = "1"
@@ -38,7 +38,7 @@ risingwave_compute = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_ctl = { workspace = true }
 risingwave_e2e_extended_mode_test = { path = "../e2e_extended_mode" }
-risingwave_expr_impl = { workspace = true }
+risingwave_expr_impl = { workspace = true, features = ["js-udf"] }
 risingwave_frontend = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_meta_node = { workspace = true }

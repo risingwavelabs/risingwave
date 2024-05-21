@@ -715,7 +715,7 @@ where
                             break;
                         } else if prev_leader != election_row.id {
                             tracing::info!("leader is {}", election_row.id);
-                            prev_leader = election_row.id.clone();
+                            prev_leader.clone_from(&election_row.id)
                         }
 
                         timeout_ticker.reset();

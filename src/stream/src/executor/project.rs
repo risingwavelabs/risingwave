@@ -189,13 +189,11 @@ impl Inner {
 mod tests {
     use std::sync::atomic::{self, AtomicI64};
 
-    use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::array::{DataChunk, StreamChunk};
-    use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::{DataType, Datum};
+    use risingwave_common::array::DataChunk;
+    use risingwave_common::catalog::Field;
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_expr::expr::{self, Expression, ValueImpl};
+    use risingwave_expr::expr::{self, ValueImpl};
 
     use super::super::test_utils::MockSource;
     use super::super::*;

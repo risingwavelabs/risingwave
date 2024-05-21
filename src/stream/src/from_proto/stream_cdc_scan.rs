@@ -23,7 +23,7 @@ use risingwave_pb::stream_plan::StreamCdcScanNode;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::{CdcBackfillExecutor, CdcScanOptions, Executor, ExternalStorageTable};
+use crate::executor::{CdcBackfillExecutor, CdcScanOptions, ExternalStorageTable};
 
 pub struct StreamCdcScanExecutorBuilder;
 

@@ -503,7 +503,6 @@ pub(crate) async fn bind_columns_from_source(
 fn bind_columns_from_source_for_cdc(
     session: &SessionImpl,
     source_schema: &ConnectorSchema,
-    _with_properties: &HashMap<String, String>,
 ) -> Result<(Option<Vec<ColumnCatalog>>, StreamSourceInfo)> {
     let format_encode_options = WithOptions::try_from(source_schema.row_options())?.into_inner();
     let mut format_encode_options_to_consume = format_encode_options.clone();
@@ -1391,7 +1390,18 @@ pub async fn bind_create_source(
     }
     debug_assert!(is_column_ids_dedup(&columns));
 
-    let (mut columns, pk_col_ids, row_id_index) = bind_pk_on_relation(columns, pk_names, true)?;
+    let must_need_pk = if is_create_source {
+        with_properties.connector_need_pk()
+    } else {
+        // For those connectors that do not need generate a `row_id`` column in the source schema such as iceberg.
+        // But in such case, we can not create mv or table on the source because there is not a pk.
+        assert!(with_properties.connector_need_pk());
+
+        true
+    };
+
+    let (mut columns, pk_col_ids, row_id_index) =
+        bind_pk_on_relation(columns, pk_names, must_need_pk)?;
 
     let watermark_descs =
         bind_source_watermark(session, source_name.clone(), source_watermarks, &columns)?;
@@ -1471,7 +1481,7 @@ pub async fn handle_create_source(
         || (with_properties.is_kafka_connector() && session.config().rw_enable_shared_source());
 
     let (columns_from_resolve_source, mut source_info) = if create_cdc_source_job {
-        bind_columns_from_source_for_cdc(&session, &source_schema, &with_properties)?
+        bind_columns_from_source_for_cdc(&session, &source_schema)?
     } else {
         bind_columns_from_source(&session, &source_schema, &with_properties).await?
     };
@@ -1695,7 +1705,7 @@ pub mod tests {
         );
 
         // Options are not merged into props.
-        assert!(source.with_properties.get("schema.location").is_none());
+        assert!(!source.with_properties.contains_key("schema.location"));
     }
 
     #[tokio::test]

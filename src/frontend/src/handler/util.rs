@@ -231,10 +231,8 @@ pub fn convert_logstore_u64_to_unix_millis(logstore_u64: u64) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use bytes::BytesMut;
     use postgres_types::{ToSql, Type};
     use risingwave_common::array::*;
-    use risingwave_common::types::Timestamptz;
 
     use super::*;
 

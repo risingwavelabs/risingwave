@@ -180,7 +180,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         );
 
         let sink_write_param = SinkWriterParam {
-            connector_params: params.env.connector_params(),
             executor_id: params.executor_id,
             vnode_bitmap: params.vnode_bitmap.clone(),
             meta_client: params.env.meta_client().map(SinkMetaClient::MetaClient),
