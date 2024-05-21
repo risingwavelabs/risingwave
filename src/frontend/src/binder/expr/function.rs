@@ -1016,9 +1016,7 @@ impl Binder {
                     if inputs[0].return_type() != DataType::Varchar {
                         // Support `quote_literal(any)` by converting it to `quote_literal(any::text)`
                         // Ref. https://github.com/postgres/postgres/blob/REL_16_1/src/include/catalog/pg_proc.dat#L4641
-                        FunctionCall::cast_mut(&mut inputs[0], DataType::Varchar, CastContext::Explicit).map_err(|e| {
-                            ErrorCode::BindError(format!("{} in `quote_literal`", e.as_report()))
-                        })?;
+                        FunctionCall::cast_mut(&mut inputs[0], DataType::Varchar, CastContext::Explicit)?;
                     }
                     Ok(FunctionCall::new_unchecked(ExprType::QuoteLiteral, inputs, DataType::Varchar).into())
                 }))),
@@ -1026,9 +1024,7 @@ impl Binder {
                     if inputs[0].return_type() != DataType::Varchar {
                         // Support `quote_nullable(any)` by converting it to `quote_nullable(any::text)`
                         // Ref. https://github.com/postgres/postgres/blob/REL_16_1/src/include/catalog/pg_proc.dat#L4650
-                        FunctionCall::cast_mut(&mut inputs[0], DataType::Varchar, CastContext::Explicit).map_err(|e| {
-                            ErrorCode::BindError(format!("{} in `quote_nullable`", e.as_report()))
-                        })?;
+                        FunctionCall::cast_mut(&mut inputs[0], DataType::Varchar, CastContext::Explicit)?;
                     }
                     Ok(FunctionCall::new_unchecked(ExprType::QuoteNullable, inputs, DataType::Varchar).into())
                 }))),
