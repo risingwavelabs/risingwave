@@ -107,6 +107,10 @@ DeltaLakeConfig:
   - name: gcs.service.account
     field_type: String
     required: false
+  - name: commit_checkpoint_interval
+    field_type: u64
+    required: false
+    default: Default::default
   - name: r#type
     field_type: String
     required: true
