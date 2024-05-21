@@ -150,6 +150,7 @@ impl<S> MonitoredStateStore<S> {
 impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
     type ChangeLogIter = impl StateStoreReadChangeLogIter;
     type Iter = impl StateStoreReadIter;
+    type RevIter = impl StateStoreReadIter;
 
     fn get(
         &self,
@@ -174,6 +175,18 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
         )
     }
 
+    fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
+        self.monitored_iter::<'_, _, _, StateStoreIterStats>(
+            read_options.table_id,
+            self.inner.rev_iter(key_range, epoch, read_options),
+        )
+    }
+
     fn iter_log(
         &self,
         epoch_range: (u64, u64),
@@ -189,6 +202,7 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
 
 impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
     type Iter<'a> = impl StateStoreIter + 'a;
+    type RevIter<'a> = impl StateStoreIter + 'a;
 
     async fn may_exist(
         &self,
@@ -230,6 +244,18 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         self.monitored_iter::<'_, _, _, StateStoreIterStats>(
             table_id,
             self.inner.iter(key_range, read_options),
+        )
+    }
+
+    fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_ {
+        let table_id = read_options.table_id;
+        self.monitored_iter::<'_, _, _, StateStoreIterStats>(
+            table_id,
+            self.inner.rev_iter(key_range, read_options),
         )
     }
 
