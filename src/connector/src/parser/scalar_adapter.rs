@@ -82,8 +82,8 @@ pub(crate) enum ScalarAdapter {
     // we use the PgNumeric type to convert the decimal to a string/decimal/rw_int256.
     Numeric(PgNumeric),
     Enum(EnumString),
-    EnumList(Vec<Option<EnumString>>),
     NumericList(Vec<Option<PgNumeric>>),
+    EnumList(Vec<Option<EnumString>>),
     List(Vec<Option<ScalarAdapter>>),
 }
 
@@ -100,8 +100,8 @@ impl ToSql for ScalarAdapter {
             ScalarAdapter::Uuid(v) => v.to_sql(ty, out),
             ScalarAdapter::Numeric(v) => v.to_sql(ty, out),
             ScalarAdapter::Enum(v) => v.to_sql(ty, out),
-            ScalarAdapter::EnumList(v) => v.to_sql(ty, out),
             ScalarAdapter::NumericList(v) => v.to_sql(ty, out),
+            ScalarAdapter::EnumList(v) => v.to_sql(ty, out),
             ScalarAdapter::List(v) => v.to_sql(ty, out),
         }
     }
@@ -130,7 +130,7 @@ impl<'a> FromSql<'a> for ScalarAdapter {
             Kind::Array(inner_type) if let Kind::Enum(_) = inner_type.kind() => {
                 Ok(ScalarAdapter::EnumList(FromSql::from_sql(ty, raw)?))
             }
-            Kind::Array(inner_type) => Ok(ScalarAdapter::List(FromSql::from_sql(ty, raw)?)),
+            Kind::Array(_) => Ok(ScalarAdapter::List(FromSql::from_sql(ty, raw)?)),
             _ => Err(anyhow!("failed to convert type {:?} to ScalarAdapter", ty).into()),
         }
     }
