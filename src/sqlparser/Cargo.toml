@@ -29,6 +29,7 @@ itertools = { workspace = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 tracing = "0.1"
 tracing-subscriber = "0.3"
+winnow = { version = "0.6.8", git = "https://github.com/TennyZhuang/winnow.git", rev = "509121449b451f0faa1b698b4e8cb36dfaa1a4b5" }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
