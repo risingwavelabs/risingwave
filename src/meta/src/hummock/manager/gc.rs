@@ -317,7 +317,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_hummock_sdk::HummockSstableObjectId;
 
-    use crate::hummock::manager::ResponseEvent;
+    use super::ResponseEvent;
     use crate::hummock::test_utils::{add_test_tables, setup_compute_env};
     use crate::MetaOpts;
 

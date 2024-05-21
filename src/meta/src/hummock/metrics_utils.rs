@@ -416,16 +416,6 @@ pub fn trigger_pin_unpin_snapshot_state(
     }
 }
 
-pub fn trigger_safepoint_stat(metrics: &MetaMetrics, safepoints: &[HummockVersionId]) {
-    if let Some(sp) = safepoints.iter().min() {
-        metrics.min_safepoint_version_id.set(*sp as _);
-    } else {
-        metrics
-            .min_safepoint_version_id
-            .set(HummockVersionId::MAX as _);
-    }
-}
-
 pub fn trigger_gc_stat(
     metrics: &MetaMetrics,
     checkpoint: &HummockVersionCheckpoint,
