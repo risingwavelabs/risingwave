@@ -433,8 +433,8 @@ impl<'a, B: RustIteratorBuilder> FromRustIterator<'a, B> {
         match iter.next() {
             Some((first_key, first_value)) => {
                 if first_key.eq(&key.user_key.table_key) && self.epoch < key.epoch_with_gap {
-                    // The semantic of `seek_fn` will ensure that `first_key` >= table_key of `key`.
-                    // At the beginning we have checked that `self.table_id` >= table_id of `key`.
+                    // The semantic of `seek_fn` will ensure that `first_key` <= table_key of `key`.
+                    // At the beginning we have checked that `self.table_id` <= table_id of `key`.
                     match iter.next() {
                         Some((next_key, next_value)) => {
                             assert_lt!(next_key, first_key);
