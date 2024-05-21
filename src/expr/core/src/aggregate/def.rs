@@ -497,9 +497,7 @@ impl AggArgs {
             val_indices: args.iter().map(|arg| arg.get_index() as usize).collect(),
         })
     }
-}
 
-impl AggArgs {
     /// return the types of arguments.
     pub fn arg_types(&self) -> &[DataType] {
         &self.data_types
@@ -508,5 +506,15 @@ impl AggArgs {
     /// return the indices of the arguments in [`risingwave_common::array::StreamChunk`].
     pub fn val_indices(&self) -> &[usize] {
         &self.val_indices
+    }
+}
+
+impl FromIterator<(DataType, usize)> for AggArgs {
+    fn from_iter<T: IntoIterator<Item = (DataType, usize)>>(iter: T) -> Self {
+        let (data_types, val_indices): (Vec<_>, Vec<_>) = iter.into_iter().unzip();
+        AggArgs {
+            data_types: data_types.into(),
+            val_indices: val_indices.into(),
+        }
     }
 }
