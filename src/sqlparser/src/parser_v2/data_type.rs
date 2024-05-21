@@ -135,7 +135,7 @@ where
         Keyword::DATE => empty.value(DataType::Date),
         Keyword::TIMESTAMP => with_time_zone().map(|with_tz| DataType::Timestamp(with_tz)),
         Keyword::TIME => with_time_zone().map(|with_tz| DataType::Time(with_tz)),
-        // TODO: Support complex inverval type parsing.
+        // TODO: Support complex interval type parsing.
         Keyword::INTERVAL => empty.value(DataType::Interval),
         Keyword::REGCLASS => empty.value(DataType::Regclass),
         Keyword::REGPROC => empty.value(DataType::Regproc),
