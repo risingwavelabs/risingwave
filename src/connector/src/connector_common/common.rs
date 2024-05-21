@@ -24,6 +24,7 @@ use aws_sdk_kinesis::Client as KinesisClient;
 use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
 use pulsar::{Authentication, Pulsar, TokioExecutor};
 use rdkafka::ClientConfig;
+use mongodb::Client;
 use risingwave_common::bail;
 use serde_derive::Deserialize;
 use serde_with::json::JsonString;
@@ -743,4 +744,15 @@ pub(crate) fn load_private_key(
         .next()
         .ok_or_else(|| anyhow!("No private key found"))?;
     Ok(cert?.into())
+}
+
+#[serde_as]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
+pub struct MongodbCommon {
+    /// The URL of MongoDB
+    #[serde(rename = "mongodb.url")]
+    pub connect_uri: String,
+    ///
+    #[serde(rename = "collection.name")]
+    pub collection: String,
 }

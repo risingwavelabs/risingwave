@@ -41,6 +41,7 @@ pub mod test_sink;
 pub mod trivial;
 pub mod utils;
 pub mod writer;
+mod mongodb;
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -573,6 +574,12 @@ pub enum SinkError {
         #[from]
         #[backtrace]
         ConnectorError,
+    ),
+    #[error("Mongodb error: {0}")]
+    Mongodb(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
     ),
 }
 

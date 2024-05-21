@@ -155,6 +155,7 @@ urlencoding = "2"
 uuid = { version = "1", features = ["v4", "fast-rng"] }
 with_options = { path = "./with_options" }
 yup-oauth2 = "8.3"
+mongodb = { version = "2.8.2", features = ["tokio-runtime"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
