@@ -1246,7 +1246,7 @@ mod tests {
             v4 = '',
         ) FORMAT plain ENCODE json (a='1',b='2')
         ";
-        assert_eq!(redact_sql(&sql), "CREATE SOURCE temp (k BIGINT, v CHARACTER VARYING) WITH (connector = [REDACTED], v1 = [REDACTED], v2 = [REDACTED], v3 = [REDACTED], v4 = [REDACTED]) FORMAT PLAIN ENCODE JSON (a = [REDACTED], b = [REDACTED])");
+        assert_eq!(redact_sql(sql), "CREATE SOURCE temp (k BIGINT, v CHARACTER VARYING) WITH (connector = [REDACTED], v1 = [REDACTED], v2 = [REDACTED], v3 = [REDACTED], v4 = [REDACTED]) FORMAT PLAIN ENCODE JSON (a = [REDACTED], b = [REDACTED])");
     }
 
     #[test]
@@ -1260,7 +1260,7 @@ mod tests {
         ) format plain encode (a='1',b='2')
         ";
         assert_eq!(
-            redact_sql(&sql),
+            redact_sql(sql),
             r"
         create tableX temp (k bigint, v varchar) [REDACTED]"
         );
@@ -1274,7 +1274,7 @@ mod tests {
         ) format plain encode (a='1',b='2')
         ";
         assert_eq!(
-            redact_sql(&sql),
+            redact_sql(sql),
             r"
         create tableX temp_[REDACTED]"
         );
