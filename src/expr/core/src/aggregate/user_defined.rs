@@ -19,6 +19,7 @@ use arrow_array::ArrayRef;
 use arrow_schema::{Field, Fields, Schema, SchemaRef};
 use risingwave_common::array::arrow::{FromArrow, ToArrow, UdfArrowConvert};
 use risingwave_common::array::Op;
+use risingwave_common::buffer::Bitmap;
 
 use super::*;
 use crate::sig::{UdfImpl, UdfKind, UdfOptions};
@@ -69,7 +70,10 @@ impl AggregateFunction for UserDefinedAggregateFunction {
         input: &StreamChunk,
         range: Range<usize>,
     ) -> Result<()> {
-        todo!()
+        // XXX(runji): this may be inefficient
+        let vis = input.visibility() & Bitmap::from_range(input.capacity(), range);
+        let input = input.clone_with_vis(vis);
+        self.update(state, &input).await
     }
 
     /// Get aggregate result from the state.

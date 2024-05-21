@@ -1336,6 +1336,7 @@ mod tests {
             order_by: vec![],
             filter: Condition::true_cond(),
             direct_args: vec![],
+            user_defined: None,
         };
         Agg::new(vec![agg_call], vec![1].into(), values.into()).into()
     }
@@ -1456,6 +1457,7 @@ mod tests {
             order_by: vec![],
             filter: Condition::true_cond(),
             direct_args: vec![],
+            user_defined: None,
         };
         let agg: PlanRef = Agg::new(vec![agg_call], vec![1].into(), values.into()).into();
 
@@ -1520,6 +1522,7 @@ mod tests {
                 order_by: vec![],
                 filter: Condition::true_cond(),
                 direct_args: vec![],
+                user_defined: None,
             },
             PlanAggCall {
                 agg_kind: AggKind::Max,
@@ -1529,6 +1532,7 @@ mod tests {
                 order_by: vec![],
                 filter: Condition::true_cond(),
                 direct_args: vec![],
+                user_defined: None,
             },
         ];
         let agg: PlanRef = Agg::new(agg_calls, vec![1, 2].into(), values.into()).into();

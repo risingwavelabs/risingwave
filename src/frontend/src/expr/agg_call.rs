@@ -97,20 +97,27 @@ impl AggCall {
     }
 
     /// Create a user-defined `AggCall`.
-    pub fn new_user_defined(catalog: Arc<FunctionCatalog>, args: Vec<ExprImpl>) -> Self {
-        let FunctionKind::Aggregate = &catalog.kind else {
+    pub fn new_user_defined(
+        args: Vec<ExprImpl>,
+        distinct: bool,
+        order_by: OrderBy,
+        filter: Condition,
+        direct_args: Vec<Literal>,
+        user_defined: Arc<FunctionCatalog>,
+    ) -> Result<Self> {
+        let FunctionKind::Aggregate = &user_defined.kind else {
             panic!("not an aggregate function");
         };
-        AggCall {
+        Ok(AggCall {
             agg_kind: AggKind::UserDefined,
-            return_type: catalog.return_type.clone(),
+            return_type: user_defined.return_type.clone(),
             args,
-            distinct: false,
-            order_by: OrderBy::any(),
-            filter: Condition::true_cond(),
-            direct_args: vec![],
-            user_defined: Some(catalog),
-        }
+            distinct,
+            order_by,
+            filter,
+            direct_args,
+            user_defined: Some(user_defined),
+        })
     }
 
     pub fn agg_kind(&self) -> AggKind {

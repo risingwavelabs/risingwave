@@ -172,36 +172,38 @@ drop function split;
 
 
 statement ok
-create aggregate weighted_avg(value int, weight int) returns int language python as $$
-class State:
-    def __init__(self):
-        self.sum = 0
-        self.weight = 0
-
+create aggregate weighted_avg(value int, weight int) returns float language python as $$
 def create_state():
-    return State()
+    return (0, 0)
 
 def accumulate(state, value, weight):
-    state.sum += value * weight
-    state.weight += weight
-    return state
+    if value is None or weight is None:
+        return state
+    (s, w) = state
+    s += value * weight
+    w += weight
+    return (s, w)
 
 def retract(state, value, weight):
-    state.sum -= value * weight
-    state.weight -= weight
-    return state
+    if value is None or weight is None:
+        return state
+    (s, w) = state
+    s -= value * weight
+    w -= weight
+    return (s, w)
 
 def finish(state):
-    if state.weight == 0:
+    (sum, weight) = state
+    if weight == 0:
         return None
     else:
-        return state.sum / state.weight
+        return sum / weight
 $$;
 
 query F
-select weighted_avg(value, weight) from (values (1, 1), (2, 2), (3, 3)) as t(value, weight);
+select weighted_avg(value, weight) from (values (1, 1), (null, 2), (3, 3)) as t(value, weight);
 ----
-2
+2.5
 
 statement ok
 drop function weighted_avg;
