@@ -77,35 +77,58 @@ impl MetaNodeService {
 
         let mut is_persistent_meta_store = false;
 
-        if let Some(sqlite_config) = &config.provide_sqlite_backend
-            && !sqlite_config.is_empty()
-        {
-            is_persistent_meta_store = true;
-            let prefix_data = env::var("PREFIX_DATA")?;
-            let file_path = PathBuf::from(&prefix_data)
-                .join(&sqlite_config[0].id)
-                .join(&sqlite_config[0].file);
-            cmd.arg("--backend")
-                .arg("sql")
-                .arg("--sql-endpoint")
-                .arg(format!("sqlite://{}?mode=rwc", file_path.display()));
-        } else {
-            match config.provide_etcd_backend.as_ref().unwrap().as_slice() {
-                [] => {
-                    cmd.arg("--backend").arg("mem");
-                }
-                etcds => {
-                    is_persistent_meta_store = true;
-                    cmd.arg("--backend")
-                        .arg("etcd")
-                        .arg("--etcd-endpoints")
-                        .arg(
-                            etcds
-                                .iter()
-                                .map(|etcd| format!("{}:{}", etcd.address, etcd.port))
-                                .join(","),
-                        );
-                }
+        match config.meta_backend.to_ascii_lowercase().as_str() {
+            "memory" => {
+                cmd.arg("--backend").arg("mem");
+            }
+            "etcd" => {
+                let etcd_config = config.provide_etcd_backend.as_ref().unwrap();
+                assert!(!etcd_config.is_empty());
+                is_persistent_meta_store = true;
+
+                cmd.arg("--backend")
+                    .arg("etcd")
+                    .arg("--etcd-endpoints")
+                    .arg(
+                        etcd_config
+                            .iter()
+                            .map(|etcd| format!("{}:{}", etcd.address, etcd.port))
+                            .join(","),
+                    );
+            }
+            "sqlite" => {
+                let sqlite_config = config.provide_sqlite_backend.as_ref().unwrap();
+                assert_eq!(sqlite_config.len(), 1);
+                is_persistent_meta_store = true;
+
+                let prefix_data = env::var("PREFIX_DATA")?;
+                let file_path = PathBuf::from(&prefix_data)
+                    .join(&sqlite_config[0].id)
+                    .join(&sqlite_config[0].file);
+                cmd.arg("--backend")
+                    .arg("sql")
+                    .arg("--sql-endpoint")
+                    .arg(format!("sqlite://{}?mode=rwc", file_path.display()));
+            }
+            "postgres" => {
+                let pg_config = config.provide_postgres_backend.as_ref().unwrap();
+                assert_eq!(pg_config.len(), 1);
+                is_persistent_meta_store = true;
+
+                cmd.arg("--backend")
+                    .arg("sql")
+                    .arg("--sql-endpoint")
+                    .arg(format!(
+                        "postgres://{}:{}@{}:{}/{}",
+                        pg_config[0].user,
+                        pg_config[0].password,
+                        pg_config[0].address,
+                        pg_config[0].port,
+                        pg_config[0].database
+                    ));
+            }
+            backend => {
+                return Err(anyhow!("unsupported meta backend {}", backend));
             }
         }
 

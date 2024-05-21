@@ -1452,6 +1452,7 @@ pub enum Statement {
     CreateSchema {
         schema_name: ObjectName,
         if_not_exists: bool,
+        user_specified: Option<ObjectName>,
     },
     /// CREATE DATABASE
     CreateDatabase {
@@ -1980,12 +1981,19 @@ impl fmt::Display for Statement {
             Statement::CreateSchema {
                 schema_name,
                 if_not_exists,
-            } => write!(
-                f,
-                "CREATE SCHEMA {if_not_exists}{name}",
-                if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
-                name = schema_name
-            ),
+                user_specified,
+            } => {
+                write!(
+                    f,
+                    "CREATE SCHEMA {if_not_exists}{name}",
+                    if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
+                    name = schema_name
+                )?;
+                if let Some(user) = user_specified {
+                    write!(f, " AUTHORIZATION {}", user)?;
+                }
+                Ok(())
+            },
             Statement::Grant {
                 privileges,
                 objects,
@@ -2887,8 +2895,8 @@ impl fmt::Display for TableColumnDef {
 pub struct CreateFunctionBody {
     /// LANGUAGE lang_name
     pub language: Option<Ident>,
-
-    pub runtime: Option<FunctionRuntime>,
+    /// RUNTIME runtime_name
+    pub runtime: Option<Ident>,
 
     /// IMMUTABLE | STABLE | VOLATILE
     pub behavior: Option<FunctionBehavior>,
@@ -2909,11 +2917,9 @@ impl fmt::Display for CreateFunctionBody {
         if let Some(language) = &self.language {
             write!(f, " LANGUAGE {language}")?;
         }
-
         if let Some(runtime) = &self.runtime {
             write!(f, " RUNTIME {runtime}")?;
         }
-
         if let Some(behavior) = &self.behavior {
             write!(f, " {behavior}")?;
         }
@@ -2999,22 +3005,6 @@ impl fmt::Display for CreateFunctionUsing {
             CreateFunctionUsing::Base64(s) => {
                 write!(f, "BASE64 '{s}'")
             }
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum FunctionRuntime {
-    QuickJs,
-    Deno,
-}
-
-impl fmt::Display for FunctionRuntime {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            FunctionRuntime::QuickJs => write!(f, "quickjs"),
-            FunctionRuntime::Deno => write!(f, "deno"),
         }
     }
 }
@@ -3320,7 +3310,7 @@ mod tests {
                 as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
                 return_: None,
                 using: None,
-                runtime: Some(FunctionRuntime::Deno),
+                runtime: Some(Ident::new_unchecked("deno")),
                 function_type: Some(CreateFunctionType::AsyncGenerator),
             },
             with_options: CreateFunctionWithOptions {

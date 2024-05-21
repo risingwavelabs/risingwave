@@ -313,7 +313,6 @@ mod tests {
     };
     use crate::hummock::iterator::MergeIterator;
     use crate::hummock::test_utils::gen_test_sstable;
-    use crate::hummock::value::HummockValue;
     use crate::hummock::{BackwardSstableIterator, SstableStoreRef, TableHolder};
 
     #[tokio::test]

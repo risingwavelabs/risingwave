@@ -275,7 +275,7 @@ pub struct MetaOpts {
     /// The maximum number of trivial move tasks to be picked in a single loop
     pub max_trivial_move_task_count_per_loop: usize,
 
-    /// The maximum number of times to probe for PullTaskEvent
+    /// The maximum number of times to probe for `PullTaskEvent`
     pub max_get_task_probe_times: usize,
 }
 

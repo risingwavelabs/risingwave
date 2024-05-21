@@ -14,7 +14,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::{Future, TryFutureExt};
+use futures::Future;
 use risingwave_common::buffer::Bitmap;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
@@ -24,12 +24,10 @@ use risingwave_hummock_trace::{
 };
 use thiserror_ext::AsReport;
 
-use super::identity;
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
 use crate::store::*;
-use crate::StateStore;
 
 #[derive(Clone)]
 pub struct TracedStateStore<S> {
@@ -143,7 +141,6 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
             self.storage_type,
         );
         self.traced_iter(self.inner.iter(key_range, read_options), span)
-            .map_ok(identity)
     }
 
     fn insert(
@@ -306,7 +303,6 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
             self.storage_type,
         );
         self.traced_iter(self.inner.iter(key_range, epoch, read_options), span)
-            .map_ok(identity)
     }
 
     fn iter_log(

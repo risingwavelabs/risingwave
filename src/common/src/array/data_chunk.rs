@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use std::borrow::Cow;
+use std::fmt;
 use std::fmt::Display;
 use std::hash::BuildHasher;
 use std::sync::Arc;
-use std::{fmt, usize};
 
 use bytes::Bytes;
 use either::Either;

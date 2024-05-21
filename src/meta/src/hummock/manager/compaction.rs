@@ -15,7 +15,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
-use function_name::named;
 use futures::future::Shared;
 use itertools::Itertools;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId};
@@ -37,7 +36,7 @@ use tokio::sync::oneshot::Receiver as OneShotReceiver;
 use crate::hummock::compaction::selector::level_selector::PickerInfo;
 use crate::hummock::compaction::selector::DynamicLevelSelectorCore;
 use crate::hummock::compaction::{CompactStatus, CompactionDeveloperConfig, CompactionSelector};
-use crate::hummock::manager::{init_selectors, read_lock};
+use crate::hummock::manager::init_selectors;
 use crate::hummock::HummockManager;
 
 const MAX_SKIP_TIMES: usize = 8;
@@ -50,21 +49,16 @@ pub struct Compaction {
     /// `CompactStatus` of each compaction group
     pub compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus>,
 
-    pub deterministic_mode: bool,
+    pub _deterministic_mode: bool,
 }
 
 impl HummockManager {
-    #[named]
     pub async fn get_assigned_compact_task_num(&self) -> u64 {
-        read_lock!(self, compaction)
-            .await
-            .compact_task_assignment
-            .len() as u64
+        self.compaction.read().await.compact_task_assignment.len() as u64
     }
 
-    #[named]
     pub async fn list_all_tasks_ids(&self) -> Vec<HummockCompactionTaskId> {
-        let compaction = read_lock!(self, compaction).await;
+        let compaction = self.compaction.read().await;
 
         compaction
             .compaction_statuses
@@ -77,11 +71,10 @@ impl HummockManager {
             .collect_vec()
     }
 
-    #[named]
     pub async fn list_compaction_status(
         &self,
     ) -> (Vec<PbCompactStatus>, Vec<CompactTaskAssignment>) {
-        let compaction = read_lock!(self, compaction).await;
+        let compaction = self.compaction.read().await;
         (
             compaction.compaction_statuses.values().map_into().collect(),
             compaction
@@ -92,14 +85,13 @@ impl HummockManager {
         )
     }
 
-    #[named]
     pub async fn get_compaction_scores(
         &self,
         compaction_group_id: CompactionGroupId,
     ) -> Vec<PickerInfo> {
         let (status, levels, group) = {
-            let compaction = read_lock!(self, compaction).await;
-            let versioning = read_lock!(self, versioning).await;
+            let compaction = self.compaction.read().await;
+            let versioning = self.versioning.read().await;
             let config_manager = self.compaction_group_manager.read().await;
             match (
                 compaction.compaction_statuses.get(&compaction_group_id),

@@ -341,9 +341,17 @@ where
                     // Before processing barrier, if did not snapshot read,
                     // do a snapshot read first.
                     // This is so we don't lose the tombstone iteration progress.
-                    // If paused, we also can't read any snapshot records.
-                    if !has_snapshot_read && !paused {
-                        // If we have not snapshot read, builders must all be empty.
+                    // Or if s3 read latency is high, we don't fail to read from s3.
+                    //
+                    // If paused, we can't read any snapshot records, skip this.
+                    //
+                    // If rate limit is set, respect the rate limit, check if we can read,
+                    // If we can't, skip it. If no rate limit set, we can read.
+                    let rate_limit_ready = rate_limiter
+                        .as_ref()
+                        .map(|r| r.check().is_ok())
+                        .unwrap_or(true);
+                    if !has_snapshot_read && !paused && rate_limit_ready {
                         debug_assert!(builders.values().all(|b| b.is_empty()));
                         let (_, snapshot) = backfill_stream.into_inner();
                         #[for_await]
@@ -437,6 +445,7 @@ where
                                 &chunk,
                                 &backfill_state,
                                 &pk_in_output_indices,
+                                &upstream_table,
                                 &pk_order,
                             )?,
                             &self.output_indices,

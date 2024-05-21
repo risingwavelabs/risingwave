@@ -94,7 +94,7 @@ pub fn available_prost_privilege(object: PbObject, for_dml_table: bool) -> PbGra
                 &acl::ALL_AVAILABLE_MVIEW_MODES
             }
         }
-        PbObject::ViewId(_) => &acl::ALL_AVAILABLE_VIEW_MODES,
+        PbObject::ViewId(_) => &acl::ALL_AVAILABLE_TABLE_MODES,
         PbObject::SinkId(_) => &acl::ALL_AVAILABLE_SINK_MODES,
         PbObject::SubscriptionId(_) => &acl::ALL_AVAILABLE_SUBSCRIPTION_MODES,
         PbObject::FunctionId(_) => &acl::ALL_AVAILABLE_FUNCTION_MODES,

@@ -18,7 +18,7 @@ use std::sync::LazyLock;
 use openssl::error::ErrorStack;
 use openssl::symm::{Cipher, Crypter, Mode as CipherMode};
 use regex::Regex;
-use risingwave_expr::{function, CryptographyError, CryptographyStage, ExprError, Result};
+use risingwave_expr::{function, ExprError, Result};
 
 #[derive(Debug, Clone, PartialEq)]
 enum Algorithm {
@@ -129,14 +129,13 @@ impl CipherConfig {
         })
     }
 
-    fn eval(&self, input: &[u8], stage: CryptographyStage) -> Result<Box<[u8]>> {
+    fn eval(&self, input: &[u8], stage: CryptographyStage) -> Result<Box<[u8]>, CryptographyError> {
         let operation = match stage {
             CryptographyStage::Encrypt => CipherMode::Encrypt,
             CryptographyStage::Decrypt => CipherMode::Decrypt,
         };
-        self.eval_inner(input, operation).map_err(|reason| {
-            ExprError::Cryptography(Box::new(CryptographyError { stage, reason }))
-        })
+        self.eval_inner(input, operation)
+            .map_err(|reason| CryptographyError { stage, reason })
     }
 
     fn eval_inner(
@@ -163,7 +162,7 @@ impl CipherConfig {
     "decrypt(bytea, bytea, varchar) -> bytea",
     prebuild = "CipherConfig::parse_cipher_config($1, $2)?"
 )]
-pub fn decrypt(data: &[u8], config: &CipherConfig) -> Result<Box<[u8]>> {
+fn decrypt(data: &[u8], config: &CipherConfig) -> Result<Box<[u8]>, CryptographyError> {
     config.eval(data, CryptographyStage::Decrypt)
 }
 
@@ -171,8 +170,22 @@ pub fn decrypt(data: &[u8], config: &CipherConfig) -> Result<Box<[u8]>> {
     "encrypt(bytea, bytea, varchar) -> bytea",
     prebuild = "CipherConfig::parse_cipher_config($1, $2)?"
 )]
-pub fn encrypt(data: &[u8], config: &CipherConfig) -> Result<Box<[u8]>> {
+fn encrypt(data: &[u8], config: &CipherConfig) -> Result<Box<[u8]>, CryptographyError> {
     config.eval(data, CryptographyStage::Encrypt)
+}
+
+#[derive(Debug)]
+enum CryptographyStage {
+    Encrypt,
+    Decrypt,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{stage:?} stage, reason: {reason}")]
+struct CryptographyError {
+    pub stage: CryptographyStage,
+    #[source]
+    pub reason: openssl::error::ErrorStack,
 }
 
 #[cfg(test)]
@@ -197,13 +210,13 @@ mod test {
 
     #[test]
     fn encrypt_testcase() {
-        let encrypt_wrapper = |data: &[u8], key: &[u8], mode: &str| -> Result<Box<[u8]>> {
-            let config = CipherConfig::parse_cipher_config(key, mode)?;
-            encrypt(data, &config)
+        let encrypt_wrapper = |data: &[u8], key: &[u8], mode: &str| -> Box<[u8]> {
+            let config = CipherConfig::parse_cipher_config(key, mode).unwrap();
+            encrypt(data, &config).unwrap()
         };
-        let decrypt_wrapper = |data: &[u8], key: &[u8], mode: &str| -> Result<Box<[u8]>> {
-            let config = CipherConfig::parse_cipher_config(key, mode)?;
-            decrypt(data, &config)
+        let decrypt_wrapper = |data: &[u8], key: &[u8], mode: &str| -> Box<[u8]> {
+            let config = CipherConfig::parse_cipher_config(key, mode).unwrap();
+            decrypt(data, &config).unwrap()
         };
         let key = b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f";
 
@@ -211,10 +224,9 @@ mod test {
             b"\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff",
             key,
             "aes-ecb/pad:none",
-        )
-        .unwrap();
+        );
 
-        let decrypted = decrypt_wrapper(&encrypted, key, "aes-ecb/pad:none").unwrap();
+        let decrypted = decrypt_wrapper(&encrypted, key, "aes-ecb/pad:none");
         assert_eq!(
             decrypted,
             (*b"\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff").into()
