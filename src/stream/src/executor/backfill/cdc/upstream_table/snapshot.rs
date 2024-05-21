@@ -23,8 +23,10 @@ use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::row::OwnedRow;
+use risingwave_common::types::{Scalar, Timestamptz};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReader};
+use risingwave_pb::plan_common::additional_column::ColumnType;
 
 use super::external::ExternalStorageTable;
 use crate::common::rate_limit::limited_chunk_size;
@@ -92,7 +94,17 @@ fn with_additional_columns(
     let (ops, mut columns, visibility) = snapshot_chunk.into_inner();
     for desc in additional_columns {
         let mut builder = desc.data_type.create_array_builder(visibility.len());
-        builder.append_n_null(visibility.len());
+        match desc.additional_column.column_type.as_ref().unwrap() {
+            // set default value for timestamp
+            &ColumnType::Timestamp(_) => builder.append_n(
+                visibility.len(),
+                Some(Timestamptz::default().to_scalar_value()),
+            ),
+            // set null for other additional columns
+            _ => {
+                builder.append_n_null(visibility.len());
+            }
+        }
         columns.push(builder.finish().into());
     }
     StreamChunk::with_visibility(ops, columns, visibility)

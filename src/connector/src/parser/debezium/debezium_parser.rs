@@ -198,6 +198,8 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
+    use risingwave_common::row::Row;
+    use risingwave_common::types::Timestamptz;
     use risingwave_pb::plan_common::{
         additional_column, AdditionalColumn, AdditionalColumnTimestamp,
     };
@@ -324,7 +326,10 @@ mod tests {
         match res {
             Ok(ParseResult::Rows) => {
                 let chunk = builder.finish();
-                println!("chunk: {:#?}", chunk)
+                for (_, row) in chunk.rows() {
+                    let commit_ts = row.datum_at(5).unwrap().into_timestamptz();
+                    assert_eq!(commit_ts, Timestamptz::from_millis(1695277757000).unwrap());
+                }
             }
             _ => panic!("unexpected parse result: {:?}", res),
         }
