@@ -69,7 +69,7 @@ WORKDIR /risingwave
 ENV ENABLE_BUILD_DASHBOARD=1
 
 RUN cargo fetch && \
-  cargo build -p risingwave_cmd_all --release --features "rw-static-link" --features embedded-deno-udf --features embedded-python-udf && \
+  cargo build -p risingwave_cmd_all --release --features "rw-static-link" --features all-udf && \
   mkdir -p /risingwave/bin && \
     mv /risingwave/target/release/risingwave /risingwave/bin/ && \
     mv /risingwave/target/release/risingwave.dwp /risingwave/bin/ && \

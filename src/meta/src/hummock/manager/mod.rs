@@ -89,9 +89,8 @@ use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
 use crate::manager::{ClusterManagerRef, FragmentManagerRef};
 use crate::manager::{MetaSrvEnv, MetaStoreImpl, MetadataManager, META_NODE_ID};
 use crate::model::{
-    BTreeMapEntryTransaction, BTreeMapEntryTransactionWrapper, BTreeMapTransaction,
-    BTreeMapTransactionWrapper, ClusterId, MetadataModel, MetadataModelError, ValTransaction,
-    VarTransaction, VarTransactionWrapper,
+    BTreeMapEntryTransaction, BTreeMapTransaction, ClusterId, MetadataModel, MetadataModelError,
+    VarTransaction,
 };
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
@@ -635,11 +634,7 @@ impl HummockManager {
         self.check_context_with_meta_node(context_id, &context_info)
             .await?;
         let _timer = start_measure_real_process_timer!(self, "pin_version");
-        let mut pinned_versions = create_trx_wrapper!(
-            self.meta_store_ref(),
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut context_info.pinned_versions)
-        );
+        let mut pinned_versions = BTreeMapTransaction::new(&mut context_info.pinned_versions);
         let mut context_pinned_version = pinned_versions.new_entry_txn_or_default(
             context_id,
             HummockPinnedVersion {
@@ -679,11 +674,7 @@ impl HummockManager {
         self.check_context_with_meta_node(context_id, &context_info)
             .await?;
         let _timer = start_measure_real_process_timer!(self, "unpin_version_before");
-        let mut pinned_versions = create_trx_wrapper!(
-            self.meta_store_ref(),
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut context_info.pinned_versions,)
-        );
+        let mut pinned_versions = BTreeMapTransaction::new(&mut context_info.pinned_versions);
         let mut context_pinned_version = pinned_versions.new_entry_txn_or_default(
             context_id,
             HummockPinnedVersion {
@@ -719,11 +710,7 @@ impl HummockManager {
         let mut guard = self.context_info.write().await;
         self.check_context_with_meta_node(context_id, &guard)
             .await?;
-        let mut pinned_snapshots = create_trx_wrapper!(
-            self.meta_store_ref(),
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut guard.pinned_snapshots,)
-        );
+        let mut pinned_snapshots = BTreeMapTransaction::new(&mut guard.pinned_snapshots);
         let mut context_pinned_snapshot = pinned_snapshots.new_entry_txn_or_default(
             context_id,
             HummockPinnedSnapshot {
@@ -746,11 +733,7 @@ impl HummockManager {
         self.check_context_with_meta_node(context_id, &guard)
             .await?;
         let _timer = start_measure_real_process_timer!(self, "pin_snapshot");
-        let mut pinned_snapshots = create_trx_wrapper!(
-            self.meta_store_ref(),
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut guard.pinned_snapshots,)
-        );
+        let mut pinned_snapshots = BTreeMapTransaction::new(&mut guard.pinned_snapshots);
         let mut context_pinned_snapshot = pinned_snapshots.new_entry_txn_or_default(
             context_id,
             HummockPinnedSnapshot {
@@ -776,11 +759,7 @@ impl HummockManager {
         self.check_context_with_meta_node(context_id, &context_info)
             .await?;
         let _timer = start_measure_real_process_timer!(self, "unpin_snapshot");
-        let mut pinned_snapshots = create_trx_wrapper!(
-            self.meta_store_ref(),
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut context_info.pinned_snapshots,)
-        );
+        let mut pinned_snapshots = BTreeMapTransaction::new(&mut context_info.pinned_snapshots);
         let release_snapshot = pinned_snapshots.remove(context_id);
         if release_snapshot.is_some() {
             commit_multi_var!(self.meta_store_ref(), pinned_snapshots)?;
@@ -818,11 +797,7 @@ impl HummockManager {
         }
         let last_read_epoch = std::cmp::min(snapshot_committed_epoch, max_committed_epoch);
 
-        let mut pinned_snapshots = create_trx_wrapper!(
-            self.meta_store_ref(),
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut context_info.pinned_snapshots,)
-        );
+        let mut pinned_snapshots = BTreeMapTransaction::new(&mut context_info.pinned_snapshots);
         let mut context_pinned_snapshot = pinned_snapshots.new_entry_txn_or_default(
             context_id,
             HummockPinnedSnapshot {
@@ -887,23 +862,13 @@ impl HummockManager {
             .fold(max_committed_epoch, std::cmp::min);
         let last_apply_version_id = current_version.id;
 
-        let mut compaction_statuses = create_trx_wrapper!(
-            self.meta_store_ref(),
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut compaction.compaction_statuses)
-        );
+        let mut compaction_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
 
-        let mut compact_task_assignment = create_trx_wrapper!(
-            self.meta_store_ref(),
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut compaction.compact_task_assignment)
-        );
+        let mut compact_task_assignment =
+            BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
 
-        let mut hummock_version_deltas = create_trx_wrapper!(
-            self.meta_store_ref(),
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut versioning.hummock_version_deltas)
-        );
+        let mut hummock_version_deltas =
+            BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
 
         let mut unschedule_groups = vec![];
         let mut trivial_tasks = vec![];
@@ -1409,17 +1374,10 @@ impl HummockManager {
         let compaction = guard.deref_mut();
         let start_time = Instant::now();
         let original_keys = compaction.compaction_statuses.keys().cloned().collect_vec();
-        let mut compact_statuses = create_trx_wrapper!(
-            self.meta_store_ref(),
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut compaction.compaction_statuses,)
-        );
+        let mut compact_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
         let mut rets = vec![false; report_tasks.len()];
-        let mut compact_task_assignment = create_trx_wrapper!(
-            self.meta_store_ref(),
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut compaction.compact_task_assignment,)
-        );
+        let mut compact_task_assignment =
+            BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
         // The compaction task is finished.
         let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
@@ -1434,17 +1392,10 @@ impl HummockManager {
         }
         let mut tasks = vec![];
 
-        let mut hummock_version_deltas = create_trx_wrapper!(
-            self.meta_store_ref(),
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut versioning.hummock_version_deltas,)
-        );
+        let mut hummock_version_deltas =
+            BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
 
-        let mut version_stats = create_trx_wrapper!(
-            self.meta_store_ref(),
-            VarTransactionWrapper,
-            VarTransaction::new(&mut versioning.version_stats)
-        );
+        let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
         let mut success_count = 0;
         let last_version_id = current_version.id;
         for (idx, task) in report_tasks.into_iter().enumerate() {
@@ -1655,14 +1606,10 @@ impl HummockManager {
         }
 
         let old_version: &HummockVersion = &versioning.current_version;
-        let mut new_version_delta = create_trx_wrapper!(
-            self.meta_store_ref(),
-            BTreeMapEntryTransactionWrapper,
-            BTreeMapEntryTransaction::new_insert(
-                &mut versioning.hummock_version_deltas,
-                old_version.id + 1,
-                build_version_delta_after_version(old_version),
-            )
+        let mut new_version_delta = BTreeMapEntryTransaction::new_insert(
+            &mut versioning.hummock_version_deltas,
+            old_version.id + 1,
+            build_version_delta_after_version(old_version),
         );
         new_version_delta.max_committed_epoch = epoch;
         new_version_delta.new_table_watermarks = new_table_watermarks;
@@ -1859,11 +1806,7 @@ impl HummockManager {
         new_hummock_version.apply_version_delta(new_version_delta.deref());
 
         // Apply stats changes.
-        let mut version_stats = create_trx_wrapper!(
-            self.meta_store_ref(),
-            VarTransactionWrapper,
-            VarTransaction::new(&mut versioning.version_stats)
-        );
+        let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
         add_prost_table_stats_map(&mut version_stats.table_stats, &table_stats_change);
         if purge_prost_table_stats(&mut version_stats.table_stats, &new_hummock_version) {
             self.metrics.version_stats.reset();
@@ -3301,7 +3244,7 @@ pub enum TableAlignRule {
 }
 
 fn gen_version_delta(
-    txn: &mut BTreeMapTransactionWrapper<'_, HummockVersionId, HummockVersionDelta>,
+    txn: &mut BTreeMapTransaction<'_, HummockVersionId, HummockVersionDelta>,
     old_version: &HummockVersion,
     compact_task: &CompactTask,
     deterministic_mode: bool,

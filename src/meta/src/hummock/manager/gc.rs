@@ -29,10 +29,10 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::Event as Respon
 use risingwave_pb::hummock::FullScanTask;
 
 use crate::hummock::error::{Error, Result};
-use crate::hummock::manager::{commit_multi_var, create_trx_wrapper};
+use crate::hummock::manager::commit_multi_var;
 use crate::hummock::HummockManager;
 use crate::manager::MetadataManager;
-use crate::model::{BTreeMapTransaction, BTreeMapTransactionWrapper, ValTransaction};
+use crate::model::BTreeMapTransaction;
 use crate::storage::MetaStore;
 
 #[derive(Default)]
@@ -105,11 +105,8 @@ impl HummockManager {
         if !context_info.version_safe_points.is_empty() {
             return Ok((0, deltas_to_delete.len()));
         }
-        let mut hummock_version_deltas = create_trx_wrapper!(
-            self.meta_store_ref(),
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut versioning.hummock_version_deltas,)
-        );
+        let mut hummock_version_deltas =
+            BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
         let batch = deltas_to_delete
             .iter()
             .take(batch_size)
