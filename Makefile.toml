@@ -4,7 +4,6 @@ extend = [
   { path = "src/risedevtool/minio.toml" },
   { path = "src/risedevtool/etcd.toml" },
   { path = "src/risedevtool/tempo.toml" },
-  { path = "src/risedevtool/kafka.toml" },
   { path = "src/risedevtool/gcloud-pubsub.toml" },
   { path = "src/risedevtool/redis.toml" },
   { path = "src/risedevtool/connector.toml" },
@@ -498,7 +497,6 @@ dependencies = [
   "download-etcd",
   "download-grafana",
   "download-tempo",
-  "download-kafka",
   "download-mcli",
   "download-minio",
   "download-prometheus",
@@ -556,7 +554,6 @@ dependencies = [
   "download-grafana",
   "download-prometheus",
   "download-tempo",
-  "download-kafka",
   "download-redis",
 ]
 

@@ -30,8 +30,8 @@ impl DockerServiceConfig for KafkaConfig {
 
     fn envs(&self) -> Vec<(String, String)> {
         vec![
-            ("KAFKA_CFG_NODE_ID".to_owned(), self.broker_id.to_string()),
-            ("KAFKA_CFG_BROKER_ID".to_owned(), self.broker_id.to_string()),
+            ("KAFKA_CFG_NODE_ID".to_owned(), self.node_id.to_string()),
+            ("KAFKA_CFG_BROKER_ID".to_owned(), self.node_id.to_string()),
             (
                 "KAFKA_CFG_PROCESS_ROLES".to_owned(),
                 "controller,broker".to_owned(),
@@ -50,7 +50,7 @@ impl DockerServiceConfig for KafkaConfig {
             ),
             (
                 "KAFKA_CFG_CONTROLLER_QUORUM_VOTERS".to_owned(),
-                format!("{}@localhost:9093", self.broker_id),
+                format!("{}@localhost:9093", self.node_id),
             ),
             (
                 "KAFKA_CFG_CONTROLLER_LISTENER_NAMES".to_owned(),
