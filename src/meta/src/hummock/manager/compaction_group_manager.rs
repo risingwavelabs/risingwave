@@ -179,6 +179,8 @@ impl HummockManager {
         let mut version = HummockVersionTransaction::new(
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
+            self.env.notification_manager(),
+            &self.metrics,
         );
         let mut new_version_delta = version.new_delta();
 
@@ -235,8 +237,6 @@ impl HummockManager {
         new_version_delta.pre_apply();
         commit_multi_var!(self.meta_store_ref(), version)?;
 
-        self.notify_last_version_delta(versioning);
-
         Ok(())
     }
 
@@ -249,6 +249,8 @@ impl HummockManager {
         let mut version = HummockVersionTransaction::new(
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
+            self.env.notification_manager(),
+            &self.metrics,
         );
         let mut new_version_delta = version.new_delta();
         let mut modified_groups: HashMap<CompactionGroupId, /* #member table */ u64> =
@@ -321,8 +323,6 @@ impl HummockManager {
                 .len();
             remove_compaction_group_in_sst_stat(&self.metrics, *group_id, max_level);
         }
-
-        self.notify_last_version_delta(versioning);
 
         // Purge may cause write to meta store. If it hurts performance while holding versioning
         // lock, consider to make it in batch.
@@ -454,6 +454,8 @@ impl HummockManager {
         let mut version = HummockVersionTransaction::new(
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
+            self.env.notification_manager(),
+            &self.metrics,
         );
         let mut new_version_delta = version.new_delta();
 
@@ -526,8 +528,6 @@ impl HummockManager {
                 table_to_partition.insert(table_id, partition_vnode_count);
             }
         }
-        // Updates SST split info
-        self.notify_last_version_delta(versioning);
 
         let mut canceled_tasks = vec![];
         for task_assignment in compaction_guard.compact_task_assignment.values() {

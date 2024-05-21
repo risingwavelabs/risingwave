@@ -18,41 +18,61 @@ use std::ops::{Deref, DerefMut};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::build_version_delta_after_version;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::HummockVersionId;
+use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
+use crate::manager::NotificationManager;
 use crate::model::{InMemValTransaction, MetadataModelResult, Transactional, ValTransaction};
+use crate::rpc::metrics::MetaMetrics;
+
+fn trigger_delta_log_stats(metrics: &MetaMetrics, total_number: usize) {
+    metrics.delta_log_count.set(total_number as _);
+}
+
+fn trigger_version_stat(metrics: &MetaMetrics, current_version: &HummockVersion) {
+    metrics
+        .max_committed_epoch
+        .set(current_version.max_committed_epoch as i64);
+    metrics
+        .version_size
+        .set(current_version.estimated_encode_len() as i64);
+    metrics.safe_epoch.set(current_version.safe_epoch as i64);
+    metrics.current_version_id.set(current_version.id as i64);
+}
 
 pub(super) struct HummockVersionTransaction<'a> {
     orig_version: &'a mut HummockVersion,
     orig_deltas: &'a mut BTreeMap<HummockVersionId, HummockVersionDelta>,
+    notification_manager: &'a NotificationManager,
+    meta_metrics: &'a MetaMetrics,
 
     pre_applied_version: Option<(HummockVersion, Vec<HummockVersionDelta>)>,
-    deterministic_mode: bool,
+    disable_apply_to_txn: bool,
 }
 
 impl<'a> HummockVersionTransaction<'a> {
     pub(super) fn new(
         version: &'a mut HummockVersion,
         deltas: &'a mut BTreeMap<HummockVersionId, HummockVersionDelta>,
+        notification_manager: &'a NotificationManager,
+        meta_metrics: &'a MetaMetrics,
     ) -> Self {
         Self {
             orig_version: version,
             orig_deltas: deltas,
             pre_applied_version: None,
-            deterministic_mode: false,
+            disable_apply_to_txn: false,
+            notification_manager,
+            meta_metrics,
         }
     }
 
-    pub(super) fn new_with_deterministic_mode(
-        version: &'a mut HummockVersion,
-        deltas: &'a mut BTreeMap<HummockVersionId, HummockVersionDelta>,
-        deterministic_mode: bool,
-    ) -> Self {
-        Self {
-            orig_version: version,
-            orig_deltas: deltas,
-            pre_applied_version: None,
-            deterministic_mode,
-        }
+    pub(super) fn disable_apply_to_txn(&mut self) {
+        assert!(
+            self.pre_applied_version.is_none(),
+            "should only call disable at the beginning of txn"
+        );
+        self.disable_apply_to_txn = true;
     }
 
     pub(super) fn version(&self) -> &HummockVersion {
@@ -84,9 +104,21 @@ impl<'a> InMemValTransaction for HummockVersionTransaction<'a> {
     fn commit(self) {
         if let Some((version, deltas)) = self.pre_applied_version {
             *self.orig_version = version;
-            for delta in deltas {
-                assert!(self.orig_deltas.insert(delta.id, delta).is_none());
+            if !self.disable_apply_to_txn {
+                let pb_deltas = deltas.iter().map(|delta| delta.to_protobuf()).collect();
+                self.notification_manager.notify_hummock_without_version(
+                    Operation::Add,
+                    Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
+                        version_deltas: pb_deltas,
+                    }),
+                );
             }
+            for delta in deltas {
+                assert!(self.orig_deltas.insert(delta.id, delta.clone()).is_none());
+            }
+
+            trigger_delta_log_stats(self.meta_metrics, self.orig_deltas.len());
+            trigger_version_stat(self.meta_metrics, self.orig_version);
         }
     }
 }
@@ -94,9 +126,10 @@ impl<'a> InMemValTransaction for HummockVersionTransaction<'a> {
 impl<'a, TXN> ValTransaction<TXN> for HummockVersionTransaction<'a>
 where
     HummockVersionDelta: Transactional<TXN>,
+    HummockVersionStats: Transactional<TXN>,
 {
     async fn apply_to_txn(&self, txn: &mut TXN) -> MetadataModelResult<()> {
-        if self.deterministic_mode {
+        if self.disable_apply_to_txn {
             return Ok(());
         }
         for delta in self

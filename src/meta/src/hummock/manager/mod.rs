@@ -78,9 +78,8 @@ use crate::hummock::compaction::{CompactStatus, CompactionDeveloperConfig};
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
     build_compact_task_level_type_metrics_label, get_or_create_local_table_stat,
-    trigger_delta_log_stats, trigger_local_table_stat, trigger_lsm_stat, trigger_mv_stat,
-    trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state, trigger_sst_stat,
-    trigger_version_stat, trigger_write_stop_stats,
+    trigger_local_table_stat, trigger_lsm_stat, trigger_mv_stat, trigger_pin_unpin_snapshot_state,
+    trigger_pin_unpin_version_state, trigger_sst_stat, trigger_write_stop_stats,
 };
 use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
@@ -858,18 +857,22 @@ impl HummockManager {
             .values()
             .map(|v| v.minimal_pinned_snapshot)
             .fold(max_committed_epoch, std::cmp::min);
-        let last_apply_version_id = versioning.current_version.id;
 
         let mut compaction_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
 
         let mut compact_task_assignment =
             BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
 
-        let mut version = HummockVersionTransaction::new_with_deterministic_mode(
+        let mut version = HummockVersionTransaction::new(
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
-            deterministic_mode,
+            self.env.notification_manager(),
+            &self.metrics,
         );
+
+        if deterministic_mode {
+            version.disable_apply_to_txn();
+        }
 
         let mut unschedule_groups = vec![];
         let mut trivial_tasks = vec![];
@@ -1031,9 +1034,7 @@ impl HummockManager {
                             "SUCCESS",
                         ])
                         .inc();
-                    let mut new_version_delta = version.new_delta();
-                    apply_compact_task(&mut new_version_delta, &compact_task);
-                    new_version_delta.pre_apply();
+                    version.apply_compact_task(&compact_task);
                     trivial_tasks.push(compact_task);
                     if trivial_tasks.len() >= self.env.opts.max_trivial_move_task_count_per_loop {
                         break 'outside;
@@ -1115,10 +1116,6 @@ impl HummockManager {
                 version
             )?;
 
-            trigger_version_stat(&self.metrics, &versioning.current_version);
-            trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
-            self.notify_stats(&versioning.version_stats);
-            self.notify_version_deltas(versioning, last_apply_version_id);
             self.metrics
                 .compact_task_batch_count
                 .with_label_values(&["batch_trivial_move"])
@@ -1392,15 +1389,19 @@ impl HummockManager {
         }
         let mut tasks = vec![];
 
-        let mut version = HummockVersionTransaction::new_with_deterministic_mode(
+        let mut version = HummockVersionTransaction::new(
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
-            deterministic_mode,
+            self.env.notification_manager(),
+            &self.metrics,
         );
+
+        if deterministic_mode {
+            version.disable_apply_to_txn();
+        }
 
         let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
         let mut success_count = 0;
-        let last_version_id = version.version().id;
         for (idx, task) in report_tasks.into_iter().enumerate() {
             rets[idx] = true;
             let mut compact_task = match compact_task_assignment.remove(task.task_id) {
@@ -1465,9 +1466,7 @@ impl HummockManager {
             };
             if is_success {
                 success_count += 1;
-                let mut new_version_delta = version.new_delta();
-                apply_compact_task(&mut new_version_delta, &compact_task);
-                new_version_delta.pre_apply();
+                version.apply_compact_task(&compact_task);
                 if purge_prost_table_stats(&mut version_stats.table_stats, version.version()) {
                     self.metrics.version_stats.reset();
                     versioning.local_metrics.clear();
@@ -1491,13 +1490,7 @@ impl HummockManager {
                 version_stats
             )?;
 
-            trigger_version_stat(&self.metrics, &versioning.current_version);
-            trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
             self.notify_stats(&versioning.version_stats);
-
-            if !deterministic_mode {
-                self.notify_version_deltas(versioning, last_version_id);
-            }
 
             self.metrics
                 .compact_task_batch_count
@@ -1605,6 +1598,8 @@ impl HummockManager {
         let mut version = HummockVersionTransaction::new(
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
+            self.env.notification_manager(),
+            &self.metrics,
         );
         let mut new_version_delta = version.new_delta();
 
@@ -1842,7 +1837,6 @@ impl HummockManager {
         assert!(prev_snapshot.committed_epoch < epoch);
         assert!(prev_snapshot.current_epoch < epoch);
 
-        trigger_version_stat(&self.metrics, &versioning.current_version);
         for compaction_group_id in &modified_compaction_groups {
             trigger_sst_stat(
                 &self.metrics,
@@ -1854,8 +1848,6 @@ impl HummockManager {
 
         tracing::trace!("new committed epoch {}", epoch);
 
-        self.notify_last_version_delta(versioning);
-        trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
         self.notify_stats(&versioning.version_stats);
         let mut table_groups = HashMap::<u32, usize>::default();
         for group in versioning.current_version.levels.values() {
@@ -2253,39 +2245,6 @@ impl HummockManager {
 
     pub fn metadata_manager(&self) -> &MetadataManager {
         &self.metadata_manager
-    }
-
-    fn notify_last_version_delta(&self, versioning: &Versioning) {
-        self.env
-            .notification_manager()
-            .notify_hummock_without_version(
-                Operation::Add,
-                Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
-                    version_deltas: vec![versioning
-                        .hummock_version_deltas
-                        .last_key_value()
-                        .unwrap()
-                        .1
-                        .to_protobuf()],
-                }),
-            );
-    }
-
-    fn notify_version_deltas(&self, versioning: &Versioning, last_version_id: u64) {
-        let start_version_id = last_version_id + 1;
-        let version_deltas = versioning
-            .hummock_version_deltas
-            .range(start_version_id..)
-            .map(|(_, delta)| delta.to_protobuf())
-            .collect_vec();
-        self.env
-            .notification_manager()
-            .notify_hummock_without_version(
-                Operation::Add,
-                Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
-                    version_deltas,
-                }),
-            );
     }
 
     fn notify_stats(&self, stats: &HummockVersionStats) {
@@ -3240,57 +3199,58 @@ pub enum TableAlignRule {
     SplitByTable(StateTableId),
 }
 
-fn apply_compact_task<'a>(
-    version_delta: &'a mut SingleDeltaTransaction<'_, '_>,
-    compact_task: &'a CompactTask,
-) {
-    let trivial_move = CompactStatus::is_trivial_move_task(compact_task);
-    version_delta.trivial_move = trivial_move;
+impl<'a> HummockVersionTransaction<'a> {
+    fn apply_compact_task(&mut self, compact_task: &CompactTask) {
+        let mut version_delta = self.new_delta();
+        let trivial_move = CompactStatus::is_trivial_move_task(compact_task);
+        version_delta.trivial_move = trivial_move;
 
-    let group_deltas = &mut version_delta
-        .group_deltas
-        .entry(compact_task.compaction_group_id)
-        .or_default()
-        .group_deltas;
-    let mut removed_table_ids_map: BTreeMap<u32, Vec<u64>> = BTreeMap::default();
-
-    for level in &compact_task.input_ssts {
-        let level_idx = level.level_idx;
-        let mut removed_table_ids = level
-            .table_infos
-            .iter()
-            .map(|sst| sst.get_sst_id())
-            .collect_vec();
-
-        removed_table_ids_map
-            .entry(level_idx)
+        let group_deltas = &mut version_delta
+            .group_deltas
+            .entry(compact_task.compaction_group_id)
             .or_default()
-            .append(&mut removed_table_ids);
-    }
+            .group_deltas;
+        let mut removed_table_ids_map: BTreeMap<u32, Vec<u64>> = BTreeMap::default();
 
-    for (level_idx, removed_table_ids) in removed_table_ids_map {
+        for level in &compact_task.input_ssts {
+            let level_idx = level.level_idx;
+            let mut removed_table_ids = level
+                .table_infos
+                .iter()
+                .map(|sst| sst.get_sst_id())
+                .collect_vec();
+
+            removed_table_ids_map
+                .entry(level_idx)
+                .or_default()
+                .append(&mut removed_table_ids);
+        }
+
+        for (level_idx, removed_table_ids) in removed_table_ids_map {
+            let group_delta = GroupDelta {
+                delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
+                    level_idx,
+                    removed_table_ids,
+                    ..Default::default()
+                })),
+            };
+            group_deltas.push(group_delta);
+        }
+
         let group_delta = GroupDelta {
             delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
-                level_idx,
-                removed_table_ids,
+                level_idx: compact_task.target_level,
+                inserted_table_infos: compact_task.sorted_output_ssts.clone(),
+                l0_sub_level_id: compact_task.target_sub_level_id,
+                vnode_partition_count: compact_task.split_weight_by_vnode,
                 ..Default::default()
             })),
         };
         group_deltas.push(group_delta);
+        version_delta.safe_epoch =
+            std::cmp::max(version_delta.version().safe_epoch, compact_task.watermark);
+        version_delta.pre_apply();
     }
-
-    let group_delta = GroupDelta {
-        delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
-            level_idx: compact_task.target_level,
-            inserted_table_infos: compact_task.sorted_output_ssts.clone(),
-            l0_sub_level_id: compact_task.target_sub_level_id,
-            vnode_partition_count: compact_task.split_weight_by_vnode,
-            ..Default::default()
-        })),
-    };
-    group_deltas.push(group_delta);
-    version_delta.safe_epoch =
-        std::cmp::max(version_delta.version().safe_epoch, compact_task.watermark);
 }
 
 async fn write_exclusive_cluster_id(
@@ -3359,7 +3319,7 @@ use super::compaction::CompactionSelector;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::context::ContextInfo;
 use crate::hummock::manager::gc::DeleteObjectTracker;
-use crate::hummock::manager::transaction::{HummockVersionTransaction, SingleDeltaTransaction};
+use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::sequence::next_sstable_object_id;
 
 #[derive(Debug, Default)]
