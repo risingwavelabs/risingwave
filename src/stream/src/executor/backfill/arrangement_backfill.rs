@@ -137,14 +137,14 @@ where
         let mut upstream = self.upstream.execute();
 
         // Query the current barrier latency from meta.
-        // Permit a +10% fluctuation in barrier latency. Set baseline to 5s.
+        // Permit a 2x fluctuation in barrier latency. Set threshold to 15s.
         let mut total_barrier_latency = Self::get_total_barrier_latency(&self.metrics);
-        let initial_barrier_latency = Self::get_barrier_latency(&self.metrics);
-        let baseline_barrier_latency = {
-            if initial_barrier_latency < 5.0 {
-                5.0
+        let current_barrier_latency = Self::get_barrier_latency(&self.metrics);
+        let threshold_barrier_latency = {
+            if current_barrier_latency < 5.0 {
+                15.0
             } else {
-                initial_barrier_latency * 2.0
+                current_barrier_latency * 2.0
             }
         };
         let adaptive_rate_limit = true;
@@ -560,7 +560,8 @@ where
                     rate_limiter = Self::adapt_rate_limit(
                         &self.actor_id,
                         &self.metrics,
-                        baseline_barrier_latency,
+                        threshold_barrier_latency,
+                        current_barrier_latency,
                         &mut total_barrier_latency,
                         &mut rate_limit,
                         rate_limiter_curr,
@@ -640,7 +641,8 @@ where
     fn adapt_rate_limit(
         actor_id: &ActorId,
         metrics: &StreamingMetrics,
-        baseline_barrier_latency: f64,
+        threshold_barrier_latency: f64,
+        current_barrier_latency: f64,
         total_barrier_latency: &mut f64,
         rate_limit: &mut Option<usize>,
         rate_limiter: Option<BackfillRateLimiter>,
@@ -649,30 +651,38 @@ where
         let new_barrier_latency = new_total_barrier_latency - *total_barrier_latency;
         *total_barrier_latency = new_total_barrier_latency;
         let new_rate_limit = if new_barrier_latency == 0.0 {
-            tracing::trace!(
+            tracing::debug!(
                 target: "adaptive_rate_limit",
-                actor_id,
                 ?rate_limit,
                 "waiting for barrier latency"
             );
             *rate_limit
             // do nothing
-        } else if new_barrier_latency > baseline_barrier_latency {
+        } else if new_barrier_latency > threshold_barrier_latency {
             tracing::debug!(
                 target: "adaptive_rate_limit",
-                actor_id,
                 new_barrier_latency,
                 "barrier latency exceeds threshold, reset to initial rate limit"
             );
             Some(INITIAL_ADAPTIVE_RATE_LIMIT)
         } else if let Some(rate_limit_set) = rate_limit {
-            let barrier_latency_diff = baseline_barrier_latency - new_barrier_latency;
-            let scaling_factor = 1_f64 + barrier_latency_diff / baseline_barrier_latency;
+            // We use the following inputs to determine the scaling factor:
+            // 1. The barrier latency "left" before we reach the threshold.
+            //    If we have a lot left, we can scale more aggressively.
+            // 2. The change in barrier latency.
+            //    If the barrier latency increases significantly, we should scale less.
+            //    That being said, we should not let it be 0 as well, if we still have threshold to scale.
+            //    So we just let it be a lower number, like 0.1.
+            let barrier_latency_surplus_ratio =
+                (threshold_barrier_latency - new_barrier_latency) / threshold_barrier_latency;
+            let barrier_latency_diff_ratio = (1_f64
+                - (new_barrier_latency - current_barrier_latency) / current_barrier_latency)
+                .clamp(0.1_f64, 1_f64);
+            let scaling_factor = 1_f64 + barrier_latency_surplus_ratio * barrier_latency_diff_ratio;
             let scaled_rate_limit = (*rate_limit_set as f64) * scaling_factor;
-            let new_rate_limit = f64::max(1_f64, scaled_rate_limit).round() as usize;
+            let new_rate_limit = f64::min(1_f64, scaled_rate_limit).round() as usize;
             tracing::debug!(
                 target: "adaptive_rate_limit",
-                actor_id,
                 new_rate_limit,
                 scaling_factor,
                 "scaling rate limit"
