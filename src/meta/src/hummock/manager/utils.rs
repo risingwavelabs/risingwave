@@ -23,6 +23,7 @@ macro_rules! commit_multi_var {
                 match &$meta_store {
                     $crate::manager::MetaStoreImpl::Kv(meta_store) => {
                         use crate::storage::Transaction;
+                        use crate::storage::meta_store::MetaStore;
                         let mut trx = Transaction::default();
                         $(
                             $val_txn.apply_to_txn(&mut trx).await?;

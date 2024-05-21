@@ -47,7 +47,6 @@ use crate::hummock::metrics_utils::{
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::HummockManager;
 use crate::model::VarTransaction;
-use crate::storage::MetaStore;
 use crate::MetaResult;
 
 /// `HummockVersionSafePoint` prevents hummock versions GE than it from being GC.

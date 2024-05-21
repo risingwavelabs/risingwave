@@ -51,7 +51,6 @@ use crate::manager::{MetaSrvEnv, MetaStoreImpl};
 use crate::model::{
     BTreeMapEntryTransaction, BTreeMapTransaction, MetadataModel, MetadataModelError,
 };
-use crate::storage::MetaStore;
 
 impl HummockManager {
     pub(super) async fn build_compaction_group_manager(

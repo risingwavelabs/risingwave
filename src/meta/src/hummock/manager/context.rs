@@ -27,7 +27,6 @@ use crate::hummock::manager::{commit_multi_var, start_measure_real_process_timer
 use crate::hummock::HummockManager;
 use crate::manager::{MetaStoreImpl, MetadataManager, META_NODE_ID};
 use crate::model::BTreeMapTransaction;
-use crate::storage::MetaStore;
 
 #[derive(Default)]
 pub(super) struct ContextInfo {

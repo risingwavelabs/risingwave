@@ -83,17 +83,13 @@ use crate::hummock::metrics_utils::{
 };
 use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
-#[cfg(any(test, feature = "test"))]
-use crate::manager::{ClusterManagerRef, FragmentManagerRef};
 use crate::manager::{MetaSrvEnv, MetaStoreImpl, MetadataManager, META_NODE_ID};
 use crate::model::{BTreeMapTransaction, ClusterId, MetadataModel, MetadataModelError};
 use crate::rpc::metrics::MetaMetrics;
-use crate::storage::MetaStore;
 
 mod compaction_group_manager;
 mod context;
 mod gc;
-#[cfg(test)]
 mod tests;
 mod versioning;
 pub use versioning::HummockVersionSafePoint;
@@ -288,8 +284,8 @@ impl HummockManager {
     #[cfg(any(test, feature = "test"))]
     pub(super) async fn with_config(
         env: MetaSrvEnv,
-        cluster_manager: ClusterManagerRef,
-        fragment_manager: FragmentManagerRef,
+        cluster_manager: crate::manager::ClusterManagerRef,
+        fragment_manager: crate::manager::FragmentManagerRef,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         config: risingwave_pb::hummock::CompactionConfig,

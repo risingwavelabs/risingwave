@@ -33,7 +33,6 @@ use crate::hummock::manager::commit_multi_var;
 use crate::hummock::HummockManager;
 use crate::manager::MetadataManager;
 use crate::model::BTreeMapTransaction;
-use crate::storage::MetaStore;
 
 #[derive(Default)]
 pub(super) struct DeleteObjectTracker {
