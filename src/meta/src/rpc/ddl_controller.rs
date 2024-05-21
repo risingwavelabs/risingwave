@@ -70,7 +70,7 @@ use crate::manager::{
     CatalogManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId, IdCategory,
     IdCategoryType, IndexId, LocalNotification, MetaSrvEnv, MetadataManager, MetadataManagerV1,
     NotificationVersion, RelationIdEnum, SchemaId, SecretId, SinkId, SourceId,
-    StreamingClusterInfo, StreamingJob, SubscriptionId, TableId, UserId, ViewId,
+    StreamingClusterInfo, StreamingJob, StreamingJobDiscriminants, SubscriptionId, TableId, UserId, ViewId,
     IGNORED_NOTIFICATION_VERSION,
 };
 use crate::model::{FragmentId, StreamContext, TableFragments, TableParallelism};
@@ -949,7 +949,7 @@ impl DdlController {
                 )
                     .await
             }
-            (CreateType::Background, _) => {
+            (CreateType::Background, &StreamingJob::MaterializedView(_)) => {
                 let ctrl = self.clone();
                 let mgr = mgr.clone();
                 let stream_job_id = stream_job.id();
@@ -974,6 +974,10 @@ impl DdlController {
                 };
                 tokio::spawn(fut);
                 Ok(IGNORED_NOTIFICATION_VERSION)
+            }
+            (CreateType::Background, _) => {
+                let d: StreamingJobDiscriminants = stream_job.into();
+                bail!("background_ddl not supported for: {:?}", d)
             }
         }
     }

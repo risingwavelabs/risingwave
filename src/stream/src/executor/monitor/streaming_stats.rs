@@ -85,9 +85,11 @@ pub struct StreamingMetrics {
     pub join_insert_cache_miss_count: LabelGuardedIntCounterVec<5>,
     pub join_actor_input_waiting_duration_ns: LabelGuardedIntCounterVec<2>,
     pub join_match_duration_ns: LabelGuardedIntCounterVec<3>,
-    pub join_barrier_align_duration: RelabeledGuardedHistogramVec<3>,
     pub join_cached_entry_count: LabelGuardedIntGaugeVec<3>,
     pub join_matched_join_keys: RelabeledGuardedHistogramVec<3>,
+
+    // Streaming Join and Streaming Dynamic Filter
+    pub barrier_align_duration: RelabeledGuardedHistogramVec<4>,
 
     // Streaming Aggregation
     pub agg_lookup_miss_count: GenericCounterVec<AtomicU64>,
@@ -457,20 +459,20 @@ impl StreamingMetrics {
         .unwrap();
 
         let opts = histogram_opts!(
-            "stream_join_barrier_align_duration",
+            "stream_barrier_align_duration",
             "Duration of join align barrier",
             exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
         );
-        let join_barrier_align_duration = register_guarded_histogram_vec_with_registry!(
+        let barrier_align_duration = register_guarded_histogram_vec_with_registry!(
             opts,
-            &["actor_id", "fragment_id", "wait_side"],
+            &["actor_id", "fragment_id", "wait_side", "executor"],
             registry
         )
         .unwrap();
 
-        let join_barrier_align_duration = RelabeledGuardedHistogramVec::with_metric_level_relabel_n(
+        let barrier_align_duration = RelabeledGuardedHistogramVec::with_metric_level_relabel_n(
             MetricLevel::Debug,
-            join_barrier_align_duration,
+            barrier_align_duration,
             level,
             1,
         );
@@ -1128,9 +1130,9 @@ impl StreamingMetrics {
             join_insert_cache_miss_count,
             join_actor_input_waiting_duration_ns,
             join_match_duration_ns,
-            join_barrier_align_duration,
             join_cached_entry_count,
             join_matched_join_keys,
+            barrier_align_duration,
             agg_lookup_miss_count,
             agg_total_lookup_count,
             agg_cached_entry_count,

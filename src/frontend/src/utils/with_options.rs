@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
-use std::convert::TryFrom;
 use std::num::NonZeroU32;
 
 use risingwave_connector::source::kafka::private_link::{

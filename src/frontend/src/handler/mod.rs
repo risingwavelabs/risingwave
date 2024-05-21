@@ -368,7 +368,16 @@ pub async fn handle(
         Statement::CreateSchema {
             schema_name,
             if_not_exists,
-        } => create_schema::handle_create_schema(handler_args, schema_name, if_not_exists).await,
+            user_specified,
+        } => {
+            create_schema::handle_create_schema(
+                handler_args,
+                schema_name,
+                if_not_exists,
+                user_specified,
+            )
+            .await
+        }
         Statement::CreateUser(stmt) => create_user::handle_create_user(handler_args, stmt).await,
         Statement::DeclareCursor { stmt } => {
             declare_cursor::handle_declare_cursor(handler_args, stmt).await

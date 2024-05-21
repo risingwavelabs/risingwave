@@ -14,7 +14,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::{Future, TryFutureExt};
+use futures::Future;
 use risingwave_common::buffer::Bitmap;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
@@ -24,12 +24,10 @@ use risingwave_hummock_trace::{
 };
 use thiserror_ext::AsReport;
 
-use super::identity;
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
 use crate::store::*;
-use crate::StateStore;
 
 #[derive(Clone)]
 pub struct TracedStateStore<S> {
@@ -107,6 +105,7 @@ impl<S> TracedStateStore<S> {
 
 impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
     type Iter<'a> = impl StateStoreIter + 'a;
+    type RevIter<'a> = impl StateStoreIter + 'a;
 
     fn may_exist(
         &self,
@@ -143,7 +142,22 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
             self.storage_type,
         );
         self.traced_iter(self.inner.iter(key_range, read_options), span)
-            .map_ok(identity)
+    }
+
+    fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_ {
+        let (l, r) = key_range.clone();
+        let bytes_key_range = (l.map(|l| l.0), r.map(|r| r.0));
+        let span = TraceSpan::new_iter_span(
+            bytes_key_range,
+            None,
+            read_options.clone().into(),
+            self.storage_type,
+        );
+        self.traced_iter(self.inner.rev_iter(key_range, read_options), span)
     }
 
     fn insert(
@@ -276,6 +290,7 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
 impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
     type ChangeLogIter = impl StateStoreReadChangeLogIter;
     type Iter = impl StateStoreReadIter;
+    type RevIter = impl StateStoreReadIter;
 
     fn get(
         &self,
@@ -306,7 +321,23 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
             self.storage_type,
         );
         self.traced_iter(self.inner.iter(key_range, epoch, read_options), span)
-            .map_ok(identity)
+    }
+
+    fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
+        let (l, r) = key_range.clone();
+        let bytes_key_range = (l.map(|l| l.0), r.map(|r| r.0));
+        let span = TraceSpan::new_iter_span(
+            bytes_key_range,
+            Some(epoch),
+            read_options.clone().into(),
+            self.storage_type,
+        );
+        self.traced_iter(self.inner.rev_iter(key_range, epoch, read_options), span)
     }
 
     fn iter_log(

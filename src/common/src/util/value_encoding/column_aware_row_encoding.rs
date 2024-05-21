@@ -26,7 +26,6 @@ use bitflags::bitflags;
 
 use super::*;
 use crate::catalog::ColumnId;
-use crate::row::Row;
 
 // deprecated design of have a Width to represent number of datum
 // may be considered should `ColumnId` representation be optimized

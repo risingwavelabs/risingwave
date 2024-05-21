@@ -30,7 +30,6 @@ use risingwave_expr::window_function::{
     create_window_state, StateKey, WindowFuncCall, WindowStates,
 };
 use risingwave_storage::row_serde::row_serde_util::serialize_pk_with_vnode;
-use risingwave_storage::StateStore;
 
 use super::over_partition::{
     new_empty_partition_cache, shrink_partition_cache, CacheKey, OverPartition, PartitionCache,
@@ -38,8 +37,6 @@ use super::over_partition::{
 };
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
-use crate::common::table::state_table::StateTable;
-use crate::executor::monitor::StreamingMetrics;
 use crate::executor::over_window::over_partition::AffectedRange;
 use crate::executor::prelude::*;
 

@@ -75,10 +75,10 @@ services:
     networks:
       iceberg_net:
 
-  etcd-0:
+  postgres-0:
     extends:
       file: ../../../../docker/docker-compose.yml
-      service: etcd-0
+      service: postgres-0
     networks:
       iceberg_net:
 
@@ -106,7 +106,7 @@ services:
 volumes:
   risingwave-standalone:
     external: false
-  etcd-0:
+  postgres-0:
     external: false
   minio-0:
     external: false

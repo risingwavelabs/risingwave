@@ -25,12 +25,7 @@ use core::fmt;
 use itertools::Itertools;
 use tracing::{debug, instrument};
 
-use self::ddl::AlterSubscriptionOperation;
-use crate::ast::ddl::{
-    AlterConnectionOperation, AlterDatabaseOperation, AlterFunctionOperation, AlterIndexOperation,
-    AlterSchemaOperation, AlterSinkOperation, AlterViewOperation, SourceWatermark,
-};
-use crate::ast::{ParseTo, *};
+use crate::ast::*;
 use crate::keywords::{self, Keyword};
 use crate::tokenizer::*;
 
@@ -2159,10 +2154,22 @@ impl Parser {
 
     pub fn parse_create_schema(&mut self) -> Result<Statement, ParserError> {
         let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
-        let schema_name = self.parse_object_name()?;
+        let (schema_name, user_specified) = if self.parse_keyword(Keyword::AUTHORIZATION) {
+            let user_specified = self.parse_object_name()?;
+            (user_specified.clone(), Some(user_specified))
+        } else {
+            let schema_name = self.parse_object_name()?;
+            let user_specified = if self.parse_keyword(Keyword::AUTHORIZATION) {
+                Some(self.parse_object_name()?)
+            } else {
+                None
+            };
+            (schema_name, user_specified)
+        };
         Ok(Statement::CreateSchema {
             schema_name,
             if_not_exists,
+            user_specified,
         })
     }
 
@@ -2417,7 +2424,7 @@ impl Parser {
                 body.language = Some(self.parse_identifier()?);
             } else if self.parse_keyword(Keyword::RUNTIME) {
                 ensure_not_set(&body.runtime, "RUNTIME")?;
-                body.runtime = Some(self.parse_function_runtime()?);
+                body.runtime = Some(self.parse_identifier()?);
             } else if self.parse_keyword(Keyword::IMMUTABLE) {
                 ensure_not_set(&body.behavior, "IMMUTABLE | STABLE | VOLATILE")?;
                 body.behavior = Some(FunctionBehavior::Immutable);
@@ -2461,17 +2468,6 @@ impl Parser {
                 Ok(CreateFunctionUsing::Base64(base64))
             }
             _ => unreachable!("{}", keyword),
-        }
-    }
-
-    fn parse_function_runtime(&mut self) -> Result<FunctionRuntime, ParserError> {
-        let ident = self.parse_identifier()?;
-        match ident.value.to_lowercase().as_str() {
-            "deno" => Ok(FunctionRuntime::Deno),
-            "quickjs" => Ok(FunctionRuntime::QuickJs),
-            r => Err(ParserError::ParserError(format!(
-                "Unsupported runtime: {r}"
-            ))),
         }
     }
 
