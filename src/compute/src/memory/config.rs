@@ -320,7 +320,7 @@ mod tests {
         );
         assert_eq!(memory_config.block_cache_capacity_mb, 1966);
         assert_eq!(memory_config.meta_cache_capacity_mb, 1146);
-        assert_eq!(memory_config.shared_buffer_capacity_mb, 0);
+        assert_eq!(memory_config.shared_buffer_capacity_mb, 1);
         assert_eq!(memory_config.compactor_memory_limit_mb, 0);
 
         storage_config.data_file_cache.dir = "data".to_string();

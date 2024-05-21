@@ -127,7 +127,7 @@ pub async fn compute_node_serve(
         non_reserved_memory_bytes,
         embedded_compactor_enabled,
         &config.storage,
-        opts.role.for_serving(),
+        !opts.role.for_streaming(),
     );
 
     let storage_memory_bytes = total_storage_memory_limit_bytes(&storage_memory_config);
