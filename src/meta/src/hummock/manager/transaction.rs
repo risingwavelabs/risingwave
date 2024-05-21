@@ -22,7 +22,9 @@ use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
 use crate::manager::NotificationManager;
-use crate::model::{InMemValTransaction, MetadataModelResult, Transactional, ValTransaction};
+use crate::model::{
+    InMemValTransaction, MetadataModelResult, Transactional, ValTransaction, VarTransaction,
+};
 use crate::rpc::metrics::MetaMetrics;
 
 fn trigger_delta_log_stats(metrics: &MetaMetrics, total_number: usize) {
@@ -177,5 +179,56 @@ impl<'a, 'b> Drop for SingleDeltaTransaction<'a, 'b> {
         if let Some(delta) = self.delta.take() {
             self.version_txn.pre_apply(delta);
         }
+    }
+}
+
+pub(super) struct HummockVersionStatsTransaction<'a> {
+    stats: VarTransaction<'a, HummockVersionStats>,
+    notification_manager: &'a NotificationManager,
+}
+
+impl<'a> HummockVersionStatsTransaction<'a> {
+    pub(super) fn new(
+        stats: &'a mut HummockVersionStats,
+        notification_manager: &'a NotificationManager,
+    ) -> Self {
+        Self {
+            stats: VarTransaction::new(stats),
+            notification_manager,
+        }
+    }
+}
+
+impl<'a> InMemValTransaction for HummockVersionStatsTransaction<'a> {
+    fn commit(self) {
+        if self.stats.has_new_value() {
+            let stats = self.stats.clone();
+            self.stats.commit();
+            self.notification_manager
+                .notify_frontend_without_version(Operation::Update, Info::HummockStats(stats));
+        }
+    }
+}
+
+impl<'a, TXN> ValTransaction<TXN> for HummockVersionStatsTransaction<'a>
+where
+    HummockVersionStats: Transactional<TXN>,
+{
+    async fn apply_to_txn(&self, txn: &mut TXN) -> MetadataModelResult<()> {
+        self.stats.apply_to_txn(txn).await
+    }
+}
+
+impl<'a> Deref for HummockVersionStatsTransaction<'a> {
+    type Target = HummockVersionStats;
+
+    fn deref(&self) -> &Self::Target {
+        self.stats.deref()
+    }
+}
+
+impl<'a> DerefMut for HummockVersionStatsTransaction<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.stats.deref_mut()
     }
 }

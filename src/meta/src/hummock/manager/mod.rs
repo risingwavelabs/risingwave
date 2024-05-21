@@ -60,7 +60,7 @@ use risingwave_pb::hummock::{
     HummockPinnedVersion, HummockSnapshot, HummockVersionStats, InputLevel, IntraLevelDelta, Level,
     PbCompactionGroupInfo, SstableInfo, SubscribeCompactionEventRequest, TableOption, TableSchema,
 };
-use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_pb::meta::subscribe_response::Operation;
 use rw_futures_util::{pending_on_none, select_all};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -86,9 +86,7 @@ use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
 #[cfg(any(test, feature = "test"))]
 use crate::manager::{ClusterManagerRef, FragmentManagerRef};
 use crate::manager::{MetaSrvEnv, MetaStoreImpl, MetadataManager, META_NODE_ID};
-use crate::model::{
-    BTreeMapTransaction, ClusterId, MetadataModel, MetadataModelError, VarTransaction,
-};
+use crate::model::{BTreeMapTransaction, ClusterId, MetadataModel, MetadataModelError};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 
@@ -1400,7 +1398,10 @@ impl HummockManager {
             version.disable_apply_to_txn();
         }
 
-        let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
+        let mut version_stats = HummockVersionStatsTransaction::new(
+            &mut versioning.version_stats,
+            self.env.notification_manager(),
+        );
         let mut success_count = 0;
         for (idx, task) in report_tasks.into_iter().enumerate() {
             rets[idx] = true;
@@ -1489,8 +1490,6 @@ impl HummockManager {
                 version,
                 version_stats
             )?;
-
-            self.notify_stats(&versioning.version_stats);
 
             self.metrics
                 .compact_task_batch_count
@@ -1799,7 +1798,10 @@ impl HummockManager {
         new_version_delta.pre_apply();
 
         // Apply stats changes.
-        let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
+        let mut version_stats = HummockVersionStatsTransaction::new(
+            &mut versioning.version_stats,
+            self.env.notification_manager(),
+        );
         add_prost_table_stats_map(&mut version_stats.table_stats, &table_stats_change);
         if purge_prost_table_stats(&mut version_stats.table_stats, version.version()) {
             self.metrics.version_stats.reset();
@@ -1848,7 +1850,6 @@ impl HummockManager {
 
         tracing::trace!("new committed epoch {}", epoch);
 
-        self.notify_stats(&versioning.version_stats);
         let mut table_groups = HashMap::<u32, usize>::default();
         for group in versioning.current_version.levels.values() {
             for table_id in &group.member_table_ids {
@@ -2245,12 +2246,6 @@ impl HummockManager {
 
     pub fn metadata_manager(&self) -> &MetadataManager {
         &self.metadata_manager
-    }
-
-    fn notify_stats(&self, stats: &HummockVersionStats) {
-        self.env
-            .notification_manager()
-            .notify_frontend_without_version(Operation::Update, Info::HummockStats(stats.clone()));
     }
 
     pub fn hummock_timer_task(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
@@ -3319,7 +3314,9 @@ use super::compaction::CompactionSelector;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::context::ContextInfo;
 use crate::hummock::manager::gc::DeleteObjectTracker;
-use crate::hummock::manager::transaction::HummockVersionTransaction;
+use crate::hummock::manager::transaction::{
+    HummockVersionStatsTransaction, HummockVersionTransaction,
+};
 use crate::hummock::sequence::next_sstable_object_id;
 
 #[derive(Debug, Default)]
