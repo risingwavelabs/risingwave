@@ -203,7 +203,7 @@ mod tests {
 
     fn test_agg(pretty: &str, input: StreamChunk, expected: Datum) {
         let agg = build(&AggCall::from_pretty(pretty)).unwrap();
-        let mut state = agg.create_state();
+        let mut state = agg.create_state().unwrap();
         agg.update(&mut state, &input)
             .now_or_never()
             .unwrap()

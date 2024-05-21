@@ -168,7 +168,7 @@ mod tests {
             "(array_agg:int4[] $0:int4 orderby $1:asc $0:desc)",
         ))
         .unwrap();
-        let mut state = agg.create_state();
+        let mut state = agg.create_state().unwrap();
         agg.update(&mut state, &chunk).await.unwrap();
         assert_eq!(
             agg.get_result(&state).await.unwrap(),
@@ -189,7 +189,7 @@ mod tests {
             "(string_agg:varchar $0:varchar $1:varchar orderby $2:asc $3:desc $0:desc)",
         ))
         .unwrap();
-        let mut state = agg.create_state();
+        let mut state = agg.create_state().unwrap();
         agg.update(&mut state, &chunk).await.unwrap();
         assert_eq!(
             agg.get_result(&state).await.unwrap(),

@@ -86,7 +86,7 @@ mod tests {
             condition.into(),
             build_append_only(&AggCall::from_pretty("(count:int8 $0:int8)")).unwrap(),
         );
-        let mut state = agg.create_state();
+        let mut state = agg.create_state()?;
 
         let chunk = StreamChunk::from_pretty(
             " I
@@ -115,7 +115,7 @@ mod tests {
             expr.into(),
             build_append_only(&AggCall::from_pretty("(count:int8 $0:int8)")).unwrap(),
         );
-        let mut state = agg.create_state();
+        let mut state = agg.create_state()?;
 
         let chunk = StreamChunk::from_pretty(
             " I
@@ -147,7 +147,7 @@ mod tests {
             expr.into(),
             build_append_only(&AggCall::from_pretty("(count:int8 $0:int8)")).unwrap(),
         );
-        let mut state = agg.create_state();
+        let mut state = agg.create_state()?;
 
         let chunk = StreamChunk::from_pretty(
             " I
