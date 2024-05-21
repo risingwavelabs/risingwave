@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use super::{ExecuteContext, Task};
 
@@ -34,20 +34,22 @@ impl ConfigureTcpNodeTask {
 
 impl Task for ConfigureTcpNodeTask {
     fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
-        assert!(
-            ctx.id.is_some(),
-            "Service should be set before executing ConfigureTcpNodeTask"
-        );
+        let Some(id) = ctx.id.clone() else {
+            panic!("Service should be set before executing ConfigureTcpNodeTask");
+        };
         let address = format!("{}:{}", self.advertise_address, self.port);
 
         if self.user_managed {
             ctx.pb.set_message(
                 "waiting for user-managed service online... (see `risedev.log` for cli args)",
             );
-            ctx.wait_tcp_user(&address)?;
+            ctx.wait_tcp_user(&address).with_context(|| {
+                format!("failed to wait for user-managed service `{id}` to be online")
+            })?;
         } else {
             ctx.pb.set_message("waiting for online...");
-            ctx.wait_tcp(&address)?;
+            ctx.wait_tcp(&address)
+                .with_context(|| format!("failed to wait for service `{id}` to be online"))?;
         }
 
         ctx.complete_spin();

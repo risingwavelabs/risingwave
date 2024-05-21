@@ -174,7 +174,11 @@ where
     }
 
     pub fn wait_tcp(&mut self, server: impl AsRef<str>) -> anyhow::Result<()> {
-        let addr = server.as_ref().parse()?;
+        let addr = server
+            .as_ref()
+            .to_socket_addrs()?
+            .next()
+            .with_context(|| format!("failed to resolve {}", server.as_ref()))?;
         wait(
             || {
                 TcpStream::connect_timeout(&addr, Duration::from_secs(1)).with_context(|| {
