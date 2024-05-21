@@ -522,6 +522,11 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .iter()
             .zip_eq_fast(&mut out_fields[self.group_key.len()..])
         {
+            if agg_call.agg_kind == AggKind::UserDefined {
+                // for user defined aggregate, the state type is always BYTEA
+                field.data_type = DataType::Bytea;
+                continue;
+            }
             let sig = FUNCTION_REGISTRY
                 .get(
                     agg_call.agg_kind,
