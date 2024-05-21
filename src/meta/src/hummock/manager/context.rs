@@ -16,14 +16,14 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use fail::fail_point;
 use itertools::Itertools;
+use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::{
-    ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
-};
-use risingwave_pb::hummock::{HummockPinnedSnapshot, HummockPinnedVersion, ValidationTask};
+use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId, INVALID_VERSION_ID};
+use risingwave_pb::hummock::{HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, ValidationTask};
 
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::{commit_multi_var, start_measure_real_process_timer};
+use crate::hummock::metrics_utils::{trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state};
 use crate::hummock::HummockManager;
 use crate::manager::{MetaStoreImpl, MetadataManager, META_NODE_ID};
 use crate::model::BTreeMapTransaction;
@@ -89,6 +89,23 @@ impl HummockManager {
             .await
             .check_context(context_id, &self.metadata_manager)
             .await
+    }
+
+    async fn check_context_with_meta_node(
+        &self,
+        context_id: HummockContextId,
+        context_info: &ContextInfo,
+    ) -> Result<()> {
+        if context_id == META_NODE_ID {
+            // Using the preserved meta id is allowed.
+        } else if !context_info
+            .check_context(context_id, &self.metadata_manager)
+            .await?
+        {
+            // The worker is not found in cluster.
+            return Err(Error::InvalidContext(context_id));
+        }
+        Ok(())
     }
 }
 
@@ -216,5 +233,203 @@ impl HummockManager {
 
     pub async fn release_meta_context(&self) -> Result<()> {
         self.release_contexts([META_NODE_ID]).await
+    }
+}
+
+// pin and unpin method
+impl HummockManager {
+    /// Pin the current greatest hummock version. The pin belongs to `context_id`
+    /// and will be unpinned when `context_id` is invalidated.
+    pub async fn pin_version(&self, context_id: HummockContextId) -> Result<HummockVersion> {
+        let versioning = self.versioning.read().await;
+        let mut context_info = self.context_info.write().await;
+        self.check_context_with_meta_node(context_id, &context_info)
+            .await?;
+        let _timer = start_measure_real_process_timer!(self, "pin_version");
+        let mut pinned_versions = BTreeMapTransaction::new(&mut context_info.pinned_versions);
+        let mut context_pinned_version = pinned_versions.new_entry_txn_or_default(
+            context_id,
+            HummockPinnedVersion {
+                context_id,
+                min_pinned_id: INVALID_VERSION_ID,
+            },
+        );
+        let version_id = versioning.current_version.id;
+        let ret = versioning.current_version.clone();
+        if context_pinned_version.min_pinned_id == INVALID_VERSION_ID
+            || context_pinned_version.min_pinned_id > version_id
+        {
+            context_pinned_version.min_pinned_id = version_id;
+            commit_multi_var!(self.meta_store_ref(), context_pinned_version)?;
+            trigger_pin_unpin_version_state(&self.metrics, &context_info.pinned_versions);
+        }
+
+        #[cfg(test)]
+        {
+            drop(context_info);
+            drop(versioning);
+            self.check_state_consistency().await;
+        }
+
+        Ok(ret)
+    }
+
+    /// Unpin all pins which belongs to `context_id` and has an id which is older than
+    /// `unpin_before`. All versions >= `unpin_before` will be treated as if they are all pinned by
+    /// this `context_id` so they will not be vacuumed.
+    pub async fn unpin_version_before(
+        &self,
+        context_id: HummockContextId,
+        unpin_before: HummockVersionId,
+    ) -> Result<()> {
+        let mut context_info = self.context_info.write().await;
+        self.check_context_with_meta_node(context_id, &context_info)
+            .await?;
+        let _timer = start_measure_real_process_timer!(self, "unpin_version_before");
+        let mut pinned_versions = BTreeMapTransaction::new(&mut context_info.pinned_versions);
+        let mut context_pinned_version = pinned_versions.new_entry_txn_or_default(
+            context_id,
+            HummockPinnedVersion {
+                context_id,
+                min_pinned_id: 0,
+            },
+        );
+        assert!(
+            context_pinned_version.min_pinned_id <= unpin_before,
+            "val must be monotonically non-decreasing. old = {}, new = {}.",
+            context_pinned_version.min_pinned_id,
+            unpin_before
+        );
+        context_pinned_version.min_pinned_id = unpin_before;
+        commit_multi_var!(self.meta_store_ref(), context_pinned_version)?;
+        trigger_pin_unpin_version_state(&self.metrics, &context_info.pinned_versions);
+
+        #[cfg(test)]
+        {
+            drop(context_info);
+            self.check_state_consistency().await;
+        }
+
+        Ok(())
+    }
+
+    pub async fn pin_specific_snapshot(
+        &self,
+        context_id: HummockContextId,
+        epoch: HummockEpoch,
+    ) -> Result<HummockSnapshot> {
+        let snapshot = self.latest_snapshot.load();
+        let mut guard = self.context_info.write().await;
+        self.check_context_with_meta_node(context_id, &guard)
+            .await?;
+        let mut pinned_snapshots = BTreeMapTransaction::new(&mut guard.pinned_snapshots);
+        let mut context_pinned_snapshot = pinned_snapshots.new_entry_txn_or_default(
+            context_id,
+            HummockPinnedSnapshot {
+                context_id,
+                minimal_pinned_snapshot: INVALID_EPOCH,
+            },
+        );
+        let epoch_to_pin = std::cmp::min(epoch, snapshot.committed_epoch);
+        if context_pinned_snapshot.minimal_pinned_snapshot == INVALID_EPOCH {
+            context_pinned_snapshot.minimal_pinned_snapshot = epoch_to_pin;
+            commit_multi_var!(self.meta_store_ref(), context_pinned_snapshot)?;
+        }
+        Ok(HummockSnapshot::clone(&snapshot))
+    }
+
+    /// Make sure `max_committed_epoch` is pinned and return it.
+    pub async fn pin_snapshot(&self, context_id: HummockContextId) -> Result<HummockSnapshot> {
+        let snapshot = self.latest_snapshot.load();
+        let mut guard = self.context_info.write().await;
+        self.check_context_with_meta_node(context_id, &guard)
+            .await?;
+        let _timer = start_measure_real_process_timer!(self, "pin_snapshot");
+        let mut pinned_snapshots = BTreeMapTransaction::new(&mut guard.pinned_snapshots);
+        let mut context_pinned_snapshot = pinned_snapshots.new_entry_txn_or_default(
+            context_id,
+            HummockPinnedSnapshot {
+                context_id,
+                minimal_pinned_snapshot: INVALID_EPOCH,
+            },
+        );
+        if context_pinned_snapshot.minimal_pinned_snapshot == INVALID_EPOCH {
+            context_pinned_snapshot.minimal_pinned_snapshot = snapshot.committed_epoch;
+            commit_multi_var!(self.meta_store_ref(), context_pinned_snapshot)?;
+            trigger_pin_unpin_snapshot_state(&self.metrics, &guard.pinned_snapshots);
+        }
+        Ok(HummockSnapshot::clone(&snapshot))
+    }
+
+    pub async fn unpin_snapshot(&self, context_id: HummockContextId) -> Result<()> {
+        let mut context_info = self.context_info.write().await;
+        self.check_context_with_meta_node(context_id, &context_info)
+            .await?;
+        let _timer = start_measure_real_process_timer!(self, "unpin_snapshot");
+        let mut pinned_snapshots = BTreeMapTransaction::new(&mut context_info.pinned_snapshots);
+        let release_snapshot = pinned_snapshots.remove(context_id);
+        if release_snapshot.is_some() {
+            commit_multi_var!(self.meta_store_ref(), pinned_snapshots)?;
+            trigger_pin_unpin_snapshot_state(&self.metrics, &context_info.pinned_snapshots);
+        }
+
+        #[cfg(test)]
+        {
+            drop(context_info);
+            self.check_state_consistency().await;
+        }
+
+        Ok(())
+    }
+
+    /// Unpin all snapshots smaller than specified epoch for current context.
+    pub async fn unpin_snapshot_before(
+        &self,
+        context_id: HummockContextId,
+        hummock_snapshot: HummockSnapshot,
+    ) -> Result<()> {
+        let versioning = self.versioning.read().await;
+        let mut context_info = self.context_info.write().await;
+        self.check_context_with_meta_node(context_id, &context_info)
+            .await?;
+        let _timer = start_measure_real_process_timer!(self, "unpin_snapshot_before");
+        // Use the max_committed_epoch in storage as the snapshot ts so only committed changes are
+        // visible in the snapshot.
+        let max_committed_epoch = versioning.current_version.max_committed_epoch;
+        // Ensure the unpin will not clean the latest one.
+        let snapshot_committed_epoch = hummock_snapshot.committed_epoch;
+        #[cfg(not(test))]
+        {
+            assert!(snapshot_committed_epoch <= max_committed_epoch);
+        }
+        let last_read_epoch = std::cmp::min(snapshot_committed_epoch, max_committed_epoch);
+
+        let mut pinned_snapshots = BTreeMapTransaction::new(&mut context_info.pinned_snapshots);
+        let mut context_pinned_snapshot = pinned_snapshots.new_entry_txn_or_default(
+            context_id,
+            HummockPinnedSnapshot {
+                context_id,
+                minimal_pinned_snapshot: INVALID_EPOCH,
+            },
+        );
+
+        // Unpin the snapshots pinned by meta but frontend doesn't know. Also equal to unpin all
+        // epochs below specific watermark.
+        if context_pinned_snapshot.minimal_pinned_snapshot < last_read_epoch
+            || context_pinned_snapshot.minimal_pinned_snapshot == INVALID_EPOCH
+        {
+            context_pinned_snapshot.minimal_pinned_snapshot = last_read_epoch;
+            commit_multi_var!(self.meta_store_ref(), context_pinned_snapshot)?;
+            trigger_pin_unpin_snapshot_state(&self.metrics, &context_info.pinned_snapshots);
+        }
+
+        #[cfg(test)]
+        {
+            drop(context_info);
+            drop(versioning);
+            self.check_state_consistency().await;
+        }
+
+        Ok(())
     }
 }
