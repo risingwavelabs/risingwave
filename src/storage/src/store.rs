@@ -44,7 +44,7 @@ use crate::storage_value::StorageValue;
 pub trait StaticSendSync = Send + Sync + 'static;
 
 pub trait IterItem: Send + 'static {
-    type ItemRef<'a>: Send + 'a;
+    type ItemRef<'a>: Send + Copy + 'a;
 }
 
 impl IterItem for StateStoreIterItem {
