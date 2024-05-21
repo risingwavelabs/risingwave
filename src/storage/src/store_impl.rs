@@ -18,10 +18,8 @@ use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
 use foyer::{
-    set_metrics_registry, FsDeviceConfigBuilder, HybridCacheBuilder, RatedTicketAdmissionPolicy,
-    RuntimeConfigBuilder,
+    DirectFsDeviceOptionsBuilder, HybridCacheBuilder, RateLimitPicker, RuntimeConfigBuilder,
 };
-use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::build_remote_object_store;
@@ -571,10 +569,11 @@ impl StateStoreImpl {
     ) -> StorageResult<Self> {
         const MB: usize = 1 << 20;
 
-        set_metrics_registry(GLOBAL_METRICS_REGISTRY.clone());
+        // FIXME(MrCroxx): Pass foyer metrics.
 
         let meta_cache_v2 = {
             let mut builder = HybridCacheBuilder::new()
+                .with_name("foyer.meta")
                 .memory(opts.meta_cache_capacity_mb * MB)
                 .with_shards(opts.meta_cache_shard_num)
                 .with_eviction_config(opts.meta_cache_eviction_config.clone())
@@ -586,17 +585,14 @@ impl StateStoreImpl {
 
             if !opts.meta_file_cache_dir.is_empty() {
                 builder = builder
-                    .with_name("foyer.meta")
                     .with_device_config(
-                        FsDeviceConfigBuilder::new(&opts.meta_file_cache_dir)
+                        DirectFsDeviceOptionsBuilder::new(&opts.meta_file_cache_dir)
                             .with_capacity(opts.meta_file_cache_capacity_mb * MB)
                             .with_file_size(opts.meta_file_cache_file_capacity_mb * MB)
-                            .with_align(opts.meta_file_cache_device_align)
-                            .with_io_size(opts.meta_file_cache_device_io_size)
                             .build(),
                     )
-                    .with_catalog_shards(64)
-                    .with_admission_policy(Arc::new(RatedTicketAdmissionPolicy::new(
+                    .with_indexer_shards(opts.meta_file_cache_indexer_shards)
+                    .with_admission_picker(Arc::new(RateLimitPicker::new(
                         opts.meta_file_cache_insert_rate_limit_mb * MB,
                     )))
                     .with_flushers(opts.meta_file_cache_flushers)
@@ -615,8 +611,7 @@ impl StateStoreImpl {
                         RuntimeConfigBuilder::new()
                             .with_thread_name("foyer.meta.runtime")
                             .build(),
-                    )
-                    .with_lazy(true);
+                    );
             }
 
             builder.build().await.map_err(HummockError::foyer_error)?
@@ -624,6 +619,7 @@ impl StateStoreImpl {
 
         let block_cache_v2 = {
             let mut builder = HybridCacheBuilder::new()
+                .with_name("foyer.block")
                 .memory(opts.block_cache_capacity_mb * MB)
                 .with_shards(opts.block_cache_shard_num)
                 .with_eviction_config(opts.block_cache_eviction_config.clone())
@@ -636,17 +632,14 @@ impl StateStoreImpl {
 
             if !opts.meta_file_cache_dir.is_empty() {
                 builder = builder
-                    .with_name("foyer.block")
                     .with_device_config(
-                        FsDeviceConfigBuilder::new(&opts.data_file_cache_dir)
+                        DirectFsDeviceOptionsBuilder::new(&opts.data_file_cache_dir)
                             .with_capacity(opts.data_file_cache_capacity_mb * MB)
                             .with_file_size(opts.data_file_cache_file_capacity_mb * MB)
-                            .with_align(opts.data_file_cache_device_align)
-                            .with_io_size(opts.data_file_cache_device_io_size)
                             .build(),
                     )
-                    .with_catalog_shards(64)
-                    .with_admission_policy(Arc::new(RatedTicketAdmissionPolicy::new(
+                    .with_indexer_shards(opts.data_file_cache_indexer_shards)
+                    .with_admission_picker(Arc::new(RateLimitPicker::new(
                         opts.data_file_cache_insert_rate_limit_mb * MB,
                     )))
                     .with_flushers(opts.data_file_cache_flushers)
@@ -665,8 +658,7 @@ impl StateStoreImpl {
                         RuntimeConfigBuilder::new()
                             .with_thread_name("foyer.block.runtime")
                             .build(),
-                    )
-                    .with_lazy(true);
+                    );
             }
 
             builder.build().await.map_err(HummockError::foyer_error)?
