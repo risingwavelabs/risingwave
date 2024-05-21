@@ -295,7 +295,7 @@ impl Sink for DeltaLakeSink {
             SinkDecouple::Disable => {
                 if config_decouple {
                     return Err(SinkError::Config(anyhow!(
-                        "config conflict: DeltaLake config `commit_checkpoint_interval` bigger than 1 which means that must enable sink decouple, but session config sink decouple is disabled"
+                        "config conflict: DeltaLake config `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
                     )));
                 }
                 Ok(false)

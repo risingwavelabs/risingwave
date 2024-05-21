@@ -269,7 +269,7 @@ impl Sink for StarrocksSink {
             SinkDecouple::Disable => {
                 if config_decouple {
                     return Err(SinkError::Config(anyhow!(
-                        "config conflict: Starrocks config `commit_checkpoint_interval` bigger than 1 which means that must enable sink decouple, but session config sink decouple is disabled"
+                        "config conflict: StarRocks config `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
                     )));
                 }
                 Ok(false)
@@ -646,12 +646,12 @@ impl StarrocksSchemaClient {
         );
         let pool = mysql_async::Pool::new(
             Opts::from_url(&conn_uri)
-                .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?,
+                .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?,
         );
         let conn = pool
             .get_conn()
             .await
-            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
+            .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?;
 
         Ok(Self { table, db, conn })
     }
@@ -664,7 +664,7 @@ impl StarrocksSchemaClient {
                 query_map.insert(column_name, column_type)
             })
             .await
-            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
+            .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?;
         Ok(query_map)
     }
 
@@ -676,7 +676,7 @@ impl StarrocksSchemaClient {
                 (table_model, primary_key)
             })
             .await
-            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?
+            .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?
             .first()
             .ok_or_else(|| {
                 SinkError::Starrocks(format!(
@@ -743,7 +743,7 @@ impl StarrocksClient {
     pub async fn finish(self) -> Result<StarrocksInsertResultResponse> {
         let raw = self.insert.finish().await?;
         let res: StarrocksInsertResultResponse = serde_json::from_slice(&raw)
-            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
+            .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?;
 
         if !STARROCKS_SUCCESS_STATUS.contains(&res.status.as_str()) {
             return Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!(
@@ -766,7 +766,7 @@ impl StarrocksTxnClient {
 
     fn check_response_and_extract_label(&self, res: Bytes) -> Result<String> {
         let res: StarrocksInsertResultResponse = serde_json::from_slice(&res)
-            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
+            .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?;
         if !STARROCKS_SUCCESS_STATUS.contains(&res.status.as_str()) {
             return Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!(
                 "transaction error: {:?}",
@@ -844,7 +844,7 @@ impl TryFrom<SinkMetadata> for StarrocksWriteResult {
         if let Some(Serialized(v)) = value.metadata {
             Ok(StarrocksWriteResult(Some(
                 String::from_utf8(v.metadata)
-                    .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?,
+                    .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?,
             )))
         } else {
             Ok(StarrocksWriteResult(None))
@@ -886,7 +886,7 @@ impl SinkCommitCoordinator for StarrocksSinkCommitter {
                 .collect::<Vec<JoinHandle<Result<String>>>>();
             futures::future::try_join_all(join_handles)
                 .await
-                .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
+                .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?;
         }
         Ok(())
     }

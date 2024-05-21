@@ -21,7 +21,7 @@ use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
 use crate::sink::writer::SinkWriter;
 use crate::sink::{LogSinker, Result, SinkLogReader, SinkMetrics};
 
-/// The `LogSinker` implementation used for commit-decoupled sinks (such as Iceberg DeltaLake and StarRocks).
+/// The `LogSinker` implementation used for commit-decoupled sinks (such as `Iceberg`, `DeltaLake` and `StarRocks`).
 /// The concurrent/frequent commit capability of these sinks is poor, so by leveraging the decoupled log reader,
 /// we delay the checkpoint barrier to make commits less frequent.
 pub struct DecoupleCheckpointLogSinkerOf<W> {

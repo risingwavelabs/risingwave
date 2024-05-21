@@ -17,7 +17,7 @@ use core::time::Duration;
 use std::collections::HashMap;
 use std::convert::Infallible;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use base64::engine::general_purpose;
 use base64::Engine;
 use bytes::{BufMut, Bytes, BytesMut};
@@ -183,21 +183,19 @@ fn try_get_be_url(resp: &Response, fe_host: String) -> Result<Option<Url>> {
                 .headers()
                 .get("location")
                 .ok_or_else(|| {
-                    SinkError::DorisStarrocksConnect(anyhow::anyhow!(
-                        "Can't get doris BE url in header",
-                    ))
+                    SinkError::DorisStarrocksConnect(anyhow!("Can't get doris BE url in header",))
                 })?
                 .to_str()
                 .context("Can't get doris BE url in header")
                 .map_err(SinkError::DorisStarrocksConnect)?
                 .to_string();
 
-            let mut parsed_be_url =
-                Url::parse(&be_url).map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
+            let mut parsed_be_url = Url::parse(&be_url)
+                .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?;
 
             if fe_host != LOCALHOST && fe_host != LOCALHOST_IP {
                 let be_host = parsed_be_url.host_str().ok_or_else(|| {
-                    SinkError::DorisStarrocksConnect(anyhow::anyhow!("Can't get be host from url"))
+                    SinkError::DorisStarrocksConnect(anyhow!("Can't get be host from url"))
                 })?;
 
                 if be_host == LOCALHOST || be_host == LOCALHOST_IP {
@@ -205,7 +203,7 @@ fn try_get_be_url(resp: &Response, fe_host: String) -> Result<Option<Url>> {
                     // so replace it with fe host
                     parsed_be_url
                         .set_host(Some(fe_host.as_str()))
-                        .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
+                        .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?;
                 }
             }
             Ok(Some(parsed_be_url))
@@ -216,7 +214,7 @@ fn try_get_be_url(resp: &Response, fe_host: String) -> Result<Option<Url>> {
             // In this case, the request should be treated as finished.
             Ok(None)
         }
-        _ => Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!(
+        _ => Err(SinkError::DorisStarrocksConnect(anyhow!(
             "Can't get doris BE url",
         ))),
     }
@@ -236,11 +234,9 @@ impl InserterInnerBuilder {
         header: HashMap<String, String>,
     ) -> Result<Self> {
         let fe_host = Url::parse(&url)
-            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?
+            .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?
             .host_str()
-            .ok_or_else(|| {
-                SinkError::DorisStarrocksConnect(anyhow::anyhow!("Can't get fe host from url"))
-            })?
+            .ok_or_else(|| SinkError::DorisStarrocksConnect(anyhow!("Can't get fe host from url")))?
             .to_string();
         let url = format!("{}/api/{}/{}/_stream_load", url, db, table);
 
@@ -271,11 +267,10 @@ impl InserterInnerBuilder {
         let resp = builder
             .send()
             .await
-            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
+            .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?;
 
-        let be_url = try_get_be_url(&resp, self.fe_host.clone())?.ok_or_else(|| {
-            SinkError::DorisStarrocksConnect(anyhow::anyhow!("Can't get doris BE url",))
-        })?;
+        let be_url = try_get_be_url(&resp, self.fe_host.clone())?
+            .ok_or_else(|| SinkError::DorisStarrocksConnect(anyhow!("Can't get doris BE url",)))?;
 
         let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
         let body = Body::wrap_stream(
@@ -287,22 +282,26 @@ impl InserterInnerBuilder {
             let response = builder
                 .send()
                 .await
-                .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
+                .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?;
             let status = response.status();
             let raw = response
                 .bytes()
                 .await
-                .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?
+                .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?
                 .into();
 
             if status == StatusCode::OK {
                 Ok(raw)
             } else {
-                Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!(
+                let response_body = String::from_utf8(raw).map_err(|err| {
+                    SinkError::DorisStarrocksConnect(
+                        anyhow!(err).context("failed to parse response body"),
+                    )
+                })?;
+                Err(SinkError::DorisStarrocksConnect(anyhow!(
                     "Failed connection {:?},{:?}",
                     status,
-                    String::from_utf8(raw)
-                        .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?
+                    response_body
                 )))
             }
         });
@@ -343,9 +342,7 @@ impl InserterInner {
             self.sender.take();
             self.wait_handle().await?;
 
-            Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!(
-                "channel closed"
-            )))
+            Err(SinkError::DorisStarrocksConnect(anyhow!("channel closed")))
         } else {
             Ok(())
         }
@@ -364,8 +361,8 @@ impl InserterInner {
             match tokio::time::timeout(WAIT_HANDDLE_TIMEOUT, self.join_handle.as_mut().unwrap())
                 .await
             {
-                Ok(res) => res.map_err(|err| SinkError::DorisStarrocksConnect(err.into()))??,
-                Err(err) => return Err(SinkError::DorisStarrocksConnect(err.into())),
+                Ok(res) => res.map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))??,
+                Err(err) => return Err(SinkError::DorisStarrocksConnect(anyhow!(err))),
             };
         Ok(res)
     }
@@ -403,15 +400,15 @@ impl MetaRequestSender {
     /// For example, the request to `/api/transaction/commit` endpoint does not seem to redirect to BE.
     pub async fn send(self) -> Result<Bytes> {
         let request = self.request;
-        let mut request_for_redirection = request.try_clone().ok_or_else(|| {
-            SinkError::DorisStarrocksConnect(anyhow::anyhow!("Can't clone request"))
-        })?;
+        let mut request_for_redirection = request
+            .try_clone()
+            .ok_or_else(|| SinkError::DorisStarrocksConnect(anyhow!("Can't clone request")))?;
 
         let resp = self
             .client
             .execute(request)
             .await
-            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
+            .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?;
 
         let be_url = try_get_be_url(&resp, self.fe_host)?;
 
@@ -422,15 +419,15 @@ impl MetaRequestSender {
                 self.client
                     .execute(request_for_redirection)
                     .await
-                    .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?
+                    .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?
                     .bytes()
                     .await
-                    .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))
+                    .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))
             }
             None => resp
                 .bytes()
                 .await
-                .map_err(|err| SinkError::DorisStarrocksConnect(err.into())),
+                .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err))),
         }
     }
 }
@@ -456,11 +453,9 @@ impl StarrocksTxnRequestBuilder {
         stream_load_http_timeout_ms: u64,
     ) -> Result<Self> {
         let fe_host = Url::parse(&url)
-            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?
+            .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?
             .host_str()
-            .ok_or_else(|| {
-                SinkError::DorisStarrocksConnect(anyhow::anyhow!("Can't get fe host from url"))
-            })?
+            .ok_or_else(|| SinkError::DorisStarrocksConnect(anyhow!("Can't get fe host from url")))?
             .to_string();
 
         let url_begin = format!("{}/api/transaction/begin", url);
@@ -492,7 +487,7 @@ impl StarrocksTxnRequestBuilder {
 
     fn build_request(&self, uri: String, method: Method, label: String) -> Result<Request> {
         let parsed_url =
-            Url::parse(&uri).map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
+            Url::parse(&uri).map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?;
         let mut request = Request::new(method, parsed_url);
 
         if uri != self.url_load {
@@ -504,15 +499,15 @@ impl StarrocksTxnRequestBuilder {
         for (k, v) in &self.header {
             header.insert(
                 HeaderName::try_from(k)
-                    .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?,
+                    .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?,
                 HeaderValue::try_from(v)
-                    .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?,
+                    .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?,
             );
         }
         header.insert(
             "label",
             HeaderValue::try_from(label)
-                .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?,
+                .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?,
         );
 
         Ok(request)
@@ -556,19 +551,18 @@ impl StarrocksTxnRequestBuilder {
 
     pub async fn build_txn_inserter(&self, label: String) -> Result<InserterInner> {
         let request = self.build_request(self.url_load.clone(), Method::PUT, label)?;
-        let mut request_for_redirection = request.try_clone().ok_or_else(|| {
-            SinkError::DorisStarrocksConnect(anyhow::anyhow!("Can't clone request"))
-        })?;
+        let mut request_for_redirection = request
+            .try_clone()
+            .ok_or_else(|| SinkError::DorisStarrocksConnect(anyhow!("Can't clone request")))?;
 
         let resp = self
             .client
             .execute(request)
             .await
-            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
+            .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?;
 
-        let be_url = try_get_be_url(&resp, self.fe_host.clone())?.ok_or_else(|| {
-            SinkError::DorisStarrocksConnect(anyhow::anyhow!("Can't get doris BE url",))
-        })?;
+        let be_url = try_get_be_url(&resp, self.fe_host.clone())?
+            .ok_or_else(|| SinkError::DorisStarrocksConnect(anyhow!("Can't get doris BE url",)))?;
         *request_for_redirection.url_mut() = be_url;
 
         let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
@@ -582,23 +576,27 @@ impl StarrocksTxnRequestBuilder {
             let response = client
                 .execute(request_for_redirection)
                 .await
-                .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
+                .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?;
 
             let status = response.status();
             let raw = response
                 .bytes()
                 .await
-                .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?
+                .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?
                 .into();
 
             if status == StatusCode::OK {
                 Ok(raw)
             } else {
-                Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!(
+                let response_body = String::from_utf8(raw).map_err(|err| {
+                    SinkError::DorisStarrocksConnect(
+                        anyhow!(err).context("failed to parse response body"),
+                    )
+                })?;
+                Err(SinkError::DorisStarrocksConnect(anyhow!(
                     "Failed connection {:?},{:?}",
                     status,
-                    String::from_utf8(raw)
-                        .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?
+                    response_body
                 )))
             }
         });
