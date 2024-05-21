@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use enum_as_inner::EnumAsInner;
 use parse_display::Display;
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
@@ -40,7 +41,7 @@ pub struct FunctionCatalog {
     pub runtime: Option<String>,
 }
 
-#[derive(Clone, Display, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Display, PartialEq, Eq, Hash, Debug, EnumAsInner)]
 #[display(style = "UPPERCASE")]
 pub enum FunctionKind {
     Scalar,

@@ -205,8 +205,11 @@ select weighted_avg(value, weight) from (values (1, 1), (null, 2), (3, 3)) as t(
 ----
 2.5
 
-statement ok
+statement error "weighted_avg" is an aggregate function
 drop function weighted_avg;
+
+statement ok
+drop aggregate weighted_avg;
 
 
 statement ok

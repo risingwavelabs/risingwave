@@ -66,6 +66,7 @@ pub enum StatementType {
     DROP_VIEW,
     DROP_INDEX,
     DROP_FUNCTION,
+    DROP_AGGREGATE,
     DROP_SOURCE,
     DROP_SINK,
     DROP_SUBSCRIPTION,

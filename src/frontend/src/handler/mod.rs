@@ -515,7 +515,18 @@ pub async fn handle(
             if_exists,
             func_desc,
             option,
-        } => drop_function::handle_drop_function(handler_args, if_exists, func_desc, option).await,
+        } => {
+            drop_function::handle_drop_function(handler_args, if_exists, func_desc, option, false)
+                .await
+        }
+        Statement::DropAggregate {
+            if_exists,
+            func_desc,
+            option,
+        } => {
+            drop_function::handle_drop_function(handler_args, if_exists, func_desc, option, true)
+                .await
+        }
         Statement::Query(_)
         | Statement::Insert { .. }
         | Statement::Delete { .. }

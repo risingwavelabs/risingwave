@@ -1387,8 +1387,16 @@ pub enum Statement {
     Kill(i32),
     /// DROP
     Drop(DropStatement),
-    /// DROP Function
+    /// DROP FUNCTION
     DropFunction {
+        if_exists: bool,
+        /// One or more function to drop
+        func_desc: Vec<FunctionDesc>,
+        /// `CASCADE` or `RESTRICT`
+        option: Option<ReferentialAction>,
+    },
+    /// DROP AGGREGATE
+    DropAggregate {
         if_exists: bool,
         /// One or more function to drop
         func_desc: Vec<FunctionDesc>,
@@ -1903,6 +1911,22 @@ impl fmt::Display for Statement {
                 write!(
                     f,
                     "DROP FUNCTION{} {}",
+                    if *if_exists { " IF EXISTS" } else { "" },
+                    display_comma_separated(func_desc),
+                )?;
+                if let Some(op) = option {
+                    write!(f, " {}", op)?;
+                }
+                Ok(())
+            }
+            Statement::DropAggregate {
+                if_exists,
+                func_desc,
+                option,
+            } => {
+                write!(
+                    f,
+                    "DROP AGGREGATE{} {}",
                     if *if_exists { " IF EXISTS" } else { "" },
                     display_comma_separated(func_desc),
                 )?;
