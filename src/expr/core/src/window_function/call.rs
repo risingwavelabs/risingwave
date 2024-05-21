@@ -317,11 +317,7 @@ impl RangeFrameOffset {
         }
     }
 
-    fn build_exprs(
-        &mut self,
-        order_data_type: &DataType,
-        offset_data_type: &DataType,
-    ) -> Result<()> {
+    fn prepare(&mut self, order_data_type: &DataType, offset_data_type: &DataType) -> Result<()> {
         use risingwave_pb::expr::expr_node::PbType as PbExprType;
 
         let input_expr = InputRefExpression::new(order_data_type.clone(), 0);
@@ -340,15 +336,14 @@ impl RangeFrameOffset {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn new_for_test(
         offset: ScalarImpl,
         order_data_type: &DataType,
         offset_data_type: &DataType,
     ) -> Self {
         let mut offset = Self::new(offset);
-        offset
-            .build_exprs(order_data_type, offset_data_type)
-            .unwrap();
+        offset.prepare(order_data_type, offset_data_type).unwrap();
         offset
     }
 }
@@ -650,7 +645,7 @@ impl RangeFrameBound {
                     .context("offset `Datum` is not decodable")?
                     .context("offset of `RangeFrameBound` must be non-NULL")?;
                 let mut offset = RangeFrameOffset::new(offset_value);
-                offset.build_exprs(order_data_type, offset_data_type)?;
+                offset.prepare(order_data_type, offset_data_type)?;
                 if bound_type == PbBoundType::Preceding {
                     Self::Preceding(offset)
                 } else {
