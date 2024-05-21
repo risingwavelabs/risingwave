@@ -50,7 +50,7 @@ static EXTERNAL: UdfImplDescriptor = UdfImplDescriptor {
                 .map(to_field)
                 .try_collect::<Fields>()?,
         );
-        let returns = arrow_schema::Schema::new(if opts.is_table_function {
+        let returns = arrow_schema::Schema::new(if opts.kind.is_table() {
             vec![
                 arrow_schema::Field::new("row", arrow_schema::DataType::Int32, true),
                 to_field(opts.return_type)?,
