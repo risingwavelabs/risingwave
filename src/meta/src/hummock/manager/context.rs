@@ -23,12 +23,10 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::hummock::{HummockPinnedSnapshot, HummockPinnedVersion, ValidationTask};
 
 use crate::hummock::error::{Error, Result};
-use crate::hummock::manager::{
-    commit_multi_var, create_trx_wrapper, start_measure_real_process_timer,
-};
+use crate::hummock::manager::{commit_multi_var, start_measure_real_process_timer};
 use crate::hummock::HummockManager;
 use crate::manager::{MetaStoreImpl, MetadataManager, META_NODE_ID};
-use crate::model::{BTreeMapTransaction, BTreeMapTransactionWrapper, ValTransaction};
+use crate::model::BTreeMapTransaction;
 use crate::storage::MetaStore;
 
 #[derive(Default)]
@@ -55,16 +53,8 @@ impl ContextInfo {
             anyhow::anyhow!("failpoint internal error")
         )));
 
-        let mut pinned_versions = create_trx_wrapper!(
-            meta_store_ref,
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut self.pinned_versions,)
-        );
-        let mut pinned_snapshots = create_trx_wrapper!(
-            meta_store_ref,
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut self.pinned_snapshots,)
-        );
+        let mut pinned_versions = BTreeMapTransaction::new(&mut self.pinned_versions);
+        let mut pinned_snapshots = BTreeMapTransaction::new(&mut self.pinned_snapshots);
         for context_id in context_ids.as_ref() {
             pinned_versions.remove(*context_id);
             pinned_snapshots.remove(*context_id);
