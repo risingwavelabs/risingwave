@@ -286,6 +286,8 @@ impl From<BTreeMap<u32, Vec<u32>>> for ActorUpstreamActors {
     }
 }
 
+derive_from_json_struct!(SecretRef, HashMap<String, u32>);
+
 derive_from_blob!(StreamNode, PbStreamNode);
 derive_from_blob!(DataType, risingwave_pb::data::PbDataType);
 derive_array_from_blob!(

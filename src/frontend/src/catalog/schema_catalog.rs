@@ -67,8 +67,8 @@ pub struct SchemaCatalog {
     secret_by_name: HashMap<String, Arc<SecretCatalog>>,
     secret_by_id: HashMap<SecretId, Arc<SecretCatalog>>,
 
-    secret_source_ref: HashMap<SecretId, Vec<SourceId>>,
-    secret_sink_ref: HashMap<SecretId, Vec<SinkId>>,
+    _secret_source_ref: HashMap<SecretId, Vec<SourceId>>,
+    _secret_sink_ref: HashMap<SecretId, Vec<SinkId>>,
 
     // This field is currently used only for `show connections`
     connection_source_ref: HashMap<ConnectionId, Vec<SourceId>>,
@@ -825,8 +825,8 @@ impl From<&PbSchema> for SchemaCatalog {
             connection_by_id: HashMap::new(),
             secret_by_name: HashMap::new(),
             secret_by_id: HashMap::new(),
-            secret_source_ref: HashMap::new(),
-            secret_sink_ref: HashMap::new(),
+            _secret_source_ref: HashMap::new(),
+            _secret_sink_ref: HashMap::new(),
             connection_source_ref: HashMap::new(),
             connection_sink_ref: HashMap::new(),
             subscription_by_name: HashMap::new(),
