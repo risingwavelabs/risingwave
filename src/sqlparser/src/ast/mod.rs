@@ -3129,6 +3129,15 @@ impl fmt::Display for DiscardType {
     }
 }
 
+impl Statement {
+    pub fn to_redacted_string(&self) -> String {
+        REDACT_SQL_OPTIONS.set(true);
+        let redacted = self.to_string();
+        REDACT_SQL_OPTIONS.set(false);
+        redacted
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3330,14 +3339,5 @@ mod tests {
             "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE javascript RUNTIME deno AS 'SELECT 1' ASYNC GENERATOR",
             format!("{}", create_function)
         );
-    }
-}
-
-impl Statement {
-    pub fn to_redacted_string(&self) -> String {
-        REDACT_SQL_OPTIONS.set(true);
-        let redacted = self.to_string();
-        REDACT_SQL_OPTIONS.set(false);
-        redacted
     }
 }
