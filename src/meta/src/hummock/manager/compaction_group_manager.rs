@@ -53,7 +53,6 @@ use crate::manager::{MetaSrvEnv, MetaStoreImpl};
 use crate::model::{
     BTreeMapEntryTransaction, BTreeMapTransaction, MetadataModel, MetadataModelError,
 };
-use crate::storage::MetaStore;
 
 impl CompactionGroupManager {
     pub(super) async fn new(env: &MetaSrvEnv) -> Result<CompactionGroupManager> {

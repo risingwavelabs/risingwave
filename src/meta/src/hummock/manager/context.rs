@@ -18,16 +18,43 @@ use fail::fail_point;
 use itertools::Itertools;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId, INVALID_VERSION_ID};
-use risingwave_pb::hummock::{HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, ValidationTask};
+use risingwave_hummock_sdk::{
+    ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
+    INVALID_VERSION_ID,
+};
+use risingwave_pb::hummock::{
+    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, ValidationTask,
+};
 
 use crate::hummock::error::{Error, Result};
+use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
 use crate::hummock::manager::{commit_multi_var, start_measure_real_process_timer};
-use crate::hummock::metrics_utils::{trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state};
+use crate::hummock::metrics_utils::{
+    trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state,
+};
 use crate::hummock::HummockManager;
 use crate::manager::{MetaStoreImpl, MetadataManager, META_NODE_ID};
 use crate::model::BTreeMapTransaction;
-use crate::storage::MetaStore;
+use crate::rpc::metrics::MetaMetrics;
+
+/// `HummockVersionSafePoint` prevents hummock versions GE than it from being GC.
+/// It's used by meta node itself to temporarily pin versions.
+pub struct HummockVersionSafePoint {
+    pub id: HummockVersionId,
+    event_sender: HummockManagerEventSender,
+}
+
+impl Drop for HummockVersionSafePoint {
+    fn drop(&mut self) {
+        if self
+            .event_sender
+            .send(HummockManagerEvent::DropSafePoint(self.id))
+            .is_err()
+        {
+            tracing::debug!("failed to drop hummock version safe point {}", self.id);
+        }
+    }
+}
 
 #[derive(Default)]
 pub(super) struct ContextInfo {
@@ -106,6 +133,11 @@ impl HummockManager {
             return Err(Error::InvalidContext(context_id));
         }
         Ok(())
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub async fn get_min_pinned_version_id(&self) -> HummockVersionId {
+        self.context_info.read().await.min_pinned_version_id()
     }
 }
 
@@ -431,5 +463,39 @@ impl HummockManager {
         }
 
         Ok(())
+    }
+}
+
+// safe point
+impl HummockManager {
+    pub async fn register_safe_point(&self) -> HummockVersionSafePoint {
+        let versioning = self.versioning.read().await;
+        let mut wl = self.context_info.write().await;
+        let safe_point = HummockVersionSafePoint {
+            id: versioning.current_version.id,
+            event_sender: self.event_sender.clone(),
+        };
+        wl.version_safe_points.push(safe_point.id);
+        trigger_safepoint_stat(&self.metrics, &wl.version_safe_points);
+        safe_point
+    }
+
+    pub async fn unregister_safe_point(&self, safe_point: HummockVersionId) {
+        let mut wl = self.context_info.write().await;
+        let version_safe_points = &mut wl.version_safe_points;
+        if let Some(pos) = version_safe_points.iter().position(|sp| *sp == safe_point) {
+            version_safe_points.remove(pos);
+        }
+        trigger_safepoint_stat(&self.metrics, &wl.version_safe_points);
+    }
+}
+
+fn trigger_safepoint_stat(metrics: &MetaMetrics, safepoints: &[HummockVersionId]) {
+    if let Some(sp) = safepoints.iter().min() {
+        metrics.min_safepoint_version_id.set(*sp as _);
+    } else {
+        metrics
+            .min_safepoint_version_id
+            .set(HummockVersionId::MAX as _);
     }
 }
