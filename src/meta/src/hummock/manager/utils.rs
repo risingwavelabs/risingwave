@@ -19,16 +19,17 @@ macro_rules! commit_multi_var {
     ($meta_store:expr, $($val_txn:expr),*) => {
         {
             async {
+                use crate::model::{InMemValTransaction, ValTransaction};
                 match &$meta_store {
-                    crate::manager::MetaStoreImpl::Kv(meta_store) => {
+                    $crate::manager::MetaStoreImpl::Kv(meta_store) => {
                         use crate::storage::Transaction;
                         let mut trx = Transaction::default();
                         $(
-                            $val_txn.as_v1_ref().apply_to_txn(&mut trx).await?;
+                            $val_txn.apply_to_txn(&mut trx).await?;
                         )*
                         meta_store.txn(trx).await?;
                         $(
-                            $val_txn.into_v1().commit();
+                            $val_txn.commit();
                         )*
                         Result::Ok(())
                     }
@@ -37,11 +38,11 @@ macro_rules! commit_multi_var {
                         use crate::model::MetadataModelError;
                         let mut trx = sql_meta_store.conn.begin().await.map_err(MetadataModelError::from)?;
                         $(
-                            $val_txn.as_v2_ref().apply_to_txn(&mut trx).await?;
+                            $val_txn.apply_to_txn(&mut trx).await?;
                         )*
                         trx.commit().await.map_err(MetadataModelError::from)?;
                         $(
-                            $val_txn.into_v2().commit();
+                            $val_txn.commit();
                         )*
                         Result::Ok(())
                     }
@@ -51,14 +52,3 @@ macro_rules! commit_multi_var {
     };
 }
 pub(crate) use commit_multi_var;
-
-macro_rules! create_trx_wrapper {
-    ($meta_store:expr, $wrapper:ident, $inner:expr) => {{
-        match &$meta_store {
-            crate::manager::MetaStoreImpl::Kv(_) => $wrapper::V1($inner),
-            crate::manager::MetaStoreImpl::Sql(_) => $wrapper::V2($inner),
-        }
-    }};
-}
-
-pub(crate) use create_trx_wrapper;

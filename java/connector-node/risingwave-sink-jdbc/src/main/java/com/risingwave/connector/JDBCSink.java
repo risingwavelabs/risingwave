@@ -89,6 +89,8 @@ public class JDBCSink implements SinkWriter {
                     "JDBC connection: autoCommit = {}, trxn = {}",
                     conn.getAutoCommit(),
                     conn.getTransactionIsolation());
+            // Commit the `getTransactionIsolation`
+            conn.commit();
 
             jdbcStatements = new JdbcStatements(conn);
         } catch (SQLException e) {
