@@ -33,7 +33,6 @@ use crate::hummock::manager::commit_multi_var;
 use crate::hummock::HummockManager;
 use crate::manager::MetadataManager;
 use crate::model::BTreeMapTransaction;
-use crate::storage::MetaStore;
 
 #[derive(Default)]
 pub(super) struct DeleteObjectTracker {
@@ -318,7 +317,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_hummock_sdk::HummockSstableObjectId;
 
-    use crate::hummock::manager::ResponseEvent;
+    use super::ResponseEvent;
     use crate::hummock::test_utils::{add_test_tables, setup_compute_env};
     use crate::MetaOpts;
 
