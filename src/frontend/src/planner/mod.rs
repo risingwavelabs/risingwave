@@ -21,6 +21,7 @@ use crate::optimizer::{OptimizerContextRef, PlanRoot};
 mod delete;
 mod insert;
 mod query;
+mod recursive_union;
 mod relation;
 mod select;
 mod set_expr;

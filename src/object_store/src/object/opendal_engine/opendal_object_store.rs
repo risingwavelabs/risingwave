@@ -13,18 +13,22 @@
 // limitations under the License.
 
 use std::ops::Range;
+use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
 use fail::fail_point;
 use futures::{stream, StreamExt, TryStreamExt};
+use opendal::layers::{RetryLayer, TimeoutLayer};
 use opendal::services::Memory;
 use opendal::{Metakey, Operator, Writer};
+use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::range::RangeBoundsExt;
 use thiserror_ext::AsReport;
 
 use crate::object::{
-    prefix, BoxedStreamingUploader, ObjectDataStream, ObjectError, ObjectMetadata,
-    ObjectMetadataIter, ObjectRangeBounds, ObjectResult, ObjectStore, StreamingUploader,
+    prefix, ObjectDataStream, ObjectError, ObjectMetadata, ObjectMetadataIter, ObjectRangeBounds,
+    ObjectResult, ObjectStore, StreamingUploader,
 };
 
 /// Opendal object storage.
@@ -32,6 +36,8 @@ use crate::object::{
 pub struct OpendalObjectStore {
     pub(crate) op: Operator,
     pub(crate) engine_type: EngineType,
+
+    pub(crate) config: Arc<ObjectStoreConfig>,
 }
 
 #[derive(Clone)]
@@ -50,19 +56,22 @@ pub enum EngineType {
 
 impl OpendalObjectStore {
     /// create opendal memory engine, used for unit tests.
-    pub fn new_memory_engine() -> ObjectResult<Self> {
+    pub fn test_new_memory_engine() -> ObjectResult<Self> {
         // Create memory backend builder.
         let builder = Memory::default();
         let op: Operator = Operator::new(builder)?.finish();
         Ok(Self {
             op,
             engine_type: EngineType::Memory,
+            config: Arc::new(ObjectStoreConfig::default()),
         })
     }
 }
 
 #[async_trait::async_trait]
 impl ObjectStore for OpendalObjectStore {
+    type StreamingUploader = OpendalStreamingUploader;
+
     fn get_object_prefix(&self, obj_id: u64) -> String {
         match self.engine_type {
             EngineType::S3 => prefix::s3::get_object_prefix(obj_id),
@@ -87,10 +96,11 @@ impl ObjectStore for OpendalObjectStore {
         }
     }
 
-    async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
-        Ok(Box::new(
-            OpendalStreamingUploader::new(self.op.clone(), path.to_string()).await?,
-        ))
+    async fn streaming_upload(&self, path: &str) -> ObjectResult<Self::StreamingUploader> {
+        Ok(
+            OpendalStreamingUploader::new(self.op.clone(), path.to_string(), self.config.clone())
+                .await?,
+        )
     }
 
     async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
@@ -130,9 +140,31 @@ impl ObjectStore for OpendalObjectStore {
             ObjectError::internal("opendal streaming read error")
         ));
         let range: Range<u64> = (range.start as u64)..(range.end as u64);
-        let reader = self.op.reader_with(path).range(range).await?;
+        let reader = self
+            .op
+            .clone()
+            .layer(
+                RetryLayer::new()
+                    .with_min_delay(Duration::from_millis(
+                        self.config.retry.req_backoff_interval_ms,
+                    ))
+                    .with_max_delay(Duration::from_millis(
+                        self.config.retry.req_backoff_max_delay_ms,
+                    ))
+                    .with_max_times(self.config.retry.streaming_read_retry_attempts)
+                    .with_factor(self.config.retry.req_backoff_factor as f32)
+                    .with_jitter(),
+            )
+            .layer(TimeoutLayer::new().with_io_timeout(Duration::from_millis(
+                self.config.retry.streaming_read_attempt_timeout_ms,
+            )))
+            .reader_with(path)
+            .range(range)
+            .await?;
         let stream = reader.into_stream().map(|item| {
-            item.map_err(|e| ObjectError::internal(format!("OpendalError: {}", e.as_report())))
+            item.map_err(|e| {
+                ObjectError::internal(format!("reader into_stream fail {}", e.as_report()))
+            })
         });
 
         Ok(Box::pin(stream))
@@ -214,6 +246,10 @@ impl ObjectStore for OpendalObjectStore {
             EngineType::Fs => "Fs",
         }
     }
+
+    fn support_streaming_upload(&self) -> bool {
+        self.op.info().native_capability().write_can_multi
+    }
 }
 
 /// Store multiple parts in a map, and concatenate them on finish.
@@ -222,8 +258,24 @@ pub struct OpendalStreamingUploader {
 }
 
 impl OpendalStreamingUploader {
-    pub async fn new(op: Operator, path: String) -> ObjectResult<Self> {
+    pub async fn new(
+        op: Operator,
+        path: String,
+        config: Arc<ObjectStoreConfig>,
+    ) -> ObjectResult<Self> {
         let writer = op
+            .clone()
+            .layer(
+                RetryLayer::new()
+                    .with_min_delay(Duration::from_millis(config.retry.req_backoff_interval_ms))
+                    .with_max_delay(Duration::from_millis(config.retry.req_backoff_max_delay_ms))
+                    .with_max_times(config.retry.streaming_upload_retry_attempts)
+                    .with_factor(config.retry.req_backoff_factor as f32)
+                    .with_jitter(),
+            )
+            .layer(TimeoutLayer::new().with_io_timeout(Duration::from_millis(
+                config.retry.streaming_upload_attempt_timeout_ms,
+            )))
             .writer_with(&path)
             .concurrent(8)
             .buffer(OPENDAL_BUFFER_SIZE)
@@ -234,14 +286,14 @@ impl OpendalStreamingUploader {
 
 const OPENDAL_BUFFER_SIZE: usize = 16 * 1024 * 1024;
 
-#[async_trait::async_trait]
 impl StreamingUploader for OpendalStreamingUploader {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
         self.writer.write(data).await?;
+
         Ok(())
     }
 
-    async fn finish(mut self: Box<Self>) -> ObjectResult<()> {
+    async fn finish(mut self) -> ObjectResult<()> {
         match self.writer.close().await {
             Ok(_) => (),
             Err(err) => {
@@ -260,8 +312,6 @@ impl StreamingUploader for OpendalStreamingUploader {
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
-
     use super::*;
 
     async fn list_all(prefix: &str, store: &OpendalObjectStore) -> Vec<ObjectMetadata> {
@@ -277,7 +327,7 @@ mod tests {
     #[tokio::test]
     async fn test_memory_upload() {
         let block = Bytes::from("123456");
-        let store = OpendalObjectStore::new_memory_engine().unwrap();
+        let store = OpendalObjectStore::test_new_memory_engine().unwrap();
         store.upload("/abc", block).await.unwrap();
 
         // No such object.
@@ -299,7 +349,7 @@ mod tests {
     async fn test_memory_metadata() {
         let block = Bytes::from("123456");
         let path = "/abc".to_string();
-        let obj_store = OpendalObjectStore::new_memory_engine().unwrap();
+        let obj_store = OpendalObjectStore::test_new_memory_engine().unwrap();
         obj_store.upload("/abc", block).await.unwrap();
 
         let err = obj_store.metadata("/not_exist").await.unwrap_err();
@@ -313,7 +363,7 @@ mod tests {
     async fn test_memory_delete_objects_and_list_object() {
         let block1 = Bytes::from("123456");
         let block2 = Bytes::from("987654");
-        let store = OpendalObjectStore::new_memory_engine().unwrap();
+        let store = OpendalObjectStore::test_new_memory_engine().unwrap();
         store.upload("abc", Bytes::from("123456")).await.unwrap();
         store.upload("prefix/abc", block1).await.unwrap();
 

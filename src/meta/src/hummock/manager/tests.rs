@@ -14,16 +14,14 @@
 
 use std::borrow::Borrow;
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
 use prometheus::Registry;
 use risingwave_common::util::epoch::{test_epoch, EpochExt, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    get_compaction_group_ssts, BranchedSstInfo,
-};
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ssts;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::version::HummockVersion;
@@ -578,7 +576,7 @@ async fn test_hummock_manager_basic() {
         );
     }
     // objects_to_delete is always empty because no compaction is ever invoked.
-    assert!(hummock_manager.get_objects_to_delete().await.is_empty());
+    assert!(hummock_manager.get_objects_to_delete().is_empty());
     assert_eq!(
         hummock_manager
             .delete_version_deltas(usize::MAX)
@@ -590,7 +588,7 @@ async fn test_hummock_manager_basic() {
         hummock_manager.create_version_checkpoint(1).await.unwrap(),
         version_id2 - init_version_id
     );
-    assert!(hummock_manager.get_objects_to_delete().await.is_empty());
+    assert!(hummock_manager.get_objects_to_delete().is_empty());
     assert_eq!(
         hummock_manager
             .delete_version_deltas(usize::MAX)
@@ -1115,7 +1113,7 @@ async fn test_extend_objects_to_delete() {
         .map(|s| s.get_object_id())
         .chain(max_committed_object_id + 1..=max_committed_object_id + orphan_sst_num)
         .collect_vec();
-    assert!(hummock_manager.get_objects_to_delete().await.is_empty());
+    assert!(hummock_manager.get_objects_to_delete().is_empty());
     assert_eq!(
         hummock_manager
             .extend_objects_to_delete_from_scan(&all_object_ids)
@@ -1123,7 +1121,7 @@ async fn test_extend_objects_to_delete() {
         orphan_sst_num as usize
     );
     assert_eq!(
-        hummock_manager.get_objects_to_delete().await.len(),
+        hummock_manager.get_objects_to_delete().len(),
         orphan_sst_num as usize
     );
 
@@ -1133,7 +1131,7 @@ async fn test_extend_objects_to_delete() {
         8
     );
     assert_eq!(
-        hummock_manager.get_objects_to_delete().await.len(),
+        hummock_manager.get_objects_to_delete().len(),
         orphan_sst_num as usize
     );
     // since version1 is still pinned, the sst removed in compaction can not be reclaimed.
@@ -1143,10 +1141,10 @@ async fn test_extend_objects_to_delete() {
             .await,
         orphan_sst_num as usize
     );
-    let objects_to_delete = hummock_manager.get_objects_to_delete().await;
+    let objects_to_delete = hummock_manager.get_objects_to_delete();
     assert_eq!(objects_to_delete.len(), orphan_sst_num as usize);
     let pinned_version2: HummockVersion = hummock_manager.pin_version(context_id).await.unwrap();
-    let objects_to_delete = hummock_manager.get_objects_to_delete().await;
+    let objects_to_delete = hummock_manager.get_objects_to_delete();
     assert_eq!(
         objects_to_delete.len(),
         orphan_sst_num as usize,
@@ -1157,7 +1155,7 @@ async fn test_extend_objects_to_delete() {
         .unpin_version_before(context_id, pinned_version2.id)
         .await
         .unwrap();
-    let objects_to_delete = hummock_manager.get_objects_to_delete().await;
+    let objects_to_delete = hummock_manager.get_objects_to_delete();
     assert_eq!(
         objects_to_delete.len(),
         orphan_sst_num as usize,
@@ -1172,7 +1170,7 @@ async fn test_extend_objects_to_delete() {
             .await,
         orphan_sst_num as usize
     );
-    let objects_to_delete = hummock_manager.get_objects_to_delete().await;
+    let objects_to_delete = hummock_manager.get_objects_to_delete();
     assert_eq!(objects_to_delete.len(), orphan_sst_num as usize);
     let new_epoch = pinned_version2.max_committed_epoch.next_epoch();
     hummock_manager
@@ -1196,7 +1194,7 @@ async fn test_extend_objects_to_delete() {
             .await,
         orphan_sst_num as usize + 3
     );
-    let objects_to_delete = hummock_manager.get_objects_to_delete().await;
+    let objects_to_delete = hummock_manager.get_objects_to_delete();
     assert_eq!(objects_to_delete.len(), orphan_sst_num as usize + 3);
 }
 
@@ -1376,41 +1374,6 @@ async fn test_split_compaction_group_on_commit() {
             .member_table_ids,
         vec![101]
     );
-    let branched_ssts = hummock_manager
-        .versioning
-        .read(&["", "", ""])
-        .await
-        .branched_ssts
-        .clone();
-    assert_eq!(branched_ssts.len(), 1);
-    assert_eq!(branched_ssts.values().next().unwrap().len(), 2);
-    assert_ne!(
-        branched_ssts
-            .values()
-            .next()
-            .unwrap()
-            .get(&2)
-            .cloned()
-            .unwrap(),
-        branched_ssts
-            .values()
-            .next()
-            .unwrap()
-            .get(&3)
-            .cloned()
-            .unwrap(),
-    );
-}
-
-async fn get_branched_ssts(
-    hummock_manager: &HummockManager,
-) -> BTreeMap<HummockSstableObjectId, BranchedSstInfo> {
-    hummock_manager
-        .versioning
-        .read(&["", "", ""])
-        .await
-        .branched_ssts
-        .clone()
 }
 
 #[tokio::test]
@@ -1544,21 +1507,6 @@ async fn test_split_compaction_group_on_demand_basic() {
             .member_table_ids,
         vec![100, 101]
     );
-    let branched_ssts = get_branched_ssts(&hummock_manager).await;
-    assert_eq!(branched_ssts.len(), 2);
-    for object_id in [10, 11] {
-        assert_eq!(branched_ssts.get(&object_id).unwrap().len(), 2);
-        assert_ne!(
-            branched_ssts
-                .get(&object_id)
-                .unwrap()
-                .get(&new_group_id)
-                .cloned()
-                .unwrap(),
-            object_id,
-            "trivial adjust should also generate a new SST id"
-        );
-    }
 }
 
 #[tokio::test]
@@ -1622,20 +1570,6 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
             .get_compaction_group_levels(new_group_id)
             .member_table_ids,
         vec![100]
-    );
-    let branched_ssts = get_branched_ssts(&hummock_manager).await;
-    assert_eq!(branched_ssts.len(), 1);
-    assert_eq!(branched_ssts.get(&10).unwrap().len(), 2);
-    let sst_ids = branched_ssts.get(&10).unwrap().get(&2).cloned().unwrap();
-    assert_ne!(sst_ids, 10);
-    assert_ne!(
-        branched_ssts
-            .get(&10)
-            .unwrap()
-            .get(&new_group_id)
-            .cloned()
-            .unwrap(),
-        sst_ids,
     );
 }
 
@@ -1915,14 +1849,6 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
         2
     );
 
-    let branched_ssts = hummock_manager.get_branched_ssts_info().await;
-    // object-11 and object-12
-    assert_eq!(branched_ssts.len(), 2);
-    let info = branched_ssts.get(&11).unwrap();
-    assert_eq!(
-        info.keys().sorted().cloned().collect_vec(),
-        vec![2, new_group_id]
-    );
     assert_eq!(
         current_version.get_compaction_group_levels(2).levels[base_level - 1].table_infos[0]
             .object_id,
@@ -2128,12 +2054,6 @@ async fn test_move_tables_between_compaction_group() {
     assert_eq!(level.table_infos[0].table_ids, vec![100]);
     assert_eq!(level.table_infos[1].table_ids, vec![100, 101]);
     assert_eq!(level.table_infos.len(), 2);
-    let branched_ssts = hummock_manager.get_branched_ssts_info().await;
-    // object-id 11 and 12.
-    assert_eq!(branched_ssts.len(), 2);
-    let info = branched_ssts.get(&12).unwrap();
-    let groups = info.keys().sorted().cloned().collect_vec();
-    assert_eq!(groups, vec![2, new_group_id]);
 
     let mut selector: Box<dyn CompactionSelector> =
         Box::<SpaceReclaimCompactionSelector>::default();
@@ -2157,9 +2077,6 @@ async fn test_move_tables_between_compaction_group() {
         .await
         .unwrap();
     assert!(ret);
-    let branched_ssts = hummock_manager.get_branched_ssts_info().await;
-    // there is still left one sst for object-12 in branched-sst.
-    assert_eq!(branched_ssts.len(), 2);
 }
 
 #[tokio::test]

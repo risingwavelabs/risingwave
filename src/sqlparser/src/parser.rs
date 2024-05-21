@@ -25,12 +25,7 @@ use core::fmt;
 use itertools::Itertools;
 use tracing::{debug, instrument};
 
-use self::ddl::AlterSubscriptionOperation;
-use crate::ast::ddl::{
-    AlterConnectionOperation, AlterDatabaseOperation, AlterFunctionOperation, AlterIndexOperation,
-    AlterSchemaOperation, AlterSinkOperation, AlterViewOperation, SourceWatermark,
-};
-use crate::ast::{ParseTo, *};
+use crate::ast::*;
 use crate::keywords::{self, Keyword};
 use crate::tokenizer::*;
 
@@ -180,12 +175,6 @@ pub struct Parser {
     /// Since we cannot distinguish `>>` and double `>`, so use `angle_brackets_num` to store the
     /// number of `<` to match `>` in sql like `struct<v1 struct<v2 int>>`.
     angle_brackets_num: i32,
-    /// It's important that already in named Array or not. so use this field check in or not.
-    /// Consider 0 is you're not in named Array. if more than 0 is you're in named Array
-    array_depth: usize,
-    /// We cannot know current array should be keep named or not, so by using this field store
-    /// every depth of array that should be keep named or not.
-    array_named_stack: Vec<bool>,
 }
 
 impl Parser {
@@ -195,8 +184,6 @@ impl Parser {
             tokens,
             index: 0,
             angle_brackets_num: 0,
-            array_depth: 0,
-            array_named_stack: Vec::new(),
         }
     }
 
@@ -310,25 +297,6 @@ impl Parser {
         let table_name = self.parse_object_name()?;
 
         Ok(Statement::Analyze { table_name })
-    }
-
-    /// Check is enter array expression.
-    pub fn peek_array_depth(&self) -> usize {
-        self.array_depth
-    }
-
-    /// When enter specify ARRAY prefix expression.
-    pub fn increase_array_depth(&mut self, num: usize) {
-        self.array_depth += num;
-    }
-
-    /// When exit specify ARRAY prefix expression.
-    pub fn decrease_array_depth(&mut self, num: usize) {
-        self.array_depth -= num;
-    }
-
-    pub fn is_in_array(&self) -> bool {
-        self.peek_array_depth() > 0
     }
 
     /// Tries to parse a wildcard expression. If it is not a wildcard, parses an expression.
@@ -483,7 +451,7 @@ impl Parser {
                             ObjectName(id_parts),
                             self.parse_except()?,
                         ))
-                    }
+                    };
                 }
                 unexpected => {
                     return self.expected(
@@ -596,10 +564,6 @@ impl Parser {
                     expr: Box::new(self.parse_subexpr(Precedence::UnaryNot)?),
                 }),
                 Keyword::ROW => self.parse_row_expr(),
-                Keyword::ARRAY if self.peek_token() == Token::LBracket => {
-                    self.expect_token(&Token::LBracket)?;
-                    self.parse_array_expr(true)
-                }
                 Keyword::ARRAY if self.peek_token() == Token::LParen => {
                     // similar to `exists(subquery)`
                     self.expect_token(&Token::LParen)?;
@@ -607,6 +571,7 @@ impl Parser {
                     self.expect_token(&Token::RParen)?;
                     Ok(exists_node)
                 }
+                Keyword::ARRAY if self.peek_token() == Token::LBracket => self.parse_array_expr(),
                 // `LEFT` and `RIGHT` are reserved as identifier but okay as function
                 Keyword::LEFT | Keyword::RIGHT => {
                     self.parse_function(ObjectName(vec![w.to_ident()?]))
@@ -668,8 +633,6 @@ impl Parser {
                     _ => Ok(Expr::Identifier(w.to_ident()?)),
                 },
             }, // End of Token::Word
-
-            Token::LBracket if self.is_in_array() => self.parse_array_expr(false),
 
             tok @ Token::Minus | tok @ Token::Plus => {
                 let op = if tok == Token::Plus {
@@ -1242,46 +1205,50 @@ impl Parser {
     }
 
     /// Parses an array expression `[ex1, ex2, ..]`
-    /// if `named` is `true`, came from an expression like  `ARRAY[ex1, ex2]`
-    pub fn parse_array_expr(&mut self, named: bool) -> Result<Expr, ParserError> {
-        self.increase_array_depth(1);
-        if self.array_named_stack.len() < self.peek_array_depth() {
-            self.array_named_stack.push(named);
-        } else if let Err(parse_err) = self.check_same_named_array(named) {
-            Err(parse_err)?
-        }
-
-        if self.peek_token() == Token::RBracket {
-            let _ = self.next_token(); // consume ]
-            self.decrease_array_depth(1);
-            Ok(Expr::Array(Array {
-                elem: vec![],
-                named,
-            }))
-        } else {
-            let exprs = self.parse_comma_separated(Parser::parse_expr)?;
-            self.expect_token(&Token::RBracket)?;
-            if self.array_named_stack.len() > self.peek_array_depth() {
-                self.array_named_stack.pop();
-            }
-            self.decrease_array_depth(1);
-            Ok(Expr::Array(Array { elem: exprs, named }))
-        }
+    pub fn parse_array_expr(&mut self) -> Result<Expr, ParserError> {
+        let mut expected_depth = None;
+        let exprs = self.parse_array_inner(0, &mut expected_depth)?;
+        Ok(Expr::Array(Array {
+            elem: exprs,
+            // Top-level array is named.
+            named: true,
+        }))
     }
 
-    fn check_same_named_array(&mut self, current_named: bool) -> Result<(), ParserError> {
-        let previous_named = self.array_named_stack.last().unwrap();
-        if current_named != *previous_named {
-            // for '['
-            self.prev_token();
-            if current_named {
-                // for keyword 'array'
-                self.prev_token();
-            }
-            parser_err!(format!("syntax error at or near {}", self.peek_token()))?
-        } else {
-            Ok(())
+    fn parse_array_inner(
+        &mut self,
+        depth: usize,
+        expected_depth: &mut Option<usize>,
+    ) -> Result<Vec<Expr>, ParserError> {
+        self.expect_token(&Token::LBracket)?;
+        if let Some(expected_depth) = *expected_depth
+            && depth > expected_depth
+        {
+            return self.expected("]", self.peek_token());
         }
+        let exprs = if self.peek_token() == Token::LBracket {
+            self.parse_comma_separated(|parser| {
+                let exprs = parser.parse_array_inner(depth + 1, expected_depth)?;
+                Ok(Expr::Array(Array {
+                    elem: exprs,
+                    named: false,
+                }))
+            })?
+        } else {
+            if let Some(expected_depth) = *expected_depth {
+                if depth < expected_depth {
+                    return self.expected("[", self.peek_token());
+                }
+            } else {
+                *expected_depth = Some(depth);
+            }
+            if self.consume_token(&Token::RBracket) {
+                return Ok(vec![]);
+            }
+            self.parse_comma_separated(Self::parse_expr)?
+        };
+        self.expect_token(&Token::RBracket)?;
+        Ok(exprs)
     }
 
     // This function parses date/time fields for interval qualifiers.
@@ -1928,7 +1895,7 @@ impl Parser {
                 _ => {
                     return token
                         .cloned()
-                        .unwrap_or(TokenWithLocation::wrap(Token::EOF))
+                        .unwrap_or(TokenWithLocation::wrap(Token::EOF));
                 }
             }
         }
@@ -2185,10 +2152,22 @@ impl Parser {
 
     pub fn parse_create_schema(&mut self) -> Result<Statement, ParserError> {
         let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
-        let schema_name = self.parse_object_name()?;
+        let (schema_name, user_specified) = if self.parse_keyword(Keyword::AUTHORIZATION) {
+            let user_specified = self.parse_object_name()?;
+            (user_specified.clone(), Some(user_specified))
+        } else {
+            let schema_name = self.parse_object_name()?;
+            let user_specified = if self.parse_keyword(Keyword::AUTHORIZATION) {
+                Some(self.parse_object_name()?)
+            } else {
+                None
+            };
+            (schema_name, user_specified)
+        };
         Ok(Statement::CreateSchema {
             schema_name,
             if_not_exists,
+            user_specified,
         })
     }
 
@@ -2443,7 +2422,7 @@ impl Parser {
                 body.language = Some(self.parse_identifier()?);
             } else if self.parse_keyword(Keyword::RUNTIME) {
                 ensure_not_set(&body.runtime, "RUNTIME")?;
-                body.runtime = Some(self.parse_function_runtime()?);
+                body.runtime = Some(self.parse_identifier()?);
             } else if self.parse_keyword(Keyword::IMMUTABLE) {
                 ensure_not_set(&body.behavior, "IMMUTABLE | STABLE | VOLATILE")?;
                 body.behavior = Some(FunctionBehavior::Immutable);
@@ -2487,17 +2466,6 @@ impl Parser {
                 Ok(CreateFunctionUsing::Base64(base64))
             }
             _ => unreachable!("{}", keyword),
-        }
-    }
-
-    fn parse_function_runtime(&mut self) -> Result<FunctionRuntime, ParserError> {
-        let ident = self.parse_identifier()?;
-        match ident.value.to_lowercase().as_str() {
-            "deno" => Ok(FunctionRuntime::Deno),
-            "quickjs" => Ok(FunctionRuntime::QuickJs),
-            r => Err(ParserError::ParserError(format!(
-                "Unsupported runtime: {r}"
-            ))),
         }
     }
 
@@ -3575,6 +3543,11 @@ impl Parser {
             }
         } else if self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
             let connector_schema = self.parse_schema()?.unwrap();
+            if connector_schema.key_encode.is_some() {
+                return Err(ParserError::ParserError(
+                    "key encode clause is not supported in source schema".to_string(),
+                ));
+            }
             AlterSourceOperation::FormatEncode { connector_schema }
         } else if self.parse_keywords(&[Keyword::REFRESH, Keyword::SCHEMA]) {
             AlterSourceOperation::RefreshSchema

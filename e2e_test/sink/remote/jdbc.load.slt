@@ -166,22 +166,22 @@ INSERT INTO t1_uuid values (221, '74605c5a-a7bb-4b3b-8742-2a12e9709dea', 'hello 
 
 
 statement ok
-CREATE TABLE t1_test_uuid_delete (id varchar, primary key(id));
+CREATE TABLE t1_test_uuid_delete (id varchar, v1 int, v2 varchar, primary key(id, v2));
 
 statement ok
-INSERT INTO t1_test_uuid_delete VALUES ('fb48ecc1-917f-4f4b-ab6d-d8e37809caf8'), ('21189447-8736-44bd-b254-26b5dec91da9');
+INSERT INTO t1_test_uuid_delete VALUES ('fb48ecc1-917f-4f4b-ab6d-d8e37809caf8', 1, 'aa'), ('21189447-8736-44bd-b254-26b5dec91da9', 2, 'bb');
 
 statement ok
 CREATE SINK sk_t1_uuid FROM t1_test_uuid_delete WITH (
     connector='jdbc',
     jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
     table.name='sk_t1_uuid',
-    primary_key='id',
+    primary_key='id, v2',
     type='upsert'
 );
 
 statement ok
-DELETE FROM t1_test_uuid_delete WHERE ID='fb48ecc1-917f-4f4b-ab6d-d8e37809caf8';
+DELETE FROM t1_test_uuid_delete WHERE id='fb48ecc1-917f-4f4b-ab6d-d8e37809caf8' AND v2='aa';
 
 
 statement ok

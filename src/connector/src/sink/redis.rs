@@ -48,6 +48,7 @@ pub struct RedisCommon {
     #[serde(rename = "redis.url")]
     pub url: String,
 }
+
 pub enum RedisPipe {
     Cluster(ClusterPipeline),
     Single(Pipeline),
@@ -140,6 +141,7 @@ impl RedisCommon {
         }
     }
 }
+
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct RedisConfig {
@@ -260,6 +262,7 @@ struct RedisSinkPayloadWriter {
     // the command pipeline for write-commit
     pipe: RedisPipe,
 }
+
 impl RedisSinkPayloadWriter {
     pub async fn new(config: RedisConfig) -> Result<Self> {
         let (conn, pipe) = config.common.build_conn_and_pipe().await?;
@@ -375,8 +378,8 @@ mod test {
     use std::collections::BTreeMap;
 
     use rdkafka::message::FromBytes;
-    use risingwave_common::array::{Array, I32Array, Op, StreamChunk, Utf8Array};
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::array::{Array, I32Array, Op, Utf8Array};
+    use risingwave_common::catalog::Field;
     use risingwave_common::types::DataType;
     use risingwave_common::util::iter_util::ZipEqDebug;
 
@@ -405,6 +408,7 @@ mod test {
             format: SinkFormat::AppendOnly,
             encode: SinkEncode::Json,
             options: BTreeMap::default(),
+            key_encode: None,
         };
 
         let mut redis_sink_writer = RedisSinkWriter::mock(schema, vec![0], &format_desc)
@@ -425,11 +429,19 @@ mod test {
             .write_chunk(chunk_a, manager.start_write_chunk(0, 0))
             .await
             .expect("failed to write batch");
-        let expected_a =
-            vec![
-            (0, "*3\r\n$3\r\nSET\r\n$8\r\n{\"id\":1}\r\n$23\r\n{\"id\":1,\"name\":\"Alice\"}\r\n"),
-            (1, "*3\r\n$3\r\nSET\r\n$8\r\n{\"id\":2}\r\n$21\r\n{\"id\":2,\"name\":\"Bob\"}\r\n"),
-            (2, "*3\r\n$3\r\nSET\r\n$8\r\n{\"id\":3}\r\n$23\r\n{\"id\":3,\"name\":\"Clare\"}\r\n"),
+        let expected_a = vec![
+            (
+                0,
+                "*3\r\n$3\r\nSET\r\n$8\r\n{\"id\":1}\r\n$23\r\n{\"id\":1,\"name\":\"Alice\"}\r\n",
+            ),
+            (
+                1,
+                "*3\r\n$3\r\nSET\r\n$8\r\n{\"id\":2}\r\n$21\r\n{\"id\":2,\"name\":\"Bob\"}\r\n",
+            ),
+            (
+                2,
+                "*3\r\n$3\r\nSET\r\n$8\r\n{\"id\":3}\r\n$23\r\n{\"id\":3,\"name\":\"Clare\"}\r\n",
+            ),
         ];
 
         if let RedisPipe::Single(pipe) = &redis_sink_writer.payload_writer.pipe {
@@ -473,6 +485,7 @@ mod test {
             format: SinkFormat::AppendOnly,
             encode: SinkEncode::Template,
             options: btree_map,
+            key_encode: None,
         };
 
         let mut redis_sink_writer = RedisSinkWriter::mock(schema, vec![0], &format_desc)

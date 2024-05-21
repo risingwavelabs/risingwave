@@ -296,6 +296,10 @@ impl DatabaseManager {
         self.databases.values().cloned().collect_vec()
     }
 
+    pub fn list_schemas(&self) -> Vec<Schema> {
+        self.schemas.values().cloned().collect_vec()
+    }
+
     pub fn list_creating_background_mvs(&self) -> Vec<Table> {
         self.tables
             .values()
@@ -356,6 +360,14 @@ impl DatabaseManager {
                 table.schema_id == schema_id && table.table_type == TableType::Table as i32
             })
             .map(|table| table.id)
+            .collect_vec()
+    }
+
+    pub fn list_view_ids(&self, schema_id: SchemaId) -> Vec<ViewId> {
+        self.views
+            .values()
+            .filter(|view| view.schema_id == schema_id)
+            .map(|view| view.id)
             .collect_vec()
     }
 

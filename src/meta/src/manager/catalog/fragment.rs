@@ -41,7 +41,7 @@ use crate::manager::cluster::WorkerId;
 use crate::manager::{commit_meta, commit_meta_with_trx, LocalNotification, MetaSrvEnv};
 use crate::model::{
     ActorId, BTreeMapTransaction, FragmentId, MetadataModel, MigrationPlan, TableFragments,
-    TableParallelism, ValTransaction,
+    TableParallelism,
 };
 use crate::storage::Transaction;
 use crate::stream::{to_build_actor_info, SplitAssignment, TableRevision};
@@ -561,7 +561,6 @@ impl FragmentManager {
             .filter_map(|table_id| map.get(table_id).cloned())
             .collect_vec();
 
-        let mut dirty_sink_into_table_upstream_fragment_id = HashSet::new();
         let mut table_fragments = BTreeMapTransaction::new(map);
         let mut table_ids_to_unregister_from_hummock = vec![];
         for table_fragment in &to_delete_table_fragments {
@@ -596,32 +595,14 @@ impl FragmentManager {
                         })
                     });
             }
-
-            if let Some(sink_fragment) = table_fragment.sink_fragment() {
-                let dispatchers = sink_fragment
-                    .get_actors()
-                    .iter()
-                    .map(|actor| actor.get_dispatcher())
-                    .collect_vec();
-
-                if !dispatchers.is_empty() {
-                    dirty_sink_into_table_upstream_fragment_id.insert(sink_fragment.fragment_id);
-                }
-            }
         }
 
-        if !dirty_sink_into_table_upstream_fragment_id.is_empty() {
-            let to_delete_table_ids: HashSet<_> = to_delete_table_fragments
-                .iter()
-                .map(|table| table.table_id())
-                .collect();
+        let to_delete_table_ids: HashSet<_> = to_delete_table_fragments
+            .iter()
+            .map(|table| table.table_id())
+            .collect();
 
-            Self::clean_dirty_table_sink_downstreams(
-                dirty_sink_into_table_upstream_fragment_id,
-                to_delete_table_ids,
-                &mut table_fragments,
-            )?;
-        }
+        Self::clean_dirty_table_sink_downstreams(to_delete_table_ids, &mut table_fragments)?;
 
         if table_ids.is_empty() {
             commit_meta!(self, table_fragments)?;
@@ -647,13 +628,23 @@ impl FragmentManager {
     // but the union branch that attaches the downstream table to the sink fragment may still exist.
     // This could lead to issues. Therefore, we need to find the sink fragment’s downstream, then locate its union node and delete the dirty merge.
     fn clean_dirty_table_sink_downstreams(
-        dirty_sink_into_table_upstream_fragment_id: HashSet<u32>,
         to_delete_table_ids: HashSet<TableId>,
         table_fragments: &mut BTreeMapTransaction<'_, TableId, TableFragments>,
     ) -> MetaResult<()> {
         tracing::info!("cleaning dirty downstream merge nodes for table sink");
 
+        let mut all_fragment_ids = HashSet::new();
+
+        for (table_id, table_fragment) in table_fragments.tree_ref() {
+            if to_delete_table_ids.contains(table_id) {
+                continue;
+            }
+
+            all_fragment_ids.extend(table_fragment.fragment_ids());
+        }
+
         let mut dirty_downstream_table_ids = HashMap::new();
+
         for (table_id, table_fragment) in table_fragments.tree_mut() {
             if to_delete_table_ids.contains(table_id) {
                 continue;
@@ -663,9 +654,7 @@ impl FragmentManager {
                 if fragment
                     .get_upstream_fragment_ids()
                     .iter()
-                    .all(|upstream_fragment_id| {
-                        !dirty_sink_into_table_upstream_fragment_id.contains(upstream_fragment_id)
-                    })
+                    .all(|upstream_fragment_id| all_fragment_ids.contains(upstream_fragment_id))
                 {
                     continue;
                 }
@@ -675,8 +664,7 @@ impl FragmentManager {
                         if let Some(NodeBody::Union(_)) = node.node_body {
                             for input in &mut node.input {
                                 if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body
-                                    && dirty_sink_into_table_upstream_fragment_id
-                                        .contains(&merge_node.upstream_fragment_id)
+                                    && !all_fragment_ids.contains(&merge_node.upstream_fragment_id)
                                 {
                                     dirty_downstream_table_ids
                                         .insert(*table_id, fragment.fragment_id);
@@ -687,12 +675,6 @@ impl FragmentManager {
                         true
                     })
                 }
-
-                fragment
-                    .upstream_fragment_ids
-                    .retain(|upstream_fragment_id| {
-                        !dirty_sink_into_table_upstream_fragment_id.contains(upstream_fragment_id)
-                    });
             }
         }
 
@@ -706,13 +688,16 @@ impl FragmentManager {
                 .get_mut(&fragment_id)
                 .with_context(|| format!("fragment not exist: id={}", fragment_id))?;
 
+            fragment
+                .upstream_fragment_ids
+                .retain(|upstream_fragment_id| all_fragment_ids.contains(upstream_fragment_id));
+
             for actor in &mut fragment.actors {
                 visit_stream_node_cont(actor.nodes.as_mut().unwrap(), |node| {
                     if let Some(NodeBody::Union(_)) = node.node_body {
                         node.input.retain_mut(|input| {
                             if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body
-                                && dirty_sink_into_table_upstream_fragment_id
-                                    .contains(&merge_node.upstream_fragment_id)
+                                && !all_fragment_ids.contains(&merge_node.upstream_fragment_id)
                             {
                                 false
                             } else {

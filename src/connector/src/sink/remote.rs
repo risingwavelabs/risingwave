@@ -42,8 +42,8 @@ use risingwave_pb::connector_service::sink_writer_stream_request::{
 use risingwave_pb::connector_service::{
     sink_coordinator_stream_request, sink_coordinator_stream_response, sink_writer_stream_response,
     PbSinkParam, SinkCoordinatorStreamRequest, SinkCoordinatorStreamResponse, SinkMetadata,
-    SinkPayloadFormat, SinkWriterStreamRequest, SinkWriterStreamResponse, TableSchema,
-    ValidateSinkRequest, ValidateSinkResponse,
+    SinkWriterStreamRequest, SinkWriterStreamResponse, TableSchema, ValidateSinkRequest,
+    ValidateSinkResponse,
 };
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::{
@@ -68,7 +68,6 @@ use crate::sink::{
     DummySinkCommitCoordinator, LogSinker, Result, Sink, SinkCommitCoordinator, SinkError,
     SinkLogReader, SinkMetrics, SinkParam, SinkWriterParam,
 };
-use crate::ConnectorParams;
 
 macro_rules! def_remote_sink {
     () => {
@@ -82,7 +81,6 @@ macro_rules! def_remote_sink {
             { HttpJava, HttpJavaSink, "http" }
         }
     };
-    () => {};
     ({ $variant_name:ident, $sink_type_name:ident, $sink_name:expr }) => {
         #[derive(Debug)]
         pub struct $variant_name;
@@ -168,7 +166,7 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
 async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorResult<()> {
     if sink_name == ElasticSearchSink::SINK_NAME
         && param.downstream_pk.len() > 1
-        && param.properties.get(ES_OPTION_DELIMITER).is_none()
+        && !param.properties.contains_key(ES_OPTION_DELIMITER)
     {
         bail!("Es sink only support single pk or pk with delimiter option");
     }
@@ -283,7 +281,7 @@ impl RemoteLogSinker {
             request_sender,
             response_stream,
         } = EmbeddedConnectorClient::new()?
-            .start_sink_writer_stream(payload_schema, sink_proto, SinkPayloadFormat::StreamChunk)
+            .start_sink_writer_stream(payload_schema, sink_proto)
             .await?;
 
         let sink_metrics = writer_param.sink_metrics;
@@ -547,12 +545,8 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
                     "sink needs coordination should not have singleton input"
                 ))
             })?,
-            CoordinatedRemoteSinkWriter::new(
-                self.param.clone(),
-                writer_param.connector_params,
-                writer_param.sink_metrics.clone(),
-            )
-            .await?,
+            CoordinatedRemoteSinkWriter::new(self.param.clone(), writer_param.sink_metrics.clone())
+                .await?,
         )
         .await?
         .into_log_sinker(writer_param.sink_metrics))
@@ -572,18 +566,10 @@ pub struct CoordinatedRemoteSinkWriter {
 }
 
 impl CoordinatedRemoteSinkWriter {
-    pub async fn new(
-        param: SinkParam,
-        connector_params: ConnectorParams,
-        sink_metrics: SinkMetrics,
-    ) -> Result<Self> {
+    pub async fn new(param: SinkParam, sink_metrics: SinkMetrics) -> Result<Self> {
         let sink_proto = param.to_proto();
         let stream_handle = EmbeddedConnectorClient::new()?
-            .start_sink_writer_stream(
-                sink_proto.table_schema.clone(),
-                sink_proto,
-                connector_params.sink_payload_format,
-            )
+            .start_sink_writer_stream(sink_proto.table_schema.clone(), sink_proto)
             .await?;
 
         Ok(Self {
@@ -717,13 +703,11 @@ impl EmbeddedConnectorClient {
         &self,
         payload_schema: Option<TableSchema>,
         sink_proto: PbSinkParam,
-        sink_payload_format: SinkPayloadFormat,
     ) -> Result<SinkWriterStreamHandle<JniSinkWriterStreamRequest>> {
         let (handle, first_rsp) = SinkWriterStreamHandle::initialize(
             SinkWriterStreamRequest {
                 request: Some(SinkRequest::Start(StartSink {
                     sink_param: Some(sink_proto),
-                    format: sink_payload_format as i32,
                     payload_schema,
                 })),
             },

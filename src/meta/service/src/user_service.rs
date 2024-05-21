@@ -76,7 +76,7 @@ impl UserServiceImpl {
                     }
                     expanded_privileges.push(privilege);
                 }
-            } else if let Some(Object::AllDmlTablesSchemaId(schema_id)) = &privilege.object {
+            } else if let Some(Object::AllDmlRelationsSchemaId(schema_id)) = &privilege.object {
                 let tables = match &self.metadata_manager {
                     MetadataManager::V1(mgr) => {
                         mgr.catalog_manager.list_dml_table_ids(*schema_id).await
@@ -89,9 +89,30 @@ impl UserServiceImpl {
                         .map(|id| id as _)
                         .collect(),
                 };
+                let views = match &self.metadata_manager {
+                    MetadataManager::V1(mgr) => mgr.catalog_manager.list_view_ids(*schema_id).await,
+                    MetadataManager::V2(mgr) => mgr
+                        .catalog_controller
+                        .list_view_ids(*schema_id as _)
+                        .await?
+                        .into_iter()
+                        .map(|id| id as _)
+                        .collect(),
+                };
                 for table_id in tables {
                     let mut privilege = privilege.clone();
                     privilege.object = Some(Object::TableId(table_id));
+                    if let Some(true) = with_grant_option {
+                        privilege
+                            .action_with_opts
+                            .iter_mut()
+                            .for_each(|p| p.with_grant_option = true);
+                    }
+                    expanded_privileges.push(privilege);
+                }
+                for view_id in views {
+                    let mut privilege = privilege.clone();
+                    privilege.object = Some(Object::ViewId(view_id));
                     if let Some(true) = with_grant_option {
                         privilege
                             .action_with_opts

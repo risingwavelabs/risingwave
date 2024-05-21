@@ -31,8 +31,8 @@ INSERT INTO person VALUES (1001, 'peter white', 'myckhsp@xpmpe.com', '1781 2313 
 INSERT INTO person VALUES (1002, 'sarah spencer', 'wipvdbm@dkaap.com', '3453 4987 9481 6270', 'los angeles');
 
 create schema abs;
-create table abs.t1 (v1 int primary key, v2 double precision, v3 varchar, v4 numeric);
-create publication my_publicaton for table abs.t1 (v1, v3);
+create table abs.t1 ("V1" int primary key, v2 double precision, v3 varchar, v4 numeric);
+create publication my_publicaton for table abs.t1 ("V1", v3);
 insert into abs.t1 values (1, 1.1, 'aaa', '5431.1234');
 
 
@@ -97,5 +97,6 @@ CREATE TABLE enum_table (
 );
 INSERT INTO enum_table VALUES (1, 'happy');
 
-CREATE TABLE list_with_null(id int primary key, my_int int[], my_num numeric[], my_mood mood[], my_uuid uuid[], my_bytea bytea[]);
-INSERT INTO list_with_null VALUES (1, '{1,2,NULL}', '{1.1,inf,NULL}', '{happy,ok,NULL}', '{bb488f9b-330d-4012-b849-12adeb49e57e,bb488f9b-330d-4012-b849-12adeb49e57f, NULL}', '{\\x00,\\x01,NULL}');
+CREATE TABLE list_with_null(id int primary key, my_int int[], my_num numeric[], my_num_1 numeric[], my_num_2 numeric[], my_mood mood[], my_uuid uuid[], my_bytea bytea[]);
+INSERT INTO list_with_null VALUES (1, '{1,2,NULL}', '{1.1,inf,NULL}', '{1.1,inf,NULL}', '{1.1,inf,NULL}', '{happy,ok,NULL}', '{bb488f9b-330d-4012-b849-12adeb49e57e,bb488f9b-330d-4012-b849-12adeb49e57f, NULL}', '{\\x00,\\x01,NULL}');
+INSERT INTO list_with_null VALUES (2, '{NULL,3,4}', '{2.2,0,NULL}' , '{2.2,0,NULL}', '{2.2,0,NULL}', '{happy,ok,sad}', '{2de296df-eda7-4202-a81f-1036100ef4f6,2977afbc-0b12-459c-a36f-f623fc9e9840}', '{\\x00,\\x01,\\x02}');

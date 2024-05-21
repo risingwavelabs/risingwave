@@ -21,7 +21,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::pg_server::Session;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, DEFAULT_SCHEMA_NAME};
-use risingwave_common::types::{DataType, Fields};
+use risingwave_common::types::{DataType, Fields, Timestamptz};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
 use risingwave_expr::scalar::like::{i_like_default, like_default};
@@ -29,7 +29,6 @@ use risingwave_pb::catalog::connection;
 use risingwave_sqlparser::ast::{
     display_comma_separated, Ident, ObjectName, ShowCreateType, ShowObject, ShowStatementFilter,
 };
-use serde_json;
 
 use super::{fields_to_descriptors, RwPgResponse, RwPgResponseBuilderExt};
 use crate::binder::{Binder, Relation};
@@ -188,12 +187,15 @@ impl From<Arc<IndexCatalog>> for ShowIndexRow {
 #[derive(Fields)]
 #[fields(style = "Title Case")]
 struct ShowClusterRow {
+    id: i32,
     addr: String,
+    r#type: String,
     state: String,
     parallel_units: String,
-    is_streaming: String,
-    is_serving: String,
-    is_unschedulable: String,
+    is_streaming: Option<bool>,
+    is_serving: Option<bool>,
+    is_unschedulable: Option<bool>,
+    started_at: Option<Timestamptz>,
 }
 
 #[derive(Fields)]
@@ -386,17 +388,22 @@ pub async fn handle_show_object(
                 .into());
         }
         ShowObject::Cluster => {
-            let workers = session.env().worker_node_manager().list_worker_nodes();
-            let rows = workers.into_iter().map(|worker| {
+            let workers = session.env().meta_client().list_all_nodes().await?;
+            let rows = workers.into_iter().sorted_by_key(|w| w.id).map(|worker| {
                 let addr: HostAddr = worker.host.as_ref().unwrap().into();
-                let property = worker.property.as_ref().unwrap();
+                let property = worker.property.as_ref();
                 ShowClusterRow {
+                    id: worker.id as _,
                     addr: addr.to_string(),
+                    r#type: worker.get_type().unwrap().as_str_name().into(),
                     state: worker.get_state().unwrap().as_str_name().to_string(),
                     parallel_units: worker.parallel_units.into_iter().map(|pu| pu.id).join(", "),
-                    is_streaming: property.is_streaming.to_string(),
-                    is_serving: property.is_serving.to_string(),
-                    is_unschedulable: property.is_unschedulable.to_string(),
+                    is_streaming: property.map(|p| p.is_streaming),
+                    is_serving: property.map(|p| p.is_serving),
+                    is_unschedulable: property.map(|p| p.is_unschedulable),
+                    started_at: worker
+                        .started_at
+                        .map(|ts| Timestamptz::from_secs(ts as i64).unwrap()),
                 }
             });
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)

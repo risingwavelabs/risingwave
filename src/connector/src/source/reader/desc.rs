@@ -30,7 +30,6 @@ use crate::parser::additional_columns::add_partition_offset_cols;
 use crate::parser::{EncodingProperties, ProtocolProperties, SpecificParserConfig};
 use crate::source::monitor::SourceMetrics;
 use crate::source::{SourceColumnDesc, SourceColumnType, UPSTREAM_SOURCE_KEY};
-use crate::ConnectorParams;
 
 pub const DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE: usize = 16;
 
@@ -59,7 +58,6 @@ pub struct SourceDescBuilder {
     row_id_index: Option<usize>,
     with_properties: HashMap<String, String>,
     source_info: PbStreamSourceInfo,
-    connector_params: ConnectorParams,
     connector_message_buffer_size: usize,
     pk_indices: Vec<usize>,
 }
@@ -72,7 +70,6 @@ impl SourceDescBuilder {
         row_id_index: Option<usize>,
         with_properties: HashMap<String, String>,
         source_info: PbStreamSourceInfo,
-        connector_params: ConnectorParams,
         connector_message_buffer_size: usize,
         pk_indices: Vec<usize>,
     ) -> Self {
@@ -82,7 +79,6 @@ impl SourceDescBuilder {
             row_id_index,
             with_properties,
             source_info,
-            connector_params,
             connector_message_buffer_size,
             pk_indices,
         }
@@ -223,7 +219,6 @@ pub mod test_utils {
             row_id_index,
             with_properties,
             source_info,
-            connector_params: Default::default(),
             connector_message_buffer_size: DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE,
             pk_indices,
         }

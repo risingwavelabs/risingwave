@@ -15,18 +15,16 @@
 use std::future::Future;
 use std::ops::{Bound, RangeBounds};
 use std::pin::{pin, Pin};
-use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
-use foyer::memory::CacheContext;
+use foyer::{CacheContext, HybridCacheBuilder};
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, EvictionConfig, NoOverride, ObjectStoreConfig,
-    RwConfig,
+    extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig, RwConfig,
 };
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
@@ -53,7 +51,7 @@ use risingwave_storage::hummock::compactor::{
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::utils::cmp_delete_range_left_bounds;
 use risingwave_storage::hummock::{
-    CachePolicy, FileCache, HummockStorage, MemoryLimiter, SstableObjectIdManager, SstableStore,
+    CachePolicy, HummockStorage, MemoryLimiter, SstableObjectIdManager, SstableStore,
     SstableStoreConfig,
 };
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
@@ -207,24 +205,30 @@ async fn compaction_test(
         state_store_type.strip_prefix("hummock+").unwrap(),
         object_store_metrics.clone(),
         "Hummock",
-        ObjectStoreConfig::default(),
+        Arc::new(ObjectStoreConfig::default()),
     )
     .await;
+    let meta_cache_v2 = HybridCacheBuilder::new()
+        .memory(storage_memory_config.meta_cache_capacity_mb * (1 << 20))
+        .with_shards(storage_memory_config.meta_cache_shard_num)
+        .storage()
+        .build()
+        .await?;
+    let block_cache_v2 = HybridCacheBuilder::new()
+        .memory(storage_memory_config.block_cache_capacity_mb * (1 << 20))
+        .with_shards(storage_memory_config.block_cache_shard_num)
+        .storage()
+        .build()
+        .await?;
     let sstable_store = Arc::new(SstableStore::new(SstableStoreConfig {
         store: Arc::new(remote_object_store),
         path: system_params.data_directory().to_string(),
-        block_cache_capacity: storage_memory_config.block_cache_capacity_mb * (1 << 20),
-        meta_cache_capacity: storage_memory_config.meta_cache_capacity_mb * (1 << 20),
-        block_cache_shard_num: storage_memory_config.block_cache_shard_num,
-        meta_cache_shard_num: storage_memory_config.meta_cache_shard_num,
-        block_cache_eviction: EvictionConfig::for_test(),
-        meta_cache_eviction: EvictionConfig::for_test(),
         prefetch_buffer_capacity: storage_memory_config.prefetch_buffer_capacity_mb * (1 << 20),
         max_prefetch_block_number: storage_opts.max_prefetch_block_number,
-        data_file_cache: FileCache::none(),
-        meta_file_cache: FileCache::none(),
         recent_filter: None,
         state_store_metrics: state_store_metrics.clone(),
+        meta_cache_v2,
+        block_cache_v2,
     }));
 
     let store = HummockStorage::new(
@@ -600,24 +604,15 @@ fn run_compactor_thread(
 ) {
     let filter_key_extractor_manager =
         FilterKeyExtractorManager::RpcFilterKeyExtractorManager(filter_key_extractor_manager);
-
-    let compaction_executor = Arc::new(CompactionExecutor::new(Some(1)));
-    let max_task_parallelism = Arc::new(AtomicU32::new(
-        (compaction_executor.worker_num() as f32 * storage_opts.compactor_max_task_multiplier)
-            .ceil() as u32,
-    ));
     let compactor_context = CompactorContext {
         storage_opts,
         sstable_store,
         compactor_metrics,
         is_share_buffer_compact: false,
         compaction_executor: Arc::new(CompactionExecutor::new(None)),
-
         memory_limiter: MemoryLimiter::unlimit(),
         task_progress_manager: Default::default(),
         await_tree_reg: None,
-        running_task_parallelism: Arc::new(AtomicU32::new(0)),
-        max_task_parallelism,
     };
 
     start_compactor(

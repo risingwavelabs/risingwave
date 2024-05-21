@@ -544,7 +544,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
     }
 }
 
-pub(crate) type LogStoreItemMergeStream<S> =
+pub(crate) type LogStoreItemMergeStream<S: StateStoreReadIter + 'static> =
     impl Stream<Item = LogStoreResult<(u64, KvLogStoreItem)>>;
 pub(crate) fn merge_log_store_item_stream<S: StateStoreReadIter>(
     iters: Vec<S>,

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::default::Default;
 use std::iter::once;
 use std::sync::Arc;
 
@@ -97,7 +96,7 @@ pub struct ReplaceTablePlan {
     /// We need to reassign splits for it.
     ///
     /// Note that there's no `SourceBackfillExecutor` involved for table with connector, so we don't need to worry about
-    /// backfill_splits.
+    /// `backfill_splits`.
     pub init_split_assignment: SplitAssignment,
 }
 
@@ -390,7 +389,7 @@ pub struct CommandContext {
     /// Differs from [`TracedEpoch`], this span focuses on the lifetime of the corresponding
     /// barrier, including the process of waiting for the barrier to be sent, flowing through the
     /// stream graph on compute nodes, and finishing its `post_collect` stuffs.
-    pub span: tracing::Span,
+    pub _span: tracing::Span,
 }
 
 impl CommandContext {
@@ -413,7 +412,7 @@ impl CommandContext {
             command,
             kind,
             barrier_manager_context,
-            span,
+            _span: span,
         }
     }
 

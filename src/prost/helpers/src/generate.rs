@@ -17,8 +17,8 @@ use quote::quote;
 use syn::ext::IdentExt;
 use syn::spanned::Spanned;
 use syn::{
-    self, Error, Expr, ExprLit, Field, GenericArgument, Lit, Meta, PathArguments, PathSegment,
-    Result, Type,
+    Error, Expr, ExprLit, Field, GenericArgument, Lit, Meta, PathArguments, PathSegment, Result,
+    Type,
 };
 
 fn extract_type_from_option(option_segment: &PathSegment) -> Type {

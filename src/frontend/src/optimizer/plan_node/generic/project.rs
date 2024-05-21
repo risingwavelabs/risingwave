@@ -86,7 +86,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Project<PlanRef> {
                     Some(input_idx) => {
                         let mut field = input_schema.fields()[input_idx].clone();
                         if let Some(name) = self.field_names.get(&i) {
-                            field.name = name.clone();
+                            field.name.clone_from(name);
                         }
                         (field.name, field.sub_fields, field.type_name)
                     }

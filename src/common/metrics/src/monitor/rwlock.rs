@@ -16,31 +16,34 @@ use prometheus::HistogramVec;
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 pub struct MonitoredRwLock<T> {
+    // labels: [lock_name, lock_type]
     metrics: HistogramVec,
     inner: RwLock<T>,
+    lock_name: &'static str,
 }
 
 impl<T> MonitoredRwLock<T> {
-    pub fn new(metrics: HistogramVec, val: T) -> Self {
+    pub fn new(metrics: HistogramVec, val: T, lock_name: &'static str) -> Self {
         Self {
             metrics,
             inner: RwLock::new(val),
+            lock_name,
         }
     }
 
-    pub async fn read<'a, 'b>(
-        &'a self,
-        label_values: &'b [&'static str],
-    ) -> RwLockReadGuard<'a, T> {
-        let _timer = self.metrics.with_label_values(label_values).start_timer();
+    pub async fn read(&self) -> RwLockReadGuard<'_, T> {
+        let _timer = self
+            .metrics
+            .with_label_values(&[self.lock_name, "read"])
+            .start_timer();
         self.inner.read().await
     }
 
-    pub async fn write<'a, 'b>(
-        &'a self,
-        label_values: &'b [&'static str],
-    ) -> RwLockWriteGuard<'a, T> {
-        let _timer = self.metrics.with_label_values(label_values).start_timer();
+    pub async fn write(&self) -> RwLockWriteGuard<'_, T> {
+        let _timer = self
+            .metrics
+            .with_label_values(&[self.lock_name, "write"])
+            .start_timer();
         self.inner.write().await
     }
 }

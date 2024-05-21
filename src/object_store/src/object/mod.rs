@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(madsim)]
 pub mod sim;
 use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use prometheus::HistogramTimer;
 
 pub mod mem;
 pub use mem::*;
@@ -30,7 +28,7 @@ pub use opendal_engine::*;
 pub mod s3;
 use await_tree::InstrumentAwait;
 use futures::stream::BoxStream;
-use futures::StreamExt;
+use futures::{Future, StreamExt};
 pub use risingwave_common::config::ObjectStoreConfig;
 pub use s3::*;
 
@@ -42,30 +40,15 @@ mod prefix;
 pub use error::*;
 use object_metrics::ObjectStoreMetrics;
 use thiserror_ext::AsReport;
+use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
 #[cfg(madsim)]
 use self::sim::SimObjectStore;
 
 pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
-pub type ObjectStreamingUploader = MonitoredStreamingUploader;
-
-type BoxedStreamingUploader = Box<dyn StreamingUploader>;
+pub type ObjectStreamingUploader = StreamingUploaderImpl;
 
 pub trait ObjectRangeBounds = RangeBounds<usize> + Clone + Send + Sync + std::fmt::Debug + 'static;
-
-/// Partitions a set of given paths into two vectors. The first vector contains all local paths, and
-/// the second contains all remote paths.
-fn partition_object_store_paths(paths: &[String]) -> Vec<String> {
-    // ToDo: Currently the result is a copy of the input. Would it be worth it to use an in-place
-    //       partition instead?
-    let mut vec_rem = vec![];
-
-    for path in paths {
-        vec_rem.push(path.to_string());
-    }
-
-    vec_rem
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjectMetadata {
@@ -76,11 +59,12 @@ pub struct ObjectMetadata {
     pub total_size: usize,
 }
 
-#[async_trait::async_trait]
 pub trait StreamingUploader: Send {
+    #[expect(async_fn_in_trait)]
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()>;
 
-    async fn finish(self: Box<Self>) -> ObjectResult<()>;
+    #[expect(async_fn_in_trait)]
+    async fn finish(self) -> ObjectResult<()>;
 
     fn get_memory_usage(&self) -> u64;
 }
@@ -88,13 +72,14 @@ pub trait StreamingUploader: Send {
 /// The implementation must be thread-safe.
 #[async_trait::async_trait]
 pub trait ObjectStore: Send + Sync {
+    type StreamingUploader: StreamingUploader;
     /// Get the key prefix for object
     fn get_object_prefix(&self, obj_id: u64) -> String;
 
     /// Uploads the object to `ObjectStore`.
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()>;
 
-    async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader>;
+    async fn streaming_upload(&self, path: &str) -> ObjectResult<Self::StreamingUploader>;
 
     /// If objects are PUT using a multipart upload, it's a good practice to GET them in the same
     /// part sizes (or at least aligned to part boundaries) for best performance.
@@ -123,7 +108,7 @@ pub trait ObjectStore: Send + Sync {
     fn monitored(
         self,
         metrics: Arc<ObjectStoreMetrics>,
-        config: ObjectStoreConfig,
+        config: Arc<ObjectStoreConfig>,
     ) -> MonitoredObjectStore<Self>
     where
         Self: Sized,
@@ -134,94 +119,182 @@ pub trait ObjectStore: Send + Sync {
     async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter>;
 
     fn store_media_type(&self) -> &'static str;
-}
 
-pub enum ObjectStoreImpl {
-    InMem(MonitoredObjectStore<InMemObjectStore>),
-    Opendal(MonitoredObjectStore<OpendalObjectStore>),
-    S3(MonitoredObjectStore<S3ObjectStore>),
-    #[cfg(madsim)]
-    Sim(MonitoredObjectStore<SimObjectStore>),
-}
-
-macro_rules! dispatch_async {
-    ($object_store:expr, $method_name:ident $(, $args:expr)*) => {
-        $object_store.$method_name($($args, )*).await
+    fn support_streaming_upload(&self) -> bool {
+        true
     }
 }
+
+#[cfg(not(madsim))]
+macro_rules! for_all_object_store {
+    ($macro:ident $($args:tt)*) => {
+        $macro! {
+            {
+                { InMem, InMemObjectStore },
+                { Opendal, OpendalObjectStore },
+                { S3, S3ObjectStore }
+            }
+            $($args)*
+        }
+    }
+}
+
+#[cfg(madsim)]
+macro_rules! for_all_object_store {
+    ($macro:ident $($args:tt)*) => {
+        $macro! {
+            {
+                { InMem, InMemObjectStore },
+                { Opendal, OpendalObjectStore },
+                { S3, S3ObjectStore },
+                { Sim, SimObjectStore }
+            }
+            $($args)*
+        }
+    }
+}
+
+macro_rules! enum_map {
+    (
+        {
+            $(
+                {$variant:ident, $_type_name:ty}
+            ),*
+        },
+        $object_store:expr,
+        $var_name:ident,
+        $func:expr
+    ) => {
+        match $object_store {
+            $(
+                ObjectStoreEnum::$variant($var_name) => ObjectStoreEnum::$variant({
+                    $func
+                }),
+            )*
+        }
+    };
+    ($object_store:expr, |$var_name:ident| $func:expr) => {
+        for_all_object_store! {
+            enum_map, $object_store, $var_name, $func
+        }
+    };
+}
+
+macro_rules! dispatch_object_store_enum {
+    (
+        {
+            $(
+                {$variant:ident, $_type_name:ty}
+            ),*
+        },
+        $object_store:expr,
+        $var_name:ident,
+        $func:expr
+    ) => {
+        match $object_store {
+            $(
+                ObjectStoreEnum::$variant($var_name) => {
+                    $func
+                },
+            )*
+        }
+    };
+    ($object_store:expr, |$var_name:ident| $func:expr) => {
+        for_all_object_store! {
+            dispatch_object_store_enum, $object_store, $var_name, $func
+        }
+    };
+}
+
+macro_rules! define_object_store_impl {
+    () => {
+        for_all_object_store! {
+            define_object_store_impl
+        }
+    };
+    (
+        {$(
+            {$variant:ident, $type_name:ty}
+        ),*}
+    ) => {
+        pub enum ObjectStoreEnum<
+            $($variant),*
+        > {
+            $(
+                $variant($variant),
+            )*
+        }
+
+        pub type ObjectStoreImpl = ObjectStoreEnum<
+            $(
+                MonitoredObjectStore<$type_name>,
+            )*
+        >;
+
+        pub type StreamingUploaderImpl = ObjectStoreEnum<
+            $(
+                MonitoredStreamingUploader<<$type_name as ObjectStore>::StreamingUploader>
+            ),*
+        >;
+    };
+}
+
+define_object_store_impl!();
 
 /// This macro routes the object store operation to the real implementation by the `ObjectStoreImpl`
 /// enum type and the `path`.
 ///
 /// Except for `InMem`,the operation should be performed on remote object store.
 macro_rules! object_store_impl_method_body {
-    ($object_store:expr, $method_name:ident, $dispatch_macro:ident, $path:expr $(, $args:expr)*) => {
+    // with await
+    ($object_store:expr, $method_name:ident ($($args:expr),*).await) => {
         {
-            let path = $path;
-            match $object_store {
-                ObjectStoreImpl::InMem(in_mem) => {
-                    $dispatch_macro!(in_mem, $method_name, path $(, $args)*)
-                },
-                ObjectStoreImpl::Opendal(opendal) => {
-                    $dispatch_macro!(opendal, $method_name, path $(, $args)*)
-                },
-                ObjectStoreImpl::S3(s3) => {
-                    $dispatch_macro!(s3, $method_name, path $(, $args)*)
-                },
-                #[cfg(madsim)]
-                ObjectStoreImpl::Sim(in_mem) => {
-                    $dispatch_macro!(in_mem, $method_name, path $(, $args)*)
-                },
-            }
-
+            dispatch_object_store_enum! {$object_store, |os| {
+                os.$method_name($($args),*).await
+            }}
+        }
+    };
+    // no await
+    ($object_store:expr, $method_name:ident ($(, $args:expr)*)) => {
+        {
+            dispatch_object_store_enum! {$object_store, |os| {
+                os.$method_name($($args),*)
+            }}
         }
     };
 }
 
-/// This macro routes the object store operation to the real implementation by the `ObjectStoreImpl`
-/// enum type and the `paths`. It is a modification of the macro above to work with a slice of
-/// strings instead of just a single one.
-///
-/// Except for `InMem`, the operation should be performed on remote object store.
-macro_rules! object_store_impl_method_body_slice {
-    ($object_store:expr, $method_name:ident, $dispatch_macro:ident, $paths:expr $(, $args:expr)*) => {
-        {
-            let paths_rem = partition_object_store_paths($paths);
+impl StreamingUploaderImpl {
+    pub async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
+        object_store_impl_method_body!(self, write_bytes(data).await)
+    }
 
-            match $object_store {
-                ObjectStoreImpl::InMem(in_mem) => {
-                    $dispatch_macro!(in_mem, $method_name, &paths_rem $(, $args)*)
-                },
-                ObjectStoreImpl::Opendal(opendal) => {
-                    $dispatch_macro!(opendal, $method_name, &paths_rem $(, $args)*)
-                },
-                ObjectStoreImpl::S3(s3) => {
-                    $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*)
-                },
-                #[cfg(madsim)]
-                ObjectStoreImpl::Sim(in_mem) => {
-                    $dispatch_macro!(in_mem, $method_name, &paths_rem $(, $args)*)
-                },
-            }
-        }
-    };
+    pub async fn finish(self) -> ObjectResult<()> {
+        object_store_impl_method_body!(self, finish().await)
+    }
+
+    pub fn get_memory_usage(&self) -> u64 {
+        object_store_impl_method_body!(self, get_memory_usage())
+    }
 }
 
 impl ObjectStoreImpl {
     pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
-        object_store_impl_method_body!(self, upload, dispatch_async, path, obj)
+        object_store_impl_method_body!(self, upload(path, obj).await)
     }
 
-    pub async fn streaming_upload(&self, path: &str) -> ObjectResult<MonitoredStreamingUploader> {
-        object_store_impl_method_body!(self, streaming_upload, dispatch_async, path)
+    pub async fn streaming_upload(&self, path: &str) -> ObjectResult<ObjectStreamingUploader> {
+        Ok(enum_map!(self, |store| {
+            store.streaming_upload(path).await?
+        }))
     }
 
     pub async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
-        object_store_impl_method_body!(self, read, dispatch_async, path, range)
+        object_store_impl_method_body!(self, read(path, range).await)
     }
 
     pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
-        object_store_impl_method_body!(self, metadata, dispatch_async, path)
+        object_store_impl_method_body!(self, metadata(path).await)
     }
 
     /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
@@ -232,11 +305,11 @@ impl ObjectStoreImpl {
         path: &str,
         start_loc: Range<usize>,
     ) -> ObjectResult<MonitoredStreamingReader> {
-        object_store_impl_method_body!(self, streaming_read, dispatch_async, path, start_loc)
+        object_store_impl_method_body!(self, streaming_read(path, start_loc).await)
     }
 
     pub async fn delete(&self, path: &str) -> ObjectResult<()> {
-        object_store_impl_method_body!(self, delete, dispatch_async, path)
+        object_store_impl_method_body!(self, delete(path).await)
     }
 
     /// Deletes the objects with the given paths permanently from the storage. If an object
@@ -245,36 +318,19 @@ impl ObjectStoreImpl {
     /// If a hybrid storage is used, the method will first attempt to delete objects in local
     /// storage. Only if that is successful, it will remove objects from remote storage.
     pub async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
-        object_store_impl_method_body_slice!(self, delete_objects, dispatch_async, paths)
+        object_store_impl_method_body!(self, delete_objects(paths).await)
     }
 
     pub async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
-        object_store_impl_method_body!(self, list, dispatch_async, prefix)
+        object_store_impl_method_body!(self, list(prefix).await)
     }
 
     pub fn get_object_prefix(&self, obj_id: u64) -> String {
-        // FIXME: ObjectStoreImpl lacks flexibility for adding new interface to ObjectStore
-        // trait. Macro object_store_impl_method_body routes to local or remote only depending on
-        // the path
-        match self {
-            ObjectStoreImpl::InMem(store) => store.inner.get_object_prefix(obj_id),
-            ObjectStoreImpl::Opendal(store) => store.inner.get_object_prefix(obj_id),
-            ObjectStoreImpl::S3(store) => store.inner.get_object_prefix(obj_id),
-            #[cfg(madsim)]
-            ObjectStoreImpl::Sim(store) => store.inner.get_object_prefix(obj_id),
-        }
+        dispatch_object_store_enum!(self, |store| store.inner.get_object_prefix(obj_id))
     }
 
     pub fn support_streaming_upload(&self) -> bool {
-        match self {
-            ObjectStoreImpl::InMem(_) => true,
-            ObjectStoreImpl::Opendal(store) => {
-                store.inner.op.info().native_capability().write_can_multi
-            }
-            ObjectStoreImpl::S3(_) => true,
-            #[cfg(madsim)]
-            ObjectStoreImpl::Sim(_) => true,
-        }
+        dispatch_object_store_enum!(self, |store| store.inner.support_streaming_upload())
     }
 }
 
@@ -303,101 +359,85 @@ fn try_update_failure_metric<T>(
 ///   - `streaming_upload_finish`: The time spent calling `finish`.
 /// - `failure_count`: `streaming_upload_start`, `streaming_upload_write_bytes`,
 ///   `streaming_upload_finish`
-pub struct MonitoredStreamingUploader {
-    inner: BoxedStreamingUploader,
+pub struct MonitoredStreamingUploader<U: StreamingUploader> {
+    inner: U,
     object_store_metrics: Arc<ObjectStoreMetrics>,
     /// Length of data uploaded with this uploader.
     operation_size: usize,
     media_type: &'static str,
-    streaming_upload_timeout: Option<Duration>,
 }
 
-impl MonitoredStreamingUploader {
+impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
     pub fn new(
         media_type: &'static str,
-        handle: BoxedStreamingUploader,
+        handle: U,
         object_store_metrics: Arc<ObjectStoreMetrics>,
-        streaming_upload_timeout: Option<Duration>,
     ) -> Self {
         Self {
             inner: handle,
             object_store_metrics,
             operation_size: 0,
             media_type,
-            streaming_upload_timeout,
         }
     }
 }
 
-impl MonitoredStreamingUploader {
-    pub async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
-        let operation_type = "streaming_upload_write_bytes";
+impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
+    async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
+        let operation_type = OperationType::StreamingUpload;
+        let operation_type_str = operation_type.as_str();
         let data_len = data.len();
+
+        let _timer = self
+            .object_store_metrics
+            .operation_latency
+            .with_label_values(&[self.media_type, operation_type_str])
+            .start_timer();
+
+        let res = self
+            .inner
+            .write_bytes(data)
+            .verbose_instrument_await(operation_type_str)
+            .await;
+
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
+
         self.object_store_metrics
             .write_bytes
-            .inc_by(data.len() as u64);
+            .inc_by(data_len as u64);
         self.object_store_metrics
             .operation_size
-            .with_label_values(&[operation_type])
+            .with_label_values(&[operation_type_str])
             .observe(data_len as f64);
-        let _timer = self
-            .object_store_metrics
-            .operation_latency
-            .with_label_values(&[self.media_type, operation_type])
-            .start_timer();
         self.operation_size += data_len;
 
-        let future = async {
-            self.inner
-                .write_bytes(data)
-                .verbose_instrument_await("object_store_streaming_upload_write_bytes")
-                .await
-        };
-        let res = match self.streaming_upload_timeout.as_ref() {
-            None => future.await,
-            Some(timeout) => tokio::time::timeout(*timeout, future)
-                .await
-                .unwrap_or_else(|_| {
-                    Err(ObjectError::internal(
-                        "streaming_upload write_bytes timeout",
-                    ))
-                }),
-        };
-
-        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
         res
     }
 
-    pub async fn finish(self) -> ObjectResult<()> {
-        let operation_type = "streaming_upload_finish";
-        self.object_store_metrics
-            .operation_size
-            .with_label_values(&["streaming_upload"])
-            .observe(self.operation_size as f64);
+    async fn finish(self) -> ObjectResult<()> {
+        let operation_type = OperationType::StreamingUploadFinish;
+        let operation_type_str = operation_type.as_str();
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type, operation_type])
+            .with_label_values(&[self.media_type, operation_type_str])
             .start_timer();
 
-        let future = async {
-            self.inner
-                .finish()
-                .verbose_instrument_await("object_store_streaming_upload_finish")
-                .await
-        };
-        let res = match self.streaming_upload_timeout.as_ref() {
-            None => future.await,
-            Some(timeout) => tokio::time::timeout(*timeout, future)
-                .await
-                .unwrap_or_else(|_| Err(ObjectError::internal("streaming_upload finish timeout"))),
-        };
+        let res = self
+            .inner
+            .finish()
+            .verbose_instrument_await(operation_type_str)
+            .await;
 
-        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
+        self.object_store_metrics
+            .operation_size
+            .with_label_values(&[operation_type_str])
+            .observe(self.operation_size as f64);
         res
     }
 
-    pub fn get_memory_usage(&self) -> u64 {
+    fn get_memory_usage(&self) -> u64 {
         self.inner.get_memory_usage()
     }
 }
@@ -407,8 +447,8 @@ pub struct MonitoredStreamingReader {
     object_store_metrics: Arc<ObjectStoreMetrics>,
     operation_size: usize,
     media_type: &'static str,
-    timer: Option<HistogramTimer>,
     streaming_read_timeout: Option<Duration>,
+    operation_type_str: &'static str,
 }
 
 impl MonitoredStreamingReader {
@@ -418,54 +458,49 @@ impl MonitoredStreamingReader {
         object_store_metrics: Arc<ObjectStoreMetrics>,
         streaming_read_timeout: Option<Duration>,
     ) -> Self {
-        let operation_type = "streaming_read";
-        let timer = object_store_metrics
-            .operation_latency
-            .with_label_values(&[media_type, operation_type])
-            .start_timer();
         Self {
             inner: handle,
             object_store_metrics,
             operation_size: 0,
             media_type,
-            timer: Some(timer),
             streaming_read_timeout,
+            operation_type_str: OperationType::StreamingRead.as_str(),
         }
     }
 
     pub async fn read_bytes(&mut self) -> Option<ObjectResult<Bytes>> {
-        let operation_type = "streaming_read_read_bytes";
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type, operation_type])
+            .with_label_values(&[self.media_type, self.operation_type_str])
             .start_timer();
         let future = async {
             self.inner
                 .next()
-                .verbose_instrument_await("object_store_streaming_read_read_bytes")
+                .verbose_instrument_await(self.operation_type_str)
                 .await
         };
         let res = match self.streaming_read_timeout.as_ref() {
             None => future.await,
-            Some(timeout) => tokio::time::timeout(*timeout, future)
+            Some(timeout_duration) => tokio::time::timeout(*timeout_duration, future)
                 .await
                 .unwrap_or_else(|_| {
-                    Some(Err(ObjectError::internal(
-                        "streaming_read read_bytes timeout",
-                    )))
+                    Some(Err(ObjectError::timeout(format!(
+                        "Retry attempts exhausted for {}. Please modify {}_attempt_timeout_ms (current={:?}) under [storage.object_store.retry] in the config accordingly if needed.",
+                        self.operation_type_str, self.operation_type_str, timeout_duration.as_millis()
+                    ))))
                 }),
         };
 
         if let Some(ret) = &res {
-            try_update_failure_metric(&self.object_store_metrics, ret, operation_type);
+            try_update_failure_metric(&self.object_store_metrics, ret, self.operation_type_str);
         }
         if let Some(Ok(data)) = &res {
             let data_len = data.len();
             self.object_store_metrics.read_bytes.inc_by(data_len as u64);
             self.object_store_metrics
                 .operation_size
-                .with_label_values(&[operation_type])
+                .with_label_values(&[self.operation_type_str])
                 .observe(data_len as f64);
             self.operation_size += data_len;
         }
@@ -475,22 +510,17 @@ impl MonitoredStreamingReader {
 
 impl Drop for MonitoredStreamingReader {
     fn drop(&mut self) {
-        let operation_type = "streaming_read";
         self.object_store_metrics
             .operation_size
-            .with_label_values(&[operation_type])
+            .with_label_values(&[self.operation_type_str])
             .observe(self.operation_size as f64);
-        self.timer.take().unwrap().observe_duration();
     }
 }
 
 pub struct MonitoredObjectStore<OS: ObjectStore> {
     inner: OS,
     object_store_metrics: Arc<ObjectStoreMetrics>,
-    streaming_read_timeout: Option<Duration>,
-    streaming_upload_timeout: Option<Duration>,
-    read_timeout: Option<Duration>,
-    upload_timeout: Option<Duration>,
+    config: Arc<ObjectStoreConfig>,
 }
 
 /// Manually dispatch trait methods.
@@ -513,19 +543,12 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     pub fn new(
         store: OS,
         object_store_metrics: Arc<ObjectStoreMetrics>,
-        config: ObjectStoreConfig,
+        config: Arc<ObjectStoreConfig>,
     ) -> Self {
         Self {
             object_store_metrics,
-            streaming_read_timeout: Some(Duration::from_millis(
-                config.object_store_streaming_read_timeout_ms,
-            )),
-            streaming_upload_timeout: Some(Duration::from_millis(
-                config.object_store_streaming_upload_timeout_ms,
-            )),
-            read_timeout: Some(Duration::from_millis(config.object_store_read_timeout_ms)),
-            upload_timeout: Some(Duration::from_millis(config.object_store_upload_timeout_ms)),
             inner: store,
+            config,
         }
     }
 
@@ -542,85 +565,91 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     }
 
     pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
-        let operation_type = "upload";
+        let operation_type = OperationType::Upload;
+        let operation_type_str = operation_type.as_str();
+
         self.object_store_metrics
             .write_bytes
             .inc_by(obj.len() as u64);
         self.object_store_metrics
             .operation_size
-            .with_label_values(&[operation_type])
+            .with_label_values(&[operation_type_str])
             .observe(obj.len() as f64);
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), operation_type])
+            .with_label_values(&[self.media_type(), operation_type_str])
             .start_timer();
-        let future = async {
+
+        let builder = || async {
             self.inner
-                .upload(path, obj)
-                .verbose_instrument_await("object_store_upload")
+                .upload(path, obj.clone())
+                .verbose_instrument_await(operation_type_str)
                 .await
-        };
-        let res = match self.upload_timeout.as_ref() {
-            None => future.await,
-            Some(timeout) => tokio::time::timeout(*timeout, future)
-                .await
-                .unwrap_or_else(|_| Err(ObjectError::internal("upload timeout"))),
         };
 
-        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        let res = retry_request(
+            builder,
+            &self.config,
+            operation_type,
+            self.object_store_metrics.clone(),
+        )
+        .await;
+
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
         res
     }
 
-    pub async fn streaming_upload(&self, path: &str) -> ObjectResult<MonitoredStreamingUploader> {
-        let operation_type = "streaming_upload_start";
+    pub async fn streaming_upload(
+        &self,
+        path: &str,
+    ) -> ObjectResult<MonitoredStreamingUploader<OS::StreamingUploader>> {
+        let operation_type = OperationType::StreamingUploadInit;
+        let operation_type_str = operation_type.as_str();
         let media_type = self.media_type();
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[media_type, operation_type])
+            .with_label_values(&[media_type, operation_type_str])
             .start_timer();
-        let future = async {
-            self.inner
-                .streaming_upload(path)
-                .verbose_instrument_await("object_store_streaming_upload")
-                .await
-        };
-        let res = match self.streaming_upload_timeout.as_ref() {
-            None => future.await,
-            Some(timeout) => tokio::time::timeout(*timeout, future)
-                .await
-                .unwrap_or_else(|_| Err(ObjectError::internal("streaming_upload init timeout"))),
-        };
 
-        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        let res = self
+            .inner
+            .streaming_upload(path)
+            .verbose_instrument_await(operation_type_str)
+            .await;
+
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
         Ok(MonitoredStreamingUploader::new(
             media_type,
             res?,
             self.object_store_metrics.clone(),
-            self.streaming_upload_timeout,
         ))
     }
 
     pub async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
-        let operation_type = "read";
+        let operation_type = OperationType::Read;
+        let operation_type_str = operation_type.as_str();
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), operation_type])
+            .with_label_values(&[self.media_type(), operation_type_str])
             .start_timer();
-        let future = async {
+
+        let builder = || async {
             self.inner
-                .read(path, range)
-                .verbose_instrument_await("object_store_read")
+                .read(path, range.clone())
+                .verbose_instrument_await(operation_type_str)
                 .await
         };
-        let res = match self.read_timeout.as_ref() {
-            None => future.await,
-            Some(read_timeout) => tokio::time::timeout(*read_timeout, future)
-                .await
-                .unwrap_or_else(|_| Err(ObjectError::internal("read timeout"))),
-        };
+
+        let res = retry_request(
+            builder,
+            &self.config,
+            operation_type,
+            self.object_store_metrics.clone(),
+        )
+        .await;
 
         if let Err(e) = &res
             && e.is_object_not_found_error()
@@ -629,7 +658,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             // Some not_found_error is expected, e.g. metadata backup's manifest.json.
             // This is a quick fix that'll only log error in `try_update_failure_metric` in state store usage.
         } else {
-            try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+            try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
         }
 
         let data = res?;
@@ -638,7 +667,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .inc_by(data.len() as u64);
         self.object_store_metrics
             .operation_size
-            .with_label_values(&[operation_type])
+            .with_label_values(&[operation_type_str])
             .observe(data.len() as f64);
         Ok(data)
     }
@@ -651,130 +680,152 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         path: &str,
         range: Range<usize>,
     ) -> ObjectResult<MonitoredStreamingReader> {
-        let operation_type = "streaming_read_start";
+        let operation_type = OperationType::StreamingReadInit;
+        let operation_type_str = operation_type.as_str();
         let media_type = self.media_type();
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[media_type, operation_type])
+            .with_label_values(&[media_type, operation_type_str])
             .start_timer();
-        let future = self
-            .inner
-            .streaming_read(path, range)
-            .verbose_instrument_await("object_store_streaming_read");
-        let res = match self.streaming_read_timeout.as_ref() {
-            None => future.await,
-            Some(timeout) => tokio::time::timeout(*timeout, future)
+
+        let builder = || async {
+            self.inner
+                .streaming_read(path, range.clone())
+                .verbose_instrument_await(operation_type_str)
                 .await
-                .unwrap_or_else(|_| Err(ObjectError::internal("streaming_read init timeout"))),
         };
 
-        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        let res = retry_request(
+            builder,
+            &self.config,
+            operation_type,
+            self.object_store_metrics.clone(),
+        )
+        .await;
+
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
+
         Ok(MonitoredStreamingReader::new(
             media_type,
             res?,
             self.object_store_metrics.clone(),
-            self.streaming_read_timeout,
+            Some(Duration::from_millis(
+                self.config.retry.streaming_read_attempt_timeout_ms,
+            )),
         ))
     }
 
     pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
-        let operation_type = "metadata";
+        let operation_type = OperationType::Metadata;
+        let operation_type_str = operation_type.as_str();
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), operation_type])
+            .with_label_values(&[self.media_type(), operation_type_str])
             .start_timer();
 
-        let future = async {
+        let builder = || async {
             self.inner
                 .metadata(path)
-                .verbose_instrument_await("object_store_metadata")
+                .verbose_instrument_await(operation_type_str)
                 .await
-        };
-        let res = match self.read_timeout.as_ref() {
-            None => future.await,
-            Some(timeout) => tokio::time::timeout(*timeout, future)
-                .await
-                .unwrap_or_else(|_| Err(ObjectError::internal("metadata timeout"))),
         };
 
-        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        let res = retry_request(
+            builder,
+            &self.config,
+            operation_type,
+            self.object_store_metrics.clone(),
+        )
+        .await;
+
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
         res
     }
 
     pub async fn delete(&self, path: &str) -> ObjectResult<()> {
-        let operation_type = "delete";
+        let operation_type = OperationType::Delete;
+        let operation_type_str = operation_type.as_str();
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), operation_type])
+            .with_label_values(&[self.media_type(), operation_type_str])
             .start_timer();
 
-        let future = async {
+        let builder = || async {
             self.inner
                 .delete(path)
-                .verbose_instrument_await("object_store_delete")
+                .verbose_instrument_await(operation_type_str)
                 .await
-        };
-        let res = match self.read_timeout.as_ref() {
-            None => future.await,
-            Some(timeout) => tokio::time::timeout(*timeout, future)
-                .await
-                .unwrap_or_else(|_| Err(ObjectError::internal("delete timeout"))),
         };
 
-        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        let res = retry_request(
+            builder,
+            &self.config,
+            operation_type,
+            self.object_store_metrics.clone(),
+        )
+        .await;
+
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
         res
     }
 
     async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
-        let operation_type = "delete_objects";
+        let operation_type = OperationType::DeleteObjects;
+        let operation_type_str = operation_type.as_str();
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), operation_type])
+            .with_label_values(&[self.media_type(), operation_type_str])
             .start_timer();
 
-        let future = async {
+        let builder = || async {
             self.inner
                 .delete_objects(paths)
-                .verbose_instrument_await("object_store_delete_objects")
+                .verbose_instrument_await(operation_type_str)
                 .await
-        };
-        let res = match self.read_timeout.as_ref() {
-            None => future.await,
-            Some(timeout) => tokio::time::timeout(*timeout, future)
-                .await
-                .unwrap_or_else(|_| Err(ObjectError::internal("delete_objects timeout"))),
         };
 
-        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        let res = retry_request(
+            builder,
+            &self.config,
+            operation_type,
+            self.object_store_metrics.clone(),
+        )
+        .await;
+
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
         res
     }
 
     pub async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
-        let operation_type = "list";
+        let operation_type = OperationType::List;
+        let operation_type_str = operation_type.as_str();
+
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), operation_type])
+            .with_label_values(&[self.media_type(), operation_type_str])
             .start_timer();
 
-        let future = async {
+        let builder = || async {
             self.inner
                 .list(prefix)
-                .verbose_instrument_await("object_store_list")
+                .verbose_instrument_await(operation_type_str)
                 .await
-        };
-        let res = match self.read_timeout.as_ref() {
-            None => future.await,
-            Some(timeout) => tokio::time::timeout(*timeout, future)
-                .await
-                .unwrap_or_else(|_| Err(ObjectError::internal("list timeout"))),
         };
 
-        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        let res = retry_request(
+            builder,
+            &self.config,
+            operation_type,
+            self.object_store_metrics.clone(),
+        )
+        .await;
+
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
         res
     }
 }
@@ -788,7 +839,7 @@ pub async fn build_remote_object_store(
     url: &str,
     metrics: Arc<ObjectStoreMetrics>,
     ident: &str,
-    config: ObjectStoreConfig,
+    config: Arc<ObjectStoreConfig>,
 ) -> ObjectStoreImpl {
     tracing::debug!(config=?config, "object store {ident}");
     match url {
@@ -831,18 +882,26 @@ pub async fn build_remote_object_store(
             let gcs = gcs.strip_prefix("gcs://").unwrap();
             let (bucket, root) = gcs.split_once('@').unwrap_or((gcs, ""));
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_gcs_engine(bucket.to_string(), root.to_string())
-                    .unwrap()
-                    .monitored(metrics, config),
+                OpendalObjectStore::new_gcs_engine(
+                    bucket.to_string(),
+                    root.to_string(),
+                    config.clone(),
+                )
+                .unwrap()
+                .monitored(metrics, config),
             )
         }
         obs if obs.starts_with("obs://") => {
             let obs = obs.strip_prefix("obs://").unwrap();
             let (bucket, root) = obs.split_once('@').unwrap_or((obs, ""));
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_obs_engine(bucket.to_string(), root.to_string())
-                    .unwrap()
-                    .monitored(metrics, config),
+                OpendalObjectStore::new_obs_engine(
+                    bucket.to_string(),
+                    root.to_string(),
+                    config.clone(),
+                )
+                .unwrap()
+                .monitored(metrics, config),
             )
         }
 
@@ -850,27 +909,39 @@ pub async fn build_remote_object_store(
             let oss = oss.strip_prefix("oss://").unwrap();
             let (bucket, root) = oss.split_once('@').unwrap_or((oss, ""));
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_oss_engine(bucket.to_string(), root.to_string())
-                    .unwrap()
-                    .monitored(metrics, config),
+                OpendalObjectStore::new_oss_engine(
+                    bucket.to_string(),
+                    root.to_string(),
+                    config.clone(),
+                )
+                .unwrap()
+                .monitored(metrics, config),
             )
         }
         webhdfs if webhdfs.starts_with("webhdfs://") => {
             let webhdfs = webhdfs.strip_prefix("webhdfs://").unwrap();
             let (namenode, root) = webhdfs.split_once('@').unwrap_or((webhdfs, ""));
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_webhdfs_engine(namenode.to_string(), root.to_string())
-                    .unwrap()
-                    .monitored(metrics, config),
+                OpendalObjectStore::new_webhdfs_engine(
+                    namenode.to_string(),
+                    root.to_string(),
+                    config.clone(),
+                )
+                .unwrap()
+                .monitored(metrics, config),
             )
         }
         azblob if azblob.starts_with("azblob://") => {
             let azblob = azblob.strip_prefix("azblob://").unwrap();
             let (container_name, root) = azblob.split_once('@').unwrap_or((azblob, ""));
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_azblob_engine(container_name.to_string(), root.to_string())
-                    .unwrap()
-                    .monitored(metrics, config),
+                OpendalObjectStore::new_azblob_engine(
+                    container_name.to_string(),
+                    root.to_string(),
+                    config.clone(),
+                )
+                .unwrap()
+                .monitored(metrics, config),
             )
         }
         fs if fs.starts_with("fs://") => {
@@ -892,13 +963,13 @@ pub async fn build_remote_object_store(
             if config.s3.developer.use_opendal {
                 tracing::info!("Using OpenDAL to access minio.");
                 ObjectStoreImpl::Opendal(
-                    OpendalObjectStore::with_minio(minio, config.clone())
+                    OpendalObjectStore::new_minio_engine(minio, config.clone())
                         .unwrap()
                         .monitored(metrics, config),
                 )
             } else {
                 ObjectStoreImpl::S3(
-                    S3ObjectStore::with_minio(minio, metrics.clone(), config.clone())
+                    S3ObjectStore::new_minio_engine(minio, metrics.clone(), config.clone())
                         .await
                         .monitored(metrics, config),
                 )
@@ -933,5 +1004,164 @@ pub async fn build_remote_object_store(
     }
 }
 
+#[inline(always)]
+fn get_retry_strategy(
+    config: &ObjectStoreConfig,
+    operation_type: OperationType,
+) -> impl Iterator<Item = Duration> {
+    let attempts = get_retry_attempts_by_type(config, operation_type);
+    ExponentialBackoff::from_millis(config.retry.req_backoff_interval_ms)
+        .max_delay(Duration::from_millis(config.retry.req_backoff_max_delay_ms))
+        .factor(config.retry.req_backoff_factor)
+        .take(attempts)
+        .map(jitter)
+}
+
 pub type ObjectMetadataIter = BoxStream<'static, ObjectResult<ObjectMetadata>>;
 pub type ObjectDataStream = BoxStream<'static, ObjectResult<Bytes>>;
+
+#[derive(Debug, Clone, Copy)]
+enum OperationType {
+    Upload,
+    StreamingUploadInit,
+    StreamingUpload,
+    StreamingUploadFinish,
+    Read,
+    StreamingReadInit,
+    StreamingRead,
+    Metadata,
+    Delete,
+    DeleteObjects,
+    List,
+}
+
+impl OperationType {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Upload => "upload",
+            Self::StreamingUploadInit => "streaming_upload_init",
+            Self::StreamingUpload => "streaming_upload",
+            Self::StreamingUploadFinish => "streaming_upload_finish",
+            Self::Read => "read",
+            Self::StreamingReadInit => "streaming_read_init",
+            Self::StreamingRead => "streaming_read",
+            Self::Metadata => "metadata",
+            Self::Delete => "delete",
+            Self::DeleteObjects => "delete_objects",
+            Self::List => "list",
+        }
+    }
+}
+
+fn get_retry_attempts_by_type(config: &ObjectStoreConfig, operation_type: OperationType) -> usize {
+    match operation_type {
+        OperationType::Upload => config.retry.upload_retry_attempts,
+        OperationType::StreamingUploadInit
+        | OperationType::StreamingUpload
+        | OperationType::StreamingUploadFinish => config.retry.streaming_upload_retry_attempts,
+        OperationType::Read => config.retry.read_retry_attempts,
+        OperationType::StreamingReadInit | OperationType::StreamingRead => {
+            config.retry.streaming_read_retry_attempts
+        }
+        OperationType::Metadata => config.retry.metadata_retry_attempts,
+        OperationType::Delete => config.retry.delete_retry_attempts,
+        OperationType::DeleteObjects => config.retry.delete_objects_retry_attempts,
+        OperationType::List => config.retry.list_retry_attempts,
+    }
+}
+
+fn get_attempt_timeout_by_type(config: &ObjectStoreConfig, operation_type: OperationType) -> u64 {
+    match operation_type {
+        OperationType::Upload => config.retry.upload_attempt_timeout_ms,
+        OperationType::StreamingUploadInit
+        | OperationType::StreamingUpload
+        | OperationType::StreamingUploadFinish => config.retry.streaming_upload_attempt_timeout_ms,
+        OperationType::Read => config.retry.read_attempt_timeout_ms,
+        OperationType::StreamingReadInit | OperationType::StreamingRead => {
+            config.retry.streaming_read_attempt_timeout_ms
+        }
+        OperationType::Metadata => config.retry.metadata_attempt_timeout_ms,
+        OperationType::Delete => config.retry.delete_attempt_timeout_ms,
+        OperationType::DeleteObjects => config.retry.delete_objects_attempt_timeout_ms,
+        OperationType::List => config.retry.list_attempt_timeout_ms,
+    }
+}
+
+struct RetryCondition {
+    operation_type: OperationType,
+    retry_count: usize,
+    metrics: Arc<ObjectStoreMetrics>,
+}
+
+impl RetryCondition {
+    fn new(operation_type: OperationType, metrics: Arc<ObjectStoreMetrics>) -> Self {
+        Self {
+            operation_type,
+            retry_count: 0,
+            metrics,
+        }
+    }
+
+    #[inline(always)]
+    fn should_retry_inner(&mut self, err: &ObjectError) -> bool {
+        let should_retry = err.should_retry();
+        if should_retry {
+            self.retry_count += 1;
+        }
+
+        should_retry
+    }
+}
+
+impl tokio_retry::Condition<ObjectError> for RetryCondition {
+    fn should_retry(&mut self, err: &ObjectError) -> bool {
+        self.should_retry_inner(err)
+    }
+}
+
+impl Drop for RetryCondition {
+    fn drop(&mut self) {
+        if self.retry_count > 0 {
+            self.metrics
+                .request_retry_count
+                .with_label_values(&[self.operation_type.as_str()])
+                .inc_by(self.retry_count as _);
+        }
+    }
+}
+
+async fn retry_request<F, T, B>(
+    builder: B,
+    config: &ObjectStoreConfig,
+    operation_type: OperationType,
+    object_store_metrics: Arc<ObjectStoreMetrics>,
+) -> ObjectResult<T>
+where
+    B: Fn() -> F,
+    F: Future<Output = ObjectResult<T>>,
+{
+    let backoff = get_retry_strategy(config, operation_type);
+    let timeout_duration =
+        Duration::from_millis(get_attempt_timeout_by_type(config, operation_type));
+    let operation_type_str = operation_type.as_str();
+
+    let retry_condition = RetryCondition::new(operation_type, object_store_metrics);
+
+    let f = || async {
+        let future = builder();
+        if timeout_duration.is_zero() {
+            future.await
+        } else {
+            tokio::time::timeout(timeout_duration, future)
+                .await
+                .unwrap_or_else(|_| {
+                    Err(ObjectError::timeout(format!(
+                        "Retry attempts exhausted for {}. Please modify {}_attempt_timeout_ms (current={:?}) and {}_retry_attempts (current={}) under [storage.object_store.retry] in the config accordingly if needed.",
+                        operation_type_str, operation_type_str, timeout_duration.as_millis(), operation_type_str, get_retry_attempts_by_type(config, operation_type)
+                    )))
+                })
+        }
+    };
+
+    tokio_retry::RetryIf::spawn(backoff, f, retry_condition).await
+}

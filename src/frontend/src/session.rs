@@ -164,6 +164,9 @@ pub struct FrontendEnv {
 /// Session map identified by `(process_id, secret_key)`
 type SessionMapRef = Arc<RwLock<HashMap<(i32, i32), Arc<SessionImpl>>>>;
 
+/// The proportion of frontend memory used for batch processing.
+const FRONTEND_BATCH_MEMORY_PROPORTION: f64 = 0.5;
+
 impl FrontendEnv {
     pub fn mock() -> Self {
         use crate::test_utils::{MockCatalogWriter, MockFrontendMetaClient, MockUserInfoWriter};
@@ -338,10 +341,6 @@ impl FrontendEnv {
             MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
         }
 
-        let mem_context = risingwave_common::memory::MemoryContext::root(
-            frontend_metrics.batch_total_mem.clone(),
-        );
-
         let health_srv = HealthServiceImpl::new();
         let host = opts.health_check_listener_addr.clone();
 
@@ -407,6 +406,11 @@ impl FrontendEnv {
             HeapProfiler::new(total_memory_bytes, config.server.heap_profiling.clone());
         // Run a background heap profiler
         heap_profiler.start();
+
+        let mem_context = risingwave_common::memory::MemoryContext::root(
+            frontend_metrics.batch_total_mem.clone(),
+            (total_memory_bytes as f64 * FRONTEND_BATCH_MEMORY_PROPORTION) as u64,
+        );
 
         Ok((
             Self {

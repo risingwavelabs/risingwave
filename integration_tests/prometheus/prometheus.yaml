@@ -27,7 +27,7 @@ scrape_configs:
 
   - job_name: etcd
     static_configs:
-      - targets: ["etcd-0:2379"]
+      - targets: ["postgres-0:2379"]
 
   - job_name: redpanda
     static_configs:

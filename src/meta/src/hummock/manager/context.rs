@@ -12,35 +12,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
-use std::ops::DerefMut;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use fail::fail_point;
-use function_name::named;
 use itertools::Itertools;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
-    ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableObjectId,
+    ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
 };
-use risingwave_pb::hummock::ValidationTask;
+use risingwave_pb::hummock::{HummockPinnedSnapshot, HummockPinnedVersion, ValidationTask};
 
 use crate::hummock::error::{Error, Result};
-use crate::hummock::manager::{
-    commit_multi_var, create_trx_wrapper, read_lock, start_measure_real_process_timer, write_lock,
-};
+use crate::hummock::manager::{commit_multi_var, start_measure_real_process_timer};
 use crate::hummock::HummockManager;
-use crate::manager::META_NODE_ID;
-use crate::model::{BTreeMapTransaction, BTreeMapTransactionWrapper, ValTransaction};
+use crate::manager::{MetaStoreImpl, MetadataManager, META_NODE_ID};
+use crate::model::BTreeMapTransaction;
 use crate::storage::MetaStore;
 
-impl HummockManager {
+#[derive(Default)]
+pub(super) struct ContextInfo {
+    pub pinned_versions: BTreeMap<HummockContextId, HummockPinnedVersion>,
+    pub pinned_snapshots: BTreeMap<HummockContextId, HummockPinnedSnapshot>,
+    /// `version_safe_points` is similar to `pinned_versions` expect for being a transient state.
+    pub version_safe_points: Vec<HummockVersionId>,
+}
+
+impl ContextInfo {
     /// Release resources pinned by these contexts, including:
     /// - Version
     /// - Snapshot
-    #[named]
-    pub async fn release_contexts(
-        &self,
+    async fn release_contexts(
+        &mut self,
         context_ids: impl AsRef<[HummockContextId]>,
+        meta_store_ref: MetaStoreImpl,
     ) -> Result<()> {
         fail_point!("release_contexts_metastore_err", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore error")
@@ -49,50 +53,69 @@ impl HummockManager {
             anyhow::anyhow!("failpoint internal error")
         )));
 
-        let mut versioning_guard = write_lock!(self, versioning).await;
-        let versioning = versioning_guard.deref_mut();
-        let mut pinned_versions = create_trx_wrapper!(
-            self.meta_store_ref(),
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut versioning.pinned_versions,)
-        );
-        let mut pinned_snapshots = create_trx_wrapper!(
-            self.meta_store_ref(),
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut versioning.pinned_snapshots,)
-        );
+        let mut pinned_versions = BTreeMapTransaction::new(&mut self.pinned_versions);
+        let mut pinned_snapshots = BTreeMapTransaction::new(&mut self.pinned_snapshots);
         for context_id in context_ids.as_ref() {
             pinned_versions.remove(*context_id);
             pinned_snapshots.remove(*context_id);
         }
-        commit_multi_var!(self.meta_store_ref(), pinned_versions, pinned_snapshots)?;
+        commit_multi_var!(meta_store_ref, pinned_versions, pinned_snapshots)?;
 
+        Ok(())
+    }
+}
+
+impl HummockManager {
+    pub async fn release_contexts(
+        &self,
+        context_ids: impl AsRef<[HummockContextId]>,
+    ) -> Result<()> {
+        let mut context_info = self.context_info.write().await;
+        context_info
+            .release_contexts(context_ids, self.meta_store_ref())
+            .await?;
         #[cfg(test)]
         {
-            drop(versioning_guard);
+            drop(context_info);
             self.check_state_consistency().await;
         }
-
         Ok(())
     }
 
     /// Checks whether `context_id` is valid.
     pub async fn check_context(&self, context_id: HummockContextId) -> Result<bool> {
-        Ok(self
-            .metadata_manager()
+        self.context_info
+            .read()
+            .await
+            .check_context(context_id, &self.metadata_manager)
+            .await
+    }
+}
+
+impl ContextInfo {
+    /// Checks whether `context_id` is valid.
+    ///
+    /// Need `&self` to sync with `release_context`
+    pub(super) async fn check_context(
+        &self,
+        context_id: HummockContextId,
+        metadata_manager: &MetadataManager,
+    ) -> Result<bool> {
+        Ok(metadata_manager
             .get_worker_by_id(context_id)
             .await
             .map_err(|err| Error::MetaStore(err.into()))?
             .is_some())
     }
+}
 
+impl HummockManager {
     /// Release invalid contexts, aka worker node ids which are no longer valid in `ClusterManager`.
-    #[named]
     pub(super) async fn release_invalid_contexts(&self) -> Result<Vec<HummockContextId>> {
-        let active_context_ids = {
-            let compaction_guard = read_lock!(self, compaction).await;
-            let versioning_guard = read_lock!(self, versioning).await;
-            let _timer = start_measure_real_process_timer!(self);
+        let (active_context_ids, mut context_info) = {
+            let compaction_guard = self.compaction.read().await;
+            let context_info = self.context_info.write().await;
+            let _timer = start_measure_real_process_timer!(self, "release_invalid_contexts");
             let mut active_context_ids = HashSet::new();
             active_context_ids.extend(
                 compaction_guard
@@ -100,19 +123,24 @@ impl HummockManager {
                     .values()
                     .map(|c| c.context_id),
             );
-            active_context_ids.extend(versioning_guard.pinned_versions.keys());
-            active_context_ids.extend(versioning_guard.pinned_snapshots.keys());
-            active_context_ids
+            active_context_ids.extend(context_info.pinned_versions.keys());
+            active_context_ids.extend(context_info.pinned_snapshots.keys());
+            (active_context_ids, context_info)
         };
 
         let mut invalid_context_ids = vec![];
         for active_context_id in &active_context_ids {
-            if !self.check_context(*active_context_id).await? {
+            if !context_info
+                .check_context(*active_context_id, &self.metadata_manager)
+                .await?
+            {
                 invalid_context_ids.push(*active_context_id);
             }
         }
 
-        self.release_contexts(&invalid_context_ids).await?;
+        context_info
+            .release_contexts(&invalid_context_ids, self.meta_store_ref())
+            .await?;
 
         Ok(invalid_context_ids)
     }
@@ -133,7 +161,13 @@ impl HummockManager {
                     continue;
                 }
             }
-            if !self.check_context(*context_id).await? {
+            if !self
+                .context_info
+                .read()
+                .await
+                .check_context(*context_id, &self.metadata_manager)
+                .await?
+            {
                 return Err(Error::InvalidSst(*sst_id));
             }
         }

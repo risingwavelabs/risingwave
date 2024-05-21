@@ -170,6 +170,7 @@ impl std::fmt::Debug for HummockEvent {
 }
 
 pub type LocalInstanceId = u64;
+pub const TEST_LOCAL_INSTANCE_ID: LocalInstanceId = 233;
 pub type HummockReadVersionRef = Arc<RwLock<HummockReadVersion>>;
 pub type ReadVersionMappingType = HashMap<TableId, HashMap<LocalInstanceId, HummockReadVersionRef>>;
 pub type ReadOnlyReadVersionMapping = ReadOnlyRwLockRef<ReadVersionMappingType>;

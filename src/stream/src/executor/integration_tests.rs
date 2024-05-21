@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
-use futures::StreamExt;
 use futures_async_stream::try_stream;
 use multimap::MultiMap;
 use risingwave_common::array::*;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::Field;
 use risingwave_common::config;
 use risingwave_common::types::*;
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
@@ -29,15 +28,12 @@ use risingwave_storage::memory::MemoryStateStore;
 
 use super::exchange::permit::channel_for_test;
 use super::*;
-use crate::executor::actor::ActorContext;
 use crate::executor::dispatch::*;
 use crate::executor::exchange::output::{BoxedOutput, LocalOutput};
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::receiver::ReceiverExecutor;
 use crate::executor::test_utils::agg_executor::{
     generate_agg_schema, new_boxed_simple_agg_executor,
 };
-use crate::executor::{Execute, MergeExecutor, ProjectExecutor, StatelessSimpleAggExecutor};
 use crate::task::{LocalBarrierManager, SharedContext};
 
 /// This test creates a merger-dispatcher pair, and run a sum. Each chunk
