@@ -162,8 +162,8 @@ impl ScalarAdapter {
     }
 
     /// convert `ScalarRefImpl` to `ScalarAdapter` so that we can correctly encode to postgres value
-    pub(crate) fn from_scalar<'a>(
-        scalar: ScalarRefImpl<'a>,
+    pub(crate) fn from_scalar(
+        scalar: ScalarRefImpl<'_>,
         ty: &Type,
     ) -> ConnectorResult<ScalarAdapter> {
         Ok(match (scalar, ty, ty.kind()) {
@@ -295,7 +295,7 @@ impl ScalarAdapter {
             (ScalarAdapter::List(vec), &DataType::List(dtype)) => {
                 let mut builder = dtype.create_array_builder(0);
                 for val in vec {
-                    let scalar = val.and_then(|v| v.into_scalar(&dtype));
+                    let scalar = val.and_then(|v| v.into_scalar(dtype));
                     builder.append(scalar);
                 }
                 Some(ScalarImpl::from(ListValue::new(builder.finish())))
