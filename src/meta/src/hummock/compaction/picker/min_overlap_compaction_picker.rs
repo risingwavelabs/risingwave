@@ -356,6 +356,10 @@ impl NonOverlapSubLevelPicker {
             ret.sstable_infos[0].extend(vec![sst.clone()]);
         }
 
+        if self.enable_check_task_level_overlap {
+            self.verify_task_level_overlap(&ret, levels);
+        }
+
         ret.sstable_infos.retain(|ssts| !ssts.is_empty());
 
         // To check whether the task is expected
@@ -384,10 +388,6 @@ impl NonOverlapSubLevelPicker {
                     break;
                 }
             }
-        }
-
-        if self.enable_check_task_level_overlap {
-            self.verify_task_level_overlap(&ret, levels);
         }
 
         ret
