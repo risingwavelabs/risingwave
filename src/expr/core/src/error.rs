@@ -95,13 +95,6 @@ pub enum ExprError {
         anyhow::Error,
     ),
 
-    #[error("UDF error: {0}")]
-    Udf(
-        #[from]
-        #[backtrace]
-        Box<arrow_udf_flight::Error>,
-    ),
-
     #[error("not a constant")]
     NotConstant,
 
@@ -117,26 +110,13 @@ pub enum ExprError {
     #[error("invalid state: {0}")]
     InvalidState(String),
 
-    #[error("error in cryptography: {0}")]
-    Cryptography(Box<CryptographyError>),
-
     /// Function error message returned by UDF.
     #[error("{0}")]
     Custom(String),
-}
 
-#[derive(Debug)]
-pub enum CryptographyStage {
-    Encrypt,
-    Decrypt,
-}
-
-#[derive(Debug, Error)]
-#[error("{stage:?} stage, reason: {reason}")]
-pub struct CryptographyError {
-    pub stage: CryptographyStage,
-    #[source]
-    pub reason: openssl::error::ErrorStack,
+    /// Error from a function call.
+    #[error("{0}")]
+    Function(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
 static_assertions::const_assert_eq!(std::mem::size_of::<ExprError>(), 40);
@@ -153,12 +133,6 @@ impl From<PbFieldNotFound> for ExprError {
             "Failed to decode prost: field not found `{}`",
             err.0
         ))
-    }
-}
-
-impl From<arrow_udf_flight::Error> for ExprError {
-    fn from(err: arrow_udf_flight::Error) -> Self {
-        Self::Udf(Box::new(err))
     }
 }
 

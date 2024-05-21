@@ -42,7 +42,7 @@ use crate::manager::cluster::WorkerId;
 use crate::manager::{commit_meta, commit_meta_with_trx, LocalNotification, MetaSrvEnv};
 use crate::model::{
     ActorId, BTreeMapTransaction, FragmentId, MetadataModel, MigrationPlan, TableFragments,
-    TableParallelism, ValTransaction,
+    TableParallelism,
 };
 use crate::storage::Transaction;
 use crate::stream::{to_build_actor_info, SplitAssignment, TableRevision};
