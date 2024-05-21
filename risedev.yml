@@ -881,10 +881,8 @@ profile:
         address: message_queue
         port: 29092
       - use: mysql
-        port: 33306
+        port: 53306
         address: host.docker.internal
-        user: root
-        password: 123456
 
   ci-redis:
     config-path: src/config/ci.toml
@@ -1495,11 +1493,12 @@ template:
     port: 8306
 
     # Note:
-    # - This will be used to initialize the MySQL instance if it's fresh.
+    # - This will be used to initialize a regular user of the MySQL instance if it's fresh.
+    #   Please do not specify "root" user here. The root user is always "root" with no password.
     # - In user-managed mode, these configs are not validated by risedev.
     #   They are passed as-is to risedev-env default user for MySQL operations.
     # - This is not used in RISEDEV_MYSQL_WITH_OPTIONS_COMMON.
-    user: root
+    user: risedev
     password: ""
     database: "risedev"
 
