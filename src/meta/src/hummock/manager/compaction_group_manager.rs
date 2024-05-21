@@ -258,7 +258,7 @@ impl HummockManager {
         // Remove member tables
         for table_id in table_ids.iter().unique() {
             let group_id = match try_get_compaction_group_id_by_table_id(
-                new_version_delta.version(),
+                new_version_delta.latest_version(),
                 *table_id,
             ) {
                 Some(group_id) => group_id,
@@ -280,7 +280,7 @@ impl HummockManager {
                 .and_modify(|count| *count -= 1)
                 .or_insert(
                     new_version_delta
-                        .version()
+                        .latest_version()
                         .get_compaction_group_levels(group_id)
                         .member_table_ids
                         .len() as u64
@@ -312,7 +312,6 @@ impl HummockManager {
             });
         }
         new_version_delta.pre_apply();
-        let version = version;
         commit_multi_var!(self.meta_store_ref(), version)?;
 
         for group_id in &groups_to_remove {
@@ -461,10 +460,12 @@ impl HummockManager {
 
         let new_sst_start_id = next_sstable_object_id(
             &self.env,
-            new_version_delta.version().count_new_ssts_in_group_split(
-                parent_group_id,
-                HashSet::from_iter(table_ids.clone()),
-            ),
+            new_version_delta
+                .latest_version()
+                .count_new_ssts_in_group_split(
+                    parent_group_id,
+                    HashSet::from_iter(table_ids.clone()),
+                ),
         )
         .await?;
         let (new_group, target_compaction_group_id) = {

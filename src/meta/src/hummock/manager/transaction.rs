@@ -77,7 +77,7 @@ impl<'a> HummockVersionTransaction<'a> {
         self.disable_apply_to_txn = true;
     }
 
-    pub(super) fn version(&self) -> &HummockVersion {
+    pub(super) fn latest_version(&self) -> &HummockVersion {
         if let Some((version, _)) = &self.pre_applied_version {
             version
         } else {
@@ -86,7 +86,7 @@ impl<'a> HummockVersionTransaction<'a> {
     }
 
     pub(super) fn new_delta<'b>(&'b mut self) -> SingleDeltaTransaction<'a, 'b> {
-        let delta = build_version_delta_after_version(self.version());
+        let delta = build_version_delta_after_version(self.latest_version());
         SingleDeltaTransaction {
             version_txn: self,
             delta: Some(delta),
@@ -151,8 +151,8 @@ pub(super) struct SingleDeltaTransaction<'a, 'b> {
 }
 
 impl<'a, 'b> SingleDeltaTransaction<'a, 'b> {
-    pub(super) fn version(&self) -> &HummockVersion {
-        self.version_txn.version()
+    pub(super) fn latest_version(&self) -> &HummockVersion {
+        self.version_txn.latest_version()
     }
 
     pub(super) fn pre_apply(mut self) {

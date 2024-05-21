@@ -883,7 +883,11 @@ impl HummockManager {
                 break;
             }
 
-            if !version.version().levels.contains_key(&compaction_group_id) {
+            if !version
+                .latest_version()
+                .levels
+                .contains_key(&compaction_group_id)
+            {
                 continue;
             }
 
@@ -919,7 +923,7 @@ impl HummockManager {
 
             let mut stats = LocalSelectorStatistic::default();
             let member_table_ids = version
-                .version()
+                .latest_version()
                 .get_compaction_group_levels(compaction_group_id)
                 .member_table_ids
                 .clone();
@@ -943,7 +947,7 @@ impl HummockManager {
 
             while let Some(compact_task) = compact_status.get_compact_task(
                 version
-                    .version()
+                    .latest_version()
                     .get_compaction_group_levels(compaction_group_id),
                 task_id as HummockCompactionTaskId,
                 &group_config,
@@ -972,7 +976,7 @@ impl HummockManager {
                     // only gc delete keys in last level because there may be older version in more bottom
                     // level.
                     gc_delete_keys: version
-                        .version()
+                        .latest_version()
                         .get_compaction_group_levels(compaction_group_id)
                         .is_last_level(target_level_id),
                     base_level: compact_task.base_level as u32,
@@ -1051,7 +1055,7 @@ impl HummockManager {
                         .table_vnode_partition
                         .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
                     compact_task.table_watermarks = version
-                        .version()
+                        .latest_version()
                         .safe_epoch_table_watermarks(&compact_task.existing_table_ids);
 
                     // do not split sst by vnode partition when target_level > base_level
@@ -1441,13 +1445,14 @@ impl HummockManager {
                 .collect();
             let is_success = if let TaskStatus::Success = compact_task.task_status() {
                 // if member_table_ids changes, the data of sstable may stale.
-                let is_expired = Self::is_compact_task_expired(&compact_task, version.version());
+                let is_expired =
+                    Self::is_compact_task_expired(&compact_task, version.latest_version());
                 if is_expired {
                     compact_task.set_task_status(TaskStatus::InputOutdatedCanceled);
                     false
                 } else {
                     let group = version
-                        .version()
+                        .latest_version()
                         .levels
                         .get(&compact_task.compaction_group_id)
                         .unwrap();
@@ -1468,7 +1473,8 @@ impl HummockManager {
             if is_success {
                 success_count += 1;
                 version.apply_compact_task(&compact_task);
-                if purge_prost_table_stats(&mut version_stats.table_stats, version.version()) {
+                if purge_prost_table_stats(&mut version_stats.table_stats, version.latest_version())
+                {
                     self.metrics.version_stats.reset();
                     versioning.local_metrics.clear();
                 }
@@ -1606,14 +1612,15 @@ impl HummockManager {
         new_version_delta.new_table_watermarks = new_table_watermarks;
         new_version_delta.change_log_delta = change_log_delta;
 
-        let mut table_compaction_group_mapping =
-            new_version_delta.version().build_compaction_group_info();
+        let mut table_compaction_group_mapping = new_version_delta
+            .latest_version()
+            .build_compaction_group_info();
 
         // Add new table
         if let Some(new_fragment_table_info) = new_table_fragment_info {
             if !new_fragment_table_info.internal_table_ids.is_empty() {
                 if let Some(levels) = new_version_delta
-                    .version()
+                    .latest_version()
                     .levels
                     .get(&(StaticCompactionGroupId::StateDefault as u64))
                 {
@@ -1652,7 +1659,7 @@ impl HummockManager {
 
             if let Some(table_id) = new_fragment_table_info.mv_table_id {
                 if let Some(levels) = new_version_delta
-                    .version()
+                    .latest_version()
                     .levels
                     .get(&(StaticCompactionGroupId::MaterializedView as u64))
                 {
@@ -1688,14 +1695,17 @@ impl HummockManager {
             ..
         } in &mut sstables
         {
-            let is_sst_belong_to_group_declared =
-                match new_version_delta.version().levels.get(compaction_group_id) {
-                    Some(compaction_group) => sst
-                        .table_ids
-                        .iter()
-                        .all(|t| compaction_group.member_table_ids.contains(t)),
-                    None => false,
-                };
+            let is_sst_belong_to_group_declared = match new_version_delta
+                .latest_version()
+                .levels
+                .get(compaction_group_id)
+            {
+                Some(compaction_group) => sst
+                    .table_ids
+                    .iter()
+                    .all(|t| compaction_group.member_table_ids.contains(t)),
+                None => false,
+            };
             if !is_sst_belong_to_group_declared {
                 let mut group_table_ids: BTreeMap<_, Vec<u32>> = BTreeMap::new();
                 for table_id in sst.get_table_ids() {
@@ -1803,7 +1813,7 @@ impl HummockManager {
             self.env.notification_manager(),
         );
         add_prost_table_stats_map(&mut version_stats.table_stats, &table_stats_change);
-        if purge_prost_table_stats(&mut version_stats.table_stats, version.version()) {
+        if purge_prost_table_stats(&mut version_stats.table_stats, version.latest_version()) {
             self.metrics.version_stats.reset();
             versioning.local_metrics.clear();
         }
@@ -3242,8 +3252,10 @@ impl<'a> HummockVersionTransaction<'a> {
             })),
         };
         group_deltas.push(group_delta);
-        version_delta.safe_epoch =
-            std::cmp::max(version_delta.version().safe_epoch, compact_task.watermark);
+        version_delta.safe_epoch = std::cmp::max(
+            version_delta.latest_version().safe_epoch,
+            compact_task.watermark,
+        );
         version_delta.pre_apply();
     }
 }
