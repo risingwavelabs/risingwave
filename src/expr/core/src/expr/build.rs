@@ -48,6 +48,14 @@ pub fn build_non_strict_from_prost(
         .map(NonStrictExpression)
 }
 
+pub fn build_constant_only_from_prost(prost: &ExprNode) -> Option<Result<BoxedExpression>> {
+    match ExprBuilder::new_constant_only().build(prost) {
+        Ok(expr) => Some(Ok(expr)),
+        Err(ExprError::NotConstant) => None,
+        Err(error) => Some(Err(error)),
+    }
+}
+
 /// Build an expression from protobuf with possibly some wrappers attached to each node.
 struct ExprBuilder<R> {
     /// The error reporting for non-strict mode.
@@ -55,12 +63,24 @@ struct ExprBuilder<R> {
     /// If set, each expression node will be wrapped with a [`NonStrict`] node that reports
     /// errors to this error reporting.
     error_report: Option<R>,
+
+    constant_only: bool,
 }
 
 impl ExprBuilder<!> {
     /// Create a new builder in strict mode.
     fn new_strict() -> Self {
-        Self { error_report: None }
+        Self {
+            error_report: None,
+            constant_only: false,
+        }
+    }
+
+    fn new_constant_only() -> Self {
+        Self {
+            error_report: None,
+            constant_only: true,
+        }
     }
 }
 
@@ -72,6 +92,7 @@ where
     fn new_non_strict(error_report: R) -> Self {
         Self {
             error_report: Some(error_report),
+            constant_only: false,
         }
     }
 
@@ -97,18 +118,21 @@ where
 
     /// Build an expression from protobuf.
     fn build_inner(&self, prost: &ExprNode) -> Result<BoxedExpression> {
-        use PbType as E;
-
         let build_child = |prost: &'_ ExprNode| self.build(prost);
+        let rex_node = prost.get_rex_node()?;
 
-        match prost.get_rex_node()? {
+        if self.constant_only && !matches!(rex_node, RexNode::Constant(_) | RexNode::FuncCall(_)) {
+            return Err(ExprError::NotConstant);
+        }
+
+        match rex_node {
             RexNode::InputRef(_) => InputRefExpression::build_boxed(prost, build_child),
             RexNode::Constant(_) => LiteralExpression::build_boxed(prost, build_child),
             RexNode::Udf(_) => UserDefinedFunction::build_boxed(prost, build_child),
 
             RexNode::FuncCall(_) => match prost.function_type() {
                 // Dedicated types
-                E::All | E::Some => SomeAllExpression::build_boxed(prost, build_child),
+                PbType::All | PbType::Some => SomeAllExpression::build_boxed(prost, build_child),
 
                 // General types, lookup in the function signature map
                 _ => FuncCallBuilder::build_boxed(prost, build_child),

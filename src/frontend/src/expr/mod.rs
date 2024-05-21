@@ -17,9 +17,9 @@ use fixedbitset::FixedBitSet;
 use futures::FutureExt;
 use paste::paste;
 use risingwave_common::array::ListValue;
-use risingwave_common::types::{DataType, Datum, JsonbVal, Scalar, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, JsonbVal, Scalar};
 use risingwave_expr::aggregate::AggKind;
-use risingwave_expr::expr::build_from_prost;
+use risingwave_expr::expr::{build_constant_only_from_prost, build_from_prost, BoxedExpression};
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{ExprNode, ProjectSetSelectItem};
 
@@ -335,13 +335,18 @@ impl ExprImpl {
             .map_err(|err| err.into())
     }
 
-    /// Evaluate the expression on the given input.
-    ///
-    /// TODO: This is a naive implementation. We should avoid proto ser/de.
-    /// Tracking issue: <https://github.com/risingwavelabs/risingwave/issues/3479>
+    /// Evaluate the expression on the given input. Should be used for testing only.
+    #[cfg(test)]
     pub async fn eval_row(&self, input: &OwnedRow) -> RwResult<Datum> {
         let backend_expr = build_from_prost(&self.to_expr_proto())?;
         Ok(backend_expr.eval_row(input).await?)
+    }
+
+    fn try_build_fold_const(&self) -> Option<risingwave_expr::Result<BoxedExpression>> {
+        if self.is_impure() {
+            return None;
+        }
+        build_constant_only_from_prost(&self.to_expr_proto())
     }
 
     /// Try to evaluate an expression if it's a constant expression by `ExprImpl::is_const`.
@@ -349,16 +354,18 @@ impl ExprImpl {
     /// Returns...
     /// - `None` if it's not a constant expression,
     /// - `Some(Ok(_))` if constant evaluation succeeds,
-    /// - `Some(Err(_))` if there's an error while evaluating a constant expression.
+    /// - `Some(Err(_))` if there's an error while building or evaluating the constant expression.
     pub fn try_fold_const(&self) -> Option<RwResult<Datum>> {
-        if self.is_const() {
-            self.eval_row(&OwnedRow::empty())
-                .now_or_never()
-                .expect("constant expression should not be async")
-                .into()
-        } else {
-            None
-        }
+        self.try_build_fold_const()?
+            .and_then(|expr| {
+                // TODO: This is a naive implementation. We should avoid proto ser/de.
+                // Tracking issue: <https://github.com/risingwavelabs/risingwave/issues/3479>
+                expr.eval_row(&OwnedRow::empty())
+                    .now_or_never()
+                    .expect("constant expression should not be async")
+            })
+            .map_err(Into::into)
+            .into()
     }
 
     /// Similar to `ExprImpl::try_fold_const`, but panics if the expression is not constant.
@@ -610,65 +617,7 @@ impl ExprImpl {
     ///
     /// The expression tree should only consist of literals and **pure** function calls.
     pub fn is_const(&self) -> bool {
-        let only_literal_and_func = {
-            struct HasOthers {
-                has_others: bool,
-            }
-
-            impl ExprVisitor for HasOthers {
-                fn visit_expr(&mut self, expr: &ExprImpl) {
-                    match expr {
-                        ExprImpl::CorrelatedInputRef(_)
-                        | ExprImpl::InputRef(_)
-                        | ExprImpl::AggCall(_)
-                        | ExprImpl::Subquery(_)
-                        | ExprImpl::TableFunction(_)
-                        | ExprImpl::WindowFunction(_)
-                        | ExprImpl::UserDefinedFunction(_)
-                        | ExprImpl::Parameter(_)
-                        | ExprImpl::Now(_) => self.has_others = true,
-                        ExprImpl::Literal(_inner) => {}
-                        ExprImpl::FunctionCall(inner) => {
-                            if !self.is_short_circuit(inner) {
-                                // only if the current `func_call` is *not* a short-circuit
-                                // expression, e.g., true or (...) | false and (...),
-                                // shall we proceed to visit it.
-                                self.visit_function_call(inner)
-                            }
-                        }
-                        ExprImpl::FunctionCallWithLambda(inner) => {
-                            self.visit_function_call_with_lambda(inner)
-                        }
-                    }
-                }
-            }
-
-            impl HasOthers {
-                fn is_short_circuit(&self, func_call: &FunctionCall) -> bool {
-                    /// evaluate the first parameter of `Or` or `And` function call
-                    fn eval_first(e: &ExprImpl, expect: bool) -> bool {
-                        let Some(Ok(Some(scalar))) = e.try_fold_const() else {
-                            return false;
-                        };
-                        scalar == ScalarImpl::Bool(expect)
-                    }
-
-                    match func_call.func_type {
-                        ExprType::Or => eval_first(&func_call.inputs()[0], true),
-                        ExprType::And => eval_first(&func_call.inputs()[0], false),
-                        _ => false,
-                    }
-                }
-            }
-
-            let mut visitor = HasOthers { has_others: false };
-            visitor.visit_expr(self);
-            !visitor.has_others
-        };
-
-        let is_pure = self.is_pure();
-
-        only_literal_and_func && is_pure
+        self.try_build_fold_const().is_some()
     }
 
     /// Returns the `InputRefs` of an Equality predicate if it matches
