@@ -38,7 +38,7 @@ impl DockerServiceConfig for MySqlConfig {
     }
 
     fn ports(&self) -> Vec<(String, String)> {
-        vec![(format!("{}:{}", self.address, self.port), "3306".to_owned())]
+        vec![(self.port.to_string(), "3306".to_owned())]
     }
 
     fn data_path(&self) -> Option<String> {
