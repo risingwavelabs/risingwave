@@ -94,6 +94,7 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
             ServiceConfig::Pubsub(c) => {
                 let address = &c.address;
                 let port = &c.port;
+                writeln!(env, r#"PUBSUB_EMULATOR_HOST="{address}:{port}""#,).unwrap();
                 writeln!(env, r#"RISEDEV_PUBSUB_WITH_OPTIONS_COMMON="connector='google_pubsub',pubsub.emulator_host='{address}:{port}'""#,).unwrap();
             }
             ServiceConfig::Postgres(c) => {

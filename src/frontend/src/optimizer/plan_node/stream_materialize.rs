@@ -33,6 +33,7 @@ use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::error::Result;
 use crate::optimizer::plan_node::derive::derive_pk;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::plan_node::utils::plan_has_backfill_leaf_nodes;
 use crate::optimizer::plan_node::{PlanBase, PlanNodeMeta};
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -84,6 +85,14 @@ impl StreamMaterialize {
         let input = reorganize_elements_id(input);
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
 
+        let create_type = if matches!(table_type, TableType::MaterializedView)
+            && input.ctx().session_ctx().config().background_ddl()
+            && plan_has_backfill_leaf_nodes(&input)
+        {
+            CreateType::Background
+        } else {
+            CreateType::Foreground
+        };
         let table = Self::derive_table_catalog(
             input.clone(),
             name,
@@ -98,6 +107,7 @@ impl StreamMaterialize {
             None,
             cardinality,
             retention_seconds,
+            create_type,
         )?;
 
         Ok(Self::new(input, table))
@@ -139,6 +149,7 @@ impl StreamMaterialize {
             version,
             Cardinality::unknown(), // unknown cardinality for tables
             retention_seconds,
+            CreateType::Foreground,
         )?;
 
         Ok(Self::new(input, table))
@@ -210,6 +221,7 @@ impl StreamMaterialize {
         version: Option<TableVersion>,
         cardinality: Cardinality,
         retention_seconds: Option<NonZeroU32>,
+        create_type: CreateType,
     ) -> Result<TableCatalog> {
         let input = rewritten_input;
 
@@ -259,7 +271,7 @@ impl StreamMaterialize {
             created_at_epoch: None,
             initialized_at_epoch: None,
             cleaned_by_watermark: false,
-            create_type: CreateType::Foreground, // Will be updated in the handler itself.
+            create_type,
             stream_job_status: StreamJobStatus::Creating,
             description: None,
             incoming_sinks: vec![],
