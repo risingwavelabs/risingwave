@@ -181,11 +181,10 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
         epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
-        self.monitored_iter(
+        self.monitored_iter::<'_, _, _, StateStoreIterStats>(
             read_options.table_id,
             self.inner.rev_iter(key_range, epoch, read_options),
         )
-        .map_ok(identity)
     }
 
     fn iter_log(
@@ -254,9 +253,10 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_ {
         let table_id = read_options.table_id;
-        // TODO: may collect the metrics as local
-        self.monitored_iter(table_id, self.inner.rev_iter(key_range, read_options))
-            .map_ok(identity)
+        self.monitored_iter::<'_, _, _, StateStoreIterStats>(
+            table_id,
+            self.inner.rev_iter(key_range, read_options),
+        )
     }
 
     fn insert(
