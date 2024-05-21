@@ -644,6 +644,7 @@ where
     'a: 'b,
 {
     fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> AccessResult {
+        tracing::info!("mongo access path: {:?}", path);
         let mut value = &self.value;
         for (idx, &key) in path.iter().enumerate() {
             if let Some(sub_value) = if self.options.ignoring_keycase {
