@@ -153,13 +153,38 @@ pub fn cstr_to_str(b: &Bytes) -> Result<&str, Utf8Error> {
 
 /// Record `sql` in the current tracing span.
 fn record_sql_in_span(sql: &str) {
+    let redacted_sql = redact_sql(sql);
     tracing::Span::current().record(
         "sql",
         tracing::field::display(truncated_fmt::TruncatedFmt(
-            &sql,
+            &redacted_sql,
             *RW_QUERY_LOG_TRUNCATE_LEN,
         )),
     );
+}
+
+fn redact_sql(sql: &str) -> String {
+    match Parser::parse_sql(sql) {
+        Ok(sqls) => sqls
+            .into_iter()
+            .map(|sql| sql.to_redacted_string())
+            .join(";"),
+        Err(_) => {
+            let re = regex::Regex::new(r"(?is)with\s*\(.*\)").unwrap();
+            let Some(m) = re.find(sql) else {
+                return sql.to_owned();
+            };
+            // Drop all contents starting from the first WITH().
+            // It might be overkill, e.g. "CREATE TABLE name_with (k int, v int)" will be redacted to
+            // "CREATE TABLE name_[REDACTED]", which is obviously incorrect.
+            // However, I'll leave it as it is to avoid using a more complex regex.
+            if m.start() > 0 {
+                format!("{}[REDACTED]", sql[0..m.start()].to_owned())
+            } else {
+                "[REDACTED]".to_owned()
+            }
+        }
+    }
 }
 
 impl<S, SM> PgProtocol<S, SM>
@@ -1203,5 +1228,55 @@ pub mod truncated_fmt {
                 "select '...(truncated)",
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_redact_parsable_sql() {
+        let sql = r"
+        create source temp (k bigint, v varchar) with (
+            connector = 'datagen',
+            v1 = 123,
+            v2 = 'with',
+            v3 = false,
+            v4 = '',
+        ) FORMAT plain ENCODE json (a='1',b='2')
+        ";
+        assert_eq!(redact_sql(&sql), "CREATE SOURCE temp (k BIGINT, v CHARACTER VARYING) WITH (connector = [REDACTED], v1 = [REDACTED], v2 = [REDACTED], v3 = [REDACTED], v4 = [REDACTED]) FORMAT PLAIN ENCODE JSON (a = [REDACTED], b = [REDACTED])");
+    }
+
+    #[test]
+    fn test_redact_not_parsable_sql() {
+        let sql = r"
+        create tableX temp (k bigint, v varchar) with (
+            v1 = 123,
+            v2 = 'with',
+            v3 = false,
+            v4 = 'with(123)'
+        ) format plain encode (a='1',b='2')
+        ";
+        assert_eq!(
+            redact_sql(&sql),
+            r"
+        create tableX temp (k bigint, v varchar) [REDACTED]"
+        );
+
+        let sql = r"
+        create tableX temp_with (k bigint, v varchar) with (
+            v1 = 123,
+            v2 = 'with',
+            v3 = false,
+            v4 = 'with(123)'
+        ) format plain encode (a='1',b='2')
+        ";
+        assert_eq!(
+            redact_sql(&sql),
+            r"
+        create tableX temp_[REDACTED]"
+        );
     }
 }

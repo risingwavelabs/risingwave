@@ -59,6 +59,8 @@ pub use crate::ast::ddl::{
 use crate::keywords::Keyword;
 use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError};
 
+thread_local!(static REDACT_SQL_OPTIONS: std::cell::RefCell<bool> = const { std::cell::RefCell::new(false) });
+
 pub struct DisplaySeparated<'a, T>
 where
     T: fmt::Display,
@@ -2562,7 +2564,14 @@ pub struct SqlOption {
 
 impl fmt::Display for SqlOption {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} = {}", self.name, self.value)
+        if REDACT_SQL_OPTIONS
+            .try_with(|b| *b.borrow())
+            .unwrap_or(false)
+        {
+            write!(f, "{} = [REDACTED]", self.name)
+        } else {
+            write!(f, "{} = {}", self.name, self.value)
+        }
     }
 }
 
@@ -3321,5 +3330,14 @@ mod tests {
             "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE javascript RUNTIME deno AS 'SELECT 1' ASYNC GENERATOR",
             format!("{}", create_function)
         );
+    }
+}
+
+impl Statement {
+    pub fn to_redacted_string(&self) -> String {
+        REDACT_SQL_OPTIONS.set(true);
+        let redacted = self.to_string();
+        REDACT_SQL_OPTIONS.set(false);
+        redacted
     }
 }

@@ -8521,6 +8521,7 @@ dependencies = [
  "openssl",
  "panic-message",
  "parking_lot 0.12.1",
+ "regex",
  "reqwest 0.12.2",
  "risingwave_common",
  "risingwave_sqlparser",
