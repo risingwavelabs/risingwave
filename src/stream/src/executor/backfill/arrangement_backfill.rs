@@ -445,6 +445,7 @@ where
                                 &chunk,
                                 &backfill_state,
                                 &pk_in_output_indices,
+                                &upstream_table,
                                 &pk_order,
                             )?,
                             &self.output_indices,

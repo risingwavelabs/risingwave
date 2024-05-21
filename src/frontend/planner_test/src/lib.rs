@@ -568,9 +568,15 @@ impl TestCase {
                 Statement::CreateSchema {
                     schema_name,
                     if_not_exists,
+                    user_specified,
                 } => {
-                    create_schema::handle_create_schema(handler_args, schema_name, if_not_exists)
-                        .await?;
+                    create_schema::handle_create_schema(
+                        handler_args,
+                        schema_name,
+                        if_not_exists,
+                        user_specified,
+                    )
+                    .await?;
                 }
                 _ => return Err(anyhow!("Unsupported statement type")),
             }
