@@ -255,9 +255,7 @@ pub async fn pg_serve(
     let listener = Listener::bind(addr).await?;
     tracing::info!(addr, "server started");
 
-    let worker_runtime = tokio::runtime::Handle::current();
-
-    let accept_runtime = {
+    let acceptor_runtime = {
         let mut builder = tokio::runtime::Builder::new_multi_thread();
         builder.worker_threads(1);
         builder
@@ -266,6 +264,11 @@ pub async fn pg_serve(
             .build()
             .unwrap()
     };
+
+    #[cfg(not(madsim))]
+    let worker_runtime = tokio::runtime::Handle::current();
+    #[cfg(madsim)]
+    let worker_runtime = tokio::runtime::Builder::new_multi_thread().build().unwrap();
 
     let f = async move {
         loop {
@@ -287,7 +290,7 @@ pub async fn pg_serve(
             }
         }
     };
-    accept_runtime.spawn(f).await?;
+    acceptor_runtime.spawn(f).await?;
     Ok(())
 }
 
