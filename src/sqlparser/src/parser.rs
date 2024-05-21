@@ -21,6 +21,7 @@ use alloc::{
     vec::Vec,
 };
 use core::fmt;
+use std::fmt::format;
 
 use itertools::Itertools;
 use tracing::{debug, instrument};
@@ -185,6 +186,29 @@ impl Parser {
             index: 0,
             angle_brackets_num: 0,
         }
+    }
+
+    pub(crate) fn parse_v2<'a, O>(
+        &'a mut self,
+        mut parse_next: impl winnow::Parser<
+            winnow::Located<&'a [TokenWithLocation]>,
+            O,
+            winnow::error::ContextError,
+        >,
+    ) -> Result<O, ParserError> {
+        use winnow::stream::Location;
+
+        let mut token_stream = winnow::Located::new(&*self.tokens);
+        let output = parse_next.parse_next(&mut token_stream).map_err(|e| {
+            ParserError::ParserError(format!(
+                "Error parsing SQL at {}: {}",
+                token_stream.location(),
+                e
+            ))
+        });
+        let offset = token_stream.location();
+        self.index += offset;
+        output
     }
 
     /// Parse a SQL statement and produce an Abstract Syntax Tree (AST)
