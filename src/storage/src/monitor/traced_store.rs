@@ -158,7 +158,6 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
             self.storage_type,
         );
         self.traced_iter(self.inner.rev_iter(key_range, read_options), span)
-            .map_ok(identity)
     }
 
     fn insert(
@@ -339,7 +338,6 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
             self.storage_type,
         );
         self.traced_iter(self.inner.rev_iter(key_range, epoch, read_options), span)
-            .map_ok(identity)
     }
 
     fn iter_log(
