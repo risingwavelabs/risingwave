@@ -290,6 +290,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
             self.ctx.id,
             self.ctx.fragment_id,
             self.metrics.clone(),
+            "Dynamic Filter",
         );
 
         pin_mut!(aligned_stream);
