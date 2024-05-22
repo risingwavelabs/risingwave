@@ -1,7 +1,7 @@
 use core::cell::RefCell;
 use std::rc::Rc;
 
-use winnow::combinator::{alt, delimited, dispatch, empty, fail, opt, separated, seq};
+use winnow::combinator::{alt, delimited, dispatch, empty, fail, opt, preceded, separated, seq};
 use winnow::error::StrContext;
 use winnow::{PResult, Parser, Stateful};
 
@@ -110,10 +110,7 @@ where
     let precision_and_scale = || {
         opt(delimited(
             Token::LParen,
-            (
-                literal_uint,
-                opt((Token::Comma, literal_uint).map(|(_, x)| x)),
-            ),
+            (literal_uint, opt(preceded(Token::Comma, literal_uint))),
             Token::RParen,
         ))
         .map(|p| match p {
