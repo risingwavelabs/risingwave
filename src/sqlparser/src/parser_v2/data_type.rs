@@ -2,7 +2,6 @@ use core::cell::RefCell;
 use std::rc::Rc;
 
 use winnow::combinator::{alt, delimited, dispatch, empty, fail, opt, separated, seq};
-use winnow::error::{ContextError, ErrMode};
 use winnow::{PResult, Parser, Stateful};
 
 use super::{
@@ -15,7 +14,7 @@ use crate::tokenizer::Token;
 
 #[derive(Default, Debug)]
 struct DataTypeParsingState {
-    /// Since we can't distinguish between `>>` and `> >` in lexer, we need to handle this case in the parser.
+    /// Since we can't distinguish between `>>` and `> >` in tokenizer, we need to handle this case in the parser.
     /// When we want a [`>`][Token::Gt] but actually consumed a [`>>`][Token::ShiftRight], we set this to true.
     /// When the value was true and we want a [`>`][Token::Gt], we just set this to false instead of really consume it.
     remaining_close: Rc<RefCell<bool>>,
