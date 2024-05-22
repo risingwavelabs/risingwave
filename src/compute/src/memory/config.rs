@@ -69,6 +69,7 @@ pub fn storage_memory_config(
     non_reserved_memory_bytes: usize,
     embedded_compactor_enabled: bool,
     storage_config: &StorageConfig,
+    is_serving: bool,
 ) -> StorageMemoryConfig {
     let (storage_memory_proportion, compactor_memory_proportion) = if embedded_compactor_enabled {
         (STORAGE_MEMORY_PROPORTION, COMPACTOR_MEMORY_PROPORTION)
@@ -110,14 +111,18 @@ pub fn storage_memory_config(
         * STORAGE_SHARED_BUFFER_MEMORY_PROPORTION)
         .ceil() as usize)
         >> 20;
-    let shared_buffer_capacity_mb =
+    let mut shared_buffer_capacity_mb =
         storage_config
             .shared_buffer_capacity_mb
             .unwrap_or(std::cmp::min(
                 default_shared_buffer_capacity_mb,
                 STORAGE_SHARED_BUFFER_MAX_MEMORY_MB,
             ));
-    if shared_buffer_capacity_mb != default_shared_buffer_capacity_mb {
+    if is_serving {
+        default_block_cache_capacity_mb += default_shared_buffer_capacity_mb;
+        // set 1 to pass internal check
+        shared_buffer_capacity_mb = 1;
+    } else if shared_buffer_capacity_mb != default_shared_buffer_capacity_mb {
         default_block_cache_capacity_mb += default_shared_buffer_capacity_mb;
         default_block_cache_capacity_mb =
             default_block_cache_capacity_mb.saturating_sub(shared_buffer_capacity_mb);
@@ -279,17 +284,36 @@ mod tests {
 
         let total_non_reserved_memory_bytes = 8 << 30;
 
-        let memory_config =
-            storage_memory_config(total_non_reserved_memory_bytes, true, &storage_config);
+        let memory_config = storage_memory_config(
+            total_non_reserved_memory_bytes,
+            true,
+            &storage_config,
+            false,
+        );
         assert_eq!(memory_config.block_cache_capacity_mb, 737);
         assert_eq!(memory_config.meta_cache_capacity_mb, 860);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
         assert_eq!(memory_config.compactor_memory_limit_mb, 819);
 
+        let memory_config = storage_memory_config(
+            total_non_reserved_memory_bytes,
+            false,
+            &storage_config,
+            true,
+        );
+        assert_eq!(memory_config.block_cache_capacity_mb, 1966);
+        assert_eq!(memory_config.meta_cache_capacity_mb, 1146);
+        assert_eq!(memory_config.shared_buffer_capacity_mb, 1);
+        assert_eq!(memory_config.compactor_memory_limit_mb, 0);
+
         storage_config.data_file_cache.dir = "data".to_string();
         storage_config.meta_file_cache.dir = "meta".to_string();
-        let memory_config =
-            storage_memory_config(total_non_reserved_memory_bytes, true, &storage_config);
+        let memory_config = storage_memory_config(
+            total_non_reserved_memory_bytes,
+            true,
+            &storage_config,
+            false,
+        );
         assert_eq!(memory_config.block_cache_capacity_mb, 737);
         assert_eq!(memory_config.meta_cache_capacity_mb, 860);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
@@ -299,7 +323,7 @@ mod tests {
         storage_config.cache.meta_cache_capacity_mb = Some(128);
         storage_config.shared_buffer_capacity_mb = Some(1024);
         storage_config.compactor_memory_limit_mb = Some(512);
-        let memory_config = storage_memory_config(0, true, &storage_config);
+        let memory_config = storage_memory_config(0, true, &storage_config, false);
         assert_eq!(memory_config.block_cache_capacity_mb, 512);
         assert_eq!(memory_config.meta_cache_capacity_mb, 128);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 1024);
