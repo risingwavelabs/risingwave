@@ -184,14 +184,16 @@ impl Parser {
     pub(crate) fn parse_v2<'a, O>(
         &'a mut self,
         mut parse_next: impl winnow::Parser<
-            winnow::Located<&'a [TokenWithLocation]>,
+            winnow::Located<parser_v2::TokenStreamWrapper<'a>>,
             O,
             winnow::error::ContextError,
         >,
     ) -> Result<O, ParserError> {
         use winnow::stream::Location;
 
-        let mut token_stream = winnow::Located::new(&*self.tokens);
+        let mut token_stream = winnow::Located::new(parser_v2::TokenStreamWrapper {
+            tokens: &self.tokens[self.index..],
+        });
         let output = parse_next.parse_next(&mut token_stream).map_err(|e| {
             ParserError::ParserError(format!(
                 "Unexpected {}: {}",
