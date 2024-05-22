@@ -31,11 +31,11 @@ where
     let remaining_close2 = input.state.remaining_close.clone();
 
     let consume_close = alt((
-        move |_input: &mut StatefulStream<S>| -> PResult<()> {
+        move |input: &mut StatefulStream<S>| -> PResult<()> {
             if *remaining_close1.borrow() {
                 Ok(())
             } else {
-                Err(ErrMode::Backtrack(ContextError::new()))
+                fail(input)
             }
         }
         .void(),
@@ -146,7 +146,7 @@ where
         Keyword::NUMERIC | Keyword::DECIMAL | Keyword::DEC => precision_and_scale().map(|(precision, scale)| {
             DataType::Decimal(precision, scale)
         }),
-        _ => fail::<_, DataType, _>,
+        _ => fail,
     };
 
     alt((
