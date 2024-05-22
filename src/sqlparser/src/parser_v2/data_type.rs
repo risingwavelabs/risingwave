@@ -9,7 +9,7 @@ use super::{
     identifier_non_reserved, keyword, literal_uint, precision_in_range, token, with_state,
     TokenStream,
 };
-use crate::ast::{DataType, StructField};
+use crate::ast::{DataType, Ident, ObjectName, StructField};
 use crate::keywords::Keyword;
 use crate::tokenizer::Token;
 
@@ -150,10 +150,15 @@ where
 
     alt((
         keywords,
-        // JSONB is not a keyword, but a special data type.
-        token
-            .verify(|t| matches!(&t.token, Token::Word(w) if w.value.eq_ignore_ascii_case("jsonb")))
-            .value(DataType::Jsonb),
+        token.verify_map(|t| match t.token {
+            // JSONB is not a keyword, but a special data type.
+            Token::Word(w) if w.value.eq_ignore_ascii_case("jsonb") => Some(DataType::Jsonb),
+            // FIXME: Really parse a full object name here.
+            Token::Word(w) => Some(DataType::Custom(ObjectName::from(vec![
+                Ident::new_unchecked(w.value),
+            ]))),
+            _ => None,
+        }),
     ))
     .context(StrContext::Label("data_type_inner"))
     .parse_next(input)
