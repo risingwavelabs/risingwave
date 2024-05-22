@@ -115,9 +115,9 @@ async fn build_tables<F: SstableWriterFactory>(
 
 fn bench_builder(
     c: &mut Criterion,
-    bucket: &str,
     capacity_mb: usize,
     enable_streaming_upload: bool,
+    local: bool,
 ) {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -125,13 +125,28 @@ fn bench_builder(
         .unwrap();
 
     let metrics = Arc::new(ObjectStoreMetrics::unused());
-
     let default_config = Arc::new(ObjectStoreConfig::default());
+
     let object_store = runtime.block_on(async {
-        S3ObjectStore::new_with_config(bucket.to_string(), metrics.clone(), default_config.clone())
+        if local {
+            S3ObjectStore::new_minio_engine(
+                "minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001",
+                metrics.clone(),
+                default_config.clone(),
+            )
             .await
             .monitored(metrics, default_config)
+        } else {
+            S3ObjectStore::new_with_config(
+                env::var("S3_BUCKET").unwrap(),
+                metrics.clone(),
+                default_config.clone(),
+            )
+            .await
+            .monitored(metrics, default_config)
+        }
     });
+
     let object_store = Arc::new(ObjectStoreImpl::S3(object_store));
 
     let sstable_store = runtime.block_on(async {
@@ -198,10 +213,15 @@ fn bench_builder(
 // SST size: 4, 32, 64, 128, 256MiB
 fn bench_multi_builder(c: &mut Criterion) {
     let sst_capacities = vec![4, 32, 64, 128, 256];
-    let bucket = env::var("S3_BUCKET").unwrap();
+    let is_local_test = if env::var("LOCAL_TEST").is_ok() {
+        true
+    } else {
+        false
+    };
+
     for capacity in sst_capacities {
-        bench_builder(c, &bucket, capacity, false);
-        bench_builder(c, &bucket, capacity, true);
+        bench_builder(c, capacity, false, is_local_test);
+        bench_builder(c, capacity, true, is_local_test);
     }
 }
 
