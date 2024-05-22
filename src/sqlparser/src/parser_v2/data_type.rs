@@ -15,7 +15,9 @@ use crate::tokenizer::Token;
 
 #[derive(Default, Debug)]
 struct DataTypeParsingState {
-    /// When we consumed an [`Token::ShiftRight`], we set this to true.
+    /// Since we can't distinguish between `>>` and `> >` in lexer, we need to handle this case in the parser.
+    /// When we want a [`>`][Token::Gt] but actually consumed a [`>>`][Token::ShiftRight], we set this to true.
+    /// When the value was true and we want a [`>`][Token::Gt], we just set this to false instead of really consume it.
     remaining_close: Rc<RefCell<bool>>,
 }
 
@@ -120,7 +122,7 @@ where
 
     let keywords = dispatch! {keyword;
         Keyword::BOOLEAN | Keyword::BOOL => empty.value(DataType::Boolean),
-        Keyword::FLOAT => opt(precision_in_range(1..53)).map(|precision| DataType::Float(precision)),
+        Keyword::FLOAT => opt(precision_in_range(1..53)).map(DataType::Float),
         Keyword::REAL => empty.value(DataType::Real),
         Keyword::DOUBLE => Keyword::PRECISION.value(DataType::Double),
         Keyword::SMALLINT => empty.value(DataType::SmallInt),
@@ -129,12 +131,12 @@ where
         Keyword::STRING | Keyword::VARCHAR => empty.value(DataType::Varchar),
         Keyword::CHAR | Keyword::CHARACTER => dispatch! {keyword;
             Keyword::VARYING => empty.value(DataType::Varchar),
-            _ => opt(precision_in_range(..)).map(|precision| DataType::Char(precision)),
+            _ => opt(precision_in_range(..)).map(DataType::Char),
         },
         Keyword::UUID => empty.value(DataType::Uuid),
         Keyword::DATE => empty.value(DataType::Date),
-        Keyword::TIMESTAMP => with_time_zone().map(|with_tz| DataType::Timestamp(with_tz)),
-        Keyword::TIME => with_time_zone().map(|with_tz| DataType::Time(with_tz)),
+        Keyword::TIMESTAMP => with_time_zone().map(DataType::Timestamp),
+        Keyword::TIME => with_time_zone().map(DataType::Time),
         // TODO: Support complex interval type parsing.
         Keyword::INTERVAL => empty.value(DataType::Interval),
         Keyword::REGCLASS => empty.value(DataType::Regclass),
@@ -151,10 +153,7 @@ where
         keywords,
         // JSONB is not a keyword, but a special data type.
         token
-            .verify(|t| match &t.token {
-                Token::Word(w) if w.value.eq_ignore_ascii_case("jsonb") => true,
-                _ => false,
-            })
+            .verify(|t| matches!(&t.token, Token::Word(w) if w.value.eq_ignore_ascii_case("jsonb")))
             .value(DataType::Jsonb),
     ))
     .parse_next(input)

@@ -25,7 +25,10 @@ mod number;
 pub(crate) use data_type::*;
 pub(crate) use number::*;
 
-trait TokenStream: Stream<Token = TokenWithLocation> + StreamIsPartial + Location + Default {}
+pub trait TokenStream:
+    Stream<Token = TokenWithLocation> + StreamIsPartial + Location + Default
+{
+}
 
 impl<S> TokenStream for S where
     S: Stream<Token = TokenWithLocation> + StreamIsPartial + Location + Default

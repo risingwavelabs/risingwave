@@ -1,6 +1,6 @@
-use core::ops::{Range, RangeBounds};
+use core::ops::RangeBounds;
 
-use winnow::combinator::{delimited, opt};
+use winnow::combinator::delimited;
 use winnow::error::ContextError;
 use winnow::{PResult, Parser};
 
