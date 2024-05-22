@@ -20,9 +20,7 @@ use bytes::Bytes;
 use futures::{stream, FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::try_drop_invalid_columns;
-use risingwave_hummock_sdk::compact::{
-    compact_task_to_string, estimate_memory_for_compact_task, statistics_compact_task,
-};
+use risingwave_hummock_sdk::compact::{compact_task_to_string, statistics_compact_task};
 use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
@@ -34,13 +32,13 @@ use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 
+use super::context::CompactTaskContext;
 use super::iterator::MonitoredCompactorIterator;
 use super::task_progress::TaskProgress;
 use super::{CompactionStatistics, TaskConfig};
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
 use crate::hummock::compactor::compaction_utils::{
-    build_multi_compaction_filter, estimate_task_output_capacity, generate_splits_for_task,
-    metrics_report_for_task, optimize_by_copy_block,
+    build_multi_compaction_filter, estimate_task_output_capacity, metrics_report_for_task,
 };
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
@@ -52,7 +50,6 @@ use crate::hummock::iterator::{
     Forward, HummockIterator, MergeIterator, SkipWatermarkIterator, ValueMeta,
 };
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
-use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     BlockedXor16FilterBuilder, CachePolicy, CompressionAlgorithm, GetObjectId, HummockResult,
@@ -296,14 +293,13 @@ pub fn partition_overlapping_sstable_infos(
 /// Always return `Ok` and let hummock manager handle errors.
 pub async fn compact(
     compactor_context: CompactorContext,
-    mut compact_task: CompactTask,
+    compact_task: CompactTask,
     mut shutdown_rx: Receiver<()>,
     object_id_getter: Box<dyn GetObjectId>,
     filter_key_extractor_manager: FilterKeyExtractorManager,
-) -> (
-    (CompactTask, HashMap<u32, TableStats>),
-    Option<MemoryTracker>,
-) {
+
+    task_context: CompactTaskContext,
+) -> (CompactTask, HashMap<u32, TableStats>) {
     let context = compactor_context.clone();
     let group_label = compact_task.compaction_group_id.to_string();
     metrics_report_for_task(&compact_task, &context);
@@ -340,26 +336,11 @@ pub async fn compact(
         Some(multi_filter_key_extractor) => multi_filter_key_extractor,
         None => {
             let task_status = TaskStatus::ExecuteFailed;
-            return (
-                compact_done(compact_task, context.clone(), vec![], task_status),
-                None,
-            );
+            return compact_done(compact_task, &context, vec![], task_status);
         }
     };
 
     let mut task_status = TaskStatus::Success;
-    let optimize_by_copy_block = optimize_by_copy_block(&compact_task, &context);
-
-    if let Err(e) =
-        generate_splits_for_task(&mut compact_task, &context, optimize_by_copy_block).await
-    {
-        tracing::warn!(error = %e.as_report(), "Failed to generate_splits");
-        task_status = TaskStatus::ExecuteFailed;
-        return (
-            compact_done(compact_task, context.clone(), vec![], task_status),
-            None,
-        );
-    }
 
     let compact_task_statistics = statistics_compact_task(&compact_task);
     // Number of splits (key ranges) is equal to number of compaction tasks
@@ -371,51 +352,16 @@ pub async fn compact(
     let task_progress_guard =
         TaskProgressGuard::new(compact_task.task_id, context.task_progress_manager.clone());
 
-    let capacity = estimate_task_output_capacity(context.clone(), &compact_task);
-
-    let task_memory_capacity_with_parallelism = estimate_memory_for_compact_task(
-        &compact_task,
-        (context.storage_opts.block_size_kb as u64) * (1 << 10),
-        context
-            .storage_opts
-            .object_store_config
-            .s3
-            .object_store_recv_buffer_size
-            .unwrap_or(6 * 1024 * 1024) as u64,
-        capacity as u64,
-        context.sstable_store.store().support_streaming_upload(),
-    ) * compact_task.splits.len() as u64;
-
     tracing::info!(
         "Ready to handle task: {} compact_task_statistics {:?} compression_algorithm {:?}  parallelism {} task_memory_capacity_with_parallelism {}, enable fast runner: {}, {}",
             compact_task.task_id,
             compact_task_statistics,
             compact_task.compression_algorithm,
             parallelism,
-            task_memory_capacity_with_parallelism,
-            optimize_by_copy_block,
+            task_context.task_memory_capacity_with_parallelism,
+            task_context.optimize_by_copy_block,
             compact_task_to_string(&compact_task),
     );
-
-    // If the task does not have enough memory, it should cancel the task and let the meta
-    // reschedule it, so that it does not occupy the compactor's resources.
-    let memory_detector = context
-        .memory_limiter
-        .try_require_memory(task_memory_capacity_with_parallelism);
-    if memory_detector.is_none() {
-        tracing::warn!(
-                "Not enough memory to serve the task {} task_memory_capacity_with_parallelism {}  memory_usage {} memory_quota {}",
-                compact_task.task_id,
-                task_memory_capacity_with_parallelism,
-                context.memory_limiter.get_memory_usage(),
-                context.memory_limiter.quota()
-            );
-        task_status = TaskStatus::NoAvailMemoryResourceCanceled;
-        return (
-            compact_done(compact_task, context.clone(), output_ssts, task_status),
-            memory_detector,
-        );
-    }
 
     context.compactor_metrics.compact_task_pending_num.inc();
     context
@@ -431,7 +377,7 @@ pub async fn compact(
                 .sub(parallelism as _);
         });
 
-    if optimize_by_copy_block {
+    if task_context.optimize_by_copy_block {
         let runner = fast_compactor_runner::CompactorRunner::new(
             context.clone(),
             compact_task.clone(),
@@ -465,15 +411,16 @@ pub async fn compact(
 
         // After a compaction is done, mutate the compaction task.
         let (compact_task, table_stats) =
-            compact_done(compact_task, context.clone(), output_ssts, task_status);
+            compact_done(compact_task, &context, output_ssts, task_status);
         let cost_time = timer.stop_and_record() * 1000.0;
         tracing::info!(
-            "Finished fast compaction task in {:?}ms: {}",
+            "Finished fast compaction task in {:?} ms: {}",
             cost_time,
             compact_task_to_string(&compact_task)
         );
-        return ((compact_task, table_stats), memory_detector);
+        return (compact_task, table_stats);
     }
+
     for (split_index, _) in compact_task.splits.iter().enumerate() {
         let filter = multi_filter.clone();
         let multi_filter_key_extractor = multi_filter_key_extractor.clone();
@@ -560,20 +507,20 @@ pub async fn compact(
 
     // After a compaction is done, mutate the compaction task.
     let (compact_task, table_stats) =
-        compact_done(compact_task, context.clone(), output_ssts, task_status);
+        compact_done(compact_task, &context, output_ssts, task_status);
     let cost_time = timer.stop_and_record() * 1000.0;
     tracing::info!(
         "Finished compaction task in {:?}ms: {}",
         cost_time,
         compact_task_output_to_string(&compact_task)
     );
-    ((compact_task, table_stats), memory_detector)
+    (compact_task, table_stats)
 }
 
 /// Fills in the compact task and tries to report the task result to meta node.
 pub(crate) fn compact_done(
     mut compact_task: CompactTask,
-    context: CompactorContext,
+    context: &CompactorContext,
     output_ssts: Vec<CompactOutput>,
     task_status: TaskStatus,
 ) -> (CompactTask, HashMap<u32, TableStats>) {

@@ -25,14 +25,17 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
-use risingwave_hummock_sdk::{can_concat, EpochWithGap, KeyComparator};
-use risingwave_pb::hummock::compact_task::TaskType;
+use risingwave_hummock_sdk::{
+    can_concat, estimate_memory_for_compact_task, EpochWithGap, KeyComparator,
+};
+use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::{
     compact_task, BloomFilterType, CompactTask, KeyRange as KeyRange_vec, LevelType, SstableInfo,
     TableSchema,
 };
 use tokio::time::Instant;
 
+use super::context::CompactTaskContext;
 pub use super::context::CompactorContext;
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::{
@@ -45,6 +48,7 @@ use crate::hummock::iterator::{
 };
 use crate::hummock::multi_builder::TableBuilderFactory;
 use crate::hummock::sstable::DEFAULT_ENTRY_SIZE;
+use crate::hummock::utils::MemoryTracker;
 use crate::hummock::{
     CachePolicy, FilterBuilder, GetObjectId, HummockResult, MemoryLimiter, SstableBuilder,
     SstableBuilderOptions, SstableDeleteRangeIterator, SstableWriterFactory, SstableWriterOptions,
@@ -671,4 +675,114 @@ pub fn calculate_task_parallelism_impl(
 ) -> usize {
     let parallelism = (compaction_size + parallel_compact_size - 1) / parallel_compact_size;
     worker_num.min(parallelism.min(max_sub_compaction as u64) as usize)
+}
+
+fn detect_task_cpu_resource(
+    mut compact_task: CompactTask,
+    avail_task_parallelism: u32,
+    context: &CompactorContext,
+) -> CompactTask {
+    let parallelism = calculate_task_parallelism(&compact_task, context);
+    assert_ne!(parallelism, 0, "splits cannot be empty");
+
+    if avail_task_parallelism < parallelism as u32 {
+        tracing::warn!(
+            task_id = compact_task.task_id,
+            parallelism = parallelism,
+            avail_task_parallelism = avail_task_parallelism,
+            "Not enough core parallelism to serve the task",
+        );
+        compact_task.set_task_status(TaskStatus::NoAvailCpuResourceCanceled);
+    }
+
+    compact_task
+}
+
+fn detect_task_memory_resource(
+    mut compact_task: CompactTask,
+    context: &CompactorContext,
+) -> (CompactTask, Option<MemoryTracker>, usize, u64) {
+    let capacity = estimate_task_output_capacity(context.clone(), &compact_task);
+    let task_memory_capacity_with_parallelism = estimate_memory_for_compact_task(
+        &compact_task,
+        (context.storage_opts.block_size_kb as u64) * (1 << 10),
+        context
+            .storage_opts
+            .object_store_config
+            .s3
+            .object_store_recv_buffer_size
+            .unwrap_or(6 * 1024 * 1024) as u64,
+        capacity as u64,
+        context.sstable_store.store().support_streaming_upload(),
+    ) * compact_task.splits.len() as u64;
+
+    // If the task does not have enough memory, it should cancel the task and let the meta
+    // reschedule it, so that it does not occupy the compactor's resources.
+    let memory_detector = context
+        .memory_limiter
+        .try_require_memory(task_memory_capacity_with_parallelism);
+    if memory_detector.is_none() {
+        tracing::warn!(
+                "Not enough memory to serve the task {} task_memory_capacity_with_parallelism {}  memory_usage {} memory_quota {}",
+                compact_task.task_id,
+                task_memory_capacity_with_parallelism,
+                context.memory_limiter.get_memory_usage(),
+                context.memory_limiter.quota()
+            );
+        compact_task.set_task_status(TaskStatus::NoAvailMemoryResourceCanceled);
+
+        return (
+            compact_task,
+            memory_detector,
+            capacity,
+            task_memory_capacity_with_parallelism,
+        );
+    }
+
+    (
+        compact_task,
+        memory_detector,
+        capacity,
+        task_memory_capacity_with_parallelism,
+    )
+}
+
+pub async fn detect_task_resource_and_rewrite(
+    compact_task: CompactTask,
+    avail_task_parallelism: u32,
+    context: &CompactorContext,
+) -> (CompactTask, Option<MemoryTracker>, CompactTaskContext) {
+    use thiserror_ext::AsReport;
+
+    // cpu
+    let mut compact_task = detect_task_cpu_resource(compact_task, avail_task_parallelism, context);
+    if compact_task.task_status() != TaskStatus::Pending {
+        return (compact_task, None, CompactTaskContext::default());
+    }
+
+    // memory
+    let optimize_by_copy_block = optimize_by_copy_block(&compact_task, context);
+
+    // rewrite task splits
+    if let Err(e) =
+        generate_splits_for_task(&mut compact_task, context, optimize_by_copy_block).await
+    {
+        tracing::warn!(error = %e.as_report(), "Failed to generate_splits");
+        compact_task.set_task_status(TaskStatus::ExecuteFailed);
+
+        return (compact_task, None, CompactTaskContext::default());
+    }
+
+    let (compact_task, memory_tracker, capacity, task_memory_capacity_with_parallelism) =
+        detect_task_memory_resource(compact_task, context);
+
+    (
+        compact_task,
+        memory_tracker,
+        CompactTaskContext {
+            capacity,
+            task_memory_capacity_with_parallelism,
+            optimize_by_copy_block,
+        },
+    )
 }

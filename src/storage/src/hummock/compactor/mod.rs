@@ -52,7 +52,10 @@ use futures::{pin_mut, StreamExt};
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
 use more_asserts::assert_ge;
 use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStatsMap};
-use risingwave_hummock_sdk::{compact_task_to_string, HummockCompactionTaskId, LocalSstableInfo};
+use risingwave_hummock_sdk::{
+    compact_task_to_string, estimate_memory_for_compact_task, HummockCompactionTaskId,
+    LocalSstableInfo,
+};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compaction_event_request::{
     Event as RequestEvent, HeartBeat, PullTask, ReportTask,
@@ -72,6 +75,7 @@ pub use self::compaction_utils::{
     check_compaction_result, check_flush_result, CompactionStatistics, RemoteBuilderFactory,
     TaskConfig,
 };
+use self::context::CompactTaskContext;
 pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
@@ -80,7 +84,10 @@ use super::{
 use crate::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManager, StaticFilterKeyExtractorManager,
 };
-use crate::hummock::compactor::compaction_utils::calculate_task_parallelism;
+use crate::hummock::compactor::compaction_utils::{
+    detect_task_resource_and_rewrite, estimate_task_output_capacity, generate_splits_for_task,
+    optimize_by_copy_block,
+};
 use crate::hummock::compactor::compactor_runner::{compact_and_build_sst, compact_done};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::SplitTableOutput;
@@ -481,28 +488,19 @@ pub fn start_compactor(
 
                         match event {
                             ResponseEvent::CompactTask(compact_task) => {
-                                let parallelism =
-                                    calculate_task_parallelism(&compact_task, &context);
-
-                                assert_ne!(parallelism, 0, "splits cannot be empty");
-
-                                if (max_task_parallelism
-                                    - running_task_parallelism.load(Ordering::SeqCst))
-                                    < parallelism as u32
-                                {
-                                    tracing::warn!(
-                                        "Not enough core parallelism to serve the task {} task_parallelism {} running_task_parallelism {} max_task_parallelism {}",
-                                        compact_task.task_id,
-                                        parallelism,
-                                        max_task_parallelism,
-                                        running_task_parallelism.load(Ordering::Relaxed),
-                                    );
-                                    let (compact_task, table_stats) = compact_done(
+                                let (compact_task, memory_tracker, task_context) =
+                                    detect_task_resource_and_rewrite(
                                         compact_task,
-                                        context.clone(),
-                                        vec![],
-                                        TaskStatus::NoAvailCpuResourceCanceled,
-                                    );
+                                        max_task_parallelism
+                                            - running_task_parallelism.load(Ordering::SeqCst),
+                                        &context,
+                                    )
+                                    .await;
+
+                                if compact_task.task_status() != TaskStatus::Pending {
+                                    let task_status = compact_task.task_status();
+                                    let (compact_task, table_stats) =
+                                        compact_done(compact_task, &context, vec![], task_status);
 
                                     send_report_task_event(
                                         &compact_task,
@@ -514,12 +512,13 @@ pub fn start_compactor(
                                 }
 
                                 running_task_parallelism
-                                    .fetch_add(parallelism as u32, Ordering::SeqCst);
+                                    .fetch_add(compact_task.splits.len() as u32, Ordering::SeqCst);
                                 executor.spawn(async move {
                                     let (tx, rx) = tokio::sync::oneshot::channel();
                                     let task_id = compact_task.task_id;
+                                    let _memory_tracker = memory_tracker;
                                     shutdown.lock().unwrap().insert(task_id, tx);
-                                    let ((compact_task, table_stats), _memory_tracker) =
+                                    let (compact_task, table_stats) =
                                         match sstable_object_id_manager
                                             .add_watermark_object_id(None)
                                             .await
@@ -541,6 +540,7 @@ pub fn start_compactor(
                                                     rx,
                                                     Box::new(sstable_object_id_manager.clone()),
                                                     filter_key_extractor_manager.clone(),
+                                                    task_context,
                                                 )
                                                 .await
                                             }
@@ -550,11 +550,11 @@ pub fn start_compactor(
                                                 compact_task.set_task_status(
                                                     TaskStatus::TrackSstObjectIdFailed,
                                                 );
-                                                ((compact_task, HashMap::default()), None)
+                                                (compact_task, HashMap::default())
                                             }
                                         };
                                     shutdown.lock().unwrap().remove(&task_id);
-                                    running_task_parallelism.fetch_sub(parallelism as u32, Ordering::SeqCst);
+                                    running_task_parallelism.fetch_sub(compact_task.splits.len() as u32, Ordering::SeqCst);
 
                                     send_report_task_event(
                                         &compact_task,
@@ -744,19 +744,60 @@ pub fn start_shared_compactor(
                         let shared_compactor_object_id_manager =
                             SharedComapctorObjectIdManager::new(output_object_ids_deque, cloned_grpc_proxy_client.clone(), context.storage_opts.sstable_id_remote_fetch_number);
                             match dispatch_task.unwrap() {
-                                dispatch_compaction_task_request::Task::CompactTask(compact_task) => {
+                                dispatch_compaction_task_request::Task::CompactTask(mut compact_task) => {
                                     let (tx, rx) = tokio::sync::oneshot::channel();
                                     let task_id = compact_task.task_id;
+
+                                    let (compact_task,task_context) = {
+                                        let optimize_by_copy_block = optimize_by_copy_block(&compact_task, &context);
+                                        if let Err(e) =
+                                            generate_splits_for_task(&mut compact_task, &context, optimize_by_copy_block).await
+                                        {
+                                            tracing::warn!(error = %e.as_report(), "Failed to generate_splits");
+                                            compact_task.set_task_status(TaskStatus::ExecuteFailed);
+
+                                            (compact_task, CompactTaskContext::default())
+                                        } else {
+                                            let capacity = estimate_task_output_capacity(context.clone(), &compact_task);
+                                            let task_memory_capacity_with_parallelism = estimate_memory_for_compact_task(
+                                                &compact_task,
+                                                (context.storage_opts.block_size_kb as u64) * (1 << 10),
+                                                context
+                                                    .storage_opts
+                                                    .object_store_config
+                                                    .s3
+                                                    .object_store_recv_buffer_size
+                                                    .unwrap_or(6 * 1024 * 1024) as u64,
+                                                capacity as u64,
+                                                context.sstable_store.store().support_streaming_upload(),
+                                            ) * compact_task.splits.len() as u64;
+
+
+                                            let task_context = CompactTaskContext {
+                                                 capacity,
+                                                task_memory_capacity_with_parallelism,
+                                                optimize_by_copy_block,
+                                            };
+
+                                            (compact_task, task_context)
+                                        }
+                                    };
+
                                     shutdown.lock().unwrap().insert(task_id, tx);
 
-                                    let ((compact_task, table_stats), _memory_tracker)= compactor_runner::compact(
-                                        context.clone(),
-                                        compact_task,
-                                        rx,
-                                        Box::new(shared_compactor_object_id_manager),
-                                        filter_key_extractor_manager.clone(),
-                                    )
-                                    .await;
+                                    let (compact_task, table_stats) = if compact_task.task_status() == TaskStatus::Pending {
+                                        compactor_runner::compact(
+                                            context.clone(),
+                                            compact_task,
+                                            rx,
+                                            Box::new(shared_compactor_object_id_manager),
+                                            filter_key_extractor_manager.clone(),
+                                            task_context,
+                                        )
+                                        .await
+                                    } else {
+                                        (compact_task, HashMap::default())
+                                    };
                                     shutdown.lock().unwrap().remove(&task_id);
                                     let report_compaction_task_request = ReportCompactionTaskRequest {
                                         event: Some(ReportCompactionTaskEvent::ReportTask(ReportSharedTask {
