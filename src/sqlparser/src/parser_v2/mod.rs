@@ -20,9 +20,11 @@ use crate::keywords::{self, Keyword};
 use crate::tokenizer::{Token, TokenWithLocation};
 
 mod data_type;
+mod impl_;
 mod number;
 
 pub(crate) use data_type::*;
+pub(crate) use impl_::TokenStreamWrapper;
 pub(crate) use number::*;
 
 pub trait TokenStream:
@@ -104,6 +106,7 @@ where
     move |input: &mut S| -> PResult<O> {
         let state = State::default();
         let input2 = std::mem::take(input);
+        dbg!(&input2);
         let mut stateful = Stateful {
             input: input2,
             state,
