@@ -31,7 +31,7 @@ use crate::error::{ErrorCode, Result as RwResult, RwError};
 use crate::session::SessionImpl;
 
 mod options {
-
+    pub const STORAGE_ENCODING: &str = "storage_encoding";
     pub const RETENTION_SECONDS: &str = "retention_seconds";
 }
 
@@ -86,6 +86,10 @@ impl WithOptions {
         self.inner
             .get(options::RETENTION_SECONDS)
             .and_then(|s| s.parse().ok())
+    }
+
+    pub fn storage_encoding(&self) -> Option<String> {
+        self.inner.get(options::STORAGE_ENCODING).cloned()
     }
 
     /// Get a subset of the options from the given keys.

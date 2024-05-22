@@ -78,6 +78,7 @@ impl StreamMaterialize {
         table_type: TableType,
         cardinality: Cardinality,
         retention_seconds: Option<NonZeroU32>,
+        storage_encoding: Option<String>,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, table_type)?;
         // the hidden column name might refer some expr id
@@ -97,6 +98,7 @@ impl StreamMaterialize {
             None,
             cardinality,
             retention_seconds,
+            storage_encoding,
         )?;
 
         Ok(Self::new(input, table))
@@ -120,6 +122,7 @@ impl StreamMaterialize {
         row_id_index: Option<usize>,
         version: Option<TableVersion>,
         retention_seconds: Option<NonZeroU32>,
+        storage_encoding: Option<String>,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, TableType::Table)?;
 
@@ -136,6 +139,7 @@ impl StreamMaterialize {
             version,
             Cardinality::unknown(), // unknown cardinality for tables
             retention_seconds,
+            storage_encoding,
         )?;
 
         Ok(Self::new(input, table))
@@ -206,6 +210,7 @@ impl StreamMaterialize {
         version: Option<TableVersion>,
         cardinality: Cardinality,
         retention_seconds: Option<NonZeroU32>,
+        storage_encoding: Option<String>,
     ) -> Result<TableCatalog> {
         let input = rewritten_input;
 
@@ -227,9 +232,9 @@ impl StreamMaterialize {
         // assert: `stream_key` is a subset of `table_pk`
 
         let read_prefix_len_hint = table_pk.len();
-        // TODO(columnar_store): should be user-defined
-        let is_columnar_store =
-            table_type == TableType::Table || table_type == TableType::MaterializedView;
+        let is_columnar_store = storage_encoding.map(|s| s == "column").unwrap_or(false);
+        // let is_columnar_store =
+        //     table_type == TableType::Table || table_type == TableType::MaterializedView;
         Ok(TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,

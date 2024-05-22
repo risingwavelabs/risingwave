@@ -533,6 +533,7 @@ impl PlanRoot {
         version: Option<TableVersion>,
         with_external_source: bool,
         retention_seconds: Option<NonZeroU32>,
+        storage_encoding: Option<String>,
     ) -> Result<StreamMaterialize> {
         let stream_plan = self.gen_optimized_stream_plan(false)?;
 
@@ -736,6 +737,7 @@ impl PlanRoot {
             row_id_index,
             version,
             retention_seconds,
+            storage_encoding,
         )
     }
 
@@ -759,6 +761,7 @@ impl PlanRoot {
             definition,
             TableType::MaterializedView,
             cardinality,
+            None,
             None,
         )
     }
@@ -784,6 +787,7 @@ impl PlanRoot {
             TableType::Index,
             cardinality,
             retention_seconds,
+            None,
         )
     }
 

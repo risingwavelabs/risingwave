@@ -325,7 +325,6 @@ fn assemble_materialize(
 
     let definition = context.normalized_sql().to_owned();
     let retention_seconds = table_catalog.retention_seconds.and_then(NonZeroU32::new);
-
     let logical_scan = LogicalScan::create(
         table_name,
         table_catalog.clone(),

@@ -660,6 +660,7 @@ fn gen_table_plan_inner(
     let connection_id =
         resolve_privatelink_in_with_option(&mut with_properties, &schema_name, &session)?;
     let retention_seconds = with_properties.retention_seconds();
+    let storage_encoding = with_properties.storage_encoding();
 
     let is_external_source = source_info.is_some();
 
@@ -745,6 +746,7 @@ fn gen_table_plan_inner(
         version,
         is_external_source,
         retention_seconds,
+        storage_encoding,
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
@@ -866,6 +868,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
         vec![],
         Some(col_id_gen.into_version()),
         true,
+        None,
         None,
     )?;
 
