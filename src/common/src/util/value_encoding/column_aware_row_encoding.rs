@@ -251,9 +251,10 @@ impl ValueRowDeserializer for Deserializer {
             }
         }
         for (id, datum) in &self.default_column_values {
-            if !contained_indices.contains(id) {
-                datums[*id].get_or_insert(datum.clone());
-            }
+            todo!("fix default column");
+            // if !contained_indices.contains(id) {
+            //     datums[*id].get_or_insert(datum.clone());
+            // }
         }
         Ok(datums.into_iter().map(|d| d.unwrap_or(None)).collect())
     }
