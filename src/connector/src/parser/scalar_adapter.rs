@@ -292,6 +292,10 @@ impl ScalarAdapter {
                 Some(ScalarImpl::from(ListValue::new(builder.finish())))
             }
             (ScalarAdapter::List(vec), &DataType::List(dtype)) => {
+                // Due to https://github.com/risingwavelabs/risingwave/issues/16882, INTERVAL_ARRAY is not supported in Debezium, so we keep backfilling and CDC consistent.
+                if matches!(**dtype, DataType::Interval) {
+                    return None;
+                }
                 let mut builder = dtype.create_array_builder(0);
                 for val in vec {
                     let scalar = val.and_then(|v| v.into_scalar(dtype));
