@@ -139,9 +139,7 @@ fn avro_type_mapping(schema: &Schema) -> ConnectorResult<DataType> {
                 .variants()
                 .iter()
                 .find_or_first(|s| !matches!(s, Schema::Null))
-                .ok_or_else(|| {
-                    anyhow::format_err!("unsupported type in Avro: {:?}", union_schema)
-                })?;
+                .ok_or_else(|| anyhow::format_err!("unsupported Avro type: {:?}", union_schema))?;
 
             avro_type_mapping(nested_schema)?
         }
@@ -151,10 +149,12 @@ fn avro_type_mapping(schema: &Schema) -> ConnectorResult<DataType> {
             {
                 DataType::Decimal
             } else {
-                bail!("unsupported type in Avro: {:?}", schema);
+                bail!("unsupported Avro type: {:?}", schema);
             }
         }
-        _ => bail!("unsupported type in Avro: {:?}", schema),
+        Schema::Map(_) | Schema::Null | Schema::Fixed(_) | Schema::Uuid => {
+            bail!("unsupported Avro type: {:?}", schema)
+        }
     };
 
     Ok(data_type)
