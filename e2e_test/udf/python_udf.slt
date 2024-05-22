@@ -170,7 +170,8 @@ wave   4
 statement ok
 drop function split;
 
-# aggregae function
+
+# aggregate function
 statement ok
 create aggregate weighted_avg(value int, weight int) returns float language python as $$
 def create_state():
