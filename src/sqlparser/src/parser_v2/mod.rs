@@ -10,9 +10,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use winnow::combinator::preceded;
 use winnow::error::{ContextError, StrContext};
-use winnow::stream::{Location, Stream, StreamIsPartial};
-use winnow::token::any;
+use winnow::stream::{ContainsToken, Location, Stream, StreamIsPartial};
+use winnow::token::{any, take_while};
 use winnow::{PResult, Parser, Stateful};
 
 use crate::ast::Ident;
@@ -37,11 +38,26 @@ impl<S> TokenStream for S where
 {
 }
 
-fn token<S>(input: &mut S) -> PResult<TokenWithLocation>
+fn any_token<S>(input: &mut S) -> PResult<TokenWithLocation>
 where
     S: TokenStream,
 {
     any(input)
+}
+
+fn token<S>(input: &mut S) -> PResult<TokenWithLocation>
+where
+    S: TokenStream,
+{
+    struct WhiteSpace;
+
+    impl ContainsToken<TokenWithLocation> for WhiteSpace {
+        fn contains_token(&self, token: TokenWithLocation) -> bool {
+            matches!(token.token, Token::Whitespace(_))
+        }
+    }
+
+    preceded(take_while(0.., WhiteSpace), any_token).parse_next(input)
 }
 
 fn keyword<S>(input: &mut S) -> PResult<Keyword>
