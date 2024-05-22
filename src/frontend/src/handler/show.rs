@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::slice::Iter;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -21,6 +22,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::pg_server::Session;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, DEFAULT_SCHEMA_NAME};
+use risingwave_common::session_config::SearchPath;
 use risingwave_common::types::{DataType, Fields, Timestamptz};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
@@ -104,6 +106,17 @@ fn schema_or_default(schema: &Option<Ident>) -> String {
     schema
         .as_ref()
         .map_or_else(|| DEFAULT_SCHEMA_NAME.to_string(), |s| s.real_value())
+}
+
+fn schema_or_search_path<'a>(
+    schema: &'a Option<Ident>,
+    search_path: &'a SearchPath,
+) -> impl Iterator<Item = String> + 'a {
+    if let Some(s) = schema {
+        return std::iter::once(s.real_value());
+    }
+
+    search_path.real_path().iter()
 }
 
 #[derive(Fields)]
@@ -254,12 +267,22 @@ pub async fn handle_show_object(
 
     let names = match command {
         // If not include schema name, use default schema name
-        ShowObject::Table { schema } => catalog_reader
-            .read_guard()
-            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
-            .iter_table()
-            .map(|t| t.name.clone())
-            .collect(),
+        ShowObject::Table { schema } => {
+            let search_path = session.shared_config().read().search_path.clone();
+            let mut table_names_in_schema = vec![];
+            for schema in schema_or_search_path(&schema, &search_path) {
+                table_names_in_schema.extend(
+                    catalog_reader
+                        .read_guard()
+                        .get_schema_by_name(session.database(), schema.as_ref())?
+                        .iter_table()
+                        .map(|t| t.name.clone())
+                        .collect::<Vec<String>>(),
+                );
+            }
+
+            table_names_in_schema
+        }
         ShowObject::InternalTable { schema } => catalog_reader
             .read_guard()
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
