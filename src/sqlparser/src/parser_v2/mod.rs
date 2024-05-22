@@ -122,7 +122,6 @@ where
     move |input: &mut S| -> PResult<O> {
         let state = State::default();
         let input2 = std::mem::take(input);
-        dbg!(&input2);
         let mut stateful = Stateful {
             input: input2,
             state,
