@@ -10,7 +10,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use winnow::error::ContextError;
+use winnow::error::{ContextError, StrContext};
 use winnow::stream::{Location, Stream, StreamIsPartial};
 use winnow::token::any;
 use winnow::{PResult, Parser, Stateful};
@@ -51,6 +51,7 @@ where
             Token::Word(w) if w.keyword != Keyword::NoKeyword => Some(w.keyword),
             _ => None,
         })
+        .context(StrContext::Label("keyword"))
         .parse_next(input)
 }
 

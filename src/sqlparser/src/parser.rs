@@ -194,8 +194,8 @@ impl Parser {
         let mut token_stream = winnow::Located::new(&*self.tokens);
         let output = parse_next.parse_next(&mut token_stream).map_err(|e| {
             ParserError::ParserError(format!(
-                "Error parsing SQL at {}: {}",
-                token_stream.location(),
+                "Unexpected {}: {}",
+                self.tokens[self.index + token_stream.location()],
                 e
             ))
         });

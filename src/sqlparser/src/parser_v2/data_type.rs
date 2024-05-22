@@ -2,6 +2,7 @@ use core::cell::RefCell;
 use std::rc::Rc;
 
 use winnow::combinator::{alt, delimited, dispatch, empty, fail, opt, separated, seq};
+use winnow::error::StrContext;
 use winnow::{PResult, Parser, Stateful};
 
 use super::{
@@ -71,7 +72,9 @@ pub fn data_type<S>(input: &mut S) -> PResult<DataType>
 where
     S: TokenStream,
 {
-    with_state::<S, DataTypeParsingState, _, _>(data_type_stateful).parse_next(input)
+    with_state::<S, DataTypeParsingState, _, _>(data_type_stateful)
+        .context(StrContext::Label("data_type"))
+        .parse_next(input)
 }
 
 fn data_type_stateful<S>(input: &mut StatefulStream<S>) -> PResult<DataType>
@@ -155,5 +158,6 @@ where
             .verify(|t| matches!(&t.token, Token::Word(w) if w.value.eq_ignore_ascii_case("jsonb")))
             .value(DataType::Jsonb),
     ))
+    .context(StrContext::Label("data_type_inner"))
     .parse_next(input)
 }
