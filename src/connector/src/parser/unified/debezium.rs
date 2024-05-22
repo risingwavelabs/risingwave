@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl, Timestamptz};
 use risingwave_pb::plan_common::additional_column::ColumnType;
 
 use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation};
@@ -206,10 +206,16 @@ where
                                 );
 
                                 // access payload.source.ts_ms
-                                self.value_accessor
+                                let ts_ms = self
+                                    .value_accessor
                                     .as_ref()
                                     .expect("value_accessor must be provided for upsert operation")
-                                    .access(&[SOURCE, SOURCE_TS_MS], Some(&desc.data_type))
+                                    .access(&[SOURCE, SOURCE_TS_MS], Some(&DataType::Int64))?;
+                                Ok(ts_ms.map(|scalar| {
+                                    Timestamptz::from_millis(scalar.into_int64())
+                                        .expect("source.ts_ms must in millisecond")
+                                        .to_scalar_value()
+                                }))
                             }
                             _ => Err(AccessError::UnsupportedAdditionalColumn {
                                 name: desc.name.clone(),
