@@ -96,6 +96,20 @@ impl Binder {
             _ => bail_not_implemented!(issue = 112, "qualified function {}", f.name),
         };
 
+        // FIXME: This is a hack to support [Bytebase queries](https://github.com/TennyZhuang/bytebase/blob/4a26f7c62b80e86e58ad2f77063138dc2f420623/backend/plugin/db/pg/sync.go#L549).
+        // Bytebase widely used the pattern like `obj_description(format('%s.%s',
+        // quote_ident(idx.schemaname), quote_ident(idx.indexname))::regclass) AS comment` to
+        // retrieve object comment, however we don't support casting a non-literal expression to
+        // regclass. We just hack the `obj_description` and `col_description` here, to disable it to
+        // bind its arguments.
+        if function_name == "obj_description" || function_name == "col_description" {
+            return Ok(ExprImpl::literal_varchar("".to_string()));
+        }
+        if function_name == "array_transform" {
+            // For type inference, we need to bind the array type first.
+            return self.bind_array_transform(f);
+        }
+
         let mut inputs: Vec<_> = f
             .args
             .iter()
@@ -231,21 +245,6 @@ impl Binder {
                 )
                 )
                 .into());
-        }
-
-        // FIXME: This is a hack to support [Bytebase queries](https://github.com/TennyZhuang/bytebase/blob/4a26f7c62b80e86e58ad2f77063138dc2f420623/backend/plugin/db/pg/sync.go#L549).
-        // Bytebase widely used the pattern like `obj_description(format('%s.%s',
-        // quote_ident(idx.schemaname), quote_ident(idx.indexname))::regclass) AS comment` to
-        // retrieve object comment, however we don't support casting a non-literal expression to
-        // regclass. We just hack the `obj_description` and `col_description` here, to disable it to
-        // bind its arguments.
-        if function_name == "obj_description" || function_name == "col_description" {
-            return Ok(ExprImpl::literal_varchar("".to_string()));
-        }
-
-        if function_name == "array_transform" {
-            // For type inference, we need to bind the array type first.
-            return self.bind_array_transform(f);
         }
 
         // window function
