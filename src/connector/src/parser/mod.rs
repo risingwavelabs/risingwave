@@ -701,7 +701,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                 // report to promethus
                 GLOBAL_SOURCE_METRICS
                     .direct_cdc_event_lag_latency
-                    .with_label_values(&[&msg_meta.full_table_name])
+                    .with_guarded_label_values(&[&msg_meta.full_table_name])
                     .observe(lag_ms as f64);
             }
 
