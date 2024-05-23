@@ -730,7 +730,7 @@ def section_streaming(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('source_partition_input_count')}[$__rate_interval])",
-                            "actor={{actor_id}} source={{source_id}} partition={{partition}} fragmend_id={{fragment_id}}",
+                            "actor={{actor_id}} source={{source_id}} partition={{partition}} fragment_id={{fragment_id}}",
                         )
                     ],
                 ),
@@ -751,7 +751,7 @@ def section_streaming(outer_panels):
                     [
                         panels.target(
                             f"(rate({metric('source_partition_input_bytes')}[$__rate_interval]))/(1000*1000)",
-                            "actor={{actor_id}} source={{source_id}} partition={{partition}} fragmend_id={{fragment_id}}",
+                            "actor={{actor_id}} source={{source_id}} partition={{partition}} fragment_id={{fragment_id}}",
                         )
                     ],
                 ),
@@ -832,8 +832,8 @@ def section_streaming(outer_panels):
                     "The figure shows the number of rows written into each materialized view per second.",
                     [
                         panels.target(
-                            f"sum(rate({metric('stream_mview_input_row_count')}[$__rate_interval])) by (fragment_id, table_id) * on(fragment_id, table_id) group_left(table_name) {metric('table_info')}",
-                            "mview {{table_id}} {{table_name}} - fragment_id {{fragment_id}}",
+                            f"rate({metric('stream_mview_input_row_count')}[$__rate_interval]) * on(fragment_id, table_id) group_left(table_name) {metric('table_info')}",
+                            "mview {{table_id}} {{table_name}} - actor {{actor_id}} fragment_id {{fragment_id}}",
                         ),
                     ],
                 ),
