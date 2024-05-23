@@ -24,12 +24,12 @@ use itertools::Itertools;
 use risingwave_common::sequence::*;
 
 thread_local! {
-    pub static SEQUENCER_64_8: RefCell<Sequencer> = RefCell::new(Sequencer::new(64, 64 * 8));
-    pub static SEQUENCER_64_16: RefCell<Sequencer> = RefCell::new(Sequencer::new(64, 64 * 16));
-    pub static SEQUENCER_64_32: RefCell<Sequencer> = RefCell::new(Sequencer::new(64, 64 * 32));
-    pub static SEQUENCER_128_8: RefCell<Sequencer> = RefCell::new(Sequencer::new(128, 128 * 8));
-    pub static SEQUENCER_128_16: RefCell<Sequencer> = RefCell::new(Sequencer::new(128, 128 * 16));
-    pub static SEQUENCER_128_32: RefCell<Sequencer> = RefCell::new(Sequencer::new(128, 128 * 32));
+    pub static SEQUENCER_64_8: RefCell<Sequencer> = const { RefCell::new(Sequencer::new(64, 64 * 8)) };
+    pub static SEQUENCER_64_16: RefCell<Sequencer> = const { RefCell::new(Sequencer::new(64, 64 * 16)) };
+    pub static SEQUENCER_64_32: RefCell<Sequencer> = const { RefCell::new(Sequencer::new(64, 64 * 32)) };
+    pub static SEQUENCER_128_8: RefCell<Sequencer> = const { RefCell::new(Sequencer::new(128, 128 * 8)) };
+    pub static SEQUENCER_128_16: RefCell<Sequencer> = const { RefCell::new(Sequencer::new(128, 128 * 16)) };
+    pub static SEQUENCER_128_32: RefCell<Sequencer> = const { RefCell::new(Sequencer::new(128, 128 * 32)) };
 }
 
 fn coarse(loops: usize) -> Duration {
