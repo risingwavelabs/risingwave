@@ -253,9 +253,13 @@ public class StreamChunkDeserializer implements Deserializer {
                     StreamChunk.fromPayload(streamChunkPayload.getBinaryData().toByteArray()),
                     valueGetters);
         } else if (writeBatch.hasStreamChunkRefPointer()) {
-            return new StreamChunkIterable(
-                    StreamChunk.fromRefPointer(writeBatch.getStreamChunkRefPointer()),
-                    valueGetters);
+            // return new StreamChunkIterable(
+            //         StreamChunk.fromRefPointer(writeBatch.getStreamChunkRefPointer()),
+            //         valueGetters);
+            return new ArrowIterable(
+                    new StreamChunk(
+                            writeBatch.getArrowArrayPointersList(),
+                            writeBatch.getArrowSchemaPointersList()));
         } else {
             throw INVALID_ARGUMENT
                     .withDescription(

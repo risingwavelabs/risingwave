@@ -278,9 +278,24 @@ public class EsSink extends SinkWriterBase {
     }
 
     private void processUpsert(SinkRow row) throws JsonMappingException, JsonProcessingException {
-        final String index = (String) row.get(0);
-        final String key = (String) row.get(1);
-        String doc = (String) row.get(2);
+        final String index;
+        if (row.get(0) == null) {
+            index = null;
+        } else {
+            index = row.get(0).toString();
+        }
+        final String key;
+        if (row.get(1) == null) {
+            key = null;
+        } else {
+            key = row.get(1).toString();
+        }
+        String doc;
+        if (row.get(2) == null) {
+            doc = null;
+        } else {
+            doc = row.get(2).toString();
+        }
 
         UpdateRequest updateRequest;
         if (config.getIndex() != null) {

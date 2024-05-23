@@ -14,15 +14,29 @@
 
 package com.risingwave.java.binding;
 
+import java.util.List;
+
 public class StreamChunk implements AutoCloseable {
     private final long pointer;
     private final boolean isOwnedChunk;
     private boolean isClosed;
+    private final List<Long> arrowArrayPointers;
+    private final List<Long> arrowSchemaPointers;
 
     StreamChunk(long pointer, boolean isOwnedChunk) {
         this.pointer = pointer;
         this.isOwnedChunk = isOwnedChunk;
         this.isClosed = false;
+        this.arrowArrayPointers = null;
+        this.arrowSchemaPointers = null;
+    }
+
+    public StreamChunk(List<Long> arrowArrayPointers, List<Long> arrowSchemaPointers) {
+        this.pointer = 0;
+        this.isOwnedChunk = false;
+        this.isClosed = false;
+        this.arrowArrayPointers = arrowArrayPointers;
+        this.arrowSchemaPointers = arrowSchemaPointers;
     }
 
     public static StreamChunk fromPayload(byte[] streamChunkPayload) {
@@ -59,5 +73,13 @@ public class StreamChunk implements AutoCloseable {
 
     long getPointer() {
         return this.pointer;
+    }
+
+    public List<Long> getArrowArrayPointers() {
+        return this.arrowArrayPointers;
+    }
+
+    public List<Long> getArrowSchemaPointers() {
+        return this.arrowSchemaPointers;
     }
 }

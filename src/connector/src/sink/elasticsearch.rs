@@ -18,9 +18,9 @@ use anyhow::anyhow;
 use risingwave_common::array::{
     ArrayBuilder, ArrayImpl, JsonbArrayBuilder, RowRef, StreamChunk, Utf8ArrayBuilder,
 };
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row;
-use risingwave_common::types::{JsonbVal, Scalar, ToText};
+use risingwave_common::types::{DataType, JsonbVal, Scalar, ToText};
 use serde_json::Value;
 
 use super::encoder::{JsonEncoder, RowEncoder};
@@ -67,6 +67,13 @@ impl StreamChunkConverter {
         match self {
             StreamChunkConverter::Es(es) => es.convert_chunk(chunk),
             StreamChunkConverter::Other => Ok(chunk),
+        }
+    }
+
+    pub fn convert_schema(&self, schema: Schema) -> Schema {
+        match self {
+            StreamChunkConverter::Es(es) => es.convert_schema(),
+            StreamChunkConverter::Other => schema,
         }
     }
 }
@@ -164,6 +171,14 @@ impl EsStreamChunkConverter {
                 std::sync::Arc::new(ArrayImpl::Jsonb(json_array)),
             ],
         ))
+    }
+
+    fn convert_schema(&self) -> Schema {
+        Schema::new(vec![
+            Field::with_name(DataType::Varchar, "index"),
+            Field::with_name(DataType::Varchar, "id"),
+            Field::with_name(DataType::Jsonb, "value"),
+        ])
     }
 
     fn build_id(&self, row: RowRef<'_>) -> Result<String> {

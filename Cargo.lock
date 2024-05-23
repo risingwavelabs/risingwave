@@ -319,10 +319,10 @@ dependencies = [
  "arrow-array 48.0.1",
  "arrow-buffer 48.0.1",
  "arrow-cast 48.0.1",
- "arrow-csv",
+ "arrow-csv 48.0.1",
  "arrow-data 48.0.1",
  "arrow-ipc 48.0.1",
- "arrow-json",
+ "arrow-json 48.0.1",
  "arrow-ord 48.0.1",
  "arrow-row 48.0.1",
  "arrow-schema 48.0.1",
@@ -340,8 +340,10 @@ dependencies = [
  "arrow-array 50.0.0",
  "arrow-buffer 50.0.0",
  "arrow-cast 50.0.0",
+ "arrow-csv 50.0.0",
  "arrow-data 50.0.0",
  "arrow-ipc 50.0.0",
+ "arrow-json 50.0.0",
  "arrow-ord 50.0.0",
  "arrow-row 50.0.0",
  "arrow-schema 50.0.0",
@@ -490,6 +492,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "arrow-csv"
+version = "50.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46af72211f0712612f5b18325530b9ad1bfbdc87290d5fbfd32a7da128983781"
+dependencies = [
+ "arrow-array 50.0.0",
+ "arrow-buffer 50.0.0",
+ "arrow-cast 50.0.0",
+ "arrow-data 50.0.0",
+ "arrow-schema 50.0.0",
+ "chrono",
+ "csv",
+ "csv-core",
+ "lazy_static",
+ "lexical-core",
+ "regex",
+]
+
+[[package]]
 name = "arrow-data"
 version = "48.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -582,6 +603,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "arrow-json"
+version = "50.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8950719280397a47d37ac01492e3506a8a724b3fb81001900b866637a829ee0f"
+dependencies = [
+ "arrow-array 50.0.0",
+ "arrow-buffer 50.0.0",
+ "arrow-cast 50.0.0",
+ "arrow-data 50.0.0",
+ "arrow-schema 50.0.0",
+ "chrono",
+ "half 2.3.1",
+ "indexmap 2.0.0",
+ "lexical-core",
+ "num",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "arrow-ord"
 version = "48.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -655,6 +696,9 @@ name = "arrow-schema"
 version = "50.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ff3e9c01f7cd169379d269f926892d0e622a704960350d09d331be3ec9e0029"
+dependencies = [
+ "bitflags 2.5.0",
+]
 
 [[package]]
 name = "arrow-select"
@@ -10983,6 +11027,7 @@ name = "risingwave_jni_core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arrow 50.0.0",
  "bytes",
  "cfg-or-panic",
  "chrono",
@@ -12094,9 +12139,9 @@ dependencies = [
 
 [[package]]
 name = "ryu"
-version = "1.0.15"
+version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ad4cc8da4ef723ed60bced201181d83791ad433213d8c24efffda1eec85d741"
+checksum = "f3cb5ba0dc43242ce17de99c180e96db90b235b8a9fdc9543c96d2209116bd9f"
 
 [[package]]
 name = "ryu-js"

@@ -59,6 +59,8 @@ impl<REQ: From<SinkWriterStreamRequest>> SinkWriterRequestSender<REQ> {
                 epoch,
                 batch_id,
                 payload: Some(payload),
+                arrow_schema_pointers: vec![],
+                arrow_array_pointers: vec![],
             })),
         })
         .await

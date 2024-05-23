@@ -28,7 +28,7 @@ use jni::JavaVM;
 use prost::Message;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::DataType;
 use risingwave_jni_core::jvm_runtime::JVM;
@@ -254,6 +254,7 @@ pub struct RemoteLogSinker {
     response_stream: BidiStreamReceiver<SinkWriterStreamResponse>,
     sink_metrics: SinkMetrics,
     stream_chunk_converter: StreamChunkConverter,
+    schema: Schema,
 }
 
 impl RemoteLogSinker {
@@ -295,6 +296,7 @@ impl RemoteLogSinker {
                 &sink_param.downstream_pk,
                 &sink_param.properties,
             )?,
+            schema: sink_param.schema(),
         })
     }
 }
@@ -449,11 +451,15 @@ impl LogSinker for RemoteLogSinker {
                                     .inc_by(cardinality as _);
 
                                 let chunk = self.stream_chunk_converter.convert_chunk(chunk)?;
+                                let schema = self
+                                    .stream_chunk_converter
+                                    .convert_schema(self.schema.clone());
                                 request_tx
                                     .send_request(JniSinkWriterStreamRequest::Chunk {
                                         epoch,
                                         batch_id: chunk_id as u64,
                                         chunk,
+                                        schema: Some(schema),
                                     })
                                     .instrument_await(format!(
                                         "Send Chunk Request: {} {}",
@@ -624,6 +630,7 @@ impl SinkWriter for CoordinatedRemoteSinkWriter {
                 chunk,
                 epoch,
                 batch_id,
+                schema: None,
             })
             .await?;
         self.batch_id += 1;
@@ -897,6 +904,7 @@ mod test {
                 epoch,
                 batch_id,
                 chunk,
+                schema,
             } => {
                 assert_eq!(epoch, 2022);
                 assert_eq!(batch_id, 0);
@@ -943,6 +951,7 @@ mod test {
                 epoch,
                 batch_id,
                 chunk,
+                schema,
             } => {
                 assert_eq!(epoch, 2023);
                 assert_eq!(batch_id, 1);

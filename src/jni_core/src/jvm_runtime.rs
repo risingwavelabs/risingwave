@@ -106,6 +106,7 @@ impl JavaVmWrapper {
             .option("-Dis_embedded_connector=true")
             .option(format!("-Djava.class.path={}", class_vec.join(":")))
             .option("-Xms16m")
+            .option("--add-opens=java.base/java.nio=org.apache.arrow.memory.core,ALL-UNNAMED")
             .option(format!("-Xmx{}", jvm_heap_size));
 
         tracing::info!("JVM args: {:?}", args_builder);

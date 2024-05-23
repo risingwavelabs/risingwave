@@ -139,7 +139,9 @@ public class CassandraUtil {
             case FLOAT:
             case DOUBLE:
             case BOOLEAN:
+                return value;
             case VARCHAR:
+                return value.toString();
             case DECIMAL:
             case DATE:
             case TIME:

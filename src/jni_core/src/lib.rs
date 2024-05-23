@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![feature(error_generic_member_access)]
+#![feature(iterator_try_collect)]
 #![feature(lazy_cell)]
 #![feature(once_cell_try)]
 #![feature(type_alias_impl_trait)]
@@ -22,7 +23,9 @@ pub mod hummock_iterator;
 pub mod jvm_runtime;
 mod macros;
 mod tracing_slf4j;
+mod utils;
 
+use core::mem::ManuallyDrop;
 use std::backtrace::Backtrace;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
@@ -30,6 +33,8 @@ use std::slice::from_raw_parts;
 use std::sync::{LazyLock, OnceLock};
 
 use anyhow::anyhow;
+use arrow::array::{Array, Int32Array};
+use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
 use bytes::Bytes;
 use cfg_or_panic::cfg_or_panic;
 use chrono::{Datelike, NaiveDateTime, Timelike};
@@ -43,7 +48,9 @@ use jni::sys::{
 };
 use jni::JNIEnv;
 use prost::{DecodeError, Message};
+use risingwave_common::array::arrow::ToArrow;
 use risingwave_common::array::{ArrayError, StreamChunk};
+use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::test_prelude::StreamChunkTestExt;
@@ -60,6 +67,7 @@ use thiserror_ext::AsReport;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing_slf4j::*;
+use utils::convert_chunk_to_arrow_arrays;
 
 use crate::hummock_iterator::HummockJavaBindingIterator;
 pub use crate::jvm_runtime::register_native_method_for_jvm;
@@ -1063,6 +1071,7 @@ pub enum JniSinkWriterStreamRequest {
         epoch: u64,
         batch_id: u64,
         chunk: StreamChunk,
+        schema: Option<Schema>,
     },
 }
 
@@ -1095,16 +1104,52 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_recvSinkWriterRe
                     epoch,
                     batch_id,
                     chunk,
+                    schema,
                 } => {
-                    let pointer = Box::into_raw(Box::new(chunk));
+                    let pointer = Box::into_raw(Box::new(chunk.clone()));
+                    let arrays = convert_chunk_to_arrow_arrays(&schema.unwrap(), &chunk);
+                    let pointers: Vec<_> = arrays
+                        .into_iter()
+                        .map(|a| {
+                            let data = a.to_data();
+                            let out_array = FFI_ArrowArray::new(&data);
+                            let out_schema = FFI_ArrowSchema::try_from(data.data_type()).unwrap();
+                            let schema = Box::into_raw(Box::new(out_schema));
+                            let array = Box::into_raw(Box::new(out_array));
+                            (schema, array)
+                        })
+                        .collect();
+                    let (array_pointers, schema_pointers): (Vec<u64>, Vec<u64>) =
+                        pointers.iter().map(|(a, b)| (*a as u64, *b as u64)).unzip();
+                    let array_pointers = array_pointers
+                        .iter()
+                        .map(|a| *a as i64)
+                        .collect::<Vec<i64>>();
+                    let schema_pointers = schema_pointers
+                        .iter()
+                        .map(|a| *a as i64)
+                        .collect::<Vec<i64>>();
+                    let array_pointers_array =
+                        env.new_long_array(array_pointers.len() as i32).unwrap();
+                    env.set_long_array_region(&array_pointers_array, 0, &array_pointers)
+                        .unwrap();
+                    let schema_pointers_array =
+                        env.new_long_array(schema_pointers.len() as i32).unwrap();
+                    env.set_long_array_region(&schema_pointers_array, 0, &schema_pointers)
+                        .unwrap();
+
                     call_static_method!(
                         env,
                         {com.risingwave.java.binding.JniSinkWriterStreamRequest},
-                        {com.risingwave.java.binding.JniSinkWriterStreamRequest fromStreamChunkOwnedPointer(long pointer, long epoch, long batchId)},
-                        pointer as u64, epoch, batch_id
+                        {com.risingwave.java.binding.JniSinkWriterStreamRequest fromStreamChunkOwnedPointer(long[] arrowArrayPointers,long[] arrowSchemaPointers, long epoch, long batchId, long pointer)},
+                        &JObject::from(array_pointers_array),&JObject::from(schema_pointers_array), epoch, batch_id, pointer as u64
                     )
                     .inspect_err(|_| unsafe {
                         // release the stream chunk on err
+                        pointers.into_iter().for_each(|pointer| {
+                            drop(Box::from_raw(pointer.0));
+                            drop(Box::from_raw(pointer.1));
+                        });
                         drop(Box::from_raw(pointer));
                     })?
                 }

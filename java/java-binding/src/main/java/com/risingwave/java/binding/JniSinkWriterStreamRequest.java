@@ -16,6 +16,9 @@ package com.risingwave.java.binding;
 
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.risingwave.proto.ConnectorServiceProto;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.stream.Collectors;
 
 public class JniSinkWriterStreamRequest implements AutoCloseable {
     private final ConnectorServiceProto.SinkWriterStreamRequest pbRequest;
@@ -50,9 +53,21 @@ public class JniSinkWriterStreamRequest implements AutoCloseable {
     }
 
     public static JniSinkWriterStreamRequest fromStreamChunkOwnedPointer(
-            long pointer, long epoch, long batchId) {
+            long[] arrowArrayPointers,
+            long[] arrowSchemaPointers,
+            long epoch,
+            long batchId,
+            long pointer) {
         return new JniSinkWriterStreamRequest(
-                StreamChunk.fromOwnedPointer(pointer), epoch, batchId);
+                new StreamChunk(
+                        Arrays.stream(arrowArrayPointers)
+                                .boxed()
+                                .collect(Collectors.toCollection(ArrayList::new)),
+                        Arrays.stream(arrowSchemaPointers)
+                                .boxed()
+                                .collect(Collectors.toCollection(ArrayList::new))),
+                epoch,
+                batchId);
     }
 
     public ConnectorServiceProto.SinkWriterStreamRequest asPbRequest() {
@@ -65,6 +80,8 @@ public class JniSinkWriterStreamRequest implements AutoCloseable {
                                     .setEpoch(epoch)
                                     .setBatchId(batchId)
                                     .setStreamChunkRefPointer(chunk.getPointer())
+                                    .addAllArrowArrayPointers(chunk.getArrowArrayPointers())
+                                    .addAllArrowSchemaPointers(chunk.getArrowSchemaPointers())
                                     .build())
                     .build();
         }
@@ -77,3 +94,7 @@ public class JniSinkWriterStreamRequest implements AutoCloseable {
         }
     }
 }
+
+// class ConverterJni {
+//     native public static void fill_arr(long arrAddr, long schemaAddr);
+// }

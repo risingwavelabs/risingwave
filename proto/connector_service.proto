@@ -57,6 +57,9 @@ message SinkWriterStreamRequest {
 
     uint64 batch_id = 3;
     uint64 epoch = 4;
+
+    repeated int64 arrow_schema_pointers = 6;
+    repeated int64 arrow_array_pointers = 7;
   }
 
   message Barrier {

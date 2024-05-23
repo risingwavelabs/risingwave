@@ -133,7 +133,6 @@ public class SinkWriterStreamObserver
                                     new MonitoredRowIterable(
                                             rowIter, connectorName, String.valueOf(sinkId)));
                 }
-
                 currentBatchId = batch.getBatchId();
 
                 if (batchWritten) {
