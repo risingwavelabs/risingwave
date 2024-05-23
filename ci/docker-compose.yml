@@ -61,7 +61,7 @@ services:
       - "29092:29092"
       - "9092:9092"
       - "9644:9644"
-      - "8081:8081"
+      - "8081:8081" # schema registry
     environment: {}
     container_name: message_queue
     healthcheck:
@@ -76,7 +76,6 @@ services:
       - mysql
       - db
       - message_queue
-      - schemaregistry
       - mongodb
       - mongodb-setup
       - mongo_data_generator
@@ -246,21 +245,6 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
     ports:
       - "2181:2181"
-
-  schemaregistry:
-    container_name: schemaregistry
-    hostname: schemaregistry
-    image: confluentinc/cp-schema-registry:latest
-    depends_on:
-      - kafka
-    ports:
-      - "8082:8082"
-    environment:
-      SCHEMA_REGISTRY_HOST_NAME: schemaregistry
-      SCHEMA_REGISTRY_KAFKASTORE_CONNECTION_URL: 'zookeeper:2181'
-      SCHEMA_REGISTRY_LISTENERS: http://schemaregistry:8082
-      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:9093,PLAINTEXT_INTERNAL://localhost:29093
-      SCHEMA_REGISTRY_DEBUG: 'true'
 
   kafka:
     container_name: kafka

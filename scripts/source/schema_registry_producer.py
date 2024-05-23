@@ -40,7 +40,10 @@ def load_avro_json(encoded, schema):
 
 if __name__ == '__main__':
     if len(sys.argv) < 5:
-        print("datagen.py <brokerlist> <schema-registry-url> <file> <name-strategy> <json/avro>")
+        print(
+            "usage: schema_registry_producer.py <brokerlist> <schema-registry-url> <file> <name-strategy> <json/avro>"
+        )
+        exit(1)
     broker_list = sys.argv[1]
     schema_registry_url = sys.argv[2]
     file = sys.argv[3]
