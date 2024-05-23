@@ -910,7 +910,7 @@ impl DdlController {
                 )
                 .await
             }
-            (CreateType::Background, &StreamingJob::MaterializedView(_)) => {
+            (CreateType::Background, &StreamingJob::MaterializedView(_) | &StreamingJob::Index(_, _)) => {
                 let ctrl = self.clone();
                 let mgr = mgr.clone();
                 let stream_job_id = stream_job.id();
