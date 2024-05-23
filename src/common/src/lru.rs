@@ -349,7 +349,7 @@ where
             self.dummy.prev.unwrap_unchecked().as_mut().next = Some(ptr);
             self.dummy.prev = Some(ptr);
 
-            entry.sequence = SEQUENCER.with(|s| s.borrow_mut().inc());
+            entry.sequence = SEQUENCER.with(|s| s.borrow_mut().alloc());
         }
     }
 }

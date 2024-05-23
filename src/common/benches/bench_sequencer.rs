@@ -86,7 +86,7 @@ fn sequencer(loops: usize, step: Sequence, lag_amp: Sequence) -> Duration {
     };
     let now = Instant::now();
     for _ in 0..loops {
-        let _ = sequencer.with(|s| s.borrow_mut().inc());
+        let _ = sequencer.with(|s| s.borrow_mut().alloc());
     }
     now.elapsed()
 }
