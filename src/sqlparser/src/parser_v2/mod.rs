@@ -28,6 +28,9 @@ pub(crate) use data_type::*;
 pub(crate) use impl_::TokenStreamWrapper;
 pub(crate) use number::*;
 
+/// Bundle trait requirements from winnow, so that we don't need to write them everywhere.
+///
+/// All combinators should accept a generic `S` that implements `TokenStream`.
 pub trait TokenStream:
     Stream<Token = TokenWithLocation> + StreamIsPartial + Location + Default
 {
@@ -38,6 +41,7 @@ impl<S> TokenStream for S where
 {
 }
 
+/// Consume any token, including whitespaces. In almost all cases, you should use [`token`] instead.
 fn any_token<S>(input: &mut S) -> PResult<TokenWithLocation>
 where
     S: TokenStream,
@@ -45,6 +49,9 @@ where
     any(input)
 }
 
+/// Consume any non-whitespace token.
+///
+/// If you need to consume a specific token, use [`Token::?`][Token] directly, which already implements [`Parser`].
 fn token<S>(input: &mut S) -> PResult<TokenWithLocation>
 where
     S: TokenStream,
@@ -60,6 +67,9 @@ where
     preceded(take_while(0.., WhiteSpace), any_token).parse_next(input)
 }
 
+/// Consume a keyword.
+///
+/// If you need to consume a specific keyword, use [`Keyword::?`][Keyword] directly, which already implements [`Parser`].
 fn keyword<S>(input: &mut S) -> PResult<Keyword>
 where
     S: TokenStream,
@@ -98,6 +108,7 @@ where
     }
 }
 
+/// Consume an identifier that is not a reserved keyword.
 fn identifier_non_reserved<S>(input: &mut S) -> PResult<Ident>
 where
     S: TokenStream,
@@ -113,6 +124,9 @@ where
         .parse_next(input)
 }
 
+/// Accept a subparser contains a given state.
+///
+/// The state will be constructed using [`Default::default()`].
 fn with_state<S, State, O, ParseNext>(mut parse_next: ParseNext) -> impl Parser<S, O, ContextError>
 where
     S: TokenStream,

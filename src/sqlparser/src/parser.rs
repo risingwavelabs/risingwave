@@ -181,6 +181,9 @@ impl Parser {
         Parser { tokens, index: 0 }
     }
 
+    /// Adaptor for [`parser_v2`].
+    ///
+    /// You can call a v2 parser from original parser by using this method.
     pub(crate) fn parse_v2<'a, O>(
         &'a mut self,
         mut parse_next: impl winnow::Parser<

@@ -1,3 +1,20 @@
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Parsers for data types.
+//!
+//! This module contains parsers for data types. To handle the anbiguity of `>>` and `> >` in struct definition,
+//! we need to use a stateful parser here. See [`with_state`] for more information.
+
 use core::cell::RefCell;
 use std::rc::Rc;
 
@@ -25,6 +42,7 @@ struct DataTypeParsingState {
 
 type StatefulStream<S> = Stateful<S, DataTypeParsingState>;
 
+/// Consume struct type definitions
 fn struct_data_type<S>(input: &mut StatefulStream<S>) -> PResult<Vec<StructField>>
 where
     S: TokenStream,
@@ -32,6 +50,7 @@ where
     let remaining_close1 = input.state.remaining_close.clone();
     let remaining_close2 = input.state.remaining_close.clone();
 
+    // Consume an abstract `>`, it may be the `remaining_close1` flag set by previous `>>`.
     let consume_close = alt((
         move |input: &mut StatefulStream<S>| -> PResult<()> {
             if *remaining_close1.borrow() {
@@ -70,6 +89,9 @@ where
     .parse_next(input)
 }
 
+/// Consume a data type definition.
+///
+/// The parser is the main entry point for data type parsing.
 pub fn data_type<S>(input: &mut S) -> PResult<DataType>
 where
     S: TokenStream,
@@ -79,6 +101,7 @@ where
         .parse_next(input)
 }
 
+/// Data type parsing with stateful stream.
 fn data_type_stateful<S>(input: &mut StatefulStream<S>) -> PResult<DataType>
 where
     S: TokenStream,
@@ -91,6 +114,7 @@ where
         .parse_next(input)
 }
 
+/// Consume a data type except [`DataType::Array`].
 fn data_type_stateful_inner<S>(input: &mut StatefulStream<S>) -> PResult<DataType>
 where
     S: TokenStream,
