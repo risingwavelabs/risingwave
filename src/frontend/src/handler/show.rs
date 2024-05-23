@@ -116,7 +116,7 @@ fn schema_or_search_path(
         vec![s.real_value()]
     } else {
         search_path
-            .path()
+            .real_path()
             .iter()
             .map(|s| {
                 if s.eq(USER_NAME_WILD_CARD) {
@@ -278,7 +278,7 @@ pub async fn handle_show_object(
     let names = match command {
         // If not include schema name, use default schema name
         ShowObject::Table { schema } => {
-            let search_path = session.shared_config().read().search_path.clone();
+            let search_path = session.config().search_path();
             let mut table_names_in_schema = vec![];
             for schema in schema_or_search_path(&session, &schema, &search_path) {
                 // If the schema is not found, skip it

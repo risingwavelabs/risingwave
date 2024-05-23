@@ -116,7 +116,7 @@ pub struct SessionConfig {
     /// See <https://www.postgresql.org/docs/14/runtime-config-client.html#GUC-SEARCH-PATH>
     #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = SearchPath::default())]
-    pub search_path: SearchPath,
+    search_path: SearchPath,
 
     /// If `VISIBILITY_MODE` is all, we will support querying data without checkpoint.
     #[serde_as(as = "DisplayFromStr")]

@@ -215,3 +215,37 @@ tablespace character varying false NULL
 hasindexes boolean false NULL
 ispopulated boolean false NULL
 definition character varying false NULL
+
+# show tables according to search path
+
+statement ok
+create schema show_another_schema;
+
+statement ok
+create table show_another_schema.t_another (v1 int);
+
+statement ok
+create table t4 (v1 int);
+
+query T
+show tables;
+----
+t4
+
+statement ok
+set search_path to show_another_schema, public;
+
+query T
+show tables;
+----
+t_another
+t4
+
+statement ok
+drop table t4;
+
+statement ok
+drop table show_another_schema.t_another;
+
+statement ok
+drop schema show_another_schema;
