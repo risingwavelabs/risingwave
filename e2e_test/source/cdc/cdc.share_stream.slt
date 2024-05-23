@@ -159,7 +159,7 @@ SELECT count(*) as cnt from rw.products_test where commit_ts = '1970-01-01 00:00
 
 # commit_ts of new records should greater than '1970-01-01 00:00:00+00:00'
 query TTT
-SELECT name,description FROM rw.products_test order by id where commit_ts > '1970-01-01 00:00:00+00:00'
+SELECT name,description FROM rw.products_test where commit_ts > '1970-01-01 00:00:00+00:00' order by id
 ----
 'Juice', '100ml Juice'
 
@@ -283,7 +283,7 @@ SELECT id,name,email_address,credit_card,city from person_new order by id;
 
 # historical data
 query ITTTT
-SELECT id,name,email_address,credit_card,city from person_new order by id where commit_ts = '1970-01-01 00:00:00+00:00';
+SELECT id,name,email_address,credit_card,city from person_new where commit_ts = '1970-01-01 00:00:00+00:00' order by id;
 ----
 1000 vicky noris yplkvgz@qbxfg.com 7878 5821 1864 2539 cheyenne
 1001 peter white myckhsp@xpmpe.com 1781 2313 8157 6974 boise
@@ -291,7 +291,7 @@ SELECT id,name,email_address,credit_card,city from person_new order by id where 
 
 # incremental data
 query ITTTT
-SELECT id,name,email_address,credit_card,city from person_new order by id where commit_ts > '1970-01-01 00:00:00+00:00';
+SELECT id,name,email_address,credit_card,city from person_new where commit_ts > '1970-01-01 00:00:00+00:00' order by id;
 ----
 1100 noris ypl@qbxfg.com 1864 2539 enne
 1101 white myc@xpmpe.com 8157 6974 se
