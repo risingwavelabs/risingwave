@@ -160,6 +160,7 @@ where
         Keyword::INTERVAL => empty.value(DataType::Interval),
         Keyword::REGCLASS => empty.value(DataType::Regclass),
         Keyword::REGPROC => empty.value(DataType::Regproc),
+        Keyword::TEXT => empty.value(DataType::Text),
         Keyword::STRUCT => cut_err(struct_data_type).map(DataType::Struct),
         Keyword::BYTEA => empty.value(DataType::Bytea),
         Keyword::NUMERIC | Keyword::DECIMAL | Keyword::DEC => cut_err(precision_and_scale()).map(|(precision, scale)| {
