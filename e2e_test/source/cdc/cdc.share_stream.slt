@@ -161,7 +161,8 @@ SELECT count(*) as cnt from rw.products_test where commit_ts = '1970-01-01 00:00
 query TTT
 SELECT name,description FROM rw.products_test where commit_ts > '1970-01-01 00:00:00+00:00' order by id
 ----
-'Juice', '100ml Juice'
+Milk Milk is a white liquid food
+Juice 100ml Juice
 
 query ITTT
 SELECT order_id,order_date,customer_name,product_id FROM orders_test order by order_id limit 3
