@@ -27,6 +27,11 @@ statement ok
 drop table tt1;
 
 statement ok
+FLUSH;
+
+sleep 3s
+
+statement ok
 create table tt1 (v1 int,
   v2 timestamptz,
   PRIMARY KEY (v1)
