@@ -43,7 +43,7 @@ where
     }
 
     cut_err(
-        delimited(Token::LParen, literal_uint, Token::LParen).try_map(move |v| {
+        delimited(Token::LParen, literal_uint, Token::RParen).try_map(move |v| {
             if range.contains(&v) {
                 Ok(v)
             } else {
