@@ -25,10 +25,10 @@ use winnow::error::StrContext;
 use winnow::{PResult, Parser, Stateful};
 
 use super::{
-    identifier_non_reserved, keyword, literal_uint, precision_in_range, token, with_state,
+    identifier_non_reserved, keyword, literal_uint, object_name, precision_in_range, with_state,
     TokenStream,
 };
-use crate::ast::{DataType, Ident, ObjectName, StructField};
+use crate::ast::{DataType, StructField};
 use crate::keywords::Keyword;
 use crate::tokenizer::Token;
 
@@ -170,16 +170,16 @@ where
 
     alt((
         keywords,
-        token.verify_map(|t| match t.token {
-            // JSONB is not a keyword, but a special data type.
-            Token::Word(w) if w.value.eq_ignore_ascii_case("jsonb") => Some(DataType::Jsonb),
-            // FIXME: Really parse a full object name here.
-            Token::Word(w) => Some(DataType::Custom(ObjectName::from(vec![
-                Ident::new_unchecked(w.value),
-            ]))),
-            _ => None,
+        object_name.map(|name| {
+            if name.to_string().eq_ignore_ascii_case("jsonb") {
+                // JSONB is not a keyword
+                DataType::Jsonb
+            } else {
+                DataType::Custom(name)
+            }
         }),
     ))
+    .context(StrContext::Label("non_keyword_data_type"))
     .context(StrContext::Label("data_type_inner"))
     .parse_next(input)
 }

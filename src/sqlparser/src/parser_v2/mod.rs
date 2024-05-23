@@ -10,13 +10,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use winnow::combinator::preceded;
+use winnow::combinator::{preceded, separated};
 use winnow::error::{ContextError, StrContext};
 use winnow::stream::{ContainsToken, Location, Stream, StreamIsPartial};
 use winnow::token::{any, take_while};
 use winnow::{PResult, Parser, Stateful};
 
-use crate::ast::Ident;
+use crate::ast::{Ident, ObjectName};
 use crate::keywords::{self, Keyword};
 use crate::tokenizer::{Token, TokenWithLocation};
 
@@ -121,6 +121,18 @@ where
             }
             _ => None,
         })
+        .parse_next(input)
+}
+
+/// Consume an object name.
+///
+/// FIXME: Object name is extremely complex, we only handle a subset here.
+fn object_name<S>(input: &mut S) -> PResult<ObjectName>
+where
+    S: TokenStream,
+{
+    separated(1.., identifier_non_reserved, Token::Period)
+        .map(ObjectName)
         .parse_next(input)
 }
 
