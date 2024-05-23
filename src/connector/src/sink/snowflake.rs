@@ -22,7 +22,7 @@ use bytes::{Bytes, BytesMut};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_object_store::object::{ObjectStore, StreamingUploader};
+use risingwave_object_store::object::{ObjectStore, OpendalStreamingUploader, StreamingUploader};
 use serde::Deserialize;
 use serde_json::Value;
 use serde_with::serde_as;
@@ -184,7 +184,7 @@ pub struct SnowflakeSinkWriter {
     /// note: the option here *implicitly* indicates whether we have at
     /// least call `streaming_upload` once during this epoch,
     /// which is mainly used to prevent uploading empty data.
-    streaming_uploader: Option<(Box<dyn StreamingUploader>, String)>,
+    streaming_uploader: Option<(OpendalStreamingUploader, String)>,
 }
 
 impl SnowflakeSinkWriter {
@@ -242,7 +242,7 @@ impl SnowflakeSinkWriter {
     /// and `streaming_upload` being called the first time.
     /// i.e., lazily initialization of the internal `streaming_uploader`.
     /// plus, this function is *pure*, the `&mut self` here is to make rustc (and tokio) happy.
-    async fn new_streaming_uploader(&mut self) -> Result<(Box<dyn StreamingUploader>, String)> {
+    async fn new_streaming_uploader(&mut self) -> Result<(OpendalStreamingUploader, String)> {
         let file_suffix = self.file_suffix();
         let path = generate_s3_file_name(self.s3_client.s3_path(), &file_suffix);
         let uploader = self

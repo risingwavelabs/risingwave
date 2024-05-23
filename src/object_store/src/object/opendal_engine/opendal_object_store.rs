@@ -27,8 +27,8 @@ use risingwave_common::range::RangeBoundsExt;
 use thiserror_ext::AsReport;
 
 use crate::object::{
-    prefix, BoxedStreamingUploader, ObjectDataStream, ObjectError, ObjectMetadata,
-    ObjectMetadataIter, ObjectRangeBounds, ObjectResult, ObjectStore, StreamingUploader,
+    prefix, ObjectDataStream, ObjectError, ObjectMetadata, ObjectMetadataIter, ObjectRangeBounds,
+    ObjectResult, ObjectStore, StreamingUploader,
 };
 
 /// Opendal object storage.
@@ -70,6 +70,8 @@ impl OpendalObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for OpendalObjectStore {
+    type StreamingUploader = OpendalStreamingUploader;
+
     fn get_object_prefix(&self, obj_id: u64) -> String {
         match self.engine_type {
             EngineType::S3 => prefix::s3::get_object_prefix(obj_id),
@@ -94,11 +96,11 @@ impl ObjectStore for OpendalObjectStore {
         }
     }
 
-    async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
-        Ok(Box::new(
+    async fn streaming_upload(&self, path: &str) -> ObjectResult<Self::StreamingUploader> {
+        Ok(
             OpendalStreamingUploader::new(self.op.clone(), path.to_string(), self.config.clone())
                 .await?,
-        ))
+        )
     }
 
     async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
@@ -244,6 +246,10 @@ impl ObjectStore for OpendalObjectStore {
             EngineType::Fs => "Fs",
         }
     }
+
+    fn support_streaming_upload(&self) -> bool {
+        self.op.info().native_capability().write_can_multi
+    }
 }
 
 /// Store multiple parts in a map, and concatenate them on finish.
@@ -280,7 +286,6 @@ impl OpendalStreamingUploader {
 
 const OPENDAL_BUFFER_SIZE: usize = 16 * 1024 * 1024;
 
-#[async_trait::async_trait]
 impl StreamingUploader for OpendalStreamingUploader {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
         self.writer.write(data).await?;
@@ -288,7 +293,7 @@ impl StreamingUploader for OpendalStreamingUploader {
         Ok(())
     }
 
-    async fn finish(mut self: Box<Self>) -> ObjectResult<()> {
+    async fn finish(mut self) -> ObjectResult<()> {
         match self.writer.close().await {
             Ok(_) => (),
             Err(err) => {
@@ -307,8 +312,6 @@ impl StreamingUploader for OpendalStreamingUploader {
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
-
     use super::*;
 
     async fn list_all(prefix: &str, store: &OpendalObjectStore) -> Vec<ObjectMetadata> {

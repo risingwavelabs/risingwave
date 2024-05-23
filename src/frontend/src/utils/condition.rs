@@ -1018,10 +1018,8 @@ mod cast_compare {
 #[cfg(test)]
 mod tests {
     use rand::Rng;
-    use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::expr::{FunctionCall, InputRef};
 
     #[test]
     fn test_split() {

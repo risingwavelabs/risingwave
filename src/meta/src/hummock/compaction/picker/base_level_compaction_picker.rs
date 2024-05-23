@@ -30,7 +30,7 @@ use crate::hummock::compaction::{create_overlap_strategy, CompactionDeveloperCon
 use crate::hummock::level_handler::LevelHandler;
 
 std::thread_local! {
-    static LOG_COUNTER: RefCell<usize> = RefCell::new(0);
+    static LOG_COUNTER: RefCell<usize> = const { RefCell::new(0) };
 }
 
 pub struct LevelCompactionPicker {
@@ -285,14 +285,11 @@ impl LevelCompactionPicker {
 
 #[cfg(test)]
 pub mod tests {
-    use itertools::Itertools;
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::selector::tests::*;
-    use crate::hummock::compaction::{
-        CompactionDeveloperConfig, CompactionMode, TierCompactionPicker,
-    };
+    use crate::hummock::compaction::{CompactionMode, TierCompactionPicker};
 
     fn create_compaction_picker_for_test() -> LevelCompactionPicker {
         let config = Arc::new(

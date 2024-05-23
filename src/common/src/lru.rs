@@ -27,7 +27,7 @@ use hashbrown::HashTable;
 use crate::sequence::{AtomicSequence, Sequence, Sequencer};
 
 thread_local! {
-    pub static SEQUENCER: RefCell<Sequencer> = RefCell::new(Sequencer::new(Sequencer::DEFAULT_STEP, Sequencer::DEFAULT_LAG));
+    pub static SEQUENCER: RefCell<Sequencer> = const { RefCell::new(Sequencer::new(Sequencer::DEFAULT_STEP, Sequencer::DEFAULT_LAG)) };
 }
 
 static SEQUENCER_DEFAULT_STEP: AtomicSequence = AtomicSequence::new(Sequencer::DEFAULT_STEP);

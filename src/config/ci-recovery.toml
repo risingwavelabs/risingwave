@@ -10,5 +10,6 @@ imm_merge_threshold = 2
 
 [system]
 barrier_interval_ms = 250
+# If this is changed, remember to also change e2e_test/source_inline/pubsub/pubsub.slt
 checkpoint_frequency = 5
 max_concurrent_creating_streaming_jobs = 0

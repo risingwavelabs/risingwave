@@ -24,7 +24,6 @@ use risingwave_pb::meta::get_reschedule_plan_request::{
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use risingwave_pb::meta::{GetClusterInfoResponse, GetReschedulePlanResponse};
 use risingwave_stream::task::FragmentId;
-use serde_yaml;
 use thiserror_ext::AsReport;
 
 use crate::cmd_impl::meta::ReschedulePayload;

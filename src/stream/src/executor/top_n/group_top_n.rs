@@ -267,11 +267,9 @@ mod tests {
     use std::sync::atomic::AtomicU64;
 
     use assert_matches::assert_matches;
-    use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::catalog::Field;
     use risingwave_common::hash::SerializedKey;
-    use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
@@ -279,7 +277,6 @@ mod tests {
     use super::*;
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{ActorContext, Barrier, Execute, Message};
 
     fn create_schema() -> Schema {
         Schema {

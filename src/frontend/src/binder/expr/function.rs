@@ -40,8 +40,8 @@ use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, UdfContext};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
-    AggCall, Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, Literal, Now, OrderBy,
-    TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
+    AggCall, CastContext, Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, Literal,
+    Now, OrderBy, TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
 };
 use crate::utils::Condition;
 
@@ -1012,6 +1012,22 @@ impl Binder {
                 ("to_ascii", raw_call(ExprType::ToAscii)),
                 ("to_hex", raw_call(ExprType::ToHex)),
                 ("quote_ident", raw_call(ExprType::QuoteIdent)),
+                ("quote_literal", guard_by_len(1, raw(|_binder, mut inputs| {
+                    if inputs[0].return_type() != DataType::Varchar {
+                        // Support `quote_literal(any)` by converting it to `quote_literal(any::text)`
+                        // Ref. https://github.com/postgres/postgres/blob/REL_16_1/src/include/catalog/pg_proc.dat#L4641
+                        FunctionCall::cast_mut(&mut inputs[0], DataType::Varchar, CastContext::Explicit)?;
+                    }
+                    Ok(FunctionCall::new_unchecked(ExprType::QuoteLiteral, inputs, DataType::Varchar).into())
+                }))),
+                ("quote_nullable", guard_by_len(1, raw(|_binder, mut inputs| {
+                    if inputs[0].return_type() != DataType::Varchar {
+                        // Support `quote_nullable(any)` by converting it to `quote_nullable(any::text)`
+                        // Ref. https://github.com/postgres/postgres/blob/REL_16_1/src/include/catalog/pg_proc.dat#L4650
+                        FunctionCall::cast_mut(&mut inputs[0], DataType::Varchar, CastContext::Explicit)?;
+                    }
+                    Ok(FunctionCall::new_unchecked(ExprType::QuoteNullable, inputs, DataType::Varchar).into())
+                }))),
                 ("string_to_array", raw_call(ExprType::StringToArray)),
                 ("encode", raw_call(ExprType::Encode)),
                 ("decode", raw_call(ExprType::Decode)),
@@ -1303,6 +1319,51 @@ impl Binder {
                 ("pg_get_partkeydef", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
                 ("pg_encoding_to_char", raw_literal(ExprImpl::literal_varchar("UTF8".into()))),
                 ("has_database_privilege", raw_literal(ExprImpl::literal_bool(true))),
+                ("has_table_privilege", raw(|binder, mut inputs|{
+                    if inputs.len() == 2 {
+                        inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
+                    }
+                    if inputs.len() == 3 {
+                        if inputs[1].return_type() == DataType::Varchar {
+                            inputs[1].cast_to_regclass_mut()?;
+                        }
+                        Ok(FunctionCall::new(ExprType::HasTablePrivilege, inputs)?.into())
+                    } else {
+                        Err(ErrorCode::ExprError(
+                            "Too many/few arguments for pg_catalog.has_table_privilege()".into(),
+                        )
+                        .into())
+                    }
+                })),
+                ("has_any_column_privilege", raw(|binder, mut inputs|{
+                    if inputs.len() == 2 {
+                        inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
+                    }
+                    if inputs.len() == 3 {
+                        if inputs[1].return_type() == DataType::Varchar {
+                            inputs[1].cast_to_regclass_mut()?;
+                        }
+                        Ok(FunctionCall::new(ExprType::HasAnyColumnPrivilege, inputs)?.into())
+                    } else {
+                        Err(ErrorCode::ExprError(
+                            "Too many/few arguments for pg_catalog.has_any_column_privilege()".into(),
+                        )
+                        .into())
+                    }
+                })),
+                ("has_schema_privilege", raw(|binder, mut inputs|{
+                    if inputs.len() == 2 {
+                        inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
+                    }
+                    if inputs.len() == 3 {
+                        Ok(FunctionCall::new(ExprType::HasSchemaPrivilege, inputs)?.into())
+                    } else {
+                        Err(ErrorCode::ExprError(
+                            "Too many/few arguments for pg_catalog.has_schema_privilege()".into(),
+                        )
+                        .into())
+                    }
+                })),
                 ("pg_stat_get_numscans", raw_literal(ExprImpl::literal_bigint(0))),
                 ("pg_backend_pid", raw(|binder, _inputs| {
                     // FIXME: the session id is not global unique in multi-frontend env.

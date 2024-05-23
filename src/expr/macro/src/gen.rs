@@ -365,13 +365,13 @@ impl FunctionAttr {
             ReturnTypeKind::Result => quote! {
                 match #output {
                     Ok(x) => Some(x),
-                    Err(e) => { errors.push(e); None }
+                    Err(e) => { errors.push(ExprError::Function(Box::new(e))); None }
                 }
             },
             ReturnTypeKind::ResultOption => quote! {
                 match #output {
                     Ok(x) => x,
-                    Err(e) => { errors.push(e); None }
+                    Err(e) => { errors.push(ExprError::Function(Box::new(e))); None }
                 }
             },
         };

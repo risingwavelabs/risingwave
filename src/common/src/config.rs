@@ -620,6 +620,7 @@ pub struct StorageConfig {
 
     /// The threshold for the number of immutable memtables to merge to a new imm.
     #[serde(default = "default::storage::imm_merge_threshold")]
+    #[deprecated]
     pub imm_merge_threshold: usize,
 
     /// Whether to enable write conflict detection
@@ -2119,8 +2120,6 @@ pub struct CompactionConfig {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use super::*;
 
     /// This test ensures that `config/example.toml` is up-to-date with the default values specified

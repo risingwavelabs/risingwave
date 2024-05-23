@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
@@ -31,6 +32,8 @@ use super::{MonitoredStateStoreGetStats, MonitoredStateStoreIterStats, Monitored
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
+use crate::monitor::monitored_storage_metrics::StateStoreIterStats;
+use crate::monitor::{StateStoreIterLogStats, StateStoreIterStatsTrait};
 use crate::store::*;
 /// A state store wrapper for monitoring metrics.
 #[derive(Clone)]
@@ -74,21 +77,21 @@ impl<S> MonitoredStateStore<S> {
     }
 }
 
-/// A util function to break the type connection between two opaque return types defined by `impl`.
-pub(crate) fn identity(input: impl StateStoreIter) -> impl StateStoreIter {
-    input
-}
-
 // Note: it is important to define the `MonitoredStateStoreIter` type alias, as it marks that
 // the return type of `monitored_iter` only captures the lifetime `'s` and has nothing to do with
 // `'a`. If we simply use `impl StateStoreIter + 's`, the rust compiler will also capture
 // the lifetime `'a` in the scope defined in the scope.
 impl<S> MonitoredStateStore<S> {
-    async fn monitored_iter<'a, St: StateStoreIter + 'a>(
+    async fn monitored_iter<
+        'a,
+        Item: IterItem,
+        I: StateStoreIter<Item> + 'a,
+        Stat: StateStoreIterStatsTrait<Item = Item>,
+    >(
         &'a self,
         table_id: TableId,
-        iter_stream_future: impl Future<Output = StorageResult<St>> + 'a,
-    ) -> StorageResult<MonitoredStateStoreIter<St>> {
+        iter_stream_future: impl Future<Output = StorageResult<I>> + 'a,
+    ) -> StorageResult<MonitoredStateStoreIter<Item, I, Stat>> {
         // start time takes iterator build time into account
         // wait for iterator creation (e.g. seek)
         let start_time = Instant::now();
@@ -100,11 +103,12 @@ impl<S> MonitoredStateStore<S> {
         // create a monitored iterator to collect metrics
         let monitored = MonitoredStateStoreIter {
             inner: iter_stream,
-            stats: MonitoredStateStoreIterStats::new(
-                table_id.table_id,
-                iter_init_duration,
-                self.storage_metrics.clone(),
-            ),
+            stats: MonitoredStateStoreIterStats {
+                inner: Stat::new(table_id.table_id, &self.storage_metrics, iter_init_duration),
+                table_id: table_id.table_id,
+                metrics: self.storage_metrics.clone(),
+            },
+            _phantom: PhantomData,
         };
         Ok(monitored)
     }
@@ -146,6 +150,7 @@ impl<S> MonitoredStateStore<S> {
 impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
     type ChangeLogIter = impl StateStoreReadChangeLogIter;
     type Iter = impl StateStoreReadIter;
+    type RevIter = impl StateStoreReadIter;
 
     fn get(
         &self,
@@ -164,11 +169,22 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
         epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
-        self.monitored_iter(
+        self.monitored_iter::<'_, _, _, StateStoreIterStats>(
             read_options.table_id,
             self.inner.iter(key_range, epoch, read_options),
         )
-        .map_ok(identity)
+    }
+
+    fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
+        self.monitored_iter::<'_, _, _, StateStoreIterStats>(
+            read_options.table_id,
+            self.inner.rev_iter(key_range, epoch, read_options),
+        )
     }
 
     fn iter_log(
@@ -177,12 +193,16 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
         key_range: TableKeyRange,
         options: ReadLogOptions,
     ) -> impl Future<Output = StorageResult<Self::ChangeLogIter>> + Send + '_ {
-        self.inner.iter_log(epoch_range, key_range, options)
+        self.monitored_iter::<'_, _, _, StateStoreIterLogStats>(
+            options.table_id,
+            self.inner.iter_log(epoch_range, key_range, options),
+        )
     }
 }
 
 impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
     type Iter<'a> = impl StateStoreIter + 'a;
+    type RevIter<'a> = impl StateStoreIter + 'a;
 
     async fn may_exist(
         &self,
@@ -221,9 +241,22 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_ {
         let table_id = read_options.table_id;
-        // TODO: may collect the metrics as local
-        self.monitored_iter(table_id, self.inner.iter(key_range, read_options))
-            .map_ok(identity)
+        self.monitored_iter::<'_, _, _, StateStoreIterStats>(
+            table_id,
+            self.inner.iter(key_range, read_options),
+        )
+    }
+
+    fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_ {
+        let table_id = read_options.table_id;
+        self.monitored_iter::<'_, _, _, StateStoreIterStats>(
+            table_id,
+            self.inner.rev_iter(key_range, read_options),
+        )
     }
 
     fn insert(
@@ -348,23 +381,29 @@ impl MonitoredStateStore<HummockStorage> {
 }
 
 /// A state store iterator wrapper for monitoring metrics.
-pub struct MonitoredStateStoreIter<S> {
-    inner: S,
-    stats: MonitoredStateStoreIterStats,
+pub(crate) struct MonitoredStateStoreIter<
+    Item: IterItem,
+    I,
+    S: StateStoreIterStatsTrait<Item = Item>,
+> {
+    inner: I,
+    stats: MonitoredStateStoreIterStats<S>,
+    _phantom: PhantomData<Item>,
 }
 
-impl<S: StateStoreIter> StateStoreIter for MonitoredStateStoreIter<S> {
-    async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
-        if let Some((key, value)) = self
+impl<Item: IterItem, I: StateStoreIter<Item>, S: StateStoreIterStatsTrait<Item = Item>>
+    StateStoreIter<Item> for MonitoredStateStoreIter<Item, I, S>
+{
+    async fn try_next(&mut self) -> StorageResult<Option<Item::ItemRef<'_>>> {
+        if let Some(item) = self
             .inner
             .try_next()
             .instrument(tracing::trace_span!("store_iter_try_next"))
             .await
             .inspect_err(|e| error!(error = %e.as_report(), "Failed in next"))?
         {
-            self.stats.total_items += 1;
-            self.stats.total_size += key.encoded_len() + value.len();
-            Ok(Some((key, value)))
+            self.stats.inner.observe(item);
+            Ok(Some(item))
         } else {
             Ok(None)
         }

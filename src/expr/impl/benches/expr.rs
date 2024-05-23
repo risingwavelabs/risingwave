@@ -29,7 +29,6 @@ use risingwave_common::types::*;
 use risingwave_expr::aggregate::{build_append_only, AggArgs, AggCall, AggKind};
 use risingwave_expr::expr::*;
 use risingwave_expr::sig::FUNCTION_REGISTRY;
-use risingwave_expr::ExprError;
 use risingwave_pb::expr::expr_node::PbType;
 use thiserror_ext::AsReport;
 

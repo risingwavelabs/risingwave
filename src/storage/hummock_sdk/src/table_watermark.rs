@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::fmt::Display;
 use std::mem::size_of;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::sync::Arc;
@@ -259,11 +259,11 @@ pub enum WatermarkDirection {
     Descending,
 }
 
-impl ToString for WatermarkDirection {
-    fn to_string(&self) -> String {
+impl Display for WatermarkDirection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            WatermarkDirection::Ascending => "Ascending".to_string(),
-            WatermarkDirection::Descending => "Descending".to_string(),
+            WatermarkDirection::Ascending => write!(f, "Ascending"),
+            WatermarkDirection::Descending => write!(f, "Descending"),
         }
     }
 }
@@ -551,13 +551,8 @@ impl TableWatermarks {
         // epoch watermark are added from later epoch to earlier epoch.
         // reverse to ensure that earlier epochs are at the front
         result_epoch_watermark.reverse();
-        assert!(
-            result_epoch_watermark.is_sorted_by(|(first_epoch, _), (second_epoch, _)| {
-                let ret = first_epoch.cmp(second_epoch);
-                assert_ne!(ret, Ordering::Equal);
-                Some(ret)
-            })
-        );
+        assert!(result_epoch_watermark
+            .is_sorted_by(|(first_epoch, _), (second_epoch, _)| { first_epoch < second_epoch }));
         *self = TableWatermarks {
             watermarks: result_epoch_watermark,
             direction: self.direction,
