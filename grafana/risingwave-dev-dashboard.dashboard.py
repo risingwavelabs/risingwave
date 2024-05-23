@@ -1221,6 +1221,24 @@ def section_streaming_actors(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_actor_latency(
+                    "Merger Barrier Align",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('stream_merge_barrier_align_duration_bucket')}[$__rate_interval])) by (le, fragment_id, {COMPONENT_LABEL}))",
+                                f"p{legend} - fragment {{{{fragment_id}}}} - {{{{{COMPONENT_LABEL}}}}}",
+                            ),
+                            [90, 99, 999, "max"],
+                        ),
+                        panels.target(
+                            f"sum by(le, fragment_id, job)(rate({metric('stream_merge_barrier_align_duration_sum')}[$__rate_interval])) / sum by(le,fragment_id,{COMPONENT_LABEL}) (rate({metric('stream_merge_barrier_align_duration_count')}[$__rate_interval])) > 0",
+                            "avg - fragment {{fragment_id}} - {{%s}}"
+                            % COMPONENT_LABEL,
+                        ),
+                    ],
+                ),
                 panels.timeseries_percentage(
                     "Join Actor Input Blocking Time Ratio",
                     "",
