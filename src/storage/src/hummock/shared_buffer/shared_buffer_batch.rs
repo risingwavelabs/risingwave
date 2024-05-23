@@ -578,10 +578,11 @@ impl SharedBufferBatch {
     ) -> Self {
         let inner =
             SharedBufferBatchInner::new(epoch, spill_offset, sorted_items, None, size, None);
+        use crate::hummock::event_handler::TEST_LOCAL_INSTANCE_ID;
         SharedBufferBatch {
             inner: Arc::new(inner),
             table_id,
-            instance_id: LocalInstanceId::default(),
+            instance_id: TEST_LOCAL_INSTANCE_ID,
         }
     }
 }

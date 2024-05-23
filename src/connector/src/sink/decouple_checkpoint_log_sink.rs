@@ -21,13 +21,13 @@ use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
 use crate::sink::writer::SinkWriter;
 use crate::sink::{LogSinker, Result, SinkLogReader, SinkMetrics};
 
-pub struct IcebergLogSinkerOf<W> {
+pub struct DecoupleCheckpointLogSinkerOf<W> {
     writer: W,
     sink_metrics: SinkMetrics,
     commit_checkpoint_interval: NonZeroU64,
 }
 
-impl<W> IcebergLogSinkerOf<W> {
+impl<W> DecoupleCheckpointLogSinkerOf<W> {
     /// Create a log sinker with a commit checkpoint interval. The sinker should be used with a
     /// decouple log reader `KvLogStoreReader`.
     pub fn new(
@@ -35,7 +35,7 @@ impl<W> IcebergLogSinkerOf<W> {
         sink_metrics: SinkMetrics,
         commit_checkpoint_interval: NonZeroU64,
     ) -> Self {
-        IcebergLogSinkerOf {
+        DecoupleCheckpointLogSinkerOf {
             writer,
             sink_metrics,
             commit_checkpoint_interval,
@@ -44,7 +44,7 @@ impl<W> IcebergLogSinkerOf<W> {
 }
 
 #[async_trait]
-impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for IcebergLogSinkerOf<W> {
+impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for DecoupleCheckpointLogSinkerOf<W> {
     async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<()> {
         let mut sink_writer = self.writer;
         let sink_metrics = self.sink_metrics;

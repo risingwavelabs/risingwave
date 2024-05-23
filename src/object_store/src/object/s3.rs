@@ -59,8 +59,8 @@ use tokio::task::JoinHandle;
 
 use super::object_metrics::ObjectStoreMetrics;
 use super::{
-    prefix, retry_request, BoxedStreamingUploader, Bytes, ObjectError, ObjectErrorInner,
-    ObjectMetadata, ObjectRangeBounds, ObjectResult, ObjectStore, StreamingUploader,
+    prefix, retry_request, Bytes, ObjectError, ObjectErrorInner, ObjectMetadata, ObjectRangeBounds,
+    ObjectResult, ObjectStore, StreamingUploader,
 };
 use crate::object::{
     try_update_failure_metric, ObjectDataStream, ObjectMetadataIter, OperationType,
@@ -301,7 +301,6 @@ impl S3StreamingUploader {
     }
 }
 
-#[async_trait::async_trait]
 impl StreamingUploader for S3StreamingUploader {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
         fail_point!("s3_write_bytes_err", |_| Err(ObjectError::internal(
@@ -321,7 +320,7 @@ impl StreamingUploader for S3StreamingUploader {
     /// If the multipart upload has not been initiated, we can use `PutObject` instead to save the
     /// `CreateMultipartUpload` and `CompleteMultipartUpload` requests. Otherwise flush the
     /// remaining data of the buffer to S3 as a new part.
-    async fn finish(mut self: Box<Self>) -> ObjectResult<()> {
+    async fn finish(mut self) -> ObjectResult<()> {
         fail_point!("s3_finish_streaming_upload_err", |_| Err(
             ObjectError::internal("s3 finish streaming upload error")
         ));
@@ -381,6 +380,8 @@ pub struct S3ObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for S3ObjectStore {
+    type StreamingUploader = S3StreamingUploader;
+
     fn get_object_prefix(&self, obj_id: u64) -> String {
         // Delegate to static method to avoid creating an `S3ObjectStore` in unit test.
         prefix::s3::get_object_prefix(obj_id)
@@ -407,18 +408,18 @@ impl ObjectStore for S3ObjectStore {
         }
     }
 
-    async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
+    async fn streaming_upload(&self, path: &str) -> ObjectResult<Self::StreamingUploader> {
         fail_point!("s3_streaming_upload_err", |_| Err(ObjectError::internal(
             "s3 streaming upload error"
         )));
-        Ok(Box::new(S3StreamingUploader::new(
+        Ok(S3StreamingUploader::new(
             self.client.clone(),
             self.bucket.clone(),
             self.part_size,
             path.to_string(),
             self.metrics.clone(),
             self.config.clone(),
-        )))
+        ))
     }
 
     /// Amazon S3 doesn't support retrieving multiple ranges of data per GET request.

@@ -15,92 +15,58 @@
 use std::cmp;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use function_name::named;
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    build_initial_compaction_group_levels, get_compaction_group_ids, BranchedSstInfo,
+    build_initial_compaction_group_levels, get_compaction_group_ids,
+    get_table_compaction_group_id_mapping, BranchedSstInfo,
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::table_stats::add_prost_table_stats_map;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockSstableObjectId, HummockVersionId, FIRST_VERSION_ID,
+    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
+    FIRST_VERSION_ID,
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionStats,
-    SstableInfo, TableStats,
+    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot,
+    HummockVersionStats, SstableInfo, TableStats,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
 use super::check_cg_write_limit;
 use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
-use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
-use crate::hummock::manager::{commit_multi_var, create_trx_wrapper, read_lock, write_lock};
-use crate::hummock::metrics_utils::{
-    trigger_safepoint_stat, trigger_write_stop_stats, LocalTableMetrics,
-};
+use crate::hummock::manager::commit_multi_var;
+use crate::hummock::manager::context::ContextInfo;
+use crate::hummock::manager::gc::DeleteObjectTracker;
+use crate::hummock::metrics_utils::{trigger_write_stop_stats, LocalTableMetrics};
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::HummockManager;
-use crate::model::{VarTransaction, VarTransactionWrapper};
-use crate::storage::MetaStore;
+use crate::model::VarTransaction;
 use crate::MetaResult;
-
-/// `HummockVersionSafePoint` prevents hummock versions GE than it from being GC.
-/// It's used by meta node itself to temporarily pin versions.
-pub struct HummockVersionSafePoint {
-    pub id: HummockVersionId,
-    event_sender: HummockManagerEventSender,
-}
-
-impl Drop for HummockVersionSafePoint {
-    fn drop(&mut self) {
-        if self
-            .event_sender
-            .send(HummockManagerEvent::DropSafePoint(self.id))
-            .is_err()
-        {
-            tracing::debug!("failed to drop hummock version safe point {}", self.id);
-        }
-    }
-}
 
 #[derive(Default)]
 pub struct Versioning {
     // Volatile states below
-    /// Avoide commit epoch epochs
+    /// Avoid commit epoch epochs
     /// Don't persist compaction version delta to meta store
     pub disable_commit_epochs: bool,
     /// Latest hummock version
     pub current_version: HummockVersion,
-    /// Objects that waits to be deleted from object store. It comes from either compaction, or
-    /// full GC (listing object store).
-    pub objects_to_delete: HashSet<HummockSstableObjectId>,
-    /// SST whose `object_id` != `sst_id`
-    pub branched_ssts: BTreeMap<
-        // SST object id
-        HummockSstableObjectId,
-        BranchedSstInfo,
-    >,
-    /// `version_safe_points` is similar to `pinned_versions` expect for being a transient state.
-    pub version_safe_points: Vec<HummockVersionId>,
-    /// Tables that write limit is trigger for.
-    pub write_limit: HashMap<CompactionGroupId, WriteLimit>,
+    pub local_metrics: HashMap<u32, LocalTableMetrics>,
 
     // Persistent states below
     pub hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
-    pub pinned_versions: BTreeMap<HummockContextId, HummockPinnedVersion>,
-    pub pinned_snapshots: BTreeMap<HummockContextId, HummockPinnedSnapshot>,
     /// Stats for latest hummock version.
     pub version_stats: HummockVersionStats,
     pub checkpoint: HummockVersionCheckpoint,
-    pub local_metrics: HashMap<u32, LocalTableMetrics>,
 }
 
-impl Versioning {
+impl ContextInfo {
     pub fn min_pinned_version_id(&self) -> HummockVersionId {
         let mut min_pinned_version_id = HummockVersionId::MAX;
         for id in self
@@ -113,64 +79,30 @@ impl Versioning {
         }
         min_pinned_version_id
     }
+}
 
+impl Versioning {
     /// Marks all objects <= `min_pinned_version_id` for deletion.
-    pub(super) fn mark_objects_for_deletion(&mut self) {
-        let min_pinned_version_id = self.min_pinned_version_id();
-        self.objects_to_delete.extend(
+    pub(super) fn mark_objects_for_deletion(
+        &self,
+        context_info: &ContextInfo,
+        delete_object_tracker: &DeleteObjectTracker,
+    ) {
+        let min_pinned_version_id = context_info.min_pinned_version_id();
+        delete_object_tracker.add(
             self.checkpoint
                 .stale_objects
                 .iter()
                 .filter(|(version_id, _)| **version_id <= min_pinned_version_id)
-                .flat_map(|(_, stale_objects)| stale_objects.id.clone()),
+                .flat_map(|(_, stale_objects)| stale_objects.id.iter().cloned()),
         );
-    }
-
-    /// If there is some sst in the target group which is just split but we have not compact it, we
-    ///  can not split or move state-table to those group, because it may cause data overlap.
-    pub fn check_branched_sst_in_target_group(
-        &self,
-        table_ids: &[StateTableId],
-        source_group_id: &CompactionGroupId,
-        target_group_id: &CompactionGroupId,
-    ) -> bool {
-        for groups in self.branched_ssts.values() {
-            if groups.contains_key(target_group_id) && groups.contains_key(source_group_id) {
-                return false;
-            }
-        }
-        let mut found_sstable_repeated = false;
-        let moving_table_ids: HashSet<&u32> = HashSet::from_iter(table_ids);
-        if let Some(group) = self.current_version.levels.get(target_group_id) {
-            let target_member_table_ids: HashSet<u32> =
-                HashSet::from_iter(group.member_table_ids.clone());
-            self.current_version.level_iter(*source_group_id, |level| {
-                for sst in &level.table_infos {
-                    if sst
-                        .table_ids
-                        .iter()
-                        .all(|table_id| !moving_table_ids.contains(table_id))
-                    {
-                        continue;
-                    }
-                    for table_id in &sst.table_ids {
-                        if target_member_table_ids.contains(table_id) {
-                            found_sstable_repeated = true;
-                            return false;
-                        }
-                    }
-                }
-                true
-            });
-        }
-        !found_sstable_repeated
     }
 }
 
 impl HummockManager {
-    #[named]
     pub async fn list_pinned_version(&self) -> Vec<HummockPinnedVersion> {
-        read_lock!(self, versioning)
+        self.context_info
+            .read()
             .await
             .pinned_versions
             .values()
@@ -178,9 +110,9 @@ impl HummockManager {
             .collect_vec()
     }
 
-    #[named]
     pub async fn list_pinned_snapshot(&self) -> Vec<HummockPinnedSnapshot> {
-        read_lock!(self, versioning)
+        self.context_info
+            .read()
             .await
             .pinned_snapshots
             .values()
@@ -205,71 +137,90 @@ impl HummockManager {
         Ok(workers)
     }
 
-    #[named]
+    /// Gets current version without pinning it.
+    /// Should not be called inside [`HummockManager`], because it requests locks internally.
+    ///
+    /// Note: this method can hurt performance because it will clone a large object.
+    pub async fn get_current_version(&self) -> HummockVersion {
+        self.versioning.read().await.current_version.clone()
+    }
+
+    pub async fn get_current_max_committed_epoch(&self) -> HummockEpoch {
+        self.versioning
+            .read()
+            .await
+            .current_version
+            .max_committed_epoch
+    }
+
+    /// Gets the mapping from table id to compaction group id
+    pub async fn get_table_compaction_group_id_mapping(
+        &self,
+    ) -> HashMap<StateTableId, CompactionGroupId> {
+        get_table_compaction_group_id_mapping(&self.versioning.read().await.current_version)
+    }
+
+    /// Get version deltas from meta store
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn list_version_deltas(
+        &self,
+        start_id: u64,
+        num_limit: u32,
+        committed_epoch_limit: HummockEpoch,
+    ) -> Result<Vec<HummockVersionDelta>> {
+        let versioning = self.versioning.read().await;
+        let version_deltas = versioning
+            .hummock_version_deltas
+            .range(start_id..)
+            .map(|(_id, delta)| delta)
+            .filter(|delta| delta.max_committed_epoch <= committed_epoch_limit)
+            .take(num_limit as _)
+            .cloned()
+            .collect();
+        Ok(version_deltas)
+    }
+
     pub async fn get_version_stats(&self) -> HummockVersionStats {
-        read_lock!(self, versioning).await.version_stats.clone()
-    }
-
-    #[named]
-    pub async fn register_safe_point(&self) -> HummockVersionSafePoint {
-        let mut wl = write_lock!(self, versioning).await;
-        let safe_point = HummockVersionSafePoint {
-            id: wl.current_version.id,
-            event_sender: self.event_sender.clone(),
-        };
-        wl.version_safe_points.push(safe_point.id);
-        trigger_safepoint_stat(&self.metrics, &wl.version_safe_points);
-        safe_point
-    }
-
-    #[named]
-    pub async fn unregister_safe_point(&self, safe_point: HummockVersionId) {
-        let mut wl = write_lock!(self, versioning).await;
-        let version_safe_points = &mut wl.version_safe_points;
-        if let Some(pos) = version_safe_points.iter().position(|sp| *sp == safe_point) {
-            version_safe_points.remove(pos);
-        }
-        trigger_safepoint_stat(&self.metrics, &wl.version_safe_points);
+        self.versioning.read().await.version_stats.clone()
     }
 
     /// Updates write limits for `target_groups` and sends notification.
     /// Returns true if `write_limit` has been modified.
     /// The implementation acquires `versioning` lock and `compaction_group_manager` lock.
-    #[named]
     pub(super) async fn try_update_write_limits(
         &self,
         target_group_ids: &[CompactionGroupId],
     ) -> bool {
-        let mut guard = write_lock!(self, versioning).await;
-        let config_mgr = self.compaction_group_manager.read().await;
+        let versioning = self.versioning.read().await;
+        let mut cg_manager = self.compaction_group_manager.write().await;
         let target_group_configs = target_group_ids
             .iter()
             .filter_map(|id| {
-                config_mgr
+                cg_manager
                     .try_get_compaction_group_config(*id)
                     .map(|config| (*id, config))
             })
             .collect();
         let mut new_write_limits = calc_new_write_limits(
             target_group_configs,
-            guard.write_limit.clone(),
-            &guard.current_version,
+            cg_manager.write_limit.clone(),
+            &versioning.current_version,
         );
         let all_group_ids: HashSet<_> =
-            HashSet::from_iter(get_compaction_group_ids(&guard.current_version));
+            HashSet::from_iter(get_compaction_group_ids(&versioning.current_version));
         new_write_limits.retain(|group_id, _| all_group_ids.contains(group_id));
-        if new_write_limits == guard.write_limit {
+        if new_write_limits == cg_manager.write_limit {
             return false;
         }
         tracing::debug!("Hummock stopped write is updated: {:#?}", new_write_limits);
         trigger_write_stop_stats(&self.metrics, &new_write_limits);
-        guard.write_limit = new_write_limits;
+        cg_manager.write_limit = new_write_limits;
         self.env
             .notification_manager()
             .notify_hummock_without_version(
                 Operation::Add,
                 Info::HummockWriteLimits(risingwave_pb::hummock::WriteLimits {
-                    write_limits: guard.write_limit.clone(),
+                    write_limits: cg_manager.write_limit.clone(),
                 }),
             );
         true
@@ -277,32 +228,64 @@ impl HummockManager {
 
     /// Gets write limits.
     /// The implementation acquires `versioning` lock.
-    #[named]
     pub async fn write_limits(&self) -> HashMap<CompactionGroupId, WriteLimit> {
-        let guard = read_lock!(self, versioning).await;
+        let guard = self.compaction_group_manager.read().await;
         guard.write_limit.clone()
     }
 
-    #[named]
     pub async fn list_branched_objects(&self) -> BTreeMap<HummockSstableObjectId, BranchedSstInfo> {
-        let guard = read_lock!(self, versioning).await;
-        guard.branched_ssts.clone()
+        let guard = self.versioning.read().await;
+        guard.current_version.build_branched_sst_info()
     }
 
-    #[named]
     pub async fn rebuild_table_stats(&self) -> Result<()> {
-        use crate::model::ValTransaction;
-        let mut versioning = write_lock!(self, versioning).await;
+        let mut versioning = self.versioning.write().await;
         let new_stats = rebuild_table_stats(&versioning.current_version);
-        let mut version_stats = create_trx_wrapper!(
-            self.meta_store_ref(),
-            VarTransactionWrapper,
-            VarTransaction::new(&mut versioning.version_stats)
-        );
+        let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
         // version_stats.hummock_version_id is always 0 in meta store.
         version_stats.table_stats = new_stats.table_stats;
         commit_multi_var!(self.meta_store_ref(), version_stats)?;
         Ok(())
+    }
+
+    pub fn latest_snapshot(&self) -> HummockSnapshot {
+        let snapshot = self.latest_snapshot.load();
+        HummockSnapshot::clone(&snapshot)
+    }
+
+    /// We don't commit an epoch without checkpoint. We will only update the `max_current_epoch`.
+    pub fn update_current_epoch(&self, max_current_epoch: HummockEpoch) -> HummockSnapshot {
+        // We only update `max_current_epoch`!
+        let prev_snapshot = self.latest_snapshot.rcu(|snapshot| HummockSnapshot {
+            committed_epoch: snapshot.committed_epoch,
+            current_epoch: max_current_epoch,
+        });
+        assert!(prev_snapshot.current_epoch < max_current_epoch);
+
+        tracing::trace!("new current epoch {}", max_current_epoch);
+        HummockSnapshot {
+            committed_epoch: prev_snapshot.committed_epoch,
+            current_epoch: max_current_epoch,
+        }
+    }
+
+    pub async fn list_change_log_epochs(
+        &self,
+        table_id: u32,
+        min_epoch: u64,
+        max_count: u32,
+    ) -> Vec<u64> {
+        let versioning = self.versioning.read().await;
+        if let Some(table_change_log) = versioning
+            .current_version
+            .table_change_log
+            .get(&TableId::new(table_id))
+        {
+            let table_change_log = table_change_log.clone();
+            table_change_log.get_epochs(min_epoch, max_count as usize)
+        } else {
+            vec![]
+        }
     }
 }
 
@@ -416,29 +399,30 @@ mod tests {
     };
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
+    use crate::hummock::manager::context::ContextInfo;
     use crate::hummock::manager::versioning::{
-        calc_new_write_limits, estimate_table_stats, rebuild_table_stats, Versioning,
+        calc_new_write_limits, estimate_table_stats, rebuild_table_stats,
     };
     use crate::hummock::model::CompactionGroup;
 
     #[test]
     fn test_min_pinned_version_id() {
-        let mut versioning = Versioning::default();
-        assert_eq!(versioning.min_pinned_version_id(), HummockVersionId::MAX);
-        versioning.pinned_versions.insert(
+        let mut context_info = ContextInfo::default();
+        assert_eq!(context_info.min_pinned_version_id(), HummockVersionId::MAX);
+        context_info.pinned_versions.insert(
             1,
             HummockPinnedVersion {
                 context_id: 1,
                 min_pinned_id: 10,
             },
         );
-        assert_eq!(versioning.min_pinned_version_id(), 10);
-        versioning.version_safe_points.push(5);
-        assert_eq!(versioning.min_pinned_version_id(), 5);
-        versioning.version_safe_points.clear();
-        assert_eq!(versioning.min_pinned_version_id(), 10);
-        versioning.pinned_versions.clear();
-        assert_eq!(versioning.min_pinned_version_id(), HummockVersionId::MAX);
+        assert_eq!(context_info.min_pinned_version_id(), 10);
+        context_info.version_safe_points.push(5);
+        assert_eq!(context_info.min_pinned_version_id(), 5);
+        context_info.version_safe_points.clear();
+        assert_eq!(context_info.min_pinned_version_id(), 10);
+        context_info.pinned_versions.clear();
+        assert_eq!(context_info.min_pinned_version_id(), HummockVersionId::MAX);
     }
 
     #[test]

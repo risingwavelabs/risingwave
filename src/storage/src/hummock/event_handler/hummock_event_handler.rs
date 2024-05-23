@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
-use std::ops::DerefMut;
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::pin::pin;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, LazyLock};
+use std::time::Duration;
 
 use arc_swap::ArcSwap;
 use await_tree::InstrumentAwait;
@@ -43,8 +43,8 @@ use crate::hummock::compactor::{await_tree_key, compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::refiller::{CacheRefillerEvent, SpawnRefillTask};
 use crate::hummock::event_handler::uploader::{
-    default_spawn_merging_task, HummockUploader, SpawnMergingTask, SpawnUploadTask, SyncedData,
-    UploadTaskInfo, UploadTaskOutput, UploadTaskPayload, UploaderEvent,
+    HummockUploader, SpawnUploadTask, SyncedData, UploadTaskInfo, UploadTaskOutput,
+    UploadTaskPayload, UploaderEvent,
 };
 use crate::hummock::event_handler::{
     HummockEvent, HummockReadVersionRef, HummockVersionUpdate, ReadOnlyReadVersionMapping,
@@ -263,7 +263,10 @@ impl HummockEventHandler {
                     let future = async move {
                         let _timer = upload_task_latency.start_timer();
                         let mut output = flush_imms(
-                            payload,
+                            payload
+                                .values()
+                                .flat_map(|imms| imms.iter().cloned())
+                                .collect(),
                             task_info,
                             upload_compactor_context.clone(),
                             filter_key_extractor_manager.clone(),
@@ -286,10 +289,6 @@ impl HummockEventHandler {
                     }
                 })
             }),
-            default_spawn_merging_task(
-                compactor_context.compaction_executor.clone(),
-                compactor_context.await_tree_reg.clone(),
-            ),
             CacheRefiller::default_spawn_refill_task(),
         )
     }
@@ -302,7 +301,6 @@ impl HummockEventHandler {
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         storage_opts: &StorageOpts,
         spawn_upload_task: SpawnUploadTask,
-        spawn_merging_task: SpawnMergingTask,
         spawn_refill_task: SpawnRefillTask,
     ) -> Self {
         let (hummock_event_tx, hummock_event_rx) =
@@ -336,7 +334,6 @@ impl HummockEventHandler {
             state_store_metrics,
             pinned_version.clone(),
             spawn_upload_task,
-            spawn_merging_task,
             buffer_tracker,
             storage_opts,
         );
@@ -393,20 +390,29 @@ impl HummockEventHandler {
         newly_uploaded_sstables: Vec<StagingSstableInfo>,
     ) {
         debug!("epoch has been synced: {}.", epoch);
+        let newly_uploaded_sstables = newly_uploaded_sstables
+            .into_iter()
+            .map(Arc::new)
+            .collect_vec();
         if !newly_uploaded_sstables.is_empty() {
-            newly_uploaded_sstables
-                .into_iter()
-                // Take rev because newer data come first in `newly_uploaded_sstables` but we apply
-                // older data first
-                .rev()
-                .for_each(|staging_sstable_info| {
-                    let staging_sstable_info_ref = Arc::new(staging_sstable_info);
-                    self.for_each_read_version(|read_version| {
-                        read_version.update(VersionUpdate::Staging(StagingData::Sst(
-                            staging_sstable_info_ref.clone(),
-                        )))
+            let related_instance_ids: HashSet<_> = newly_uploaded_sstables
+                .iter()
+                .flat_map(|sst| sst.imm_ids().keys().cloned())
+                .collect();
+            self.for_each_read_version(related_instance_ids, |instance_id, read_version| {
+                newly_uploaded_sstables
+                    .iter()
+                    // Take rev because newer data come first in `newly_uploaded_sstables` but we apply
+                    // older data first
+                    .rev()
+                    .for_each(|staging_sstable_info| {
+                        if staging_sstable_info.imm_ids().contains_key(&instance_id) {
+                            read_version.update(VersionUpdate::Staging(StagingData::Sst(
+                                staging_sstable_info.clone(),
+                            )));
+                        }
                     });
-                });
+            });
         }
         let result = self
             .uploader
@@ -439,22 +445,74 @@ impl HummockEventHandler {
 
     /// This function will be performed under the protection of the `read_version_mapping` read
     /// lock, and add write lock on each `read_version` operation
-    /// TODO: it may cost a lot of CPU to update every local-version for every upload task. We can use instance id of upload task to optimize this operation
-    fn for_each_read_version(&self, mut f: impl FnMut(&mut HummockReadVersion)) {
-        self.local_read_version_mapping
-            .values()
-            .for_each(|read_version: &HummockReadVersionRef| f(read_version.write().deref_mut()));
+    fn for_each_read_version(
+        &self,
+        instances: impl IntoIterator<Item = LocalInstanceId>,
+        mut f: impl FnMut(LocalInstanceId, &mut HummockReadVersion),
+    ) {
+        let instances = {
+            #[cfg(debug_assertion)]
+            {
+                // check duplication on debug_mode
+                use std::collections::HashSet;
+                let mut id_set = HashSet::new();
+                for instance in instances {
+                    assert!(id_set.insert(instance));
+                }
+                id_set
+            }
+            #[cfg(not(debug_assertion))]
+            {
+                instances
+            }
+        };
+        let mut pending = VecDeque::new();
+        let mut total_count = 0;
+        for instance_id in instances {
+            let Some(read_version) = self.local_read_version_mapping.get(&instance_id) else {
+                continue;
+            };
+            total_count += 1;
+            if let Some(mut write_guard) = read_version.try_write() {
+                f(instance_id, &mut write_guard);
+            } else {
+                pending.push_back(instance_id);
+            }
+        }
+        if !pending.is_empty() {
+            warn!(
+                pending_count = pending.len(),
+                total_count, "cannot acquire lock for all read version"
+            );
+        }
+
+        const TRY_LOCK_TIMEOUT: Duration = Duration::from_millis(1);
+
+        while let Some(instance_id) = pending.pop_front() {
+            let read_version = self
+                .local_read_version_mapping
+                .get(&instance_id)
+                .expect("have checked exist before");
+            if let Some(mut write_guard) = read_version.try_write_for(TRY_LOCK_TIMEOUT) {
+                f(instance_id, &mut write_guard);
+            } else {
+                warn!(instance_id, "failed to get lock again for instance");
+                pending.push_back(instance_id);
+            }
+        }
     }
 
     fn handle_data_spilled(&mut self, staging_sstable_info: StagingSstableInfo) {
-        // todo: do some prune for version update
         let staging_sstable_info = Arc::new(staging_sstable_info);
-        self.for_each_read_version(|read_version| {
-            trace!("data_spilled. SST size {}", staging_sstable_info.imm_size());
-            read_version.update(VersionUpdate::Staging(StagingData::Sst(
-                staging_sstable_info.clone(),
-            )))
-        })
+        trace!("data_spilled. SST size {}", staging_sstable_info.imm_size());
+        self.for_each_read_version(
+            staging_sstable_info.imm_ids().keys().cloned(),
+            |_, read_version| {
+                read_version.update(VersionUpdate::Staging(StagingData::Sst(
+                    staging_sstable_info.clone(),
+                )))
+            },
+        )
     }
 
     fn handle_await_sync_epoch(
@@ -685,9 +743,13 @@ impl HummockEventHandler {
             .store(Arc::new(new_pinned_version.clone()));
 
         {
-            self.for_each_read_version(|read_version| {
-                read_version.update(VersionUpdate::CommittedSnapshot(new_pinned_version.clone()))
-            });
+            self.for_each_read_version(
+                self.local_read_version_mapping.keys().cloned(),
+                |_, read_version| {
+                    read_version
+                        .update(VersionUpdate::CommittedSnapshot(new_pinned_version.clone()))
+                },
+            );
         }
 
         let prev_max_committed_epoch = pinned_version.max_committed_epoch();
@@ -775,11 +837,6 @@ impl HummockEventHandler {
                 let _timer = self.metrics.event_handler_on_spilled_latency.start_timer();
                 self.handle_data_spilled(staging_sstable_info);
             }
-
-            UploaderEvent::ImmMerged(_merge_output) => {
-                // update read version for corresponding table shards
-                unreachable!("This feature has been removed");
-            }
         }
     }
 
@@ -821,9 +878,6 @@ impl HummockEventHandler {
 
                 if is_checkpoint {
                     self.uploader.start_sync_epoch(epoch);
-                } else {
-                    // start merging task on non-checkpoint epochs sealed
-                    self.uploader.start_merge_imms(epoch);
                 }
             }
 
@@ -859,16 +913,16 @@ impl HummockEventHandler {
                 vnodes,
             } => {
                 let pinned_version = self.pinned_version.load();
+                let instance_id = self.generate_instance_id();
                 let basic_read_version = Arc::new(RwLock::new(
                     HummockReadVersion::new_with_replication_option(
                         table_id,
+                        instance_id,
                         (**pinned_version).clone(),
                         is_replicated,
                         vnodes,
                     ),
                 ));
-
-                let instance_id = self.generate_instance_id();
 
                 debug!(
                     "new read version registered: table_id: {}, instance_id: {}",
@@ -1047,7 +1101,6 @@ mod tests {
             Arc::new(HummockStateStoreMetrics::unused()),
             &default_opts_for_test(),
             Arc::new(|_, _| unreachable!("should not spawn upload task")),
-            Arc::new(|_, _, _, _| unreachable!("should not spawn merging task")),
             Arc::new(move |_, _, old_version, new_version| {
                 let (tx, rx) = oneshot::channel();
                 refill_task_tx_clone
