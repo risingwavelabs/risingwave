@@ -122,7 +122,7 @@ impl<'a> Stream for TokenStreamWrapper<'a> {
     #[inline(always)]
     fn next_slice(&mut self, offset: usize) -> Self::Slice {
         TokenStreamWrapper {
-            tokens: &self.tokens.next_slice(offset),
+            tokens: self.tokens.next_slice(offset),
         }
     }
 
