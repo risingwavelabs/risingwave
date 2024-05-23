@@ -53,17 +53,15 @@ where
     S: TokenStream,
 {
     #[derive(Debug, thiserror::Error)]
-    enum Error {
-        #[error("Precision must be in range {0:?}")]
-        OutOfRange(String),
-    }
+    #[error("Precision must be in range {0:?}")]
+    struct OutOfRange(String);
 
     cut_err(
         delimited(Token::LParen, literal_uint, Token::RParen).try_map(move |v| {
             if range.contains(&v) {
                 Ok(v)
             } else {
-                Err(Error::OutOfRange(format!("{:?}", range)))
+                Err(OutOfRange(format!("{:?}", range)))
             }
         }),
     )
