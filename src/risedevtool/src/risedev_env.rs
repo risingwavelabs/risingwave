@@ -85,7 +85,7 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 // These envs are used by `mysql` cli.
                 writeln!(env, r#"MYSQL_HOST="{host}""#,).unwrap();
                 writeln!(env, r#"MYSQL_TCP_PORT="{port}""#,).unwrap();
-                writeln!(env, r#"MYSQL_USER="{user}""#,).unwrap();
+                writeln!(env, r#"MYSQL_USER="{user}""#,).unwrap(); // FIXME: This does not take effect.
                 writeln!(env, r#"MYSQL_PWD="{password}""#,).unwrap();
                 // Note: user and password are not included in the common WITH options.
                 // It's expected to create another dedicated user for the source.
