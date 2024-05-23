@@ -52,6 +52,7 @@ hybird_partition_vnode_count = 4
 event_log_enabled = true
 event_log_channel_max_size = 10
 enable_dropped_column_reclaim = false
+secret_store_private_key = [100, 101, 109, 111, 45, 115, 101, 99, 114, 101, 116, 45, 112, 114, 105, 118, 97, 116, 101, 45, 107, 101, 121]
 
 [meta.compaction_config]
 max_bytes_for_level_base = 536870912
