@@ -141,7 +141,7 @@ where
 
     let keywords = dispatch! {keyword;
         Keyword::BOOLEAN | Keyword::BOOL => empty.value(DataType::Boolean),
-        Keyword::FLOAT => opt(precision_in_range(1..53)).map(DataType::Float),
+        Keyword::FLOAT => opt(precision_in_range(1..54)).map(DataType::Float),
         Keyword::REAL => empty.value(DataType::Real),
         Keyword::DOUBLE => opt(Keyword::PRECISION).value(DataType::Double),
         Keyword::SMALLINT => empty.value(DataType::SmallInt),
