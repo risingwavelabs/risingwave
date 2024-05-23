@@ -321,9 +321,14 @@ fn task_main(
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 PostgresService::new(c.clone()).execute(&mut ctx)?;
-                let mut task =
-                    risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
-                task.execute(&mut ctx)?;
+                if c.user_managed {
+                    let mut task =
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    task.execute(&mut ctx)?;
+                } else {
+                    let mut task = risedev::LogReadyCheckTask::new("ready to accept connections")?;
+                    task.execute(&mut ctx)?;
+                }
                 ctx.pb
                     .set_message(format!("postgres {}:{}", c.address, c.port));
             }
