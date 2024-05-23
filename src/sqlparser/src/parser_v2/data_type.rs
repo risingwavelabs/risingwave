@@ -1,7 +1,9 @@
 use core::cell::RefCell;
 use std::rc::Rc;
 
-use winnow::combinator::{alt, delimited, dispatch, empty, fail, opt, preceded, separated, seq};
+use winnow::combinator::{
+    alt, delimited, dispatch, empty, fail, opt, preceded, repeat, separated, seq, Repeat,
+};
 use winnow::error::StrContext;
 use winnow::{PResult, Parser, Stateful};
 
@@ -81,16 +83,10 @@ fn data_type_stateful<S>(input: &mut StatefulStream<S>) -> PResult<DataType>
 where
     S: TokenStream,
 {
-    (
-        data_type_stateful_inner,
-        opt((Token::LBracket, Token::RBracket)),
-    )
-        .map(|(dt, is_array)| {
-            if is_array.is_some() {
-                DataType::Array(Box::new(dt))
-            } else {
-                dt
-            }
+    repeat(0.., (Token::LBracket, Token::RBracket))
+        .fold1(data_type_stateful_inner, |mut acc, _| {
+            acc = DataType::Array(Box::new(acc));
+            acc
         })
         .parse_next(input)
 }

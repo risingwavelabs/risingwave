@@ -11413,7 +11413,7 @@ dependencies = [
  "serde",
  "tracing",
  "tracing-subscriber",
- "winnow 0.6.8 (git+https://github.com/TennyZhuang/winnow.git?rev=509121449b451f0faa1b698b4e8cb36dfaa1a4b5)",
+ "winnow 0.6.8 (git+https://github.com/TennyZhuang/winnow.git?rev=a6b1f04)",
  "workspace-hack",
 ]
 
@@ -16231,7 +16231,7 @@ dependencies = [
 [[package]]
 name = "winnow"
 version = "0.6.8"
-source = "git+https://github.com/TennyZhuang/winnow.git?rev=509121449b451f0faa1b698b4e8cb36dfaa1a4b5#509121449b451f0faa1b698b4e8cb36dfaa1a4b5"
+source = "git+https://github.com/TennyZhuang/winnow.git?rev=a6b1f04#a6b1f04cbe9b39d218da5a121e610144ebf961b0"
 dependencies = [
  "memchr",
 ]
