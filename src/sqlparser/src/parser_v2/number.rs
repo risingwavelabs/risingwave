@@ -56,13 +56,15 @@ where
     #[error("Precision must be in range {0:?}")]
     struct OutOfRange(String);
 
-    cut_err(
-        delimited(Token::LParen, literal_uint, Token::RParen).try_map(move |v| {
+    delimited(
+        Token::LParen,
+        cut_err(literal_uint.try_map(move |v| {
             if range.contains(&v) {
                 Ok(v)
             } else {
                 Err(OutOfRange(format!("{:?}", range)))
             }
-        }),
+        })),
+        cut_err(Token::RParen),
     )
 }
