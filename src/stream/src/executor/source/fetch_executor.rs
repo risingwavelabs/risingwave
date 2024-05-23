@@ -258,10 +258,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         }
                                     }
 
-                                    state_store_handler
-                                        .state_table
-                                        .barrier(barrier)
-                                        .await?;
+                                    state_store_handler.state_table.barrier(barrier).await?;
 
                                     if let Some(vnode_bitmap) =
                                         barrier.as_update_vnode_bitmap(self.actor_ctx.id)

@@ -26,7 +26,6 @@ use risingwave_storage::table::TableIter;
 
 use crate::common::table::state_table::StateTable;
 use crate::common::table::test_utils::{gen_prost_table, gen_prost_table_with_value_indices};
-use crate::executor::Barrier;
 
 /// There are three struct in relational layer, StateTable, MemTable and StorageTable.
 /// `StateTable` provides read/write interfaces to the upper layer streaming operator.
@@ -110,10 +109,7 @@ async fn test_storage_table_value_indices() {
     ]));
 
     epoch.inc_for_test();
-    state
-        .barrier(&Barrier::with_epoch_pair_for_test(epoch))
-        .await
-        .unwrap();
+    state.commit_for_test(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
     let get_row1_res = table
@@ -226,10 +222,7 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
     ]));
 
     epoch.inc_for_test();
-    state
-        .barrier(&Barrier::with_epoch_pair_for_test(epoch))
-        .await
-        .unwrap();
+    state.commit_for_test(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
     let get_row1_res = table
@@ -332,10 +325,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
         Some(222_i32.into()),
     ]));
     epoch.inc_for_test();
-    state
-        .barrier(&Barrier::with_epoch_pair_for_test(epoch))
-        .await
-        .unwrap();
+    state.commit_for_test(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
     let get_row1_res = table
@@ -446,10 +436,7 @@ async fn test_batch_scan_with_value_indices() {
     ]));
 
     epoch.inc_for_test();
-    state
-        .barrier(&Barrier::with_epoch_pair_for_test(epoch))
-        .await
-        .unwrap();
+    state.commit_for_test(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
     let iter = table

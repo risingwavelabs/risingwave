@@ -1142,6 +1142,11 @@ where
         }
     }
 
+    pub async fn commit_for_test(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+        self.barrier(&Barrier::with_prev_epoch_for_test(epoch.curr, epoch.prev))
+            .await
+    }
+
     pub async fn barrier(&mut self, barrier: &Barrier) -> StreamExecutorResult<()> {
         self.barrier_inner(barrier, None).await
     }
