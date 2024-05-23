@@ -649,7 +649,7 @@ where
         rate_limiter: &mut Option<BackfillRateLimiter>,
     ) {
         if let Some(rate_limit_setting) = rate_limit {
-            *rate_limit_setting *= 2;
+            *rate_limit_setting = (*rate_limit_setting * 2).clamp(1, 100000);
             *rate_limiter = create_limiter(*rate_limit_setting)
         }
     }
