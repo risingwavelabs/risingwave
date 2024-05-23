@@ -194,6 +194,8 @@ message ExprNode {
     ENCRYPT = 325;
     INET_ATON = 328;
     INET_NTOA = 329;
+    QUOTE_LITERAL = 330;
+    QUOTE_NULLABLE = 331;
 
     // Unary operators
     NEG = 401;
