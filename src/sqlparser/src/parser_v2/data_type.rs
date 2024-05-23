@@ -2,7 +2,7 @@ use core::cell::RefCell;
 use std::rc::Rc;
 
 use winnow::combinator::{
-    alt, delimited, dispatch, empty, fail, opt, preceded, repeat, separated, seq, Repeat,
+    alt, delimited, dispatch, empty, fail, opt, preceded, repeat, separated, seq,
 };
 use winnow::error::StrContext;
 use winnow::{PResult, Parser, Stateful};
