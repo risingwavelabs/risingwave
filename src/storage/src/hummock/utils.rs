@@ -389,7 +389,15 @@ pub fn check_subset_preserve_order<T: Eq>(
     true
 }
 
-pub(crate) const ENABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
+static SANITY_CHECK_ENABLED: AtomicBool = AtomicBool::new(cfg!(debug_assertions));
+
+pub fn set_sanity_check_enabled(enabled: bool) {
+    SANITY_CHECK_ENABLED.store(enabled, AtomicOrdering::Release);
+}
+
+pub(crate) fn sanity_check_enabled() -> bool {
+    SANITY_CHECK_ENABLED.load(AtomicOrdering::Acquire)
+}
 
 /// Make sure the key to insert should not exist in storage.
 pub(crate) async fn do_insert_sanity_check(

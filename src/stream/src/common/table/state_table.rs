@@ -66,7 +66,6 @@ use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
 use crate::cache::cache_may_stale;
 use crate::common::cache::{StateCache, StateCacheFiller};
 use crate::common::table::state_table_cache::StateTableWatermarkCache;
-use crate::consistency::enable_strict_consistency;
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 /// This num is arbitrary and we may want to improve this choice in the future.
@@ -284,16 +283,11 @@ where
         store: S,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
-        let consistency_level = if enable_strict_consistency() {
-            StateTableOpConsistencyLevel::ConsistentOldValue
-        } else {
-            StateTableOpConsistencyLevel::Inconsistent
-        };
         Self::from_table_catalog_with_consistency_level(
             table_catalog,
             store,
             vnodes,
-            consistency_level,
+            StateTableOpConsistencyLevel::ConsistentOldValue,
         )
         .await
     }
@@ -563,7 +557,7 @@ where
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
     ) -> Self {
-        Self::new_with_distribution_inner_for_test(
+        Self::new_with_distribution_inner(
             store,
             table_id,
             columns,
@@ -587,7 +581,7 @@ where
         distribution: TableDistribution,
         value_indices: Option<Vec<usize>>,
     ) -> Self {
-        Self::new_with_distribution_inner_for_test(
+        Self::new_with_distribution_inner(
             store,
             table_id,
             table_columns,
@@ -610,7 +604,7 @@ where
         distribution: TableDistribution,
         value_indices: Option<Vec<usize>>,
     ) -> Self {
-        Self::new_with_distribution_inner_for_test(
+        Self::new_with_distribution_inner(
             store,
             table_id,
             table_columns,
@@ -624,7 +618,7 @@ where
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn new_with_distribution_inner_for_test(
+    async fn new_with_distribution_inner(
         store: S,
         table_id: TableId,
         table_columns: Vec<ColumnDesc>,

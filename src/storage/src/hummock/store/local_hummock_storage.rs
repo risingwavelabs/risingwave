@@ -39,8 +39,8 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
 };
 use crate::hummock::store::version::{read_filter_for_version, HummockVersionReader};
 use crate::hummock::utils::{
-    do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check, wait_for_epoch,
-    ENABLE_SANITY_CHECK,
+    do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check, sanity_check_enabled,
+    wait_for_epoch,
 };
 use crate::hummock::write_limiter::WriteLimiterRef;
 use crate::hummock::{MemoryLimiter, SstableIterator};
@@ -321,7 +321,7 @@ impl LocalStateStore for LocalHummockStorage {
                 // a workaround you may call disable the check by initializing the
                 // state store with `is_consistent_op=false`.
                 KeyOp::Insert(value) => {
-                    if ENABLE_SANITY_CHECK {
+                    if sanity_check_enabled() {
                         do_insert_sanity_check(
                             &key,
                             &value,
@@ -339,7 +339,7 @@ impl LocalStateStore for LocalHummockStorage {
                     }
                 }
                 KeyOp::Delete(old_value) => {
-                    if ENABLE_SANITY_CHECK {
+                    if sanity_check_enabled() {
                         do_delete_sanity_check(
                             &key,
                             &old_value,
@@ -357,7 +357,7 @@ impl LocalStateStore for LocalHummockStorage {
                     }
                 }
                 KeyOp::Update((old_value, new_value)) => {
-                    if ENABLE_SANITY_CHECK {
+                    if sanity_check_enabled() {
                         do_update_sanity_check(
                             &key,
                             &old_value,
