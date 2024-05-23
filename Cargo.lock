@@ -736,7 +736,8 @@ dependencies = [
 [[package]]
 name = "arrow-udf-js"
 version = "0.3.0"
-source = "git+https://github.com/risingwavelabs/arrow-udf.git?rev=ca61749#ca61749da24b09b410ab4f7dbb71ab9b520488c6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc1d882f3cbdaf8dd02d9936c3acbf9e1deca401987562f804977ec262bf5e10"
 dependencies = [
  "anyhow",
  "arrow-array 50.0.0",
@@ -799,7 +800,8 @@ dependencies = [
 [[package]]
 name = "arrow-udf-python"
 version = "0.2.0"
-source = "git+https://github.com/risingwavelabs/arrow-udf.git?rev=ca61749#ca61749da24b09b410ab4f7dbb71ab9b520488c6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4506efc6fbc200c083add2a7ed4e3616a859941a745e922320ae7051d90d12ec"
 dependencies = [
  "anyhow",
  "arrow-array 50.0.0",
