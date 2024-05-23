@@ -15,7 +15,7 @@
 use std::sync::LazyLock;
 
 use apache_avro::schema::{DecimalSchema, RecordSchema};
-use apache_avro::types::Value;
+use apache_avro::types::{Value, ValueKind};
 use apache_avro::{Decimal as AvroDecimal, Schema};
 use chrono::Datelike;
 use itertools::Itertools;
@@ -27,6 +27,7 @@ use risingwave_common::types::{
     DataType, Date, Datum, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
+use thiserror_ext::AsReport;
 
 use super::{bail_uncategorized, uncategorized, Access, AccessError, AccessResult};
 use crate::error::ConnectorResult;
@@ -85,8 +86,8 @@ impl<'a> AvroParseOptions<'a> {
     {
         let create_error = || AccessError::TypeError {
             expected: format!("{:?}", type_expected),
-            got: format!("{:?}", value),
-            value: String::new(),
+            got: format!("{:?}", ValueKind::from(value)),
+            value: format!("{:?}", value),
         };
 
         let v: ScalarImpl = match (type_expected, value) {
@@ -272,6 +273,17 @@ impl<'a> AvroParseOptions<'a> {
                 let jsonb = builder.finish();
                 debug_assert!(jsonb.as_ref().is_object());
                 JsonbVal::from(jsonb).into()
+            }
+            (Some(DataType::Jsonb), v) => {
+                let json_val = serde_json::Value::try_from(v.clone()).map_err(|err| {
+                    AccessError::TypeErrorWithCause {
+                        expected: format!("{:?}", type_expected),
+                        got: format!("{:?}", ValueKind::from(value)),
+                        value: format!("{:?}", value),
+                        err: err.to_report_string(),
+                    }
+                })?;
+                JsonbVal::from(json_val).into()
             }
 
             (_expected, _got) => Err(create_error())?,

@@ -54,7 +54,7 @@ impl AccessBuilder for ProtobufAccessBuilder {
         };
 
         let message = DynamicMessage::decode(self.message_descriptor.clone(), payload)
-            .context("failed to parse message")?;
+            .context("failed to decode protobuf message")?;
 
         Ok(AccessImpl::Protobuf(ProtobufAccess::new(
             message,

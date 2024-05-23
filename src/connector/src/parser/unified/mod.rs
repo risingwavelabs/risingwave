@@ -101,6 +101,13 @@ pub enum AccessError {
         got: String,
         value: String,
     },
+    #[error("Cannot parse value `{value}` with type `{got}` into expected type `{expected}`, caused by: {err}")]
+    TypeErrorWithCause {
+        expected: String,
+        got: String,
+        value: String,
+        err: String,
+    },
     #[error("Unsupported data type `{ty}`")]
     UnsupportedType { ty: String },
 
