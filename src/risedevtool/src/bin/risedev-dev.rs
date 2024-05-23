@@ -310,7 +310,7 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 MySqlService::new(c.clone()).execute(&mut ctx)?;
                 let mut task =
-                    risedev::ConfigureTcpNodeTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    risedev::ConfigureLogTask::new("Ready for start up.", c.user_managed)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("mysql {}:{}", c.address, c.port));

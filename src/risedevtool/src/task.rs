@@ -30,6 +30,7 @@ mod prometheus_service;
 mod pubsub_service;
 mod redis_service;
 mod task_configure_grpc_node;
+mod task_configure_log;
 mod task_configure_minio;
 mod task_etcd_ready_check;
 mod task_kafka_ready_check;
@@ -39,13 +40,15 @@ mod tempo_service;
 mod utils;
 
 use std::env;
+use std::io::{Read as _, Seek as _, SeekFrom};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
+use fs_err::File;
 use indicatif::ProgressBar;
 use reqwest::blocking::{Client, Response};
 use tempfile::TempDir;
@@ -68,6 +71,7 @@ pub use self::prometheus_service::*;
 pub use self::pubsub_service::*;
 pub use self::redis_service::*;
 pub use self::task_configure_grpc_node::*;
+pub use self::task_configure_log::*;
 pub use self::task_configure_minio::*;
 pub use self::task_etcd_ready_check::*;
 pub use self::task_kafka_ready_check::*;
@@ -109,6 +113,9 @@ where
 
     /// The status file corresponding to the current context.
     pub status_file: Option<PathBuf>,
+
+    /// The log file corresponding to the current context. (e.g. frontend-4566.log)
+    pub log_file: Option<PathBuf>,
 }
 
 impl<W> ExecuteContext<W>
@@ -121,6 +128,7 @@ where
             pb,
             status_dir,
             status_file: None,
+            log_file: None,
             id: None,
         }
     }
@@ -129,8 +137,18 @@ where
         let id = task.id();
         if !id.is_empty() {
             self.pb.set_prefix(id.clone());
-            self.status_file = Some(self.status_dir.path().join(format!("{}.status", id)));
-            self.id = Some(id);
+            self.id = Some(id.clone());
+
+            // Remove the old status file if exists to avoid confusion.
+            let status_file = self.status_dir.path().join(format!("{}.status", id));
+            fs_err::remove_file(&status_file).ok();
+            self.status_file = Some(status_file);
+
+            // Remove the old log file if exists to avoid confusion.
+            let log_file = Path::new(&env::var("PREFIX_LOG").unwrap())
+                .join(format!("{}.log", self.id.as_ref().unwrap()));
+            fs_err::remove_file(&log_file).ok();
+            self.log_file = Some(log_file);
         }
     }
 
@@ -168,9 +186,37 @@ where
         self.status_file.clone().unwrap()
     }
 
-    pub fn log_path(&self) -> anyhow::Result<PathBuf> {
-        let prefix_log = env::var("PREFIX_LOG")?;
-        Ok(Path::new(&prefix_log).join(format!("{}.log", self.id.as_ref().unwrap())))
+    pub fn log_path(&self) -> &Path {
+        self.log_file.as_ref().unwrap().as_path()
+    }
+
+    pub fn wait_log_include(&mut self, pattern: impl AsRef<str>) -> anyhow::Result<()> {
+        let pattern = pattern.as_ref();
+        let log_path = self.log_path().to_path_buf();
+
+        let mut content = String::new();
+        let mut offset = 0;
+
+        wait(
+            || {
+                let mut file = File::open(&log_path).context("log file does not exist")?;
+                file.seek(SeekFrom::Start(offset as u64))?;
+                offset += file.read_to_string(&mut content)?;
+
+                if content.contains(pattern) {
+                    Ok(())
+                } else {
+                    bail!("pattern \"{}\" not found in log", pattern)
+                }
+            },
+            &mut self.log,
+            self.status_file.as_ref().unwrap(),
+            self.id.as_ref().unwrap(),
+            Some(Duration::from_secs(30)),
+            true,
+        )?;
+
+        Ok(())
     }
 
     pub fn wait_tcp(&mut self, server: impl AsRef<str>) -> anyhow::Result<()> {
@@ -307,7 +353,7 @@ where
             }
         }
         cmd.arg(Path::new(&prefix_path).join("run_command.sh"));
-        cmd.arg(self.log_path()?);
+        cmd.arg(self.log_path());
         cmd.arg(self.status_path());
         cmd.arg(user_cmd.get_program());
         for arg in user_cmd.get_args() {

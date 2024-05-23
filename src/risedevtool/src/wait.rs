@@ -75,7 +75,7 @@ pub fn wait(
             });
         }
 
-        sleep(Duration::from_millis(30));
+        sleep(Duration::from_millis(100));
     }
 }
 
@@ -104,6 +104,6 @@ pub fn wait_tcp_available(
             }
         }
 
-        sleep(Duration::from_millis(50));
+        sleep(Duration::from_millis(100));
     }
 }
