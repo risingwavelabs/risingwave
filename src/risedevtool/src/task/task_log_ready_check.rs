@@ -12,9 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{Context, Result};
+use std::io::{Read as _, Seek as _, SeekFrom};
+use std::time::Duration;
+
+use anyhow::{bail, Context, Result};
+use fs_err::File;
 
 use super::{ExecuteContext, Task};
+use crate::wait::wait;
 
 /// Check if a log pattern is found in the log output indicating the service is ready.
 pub struct LogReadyCheckTask {
@@ -40,6 +45,41 @@ impl Task for LogReadyCheckTask {
             .with_context(|| format!("failed to wait for service `{id}` to be ready"))?;
 
         ctx.complete_spin();
+
+        Ok(())
+    }
+}
+
+impl<W> ExecuteContext<W>
+where
+    W: std::io::Write,
+{
+    fn wait_log_contains(&mut self, pattern: impl AsRef<str>) -> anyhow::Result<()> {
+        let pattern = pattern.as_ref();
+        let log_path = self.log_path().to_path_buf();
+
+        let mut content = String::new();
+        let mut offset = 0;
+
+        wait(
+            || {
+                let mut file = File::open(&log_path).context("log file does not exist")?;
+                file.seek(SeekFrom::Start(offset as u64))?;
+                offset += file.read_to_string(&mut content)?;
+
+                // Always going through the whole log file could be stupid, but it's reliable.
+                if content.contains(pattern) {
+                    Ok(())
+                } else {
+                    bail!("pattern \"{}\" not found in log", pattern)
+                }
+            },
+            &mut self.log,
+            self.status_file.as_ref().unwrap(),
+            self.id.as_ref().unwrap(),
+            Some(Duration::from_secs(30)),
+            true,
+        )?;
 
         Ok(())
     }
