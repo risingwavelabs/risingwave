@@ -93,7 +93,7 @@ prost = { version = "0.12", features = ["no-recursion-limit"] }
 prost-reflect = "0.13"
 prost-types = "0.12"
 protobuf-native = "0.2.2"
-pulsar = { version = "6.2", default-features = false, features = [
+pulsar = { version = "6.3", default-features = false, features = [
     "tokio-runtime",
     "telemetry",
     "auth-oauth2",
