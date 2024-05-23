@@ -1,6 +1,6 @@
 use core::ops::RangeBounds;
 
-use winnow::combinator::delimited;
+use winnow::combinator::{cut_err, delimited};
 use winnow::error::ContextError;
 use winnow::{PResult, Parser};
 
@@ -30,9 +30,25 @@ where
     token_number.try_map(|s| s.parse::<u64>()).parse_next(input)
 }
 
-pub fn precision_in_range<S>(range: impl RangeBounds<u64>) -> impl Parser<S, u64, ContextError>
+pub fn precision_in_range<S>(
+    range: impl RangeBounds<u64> + std::fmt::Debug,
+) -> impl Parser<S, u64, ContextError>
 where
     S: TokenStream,
 {
-    delimited(Token::LParen, literal_uint, Token::LParen).verify(move |v| range.contains(v))
+    #[derive(Debug, thiserror::Error)]
+    enum Error {
+        #[error("Precision must be in range {0:?}")]
+        OutOfRange(String),
+    }
+
+    cut_err(
+        delimited(Token::LParen, literal_uint, Token::LParen).try_map(move |v| {
+            if range.contains(&v) {
+                Ok(v)
+            } else {
+                Err(Error::OutOfRange(format!("{:?}", range)))
+            }
+        }),
+    )
 }

@@ -24,6 +24,7 @@ normal = ["workspace-hack"]
 [dependencies]
 itertools = { workspace = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
+thiserror = "1.0.61"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 winnow = { version = "0.6.8", git = "https://github.com/TennyZhuang/winnow.git", rev = "a6b1f04" }

@@ -195,10 +195,17 @@ impl Parser {
             tokens: &self.tokens[self.index..],
         });
         let output = parse_next.parse_next(&mut token_stream).map_err(|e| {
+            let msg = if let Some(e) = e.into_inner()
+                && let Some(cause) = e.cause()
+            {
+                cause.to_string()
+            } else {
+                "".to_string()
+            };
             ParserError::ParserError(format!(
                 "Unexpected {}: {}",
                 self.tokens[self.index + token_stream.location()],
-                e
+                msg
             ))
         });
         let offset = token_stream.location();

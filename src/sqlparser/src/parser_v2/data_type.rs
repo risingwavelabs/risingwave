@@ -83,7 +83,7 @@ fn data_type_stateful<S>(input: &mut StatefulStream<S>) -> PResult<DataType>
 where
     S: TokenStream,
 {
-    repeat(0.., (Token::LBracket, Token::RBracket))
+    repeat(0.., (Token::LBracket, cut_err(Token::RBracket)))
         .fold1(data_type_stateful_inner, |mut acc, _| {
             acc = DataType::Array(Box::new(acc));
             acc
