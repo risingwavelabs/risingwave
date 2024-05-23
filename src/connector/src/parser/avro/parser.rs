@@ -550,7 +550,7 @@ mod test {
     }
 
     // run this script when updating `simple-schema.avsc`, the script will generate new value in
-    // `avro_bin.1`
+    // `avro_simple_schema_bin.1`
     #[ignore]
     #[tokio::test]
     async fn update_avro_payload() {
@@ -561,13 +561,13 @@ mod test {
         let record = build_avro_data(&conf.schema);
         writer.append(record).unwrap();
         let encoded = writer.into_inner().unwrap();
-        println!("path = {:?}", e2e_file_path("avro_bin.1"));
+        println!("path = {:?}", e2e_file_path("avro_simple_schema_bin.1"));
         let mut file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .truncate(true)
-            .open(e2e_file_path("avro_bin.1"))
+            .open(e2e_file_path("avro_simple_schema_bin.1"))
             .unwrap();
         file.write_all(encoded.as_slice()).unwrap();
         println!(
