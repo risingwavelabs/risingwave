@@ -2,7 +2,7 @@ use core::cell::RefCell;
 use std::rc::Rc;
 
 use winnow::combinator::{
-    alt, delimited, dispatch, empty, fail, opt, preceded, repeat, separated, seq,
+    alt, cut_err, delimited, dispatch, empty, fail, opt, preceded, repeat, separated, seq,
 };
 use winnow::error::StrContext;
 use winnow::{PResult, Parser, Stateful};
@@ -59,7 +59,6 @@ where
             seq! {
                 StructField {
                     name: identifier_non_reserved,
-                    _: Token::Colon,
                     data_type: data_type_stateful,
                 }
             },
@@ -137,9 +136,9 @@ where
         Keyword::INTERVAL => empty.value(DataType::Interval),
         Keyword::REGCLASS => empty.value(DataType::Regclass),
         Keyword::REGPROC => empty.value(DataType::Regproc),
-        Keyword::STRUCT => struct_data_type.map(DataType::Struct),
+        Keyword::STRUCT => cut_err(struct_data_type).map(DataType::Struct),
         Keyword::BYTEA => empty.value(DataType::Bytea),
-        Keyword::NUMERIC | Keyword::DECIMAL | Keyword::DEC => precision_and_scale().map(|(precision, scale)| {
+        Keyword::NUMERIC | Keyword::DECIMAL | Keyword::DEC => cut_err(precision_and_scale()).map(|(precision, scale)| {
             DataType::Decimal(precision, scale)
         }),
         _ => fail,
