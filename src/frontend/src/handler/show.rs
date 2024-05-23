@@ -281,7 +281,6 @@ pub async fn handle_show_object(
             let search_path = session.shared_config().read().search_path.clone();
             let mut table_names_in_schema = vec![];
             for schema in schema_or_search_path(&session, &schema, &search_path) {
-                tracing::info!("schema: {}", schema);
                 // If the schema is not found, skip it
                 if let Ok(schema_catalog) = catalog_reader
                     .read_guard()
