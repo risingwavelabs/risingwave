@@ -5,25 +5,18 @@ statement ok
 create table dim(v1 int);
 
 statement ok
-create table dim2(v1 int);
+create materialized view m1 as select fact.v1 from fact join dim on fact.v1 = dim.v1;
+
+# Total update = 250_000 * 100 = 25M records
 
 statement ok
-insert into fact select 1 from generate_series(1, 1000000);
+insert into dim select 1 from generate_series(1, 100);
 
 statement ok
-insert into dim select 1 from generate_series(1, 500);
+insert into fact select 1 from generate_series(1, 250000);
 
 statement ok
 flush;
-
-statement ok
-set background_ddl = true;
-
-statement ok
-create materialized view m1 as select fact.v1 from fact join dim on fact.v1 = dim.v1;
-
-statement ok
-set background_ddl = false;
 
 # Let at least 16 barriers pass through
 # Then we have 1 * 2^16 = 65536
@@ -87,3 +80,6 @@ flush;
 
 # statement ok
 # drop table dim;
+
+# statement ok
+# create materialized view m2 as select fact.v1 from fact join dim on fact.v1 = dim.v1;

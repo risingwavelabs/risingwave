@@ -4,8 +4,10 @@ create table fact(v1 int);
 statement ok
 create table dim(v1 int);
 
+# Total backfill = 50_000 * 100 = 5M records
+
 statement ok
-insert into fact select 1 from generate_series(1, 1000000);
+insert into fact select 1 from generate_series(1, 250000);
 
 statement ok
 insert into dim select 1 from generate_series(1, 100);
@@ -17,7 +19,7 @@ statement ok
 set background_ddl = true;
 
 statement ok
-create sink s1 as select fact.v1 from fact join dim on fact.v1 = dim.v1 with (connector = 'blackhole');
+create materialized view m1 as select fact.v1 from fact join dim on fact.v1 = dim.v1;
 
 statement ok
 set background_ddl = false;
@@ -84,3 +86,12 @@ flush;
 
 # statement ok
 # drop table dim;
+
+statement ok
+set background_ddl = true;
+
+statement ok
+create materialized view m2 as select fact.v1 from fact join dim on fact.v1 = dim.v1;
+
+statement ok
+set background_ddl = false;

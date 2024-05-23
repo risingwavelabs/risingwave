@@ -826,18 +826,6 @@ pub fn create_builder(
     }
 }
 
-pub fn create_limiter_with_state(
-    rate_limit: usize,
-    rate_limit_state: InMemoryState,
-) -> Option<BackfillRateLimiter> {
-    if rate_limit == 0 {
-        return None;
-    }
-    let quota = Quota::per_second(NonZeroU32::new(rate_limit as u32).unwrap());
-    let clock = MonotonicClock;
-    Some(RateLimiter::new(quota, rate_limit_state, &clock))
-}
-
 pub fn create_limiter(rate_limit: usize) -> Option<BackfillRateLimiter> {
     if rate_limit == 0 {
         return None;
