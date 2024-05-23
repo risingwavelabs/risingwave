@@ -16,37 +16,43 @@ use anyhow::{Context, Result};
 
 use super::{ExecuteContext, Task};
 
-pub struct ConfigureLogTask {
-    pattern: String,
+/// Check if a TCP port can be connected to.
+///
+/// Note that accepting a connection does not always mean the service is ready.
+pub struct TcpReadyCheckTask {
+    advertise_address: String,
+    port: u16,
     user_managed: bool,
 }
 
-impl ConfigureLogTask {
-    pub fn new(pattern: impl Into<String>, user_managed: bool) -> Result<Self> {
+impl TcpReadyCheckTask {
+    pub fn new(advertise_address: String, port: u16, user_managed: bool) -> Result<Self> {
         Ok(Self {
-            pattern: pattern.into(),
+            advertise_address,
+            port,
             user_managed,
         })
     }
 }
 
-impl Task for ConfigureLogTask {
+impl Task for TcpReadyCheckTask {
     fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
         let Some(id) = ctx.id.clone() else {
-            panic!("Service should be set before executing ConfigureLogTask");
+            panic!("Service should be set before executing TcpReadyCheckTask");
         };
+        let address = format!("{}:{}", self.advertise_address, self.port);
 
         if self.user_managed {
             ctx.pb.set_message(
-                "waiting for user-managed service ready... (see `risedev.log` for cli args)",
+                "waiting for user-managed service online... (see `risedev.log` for cli args)",
             );
-            ctx.wait_log_include(&self.pattern).with_context(|| {
-                format!("failed to wait for user-managed service `{id}` to be ready")
+            ctx.wait_tcp_user(&address).with_context(|| {
+                format!("failed to wait for user-managed service `{id}` to be online")
             })?;
         } else {
-            ctx.pb.set_message("waiting for ready...");
-            ctx.wait_log_include(&self.pattern)
-                .with_context(|| format!("failed to wait for service `{id}` to be ready"))?;
+            ctx.pb.set_message("waiting for online...");
+            ctx.wait_tcp(&address)
+                .with_context(|| format!("failed to wait for service `{id}` to be online"))?;
         }
 
         ctx.complete_spin();

@@ -29,13 +29,13 @@ mod postgres_service;
 mod prometheus_service;
 mod pubsub_service;
 mod redis_service;
-mod task_configure_grpc_node;
-mod task_configure_log;
 mod task_configure_minio;
 mod task_etcd_ready_check;
 mod task_kafka_ready_check;
+mod task_log_ready_check;
 mod task_pubsub_emu_ready_check;
 mod task_redis_ready_check;
+mod task_tcp_ready_check;
 mod tempo_service;
 mod utils;
 
@@ -70,13 +70,13 @@ pub use self::postgres_service::*;
 pub use self::prometheus_service::*;
 pub use self::pubsub_service::*;
 pub use self::redis_service::*;
-pub use self::task_configure_grpc_node::*;
-pub use self::task_configure_log::*;
 pub use self::task_configure_minio::*;
 pub use self::task_etcd_ready_check::*;
 pub use self::task_kafka_ready_check::*;
+pub use self::task_log_ready_check::*;
 pub use self::task_pubsub_emu_ready_check::*;
 pub use self::task_redis_ready_check::*;
+pub use self::task_tcp_ready_check::*;
 pub use self::tempo_service::*;
 use crate::util::{complete_spin, get_program_args, get_program_name};
 use crate::wait::{wait, wait_tcp_available};
@@ -190,7 +190,7 @@ where
         self.log_file.as_ref().unwrap().as_path()
     }
 
-    pub fn wait_log_include(&mut self, pattern: impl AsRef<str>) -> anyhow::Result<()> {
+    pub fn wait_log_contains(&mut self, pattern: impl AsRef<str>) -> anyhow::Result<()> {
         let pattern = pattern.as_ref();
         let log_path = self.log_path().to_path_buf();
 
@@ -203,6 +203,7 @@ where
                 file.seek(SeekFrom::Start(offset as u64))?;
                 offset += file.read_to_string(&mut content)?;
 
+                // Always going through the whole log file could be stupid, but it's reliable.
                 if content.contains(pattern) {
                     Ok(())
                 } else {

@@ -16,40 +16,38 @@ use anyhow::{Context, Result};
 
 use super::{ExecuteContext, Task};
 
-pub struct ConfigureTcpNodeTask {
-    advertise_address: String,
-    port: u16,
+/// Check if a log pattern is found in the log output indicating the service is ready.
+pub struct LogReadyCheckTask {
+    pattern: String,
     user_managed: bool,
 }
 
-impl ConfigureTcpNodeTask {
-    pub fn new(advertise_address: String, port: u16, user_managed: bool) -> Result<Self> {
+impl LogReadyCheckTask {
+    pub fn new(pattern: impl Into<String>, user_managed: bool) -> Result<Self> {
         Ok(Self {
-            advertise_address,
-            port,
+            pattern: pattern.into(),
             user_managed,
         })
     }
 }
 
-impl Task for ConfigureTcpNodeTask {
+impl Task for LogReadyCheckTask {
     fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
         let Some(id) = ctx.id.clone() else {
-            panic!("Service should be set before executing ConfigureTcpNodeTask");
+            panic!("Service should be set before executing LogReadyCheckTask");
         };
-        let address = format!("{}:{}", self.advertise_address, self.port);
 
         if self.user_managed {
             ctx.pb.set_message(
-                "waiting for user-managed service online... (see `risedev.log` for cli args)",
+                "waiting for user-managed service ready... (see `risedev.log` for cli args)",
             );
-            ctx.wait_tcp_user(&address).with_context(|| {
-                format!("failed to wait for user-managed service `{id}` to be online")
+            ctx.wait_log_contains(&self.pattern).with_context(|| {
+                format!("failed to wait for user-managed service `{id}` to be ready")
             })?;
         } else {
-            ctx.pb.set_message("waiting for online...");
-            ctx.wait_tcp(&address)
-                .with_context(|| format!("failed to wait for service `{id}` to be online"))?;
+            ctx.pb.set_message("waiting for ready...");
+            ctx.wait_log_contains(&self.pattern)
+                .with_context(|| format!("failed to wait for service `{id}` to be ready"))?;
         }
 
         ctx.complete_spin();
