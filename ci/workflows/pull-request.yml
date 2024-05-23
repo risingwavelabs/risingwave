@@ -1,7 +1,11 @@
 auto-retry: &auto-retry
+  automatic:
+    # Agent terminated because the AWS EC2 spot instance killed by AWS.
+    - signal_reason: agent_stop
+      limit: 3
 
 cargo-cache: &cargo-cache
-  id: cache
+  id: cargo
   key: "v1-cache-{{ id }}-{{ runner.os }}-{{ checksum 'Cargo.lock' }}"
   restore-keys:
     - "v1-cache-{{ id }}-{{ runner.os }}-"
@@ -13,12 +17,7 @@ cargo-cache: &cargo-cache
   paths:
     - ".cargo/registry/index"
     - ".cargo/registry/cache"
-    - ".cargo/git/db"
-
-  automatic:
-    # Agent terminated because the AWS EC2 spot instance killed by AWS.
-    - signal_reason: agent_stop
-      limit: 3
+    - ".cargo/git"
 
 steps:
   - label: "check ci image rebuild"
