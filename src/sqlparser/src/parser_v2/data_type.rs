@@ -143,7 +143,7 @@ where
         Keyword::BOOLEAN | Keyword::BOOL => empty.value(DataType::Boolean),
         Keyword::FLOAT => opt(precision_in_range(1..53)).map(DataType::Float),
         Keyword::REAL => empty.value(DataType::Real),
-        Keyword::DOUBLE => Keyword::PRECISION.value(DataType::Double),
+        Keyword::DOUBLE => opt(Keyword::PRECISION).value(DataType::Double),
         Keyword::SMALLINT => empty.value(DataType::SmallInt),
         Keyword::INT | Keyword::INTEGER => empty.value(DataType::Int),
         Keyword::BIGINT => empty.value(DataType::BigInt),
