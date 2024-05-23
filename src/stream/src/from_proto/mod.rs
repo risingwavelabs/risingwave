@@ -128,7 +128,6 @@ pub async fn create_executor(
     node: &StreamNode,
     store: impl StateStore,
 ) -> StreamResult<Executor> {
-    tracing::info!("create executor:{:?}", node);
     build_executor! {
         params,
         node,
