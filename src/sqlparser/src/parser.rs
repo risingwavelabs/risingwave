@@ -207,7 +207,11 @@ impl Parser {
             };
             ParserError::ParserError(format!(
                 "Unexpected {}{}",
-                self.tokens[self.index + token_stream.location()],
+                if self.index + token_stream.location() >= self.tokens.len() {
+                    &"EOF" as &dyn std::fmt::Display
+                } else {
+                    &self.tokens[self.index + token_stream.location()] as &dyn std::fmt::Display
+                },
                 msg
             ))
         });

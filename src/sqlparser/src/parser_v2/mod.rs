@@ -10,7 +10,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use winnow::combinator::{preceded, separated};
+use winnow::combinator::{preceded, separated, trace};
 use winnow::error::{ContextError, StrContext};
 use winnow::stream::{ContainsToken, Location, Stream, StreamIsPartial};
 use winnow::token::{any, take_while};
@@ -88,9 +88,11 @@ where
     I: TokenStream,
 {
     fn parse_next(&mut self, input: &mut I) -> PResult<TokenWithLocation, ContextError> {
-        token
-            .verify(move |t: &TokenWithLocation| t.token == *self)
-            .parse_next(input)
+        trace(
+            format!("token {}", self),
+            token.verify(move |t: &TokenWithLocation| t.token == *self),
+        )
+        .parse_next(input)
     }
 }
 

@@ -20,6 +20,7 @@ use std::rc::Rc;
 
 use winnow::combinator::{
     alt, cut_err, delimited, dispatch, empty, fail, opt, preceded, repeat, separated, seq,
+    terminated, trace,
 };
 use winnow::error::StrContext;
 use winnow::{PResult, Parser, Stateful};
@@ -51,36 +52,49 @@ where
     let remaining_close2 = input.state.remaining_close.clone();
 
     // Consume an abstract `>`, it may be the `remaining_close1` flag set by previous `>>`.
-    let consume_close = alt((
-        move |input: &mut StatefulStream<S>| -> PResult<()> {
-            if *remaining_close1.borrow() {
-                Ok(())
-            } else {
-                fail(input)
-            }
-        }
-        .void(),
-        (
-            Token::ShiftRight,
-            move |_input: &mut StatefulStream<S>| -> PResult<()> {
-                *remaining_close2.borrow_mut() = true;
-                Ok(())
-            },
-        )
+    let consume_close = trace(
+        "consume_struct_close",
+        alt((
+            trace(
+                "consume_remaining_close",
+                move |input: &mut StatefulStream<S>| -> PResult<()> {
+                    if *remaining_close1.borrow() {
+                        *remaining_close1.borrow_mut() = false;
+                        Ok(())
+                    } else {
+                        fail(input)
+                    }
+                },
+            )
             .void(),
-        Token::Gt.void(),
-    ));
+            trace(
+                "produce_remaining_close",
+                (
+                    Token::ShiftRight,
+                    move |_input: &mut StatefulStream<S>| -> PResult<()> {
+                        *remaining_close2.borrow_mut() = true;
+                        Ok(())
+                    },
+                )
+                    .void(),
+            ),
+            Token::Gt.void(),
+        )),
+    );
 
     delimited(
         Token::Lt,
         separated(
             1..,
-            seq! {
-                StructField {
-                    name: identifier_non_reserved,
-                    data_type: data_type_stateful,
-                }
-            },
+            trace(
+                "struct_field",
+                seq! {
+                    StructField {
+                        name: identifier_non_reserved,
+                        data_type: data_type_stateful,
+                    }
+                },
+            ),
             Token::Comma,
         ),
         consume_close,
@@ -96,9 +110,22 @@ pub fn data_type<S>(input: &mut S) -> PResult<DataType>
 where
     S: TokenStream,
 {
-    with_state::<S, DataTypeParsingState, _, _>(data_type_stateful)
-        .context(StrContext::Label("data_type"))
-        .parse_next(input)
+    with_state::<S, DataTypeParsingState, _, _>(terminated(
+        data_type_stateful,
+        cut_err(trace(
+            "data_type_verify_state",
+            |input: &mut StatefulStream<S>| {
+                // If there is remaining `>`, we should fail.
+                if *input.state.remaining_close.borrow() {
+                    fail(input)
+                } else {
+                    Ok(())
+                }
+            },
+        )),
+    ))
+    .context(StrContext::Label("data_type"))
+    .parse_next(input)
 }
 
 /// Data type parsing with stateful stream.
@@ -169,18 +196,22 @@ where
         _ => fail,
     };
 
-    alt((
-        keywords,
-        object_name.map(|name| {
-            if name.to_string().eq_ignore_ascii_case("jsonb") {
-                // JSONB is not a keyword
-                DataType::Jsonb
-            } else {
-                DataType::Custom(name)
-            }
-        }),
-    ))
-    .context(StrContext::Label("non_keyword_data_type"))
-    .context(StrContext::Label("data_type_inner"))
+    trace(
+        "data_type_inner",
+        alt((
+            keywords,
+            trace(
+                "non_keyword_data_type",
+                object_name.map(|name| {
+                    if name.to_string().eq_ignore_ascii_case("jsonb") {
+                        // JSONB is not a keyword
+                        DataType::Jsonb
+                    } else {
+                        DataType::Custom(name)
+                    }
+                }),
+            ),
+        )),
+    )
     .parse_next(input)
 }
