@@ -24,7 +24,7 @@ impl<'a> Offset<CheckpointWrapper<'a>> for CheckpointWrapper<'a> {
     }
 }
 
-/// Customized wrapper that implements [`TokenStream`], override [`Debug`] implementation for better diagnostics.
+/// Customized wrapper that implements [`TokenStream`][super::TokenStream], override [`Debug`] implementation for better diagnostics.
 #[derive(Default, Copy, Clone)]
 pub struct TokenStreamWrapper<'a> {
     pub tokens: &'a [TokenWithLocation],
