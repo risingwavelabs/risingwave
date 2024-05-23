@@ -6,4 +6,4 @@
 - input: SELECT NULL::STRUCT<v1 INT, v2 INT>
   formatted_sql: SELECT CAST(NULL AS STRUCT<v1 INT, v2 INT>)
 - input: SELECT NULL::STRUCT<v1 INT, v2 INT>>
-  error_msg: 'sql parser error: Unexpected EOF'
+  error_msg: 'sql parser error: Unexpected EOF: Unconsumed `>>`'

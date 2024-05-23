@@ -22,7 +22,7 @@ use winnow::combinator::{
     alt, cut_err, delimited, dispatch, empty, fail, opt, preceded, repeat, separated, seq,
     terminated, trace,
 };
-use winnow::error::StrContext;
+use winnow::error::{ContextError, ErrMode, ErrorKind, FromExternalError, StrContext};
 use winnow::{PResult, Parser, Stateful};
 
 use super::{
@@ -110,6 +110,10 @@ pub fn data_type<S>(input: &mut S) -> PResult<DataType>
 where
     S: TokenStream,
 {
+    #[derive(Debug, thiserror::Error)]
+    #[error("Unconsumed `>>`")]
+    struct UnconsumedShiftRight;
+
     with_state::<S, DataTypeParsingState, _, _>(terminated(
         data_type_stateful,
         cut_err(trace(
@@ -117,7 +121,11 @@ where
             |input: &mut StatefulStream<S>| {
                 // If there is remaining `>`, we should fail.
                 if *input.state.remaining_close.borrow() {
-                    fail(input)
+                    Err(ErrMode::Cut(ContextError::from_external_error(
+                        input,
+                        ErrorKind::Fail,
+                        UnconsumedShiftRight,
+                    )))
                 } else {
                     Ok(())
                 }
