@@ -67,6 +67,7 @@ where
         ),
         consume_close,
     )
+    .context(StrContext::Label("struct_data_type"))
     .parse_next(input)
 }
 
