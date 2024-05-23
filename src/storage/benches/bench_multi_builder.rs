@@ -116,15 +116,14 @@ async fn build_tables<F: SstableWriterFactory>(
             .await
             .unwrap();
     }
-    let output = builder
+
+    builder
         .finish()
         .await
         .unwrap()
         .into_iter()
         .map(|info| info.sst_info.sst_info)
-        .collect();
-
-    output
+        .collect()
 }
 
 async fn generate_sstable_store(object_store: Arc<ObjectStoreImpl>) -> Arc<SstableStore> {
@@ -227,11 +226,7 @@ fn bench_builder(
 // SST size: 4, 32, 64, 128, 256MiB
 fn bench_multi_builder(c: &mut Criterion) {
     let sst_capacities = vec![4, 32, 64, 128, 256];
-    let is_local_test = if env::var("LOCAL_TEST").is_ok() {
-        true
-    } else {
-        false
-    };
+    let is_local_test = env::var("LOCAL_TEST").is_ok();
 
     for capacity in sst_capacities {
         bench_builder(c, capacity, false, is_local_test);
