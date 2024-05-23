@@ -51,7 +51,7 @@ impl VirtualNode {
     ///
     /// Note: Not all bits of the inner representation are used. One should rely on this constant
     /// to determine the count of virtual nodes.
-    pub const BITS: usize = 8;
+    pub const BITS: usize = 0;
     /// The total count of virtual nodes.
     pub const COUNT: usize = 1 << Self::BITS;
     /// The size of a virtual node in bytes, in memory or serialized representation.
