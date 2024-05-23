@@ -18,7 +18,6 @@ use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant, SystemTime};
-
 use anyhow::Context;
 use arc_swap::ArcSwap;
 use bytes::Bytes;
@@ -49,7 +48,7 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_meta_model_v2::{
     compaction_status, compaction_task, hummock_pinned_snapshot, hummock_pinned_version,
-    hummock_version_delta, hummock_version_stats,
+    hummock_version_delta, hummock_version_stats, object,
 };
 use risingwave_pb::hummock::compact_task::{self, TaskStatus, TaskType};
 use risingwave_pb::hummock::group_delta::DeltaType;
@@ -74,10 +73,10 @@ use tokio_stream::wrappers::IntervalStream;
 use tonic::Streaming;
 use tracing::warn;
 
-use crate::hummock::compaction::selector::{
+use crate::{hummock::compaction::selector::{
     DynamicLevelSelector, LocalSelectorStatistic, ManualCompactionOption, ManualCompactionSelector,
     SpaceReclaimCompactionSelector, TombstoneCompactionSelector, TtlCompactionSelector,
-};
+}, manager::SystemParamsManagerImpl};
 use crate::hummock::compaction::{CompactStatus, CompactionDeveloperConfig};
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
@@ -386,13 +385,24 @@ impl HummockManager {
         // Skip this check in e2e compaction test, which needs to start a secondary cluster with
         // same bucket
         if !deterministic_mode {
-            write_exclusive_cluster_id(
+            let is_new_cluster = write_exclusive_cluster_id(
                 state_store_dir,
                 env.cluster_id().clone(),
                 object_store.clone(),
             )
             .await?;
-
+        if is_new_cluster{
+            match env.system_params_manager_impl_ref() {
+                SystemParamsManagerImpl::Kv(mgr) => {
+                    mgr.set_param("is_new_cluster", Some("true".to_owned()))
+                        .await.unwrap();
+                }
+                SystemParamsManagerImpl::Sql(mgr) => {
+                    mgr.set_param("is_new_cluster", Some("true".to_owned()))
+                        .await.unwrap();
+                }
+            };
+        }
             // config bucket lifecycle for new cluster.
             if let risingwave_object_store::object::ObjectStoreImpl::S3(s3) = object_store.as_ref()
                 && !env.opts.do_not_config_object_storage_lifecycle
@@ -3426,7 +3436,7 @@ async fn write_exclusive_cluster_id(
     state_store_dir: &str,
     cluster_id: ClusterId,
     object_store: ObjectStoreRef,
-) -> Result<()> {
+) -> Result<bool> {
     const CLUSTER_ID_DIR: &str = "cluster_id";
     const CLUSTER_ID_NAME: &str = "0";
     let cluster_id_dir = format!("{}/{}/", state_store_dir, CLUSTER_ID_DIR);
@@ -3435,7 +3445,7 @@ async fn write_exclusive_cluster_id(
         Ok(stored_cluster_id) => {
             let stored_cluster_id = String::from_utf8(stored_cluster_id.to_vec()).unwrap();
             if cluster_id.deref() == stored_cluster_id {
-                return Ok(());
+                return Ok(false);
             }
 
             Err(ObjectError::internal(format!(
@@ -3449,7 +3459,7 @@ async fn write_exclusive_cluster_id(
                 object_store
                     .upload(&cluster_id_full_path, Bytes::from(String::from(cluster_id)))
                     .await?;
-                return Ok(());
+                return Ok(true);
             }
             Err(e.into())
         }
