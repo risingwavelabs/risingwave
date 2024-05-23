@@ -128,23 +128,23 @@ pub trait UdfImpl: std::fmt::Debug + Send + Sync {
     ) -> Result<BoxStream<'a, Result<RecordBatch>>>;
 
     /// For aggregate function, create the initial state.
-    fn create_state(&self) -> Result<ArrayRef> {
-        bail!("aggregate function not supported");
+    fn call_agg_create_state(&self) -> Result<ArrayRef> {
+        bail!("aggregate function is not supported");
     }
 
     /// For aggregate function, accumulate or retract the state.
-    fn accumulate_or_retract(
+    fn call_agg_accumulate_or_retract(
         &self,
         _state: &ArrayRef,
         _ops: &BooleanArray,
         _input: &RecordBatch,
     ) -> Result<ArrayRef> {
-        bail!("aggregate function not supported");
+        bail!("aggregate function is not supported");
     }
 
     /// For aggregate function, get aggregate result from the state.
-    fn finish(&self, _state: &ArrayRef) -> Result<ArrayRef> {
-        bail!("aggregate function not supported");
+    fn call_agg_finish(&self, _state: &ArrayRef) -> Result<ArrayRef> {
+        bail!("aggregate function is not supported");
     }
 
     /// Whether the UDF talks in legacy mode.

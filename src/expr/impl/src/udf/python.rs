@@ -77,11 +77,11 @@ impl UdfImpl for PythonFunction {
             .map(|s| futures_util::stream::iter(s).boxed())
     }
 
-    fn create_state(&self) -> Result<ArrayRef> {
+    fn call_agg_create_state(&self) -> Result<ArrayRef> {
         self.runtime.create_state(&self.identifier)
     }
 
-    fn accumulate_or_retract(
+    fn call_agg_accumulate_or_retract(
         &self,
         state: &ArrayRef,
         ops: &BooleanArray,
@@ -91,7 +91,7 @@ impl UdfImpl for PythonFunction {
             .accumulate_or_retract(&self.identifier, state, ops, input)
     }
 
-    fn finish(&self, state: &ArrayRef) -> Result<ArrayRef> {
+    fn call_agg_finish(&self, state: &ArrayRef) -> Result<ArrayRef> {
         self.runtime.finish(&self.identifier, state)
     }
 }
