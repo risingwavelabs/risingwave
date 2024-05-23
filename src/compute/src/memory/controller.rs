@@ -150,10 +150,18 @@ impl LruWatermarkController {
 
         let cur_used_memory_bytes = jemalloc_active_bytes + jvm_allocated_bytes;
 
+        // To calculate the total amount of memory that needs to be evicted, we sequentially calculate and accumulate
+        // the memory amounts exceeding the thresholds for aggressive, graceful, and stable, multiplying each by
+        // different weights.
+        //
+        //   (range)                 : (weight)
         // * aggressive ~ inf        : evict factor aggressive
         // *   graceful ~ aggressive : evict factor graceful
         // *     stable ~ graceful   : evict factor stable
         // *          0 ~ stable     : no eviction
+        //
+        // Why different weights instead of 1.0? It acts like a penalty factor, used to penalize the system for not
+        // keeping the memory usage down at the lower thresholds.
         let to_evict_bytes = cur_used_memory_bytes.saturating_sub(self.threshold_aggressive) as f64
             * self.eviction_factor_aggressive
             + cur_used_memory_bytes
