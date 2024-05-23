@@ -201,12 +201,12 @@ impl Parser {
             let msg = if let Some(e) = e.into_inner()
                 && let Some(cause) = e.cause()
             {
-                cause.to_string()
+                format!(": {}", cause)
             } else {
                 "".to_string()
             };
             ParserError::ParserError(format!(
-                "Unexpected {}: {}",
+                "Unexpected {}{}",
                 self.tokens[self.index + token_stream.location()],
                 msg
             ))

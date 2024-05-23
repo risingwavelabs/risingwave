@@ -6,9 +6,9 @@
 - input: CREATE TABLE t(a int[][][]);
   formatted_sql: CREATE TABLE t (a INT[][][])
 - input: CREATE TABLE t(a int[);
-  error_msg: 'sql parser error: Unexpected ) at line:1, column:23: '
+  error_msg: 'sql parser error: Unexpected ) at line:1, column:23'
 - input: CREATE TABLE t(a int[[]);
-  error_msg: 'sql parser error: Unexpected [ at line:1, column:23: '
+  error_msg: 'sql parser error: Unexpected [ at line:1, column:23'
 - input: CREATE TABLE t(a int]);
   error_msg: |-
     sql parser error: Expected ',' or ')' after column definition, found: ] at line:1, column:22
