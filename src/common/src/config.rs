@@ -509,6 +509,11 @@ pub struct BatchConfig {
     /// This is the secs used to mask a worker unavailable temporarily.
     #[serde(default = "default::batch::mask_worker_temporary_secs")]
     pub mask_worker_temporary_secs: usize,
+
+    /// Keywords on which SQL option redaction is based in the query log.
+    /// A SQL option with a name containing any of these keywords will be redacted.
+    #[serde(default = "default::batch::redact_sql_option_keywords")]
+    pub redact_sql_option_keywords: Vec<String>,
 }
 
 /// The section `[streaming]` in `risingwave.toml`.
@@ -1677,6 +1682,13 @@ pub mod default {
 
         pub fn mask_worker_temporary_secs() -> usize {
             30
+        }
+
+        pub fn redact_sql_option_keywords() -> Vec<String> {
+            ["password", "secret", "credential", "token"]
+                .into_iter()
+                .map(str::to_string)
+                .collect()
         }
     }
 
