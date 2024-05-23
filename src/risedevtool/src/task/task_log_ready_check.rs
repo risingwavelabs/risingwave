@@ -19,14 +19,12 @@ use super::{ExecuteContext, Task};
 /// Check if a log pattern is found in the log output indicating the service is ready.
 pub struct LogReadyCheckTask {
     pattern: String,
-    user_managed: bool,
 }
 
 impl LogReadyCheckTask {
-    pub fn new(pattern: impl Into<String>, user_managed: bool) -> Result<Self> {
+    pub fn new(pattern: impl Into<String>) -> Result<Self> {
         Ok(Self {
             pattern: pattern.into(),
-            user_managed,
         })
     }
 }
@@ -37,18 +35,9 @@ impl Task for LogReadyCheckTask {
             panic!("Service should be set before executing LogReadyCheckTask");
         };
 
-        if self.user_managed {
-            ctx.pb.set_message(
-                "waiting for user-managed service ready... (see `risedev.log` for cli args)",
-            );
-            ctx.wait_log_contains(&self.pattern).with_context(|| {
-                format!("failed to wait for user-managed service `{id}` to be ready")
-            })?;
-        } else {
-            ctx.pb.set_message("waiting for ready...");
-            ctx.wait_log_contains(&self.pattern)
-                .with_context(|| format!("failed to wait for service `{id}` to be ready"))?;
-        }
+        ctx.pb.set_message("waiting for ready...");
+        ctx.wait_log_contains(&self.pattern)
+            .with_context(|| format!("failed to wait for service `{id}` to be ready"))?;
 
         ctx.complete_spin();
 
