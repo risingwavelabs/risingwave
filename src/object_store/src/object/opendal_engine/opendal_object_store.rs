@@ -265,7 +265,7 @@ pub struct OpendalStreamingUploader {
 
 impl OpendalStreamingUploader {
     const UPLOAD_BUFFER_SIZE: usize = 16 * 1024 * 1024;
-    
+
     pub async fn new(
         op: Operator,
         path: String,
@@ -287,7 +287,12 @@ impl OpendalStreamingUploader {
             .writer_with(&path)
             .concurrent(8)
             .await?;
-        Ok(Self { writer, buf: vec![], not_uploaded_len: 0, is_valid: true })
+        Ok(Self {
+            writer,
+            buf: vec![],
+            not_uploaded_len: 0,
+            is_valid: true,
+        })
     }
 
     async fn flush(&mut self) -> ObjectResult<()> {
@@ -306,7 +311,6 @@ impl OpendalStreamingUploader {
     }
 }
 
-
 impl StreamingUploader for OpendalStreamingUploader {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
         assert!(self.is_valid);
@@ -318,12 +322,12 @@ impl StreamingUploader for OpendalStreamingUploader {
         Ok(())
     }
 
-    async fn finish(mut self: Box<Self>) -> ObjectResult<()> {
+    async fn finish(mut self: Self) -> ObjectResult<()> {
         assert!(self.is_valid);
         if self.not_uploaded_len > 0 {
             self.flush().await?;
         }
-        
+
         assert!(self.buf.is_empty());
         assert_eq!(self.not_uploaded_len, 0);
 
@@ -340,7 +344,7 @@ impl StreamingUploader for OpendalStreamingUploader {
     }
 
     fn get_memory_usage(&self) -> u64 {
-       Self::UPLOAD_BUFFER_SIZE as u64
+        Self::UPLOAD_BUFFER_SIZE as u64
     }
 }
 
