@@ -169,21 +169,7 @@ fn redact_sql(sql: &str) -> String {
             .into_iter()
             .map(|sql| sql.to_redacted_string())
             .join(";"),
-        Err(_) => {
-            let re = regex::Regex::new(r"(?is)with\s*\(.*\)").unwrap();
-            let Some(m) = re.find(sql) else {
-                return sql.to_owned();
-            };
-            // Drop all contents starting from the first WITH().
-            // It might be overkill, e.g. "CREATE TABLE name_with (k int, v int)" will be redacted to
-            // "CREATE TABLE name_[REDACTED]", which is obviously incorrect.
-            // However, I'll leave it as it is to avoid using a more complex regex.
-            if m.start() > 0 {
-                format!("{}[REDACTED]", sql[0..m.start()].to_owned())
-            } else {
-                "[REDACTED]".to_owned()
-            }
-        }
+        Err(_) => sql.to_owned(),
     }
 }
 
@@ -1247,36 +1233,5 @@ mod tests {
         ) FORMAT plain ENCODE json (a='1',b='2')
         ";
         assert_eq!(redact_sql(sql), "CREATE SOURCE temp (k BIGINT, v CHARACTER VARYING) WITH (connector = [REDACTED], v1 = [REDACTED], v2 = [REDACTED], v3 = [REDACTED], v4 = [REDACTED]) FORMAT PLAIN ENCODE JSON (a = [REDACTED], b = [REDACTED])");
-    }
-
-    #[test]
-    fn test_redact_not_parsable_sql() {
-        let sql = r"
-        create tableX temp (k bigint, v varchar) with (
-            v1 = 123,
-            v2 = 'with',
-            v3 = false,
-            v4 = 'with(123)'
-        ) format plain encode (a='1',b='2')
-        ";
-        assert_eq!(
-            redact_sql(sql),
-            r"
-        create tableX temp (k bigint, v varchar) [REDACTED]"
-        );
-
-        let sql = r"
-        create tableX temp_with (k bigint, v varchar) with (
-            v1 = 123,
-            v2 = 'with',
-            v3 = false,
-            v4 = 'with(123)'
-        ) format plain encode (a='1',b='2')
-        ";
-        assert_eq!(
-            redact_sql(sql),
-            r"
-        create tableX temp_[REDACTED]"
-        );
     }
 }
