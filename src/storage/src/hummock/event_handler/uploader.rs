@@ -135,10 +135,9 @@ impl UploadingTask {
         let imm_ids = payload
             .iter()
             .map(|(instance_id, imms)| {
-                (
-                    *instance_id,
-                    imms.iter().map(|imm| imm.batch_id()).collect_vec(),
-                )
+                let mut imm_ids = imms.iter().map(|imm| imm.batch_id()).collect_vec();
+                imm_ids.sort();
+                (*instance_id, imm_ids)
             })
             .collect();
         let task_size = payload
@@ -450,7 +449,7 @@ impl SealedData {
     }
 
     // Flush can be triggered by either a sync_epoch or a spill (`may_flush`) request.
-    fn flush(&mut self, context: &UploaderContext, is_spilled: bool) {
+    fn flush(&mut self, context: &UploaderContext, is_spilled: bool) -> bool {
         let payload: HashMap<_, _> = take(&mut self.imms_by_table_shard)
             .into_iter()
             .map(|(id, imms)| (id, imms.into_iter().collect()))
@@ -641,13 +640,12 @@ impl HummockUploader {
         );
 
         let unsealed_data = self.unsealed_data.entry(epoch).or_default();
-        
+        unsealed_data.size += imm.size();
         unsealed_data
             .imms
             .entry(imm.instance_id)
             .or_default()
             .push_front(imm);
-        unsealed_data.size += imm.size();
     }
 
     pub(crate) fn add_table_watermarks(
