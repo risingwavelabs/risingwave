@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::{build_retractable, AggCall, BoxedAggregateFunction};
 use risingwave_pb::stream_plan::PbAggNodeVersion;
@@ -184,7 +183,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
     async fn flush_data(
         this: &mut ExecutorInner<S>,
         vars: &mut ExecutionVars<S>,
-        epoch: EpochPair,
+        barrier: &Barrier,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         let chunk = if vars.state_changed || vars.agg_group.is_uninitialized() {
             // Flush distinct dedup state.
@@ -206,8 +205,11 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         };
 
         // Commit all state tables.
-        futures::future::try_join_all(this.all_state_tables_mut().map(|table| table.commit(epoch)))
-            .await?;
+        futures::future::try_join_all(
+            this.all_state_tables_mut()
+                .map(|table| table.barrier(barrier)),
+        )
+        .await?;
 
         vars.state_changed = false;
         Ok(chunk)
@@ -273,9 +275,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                     Self::try_flush_data(&mut this).await?;
                 }
                 Message::Barrier(barrier) => {
-                    if let Some(chunk) =
-                        Self::flush_data(&mut this, &mut vars, barrier.epoch).await?
-                    {
+                    if let Some(chunk) = Self::flush_data(&mut this, &mut vars, &barrier).await? {
                         yield Message::Chunk(chunk);
                     }
                     vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {

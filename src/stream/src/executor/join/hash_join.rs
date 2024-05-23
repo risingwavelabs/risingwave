@@ -446,10 +446,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         Ok(entry_state)
     }
 
-    pub async fn flush(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+    pub async fn flush(&mut self, barrier: &Barrier) -> StreamExecutorResult<()> {
         self.metrics.flush();
-        self.state.table.commit(epoch).await?;
-        self.degree_state.table.commit(epoch).await?;
+        self.state.table.barrier(barrier).await?;
+        self.degree_state.table.barrier(barrier).await?;
         Ok(())
     }
 
@@ -636,6 +636,7 @@ use risingwave_common_estimate_size::KvSize;
 use thiserror::Error;
 
 use super::*;
+use crate::executor::Barrier;
 
 /// We manages a `HashMap` in memory for all entries belonging to a join key.
 /// When evicted, `cached` does not hold any entries.

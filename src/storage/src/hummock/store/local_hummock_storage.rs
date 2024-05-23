@@ -30,8 +30,10 @@ use tracing::{warn, Instrument};
 use super::version::{StagingData, VersionUpdate};
 use crate::error::StorageResult;
 use crate::hummock::event_handler::hummock_event_handler::HummockEventSender;
-use crate::hummock::event_handler::{HummockEvent, HummockReadVersionRef, LocalInstanceGuard};
 use crate::hummock::iterator::change_log::ChangeLogIterator;
+use crate::hummock::event_handler::{
+    HummockEvent, HummockReadVersionRef, LocalInstanceGuard, LocalInstanceId,
+};
 use crate::hummock::iterator::{
     Backward, BackwardUserIterator, ConcatIteratorInner, Forward, HummockIteratorUnion,
     IteratorFactory, MergeIterator, UserIterator,
@@ -700,7 +702,7 @@ impl LocalHummockStorage {
         self.instance_guard.table_id
     }
 
-    pub fn instance_id(&self) -> u64 {
+    pub fn instance_id(&self) -> LocalInstanceId {
         self.instance_guard.instance_id
     }
 

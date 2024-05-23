@@ -241,7 +241,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                         }
                     }
 
-                    table.commit(barrier.epoch).await?;
+                    table.barrier(&barrier).await?;
 
                     if barrier.kind.is_checkpoint() {
                         if idle_input {

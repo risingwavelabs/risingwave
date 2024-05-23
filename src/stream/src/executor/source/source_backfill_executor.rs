@@ -478,7 +478,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     .await?;
                                 self.backfill_state_store
                                     .state_store
-                                    .commit(barrier.epoch)
+                                    .barrier(&barrier)
                                     .await?;
 
                                 yield Message::Barrier(barrier);
@@ -620,7 +620,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                     }
                     self.backfill_state_store
                         .state_store
-                        .commit(barrier.epoch)
+                        .barrier(&barrier)
                         .await?;
                     yield Message::Barrier(barrier);
                 }

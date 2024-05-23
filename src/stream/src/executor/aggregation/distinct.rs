@@ -306,7 +306,7 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
-    use crate::executor::ActorContext;
+    use crate::executor::{ActorContext, Barrier};
 
     async fn infer_dedup_tables<S: StateStore>(
         agg_calls: &[AggCall],
@@ -432,7 +432,10 @@ mod tests {
 
         epoch.inc_for_test();
         for table in dedup_tables.values_mut() {
-            table.commit(epoch).await.unwrap();
+            table
+                .barrier(&Barrier::with_epoch_pair_for_test(epoch))
+                .await
+                .unwrap();
         }
 
         // --- chunk 2 ---
@@ -473,7 +476,10 @@ mod tests {
 
         epoch.inc_for_test();
         for table in dedup_tables.values_mut() {
-            table.commit(epoch).await.unwrap();
+            table
+                .barrier(&Barrier::with_epoch_pair_for_test(epoch))
+                .await
+                .unwrap();
         }
 
         drop(deduplicater);
@@ -539,7 +545,10 @@ mod tests {
 
         epoch.inc_for_test();
         for table in dedup_tables.values_mut() {
-            table.commit(epoch).await.unwrap();
+            table
+                .barrier(&Barrier::with_epoch_pair_for_test(epoch))
+                .await
+                .unwrap();
         }
     }
 
@@ -615,7 +624,10 @@ mod tests {
 
         epoch.inc_for_test();
         for table in dedup_tables.values_mut() {
-            table.commit(epoch).await.unwrap();
+            table
+                .barrier(&Barrier::with_epoch_pair_for_test(epoch))
+                .await
+                .unwrap();
         }
 
         let chunk = StreamChunk::from_pretty(
@@ -666,7 +678,10 @@ mod tests {
 
         epoch.inc_for_test();
         for table in dedup_tables.values_mut() {
-            table.commit(epoch).await.unwrap();
+            table
+                .barrier(&Barrier::with_epoch_pair_for_test(epoch))
+                .await
+                .unwrap();
         }
     }
 }

@@ -818,11 +818,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const A: bool>
                             wait_first_barrier = false;
                             self.memo_table.as_mut().unwrap().init_epoch(barrier.epoch);
                         } else {
-                            self.memo_table
-                                .as_mut()
-                                .unwrap()
-                                .commit(barrier.epoch)
-                                .await?;
+                            self.memo_table.as_mut().unwrap().barrier(&barrier).await?;
                         }
                     }
                     if let Some(vnodes) = barrier.as_update_vnode_bitmap(self.ctx.id) {

@@ -223,8 +223,8 @@ where
         generate_output(res_rows, res_ops, &self.schema)
     }
 
-    async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.managed_state.flush(epoch).await
+    async fn flush_data(&mut self, barrier: &Barrier) -> StreamExecutorResult<()> {
+        self.managed_state.flush(barrier).await
     }
 
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {

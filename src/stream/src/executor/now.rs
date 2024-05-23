@@ -93,7 +93,7 @@ impl<S: StateStore> NowExecutor<S> {
                     paused = barrier.is_pause_on_startup();
                     initialized = true;
                 } else {
-                    state_table.commit(barrier.epoch).await?;
+                    state_table.barrier(&barrier).await?;
                 }
 
                 // Extract timestamp from the current epoch.

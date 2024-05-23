@@ -459,8 +459,8 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                         last_committed_epoch_row.clone_from(&current_epoch_row);
                     }
 
-                    self.left_table.commit(barrier.epoch).await?;
-                    self.right_table.commit(barrier.epoch).await?;
+                    self.left_table.barrier(&barrier).await?;
+                    self.right_table.barrier(&barrier).await?;
 
                     prev_epoch_value = Some(curr);
 

@@ -135,7 +135,7 @@ async fn test_snapshot_inner(
         .await
         .unwrap();
     let epoch2 = epoch1.next_epoch();
-    local.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
+    local.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test(true));
     if enable_sync {
         let res = hummock_storage.seal_and_sync_epoch(epoch1).await.unwrap();
         if enable_commit {
@@ -175,7 +175,7 @@ async fn test_snapshot_inner(
         .await
         .unwrap();
     let epoch3 = epoch2.next_epoch();
-    local.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
+    local.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test(true));
     if enable_sync {
         let res = hummock_storage.seal_and_sync_epoch(epoch2).await.unwrap();
         if enable_commit {
@@ -215,7 +215,7 @@ async fn test_snapshot_inner(
         )
         .await
         .unwrap();
-    local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
+    local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test(true));
     if enable_sync {
         let res = hummock_storage.seal_and_sync_epoch(epoch3).await.unwrap();
         if enable_commit {
@@ -273,7 +273,7 @@ async fn test_snapshot_range_scan_inner(
         )
         .await
         .unwrap();
-    local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
+    local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test(true));
     if enable_sync {
         let res = hummock_storage.seal_and_sync_epoch(epoch).await.unwrap();
         if enable_commit {

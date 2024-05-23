@@ -26,6 +26,7 @@ use risingwave_storage::StateStore;
 use super::{serialize_pk_to_cache_key, CacheKey, CacheKeySerde, GroupKey, TopNCache};
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
+use crate::executor::Barrier;
 
 /// * For TopN, the storage key is: `[ order_by + remaining columns of pk ]`
 /// * For group TopN, the storage key is: `[ group_key + order_by + remaining columns of pk ]`
@@ -304,8 +305,8 @@ impl<S: StateStore> ManagedTopNState<S> {
         Ok(())
     }
 
-    pub async fn flush(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.state_table.commit(epoch).await?;
+    pub async fn flush(&mut self, barrier: &Barrier) -> StreamExecutorResult<()> {
+        self.state_table.barrier(barrier).await?;
         Ok(())
     }
 

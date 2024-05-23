@@ -21,6 +21,7 @@ use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 
 use crate::common::table::state_table::StateTable;
+use crate::executor::Barrier;
 
 pub async fn gen_basic_table(row_count: usize) -> StorageTable<MemoryStateStore> {
     let state_store = MemoryStateStore::new();
@@ -62,7 +63,10 @@ pub async fn gen_basic_table(row_count: usize) -> StorageTable<MemoryStateStore>
     }
 
     epoch.inc_for_test();
-    state.commit(epoch).await.unwrap();
+    state
+        .barrier(&Barrier::with_prev_epoch_for_test(epoch.curr, epoch.prev))
+        .await
+        .unwrap();
 
     table
 }

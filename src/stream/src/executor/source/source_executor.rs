@@ -23,7 +23,7 @@ use risingwave_common::array::ArrayRef;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_common::util::epoch::{Epoch, EpochPair};
+use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
@@ -335,7 +335,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
     async fn persist_state_and_clear_cache(
         &mut self,
-        epoch: EpochPair,
+        barrier: &Barrier,
     ) -> StreamExecutorResult<HashMap<SplitId, SplitImpl>> {
         let core = self.stream_source_core.as_mut().unwrap();
 
@@ -351,7 +351,7 @@ impl<S: StateStore> SourceExecutor<S> {
         }
 
         // commit anyway, even if no message saved
-        core.split_state_store.state_table.commit(epoch).await?;
+        core.split_state_store.state_table.barrier(barrier).await?;
 
         let updated_splits = core.updated_splits_in_epoch.clone();
 
@@ -567,7 +567,7 @@ impl<S: StateStore> SourceExecutor<S> {
                         }
                     }
 
-                    let updated_splits = self.persist_state_and_clear_cache(epoch).await?;
+                    let updated_splits = self.persist_state_and_clear_cache(&barrier).await?;
 
                     // when handle a checkpoint barrier, spawn a task to wait for epoch commit notification
                     if barrier.kind.is_checkpoint()
@@ -836,7 +836,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnId, Field, TableId};
     use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::util::epoch::test_epoch;
+    use risingwave_common::util::epoch::{test_epoch, EpochPair};
     use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
     use risingwave_pb::catalog::StreamSourceInfo;

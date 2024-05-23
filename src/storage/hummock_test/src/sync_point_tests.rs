@@ -300,7 +300,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     local.flush().await.unwrap();
     local.seal_current_epoch(
         test_epoch(101),
-        risingwave_storage::store::SealCurrentEpochOptions::for_test(),
+        risingwave_storage::store::SealCurrentEpochOptions::for_test(true),
     );
     flush_and_commit(&hummock_meta_client, &storage, test_epoch(100)).await;
     compact_once(
@@ -335,7 +335,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     local.flush().await.unwrap();
     local.seal_current_epoch(
         test_epoch(102),
-        risingwave_storage::store::SealCurrentEpochOptions::for_test(),
+        risingwave_storage::store::SealCurrentEpochOptions::for_test(true),
     );
     flush_and_commit(&hummock_meta_client, &storage, test_epoch(101)).await;
     compact_once(
@@ -370,7 +370,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     local.flush().await.unwrap();
     local.seal_current_epoch(
         test_epoch(103),
-        risingwave_storage::store::SealCurrentEpochOptions::for_test(),
+        risingwave_storage::store::SealCurrentEpochOptions::for_test(true),
     );
     flush_and_commit(&hummock_meta_client, &storage, test_epoch(102)).await;
     // move this two file to the same level.
@@ -399,7 +399,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     local.flush().await.unwrap();
     local.seal_current_epoch(
         u64::MAX,
-        risingwave_storage::store::SealCurrentEpochOptions::for_test(),
+        risingwave_storage::store::SealCurrentEpochOptions::for_test(true),
     );
     flush_and_commit(&hummock_meta_client, &storage, test_epoch(103)).await;
     // move this two file to the same level.

@@ -19,7 +19,6 @@ use futures::stream;
 use itertools::Itertools;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common_estimate_size::collections::EstimatedHashMap;
 use risingwave_common_estimate_size::EstimateSize;
@@ -535,11 +534,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
     async fn commit_state_tables(
         this: &mut ExecutorInner<K, S>,
-        epoch: EpochPair,
+        barrier: &Barrier,
     ) -> StreamExecutorResult<()> {
         futures::future::try_join_all(
             this.all_state_tables_mut()
-                .map(|table| async { table.commit(epoch).await }),
+                .map(|table| async { table.barrier(barrier).await }),
         )
         .await?;
         Ok(())
@@ -648,7 +647,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     for chunk in Self::flush_data(&mut this, &mut vars) {
                         yield Message::Chunk(chunk?);
                     }
-                    Self::commit_state_tables(&mut this, barrier.epoch).await?;
+                    Self::commit_state_tables(&mut this, &barrier).await?;
 
                     if this.emit_on_window_close {
                         // ignore watermarks on other columns

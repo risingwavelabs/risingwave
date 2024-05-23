@@ -756,6 +756,7 @@ impl From<TracedInitOptions> for InitOptions {
 pub struct SealCurrentEpochOptions {
     pub table_watermarks: Option<(WatermarkDirection, Vec<VnodeWatermark>)>,
     pub switch_op_consistency_level: Option<OpConsistencyLevel>,
+    pub is_checkpoint: bool,
 }
 
 impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
@@ -773,6 +774,7 @@ impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
             switch_op_consistency_level: value
                 .switch_op_consistency_level
                 .map(|level| matches!(level, OpConsistencyLevel::ConsistentOldValue { .. })),
+            is_checkpoint: value.is_checkpoint,
         }
     }
 }
@@ -807,15 +809,17 @@ impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
                     OpConsistencyLevel::Inconsistent
                 }
             }),
+            is_checkpoint: value.is_checkpoint,
         }
     }
 }
 
 impl SealCurrentEpochOptions {
-    pub fn for_test() -> Self {
+    pub fn for_test(is_checkpoint: bool) -> Self {
         Self {
             table_watermarks: None,
             switch_op_consistency_level: None,
+            is_checkpoint,
         }
     }
 }

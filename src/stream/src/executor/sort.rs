@@ -120,7 +120,7 @@ impl<S: StateStore> SortExecutor<S> {
                     this.buffer_table.try_flush().await?;
                 }
                 Message::Barrier(barrier) => {
-                    this.buffer_table.commit(barrier.epoch).await?;
+                    this.buffer_table.barrier(&barrier).await?;
 
                     // Update the vnode bitmap for state tables of all agg calls if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(this.actor_ctx.id) {

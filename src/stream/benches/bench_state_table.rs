@@ -24,6 +24,7 @@ use risingwave_common::util::epoch::{test_epoch, EpochPair};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_stream::common::table::state_table::WatermarkCacheParameterizedStateTable;
+use risingwave_stream::executor::Barrier;
 use tokio::runtime::Runtime;
 
 type TestStateTable<const USE_WATERMARK_CACHE: bool> =
@@ -119,7 +120,10 @@ async fn run_bench_state_table_inserts<const USE_WATERMARK_CACHE: bool>(
         state_table.insert(row);
     }
     epoch.inc_for_test();
-    state_table.commit(epoch).await.unwrap();
+    state_table
+        .barrier(&Barrier::with_epoch_pair_for_test(epoch))
+        .await
+        .unwrap();
 }
 
 fn bench_state_table_inserts(c: &mut Criterion) {
@@ -179,7 +183,10 @@ async fn run_bench_state_table_chunks<const USE_WATERMARK_CACHE: bool>(
         state_table.write_chunk(chunk);
     }
     epoch.inc_for_test();
-    state_table.commit(epoch).await.unwrap();
+    state_table
+        .barrier(&Barrier::with_epoch_pair_for_test(epoch))
+        .await
+        .unwrap();
 }
 
 fn bench_state_table_write_chunk(c: &mut Criterion) {

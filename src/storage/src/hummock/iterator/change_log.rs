@@ -473,6 +473,7 @@ pub mod test_utils {
                     SealCurrentEpochOptions {
                         table_watermarks: None,
                         switch_op_consistency_level: None,
+                        is_checkpoint: true,
                     },
                 );
             }
@@ -499,6 +500,7 @@ pub mod test_utils {
             SealCurrentEpochOptions {
                 table_watermarks: None,
                 switch_op_consistency_level: None,
+                is_checkpoint: true,
             },
         );
     }

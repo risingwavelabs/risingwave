@@ -17,7 +17,6 @@ use futures::stream;
 use futures::stream::select_with_strategy;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::{bail, row};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
@@ -431,7 +430,7 @@ where
 
                 // Persist state on barrier
                 Self::persist_state(
-                    barrier.epoch,
+                    &barrier,
                     &mut self.state_table,
                     false,
                     &current_pos,
@@ -523,7 +522,7 @@ where
                         debug_assert_ne!(current_pos, None);
 
                         Self::persist_state(
-                            barrier.epoch,
+                            barrier,
                             &mut self.state_table,
                             true,
                             &current_pos,
@@ -701,7 +700,7 @@ where
     }
 
     async fn persist_state(
-        epoch: EpochPair,
+        barrier: &Barrier,
         table: &mut Option<StateTable<S>>,
         is_finished: bool,
         current_pos: &Option<OwnedRow>,
@@ -712,7 +711,7 @@ where
         // Backwards compatibility with no state table in backfill.
         let Some(table) = table else { return Ok(()) };
         utils::persist_state(
-            epoch,
+            barrier,
             table,
             is_finished,
             current_pos,

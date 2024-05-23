@@ -888,10 +888,8 @@ impl HummockEventHandler {
                     "seal epoch from non-existing read version instance: instance_id: {}, table_id: {}, epoch: {}",
                     instance_id, table_id, epoch,
                 );
-                if let Some((direction, watermarks)) = opts.table_watermarks {
-                    self.uploader
-                        .add_table_watermarks(epoch, table_id, watermarks, direction)
-                }
+                self.uploader
+                    .local_seal_epoch(epoch, table_id, instance_id, opts)
             }
 
             #[cfg(any(test, feature = "test"))]

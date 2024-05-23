@@ -456,7 +456,7 @@ where
                     upstream_table.write_chunk(chunk);
                 }
 
-                upstream_table.commit(barrier.epoch).await?;
+                upstream_table.barrier(&barrier).await?;
 
                 backfill_snapshot_read_row_count_metric.inc_by(cur_barrier_snapshot_processed_rows);
                 backfill_upstream_output_row_count_metric
@@ -476,7 +476,7 @@ where
 
                 // Persist state on barrier
                 persist_state_per_vnode(
-                    barrier.epoch,
+                    &barrier,
                     &mut self.state_table,
                     &mut backfill_state,
                     #[cfg(debug_assertions)]
@@ -572,7 +572,7 @@ where
                         }
 
                         persist_state_per_vnode(
-                            barrier.epoch,
+                            barrier,
                             &mut self.state_table,
                             &mut backfill_state,
                             #[cfg(debug_assertions)]

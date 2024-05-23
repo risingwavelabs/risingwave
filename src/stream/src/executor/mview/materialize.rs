@@ -272,7 +272,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         &self.depended_subscription_ids,
                     );
                     self.state_table
-                        .commit_may_switch_consistent_op(b.epoch, op_consistency_level)
+                        .barrier_may_switch_consistent_op(&b, op_consistency_level)
                         .await?;
                     if !self.state_table.is_consistent_op() {
                         assert_eq!(self.conflict_behavior, ConflictBehavior::Overwrite);

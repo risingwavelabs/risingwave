@@ -23,7 +23,6 @@ use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::reader::desc::{FsSourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
@@ -233,7 +232,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
     async fn take_snapshot_and_clear_cache(
         &mut self,
-        epoch: EpochPair,
+        barrier: &Barrier,
     ) -> StreamExecutorResult<()> {
         let core = &mut self.stream_source_core;
         let incompleted = core
@@ -270,7 +269,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             core.split_state_store.set_all_complete(completed).await?
         }
         // commit anyway, even if no message saved
-        core.split_state_store.state_table.commit(epoch).await?;
+        core.split_state_store.state_table.barrier(barrier).await?;
 
         core.updated_splits_in_epoch.clear();
         Ok(())
@@ -396,7 +395,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
                             stream.resume_stream();
                             self_paused = false;
                         }
-                        let epoch = barrier.epoch;
 
                         if let Some(ref mutation) = barrier.mutation.as_deref() {
                             match mutation {
@@ -427,7 +425,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                                 _ => {}
                             }
                         }
-                        self.take_snapshot_and_clear_cache(epoch).await?;
+                        self.take_snapshot_and_clear_cache(barrier).await?;
 
                         yield msg;
                     }

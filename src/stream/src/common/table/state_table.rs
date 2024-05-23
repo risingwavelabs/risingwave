@@ -66,7 +66,7 @@ use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
 use crate::cache::cache_may_stale;
 use crate::common::cache::{StateCache, StateCacheFiller};
 use crate::common::table::state_table_cache::StateTableWatermarkCache;
-use crate::executor::{StreamExecutorError, StreamExecutorResult};
+use crate::executor::{Barrier, StreamExecutorError, StreamExecutorResult};
 
 /// This num is arbitrary and we may want to improve this choice in the future.
 const STATE_CLEANING_PERIOD_EPOCH: usize = 300;
@@ -1142,29 +1142,29 @@ where
         }
     }
 
-    pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.commit_inner(new_epoch, None).await
+    pub async fn barrier(&mut self, barrier: &Barrier) -> StreamExecutorResult<()> {
+        self.barrier_inner(barrier, None).await
     }
 
-    pub async fn commit_may_switch_consistent_op(
+    pub async fn barrier_may_switch_consistent_op(
         &mut self,
-        new_epoch: EpochPair,
+        barrier: &Barrier,
         op_consistency_level: StateTableOpConsistencyLevel,
     ) -> StreamExecutorResult<()> {
         if self.op_consistency_level != op_consistency_level {
-            self.commit_inner(new_epoch, Some(op_consistency_level))
+            self.barrier_inner(barrier, Some(op_consistency_level))
                 .await
         } else {
-            self.commit_inner(new_epoch, None).await
+            self.barrier_inner(barrier, None).await
         }
     }
 
-    async fn commit_inner(
+    async fn barrier_inner(
         &mut self,
-        new_epoch: EpochPair,
+        barrier: &Barrier,
         switch_consistent_op: Option<StateTableOpConsistencyLevel>,
     ) -> StreamExecutorResult<()> {
-        assert_eq!(self.epoch(), new_epoch.prev);
+        assert_eq!(self.epoch(), barrier.epoch.prev);
         let switch_op_consistency_level = switch_consistent_op.map(|new_consistency_level| {
             assert_ne!(self.op_consistency_level, new_consistency_level);
             self.op_consistency_level = new_consistency_level;
@@ -1189,15 +1189,16 @@ where
         if !self.is_dirty() {
             // If the state table is not modified, go fast path.
             self.local_store.seal_current_epoch(
-                new_epoch.curr,
+                barrier.epoch.curr,
                 SealCurrentEpochOptions {
                     table_watermarks: None,
                     switch_op_consistency_level,
+                    is_checkpoint: barrier.kind.is_checkpoint(),
                 },
             );
             return Ok(());
         } else {
-            self.seal_current_epoch(new_epoch.curr, switch_op_consistency_level)
+            self.seal_current_epoch(barrier, switch_op_consistency_level)
                 .instrument(tracing::info_span!("state_table_commit"))
                 .await?;
         }
@@ -1256,7 +1257,7 @@ where
     /// Write to state store.
     async fn seal_current_epoch(
         &mut self,
-        next_epoch: u64,
+        barrier: &Barrier,
         switch_op_consistency_level: Option<OpConsistencyLevel>,
     ) -> StreamExecutorResult<()> {
         let watermark = self.state_clean_watermark.take();
@@ -1349,10 +1350,11 @@ where
             seal_watermark.map(|(direction, watermark)| (direction, vec![watermark]));
 
         self.local_store.seal_current_epoch(
-            next_epoch,
+            barrier.epoch.curr,
             SealCurrentEpochOptions {
                 table_watermarks,
                 switch_op_consistency_level,
+                is_checkpoint: barrier.kind.is_checkpoint(),
             },
         );
         Ok(())

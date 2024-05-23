@@ -329,6 +329,10 @@ impl Barrier {
         }
     }
 
+    pub fn with_epoch_pair_for_test(epoch: EpochPair) -> Self {
+        Self::with_prev_epoch_for_test(epoch.curr, epoch.prev)
+    }
+
     #[must_use]
     pub fn with_mutation(self, mutation: Mutation) -> Self {
         Self {

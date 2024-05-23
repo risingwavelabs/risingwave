@@ -260,7 +260,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
 
                                     state_store_handler
                                         .state_table
-                                        .commit(barrier.epoch)
+                                        .barrier(barrier)
                                         .await?;
 
                                     if let Some(vnode_bitmap) =

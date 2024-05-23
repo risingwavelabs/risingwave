@@ -307,7 +307,7 @@ mod tests {
     use crate::common::table::state_table::StateTable;
     use crate::common::StateTableColumnMapping;
     use crate::executor::aggregation::GroupKey;
-    use crate::executor::{PkIndices, StreamExecutorResult};
+    use crate::executor::{Barrier, PkIndices, StreamExecutorResult};
 
     fn create_chunk<S: StateStore>(
         pretty: &str,
@@ -402,7 +402,10 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table
+                .barrier(&Barrier::with_epoch_pair_for_test(epoch))
+                .await
+                .unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(3i32.into()));
@@ -420,7 +423,10 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table
+                .barrier(&Barrier::with_epoch_pair_for_test(epoch))
+                .await
+                .unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(2i32.into()));
@@ -502,7 +508,10 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table
+                .barrier(&Barrier::with_epoch_pair_for_test(epoch))
+                .await
+                .unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(8i32.into()));
@@ -520,7 +529,10 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table
+                .barrier(&Barrier::with_epoch_pair_for_test(epoch))
+                .await
+                .unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(9i32.into()));
@@ -646,8 +658,14 @@ mod tests {
             state_2.apply_chunk(&chunk_2)?;
 
             epoch.inc_for_test();
-            table_1.commit(epoch).await.unwrap();
-            table_2.commit(epoch).await.unwrap();
+            table_1
+                .barrier(&Barrier::with_epoch_pair_for_test(epoch))
+                .await
+                .unwrap();
+            table_2
+                .barrier(&Barrier::with_epoch_pair_for_test(epoch))
+                .await
+                .unwrap();
 
             let out1 = state_1
                 .get_output(&table_1, group_key.as_ref(), &agg1)
@@ -720,7 +738,10 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table
+                .barrier(&Barrier::with_epoch_pair_for_test(epoch))
+                .await
+                .unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(5i32.into()));
@@ -738,7 +759,10 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table
+                .barrier(&Barrier::with_epoch_pair_for_test(epoch))
+                .await
+                .unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(8i32.into()));
@@ -835,7 +859,10 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table
+                .barrier(&Barrier::with_epoch_pair_for_test(epoch))
+                .await
+                .unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(min_value.into()));
@@ -862,7 +889,10 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table
+                .barrier(&Barrier::with_epoch_pair_for_test(epoch))
+                .await
+                .unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(min_value.into()));
@@ -924,7 +954,10 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table
+                .barrier(&Barrier::with_epoch_pair_for_test(epoch))
+                .await
+                .unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(4i32.into()));
@@ -944,7 +977,10 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table
+                .barrier(&Barrier::with_epoch_pair_for_test(epoch))
+                .await
+                .unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(12i32.into()));
@@ -966,7 +1002,10 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table
+                .barrier(&Barrier::with_epoch_pair_for_test(epoch))
+                .await
+                .unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(12i32.into()));
@@ -1038,7 +1077,10 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table
+                .barrier(&Barrier::with_epoch_pair_for_test(epoch))
+                .await
+                .unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some("c,a".into()));
@@ -1055,7 +1097,10 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table
+                .barrier(&Barrier::with_epoch_pair_for_test(epoch))
+                .await
+                .unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some("d_c,a+e".into()));
@@ -1122,7 +1167,10 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table
+                .barrier(&Barrier::with_epoch_pair_for_test(epoch))
+                .await
+                .unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res.unwrap().as_list(), &ListValue::from_iter([2, 1]));
@@ -1139,7 +1187,10 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table
+                .barrier(&Barrier::with_epoch_pair_for_test(epoch))
+                .await
+                .unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res.unwrap().as_list(), &ListValue::from_iter([2, 2, 0, 1]));

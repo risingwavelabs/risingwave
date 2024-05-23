@@ -21,7 +21,7 @@ use risingwave_connector::source::cdc::external::CdcOffset;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
-use crate::executor::StreamExecutorResult;
+use crate::executor::{Barrier, StreamExecutorResult};
 
 #[derive(Debug, Default)]
 pub struct CdcStateRecord {
@@ -131,7 +131,7 @@ impl<S: StateStore> CdcBackfillState<S> {
     }
 
     /// Persist the state to storage
-    pub async fn commit_state(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.state_table.commit(new_epoch).await
+    pub async fn commit_state(&mut self, barrier: &Barrier) -> StreamExecutorResult<()> {
+        self.state_table.barrier(barrier).await
     }
 }

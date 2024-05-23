@@ -35,7 +35,6 @@ use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_common::util::value_encoding::BasicSerde;
@@ -47,7 +46,7 @@ use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::{ReplicatedStateTable, StateTableInner};
 use crate::executor::{
-    Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
+    Barrier, Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
 };
 
 /// `vnode`, `is_finished`, `row_count`, all occupy 1 column each.
@@ -551,7 +550,7 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
 /// Flush the data
 pub(crate) async fn flush_data<S: StateStore, const IS_REPLICATED: bool>(
     table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
-    epoch: EpochPair,
+    barrier: &Barrier,
     old_state: &mut Option<Vec<Datum>>,
     current_partial_state: &mut [Datum],
 ) -> StreamExecutorResult<()> {
@@ -579,7 +578,7 @@ pub(crate) async fn flush_data<S: StateStore, const IS_REPLICATED: bool>(
             })
         });
     }
-    table.commit(epoch).await
+    table.barrier(barrier).await
 }
 
 /// We want to avoid allocating a row for every vnode.
@@ -720,7 +719,7 @@ where
 /// TODO(kwannoel): Instead of persisting state per vnode each time,
 /// we can optimize by persisting state for a subset of vnodes which were updated.
 pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: bool>(
-    epoch: EpochPair,
+    barrier: &Barrier,
     table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
     backfill_state: &mut BackfillState,
     #[cfg(debug_assertions)] state_len: usize,
@@ -776,7 +775,7 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
         backfill_state.mark_committed(vnode);
     }
 
-    table.commit(epoch).await?;
+    table.barrier(barrier).await?;
     Ok(())
 }
 
@@ -786,7 +785,7 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
 /// For `current_pos` and `old_pos` are just pk of upstream.
 /// They should be strictly increasing.
 pub(crate) async fn persist_state<S: StateStore, const IS_REPLICATED: bool>(
-    epoch: EpochPair,
+    barrier: &Barrier,
     table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
     is_finished: bool,
     current_pos: &Option<OwnedRow>,
@@ -797,10 +796,10 @@ pub(crate) async fn persist_state<S: StateStore, const IS_REPLICATED: bool>(
     if let Some(current_pos_inner) = current_pos {
         // state w/o vnodes.
         build_temporary_state(current_state, is_finished, current_pos_inner, row_count);
-        flush_data(table, epoch, old_state, current_state).await?;
+        flush_data(table, barrier, old_state, current_state).await?;
         *old_state = Some(current_state.into());
     } else {
-        table.commit(epoch).await?;
+        table.barrier(barrier).await?;
     }
     Ok(())
 }
