@@ -42,7 +42,6 @@ use super::nexmark::source::message::NexmarkMeta;
 use super::{GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
-pub(crate) use crate::source::common::CommonSplitReader;
 use crate::source::filesystem::FsPageItem;
 use crate::source::monitor::EnumeratorMetrics;
 use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc};
@@ -314,6 +313,7 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
     Ok(SourceStruct::new(format, encode))
 }
 
+/// Stream of [`SourceMessage`].
 pub type BoxSourceStream = BoxStream<'static, crate::error::ConnectorResult<Vec<SourceMessage>>>;
 
 pub trait ChunkSourceStream =
