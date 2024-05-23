@@ -1,4 +1,4 @@
-CREATE MATERIALIZED VIEW ad_ctr_mv AS
+CREATE MATERIALIZED VIEW ad_ctr AS
 SELECT
     ad_clicks.ad_id AS ad_id,
     ad_clicks.clicks_count :: NUMERIC / ad_impressions.impressions_count AS ctr
@@ -23,7 +23,7 @@ FROM
             ai.ad_id
     ) AS ad_clicks ON ad_impressions.ad_id = ad_clicks.ad_id;
 
-CREATE MATERIALIZED VIEW ad_ctr_5min_mv AS
+CREATE MATERIALIZED VIEW ad_ctr_5min AS
 SELECT
     ac.ad_id AS ad_id,
     ac.clicks_count :: NUMERIC / ai.impressions_count AS ctr,

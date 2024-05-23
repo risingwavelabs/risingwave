@@ -453,7 +453,7 @@ mod tests {
     use crate::hummock::sstable::{SstableBuilder, SstableBuilderOptions};
     use crate::hummock::test_utils::{test_user_key_of, test_value_of, TEST_KEYS_COUNT};
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{BlockIterator, CachePolicy, Sstable, SstableWriterOptions};
+    use crate::hummock::{BlockIterator, CachePolicy, SstableWriterOptions};
     use crate::monitor::StoreLocalStatistic;
 
     #[tokio::test]

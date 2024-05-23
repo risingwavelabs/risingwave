@@ -15,7 +15,6 @@
 use std::mem;
 
 use anyhow::anyhow;
-use await_tree::InstrumentAwait;
 use futures::stream::select;
 use futures::{FutureExt, TryFutureExt, TryStreamExt};
 use itertools::Itertools;
@@ -481,7 +480,6 @@ mod test {
     use super::*;
     use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
     use crate::executor::test_utils::*;
-    use crate::executor::ActorContext;
 
     #[tokio::test]
     async fn test_force_append_only_sink() {

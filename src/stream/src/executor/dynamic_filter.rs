@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::ops::Bound::{self, *};
-use std::sync::Arc;
 
 use futures::stream;
 use risingwave_common::array::{Array, ArrayImpl, Op};
@@ -21,7 +20,7 @@ use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{self, once, OwnedRow as RowData};
-use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl, ToDatumRef, ToOwnedDatum};
+use risingwave_common::types::{DefaultOrd, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::{
     build_func_non_strict, InputRefExpression, LiteralExpression, NonStrictExpression,
@@ -290,6 +289,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
             self.ctx.id,
             self.ctx.fragment_id,
             self.metrics.clone(),
+            "Dynamic Filter",
         );
 
         pin_mut!(aligned_stream);
@@ -489,9 +489,8 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> Execute
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::*;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_hummock_sdk::HummockReadEpoch;
@@ -500,7 +499,6 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
-    use crate::executor::{ActorContext, StreamExecutorResult};
 
     async fn create_in_memory_state_table(
         mem_state: MemoryStateStore,

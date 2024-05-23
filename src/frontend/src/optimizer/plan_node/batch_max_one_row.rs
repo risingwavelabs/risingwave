@@ -17,7 +17,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::MaxOneRowNode;
 
 use super::batch::prelude::*;
-use super::generic::{DistillUnit, PhysicalPlanRef};
+use super::generic::DistillUnit;
 use super::utils::Distill;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,

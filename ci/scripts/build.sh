@@ -55,8 +55,7 @@ cargo build \
     -p risingwave_compaction_test \
     -p risingwave_e2e_extended_mode_test \
     "${RISINGWAVE_FEATURE_FLAGS[@]}" \
-    --features embedded-deno-udf \
-    --features embedded-python-udf \
+    --features all-udf \
     --profile "$profile" \
     --timings
 

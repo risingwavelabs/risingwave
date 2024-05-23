@@ -595,19 +595,15 @@ impl OwnedByUserCatalog for TableCatalog {
 #[cfg(test)]
 mod tests {
 
-    use risingwave_common::catalog::{
-        row_id_column_desc, ColumnCatalog, ColumnDesc, ColumnId, TableId,
-    };
+    use risingwave_common::catalog::{row_id_column_desc, ColumnDesc, ColumnId};
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_pb::catalog::{PbStreamJobStatus, PbTable};
     use risingwave_pb::plan_common::{
         AdditionalColumn, ColumnDescVersion, PbColumnCatalog, PbColumnDesc,
     };
 
     use super::*;
-    use crate::catalog::table_catalog::{TableCatalog, TableType};
 
     #[test]
     fn test_into_table_catalog() {

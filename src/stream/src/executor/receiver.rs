@@ -191,15 +191,13 @@ impl Execute for ReceiverExecutor {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::sync::Arc;
 
     use futures::{pin_mut, FutureExt};
-    use risingwave_common::array::StreamChunk;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 
     use super::*;
-    use crate::executor::{ActorContext, Barrier, Execute, Mutation, UpdateMutation};
+    use crate::executor::UpdateMutation;
     use crate::task::test_utils::helper_make_local_actor;
 
     #[tokio::test]
