@@ -85,7 +85,7 @@ impl StreamMaterialize {
         let input = reorganize_elements_id(input);
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
 
-        let create_type = if matches!(table_type, TableType::MaterializedView)
+        let create_type = if matches!(table_type, TableType::MaterializedView | TableType::Index)
             && input.ctx().session_ctx().config().background_ddl()
             && plan_has_backfill_leaf_nodes(&input)
         {
