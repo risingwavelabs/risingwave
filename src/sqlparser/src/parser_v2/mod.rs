@@ -12,7 +12,7 @@
 
 use winnow::combinator::{preceded, separated, trace};
 use winnow::error::{ContextError, StrContext};
-use winnow::stream::{ContainsToken, Location, Stream, StreamIsPartial};
+use winnow::stream::{Location, Stream, StreamIsPartial};
 use winnow::token::{any, take_while};
 use winnow::{PResult, Parser, Stateful};
 
