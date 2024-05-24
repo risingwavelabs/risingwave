@@ -55,6 +55,7 @@ public class EsSinkTest {
         EsSink sink =
                 new EsSink(
                         new EsSinkConfig(container.getHttpHostAddress())
+                                .setConnector("elasticsearch")
                                 .withIndex("test")
                                 .withDelimiter("$")
                                 .withUsername(username)
