@@ -21,6 +21,7 @@ use std::sync::Arc;
 use std::task::{ready, Context, Poll};
 use std::time::Duration;
 
+use await_tree::InstrumentAwait;
 use aws_sdk_s3::config::{Credentials, Region};
 use aws_sdk_s3::error::BoxError;
 use aws_sdk_s3::operation::abort_multipart_upload::AbortMultipartUploadError;
@@ -311,7 +312,9 @@ impl StreamingUploader for S3StreamingUploader {
         self.buf.push(data);
 
         if self.not_uploaded_len >= self.part_size {
-            self.upload_next_part().await?;
+            self.upload_next_part()
+                .verbose_instrument_await("s3_upload_next_part")
+                .await?;
             self.not_uploaded_len = 0;
         }
         Ok(())
@@ -340,6 +343,7 @@ impl StreamingUploader for S3StreamingUploader {
                         .content_length(self.not_uploaded_len as i64)
                         .key(&self.key)
                         .send()
+                        .verbose_instrument_await("s3_put_object")
                         .await
                         .map_err(|err| {
                             set_error_should_retry::<PutObjectError>(
@@ -355,7 +359,11 @@ impl StreamingUploader for S3StreamingUploader {
                 try_update_failure_metric(&self.metrics, &res, operation_type.as_str());
                 res
             }
-        } else if let Err(e) = self.flush_multipart_and_complete().await {
+        } else if let Err(e) = self
+            .flush_multipart_and_complete()
+            .verbose_instrument_await("s3_flush_multipart_and_complete")
+            .await
+        {
             tracing::warn!(key = self.key, error = %e.as_report(), "Failed to upload object");
             self.abort_multipart_upload().await?;
             Err(e)
