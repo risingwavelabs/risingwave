@@ -219,7 +219,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         );
         let stream = source_desc
             .source
-            .to_stream(Some(splits), column_ids, Arc::new(source_ctx))
+            .build_stream(Some(splits), column_ids, Arc::new(source_ctx))
             .await
             .map_err(StreamExecutorError::connector_error)?;
         Ok(apply_rate_limit(stream, self.rate_limit_rps).boxed())
