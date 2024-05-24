@@ -711,6 +711,7 @@ pub async fn create_hummock_store_with_metrics(
         metrics.storage_metrics.clone(),
         metrics.compactor_metrics.clone(),
         None,
+        false,
     )
     .await?;
 

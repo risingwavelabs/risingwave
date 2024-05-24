@@ -565,6 +565,7 @@ impl StateStoreImpl {
         storage_metrics: Arc<MonitoredStorageMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
         await_tree_config: Option<await_tree::Config>,
+        devide_prefix: bool,
     ) -> StorageResult<Self> {
         set_foyer_metrics_registry(GLOBAL_METRICS_REGISTRY.clone());
 
@@ -662,6 +663,7 @@ impl StateStoreImpl {
                     meta_file_cache,
                     recent_filter,
                     state_store_metrics: state_store_metrics.clone(),
+                    devide_prefix,
                 }));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());

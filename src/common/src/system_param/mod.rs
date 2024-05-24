@@ -87,6 +87,7 @@ macro_rules! for_all_params {
             { max_concurrent_creating_streaming_jobs,   u32,    Some(1_u32),                                true,   "Max number of concurrent creating streaming jobs.", },
             { pause_on_next_bootstrap,                  bool,   Some(false),                                true,   "Whether to pause all data sources on next bootstrap.", },
             { enable_tracing,                           bool,   Some(false),                                true,   "Whether to enable distributed tracing.", },
+            { is_new_cluster,                           bool,   Some(false),                                true,   "Whether to devide object prefix", },
         }
     };
 }

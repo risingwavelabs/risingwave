@@ -18,6 +18,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant, SystemTime};
+
 use anyhow::Context;
 use arc_swap::ArcSwap;
 use bytes::Bytes;
@@ -73,10 +74,10 @@ use tokio_stream::wrappers::IntervalStream;
 use tonic::Streaming;
 use tracing::warn;
 
-use crate::{hummock::compaction::selector::{
+use crate::hummock::compaction::selector::{
     DynamicLevelSelector, LocalSelectorStatistic, ManualCompactionOption, ManualCompactionSelector,
     SpaceReclaimCompactionSelector, TombstoneCompactionSelector, TtlCompactionSelector,
-}, manager::SystemParamsManagerImpl};
+};
 use crate::hummock::compaction::{CompactStatus, CompactionDeveloperConfig};
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
@@ -89,7 +90,9 @@ use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
 #[cfg(any(test, feature = "test"))]
 use crate::manager::{ClusterManagerRef, FragmentManagerRef};
-use crate::manager::{MetaSrvEnv, MetaStoreImpl, MetadataManager, META_NODE_ID};
+use crate::manager::{
+    MetaSrvEnv, MetaStoreImpl, MetadataManager, SystemParamsManagerImpl, META_NODE_ID,
+};
 use crate::model::{
     BTreeMapEntryTransaction, BTreeMapEntryTransactionWrapper, BTreeMapTransaction,
     BTreeMapTransactionWrapper, ClusterId, MetadataModel, MetadataModelError, ValTransaction,
@@ -391,18 +394,20 @@ impl HummockManager {
                 object_store.clone(),
             )
             .await?;
-        if is_new_cluster{
-            match env.system_params_manager_impl_ref() {
-                SystemParamsManagerImpl::Kv(mgr) => {
-                    mgr.set_param("is_new_cluster", Some("true".to_owned()))
-                        .await.unwrap();
-                }
-                SystemParamsManagerImpl::Sql(mgr) => {
-                    mgr.set_param("is_new_cluster", Some("true".to_owned()))
-                        .await.unwrap();
-                }
-            };
-        }
+            if is_new_cluster {
+                match env.system_params_manager_impl_ref() {
+                    SystemParamsManagerImpl::Kv(mgr) => {
+                        mgr.set_param("is_new_cluster", Some("true".to_owned()))
+                            .await
+                            .unwrap();
+                    }
+                    SystemParamsManagerImpl::Sql(mgr) => {
+                        mgr.set_param("is_new_cluster", Some("true".to_owned()))
+                            .await
+                            .unwrap();
+                    }
+                };
+            }
             // config bucket lifecycle for new cluster.
             if let risingwave_object_store::object::ObjectStoreImpl::S3(s3) = object_store.as_ref()
                 && !env.opts.do_not_config_object_storage_lifecycle

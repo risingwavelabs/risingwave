@@ -59,6 +59,8 @@ pub struct SstDumpArgs {
     print_table: bool,
     #[clap(short = 'd')]
     data_dir: Option<String>,
+    #[clap(short, long = "devide_prefix")]
+    devide_prefix: Option<bool>,
 }
 
 pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result<()> {
@@ -109,7 +111,9 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
     } else {
         // Object information is retrieved from object store. Meta service is not required.
         let hummock_service_opts = HummockServiceOpts::from_env(args.data_dir.clone())?;
-        let sstable_store = hummock_service_opts.create_sstable_store().await?;
+        let sstable_store = hummock_service_opts
+            .create_sstable_store(args.devide_prefix.unwrap_or_default())
+            .await?;
         if let Some(obj_id) = &args.object_id {
             let obj_store = sstable_store.store();
             let obj_path = sstable_store.get_sst_data_path(*obj_id);

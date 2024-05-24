@@ -33,7 +33,7 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::pretty_bytes::convert;
-use risingwave_common::{GIT_SHA, RW_VERSION};
+use risingwave_common::{system_param, GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
@@ -88,7 +88,6 @@ pub async fn compute_node_serve(
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
     let config = load_config(&opts.config_path, &opts);
-
     info!("Starting compute node",);
     info!("> config: {:?}", config);
     info!(
@@ -194,6 +193,7 @@ pub async fn compute_node_serve(
         storage_metrics.clone(),
         compactor_metrics.clone(),
         await_tree_config.clone(),
+        system_params.is_new_cluster(),
     )
     .await
     .unwrap();

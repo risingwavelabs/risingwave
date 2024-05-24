@@ -94,6 +94,7 @@ impl HummockJavaBindingIterator {
             state_store_metrics: Arc::new(global_hummock_state_store_metrics(
                 MetricLevel::Disabled,
             )),
+            devide_prefix: false,
         }));
         let reader = HummockVersionReader::new(
             sstable_store,

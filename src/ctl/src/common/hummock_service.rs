@@ -35,6 +35,8 @@ pub struct HummockServiceOpts {
     pub hummock_url: String,
     pub data_dir: Option<String>,
 
+    devide_prefix: bool,
+
     heartbeat_handle: Option<JoinHandle<()>>,
     heartbeat_shutdown_sender: Option<Sender<()>>,
 }
@@ -79,11 +81,22 @@ impl HummockServiceOpts {
                 bail!(MESSAGE);
             }
         };
+        let devide_prefix = match env::var("RW_OBJECT_STORE_DEVIDE_PREFIX") {
+            Ok(devide_prefix) => devide_prefix == "true",
+            Err(_) => {
+                const MESSAGE: &str = "env variable `RW_OBJECT_STORE_DEVIDE_PREFIX` not found.
+
+                ";
+                bail!(MESSAGE);
+            }
+        };
+
         Ok(Self {
             hummock_url,
             data_dir,
             heartbeat_handle: None,
             heartbeat_shutdown_sender: None,
+            devide_prefix,
         })
     }
 
@@ -141,6 +154,7 @@ impl HummockServiceOpts {
             metrics.storage_metrics.clone(),
             metrics.compactor_metrics.clone(),
             None,
+            self.devide_prefix,
         )
         .await?;
 
@@ -156,7 +170,7 @@ impl HummockServiceOpts {
         }
     }
 
-    pub async fn create_sstable_store(&self) -> Result<Arc<SstableStore>> {
+    pub async fn create_sstable_store(&self, devide_prefix: bool) -> Result<Arc<SstableStore>> {
         let object_store = build_remote_object_store(
             self.hummock_url.strip_prefix("hummock+").unwrap(),
             Arc::new(ObjectStoreMetrics::unused()),
@@ -184,6 +198,7 @@ impl HummockServiceOpts {
             state_store_metrics: Arc::new(global_hummock_state_store_metrics(
                 MetricLevel::Disabled,
             )),
+            devide_prefix,
         })))
     }
 }

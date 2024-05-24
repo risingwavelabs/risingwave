@@ -202,6 +202,7 @@ pub struct SstableStoreConfig {
     pub meta_file_cache: FileCache<HummockSstableObjectId, CachedSstable>,
     pub recent_filter: Option<Arc<RecentFilter<(HummockSstableObjectId, usize)>>>,
     pub state_store_metrics: Arc<HummockStateStoreMetrics>,
+    pub devide_prefix: bool,
 }
 
 pub struct SstableStore {
@@ -220,6 +221,7 @@ pub struct SstableStore {
     prefetch_buffer_usage: Arc<AtomicUsize>,
     prefetch_buffer_capacity: usize,
     max_prefetch_block_number: usize,
+    devide_prefix: bool,
 }
 
 impl SstableStore {
@@ -286,6 +288,7 @@ impl SstableStore {
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
             prefetch_buffer_capacity: config.prefetch_buffer_capacity,
             max_prefetch_block_number: config.max_prefetch_block_number,
+            devide_prefix: config.devide_prefix,
         }
     }
 
@@ -296,6 +299,7 @@ impl SstableStore {
         path: String,
         block_cache_capacity: usize,
         meta_cache_capacity: usize,
+        devide_prefix: bool,
     ) -> Self {
         let meta_cache = Arc::new(Cache::lru(LruCacheConfig {
             capacity: meta_cache_capacity,
@@ -328,6 +332,7 @@ impl SstableStore {
             prefetch_buffer_capacity: block_cache_capacity,
             max_prefetch_block_number: 16, /* compactor won't use this parameter, so just assign a default value. */
             recent_filter: None,
+            devide_prefix,
         }
     }
 
@@ -621,7 +626,7 @@ impl SstableStore {
     }
 
     pub fn get_sst_data_path(&self, object_id: HummockSstableObjectId) -> String {
-        let obj_prefix = self.store.get_object_prefix(object_id);
+        let obj_prefix = self.store.get_object_prefix(object_id, self.devide_prefix);
         format!(
             "{}/{}{}.{}",
             self.path, obj_prefix, object_id, OBJECT_SUFFIX

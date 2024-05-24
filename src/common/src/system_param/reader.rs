@@ -137,6 +137,10 @@ where
         self.inner().data_directory.as_ref().unwrap()
     }
 
+    fn is_new_cluster(&self) -> bool {
+        self.inner().is_new_cluster.unwrap()
+    }
+
     fn backup_storage_url(&self) -> &str {
         self.inner().backup_storage_url.as_ref().unwrap()
     }
