@@ -25,38 +25,37 @@ impl DockerServiceConfig for KafkaConfig {
     }
 
     fn image(&self) -> String {
-        "bitnami/kafka:3.7".to_owned()
+        "confluentinc/cp-kafka:7.6.1".to_owned()
     }
 
     fn envs(&self) -> Vec<(String, String)> {
         vec![
-            ("KAFKA_CFG_NODE_ID".to_owned(), self.node_id.to_string()),
-            ("KAFKA_CFG_BROKER_ID".to_owned(), self.node_id.to_string()),
+            ("KAFKA_NODE_ID".to_owned(), self.node_id.to_string()),
             (
-                "KAFKA_CFG_PROCESS_ROLES".to_owned(),
+                "KAFKA_PROCESS_ROLES".to_owned(),
                 "controller,broker".to_owned(),
             ),
             (
-                "KAFKA_CFG_LISTENERS".to_owned(),
+                "KAFKA_LISTENERS".to_owned(),
                 "PLAINTEXT://:9092,CONTROLLER://:9093".to_owned(),
             ),
             (
-                "KAFKA_CFG_ADVERTISED_LISTENERS".to_owned(),
+                "KAFKA_ADVERTISED_LISTENERS".to_owned(),
                 format!("PLAINTEXT://{}:{}", self.address, self.port),
             ),
             (
-                "KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP".to_owned(),
+                "KAFKA_LISTENER_SECURITY_PROTOCOL_MAP".to_owned(),
                 "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT".to_owned(),
             ),
             (
-                "KAFKA_CFG_CONTROLLER_QUORUM_VOTERS".to_owned(),
+                "KAFKA_CONTROLLER_QUORUM_VOTERS".to_owned(),
                 format!("{}@localhost:9093", self.node_id),
             ),
             (
-                "KAFKA_CFG_CONTROLLER_LISTENER_NAMES".to_owned(),
+                "KAFKA_CONTROLLER_LISTENER_NAMES".to_owned(),
                 "CONTROLLER".to_owned(),
             ),
-            ("KAFKA_KRAFT_CLUSTER_ID".to_owned(), "risedev".to_owned()),
+            ("CLUSTER_ID".to_owned(), "RiseDevRiseDevRiseDev1".to_owned()),
         ]
     }
 
@@ -68,7 +67,7 @@ impl DockerServiceConfig for KafkaConfig {
     }
 
     fn data_path(&self) -> Option<String> {
-        self.persist_data.then(|| "/bitnami/kafka".to_owned())
+        self.persist_data.then(|| "/var/lib/kafka/data".to_owned())
     }
 }
 
