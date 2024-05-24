@@ -199,8 +199,6 @@ where
         Keyword::TIME => with_time_zone().map(DataType::Time),
         // TODO: Support complex interval type parsing.
         Keyword::INTERVAL => empty.value(DataType::Interval),
-        Keyword::REGCLASS => empty.value(DataType::Regclass),
-        Keyword::REGPROC => empty.value(DataType::Regproc),
         Keyword::TEXT => empty.value(DataType::Text),
         Keyword::STRUCT => cut_err(struct_data_type).map(DataType::Struct),
         Keyword::BYTEA => empty.value(DataType::Bytea),
@@ -216,14 +214,15 @@ where
             keywords,
             trace(
                 "non_keyword_data_type",
-                object_name.map(|name| {
-                    if name.to_string().eq_ignore_ascii_case("jsonb") {
-                        // JSONB is not a keyword
-                        DataType::Jsonb
-                    } else {
-                        DataType::Custom(name)
-                    }
-                }),
+                object_name.map(
+                    |name| match name.to_string().to_ascii_lowercase().as_str() {
+                        // PostgreSQL built-in data types that are not keywords.
+                        "jsonb" => DataType::Jsonb,
+                        "regclass" => DataType::Regclass,
+                        "regproc" => DataType::Regproc,
+                        _ => DataType::Custom(name),
+                    },
+                ),
             ),
         )),
     )
