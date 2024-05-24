@@ -357,7 +357,8 @@ impl StreamingUploader for S3StreamingUploader {
                     retry_request(builder, &self.config, operation_type, self.metrics.clone())
                         .await;
                 try_update_failure_metric(&self.metrics, &res, operation_type.as_str());
-                res
+                res?;
+                Ok(())
             }
         } else if let Err(e) = self
             .flush_multipart_and_complete()
