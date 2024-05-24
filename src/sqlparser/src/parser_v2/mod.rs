@@ -56,15 +56,11 @@ fn token<S>(input: &mut S) -> PResult<TokenWithLocation>
 where
     S: TokenStream,
 {
-    struct WhiteSpace;
-
-    impl ContainsToken<TokenWithLocation> for WhiteSpace {
-        fn contains_token(&self, token: TokenWithLocation) -> bool {
-            matches!(token.token, Token::Whitespace(_))
-        }
-    }
-
-    preceded(take_while(0.., WhiteSpace), any_token).parse_next(input)
+    preceded(
+        take_while(0.., |token| matches!(token.token, Token::Whitespace(_))),
+        any_token,
+    )
+    .parse_next(input)
 }
 
 /// Consume a keyword.

@@ -138,6 +138,7 @@ impl<'a> Stream for TokenStreamWrapper<'a> {
 
     #[inline(always)]
     fn raw(&self) -> &dyn std::fmt::Debug {
+        // We customized the `Debug` implementation in the wrapper, so don't return `self.tokens` here.
         self
     }
 }

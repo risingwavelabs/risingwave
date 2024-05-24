@@ -125,21 +125,18 @@ where
 
     with_state::<S, DataTypeParsingState, _, _>(terminated(
         data_type_stateful,
-        cut_err(trace(
-            "data_type_verify_state",
-            |input: &mut StatefulStream<S>| {
-                // If there is remaining `>`, we should fail.
-                if *input.state.remaining_close.borrow() {
-                    Err(ErrMode::Cut(ContextError::from_external_error(
-                        input,
-                        ErrorKind::Fail,
-                        UnconsumedShiftRight,
-                    )))
-                } else {
-                    Ok(())
-                }
-            },
-        )),
+        trace("data_type_verify_state", |input: &mut StatefulStream<S>| {
+            // If there is remaining `>`, we should fail.
+            if *input.state.remaining_close.borrow() {
+                Err(ErrMode::Cut(ContextError::from_external_error(
+                    input,
+                    ErrorKind::Fail,
+                    UnconsumedShiftRight,
+                )))
+            } else {
+                Ok(())
+            }
+        }),
     ))
     .context(StrContext::Label("data_type"))
     .parse_next(input)
@@ -210,7 +207,7 @@ where
         Keyword::NUMERIC | Keyword::DECIMAL | Keyword::DEC => cut_err(precision_and_scale()).map(|(precision, scale)| {
             DataType::Decimal(precision, scale)
         }),
-        _ => fail,
+        _ =>  cut_err(fail),
     };
 
     trace(
