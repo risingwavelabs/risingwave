@@ -625,7 +625,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
 
-        if self.media_type() == "s3" {
+        if self.media_type() == "s3" && !self.config.s3.developer.use_opendal {
             // After #16231, streaming uploader implemented via aws-sdk-s3 will maintain metrics internally in s3.rs
             // so MonitoredStreamingUploader will only be used when the inner object store is opendal.
             // TODO: we should avoid this special case after fully migrating to opeandal for s3.
