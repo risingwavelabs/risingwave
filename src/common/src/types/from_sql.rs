@@ -40,7 +40,7 @@ impl<'a> FromSql<'a> for ScalarImpl {
                 Type::VARCHAR | Type::TEXT | Type::BPCHAR | Type::NAME | Type::UNKNOWN => {
                     ScalarImpl::from(String::from_sql(ty, raw)?)
                 }
-                // Serial Int256 Struct List Decimal are not supported here
+                // Serial, Int256, Struct, List and Decimal are not supported here
                 _ => bail_not_implemented!("the postgres decoding for {ty} is unsupported"),
             },
             _ => bail_not_implemented!("the postgres decoding for {ty} is unsupported"),

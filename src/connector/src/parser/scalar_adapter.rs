@@ -168,34 +168,34 @@ impl ScalarAdapter {
         Ok(match (scalar, ty, ty.kind()) {
             (ScalarRefImpl::Utf8(s), &Type::UUID, _) => ScalarAdapter::Uuid(s.parse()?),
             (ScalarRefImpl::Utf8(s), &Type::NUMERIC, _) => {
-                ScalarAdapter::Numeric(string_to_pg_numeric(s)?)
+                ScalarAdapter::Numeric(string_to_pg_numeric(s))
             }
             (ScalarRefImpl::Int256(s), &Type::NUMERIC, _) => {
-                ScalarAdapter::Numeric(string_to_pg_numeric(&s.to_string())?)
+                ScalarAdapter::Numeric(string_to_pg_numeric(&s.to_string()))
             }
             (ScalarRefImpl::Utf8(s), _, Kind::Enum(_)) => {
                 ScalarAdapter::Enum(EnumString(s.to_owned()))
             }
             (ScalarRefImpl::List(list), &Type::NUMERIC_ARRAY, _) => {
                 let mut vec = vec![];
-                for scalar in list.iter() {
-                    vec.push(match scalar {
+                for datum in list.iter() {
+                    vec.push(match datum {
                         Some(ScalarRefImpl::Int256(s)) => Some(string_to_pg_numeric(&s.to_string())),
-                        Some(ScalarRefImpl::Decimal(s)) => Some(string_to_pg_numeric(&s.to_string())),
-                        Some(ScalarRefImpl::Utf8(s)) => Some(string_to_pg_numeric(s)),
+                        Some(ScalarRefImpl::Decimal(s)) => Some(rw_numeric_to_pg_numeric(s)),
+                        Some(ScalarRefImpl::Utf8(s)) => Some(string_to_pg_numeric(&s.to_string())),
                         None => None,
                         _ => {
                             unreachable!("Currently, only rw-numeric[], rw_int256[] and varchar[] are supported to convert to pg-numeric[]");
                         }
-                    }.transpose()?)
+                    })
                 }
                 ScalarAdapter::NumericList(vec)
             }
             (ScalarRefImpl::List(list), _, Kind::Array(inner_type)) => match inner_type.kind() {
                 Kind::Enum(_) => {
                     let mut vec = vec![];
-                    for scalar in list.iter() {
-                        vec.push(match scalar {
+                    for datum in list.iter() {
+                        vec.push(match datum {
                             Some(ScalarRefImpl::Utf8(s)) => Some(EnumString(s.to_owned())),
                             _ => unreachable!(
                                 "Only non-null varchar[] is supported to convert to enum[]"
@@ -206,9 +206,9 @@ impl ScalarAdapter {
                 }
                 _ => {
                     let mut vec = vec![];
-                    for scalar in list.iter() {
+                    for datum in list.iter() {
                         vec.push(
-                            scalar
+                            datum
                                 .map(|s| ScalarAdapter::from_scalar(s, inner_type))
                                 .transpose()?,
                         );
@@ -232,42 +232,21 @@ impl ScalarAdapter {
             (ScalarAdapter::Numeric(numeric), &DataType::Int256) => {
                 pg_numeric_to_rw_int256(&numeric)
             }
+            (ScalarAdapter::Numeric(numeric), &DataType::Decimal) => {
+                pg_numeric_to_rw_numeric(&numeric)
+            }
             (ScalarAdapter::Enum(EnumString(s)), &DataType::Varchar) => Some(ScalarImpl::from(s)),
             (ScalarAdapter::NumericList(vec), &DataType::List(dtype)) => {
                 let mut builder = dtype.create_array_builder(0);
                 for val in vec {
                     let scalar = match (val, &dtype) {
-                        (Some(numeric), box DataType::Varchar) => {
+                        (Some(numeric), box DataType::Varchar | box DataType::Int256 | box DataType::Decimal) => {
                             if pg_numeric_is_special(&numeric) {
                                 return None;
                             } else {
-                                Some(ScalarImpl::from(pg_numeric_to_string(&numeric)))
+                                ScalarAdapter::Numeric(numeric).into_scalar(&dtype)
                             }
                         }
-                        (Some(numeric), box DataType::Int256) => match numeric {
-                            PgNumeric::Normalized(big_decimal) => {
-                                match Int256::from_str(big_decimal.to_string().as_str()) {
-                                    Ok(num) => Some(ScalarImpl::from(num)),
-                                    Err(err) => {
-                                        tracing::error!(error = %err.as_report(), "parse pg-numeric as rw_int256 failed");
-                                        return None;
-                                    }
-                                }
-                            }
-                            _ => return None,
-                        },
-                        (Some(numeric), box DataType::Decimal) => match numeric {
-                            PgNumeric::Normalized(big_decimal) => {
-                                match Decimal::from_str(big_decimal.to_string().as_str()) {
-                                    Ok(num) => Some(ScalarImpl::from(num)),
-                                    Err(err) => {
-                                        tracing::error!(error = %err.as_report(), "parse pg-numeric as rw-numeric failed (likely out-of-range");
-                                        return None;
-                                    }
-                                }
-                            }
-                            _ => return None,
-                        },
                         (Some(_), _) => unreachable!(
                             "into_scalar_in_list should only be called with ScalarAdapter::Numeric types"
                         ),
@@ -298,8 +277,7 @@ impl ScalarAdapter {
                 }
                 let mut builder = dtype.create_array_builder(0);
                 for val in vec {
-                    let scalar = val.and_then(|v| v.into_scalar(dtype));
-                    builder.append(scalar);
+                    builder.append(val.and_then(|v| v.into_scalar(dtype)));
                 }
                 Some(ScalarImpl::from(ListValue::new(builder.finish())))
             }
@@ -332,6 +310,23 @@ fn pg_numeric_to_rw_int256(val: &PgNumeric) -> Option<ScalarImpl> {
     }
 }
 
+fn pg_numeric_to_rw_numeric(val: &PgNumeric) -> Option<ScalarImpl> {
+    match val {
+        PgNumeric::NegativeInf => Some(ScalarImpl::from(Decimal::NegativeInf)),
+        PgNumeric::Normalized(big_decimal) => {
+            match Decimal::from_str(big_decimal.to_string().as_str()) {
+                Ok(num) => Some(ScalarImpl::from(num)),
+                Err(err) => {
+                    tracing::error!(error = %err.as_report(), "parse pg-numeric as rw-numeric failed (likely out-of-range");
+                    return None;
+                }
+            }
+        }
+        PgNumeric::PositiveInf => Some(ScalarImpl::from(Decimal::PositiveInf)),
+        PgNumeric::NaN => Some(ScalarImpl::from(Decimal::NaN)),
+    }
+}
+
 fn pg_numeric_to_string(val: &PgNumeric) -> String {
     // TODO(kexiang): NEGATIVE_INFINITY -> -Infinity, POSITIVE_INFINITY -> Infinity, NAN -> NaN
     // The current implementation is to ensure consistency with the behavior of cdc event parsor.
@@ -343,11 +338,20 @@ fn pg_numeric_to_string(val: &PgNumeric) -> String {
     }
 }
 
-fn string_to_pg_numeric(s: &str) -> super::ConnectorResult<PgNumeric> {
-    Ok(match s {
+fn string_to_pg_numeric(s: &str) -> PgNumeric {
+    match s {
         "NEGATIVE_INFINITY" => PgNumeric::NegativeInf,
         "POSITIVE_INFINITY" => PgNumeric::PositiveInf,
         "NAN" => PgNumeric::NaN,
         _ => PgNumeric::Normalized(s.parse().unwrap()),
-    })
+    }
+}
+
+fn rw_numeric_to_pg_numeric(val: Decimal) -> PgNumeric {
+    match val {
+        Decimal::NegativeInf => PgNumeric::NegativeInf,
+        Decimal::Normalized(inner) => PgNumeric::Normalized(inner.to_string().parse().unwrap()),
+        Decimal::PositiveInf => PgNumeric::PositiveInf,
+        Decimal::NaN => PgNumeric::NaN,
+    }
 }
