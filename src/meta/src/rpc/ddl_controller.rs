@@ -2175,7 +2175,7 @@ impl DdlController {
                 MetadataManager::V1(mgr) => {
                     if mgr
                         .catalog_manager
-                        .list_creating_background_mvs()
+                        .list_creating_background_jobs()
                         .await
                         .is_empty()
                     {
@@ -2185,7 +2185,7 @@ impl DdlController {
                 MetadataManager::V2(mgr) => {
                     if mgr
                         .catalog_controller
-                        .list_background_creating_mviews()
+                        .list_background_creating_jobs()
                         .await?
                         .is_empty()
                     {

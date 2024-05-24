@@ -348,7 +348,7 @@ impl MetadataManager {
     pub async fn list_background_creating_jobs(&self) -> MetaResult<Vec<TableId>> {
         match self {
             MetadataManager::V1(mgr) => {
-                let tables = mgr.catalog_manager.list_creating_background_mvs().await;
+                let tables = mgr.catalog_manager.list_creating_background_jobs().await;
                 Ok(tables
                     .into_iter()
                     .map(|table| TableId::from(table.id))
@@ -357,7 +357,7 @@ impl MetadataManager {
             MetadataManager::V2(mgr) => {
                 let tables = mgr
                     .catalog_controller
-                    .list_background_creating_mviews()
+                    .list_background_creating_jobs()
                     .await?;
 
                 Ok(tables

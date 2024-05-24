@@ -514,19 +514,20 @@ impl CatalogController {
         Ok(())
     }
 
-    pub async fn list_background_creating_mviews(&self) -> MetaResult<Vec<table::Model>> {
+    pub async fn list_background_creating_jobs(&self) -> MetaResult<Vec<table::Model>> {
         let inner = self.inner.read().await;
         let tables = Table::find()
             .join(JoinType::LeftJoin, table::Relation::Object1.def())
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
             .filter(
-                table::Column::TableType
+                (table::Column::TableType
                     .eq(TableType::MaterializedView)
-                    .and(
-                        streaming_job::Column::CreateType
-                            .eq(CreateType::Background)
-                            .and(streaming_job::Column::JobStatus.eq(JobStatus::Creating)),
-                    ),
+                    .or(table::Column::TableType.eq(TableType::Index)))
+                .and(
+                    streaming_job::Column::CreateType
+                        .eq(CreateType::Background)
+                        .and(streaming_job::Column::JobStatus.eq(JobStatus::Creating)),
+                ),
             )
             .all(&inner.db)
             .await?;

@@ -3571,12 +3571,12 @@ impl CatalogManager {
     }
 
     /// Lists table catalogs for mviews, without their internal tables.
-    pub async fn list_creating_background_mvs(&self) -> Vec<Table> {
+    pub async fn list_creating_background_jobs(&self) -> Vec<Table> {
         self.core
             .lock()
             .await
             .database
-            .list_creating_background_mvs()
+            .list_creating_background_jobs()
     }
 
     /// Lists table catalogs for all tables with `stream_job_status=CREATING`.

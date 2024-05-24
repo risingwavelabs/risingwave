@@ -300,12 +300,13 @@ impl DatabaseManager {
         self.schemas.values().cloned().collect_vec()
     }
 
-    pub fn list_creating_background_mvs(&self) -> Vec<Table> {
+    pub fn list_creating_background_jobs(&self) -> Vec<Table> {
         self.tables
             .values()
             .filter(|&t| {
                 t.stream_job_status == PbStreamJobStatus::Creating as i32
-                    && t.table_type == TableType::MaterializedView as i32
+                    && (t.table_type == TableType::MaterializedView as i32
+                        || t.table_type == TableType::Index as i32)
                     && t.create_type == CreateType::Background as i32
             })
             .cloned()

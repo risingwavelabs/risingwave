@@ -142,7 +142,7 @@ impl GlobalBarrierManagerContext {
 
     async fn recover_background_mv_progress_v1(&self) -> MetaResult<()> {
         let mgr = self.metadata_manager.as_v1_ref();
-        let mviews = mgr.catalog_manager.list_creating_background_mvs().await;
+        let mviews = mgr.catalog_manager.list_creating_background_jobs().await;
 
         let mut mview_definitions = HashMap::new();
         let mut table_map = HashMap::new();
@@ -232,7 +232,7 @@ impl GlobalBarrierManagerContext {
         let mgr = self.metadata_manager.as_v2_ref();
         let mviews = mgr
             .catalog_controller
-            .list_background_creating_mviews()
+            .list_background_creating_jobs()
             .await?;
 
         let mut senders = HashMap::new();
