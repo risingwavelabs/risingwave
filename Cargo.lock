@@ -736,7 +736,8 @@ dependencies = [
 [[package]]
 name = "arrow-udf-js"
 version = "0.3.1"
-source = "git+https://github.com/risingwavelabs/arrow-udf.git?rev=d014e25#d014e2506299009215b5765079dfdb7f33f03ede"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "76cb6d108605c5489fff1ef9c520656946ad05ed0de3ea6d26d56bcb34bdb8c5"
 dependencies = [
  "anyhow",
  "arrow-array 50.0.0",
