@@ -91,6 +91,7 @@ macro_rules! for_all_sinks {
                 { Jdbc, $crate::sink::remote::JdbcSink },
                 { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
                 { Cassandra, $crate::sink::remote::CassandraSink },
+                { BlockHoleJava, $crate::sink::remote::BlackHoleJavaSink },
                 { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },

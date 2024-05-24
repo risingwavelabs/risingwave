@@ -105,3 +105,5 @@ BigQuery:
   bigquery.dataset: 'test_bigquery_sink'
   bigquery.table: 'table_bench'
   force_append_only: 'true'
+BlackHoleJava:
+  connector: 'blackhole-java'

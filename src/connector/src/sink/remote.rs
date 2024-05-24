@@ -74,6 +74,7 @@ macro_rules! def_remote_sink {
         def_remote_sink! {
             { ElasticSearch, ElasticSearchSink, "elasticsearch" }
             { Cassandra, CassandraSink, "cassandra" }
+            { BlackHoleJava, BlackHoleJavaSink, "blackhole-java" }
             { Jdbc, JdbcSink, "jdbc", |desc| {
                 desc.sink_type.is_append_only()
             } }
