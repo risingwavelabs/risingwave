@@ -89,6 +89,11 @@
         </dependency>
         <dependency>
             <groupId>com.risingwave</groupId>
+            <artifactId>risingwave-sink-blackhole</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.risingwave</groupId>
             <artifactId>risingwave-sink-cassandra</artifactId>
             <scope>provided</scope>
         </dependency>

@@ -41,6 +41,8 @@ public class SinkUtils {
                 return new JDBCSinkFactory();
             case "elasticsearch":
                 return new EsSinkFactory();
+            case "blackhole-java":
+                return new BlackholeFactory();
             case "cassandra":
                 return new CassandraFactory();
             case "http":
