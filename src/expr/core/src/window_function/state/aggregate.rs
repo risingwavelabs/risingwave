@@ -25,7 +25,7 @@ use smallvec::SmallVec;
 use super::buffer::{RangeWindow, RowsWindow, WindowBuffer, WindowImpl};
 use super::{BoxedWindowState, StateEvictHint, StateKey, StatePos, WindowState};
 use crate::aggregate::{
-    AggArgs, AggCall, AggregateFunction, AggregateState as AggImplState, BoxedAggregateFunction,
+    AggCall, AggregateFunction, AggregateState as AggImplState, BoxedAggregateFunction,
 };
 use crate::sig::FUNCTION_REGISTRY;
 use crate::window_function::{FrameBounds, WindowFuncCall, WindowFuncKind};
@@ -52,12 +52,7 @@ pub(super) fn new(call: &WindowFuncCall) -> Result<BoxedWindowState> {
     let arg_data_types = call.args.arg_types().to_vec();
     let agg_call = AggCall {
         kind: agg_kind,
-        args: match &call.args {
-            // convert args to [0] or [0, 1]
-            AggArgs::None => AggArgs::None,
-            AggArgs::Unary(data_type, _) => AggArgs::Unary(data_type.to_owned(), 0),
-            AggArgs::Binary(data_types, _) => AggArgs::Binary(data_types.to_owned(), [0, 1]),
-        },
+        args: call.args.clone(),
         return_type: call.return_type.clone(),
         column_orders: Vec::new(), // the input is already sorted
         // TODO(rc): support filter on window function call
@@ -65,6 +60,7 @@ pub(super) fn new(call: &WindowFuncCall) -> Result<BoxedWindowState> {
         // TODO(rc): support distinct on window function call? PG doesn't support it either.
         distinct: false,
         direct_args: vec![],
+        user_defined: None,
     };
     let agg_func_sig = FUNCTION_REGISTRY
         .get(agg_kind, &arg_data_types, &call.return_type)
@@ -72,7 +68,7 @@ pub(super) fn new(call: &WindowFuncCall) -> Result<BoxedWindowState> {
     let agg_func = agg_func_sig.build_aggregate(&agg_call)?;
     let (agg_impl, enable_delta) =
         if agg_func_sig.is_retractable() && call.frame.exclusion.is_no_others() {
-            let init_state = agg_func.create_state();
+            let init_state = agg_func.create_state()?;
             (AggImpl::Incremental(init_state), true)
         } else {
             (AggImpl::Full, false)
@@ -212,7 +208,7 @@ impl AggregatorWrapper<'_> {
     where
         V: AsRef<[Datum]>,
     {
-        let mut state = self.agg_func.create_state();
+        let mut state = self.agg_func.create_state()?;
         self.update(
             &mut state,
             values.into_iter().map(|args| (Op::Insert, args)),

@@ -2323,11 +2323,8 @@ impl Parser {
         let args = self.parse_comma_separated(Parser::parse_function_arg)?;
         self.expect_token(&Token::RParen)?;
 
-        let return_type = if self.parse_keyword(Keyword::RETURNS) {
-            Some(self.parse_data_type()?)
-        } else {
-            None
-        };
+        self.expect_keyword(Keyword::RETURNS)?;
+        let returns = self.parse_data_type()?;
 
         let append_only = self.parse_keywords(&[Keyword::APPEND, Keyword::ONLY]);
         let params = self.parse_create_function_body()?;
@@ -2336,7 +2333,7 @@ impl Parser {
             or_replace,
             name,
             args,
-            returns: return_type,
+            returns,
             append_only,
             params,
         })
@@ -2514,6 +2511,8 @@ impl Parser {
     pub fn parse_drop(&mut self) -> Result<Statement, ParserError> {
         if self.parse_keyword(Keyword::FUNCTION) {
             return self.parse_drop_function();
+        } else if self.parse_keyword(Keyword::AGGREGATE) {
+            return self.parse_drop_aggregate();
         }
         Ok(Statement::Drop(DropStatement::parse_to(self)?))
     }
@@ -2531,6 +2530,25 @@ impl Parser {
             _ => None,
         };
         Ok(Statement::DropFunction {
+            if_exists,
+            func_desc,
+            option,
+        })
+    }
+
+    /// ```sql
+    /// DROP AGGREGATE [ IF EXISTS ] name [ ( [ [ argmode ] [ argname ] argtype [, ...] ] ) ] [, ...]
+    /// [ CASCADE | RESTRICT ]
+    /// ```
+    fn parse_drop_aggregate(&mut self) -> Result<Statement, ParserError> {
+        let if_exists = self.parse_keywords(&[Keyword::IF, Keyword::EXISTS]);
+        let func_desc = self.parse_comma_separated(Parser::parse_function_desc)?;
+        let option = match self.parse_one_of_keywords(&[Keyword::CASCADE, Keyword::RESTRICT]) {
+            Some(Keyword::CASCADE) => Some(ReferentialAction::Cascade),
+            Some(Keyword::RESTRICT) => Some(ReferentialAction::Restrict),
+            _ => None,
+        };
+        Ok(Statement::DropAggregate {
             if_exists,
             func_desc,
             option,
