@@ -284,10 +284,10 @@ impl ClusterController {
                     match cluster_controller.delete_worker(host_addr.clone()).await {
                         Ok(_) => {
                             tracing::warn!(
-                                "Deleted expired worker {} {:#?}, current timestamp {}",
                                 worker_id,
-                                host_addr.clone(),
-                                now,
+                                ?host_addr,
+                                %now,
+                                "Deleted expired worker"
                             );
                             match worker_type {
                                 WorkerType::Frontend
