@@ -150,12 +150,11 @@ impl MemTable {
             }
             Entry::Occupied(mut e) => {
                 let old_op = e.get_mut();
-                let old_op_size = old_op.estimated_size();
+                self.kv_size.sub_val(old_op);
 
                 match old_op {
                     KeyOp::Delete(ref mut old_op_old_value) => {
                         let new_op = KeyOp::Update((std::mem::take(old_op_old_value), value));
-                        self.kv_size.sub_size(old_op_size);
                         self.kv_size.add_val(&new_op);
                         e.insert(new_op);
                         Ok(())
@@ -175,7 +174,6 @@ impl MemTable {
                                 error = %err.as_report(),
                                 "double insert / insert on updated, ignoring because sanity check is disabled"
                             );
-                            self.kv_size.sub_size(old_op_size);
                             self.kv_size.add_val(&new_op);
                             e.insert(new_op);
                             Ok(())
@@ -209,7 +207,7 @@ impl MemTable {
             }
             Entry::Occupied(mut e) => {
                 let old_op = e.get_mut();
-                let old_op_size = old_op.estimated_size();
+                self.kv_size.sub_val(old_op);
 
                 match old_op {
                     KeyOp::Insert(old_op_new_value) => {
@@ -221,7 +219,6 @@ impl MemTable {
                             }));
                         }
 
-                        self.kv_size.sub_size(old_op_size);
                         self.kv_size.sub_size(key_len);
                         e.remove();
                         Ok(())
@@ -241,7 +238,6 @@ impl MemTable {
                                 error = %err.as_report(),
                                 "double delete, ignoring because sanity check is disabled"
                             );
-                            self.kv_size.sub_size(old_op_size);
                             self.kv_size.add_val(&new_op);
                             e.insert(new_op);
                             Ok(())
@@ -257,7 +253,6 @@ impl MemTable {
                         }
 
                         let new_op = KeyOp::Delete(std::mem::take(old_op_old_value));
-                        self.kv_size.sub_size(old_op_size);
                         self.kv_size.add_val(&new_op);
                         e.insert(new_op);
                         Ok(())
@@ -295,7 +290,7 @@ impl MemTable {
             }
             Entry::Occupied(mut e) => {
                 let old_op = e.get_mut();
-                let old_op_size = old_op.estimated_size();
+                self.kv_size.sub_val(old_op);
 
                 match old_op {
                     KeyOp::Insert(old_op_new_value) => {
@@ -308,7 +303,6 @@ impl MemTable {
                         }
 
                         let new_op = KeyOp::Insert(new_value);
-                        self.kv_size.sub_size(old_op_size);
                         self.kv_size.add_val(&new_op);
                         e.insert(new_op);
                         Ok(())
@@ -323,7 +317,6 @@ impl MemTable {
                         }
 
                         let new_op = KeyOp::Update((std::mem::take(old_op_old_value), new_value));
-                        self.kv_size.sub_size(old_op_size);
                         self.kv_size.add_val(&new_op);
                         e.insert(new_op);
                         Ok(())
@@ -343,7 +336,6 @@ impl MemTable {
                                 error = %err.as_report(),
                                 "update on deleted, ignoring because sanity check is disabled"
                             );
-                            self.kv_size.sub_size(old_op_size);
                             self.kv_size.add_val(&new_op);
                             e.insert(new_op);
                             Ok(())
