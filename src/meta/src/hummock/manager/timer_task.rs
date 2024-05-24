@@ -37,19 +37,6 @@ use crate::hummock::manager::HISTORY_TABLE_INFO_STATISTIC_TIME;
 use crate::hummock::metrics_utils::{trigger_lsm_stat, trigger_mv_stat};
 use crate::hummock::{HummockManager, TASK_NORMAL};
 
-// This structure describes how hummock handles sst switching in a compaction group. A better sst cut will result in better data alignment, which in turn will improve the efficiency of the compaction.
-// By adopting certain rules, a better sst cut will lead to better data alignment and thus improve the efficiency of the compaction.
-enum TableAlignRule {
-    // The table_id is not optimized for alignment.
-    NoOptimization,
-    // Move the table_id to a separate compaction group. Currently, the system only supports separate compaction with one table.
-    SplitToDedicatedCg((CompactionGroupId, BTreeMap<StateTableId, u32>)),
-    // In the current group, partition the table's data according to the granularity of the vnode.
-    SplitByVnode((StateTableId, u32)),
-    // In the current group, partition the table's data at the granularity of the table.
-    SplitByTable(StateTableId),
-}
-
 impl HummockManager {
     pub fn hummock_timer_task(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
@@ -464,77 +451,26 @@ impl HummockManager {
         let mut group_infos = self.calculate_compaction_group_statistic().await;
         group_infos.sort_by_key(|group| group.group_size);
         group_infos.reverse();
-        const SPLIT_BY_TABLE: u32 = 1;
 
-        let mut group_to_table_vnode_partition = self.group_to_table_vnode_partition.read().clone();
         for group in &group_infos {
             if group.table_statistic.len() == 1 {
                 // no need to handle the separate compaciton group
                 continue;
             }
 
-            let mut table_vnode_partition_mappoing = group_to_table_vnode_partition
-                .entry(group.group_id)
-                .or_default();
-
             for (table_id, table_size) in &group.table_statistic {
-                let rule = self
-                    .calculate_table_align_rule(
-                        &table_write_throughput,
-                        table_id,
-                        table_size,
-                        !created_tables.contains(table_id),
-                        checkpoint_secs,
-                        group.group_id,
-                        group.group_size,
-                    )
-                    .await;
-
-                match rule {
-                    TableAlignRule::NoOptimization => {
-                        table_vnode_partition_mappoing.remove(table_id);
-                        continue;
-                    }
-
-                    TableAlignRule::SplitByTable(table_id) => {
-                        if self.env.opts.hybird_partition_vnode_count > 0 {
-                            table_vnode_partition_mappoing.insert(table_id, SPLIT_BY_TABLE);
-                        } else {
-                            table_vnode_partition_mappoing.remove(&table_id);
-                        }
-                    }
-
-                    TableAlignRule::SplitByVnode((table_id, vnode)) => {
-                        if self.env.opts.hybird_partition_vnode_count > 0 {
-                            table_vnode_partition_mappoing.insert(table_id, vnode);
-                        } else {
-                            table_vnode_partition_mappoing.remove(&table_id);
-                        }
-                    }
-
-                    TableAlignRule::SplitToDedicatedCg((
-                        new_group_id,
-                        table_vnode_partition_count,
-                    )) => {
-                        let _ = table_vnode_partition_mappoing; // drop
-                        group_to_table_vnode_partition
-                            .insert(new_group_id, table_vnode_partition_count);
-
-                        table_vnode_partition_mappoing = group_to_table_vnode_partition
-                            .entry(group.group_id)
-                            .or_default();
-                    }
-                }
+                self.calculate_table_align_rule(
+                    &table_write_throughput,
+                    table_id,
+                    table_size,
+                    !created_tables.contains(table_id),
+                    checkpoint_secs,
+                    group.group_id,
+                    group.group_size,
+                )
+                .await;
             }
         }
-
-        tracing::trace!(
-            "group_to_table_vnode_partition {:?}",
-            group_to_table_vnode_partition
-        );
-
-        // batch update group_to_table_vnode_partition
-        *self.group_to_table_vnode_partition.write() = group_to_table_vnode_partition;
     }
 
     async fn on_handle_trigger_multi_group(&self, task_type: compact_task::TaskType) {
@@ -559,11 +495,10 @@ impl HummockManager {
         checkpoint_secs: u64,
         parent_group_id: u64,
         group_size: u64,
-    ) -> TableAlignRule {
+    ) {
         let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
         let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
         let partition_vnode_count = self.env.opts.partition_vnode_count;
-        let hybrid_vnode_count: u32 = self.env.opts.hybird_partition_vnode_count;
         let window_size = HISTORY_TABLE_INFO_STATISTIC_TIME / (checkpoint_secs as usize);
 
         let mut is_high_write_throughput = false;
@@ -591,21 +526,6 @@ impl HummockManager {
         }
 
         let state_table_size = *table_size;
-        let result = {
-            // When in a hybrid compaction group, data from multiple state tables may exist in a single sst, and in order to make the data in the sub level more aligned, a proactive cut is made for the data.
-            // https://github.com/risingwavelabs/risingwave/issues/13037
-            // 1. In some scenario (like backfill), the creating state_table / mv may have high write throughput (creating table ). Therefore, we relax the limit of `is_low_write_throughput` and partition the table with high write throughput by vnode to improve the parallel efficiency of compaction.
-            // Add: creating table is not allowed to be split
-            // 2. For table with low throughput, partition by table_id to minimize amplification.
-            // 3. When the write mode is changed (the above conditions are not met), the default behavior is restored
-            if !is_low_write_throughput {
-                TableAlignRule::SplitByVnode((*table_id, hybrid_vnode_count))
-            } else if state_table_size > self.env.opts.cut_table_size_limit {
-                TableAlignRule::SplitByTable(*table_id)
-            } else {
-                TableAlignRule::NoOptimization
-            }
-        };
 
         // 1. Avoid splitting a creating table
         // 2. Avoid splitting a is_low_write_throughput creating table
@@ -614,7 +534,7 @@ impl HummockManager {
             || (is_low_write_throughput)
             || (state_table_size < self.env.opts.min_table_split_size && !is_high_write_throughput)
         {
-            return result;
+            return;
         }
 
         // do not split a large table and a small table because it would increase IOPS
@@ -624,7 +544,7 @@ impl HummockManager {
             if rest_group_size < state_table_size
                 && rest_group_size < self.env.opts.min_table_split_size
             {
-                return result;
+                return;
             }
         }
 
@@ -638,10 +558,6 @@ impl HummockManager {
         match ret {
             Ok((new_group_id, table_vnode_partition_count)) => {
                 tracing::info!("move state table [{}] from group-{} to group-{} success table_vnode_partition_count {:?}", table_id, parent_group_id, new_group_id, table_vnode_partition_count);
-                return TableAlignRule::SplitToDedicatedCg((
-                    new_group_id,
-                    table_vnode_partition_count,
-                ));
             }
             Err(e) => {
                 tracing::info!(
@@ -652,7 +568,5 @@ impl HummockManager {
                 )
             }
         }
-
-        TableAlignRule::NoOptimization
     }
 }

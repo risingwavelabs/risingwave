@@ -133,7 +133,6 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
     compaction_selectors
 }
 
-
 impl<'a> HummockVersionTransaction<'a> {
     fn apply_compact_task(&mut self, compact_task: &CompactTask) {
         let mut version_delta = self.new_delta();
@@ -643,8 +642,6 @@ impl HummockManager {
             .values()
             .map(|v| v.minimal_pinned_snapshot)
             .fold(max_committed_epoch, std::cmp::min);
-      
-        let last_apply_version_id = versioning.current_version.id;
 
         let mut compaction_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
 
@@ -661,7 +658,6 @@ impl HummockManager {
         if deterministic_mode {
             version.disable_apply_to_txn();
         }
-
 
         let mut unschedule_groups = vec![];
         let mut trivial_tasks = vec![];
@@ -726,7 +722,6 @@ impl HummockManager {
                     table_id_to_option.insert(*table_id, *opts);
                 }
             }
-
 
             while let Some(compact_task) = compact_status.get_compact_task(
                 version
@@ -893,7 +888,6 @@ impl HummockManager {
                 compact_task_assignment,
                 version
             )?;
-            self.notify_version_deltas(versioning, last_apply_version_id);
             self.metrics
                 .compact_task_batch_count
                 .with_label_values(&["batch_trivial_move"])
@@ -1228,7 +1222,6 @@ impl HummockManager {
                     compact_task.set_task_status(TaskStatus::InputOutdatedCanceled);
                     false
                 } else {
-
                     let group = version
                         .latest_version()
                         .levels
@@ -1497,6 +1490,7 @@ impl HummockManager {
                 .env
                 .opts
                 .compact_task_table_size_partition_threshold_high;
+            use risingwave_common::system_param::reader::SystemParamsRead;
             let params = self.env.system_params_reader().await;
             let barrier_interval_ms = params.barrier_interval_ms() as u64;
             let checkpoint_secs = std::cmp::max(

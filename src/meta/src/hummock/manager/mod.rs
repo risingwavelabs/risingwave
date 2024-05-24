@@ -22,7 +22,6 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::system_param::reader::SystemParamsRead;
-
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
@@ -40,6 +39,7 @@ use risingwave_pb::hummock::{
 use risingwave_pb::meta::subscribe_response::Operation;
 use tokio::sync::mpsc::UnboundedSender;
 use tonic::Streaming;
+
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
@@ -530,7 +530,6 @@ impl HummockManager {
         Ok(())
     }
 
-
     /// Replay a version delta to current hummock version.
     /// Returns the `version_id`, `max_committed_epoch` of the new version and the modified
     /// compaction groups
@@ -559,23 +558,6 @@ impl HummockManager {
 
     pub fn metadata_manager(&self) -> &MetadataManager {
         &self.metadata_manager
-    }
-
-    fn notify_version_deltas(&self, versioning: &Versioning, last_version_id: u64) {
-        let start_version_id = last_version_id + 1;
-        let version_deltas = versioning
-            .hummock_version_deltas
-            .range(start_version_id..)
-            .map(|(_, delta)| delta.to_protobuf())
-            .collect_vec();
-        self.env
-            .notification_manager()
-            .notify_hummock_without_version(
-                Operation::Add,
-                Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
-                    version_deltas,
-                }),
-            );
     }
 }
 
