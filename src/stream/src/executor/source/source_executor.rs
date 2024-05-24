@@ -175,15 +175,7 @@ impl<S: StateStore> SourceExecutor<S> {
     ) -> StreamExecutorResult<()> {
         self.metrics
             .source_split_change_count
-            .with_guarded_label_values(
-                &self
-                    .get_metric_labels()
-                    .iter()
-                    .map(AsRef::as_ref)
-                    .collect::<Vec<&str>>()
-                    .try_into()
-                    .unwrap(),
-            )
+            .with_guarded_label_values(&self.get_metric_labels().each_ref().map(AsRef::as_ref))
             .inc();
         if let Some(target_splits) = split_assignment.get(&self.actor_ctx.id).cloned() {
             if self
