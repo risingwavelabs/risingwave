@@ -53,7 +53,7 @@ where
     S: TokenStream,
 {
     #[derive(Debug, thiserror::Error)]
-    #[error("Precision must be in range {0:?}")]
+    #[error("Precision must be in range '{0}'")]
     struct OutOfRange(String);
 
     delimited(
