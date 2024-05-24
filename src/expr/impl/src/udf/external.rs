@@ -124,11 +124,7 @@ impl UdfImpl for ExternalFunction {
     async fn call(&self, input: &RecordBatch) -> Result<RecordBatch> {
         let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
         let result = if self.always_retry_on_network_error {
-            self.call_with_always_retry_on_network_error(
-                input,
-                // &metrics.udf_retry_count.with_label_values(labels),
-            )
-            .await
+            self.call_with_always_retry_on_network_error(input).await
         } else {
             let result = if disable_retry_count != 0 {
                 self.client.call(&self.identifier, input).await
@@ -229,7 +225,7 @@ impl ExternalFunction {
         for i in 0..5 {
             match self.client.call(&self.identifier, input).await {
                 Err(err) if is_connection_error(&err) && i != 4 => {
-                    tracing::error!(error = %err.as_report(), "UDF connection error. retry...");
+                    tracing::error!(backoff, error = %err.as_report(), "UDF connection error. retry...");
                 }
                 ret => return ret,
             }
@@ -243,13 +239,12 @@ impl ExternalFunction {
     async fn call_with_always_retry_on_network_error(
         &self,
         input: &RecordBatch,
-        // retry_count: &IntCounter,
     ) -> Result<RecordBatch, arrow_udf_flight::Error> {
         let mut backoff = Duration::from_millis(100);
         loop {
             match self.client.call(&self.identifier, input).await {
                 Err(err) if is_tonic_error(&err) => {
-                    tracing::error!(error = %err.as_report(), "UDF tonic error. retry...");
+                    tracing::error!(backoff, error = %err.as_report(), "UDF tonic error. retry...");
                 }
                 ret => {
                     if ret.is_err() {
@@ -258,7 +253,6 @@ impl ExternalFunction {
                     return ret;
                 }
             }
-            // retry_count.inc();
             tokio::time::sleep(backoff).await;
             backoff *= 2;
         }
