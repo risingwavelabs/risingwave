@@ -25,7 +25,7 @@ impl DockerServiceConfig for KafkaConfig {
     }
 
     fn image(&self) -> String {
-        "confluentinc/cp-kafka:7.6.1".to_owned()
+        self.image.clone()
     }
 
     fn envs(&self) -> Vec<(String, String)> {
@@ -60,10 +60,7 @@ impl DockerServiceConfig for KafkaConfig {
     }
 
     fn ports(&self) -> Vec<(String, String)> {
-        vec![(
-            format!("{}:{}", self.listen_address, self.port),
-            "9092".to_owned(),
-        )]
+        vec![(self.port.to_string(), "9092".to_owned())]
     }
 
     fn data_path(&self) -> Option<String> {
@@ -71,4 +68,5 @@ impl DockerServiceConfig for KafkaConfig {
     }
 }
 
+/// Docker-backed Kafka service.
 pub type KafkaService = DockerService<KafkaConfig>;
