@@ -382,6 +382,10 @@ impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
     }
 }
 
+/// NOTICE: after #16231, streaming uploader implemented via aws-sdk-s3 will maintain metrics internally in s3.rs
+/// so MonitoredStreamingUploader will only be used when the inner object store is opendal.
+///
+/// TODO: we should avoid this special case after fully migrating to opeandal for s3.
 impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
         let operation_type = OperationType::StreamingUpload;
@@ -620,11 +624,19 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
-        Ok(MonitoredStreamingUploader::new(
-            media_type,
-            res?,
-            self.object_store_metrics.clone(),
-        ))
+
+        if self.media_type() == "s3" {
+            // After #16231, streaming uploader implemented via aws-sdk-s3 will maintain metrics internally in s3.rs
+            // so MonitoredStreamingUploader will only be used when the inner object store is opendal.
+            // TODO: we should avoid this special case after fully migrating to opeandal for s3.
+            Ok(res?)
+        } else {
+            Ok(MonitoredStreamingUploader::new(
+                media_type,
+                res?,
+                self.object_store_metrics.clone(),
+            ))
+        }
     }
 
     pub async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {

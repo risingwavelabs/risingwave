@@ -331,18 +331,29 @@ impl StreamingUploader for S3StreamingUploader {
                 debug_assert_eq!(self.not_uploaded_len, 0);
                 Err(ObjectError::internal("upload empty object"))
             } else {
-                self.client
-                    .put_object()
-                    .bucket(&self.bucket)
-                    .body(get_upload_body(self.buf))
-                    .content_length(self.not_uploaded_len as i64)
-                    .key(&self.key)
-                    .send()
-                    .await
-                    .map_err(|err| {
-                        set_error_should_retry::<PutObjectError>(self.config.clone(), err.into())
-                    })?;
-                Ok(())
+                let operation_type = OperationType::Upload;
+                let builder = || async {
+                    self.client
+                        .put_object()
+                        .bucket(&self.bucket)
+                        .body(get_upload_body(self.buf.clone()))
+                        .content_length(self.not_uploaded_len as i64)
+                        .key(&self.key)
+                        .send()
+                        .await
+                        .map_err(|err| {
+                            set_error_should_retry::<PutObjectError>(
+                                self.config.clone(),
+                                err.into(),
+                            )
+                        })
+                };
+
+                let res =
+                    retry_request(builder, &self.config, operation_type, self.metrics.clone())
+                        .await;
+                try_update_failure_metric(&self.metrics, &res, operation_type.as_str());
+                res
             }
         } else if let Err(e) = self.flush_multipart_and_complete().await {
             tracing::warn!(key = self.key, error = %e.as_report(), "Failed to upload object");
