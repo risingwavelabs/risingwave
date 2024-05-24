@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
 
 use anyhow::Context;
@@ -199,16 +200,15 @@ impl Build for UserDefinedFunction {
                 .try_collect::<Fields>()?,
         ));
 
-        // batch query does not have a fragment_id
-        let fragment_id = FRAGMENT_ID::try_with(ToOwned::to_owned)
-            .unwrap_or(0)
-            .to_string();
-        let labels: &[&str; 4] = &[
-            udf.link.as_deref().unwrap_or(""),
+        let metrics = GLOBAL_METRICS.with_label_values(
+            link.unwrap_or(""),
             language,
             identifier,
-            fragment_id.as_str(),
-        ];
+            // batch query does not have a fragment_id
+            &FRAGMENT_ID::try_with(ToOwned::to_owned)
+                .unwrap_or(0)
+                .to_string(),
+        );
 
         Ok(Self {
             children: udf.children.iter().map(build_child).try_collect()?,
@@ -218,7 +218,7 @@ impl Build for UserDefinedFunction {
             runtime,
             arrow_convert,
             span: format!("udf_call({})", identifier).into(),
-            metrics: GLOBAL_METRICS.with_label_values(labels),
+            metrics,
         })
     }
 }
@@ -241,7 +241,7 @@ struct MetricsVec {
     /// Total number of input bytes of UDF calls.
     input_bytes: LabelGuardedIntCounterVec<4>,
     /// Total memory usage of UDF runtime in bytes.
-    memory_usage_bytes: LabelGuardedIntGaugeVec<4>,
+    memory_usage_bytes: LabelGuardedIntGaugeVec<5>,
 }
 
 /// Monitor metrics for UDF.
@@ -263,7 +263,7 @@ struct Metrics {
     /// Total number of input bytes of UDF calls.
     input_bytes: LabelGuardedIntCounter<4>,
     /// Total memory usage of UDF runtime in bytes.
-    memory_usage_bytes: LabelGuardedIntGauge<4>,
+    memory_usage_bytes: LabelGuardedIntGauge<5>,
 }
 
 /// Global UDF metrics.
@@ -273,6 +273,7 @@ static GLOBAL_METRICS: LazyLock<MetricsVec> =
 impl MetricsVec {
     fn new(registry: &Registry) -> Self {
         let labels = &["link", "language", "name", "fragment_id"];
+        let labels5 = &["link", "language", "name", "fragment_id", "instance_id"];
         let success_count = register_guarded_int_counter_vec_with_registry!(
             "udf_success_count",
             "Total number of successful UDF calls",
@@ -327,7 +328,7 @@ impl MetricsVec {
         let memory_usage_bytes = register_guarded_int_gauge_vec_with_registry!(
             "udf_memory_usage",
             "Total memory usage of UDF runtime in bytes",
-            labels,
+            labels5,
             registry
         )
         .unwrap();
@@ -344,16 +345,29 @@ impl MetricsVec {
         }
     }
 
-    fn with_label_values(&self, values: &[&str; 4]) -> Metrics {
+    fn with_label_values(
+        &self,
+        link: &str,
+        language: &str,
+        identifier: &str,
+        fragment_id: &str,
+    ) -> Metrics {
+        // generate an unique id for each instance
+        static NEXT_INSTANCE_ID: AtomicU64 = AtomicU64::new(0);
+        let instance_id = NEXT_INSTANCE_ID.fetch_add(1, Ordering::Relaxed).to_string();
+
+        let labels = &[link, language, identifier, fragment_id];
+        let labels5 = &[link, language, identifier, fragment_id, &instance_id];
+
         Metrics {
-            success_count: self.success_count.with_guarded_label_values(values),
-            failure_count: self.failure_count.with_guarded_label_values(values),
-            retry_count: self.retry_count.with_guarded_label_values(values),
-            input_chunk_rows: self.input_chunk_rows.with_guarded_label_values(values),
-            latency: self.latency.with_guarded_label_values(values),
-            input_rows: self.input_rows.with_guarded_label_values(values),
-            input_bytes: self.input_bytes.with_guarded_label_values(values),
-            memory_usage_bytes: self.memory_usage_bytes.with_guarded_label_values(values),
+            success_count: self.success_count.with_guarded_label_values(labels),
+            failure_count: self.failure_count.with_guarded_label_values(labels),
+            retry_count: self.retry_count.with_guarded_label_values(labels),
+            input_chunk_rows: self.input_chunk_rows.with_guarded_label_values(labels),
+            latency: self.latency.with_guarded_label_values(labels),
+            input_rows: self.input_rows.with_guarded_label_values(labels),
+            input_bytes: self.input_bytes.with_guarded_label_values(labels),
+            memory_usage_bytes: self.memory_usage_bytes.with_guarded_label_values(labels5),
         }
     }
 }
