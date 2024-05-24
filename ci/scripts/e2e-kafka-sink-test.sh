@@ -17,7 +17,7 @@ sleep 2
 
 # test append-only kafka sink
 echo "testing append-only kafka sink"
-diff ./e2e_test/sink/kafka/append_only1.result \
+diff -b ./e2e_test/sink/kafka/append_only1.result \
 <((rpk topic consume test-rw-sink-append-only --offset start --format '%v\n' --num 10 | sort) 2> /dev/null)
 if [ $? -ne 0 ]; then
   echo "The output for append-only sink is not as expected."
@@ -26,7 +26,7 @@ fi
 
 # test upsert kafka sink
 echo "testing upsert kafka sink"
-diff ./e2e_test/sink/kafka/upsert1.result \
+diff -b ./e2e_test/sink/kafka/upsert1.result \
 <((rpk topic consume test-rw-sink-upsert --offset start --format '%k\t%v\n' --num 10 | sort) 2> /dev/null)
 if [ $? -ne 0 ]; then
   echo "The output for upsert sink is not as expected."
@@ -35,7 +35,7 @@ fi
 
 # test upsert kafka sink with schema
 echo "testing upsert kafka sink with schema"
-diff ./e2e_test/sink/kafka/upsert_schema1.result \
+diff -b ./e2e_test/sink/kafka/upsert_schema1.result \
 <((rpk topic consume test-rw-sink-upsert-schema --offset start --format '%k\t%v\n' --num 10 | sort) 2> /dev/null)
 if [ $? -ne 0 ]; then
   echo "The output for upsert sink with schema is not as expected."
@@ -60,7 +60,7 @@ psql -h localhost -p 4566 -d dev -U root -c "update t_kafka set v_varchar = '', 
 
 # test append-only kafka sink after update
 echo "testing append-only kafka sink after updating data"
-diff ./e2e_test/sink/kafka/append_only2.result \
+diff -b ./e2e_test/sink/kafka/append_only2.result \
 <((rpk topic consume test-rw-sink-append-only --offset start --format '%v\n' --num 11 | sort) 2> /dev/null)
 if [ $? -ne 0 ]; then
   echo "The output for append-only sink after update is not as expected."
@@ -69,7 +69,7 @@ fi
 
 # test upsert kafka sink after update
 echo "testing upsert kafka sink after updating data"
-diff ./e2e_test/sink/kafka/upsert2.result \
+diff -b ./e2e_test/sink/kafka/upsert2.result \
 <((rpk topic consume test-rw-sink-upsert --offset start --format '%k\t%v\n' --num 11 | sort) 2> /dev/null)
 if [ $? -ne 0 ]; then
   echo "The output for upsert sink after update is not as expected."
@@ -78,7 +78,7 @@ fi
 
 # test upsert kafka sink with schema after update
 echo "testing upsert kafka sink with schema after updating data"
-diff ./e2e_test/sink/kafka/upsert_schema2.result \
+diff -b ./e2e_test/sink/kafka/upsert_schema2.result \
 <((rpk topic consume test-rw-sink-upsert-schema --offset start --format '%k\t%v\n' --num 11 | sort) 2> /dev/null)
 if [ $? -ne 0 ]; then
   echo "The output for upsert sink with schema is not as expected."
@@ -99,7 +99,7 @@ fi
 
 # test without-snapshot kafka sink
 echo "testing without-snapshot kafka sink"
-diff ./e2e_test/sink/kafka/without_snapshot.result \
+diff -b ./e2e_test/sink/kafka/without_snapshot.result \
 <((rpk topic consume test-rw-sink-without-snapshot --offset start --format '%v\n' --num 3 | sort) 2> /dev/null)
 if [ $? -ne 0 ]; then
   echo "The output for append-only sink is not as expected."
@@ -112,7 +112,7 @@ psql -h localhost -p 4566 -d dev -U root -c "delete from t_kafka where id = 1;" 
 
 # test upsert kafka sink after delete
 echo "testing upsert kafka sink after deleting data"
-diff ./e2e_test/sink/kafka/upsert3.result \
+diff -b ./e2e_test/sink/kafka/upsert3.result \
 <((rpk topic consume test-rw-sink-upsert --offset start --format '%k\t%v\n' --num 12 | sort) 2> /dev/null)
 if [ $? -ne 0 ]; then
   echo "The output for upsert sink after update is not as expected."
@@ -121,7 +121,7 @@ fi
 
 # test upsert kafka sink with schema after delete
 echo "testing upsert kafka sink with schema after deleting data"
-diff ./e2e_test/sink/kafka/upsert_schema3.result \
+diff -b ./e2e_test/sink/kafka/upsert_schema3.result \
 <((rpk topic consume test-rw-sink-upsert-schema --offset start --format '%k\t%v\n' --num 12 | sort) 2> /dev/null)
 if [ $? -ne 0 ]; then
   echo "The output for upsert sink with schema is not as expected."
