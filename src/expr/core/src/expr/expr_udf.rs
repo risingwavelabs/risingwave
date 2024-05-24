@@ -19,8 +19,8 @@ use arrow_schema::{Fields, Schema, SchemaRef};
 use await_tree::InstrumentAwait;
 use prometheus::{
     exponential_buckets, register_histogram_vec_with_registry,
-    register_int_counter_vec_with_registry, Histogram, HistogramVec, IntCounter, IntCounterVec,
-    Registry,
+    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry, Histogram,
+    HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
 use risingwave_common::array::arrow::{FromArrow, ToArrow, UdfArrowConvert};
 use risingwave_common::array::{Array, ArrayRef, DataChunk};
@@ -114,6 +114,10 @@ impl UserDefinedFunction {
             &self.metrics.failure_count
         }
         .inc();
+        // update memory usage
+        self.metrics
+            .memory_usage_bytes
+            .set(self.runtime.memory_usage() as i64);
 
         let arrow_output = arrow_output_result?;
 
@@ -239,6 +243,8 @@ struct MetricsVec {
     input_rows: IntCounterVec,
     /// Total number of input bytes of UDF calls.
     input_bytes: IntCounterVec,
+    /// Total memory usage of UDF runtime in bytes.
+    memory_usage_bytes: IntGaugeVec,
 }
 
 /// Monitor metrics for UDF.
@@ -259,6 +265,8 @@ struct Metrics {
     input_rows: IntCounter,
     /// Total number of input bytes of UDF calls.
     input_bytes: IntCounter,
+    /// Total memory usage of UDF runtime in bytes.
+    memory_usage_bytes: IntGauge,
 }
 
 /// Global UDF metrics.
@@ -319,6 +327,13 @@ impl MetricsVec {
             registry
         )
         .unwrap();
+        let memory_usage_bytes = register_int_gauge_vec_with_registry!(
+            "udf_memory_usage",
+            "Total memory usage of UDF runtime in bytes",
+            labels,
+            registry
+        )
+        .unwrap();
 
         MetricsVec {
             success_count,
@@ -328,6 +343,7 @@ impl MetricsVec {
             latency,
             input_rows,
             input_bytes,
+            memory_usage_bytes,
         }
     }
 
@@ -340,6 +356,7 @@ impl MetricsVec {
             latency: self.latency.with_label_values(values),
             input_rows: self.input_rows.with_label_values(values),
             input_bytes: self.input_bytes.with_label_values(values),
+            memory_usage_bytes: self.memory_usage_bytes.with_label_values(values),
         }
     }
 }

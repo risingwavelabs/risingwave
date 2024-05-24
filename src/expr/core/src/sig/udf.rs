@@ -155,4 +155,11 @@ pub trait UdfImpl: std::fmt::Debug + Send + Sync {
     fn is_legacy(&self) -> bool {
         false
     }
+
+    /// Return the memory size consumed by UDF runtime in bytes.
+    ///
+    /// If not available, return 0.
+    fn memory_usage(&self) -> usize {
+        0
+    }
 }

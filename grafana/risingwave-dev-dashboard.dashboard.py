@@ -4268,6 +4268,20 @@ def section_udf(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_bytes(
+                    "UDF Memory Usage (bytes)",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('udf_memory_usage')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "udf_memory_usage - {{%s}}" % NODE_LABEL,
+                        ),
+                        panels.target(
+                            f"sum({metric('udf_memory_usage')}) by (name, fragment_id)",
+                            "udf_memory_usage - {{name}} {{fragment_id}}",
+                        ),
+                    ],
+                ),
             ],
         )
     ]
