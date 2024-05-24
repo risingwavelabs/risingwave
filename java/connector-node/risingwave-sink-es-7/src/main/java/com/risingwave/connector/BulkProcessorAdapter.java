@@ -16,14 +16,12 @@
 
 package com.risingwave.connector;
 
-import com.risingwave.connector.EsSink.RequestTracker;
-import com.risingwave.connector.api.sink.SinkRow;
 import java.util.concurrent.TimeUnit;
 
 public interface BulkProcessorAdapter {
-    public void addRow(SinkRow row, String indexName, RequestTracker requestTracker);
+    public void addRow(String index, String key, String doc);
 
-    public void deleteRow(SinkRow row, String indexName, RequestTracker requestTracker);
+    public void deleteRow(String index, String key);
 
     public void flush();
 

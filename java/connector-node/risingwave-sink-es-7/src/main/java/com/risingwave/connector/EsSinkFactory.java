@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-
 package com.risingwave.connector;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -26,10 +25,8 @@ import com.risingwave.connector.api.sink.SinkWriterV1;
 import com.risingwave.proto.Catalog;
 import com.risingwave.proto.Data;
 import io.grpc.Status;
-import java.io.IOException;
 import java.util.Map;
 import org.apache.http.HttpHost;
-import org.elasticsearch.client.RequestOptions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -85,32 +82,30 @@ public class EsSinkFactory implements SinkFactory {
             }
         }
 
-        RestHighLevelClientAdapter client;
         // 2. check connection
         try {
-            boolean isConnected;
             if (config.getConnector().equals("elasticsearch")) {
-                client = new ElasticRestHighLevelClientAdapter(host, config);
-                isConnected = client.ping(RequestOptions.DEFAULT);
+                ElasticRestHighLevelClientAdapter esClient =
+                        new ElasticRestHighLevelClientAdapter(host, config);
+                if (esClient.ping(org.elasticsearch.client.RequestOptions.DEFAULT)) {
+                    throw Status.INVALID_ARGUMENT
+                            .withDescription("Cannot connect to " + config.getUrl())
+                            .asRuntimeException();
+                }
+                esClient.close();
             } else if (config.getConnector().equals("opensearch")) {
-                client = new OpensearchRestHighLevelClientAdapter(host, config);
-                isConnected = client.ping(org.opensearch.client.RequestOptions.DEFAULT);
+                OpensearchRestHighLevelClientAdapter opensearchClient =
+                        new OpensearchRestHighLevelClientAdapter(host, config);
+                if (opensearchClient.ping(org.opensearch.client.RequestOptions.DEFAULT)) {
+                    throw Status.INVALID_ARGUMENT
+                            .withDescription("Cannot connect to " + config.getUrl())
+                            .asRuntimeException();
+                }
+                opensearchClient.close();
             } else {
                 throw new RuntimeException("Sink type must be elasticsearch or opensearch");
             }
-            if (!isConnected) {
-                throw Status.INVALID_ARGUMENT
-                        .withDescription("Cannot connect to " + config.getUrl())
-                        .asRuntimeException();
-            }
         } catch (Exception e) {
-            throw Status.INTERNAL.withDescription(e.getMessage()).asRuntimeException();
-        }
-
-        // 3. close client
-        try {
-            client.close();
-        } catch (IOException e) {
             throw Status.INTERNAL.withDescription(e.getMessage()).asRuntimeException();
         }
     }

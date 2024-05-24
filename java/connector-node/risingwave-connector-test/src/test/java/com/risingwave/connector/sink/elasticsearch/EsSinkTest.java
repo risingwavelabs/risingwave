@@ -19,9 +19,9 @@ import static org.junit.Assert.fail;
 
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
+import com.risingwave.connector.ElasticRestHighLevelClientAdapter;
 import com.risingwave.connector.EsSink;
 import com.risingwave.connector.EsSinkConfig;
-import com.risingwave.connector.RestHighLevelClientAdapter;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.ArraySinkRow;
 import com.risingwave.proto.Data;
@@ -74,13 +74,13 @@ public class EsSinkTest {
             fail(e.getMessage());
         }
 
-        RestHighLevelClientAdapter client = sink.getClient();
+        ElasticRestHighLevelClientAdapter client =
+                (ElasticRestHighLevelClientAdapter) sink.getClient();
         SearchRequest searchRequest = new SearchRequest("test");
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
         searchSourceBuilder.query(QueryBuilders.matchAllQuery());
         searchRequest.source(searchSourceBuilder);
-        SearchResponse searchResponse =
-                (SearchResponse) client.search(searchRequest, RequestOptions.DEFAULT);
+        SearchResponse searchResponse = client.search(searchRequest, RequestOptions.DEFAULT);
 
         SearchHits hits = searchResponse.getHits();
         assertEquals(2, hits.getHits().length);

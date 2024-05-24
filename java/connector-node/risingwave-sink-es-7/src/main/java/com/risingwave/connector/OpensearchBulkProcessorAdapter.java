@@ -17,12 +17,9 @@
 package com.risingwave.connector;
 
 import com.risingwave.connector.EsSink.RequestTracker;
-import com.risingwave.connector.api.sink.SinkRow;
 import java.util.concurrent.TimeUnit;
 import org.opensearch.action.bulk.BackoffPolicy;
 import org.opensearch.action.bulk.BulkProcessor;
-import org.opensearch.action.bulk.BulkRequest;
-import org.opensearch.action.bulk.BulkResponse;
 import org.opensearch.action.delete.DeleteRequest;
 import org.opensearch.action.update.UpdateRequest;
 import org.opensearch.client.RequestOptions;
@@ -35,57 +32,18 @@ import org.slf4j.LoggerFactory;
 
 public class OpensearchBulkProcessorAdapter implements BulkProcessorAdapter {
     private static final Logger LOG = LoggerFactory.getLogger(EsSink.class);
+    private final RequestTracker requestTracker;
     BulkProcessor opensearchBulkProcessor;
-
-    private class BulkListener implements BulkProcessor.Listener {
-        private final RequestTracker requestTracker;
-
-        public BulkListener(RequestTracker requestTracker) {
-            this.requestTracker = requestTracker;
-        }
-
-        /** This method is called just before bulk is executed. */
-        @Override
-        public void beforeBulk(long executionId, BulkRequest request) {
-            LOG.debug("Sending bulk of {} actions to Elasticsearch.", request.numberOfActions());
-        }
-
-        /** This method is called after bulk execution. */
-        @Override
-        public void afterBulk(long executionId, BulkRequest request, BulkResponse response) {
-            if (response.hasFailures()) {
-                String errMessage =
-                        String.format(
-                                "Bulk of %d actions failed. Failure: %s",
-                                request.numberOfActions(), response.buildFailureMessage());
-                this.requestTracker.addErrResult(errMessage);
-            } else {
-                this.requestTracker.addOkResult(request.numberOfActions());
-                LOG.debug("Sent bulk of {} actions to Elasticsearch.", request.numberOfActions());
-            }
-        }
-
-        /** This method is called when the bulk failed and raised a Throwable */
-        @Override
-        public void afterBulk(long executionId, BulkRequest request, Throwable failure) {
-            String errMessage =
-                    String.format(
-                            "Bulk of %d actions failed. Failure: %s",
-                            request.numberOfActions(), failure.getMessage());
-            this.requestTracker.addErrResult(errMessage);
-        }
-    }
 
     public OpensearchBulkProcessorAdapter(
             RequestTracker requestTracker, OpensearchRestHighLevelClientAdapter client) {
         BulkProcessor.Builder builder =
                 BulkProcessor.builder(
-                        (OpensearchBulkRequestConsumerFactory)
-                                (bulkRequest, bulkResponseActionListener) ->
-                                        client.bulkAsync(
-                                                bulkRequest,
-                                                RequestOptions.DEFAULT,
-                                                bulkResponseActionListener),
+                        (bulkRequest, bulkResponseActionListener) ->
+                                client.bulkAsync(
+                                        bulkRequest,
+                                        RequestOptions.DEFAULT,
+                                        bulkResponseActionListener),
                         new BulkListener(requestTracker));
         // Possible feature: move these to config
         // execute the bulk every 10 000 requests
@@ -101,6 +59,7 @@ public class OpensearchBulkProcessorAdapter implements BulkProcessorAdapter {
         builder.setBackoffPolicy(
                 BackoffPolicy.exponentialBackoff(TimeValue.timeValueMillis(100), 3));
         this.opensearchBulkProcessor = builder.build();
+        this.requestTracker = requestTracker;
     }
 
     @Override
@@ -114,34 +73,19 @@ public class OpensearchBulkProcessorAdapter implements BulkProcessorAdapter {
     }
 
     @Override
-    public void addRow(SinkRow row, String indexName, RequestTracker requestTracker) {
-        final String index = (String) row.get(0);
-        final String key = (String) row.get(1);
-        String doc = (String) row.get(2);
-
+    public void addRow(String index, String key, String doc) {
         UpdateRequest updateRequest;
-        if (indexName != null) {
-            updateRequest = new UpdateRequest(indexName, key).doc(doc, XContentType.JSON);
-        } else {
-            updateRequest = new UpdateRequest(index, key).doc(doc, XContentType.JSON);
-        }
+        updateRequest = new UpdateRequest(index, key).doc(doc, XContentType.JSON);
         updateRequest.docAsUpsert(true);
-        requestTracker.addWriteTask();
+        this.requestTracker.addWriteTask();
         this.opensearchBulkProcessor.add(updateRequest);
     }
 
     @Override
-    public void deleteRow(SinkRow row, String indexName, RequestTracker requestTracker) {
-        final String index = (String) row.get(0);
-        final String key = (String) row.get(1);
-
+    public void deleteRow(String index, String key) {
         DeleteRequest deleteRequest;
-        if (indexName != null) {
-            deleteRequest = new DeleteRequest(indexName, key);
-        } else {
-            deleteRequest = new DeleteRequest(index, key);
-        }
-        requestTracker.addWriteTask();
+        deleteRequest = new DeleteRequest(index, key);
+        this.requestTracker.addWriteTask();
         this.opensearchBulkProcessor.add(deleteRequest);
     }
 }

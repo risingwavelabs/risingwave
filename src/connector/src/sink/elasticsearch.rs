@@ -40,7 +40,7 @@ impl StreamChunkConverter {
         pk_indices: &Vec<usize>,
         properties: &HashMap<String, String>,
     ) -> Result<Self> {
-        if sink_name == ElasticSearchSink::SINK_NAME || sink_name == OpensearchSink::SINK_NAME {
+        if is_es_sink(sink_name) {
             let index_column = properties
                 .get(ES_OPTION_INDEX_COLUMN)
                 .cloned()
@@ -169,4 +169,8 @@ impl EsStreamChunkConverter {
     fn build_id(&self, row: RowRef<'_>) -> Result<String> {
         (self.fn_build_id)(row)
     }
+}
+
+pub fn is_es_sink(sink_name: &str) -> bool {
+    sink_name == ElasticSearchSink::SINK_NAME || sink_name == OpensearchSink::SINK_NAME
 }

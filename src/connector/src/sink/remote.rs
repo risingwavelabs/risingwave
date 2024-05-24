@@ -57,7 +57,7 @@ use tokio::task::spawn_blocking;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 
-use super::elasticsearch::{StreamChunkConverter, ES_OPTION_DELIMITER};
+use super::elasticsearch::{is_es_sink, StreamChunkConverter, ES_OPTION_DELIMITER};
 use crate::error::ConnectorResult;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::coordinate::CoordinatedSinkWriter;
@@ -166,7 +166,7 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
 }
 
 async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorResult<()> {
-    if (sink_name == ElasticSearchSink::SINK_NAME || sink_name == OpensearchSink::SINK_NAME)
+    if is_es_sink(sink_name)
         && param.downstream_pk.len() > 1
         && param.properties.get(ES_OPTION_DELIMITER).is_none()
     {

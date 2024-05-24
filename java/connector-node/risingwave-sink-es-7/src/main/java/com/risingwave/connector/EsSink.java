@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-
 package com.risingwave.connector;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -167,14 +166,22 @@ public class EsSink extends SinkWriterBase {
     }
 
     private void writeRow(SinkRow row) throws JsonMappingException, JsonProcessingException {
+        final String key = (String) row.get(1);
+        String doc = (String) row.get(2);
+        final String index;
+        if (config.getIndex() == null) {
+            index = (String) row.get(0);
+        } else {
+            index = config.getIndex();
+        }
         switch (row.getOp()) {
             case INSERT:
             case UPDATE_INSERT:
-                this.bulkProcessor.addRow(row, config.getIndex(), requestTracker);
+                this.bulkProcessor.addRow(index, key, doc);
                 break;
             case DELETE:
             case UPDATE_DELETE:
-                this.bulkProcessor.deleteRow(row, config.getIndex(), requestTracker);
+                this.bulkProcessor.deleteRow(index, key);
                 break;
             default:
                 throw Status.INVALID_ARGUMENT

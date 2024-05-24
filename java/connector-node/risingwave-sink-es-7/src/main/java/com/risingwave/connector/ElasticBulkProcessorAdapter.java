@@ -17,12 +17,10 @@
 package com.risingwave.connector;
 
 import com.risingwave.connector.EsSink.RequestTracker;
-import com.risingwave.connector.api.sink.SinkRow;
 import java.util.concurrent.TimeUnit;
 import org.elasticsearch.action.bulk.BackoffPolicy;
 import org.elasticsearch.action.bulk.BulkProcessor;
 import org.elasticsearch.action.bulk.BulkRequest;
-import org.elasticsearch.action.bulk.BulkResponse;
 import org.elasticsearch.action.delete.DeleteRequest;
 import org.elasticsearch.action.update.UpdateRequest;
 import org.elasticsearch.client.RequestOptions;
@@ -36,56 +34,17 @@ import org.slf4j.LoggerFactory;
 public class ElasticBulkProcessorAdapter implements BulkProcessorAdapter {
     private static final Logger LOG = LoggerFactory.getLogger(EsSink.class);
     BulkProcessor esBulkProcessor;
-
-    private class BulkListener implements BulkProcessor.Listener {
-        private final RequestTracker requestTracker;
-
-        public BulkListener(RequestTracker requestTracker) {
-            this.requestTracker = requestTracker;
-        }
-
-        /** This method is called just before bulk is executed. */
-        @Override
-        public void beforeBulk(long executionId, BulkRequest request) {
-            LOG.debug("Sending bulk of {} actions to Elasticsearch.", request.numberOfActions());
-        }
-
-        /** This method is called after bulk execution. */
-        @Override
-        public void afterBulk(long executionId, BulkRequest request, BulkResponse response) {
-            if (response.hasFailures()) {
-                String errMessage =
-                        String.format(
-                                "Bulk of %d actions failed. Failure: %s",
-                                request.numberOfActions(), response.buildFailureMessage());
-                this.requestTracker.addErrResult(errMessage);
-            } else {
-                this.requestTracker.addOkResult(request.numberOfActions());
-                LOG.debug("Sent bulk of {} actions to Elasticsearch.", request.numberOfActions());
-            }
-        }
-
-        /** This method is called when the bulk failed and raised a Throwable */
-        @Override
-        public void afterBulk(long executionId, BulkRequest request, Throwable failure) {
-            String errMessage =
-                    String.format(
-                            "Bulk of %d actions failed. Failure: %s",
-                            request.numberOfActions(), failure.getMessage());
-            this.requestTracker.addErrResult(errMessage);
-        }
-    }
+    private final RequestTracker requestTracker;
 
     public ElasticBulkProcessorAdapter(
             RequestTracker requestTracker, ElasticRestHighLevelClientAdapter client) {
         BulkProcessor.Builder builder =
                 BulkProcessor.builder(
-                        (ElasticBulkRequestConsumerFactory)
-                                (bulkRequest, bulkResponseActionListener) ->
-                                        client.bulkAsync(
-                                                bulkRequest,
-                                                RequestOptions.DEFAULT,
-                                                bulkResponseActionListener),
+                        (bulkRequest, bulkResponseActionListener) ->
+                                client.bulkAsync(
+                                        bulkRequest,
+                                        RequestOptions.DEFAULT,
+                                        bulkResponseActionListener),
                         new BulkListener(requestTracker));
         // Possible feature: move these to config
         // execute the bulk every 10 000 requests
@@ -101,6 +60,7 @@ public class ElasticBulkProcessorAdapter implements BulkProcessorAdapter {
         builder.setBackoffPolicy(
                 BackoffPolicy.exponentialBackoff(TimeValue.timeValueMillis(100), 3));
         this.esBulkProcessor = builder.build();
+        this.requestTracker = requestTracker;
     }
 
     @Override
@@ -114,34 +74,94 @@ public class ElasticBulkProcessorAdapter implements BulkProcessorAdapter {
     }
 
     @Override
-    public void addRow(SinkRow row, String indexName, RequestTracker requestTracker) {
-        final String index = (String) row.get(0);
-        final String key = (String) row.get(1);
-        String doc = (String) row.get(2);
-
+    public void addRow(String index, String key, String doc) {
         UpdateRequest updateRequest;
-        if (indexName != null) {
-            updateRequest = new UpdateRequest(indexName, "_doc", key).doc(doc, XContentType.JSON);
-        } else {
-            updateRequest = new UpdateRequest(indexName, "_doc", key).doc(doc, XContentType.JSON);
-        }
+        updateRequest = new UpdateRequest(index, "_doc", key).doc(doc, XContentType.JSON);
         updateRequest.docAsUpsert(true);
-        requestTracker.addWriteTask();
+        this.requestTracker.addWriteTask();
         this.esBulkProcessor.add(updateRequest);
     }
 
     @Override
-    public void deleteRow(SinkRow row, String indexName, RequestTracker requestTracker) {
-        final String index = (String) row.get(0);
-        final String key = (String) row.get(1);
-
+    public void deleteRow(String index, String key) {
         DeleteRequest deleteRequest;
-        if (indexName != null) {
-            deleteRequest = new DeleteRequest(indexName, "_doc", key);
-        } else {
-            deleteRequest = new DeleteRequest(index, "_doc", key);
-        }
-        requestTracker.addWriteTask();
+        deleteRequest = new DeleteRequest(index, "_doc", key);
+        this.requestTracker.addWriteTask();
         this.esBulkProcessor.add(deleteRequest);
+    }
+}
+
+class BulkListener
+        implements org.elasticsearch.action.bulk.BulkProcessor.Listener,
+                org.opensearch.action.bulk.BulkProcessor.Listener {
+    private static final Logger LOG = LoggerFactory.getLogger(EsSink.class);
+    private final RequestTracker requestTracker;
+
+    public BulkListener(RequestTracker requestTracker) {
+        this.requestTracker = requestTracker;
+    }
+
+    @Override
+    public void beforeBulk(long executionId, org.elasticsearch.action.bulk.BulkRequest request) {
+        LOG.debug("Sending bulk of {} actions to Elasticsearch.", request.numberOfActions());
+    }
+
+    @Override
+    public void afterBulk(
+            long executionId,
+            org.elasticsearch.action.bulk.BulkRequest request,
+            org.elasticsearch.action.bulk.BulkResponse response) {
+        if (response.hasFailures()) {
+            String errMessage =
+                    String.format(
+                            "Bulk of %d actions failed. Failure: %s",
+                            request.numberOfActions(), response.buildFailureMessage());
+            this.requestTracker.addErrResult(errMessage);
+        } else {
+            this.requestTracker.addOkResult(request.numberOfActions());
+            LOG.debug("Sent bulk of {} actions to Elasticsearch.", request.numberOfActions());
+        }
+    }
+
+    /** This method is called when the bulk failed and raised a Throwable */
+    @Override
+    public void afterBulk(long executionId, BulkRequest request, Throwable failure) {
+        String errMessage =
+                String.format(
+                        "Bulk of %d actions failed. Failure: %s",
+                        request.numberOfActions(), failure.getMessage());
+        this.requestTracker.addErrResult(errMessage);
+    }
+
+    @Override
+    public void beforeBulk(long executionId, org.opensearch.action.bulk.BulkRequest request) {
+        LOG.debug("Sending bulk of {} actions to Opensearch.", request.numberOfActions());
+    }
+
+    @Override
+    public void afterBulk(
+            long executionId,
+            org.opensearch.action.bulk.BulkRequest request,
+            org.opensearch.action.bulk.BulkResponse response) {
+        if (response.hasFailures()) {
+            String errMessage =
+                    String.format(
+                            "Bulk of %d actions failed. Failure: %s",
+                            request.numberOfActions(), response.buildFailureMessage());
+            this.requestTracker.addErrResult(errMessage);
+        } else {
+            this.requestTracker.addOkResult(request.numberOfActions());
+            LOG.debug("Sent bulk of {} actions to Opensearch.", request.numberOfActions());
+        }
+    }
+
+    @Override
+    public void afterBulk(
+            long executionId, org.opensearch.action.bulk.BulkRequest request, Throwable failure) {
+        String errMessage =
+                String.format(
+                        "Bulk of %d actions failed. Failure: %s",
+                        request.numberOfActions(), failure.getMessage());
+        this.requestTracker.addErrResult(errMessage);
     }
 }
