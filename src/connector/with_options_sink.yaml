@@ -109,6 +109,7 @@ DeltaLakeConfig:
     required: false
   - name: commit_checkpoint_interval
     field_type: u64
+    comments: Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
     required: false
     default: Default::default
   - name: r#type
@@ -737,7 +738,7 @@ StarrocksConfig:
     field_type: u64
     comments: The timeout in milliseconds for stream load http request, defaults to 10 seconds.
     required: false
-    default: 10 * 1000
+    default: 30 * 1000
   - name: commit_checkpoint_interval
     field_type: u64
     comments: Set this option to a positive integer n, RisingWave will try to commit data  to Starrocks at every n checkpoints by leveraging the  [StreamLoad Transaction API](https://docs.starrocks.io/docs/loading/Stream_Load_transaction_interface/),  also, in this time, the `sink_decouple` option should be enabled as well.  Defaults to 1 if commit_checkpoint_interval <= 0

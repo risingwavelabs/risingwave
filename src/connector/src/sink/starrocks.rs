@@ -32,7 +32,7 @@ use risingwave_pb::connector_service::SinkMetadata;
 use serde::Deserialize;
 use serde_derive::Serialize;
 use serde_json::Value;
-use serde_with::serde_as;
+use serde_with::{serde_as, DisplayFromStr};
 use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 use url::form_urlencoded;
@@ -59,7 +59,7 @@ const STARROCK_MYSQL_MAX_ALLOWED_PACKET: usize = 1024;
 const STARROCK_MYSQL_WAIT_TIMEOUT: usize = 28800;
 
 const fn _default_stream_load_http_timeout_ms() -> u64 {
-    10 * 1000
+    30 * 1000
 }
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
@@ -98,6 +98,7 @@ pub struct StarrocksConfig {
         rename = "starrocks.stream_load.http.timeout.ms",
         default = "_default_stream_load_http_timeout_ms"
     )]
+    #[serde_as(as = "DisplayFromStr")]
     pub stream_load_http_timeout_ms: u64,
 
     /// Set this option to a positive integer n, RisingWave will try to commit data
@@ -114,6 +115,7 @@ pub struct StarrocksConfig {
 
     pub r#type: String, // accept "append-only" or "upsert"
 }
+
 impl StarrocksConfig {
     pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
         let config =
