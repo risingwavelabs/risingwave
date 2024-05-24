@@ -17,13 +17,10 @@ use std::sync::{Arc, LazyLock};
 use anyhow::Context;
 use arrow_schema::{Fields, Schema, SchemaRef};
 use await_tree::InstrumentAwait;
-use prometheus::{
-    exponential_buckets, register_histogram_vec_with_registry,
-    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry, Histogram,
-    HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
-};
+use prometheus::{exponential_buckets, Registry};
 use risingwave_common::array::arrow::{FromArrow, ToArrow, UdfArrowConvert};
 use risingwave_common::array::{Array, ArrayRef, DataChunk};
+use risingwave_common::metrics::*;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
@@ -230,43 +227,43 @@ impl Build for UserDefinedFunction {
 #[derive(Debug, Clone)]
 struct MetricsVec {
     /// Number of successful UDF calls.
-    success_count: IntCounterVec,
+    success_count: LabelGuardedIntCounterVec<4>,
     /// Number of failed UDF calls.
-    failure_count: IntCounterVec,
+    failure_count: LabelGuardedIntCounterVec<4>,
     /// Total number of retried UDF calls.
-    retry_count: IntCounterVec,
+    retry_count: LabelGuardedIntCounterVec<4>,
     /// Input chunk rows of UDF calls.
-    input_chunk_rows: HistogramVec,
+    input_chunk_rows: LabelGuardedHistogramVec<4>,
     /// The latency of UDF calls in seconds.
-    latency: HistogramVec,
+    latency: LabelGuardedHistogramVec<4>,
     /// Total number of input rows of UDF calls.
-    input_rows: IntCounterVec,
+    input_rows: LabelGuardedIntCounterVec<4>,
     /// Total number of input bytes of UDF calls.
-    input_bytes: IntCounterVec,
+    input_bytes: LabelGuardedIntCounterVec<4>,
     /// Total memory usage of UDF runtime in bytes.
-    memory_usage_bytes: IntGaugeVec,
+    memory_usage_bytes: LabelGuardedIntGaugeVec<4>,
 }
 
 /// Monitor metrics for UDF.
 #[derive(Debug, Clone)]
 struct Metrics {
     /// Number of successful UDF calls.
-    success_count: IntCounter,
+    success_count: LabelGuardedIntCounter<4>,
     /// Number of failed UDF calls.
-    failure_count: IntCounter,
+    failure_count: LabelGuardedIntCounter<4>,
     /// Total number of retried UDF calls.
     #[allow(dead_code)]
-    retry_count: IntCounter,
+    retry_count: LabelGuardedIntCounter<4>,
     /// Input chunk rows of UDF calls.
-    input_chunk_rows: Histogram,
+    input_chunk_rows: LabelGuardedHistogram<4>,
     /// The latency of UDF calls in seconds.
-    latency: Histogram,
+    latency: LabelGuardedHistogram<4>,
     /// Total number of input rows of UDF calls.
-    input_rows: IntCounter,
+    input_rows: LabelGuardedIntCounter<4>,
     /// Total number of input bytes of UDF calls.
-    input_bytes: IntCounter,
+    input_bytes: LabelGuardedIntCounter<4>,
     /// Total memory usage of UDF runtime in bytes.
-    memory_usage_bytes: IntGauge,
+    memory_usage_bytes: LabelGuardedIntGauge<4>,
 }
 
 /// Global UDF metrics.
@@ -276,28 +273,28 @@ static GLOBAL_METRICS: LazyLock<MetricsVec> =
 impl MetricsVec {
     fn new(registry: &Registry) -> Self {
         let labels = &["link", "language", "name", "fragment_id"];
-        let success_count = register_int_counter_vec_with_registry!(
+        let success_count = register_guarded_int_counter_vec_with_registry!(
             "udf_success_count",
             "Total number of successful UDF calls",
             labels,
             registry
         )
         .unwrap();
-        let failure_count = register_int_counter_vec_with_registry!(
+        let failure_count = register_guarded_int_counter_vec_with_registry!(
             "udf_failure_count",
             "Total number of failed UDF calls",
             labels,
             registry
         )
         .unwrap();
-        let retry_count = register_int_counter_vec_with_registry!(
+        let retry_count = register_guarded_int_counter_vec_with_registry!(
             "udf_retry_count",
             "Total number of retried UDF calls",
             labels,
             registry
         )
         .unwrap();
-        let input_chunk_rows = register_histogram_vec_with_registry!(
+        let input_chunk_rows = register_guarded_histogram_vec_with_registry!(
             "udf_input_chunk_rows",
             "Input chunk rows of UDF calls",
             labels,
@@ -305,7 +302,7 @@ impl MetricsVec {
             registry
         )
         .unwrap();
-        let latency = register_histogram_vec_with_registry!(
+        let latency = register_guarded_histogram_vec_with_registry!(
             "udf_latency",
             "The latency(s) of UDF calls",
             labels,
@@ -313,21 +310,21 @@ impl MetricsVec {
             registry
         )
         .unwrap();
-        let input_rows = register_int_counter_vec_with_registry!(
+        let input_rows = register_guarded_int_counter_vec_with_registry!(
             "udf_input_rows",
             "Total number of input rows of UDF calls",
             labels,
             registry
         )
         .unwrap();
-        let input_bytes = register_int_counter_vec_with_registry!(
+        let input_bytes = register_guarded_int_counter_vec_with_registry!(
             "udf_input_bytes",
             "Total number of input bytes of UDF calls",
             labels,
             registry
         )
         .unwrap();
-        let memory_usage_bytes = register_int_gauge_vec_with_registry!(
+        let memory_usage_bytes = register_guarded_int_gauge_vec_with_registry!(
             "udf_memory_usage",
             "Total memory usage of UDF runtime in bytes",
             labels,
@@ -349,14 +346,14 @@ impl MetricsVec {
 
     fn with_label_values(&self, values: &[&str; 4]) -> Metrics {
         Metrics {
-            success_count: self.success_count.with_label_values(values),
-            failure_count: self.failure_count.with_label_values(values),
-            retry_count: self.retry_count.with_label_values(values),
-            input_chunk_rows: self.input_chunk_rows.with_label_values(values),
-            latency: self.latency.with_label_values(values),
-            input_rows: self.input_rows.with_label_values(values),
-            input_bytes: self.input_bytes.with_label_values(values),
-            memory_usage_bytes: self.memory_usage_bytes.with_label_values(values),
+            success_count: self.success_count.with_guarded_label_values(values),
+            failure_count: self.failure_count.with_guarded_label_values(values),
+            retry_count: self.retry_count.with_guarded_label_values(values),
+            input_chunk_rows: self.input_chunk_rows.with_guarded_label_values(values),
+            latency: self.latency.with_guarded_label_values(values),
+            input_rows: self.input_rows.with_guarded_label_values(values),
+            input_bytes: self.input_bytes.with_guarded_label_values(values),
+            memory_usage_bytes: self.memory_usage_bytes.with_guarded_label_values(values),
         }
     }
 }
