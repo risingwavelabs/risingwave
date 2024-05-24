@@ -390,7 +390,7 @@ impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
         let operation_type_str = operation_type.as_str();
         let data_len = data.len();
 
-        let res = if self.media_type() == "s3" {
+        let res = if self.media_type == "s3" {
             // TODO: we should avoid this special case after fully migrating to opeandal for s3.
             self.inner
                 .write_bytes(data)
@@ -427,7 +427,7 @@ impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
         let operation_type = OperationType::StreamingUploadFinish;
         let operation_type_str = operation_type.as_str();
 
-        let res = if self.media_type() == "s3" {
+        let res = if self.media_type == "s3" {
             // TODO: we should avoid this special case after fully migrating to opeandal for s3.
             self.inner
                 .finish()
