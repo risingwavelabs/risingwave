@@ -78,8 +78,9 @@ pub struct DatabaseManager {
     pub(super) connections: BTreeMap<ConnectionId, Connection>,
 
     /// Relation reference count mapping.
-    // TODO(zehua): avoid key conflicts after distinguishing table's and source's id generator.
     pub(super) relation_ref_count: HashMap<RelationId, usize>,
+    /// Connection reference count mapping.
+    pub(super) connection_ref_count: HashMap<ConnectionId, usize>,
     // In-progress creation tracker.
     pub(super) in_progress_creation_tracker: HashSet<RelationKey>,
     // In-progress creating streaming job tracker: this is a temporary workaround to avoid clean up
@@ -103,6 +104,7 @@ impl DatabaseManager {
         let subscriptions = Subscription::list(env.meta_store().as_kv()).await?;
 
         let mut relation_ref_count = HashMap::new();
+        let mut connection_ref_count = HashMap::new();
 
         let databases = BTreeMap::from_iter(
             databases
@@ -111,15 +113,17 @@ impl DatabaseManager {
         );
         let schemas = BTreeMap::from_iter(schemas.into_iter().map(|schema| (schema.id, schema)));
         let sources = BTreeMap::from_iter(sources.into_iter().map(|source| {
-            // TODO(weili): wait for yezizp to refactor ref cnt
             if let Some(connection_id) = source.connection_id {
-                *relation_ref_count.entry(connection_id).or_default() += 1;
+                *connection_ref_count.entry(connection_id).or_default() += 1;
             }
             (source.id, source)
         }));
         let sinks = BTreeMap::from_iter(sinks.into_iter().map(|sink| {
             for depend_relation_id in &sink.dependent_relations {
                 *relation_ref_count.entry(*depend_relation_id).or_default() += 1;
+            }
+            if let Some(connection_id) = sink.connection_id {
+                *connection_ref_count.entry(connection_id).or_default() += 1;
             }
             (sink.id, sink)
         }));
@@ -157,6 +161,7 @@ impl DatabaseManager {
             functions,
             connections,
             relation_ref_count,
+            connection_ref_count,
             in_progress_creation_tracker: HashSet::default(),
             in_progress_creation_streaming_job: HashMap::default(),
             in_progress_creating_tables: HashMap::default(),
@@ -451,12 +456,28 @@ impl DatabaseManager {
             && self.views.values().all(|v| v.schema_id != schema_id)
     }
 
-    pub fn increase_ref_count(&mut self, relation_id: RelationId) {
+    pub fn increase_relation_ref_count(&mut self, relation_id: RelationId) {
         *self.relation_ref_count.entry(relation_id).or_insert(0) += 1;
     }
 
-    pub fn decrease_ref_count(&mut self, relation_id: RelationId) {
+    pub fn decrease_relation_ref_count(&mut self, relation_id: RelationId) {
         match self.relation_ref_count.entry(relation_id) {
+            Entry::Occupied(mut o) => {
+                *o.get_mut() -= 1;
+                if *o.get() == 0 {
+                    o.remove_entry();
+                }
+            }
+            Entry::Vacant(_) => unreachable!(),
+        }
+    }
+
+    pub fn increase_connection_ref_count(&mut self, connection_id: ConnectionId) {
+        *self.connection_ref_count.entry(connection_id).or_insert(0) += 1;
+    }
+
+    pub fn decrease_connection_ref_count(&mut self, connection_id: ConnectionId) {
+        match self.connection_ref_count.entry(connection_id) {
             Entry::Occupied(mut o) => {
                 *o.get_mut() -= 1;
                 if *o.get() == 0 {
@@ -619,7 +640,6 @@ impl DatabaseManager {
         }
     }
 
-    // TODO(zehua): refactor when using SourceId.
     pub fn ensure_table_view_or_source_id(&self, table_id: &TableId) -> MetaResult<()> {
         if self.tables.contains_key(table_id)
             || self.sources.contains_key(table_id)
