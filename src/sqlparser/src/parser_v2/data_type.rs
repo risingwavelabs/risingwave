@@ -82,9 +82,18 @@ where
         )),
     );
 
+    // If there is an `over-consumed' `>`, we shouldn't handle `,`.
+    let sep = |input: &mut StatefulStream<S>| -> PResult<()> {
+        if *input.state.remaining_close.borrow() {
+            fail(input)
+        } else {
+            Token::Comma.void().parse_next(input)
+        }
+    };
+
     delimited(
         Token::Lt,
-        separated(
+        cut_err(separated(
             1..,
             trace(
                 "struct_field",
@@ -95,9 +104,9 @@ where
                     }
                 },
             ),
-            Token::Comma,
-        ),
-        consume_close,
+            sep,
+        )),
+        cut_err(consume_close),
     )
     .context(StrContext::Label("struct_data_type"))
     .parse_next(input)
