@@ -107,14 +107,6 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
     type Iter<'a> = impl StateStoreIter + 'a;
     type RevIter<'a> = impl StateStoreIter + 'a;
 
-    fn may_exist(
-        &self,
-        key_range: TableKeyRange,
-        read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<bool>> + Send + '_ {
-        self.inner.may_exist(key_range, read_options)
-    }
-
     fn get(
         &self,
         key: TableKey<Bytes>,

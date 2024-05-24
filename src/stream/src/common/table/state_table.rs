@@ -39,8 +39,8 @@ use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_sdk::key::{
-    end_bound_of_prefix, prefixed_range_with_vnode, range_of_prefix,
-    start_bound_of_excluded_prefix, TableKey, TableKeyRange,
+    end_bound_of_prefix, prefixed_range_with_vnode, start_bound_of_excluded_prefix, TableKey,
+    TableKeyRange,
 };
 use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
 use risingwave_pb::catalog::Table;
@@ -1509,51 +1509,6 @@ where
         self.iter_kv(memcomparable_range_with_vnode, None, prefetch_options)
             .await
             .map_err(StreamExecutorError::from)
-    }
-
-    /// Returns:
-    /// false: the provided pk prefix is absent in state store.
-    /// true: the provided pk prefix may or may not be present in state store.
-    pub async fn may_exist(&self, pk_prefix: impl Row) -> StreamExecutorResult<bool> {
-        let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
-        let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
-        let encoded_key_range = range_of_prefix(&encoded_prefix);
-
-        // We assume that all usages of iterating the state table only access a single vnode.
-        // If this assertion fails, then something must be wrong with the operator implementation or
-        // the distribution derivation from the optimizer.
-        let vnode = self.compute_prefix_vnode(&pk_prefix);
-        let table_key_range = prefixed_range_with_vnode(encoded_key_range, vnode);
-
-        // Construct prefix hint for prefix bloom filter.
-        if self.prefix_hint_len != 0 {
-            debug_assert_eq!(self.prefix_hint_len, pk_prefix.len());
-        }
-        let prefix_hint = {
-            if self.prefix_hint_len == 0 || self.prefix_hint_len > pk_prefix.len() {
-                panic!();
-            } else {
-                let encoded_prefix_len = self
-                    .pk_serde
-                    .deserialize_prefix_len(&encoded_prefix, self.prefix_hint_len)?;
-
-                Some(Bytes::copy_from_slice(
-                    &encoded_prefix[..encoded_prefix_len],
-                ))
-            }
-        };
-
-        let read_options = ReadOptions {
-            prefix_hint,
-            table_id: self.table_id,
-            cache_policy: CachePolicy::Fill(CacheContext::Default),
-            ..Default::default()
-        };
-
-        self.local_store
-            .may_exist(table_key_range, read_options)
-            .await
-            .map_err(Into::into)
     }
 
     #[cfg(test)]

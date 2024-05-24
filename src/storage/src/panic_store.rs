@@ -91,15 +91,6 @@ impl LocalStateStore for PanicStateStore {
     type RevIter<'a> = PanicStateStoreIter<StateStoreIterItem>;
 
     #[allow(clippy::unused_async)]
-    async fn may_exist(
-        &self,
-        _key_range: TableKeyRange,
-        _read_options: ReadOptions,
-    ) -> StorageResult<bool> {
-        panic!("should not call may_exist from the state store!");
-    }
-
-    #[allow(clippy::unused_async)]
     async fn get(
         &self,
         _key: TableKey<Bytes>,

@@ -28,7 +28,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{
-    bound_table_key_range, is_empty_key_range, FullKey, TableKey, TableKeyRange, UserKey,
+    bound_table_key_range, FullKey, TableKey, TableKeyRange, UserKey,
 };
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::table_watermark::{
@@ -62,9 +62,7 @@ use crate::hummock::{
 use crate::mem_table::{
     ImmId, ImmutableMemtable, MemTableHummockIterator, MemTableHummockRevIterator,
 };
-use crate::monitor::{
-    GetLocalMetricsGuard, HummockStateStoreMetrics, MayExistLocalMetricsGuard, StoreLocalStatistic,
-};
+use crate::monitor::{GetLocalMetricsGuard, HummockStateStoreMetrics, StoreLocalStatistic};
 use crate::store::{gen_min_epoch, ReadLogOptions, ReadOptions};
 
 pub type CommittedVersion = PinnedVersion;
@@ -917,135 +915,6 @@ impl HummockVersionReader {
                 .set(local_stats.cache_meta_block_miss as i64);
         }
         Ok(())
-    }
-
-    // Note: this method will not check the kv tomestones and delete range tomestones
-    pub async fn may_exist(
-        &self,
-        table_key_range: TableKeyRange,
-        read_options: ReadOptions,
-        read_version_tuple: ReadVersionTuple,
-    ) -> StorageResult<bool> {
-        if is_empty_key_range(&table_key_range) {
-            return Ok(false);
-        }
-
-        let table_id = read_options.table_id;
-        let (imms, uncommitted_ssts, committed_version) = read_version_tuple;
-        let mut stats_guard =
-            MayExistLocalMetricsGuard::new(self.state_store_metrics.clone(), table_id);
-
-        // 1. check staging data
-        for imm in &imms {
-            if imm.range_exists(&table_key_range) {
-                return Ok(true);
-            }
-        }
-
-        let user_key_range = bound_table_key_range(read_options.table_id, &table_key_range);
-        let user_key_range_ref = (
-            user_key_range.0.as_ref().map(UserKey::as_ref),
-            user_key_range.1.as_ref().map(UserKey::as_ref),
-        );
-        let bloom_filter_prefix_hash = if let Some(prefix_hint) = read_options.prefix_hint {
-            Sstable::hash_for_bloom_filter(&prefix_hint, table_id.table_id)
-        } else {
-            // only use `table_key_range` to see whether all SSTs are filtered out
-            // without looking at bloom filter because prefix_hint is not provided
-            if !uncommitted_ssts.is_empty() {
-                // uncommitted_ssts is already pruned by `table_key_range` so no extra check is
-                // needed.
-                return Ok(true);
-            }
-            for level in committed_version.levels(table_id) {
-                match level.level_type() {
-                    LevelType::Overlapping | LevelType::Unspecified => {
-                        if prune_overlapping_ssts(&level.table_infos, table_id, &table_key_range)
-                            .next()
-                            .is_some()
-                        {
-                            return Ok(true);
-                        }
-                    }
-                    LevelType::Nonoverlapping => {
-                        if prune_nonoverlapping_ssts(&level.table_infos, user_key_range_ref)
-                            .next()
-                            .is_some()
-                        {
-                            return Ok(true);
-                        }
-                    }
-                }
-            }
-            return Ok(false);
-        };
-
-        // 2. order guarantee: imm -> sst
-        for local_sst in &uncommitted_ssts {
-            stats_guard.local_stats.may_exist_check_sstable_count += 1;
-            if hit_sstable_bloom_filter(
-                self.sstable_store
-                    .sstable(local_sst, &mut stats_guard.local_stats)
-                    .await?
-                    .as_ref(),
-                &user_key_range_ref,
-                bloom_filter_prefix_hash,
-                &mut stats_guard.local_stats,
-            ) {
-                return Ok(true);
-            }
-        }
-
-        // 3. read from committed_version sst file
-        // Because SST meta records encoded key range,
-        // the filter key needs to be encoded as well.
-        assert!(committed_version.is_valid());
-        for level in committed_version.levels(table_id) {
-            if level.table_infos.is_empty() {
-                continue;
-            }
-            match level.level_type() {
-                LevelType::Overlapping | LevelType::Unspecified => {
-                    let sstable_infos =
-                        prune_overlapping_ssts(&level.table_infos, table_id, &table_key_range);
-                    for sstable_info in sstable_infos {
-                        stats_guard.local_stats.may_exist_check_sstable_count += 1;
-                        if hit_sstable_bloom_filter(
-                            self.sstable_store
-                                .sstable(sstable_info, &mut stats_guard.local_stats)
-                                .await?
-                                .as_ref(),
-                            &user_key_range_ref,
-                            bloom_filter_prefix_hash,
-                            &mut stats_guard.local_stats,
-                        ) {
-                            return Ok(true);
-                        }
-                    }
-                }
-                LevelType::Nonoverlapping => {
-                    let table_infos =
-                        prune_nonoverlapping_ssts(&level.table_infos, user_key_range_ref);
-
-                    for table_info in table_infos {
-                        stats_guard.local_stats.may_exist_check_sstable_count += 1;
-                        if hit_sstable_bloom_filter(
-                            self.sstable_store
-                                .sstable(table_info, &mut stats_guard.local_stats)
-                                .await?
-                                .as_ref(),
-                            &user_key_range_ref,
-                            bloom_filter_prefix_hash,
-                            &mut stats_guard.local_stats,
-                        ) {
-                            return Ok(true);
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(false)
     }
 
     pub async fn iter_log(
