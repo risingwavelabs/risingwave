@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -20,6 +21,7 @@ use enum_as_inner::EnumAsInner;
 use foyer::{
     DirectFsDeviceOptionsBuilder, HybridCacheBuilder, RateLimitPicker, RuntimeConfigBuilder,
 };
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::build_remote_object_store;
@@ -569,7 +571,9 @@ impl StateStoreImpl {
     ) -> StorageResult<Self> {
         const MB: usize = 1 << 20;
 
-        // FIXME(MrCroxx): Pass foyer metrics.
+        metrics_prometheus::Recorder::builder()
+            .with_registry(GLOBAL_METRICS_REGISTRY.deref().clone())
+            .build_and_install();
 
         let meta_cache_v2 = {
             let mut builder = HybridCacheBuilder::new()

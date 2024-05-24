@@ -2482,7 +2482,7 @@ dependencies = [
  "hyper 0.14.27",
  "hyper-tls 0.5.0",
  "lz4",
- "sealed",
+ "sealed 0.4.0",
  "serde",
  "static_assertions",
  "thiserror",
@@ -7264,6 +7264,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "metrics-prometheus"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b3e1316f9ef05b91f4d0e0a0da5b620ba919d336280b83b36be096b86c030fdd"
+dependencies = [
+ "arc-swap",
+ "metrics",
+ "metrics-util",
+ "once_cell",
+ "prometheus",
+ "sealed 0.5.0",
+ "smallvec",
+ "thiserror",
+]
+
+[[package]]
+name = "metrics-util"
+version = "0.16.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b07a5eb561b8cbc16be2d216faf7757f9baf3bfb94dbb0fae3df8387a5bb47f"
+dependencies = [
+ "crossbeam-epoch",
+ "crossbeam-utils",
+ "hashbrown 0.14.3",
+ "metrics",
+ "num_cpus",
+]
+
+[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9370,7 +9399,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.11.2",
+ "parking_lot 0.12.1",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
@@ -11529,6 +11558,7 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
+ "metrics-prometheus",
  "moka",
  "more-asserts",
  "nix 0.28.0",
@@ -12402,6 +12432,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "sealed"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4a8caec23b7800fb97971a1c6ae365b6239aaeddfb934d6265f8505e795699d"
+dependencies = [
+ "heck 0.4.1",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.57",
 ]
 
 [[package]]
