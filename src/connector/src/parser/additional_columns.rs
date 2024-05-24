@@ -28,7 +28,7 @@ use risingwave_pb::plan_common::{
 };
 
 use crate::error::ConnectorResult;
-use crate::source::cdc::{MONGODB_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR};
+use crate::source::cdc::MONGODB_CDC_CONNECTOR;
 use crate::source::{
     GCS_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, OPENDAL_S3_CONNECTOR, PULSAR_CONNECTOR,
     S3_CONNECTOR,
@@ -56,20 +56,28 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
             (OPENDAL_S3_CONNECTOR, HashSet::from(["file", "offset"])),
             (S3_CONNECTOR, HashSet::from(["file", "offset"])),
             (GCS_CONNECTOR, HashSet::from(["file", "offset"])),
-            (
-                MYSQL_CDC_CONNECTOR,
-                HashSet::from(["timestamp", "partition", "offset"]),
-            ),
-            (
-                POSTGRES_CDC_CONNECTOR,
-                HashSet::from(["timestamp", "partition", "offset"]),
-            ),
+            // mongodb-cdc doesn't support cdc backfill table
             (
                 MONGODB_CDC_CONNECTOR,
                 HashSet::from(["timestamp", "partition", "offset"]),
             ),
         ])
     });
+
+// For CDC backfill table, the additional columns are added to the schema of `StreamCdcScan`
+pub static CDC_BACKFILL_TABLE_ADDITIONAL_COLUMNS: LazyLock<Option<HashSet<&'static str>>> =
+    LazyLock::new(|| Some(HashSet::from(["timestamp"])));
+
+pub fn get_supported_additional_columns(
+    connector_name: &str,
+    is_cdc_backfill: bool,
+) -> Option<&HashSet<&'static str>> {
+    if is_cdc_backfill {
+        CDC_BACKFILL_TABLE_ADDITIONAL_COLUMNS.as_ref()
+    } else {
+        COMPATIBLE_ADDITIONAL_COLUMNS.get(connector_name)
+    }
+}
 
 pub fn gen_default_addition_col_name(
     connector_name: &str,
@@ -100,9 +108,10 @@ pub fn build_additional_column_catalog(
     inner_field_name: Option<&str>,
     data_type: Option<&str>,
     reject_unknown_connector: bool,
+    is_cdc_backfill_table: bool,
 ) -> ConnectorResult<ColumnCatalog> {
     let compatible_columns = match (
-        COMPATIBLE_ADDITIONAL_COLUMNS.get(connector_name),
+        get_supported_additional_columns(connector_name, is_cdc_backfill_table),
         reject_unknown_connector,
     ) {
         (Some(compat_cols), _) => compat_cols,
@@ -203,7 +212,7 @@ pub fn build_additional_column_catalog(
 /// ## Returns
 /// - `columns_exist`: whether 1. `partition`/`file` and 2. `offset` columns are included in `columns`.
 /// - `additional_columns`: The `ColumnCatalog` for `partition`/`file` and `offset` columns.
-pub fn add_partition_offset_cols(
+pub fn source_add_partition_offset_cols(
     columns: &[ColumnCatalog],
     connector_name: &str,
 ) -> ([bool; 2], [ColumnCatalog; 2]) {
@@ -231,6 +240,7 @@ pub fn add_partition_offset_cols(
                             None,
                             None,
                             None,
+                            false,
                             false,
                         )
                         .unwrap(),

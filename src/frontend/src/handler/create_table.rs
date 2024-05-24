@@ -769,7 +769,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
     let mut columns = bind_sql_columns(&column_defs)?;
     let with_properties = source.with_properties.clone().into_iter().collect();
     // append additional columns to the end
-    handle_addition_columns(&with_properties, include_column_options, &mut columns)?;
+    handle_addition_columns(&with_properties, include_column_options, &mut columns, true)?;
 
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(c.name())
