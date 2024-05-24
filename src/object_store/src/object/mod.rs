@@ -384,7 +384,7 @@ impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
 
 impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
-        let operation_type = OperationType::StreamingUpload;
+        let operation_type = OperationType::StreamingUploadWriteBytes;
         let operation_type_str = operation_type.as_str();
         let data_len = data.len();
 
@@ -1025,6 +1025,7 @@ enum OperationType {
     Upload,
     StreamingUploadInit,
     StreamingUpload,
+    StreamingUploadWriteBytes,
     StreamingUploadFinish,
     Read,
     StreamingReadInit,
@@ -1041,6 +1042,7 @@ impl OperationType {
             Self::Upload => "upload",
             Self::StreamingUploadInit => "streaming_upload_init",
             Self::StreamingUpload => "streaming_upload",
+            Self::StreamingUploadWriteBytes => "streaming_upload_write_bytes",
             Self::StreamingUploadFinish => "streaming_upload_finish",
             Self::Read => "read",
             Self::StreamingReadInit => "streaming_read_init",
@@ -1058,6 +1060,7 @@ fn get_retry_attempts_by_type(config: &ObjectStoreConfig, operation_type: Operat
         OperationType::Upload => config.retry.upload_retry_attempts,
         OperationType::StreamingUploadInit
         | OperationType::StreamingUpload
+        | OperationType::StreamingUploadWriteBytes
         | OperationType::StreamingUploadFinish => config.retry.streaming_upload_retry_attempts,
         OperationType::Read => config.retry.read_retry_attempts,
         OperationType::StreamingReadInit | OperationType::StreamingRead => {
@@ -1075,6 +1078,7 @@ fn get_attempt_timeout_by_type(config: &ObjectStoreConfig, operation_type: Opera
         OperationType::Upload => config.retry.upload_attempt_timeout_ms,
         OperationType::StreamingUploadInit
         | OperationType::StreamingUpload
+        | OperationType::StreamingUploadWriteBytes
         | OperationType::StreamingUploadFinish => config.retry.streaming_upload_attempt_timeout_ms,
         OperationType::Read => config.retry.read_attempt_timeout_ms,
         OperationType::StreamingReadInit | OperationType::StreamingRead => {
