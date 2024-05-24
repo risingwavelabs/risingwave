@@ -145,7 +145,7 @@ impl ClusterService for ClusterServiceImpl {
                 let _ = mgr.cluster_manager.delete_worker_node(host).await?;
             }
             MetadataManager::V2(mgr) => {
-                let _ = mgr.cluster_controller.delete_worker(host).await?;
+                mgr.cluster_controller.delete_worker(host).await?;
             }
         }
 

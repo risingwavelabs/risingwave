@@ -71,8 +71,8 @@ if [ "${ARCH}" == "aarch64" ]; then
   # see https://github.com/tikv/jemallocator/blob/802969384ae0c581255f3375ee2ba774c8d2a754/jemalloc-sys/build.rs#L218
   export JEMALLOC_SYS_WITH_LG_PAGE=16
 fi
-cargo build -p risingwave_cmd_all --features "rw-static-link" --profile release
-cargo build -p risingwave_cmd --bin risectl --features "rw-static-link" --profile release
+OPENSSL_STATIC=1 cargo build -p risingwave_cmd_all --features "rw-static-link" --features external-udf --features wasm-udf --features js-udf --profile release
+OPENSSL_STATIC=1 cargo build -p risingwave_cmd --bin risectl --features "rw-static-link" --profile release
 cd target/release && chmod +x risingwave risectl
 
 echo "--- Upload nightly binary to s3"

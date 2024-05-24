@@ -133,6 +133,63 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
     compaction_selectors
 }
 
+
+impl<'a> HummockVersionTransaction<'a> {
+    fn apply_compact_task(&mut self, compact_task: &CompactTask) {
+        let mut version_delta = self.new_delta();
+        let trivial_move = CompactStatus::is_trivial_move_task(compact_task);
+        version_delta.trivial_move = trivial_move;
+
+        let group_deltas = &mut version_delta
+            .group_deltas
+            .entry(compact_task.compaction_group_id)
+            .or_default()
+            .group_deltas;
+        let mut removed_table_ids_map: BTreeMap<u32, Vec<u64>> = BTreeMap::default();
+
+        for level in &compact_task.input_ssts {
+            let level_idx = level.level_idx;
+            let mut removed_table_ids = level
+                .table_infos
+                .iter()
+                .map(|sst| sst.get_sst_id())
+                .collect_vec();
+
+            removed_table_ids_map
+                .entry(level_idx)
+                .or_default()
+                .append(&mut removed_table_ids);
+        }
+
+        for (level_idx, removed_table_ids) in removed_table_ids_map {
+            let group_delta = GroupDelta {
+                delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
+                    level_idx,
+                    removed_table_ids,
+                    ..Default::default()
+                })),
+            };
+            group_deltas.push(group_delta);
+        }
+
+        let group_delta = GroupDelta {
+            delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
+                level_idx: compact_task.target_level,
+                inserted_table_infos: compact_task.sorted_output_ssts.clone(),
+                l0_sub_level_id: compact_task.target_sub_level_id,
+                vnode_partition_count: compact_task.split_weight_by_vnode,
+                ..Default::default()
+            })),
+        };
+        group_deltas.push(group_delta);
+        version_delta.safe_epoch = std::cmp::max(
+            version_delta.latest_version().safe_epoch,
+            compact_task.watermark,
+        );
+        version_delta.pre_apply();
+    }
+}
+
 #[derive(Default)]
 pub struct Compaction {
     /// Compaction task that is already assigned to a compactor
@@ -146,20 +203,6 @@ pub struct Compaction {
 impl HummockManager {
     pub async fn get_assigned_compact_task_num(&self) -> u64 {
         self.compaction.read().await.compact_task_assignment.len() as u64
-    }
-
-    pub async fn list_all_tasks_ids(&self) -> Vec<HummockCompactionTaskId> {
-        let compaction = self.compaction.read().await;
-
-        compaction
-            .compaction_statuses
-            .iter()
-            .flat_map(|(_, cs)| {
-                cs.level_handlers
-                    .iter()
-                    .flat_map(|lh| lh.pending_tasks_ids())
-            })
-            .collect_vec()
     }
 
     pub async fn list_compaction_status(
@@ -202,8 +245,10 @@ impl HummockManager {
         let ctx = dynamic_level_core.get_priority_levels(&levels, &status.level_handlers);
         ctx.score_levels
     }
+}
 
-    pub async fn handle_pull_task_event(
+impl HummockManager {
+    async fn handle_pull_task_event(
         &self,
         context_id: u32,
         pull_task_count: usize,
@@ -292,7 +337,221 @@ impl HummockManager {
     }
 
     /// dedicated event runtime for CPU/IO bound event
-    pub async fn compact_task_dedicated_event_handler(
+    pub fn compaction_event_loop(
+        hummock_manager: Arc<Self>,
+        mut compactor_streams_change_rx: UnboundedReceiver<(
+            u32,
+            Streaming<SubscribeCompactionEventRequest>,
+        )>,
+    ) -> Vec<(JoinHandle<()>, Sender<()>)> {
+        let mut compactor_request_streams = FuturesUnordered::new();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let (shutdown_tx_dedicated, shutdown_rx_dedicated) = tokio::sync::oneshot::channel();
+        let shutdown_rx_shared = shutdown_rx.shared();
+        let shutdown_rx_dedicated_shared = shutdown_rx_dedicated.shared();
+
+        let (tx, rx) = unbounded_channel();
+
+        let mut join_handle_vec = Vec::default();
+
+        let hummock_manager_dedicated = hummock_manager.clone();
+        let compact_task_event_handler_join_handle = tokio::spawn(async move {
+            Self::compact_task_dedicated_event_handler(
+                hummock_manager_dedicated,
+                rx,
+                shutdown_rx_dedicated_shared,
+            )
+            .await;
+        });
+
+        join_handle_vec.push((
+            compact_task_event_handler_join_handle,
+            shutdown_tx_dedicated,
+        ));
+
+        let join_handle = tokio::spawn(async move {
+            let push_stream =
+                |context_id: u32,
+                 stream: Streaming<SubscribeCompactionEventRequest>,
+                 compactor_request_streams: &mut FuturesUnordered<_>| {
+                    let future = stream
+                        .into_future()
+                        .map(move |stream_future| (context_id, stream_future));
+
+                    compactor_request_streams.push(future);
+                };
+
+            let mut event_loop_iteration_now = Instant::now();
+
+            loop {
+                let shutdown_rx_shared = shutdown_rx_shared.clone();
+                let hummock_manager = hummock_manager.clone();
+                hummock_manager
+                    .metrics
+                    .compaction_event_loop_iteration_latency
+                    .observe(event_loop_iteration_now.elapsed().as_millis() as _);
+                event_loop_iteration_now = Instant::now();
+
+                tokio::select! {
+                    _ = shutdown_rx_shared => { return; },
+
+                    compactor_stream = compactor_streams_change_rx.recv() => {
+                        if let Some((context_id, stream)) = compactor_stream {
+                            tracing::info!("compactor {} enters the cluster", context_id);
+                            push_stream(context_id, stream, &mut compactor_request_streams);
+                        }
+                    },
+
+                    result = pending_on_none(compactor_request_streams.next()) => {
+                        let mut compactor_alive = true;
+
+                        let (context_id, compactor_stream_req): (_, (std::option::Option<std::result::Result<SubscribeCompactionEventRequest, _>>, _)) = result;
+                        let (event, create_at, stream) = match compactor_stream_req {
+                            (Some(Ok(req)), stream) => {
+                                (req.event.unwrap(), req.create_at, stream)
+                            }
+
+                            (Some(Err(err)), _stream) => {
+                                tracing::warn!(error = %err.as_report(), "compactor stream {} poll with err, recv stream may be destroyed", context_id);
+                                continue
+                            }
+
+                            _ => {
+                                tracing::warn!("compactor stream {} poll err, recv stream may be destroyed", context_id);
+                                continue
+                            },
+                        };
+
+                        {
+                            let consumed_latency_ms = SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .expect("Clock may have gone backwards")
+                                .as_millis()
+                                as u64
+                            - create_at;
+                            hummock_manager.metrics
+                                .compaction_event_consumed_latency
+                                .observe(consumed_latency_ms as _);
+                        }
+
+                        match event {
+                            RequestEvent::HeartBeat(HeartBeat {
+                                progress,
+                            }) => {
+                                let compactor_manager = hummock_manager.compactor_manager.clone();
+                                let cancel_tasks = compactor_manager.update_task_heartbeats(&progress);
+                                if let Some(compactor) = compactor_manager.get_compactor(context_id) {
+                                    // TODO: task cancellation can be batched
+                                    for task in cancel_tasks {
+                                        tracing::info!(
+                                            "Task with group_id {} task_id {} with context_id {} has expired due to lack of visible progress",
+                                            task.compaction_group_id,
+                                            task.task_id,
+                                            context_id,
+                                        );
+
+                                        if let Err(e) =
+                                            hummock_manager
+                                            .cancel_compact_task(task.task_id, TaskStatus::HeartbeatCanceled)
+                                            .await
+                                        {
+                                            tracing::error!(
+                                                task_id = task.task_id,
+                                                error = %e.as_report(),
+                                                "Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
+                                                until we can successfully report its status."
+                                            );
+                                        }
+
+                                        // Forcefully cancel the task so that it terminates
+                                        // early on the compactor
+                                        // node.
+                                        let _ = compactor.cancel_task(task.task_id);
+                                        tracing::info!(
+                                            "CancelTask operation for task_id {} has been sent to node with context_id {}",
+                                            context_id,
+                                            task.task_id
+                                        );
+                                    }
+                                } else {
+                                    // Determine the validity of the compactor streaming rpc. When the compactor no longer exists in the manager, the stream will be removed.
+                                    // Tip: Connectivity to the compactor will be determined through the `send_event` operation. When send fails, it will be removed from the manager
+                                    compactor_alive = false;
+                                }
+                            },
+
+                            RequestEvent::Register(_) => {
+                                unreachable!()
+                            }
+
+                            e @ (RequestEvent::PullTask(_) | RequestEvent::ReportTask(_)) => {
+                                let _ = tx.send((context_id, e));
+                            }
+                        }
+
+                        if compactor_alive {
+                            push_stream(context_id, stream, &mut compactor_request_streams);
+                        } else {
+                            tracing::warn!("compactor stream {} error, send stream may be destroyed", context_id);
+                        }
+                    },
+                }
+            }
+        });
+
+        join_handle_vec.push((join_handle, shutdown_tx));
+
+        join_handle_vec
+    }
+
+    pub fn add_compactor_stream(
+        &self,
+        context_id: u32,
+        req_stream: Streaming<SubscribeCompactionEventRequest>,
+    ) {
+        self.compactor_streams_change_tx
+            .send((context_id, req_stream))
+            .unwrap();
+    }
+
+    pub async fn auto_pick_compaction_group_and_type(
+        &self,
+    ) -> Option<(CompactionGroupId, compact_task::TaskType)> {
+        let mut compaction_group_ids = self.compaction_group_ids().await;
+        compaction_group_ids.shuffle(&mut thread_rng());
+
+        for cg_id in compaction_group_ids {
+            if let Some(pick_type) = self.compaction_state.auto_pick_type(cg_id) {
+                return Some((cg_id, pick_type));
+            }
+        }
+
+        None
+    }
+
+    /// This method will return all compaction group id in a random order and task type. If there are any group block by `write_limit`, it will return a single array with `TaskType::Emergency`.
+    /// If these groups get different task-type, it will return all group id with `TaskType::Dynamic` if the first group get `TaskType::Dynamic`, otherwise it will return the single group with other task type.
+    async fn auto_pick_compaction_groups_and_type(
+        &self,
+    ) -> (Vec<CompactionGroupId>, compact_task::TaskType) {
+        let mut compaction_group_ids = self.compaction_group_ids().await;
+        compaction_group_ids.shuffle(&mut thread_rng());
+
+        let mut normal_groups = vec![];
+        for cg_id in compaction_group_ids {
+            if let Some(pick_type) = self.compaction_state.auto_pick_type(cg_id) {
+                if pick_type == TaskType::Dynamic {
+                    normal_groups.push(cg_id);
+                } else if normal_groups.is_empty() {
+                    return (vec![cg_id], pick_type);
+                }
+            }
+        }
+        (normal_groups, TaskType::Dynamic)
+    }
+
+    /// dedicated event runtime for CPU/IO bound event
+    async fn compact_task_dedicated_event_handler(
         hummock_manager: Arc<HummockManager>,
         mut rx: UnboundedReceiver<(u32, subscribe_compaction_event_request::Event)>,
         shutdown_rx_shared: Shared<OneShotReceiver<()>>,
@@ -368,15 +627,14 @@ impl HummockManager {
             .map_err(|err| Error::MetaStore(err.into()))?;
 
         let mut compaction_guard = self.compaction.write().await;
-        let compaction = compaction_guard.deref_mut();
+        let compaction: &mut Compaction = &mut compaction_guard;
         let mut versioning_guard = self.versioning.write().await;
-        let versioning = versioning_guard.deref_mut();
+        let versioning: &mut Versioning = &mut versioning_guard;
 
         let _timer = start_measure_real_process_timer!(self, "get_compact_tasks_impl");
 
-        let mut current_version = versioning.current_version.clone();
         let start_time = Instant::now();
-        let max_committed_epoch = current_version.max_committed_epoch;
+        let max_committed_epoch = versioning.current_version.max_committed_epoch;
         let watermark = self
             .context_info
             .read()
@@ -385,25 +643,25 @@ impl HummockManager {
             .values()
             .map(|v| v.minimal_pinned_snapshot)
             .fold(max_committed_epoch, std::cmp::min);
-        let last_apply_version_id = current_version.id;
+      
+        let last_apply_version_id = versioning.current_version.id;
 
-        let mut compaction_statuses = create_trx_wrapper!(
-            self.meta_store_ref(),
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut compaction.compaction_statuses)
+        let mut compaction_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
+
+        let mut compact_task_assignment =
+            BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
+
+        let mut version = HummockVersionTransaction::new(
+            &mut versioning.current_version,
+            &mut versioning.hummock_version_deltas,
+            self.env.notification_manager(),
+            &self.metrics,
         );
 
-        let mut compact_task_assignment = create_trx_wrapper!(
-            self.meta_store_ref(),
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut compaction.compact_task_assignment)
-        );
+        if deterministic_mode {
+            version.disable_apply_to_txn();
+        }
 
-        let mut hummock_version_deltas = create_trx_wrapper!(
-            self.meta_store_ref(),
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut versioning.hummock_version_deltas)
-        );
 
         let mut unschedule_groups = vec![];
         let mut trivial_tasks = vec![];
@@ -416,7 +674,11 @@ impl HummockManager {
                 break;
             }
 
-            if !current_version.levels.contains_key(&compaction_group_id) {
+            if !version
+                .latest_version()
+                .levels
+                .contains_key(&compaction_group_id)
+            {
                 continue;
             }
 
@@ -451,7 +713,8 @@ impl HummockManager {
                 || matches!(selector.task_type(), TaskType::Emergency);
 
             let mut stats = LocalSelectorStatistic::default();
-            let member_table_ids = current_version
+            let member_table_ids = version
+                .latest_version()
                 .get_compaction_group_levels(compaction_group_id)
                 .member_table_ids
                 .clone();
@@ -464,8 +727,11 @@ impl HummockManager {
                 }
             }
 
+
             while let Some(compact_task) = compact_status.get_compact_task(
-                current_version.get_compaction_group_levels(compaction_group_id),
+                version
+                    .latest_version()
+                    .get_compaction_group_levels(compaction_group_id),
                 task_id as HummockCompactionTaskId,
                 &group_config,
                 &mut stats,
@@ -492,7 +758,8 @@ impl HummockManager {
                     target_level: target_level_id,
                     // only gc delete keys in last level because there may be older version in more bottom
                     // level.
-                    gc_delete_keys: current_version
+                    gc_delete_keys: version
+                        .latest_version()
                         .get_compaction_group_levels(compaction_group_id)
                         .is_last_level(target_level_id),
                     base_level: compact_task.base_level as u32,
@@ -552,13 +819,8 @@ impl HummockManager {
                             "SUCCESS",
                         ])
                         .inc();
-                    let version_delta = gen_version_delta(
-                        &mut hummock_version_deltas,
-                        &current_version,
-                        &compact_task,
-                        deterministic_mode,
-                    );
-                    current_version.apply_version_delta(&version_delta);
+
+                    version.apply_compact_task(&compact_task);
                     trivial_tasks.push(compact_task);
                     if trivial_tasks.len() >= self.env.opts.max_trivial_move_task_count_per_loop {
                         break 'outside;
@@ -569,7 +831,8 @@ impl HummockManager {
                         group_config.compaction_config.as_ref(),
                     )
                     .await;
-                    compact_task.table_watermarks = current_version
+                    compact_task.table_watermarks = version
+                        .latest_version()
                         .safe_epoch_table_watermarks(&compact_task.existing_table_ids);
 
                     // do not split sst by vnode partition when target_level > base_level
@@ -628,13 +891,8 @@ impl HummockManager {
                 self.meta_store_ref(),
                 compaction_statuses,
                 compact_task_assignment,
-                hummock_version_deltas
+                version
             )?;
-
-            trigger_version_stat(&self.metrics, &current_version);
-            versioning.current_version = current_version;
-            trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
-            self.notify_stats(&versioning.version_stats);
             self.notify_version_deltas(versioning, last_apply_version_id);
             self.metrics
                 .compact_task_batch_count
@@ -722,11 +980,7 @@ impl HummockManager {
     }
 
     /// Cancels a compaction task no matter it's assigned or unassigned.
-    pub async fn cancel_compact_task(
-        &self,
-        task_id: u64,
-        task_status: TaskStatus,
-    ) -> crate::hummock::error::Result<bool> {
+    pub async fn cancel_compact_task(&self, task_id: u64, task_status: TaskStatus) -> Result<bool> {
         fail_point!("fp_cancel_compact_task", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore err")
         )));
@@ -736,19 +990,19 @@ impl HummockManager {
         Ok(ret[0])
     }
 
-    pub async fn cancel_compact_tasks(
+    async fn cancel_compact_tasks(
         &self,
         tasks: Vec<u64>,
         task_status: TaskStatus,
-    ) -> crate::hummock::error::Result<Vec<bool>> {
+    ) -> Result<Vec<bool>> {
         self.cancel_compact_task_impl(tasks, task_status).await
     }
 
-    pub async fn cancel_compact_task_impl(
+    async fn cancel_compact_task_impl(
         &self,
         task_ids: Vec<u64>,
         task_status: TaskStatus,
-    ) -> crate::hummock::error::Result<Vec<bool>> {
+    ) -> Result<Vec<bool>> {
         assert!(CANCEL_STATUS_SET.contains(&task_status));
         let tasks = task_ids
             .into_iter()
@@ -767,12 +1021,12 @@ impl HummockManager {
         Ok(rets)
     }
 
-    pub async fn get_compact_tasks(
+    async fn get_compact_tasks(
         &self,
         mut compaction_groups: Vec<CompactionGroupId>,
         max_select_count: usize,
         selector: &mut Box<dyn CompactionSelector>,
-    ) -> crate::hummock::error::Result<(Vec<CompactTask>, Vec<CompactionGroupId>)> {
+    ) -> Result<(Vec<CompactTask>, Vec<CompactionGroupId>)> {
         fail_point!("fp_get_compact_task", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore error")
         )));
@@ -798,7 +1052,7 @@ impl HummockManager {
         &self,
         compaction_group_id: CompactionGroupId,
         selector: &mut Box<dyn CompactionSelector>,
-    ) -> crate::hummock::error::Result<Option<CompactTask>> {
+    ) -> Result<Option<CompactTask>> {
         fail_point!("fp_get_compact_task", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore error")
         )));
@@ -822,14 +1076,14 @@ impl HummockManager {
         &self,
         compaction_group_id: CompactionGroupId,
         manual_compaction_option: ManualCompactionOption,
-    ) -> crate::hummock::error::Result<Option<CompactTask>> {
+    ) -> Result<Option<CompactTask>> {
         let mut selector: Box<dyn CompactionSelector> =
             Box::new(ManualCompactionSelector::new(manual_compaction_option));
         self.get_compact_task(compaction_group_id, &mut selector)
             .await
     }
 
-    fn is_compact_task_expired(
+    pub(super) fn is_compact_task_expired(
         compact_task: &CompactTask,
         hummock_version: &HummockVersion,
     ) -> bool {
@@ -871,7 +1125,7 @@ impl HummockManager {
         task_status: TaskStatus,
         sorted_output_ssts: Vec<SstableInfo>,
         table_stats_change: Option<PbTableStatsMap>,
-    ) -> crate::hummock::error::Result<bool> {
+    ) -> Result<bool> {
         let rets = self
             .report_compact_tasks(vec![ReportTask {
                 task_id,
@@ -890,53 +1144,46 @@ impl HummockManager {
     ///
     /// Return Ok(false) indicates either the task is not found,
     /// or the task is not owned by `context_id` when `context_id` is not None.
-    pub async fn report_compact_tasks(
-        &self,
-        report_tasks: Vec<ReportTask>,
-    ) -> crate::hummock::error::Result<Vec<bool>> {
+
+    pub async fn report_compact_tasks(&self, report_tasks: Vec<ReportTask>) -> Result<Vec<bool>> {
         let mut guard = self.compaction.write().await;
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
-        let compaction = guard.deref_mut();
+        let compaction: &mut Compaction = &mut guard;
         let start_time = Instant::now();
         let original_keys = compaction.compaction_statuses.keys().cloned().collect_vec();
-        let mut compact_statuses = create_trx_wrapper!(
-            self.meta_store_ref(),
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut compaction.compaction_statuses,)
-        );
+        let mut compact_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
         let mut rets = vec![false; report_tasks.len()];
-        let mut compact_task_assignment = create_trx_wrapper!(
-            self.meta_store_ref(),
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut compaction.compact_task_assignment,)
-        );
+        let mut compact_task_assignment =
+            BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
         // The compaction task is finished.
         let mut versioning_guard = self.versioning.write().await;
-        let versioning = versioning_guard.deref_mut();
+        let versioning: &mut Versioning = &mut versioning_guard;
         let _timer = start_measure_real_process_timer!(self, "report_compact_tasks");
 
-        let mut current_version = versioning.current_version.clone();
         // purge stale compact_status
         for group_id in original_keys {
-            if !current_version.levels.contains_key(&group_id) {
+            if !versioning.current_version.levels.contains_key(&group_id) {
                 compact_statuses.remove(group_id);
             }
         }
         let mut tasks = vec![];
 
-        let mut hummock_version_deltas = create_trx_wrapper!(
-            self.meta_store_ref(),
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut versioning.hummock_version_deltas,)
+        let mut version = HummockVersionTransaction::new(
+            &mut versioning.current_version,
+            &mut versioning.hummock_version_deltas,
+            self.env.notification_manager(),
+            &self.metrics,
         );
 
-        let mut version_stats = create_trx_wrapper!(
-            self.meta_store_ref(),
-            VarTransactionWrapper,
-            VarTransaction::new(&mut versioning.version_stats)
+        if deterministic_mode {
+            version.disable_apply_to_txn();
+        }
+
+        let mut version_stats = HummockVersionStatsTransaction::new(
+            &mut versioning.version_stats,
+            self.env.notification_manager(),
         );
         let mut success_count = 0;
-        let last_version_id = current_version.id;
         for (idx, task) in report_tasks.into_iter().enumerate() {
             rets[idx] = true;
             let mut compact_task = match compact_task_assignment.remove(task.task_id) {
@@ -975,12 +1222,15 @@ impl HummockManager {
                 .collect();
             let is_success = if let TaskStatus::Success = compact_task.task_status() {
                 // if member_table_ids changes, the data of sstable may stale.
-                let is_expired = Self::is_compact_task_expired(&compact_task, &current_version);
+                let is_expired =
+                    Self::is_compact_task_expired(&compact_task, version.latest_version());
                 if is_expired {
                     compact_task.set_task_status(TaskStatus::InputOutdatedCanceled);
                     false
                 } else {
-                    let group = current_version
+
+                    let group = version
+                        .latest_version()
                         .levels
                         .get(&compact_task.compaction_group_id)
                         .unwrap();
@@ -1000,16 +1250,9 @@ impl HummockManager {
             };
             if is_success {
                 success_count += 1;
-                let version_delta = gen_version_delta(
-                    &mut hummock_version_deltas,
-                    &current_version,
-                    &compact_task,
-                    deterministic_mode,
-                );
-                // apply version delta before we persist this change. If it causes panic we can
-                // recover to a correct state after restarting meta-node.
-                current_version.apply_version_delta(&version_delta);
-                if purge_prost_table_stats(&mut version_stats.table_stats, &current_version) {
+                version.apply_compact_task(&compact_task);
+                if purge_prost_table_stats(&mut version_stats.table_stats, version.latest_version())
+                {
                     self.metrics.version_stats.reset();
                     versioning.local_metrics.clear();
                 }
@@ -1028,18 +1271,9 @@ impl HummockManager {
                 self.meta_store_ref(),
                 compact_statuses,
                 compact_task_assignment,
-                hummock_version_deltas,
+                version,
                 version_stats
             )?;
-
-            trigger_version_stat(&self.metrics, &current_version);
-            trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
-            self.notify_stats(&versioning.version_stats);
-            versioning.current_version = current_version;
-
-            if !deterministic_mode {
-                self.notify_version_deltas(versioning, last_version_id);
-            }
 
             self.metrics
                 .compact_task_batch_count
@@ -1115,7 +1349,7 @@ impl HummockManager {
         &self,
         _base_version_id: HummockVersionId,
         compaction_groups: Vec<CompactionGroupId>,
-    ) -> crate::hummock::error::Result<()> {
+    ) -> Result<()> {
         let old_version = self.get_current_version().await;
         tracing::info!(
             "Trigger compaction for version {}, epoch {}, groups {:?}",
@@ -1137,7 +1371,7 @@ impl HummockManager {
         &self,
         compaction_group: CompactionGroupId,
         manual_compaction_option: ManualCompactionOption,
-    ) -> crate::hummock::error::Result<()> {
+    ) -> Result<()> {
         let start_time = Instant::now();
 
         // 1. Get idle compactor.

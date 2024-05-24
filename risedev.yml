@@ -863,7 +863,7 @@ profile:
         port: 29092
 
   ci-inline-source-test:
-    config-path: src/config/ci.toml
+    config-path: src/config/ci-recovery.toml
     steps:
       - use: minio
       - use: etcd
@@ -1496,7 +1496,10 @@ template:
     port: 8306
 
     # Note:
-    # - This will be used to initialize the MySQL instance if it's fresh.
+    # - This will be used to initialize the MySQL instance.
+    #   * If the user is "root", the password will be used as the root password.
+    #   * Otherwise, a regular user will be created with the given password. The root password will be empty.
+    #   Note that this only applies to fresh instances, i.e., the data directory is empty.
     # - In user-managed mode, these configs are not validated by risedev.
     #   They are passed as-is to risedev-env default user for MySQL operations.
     # - This is not used in RISEDEV_MYSQL_WITH_OPTIONS_COMMON.

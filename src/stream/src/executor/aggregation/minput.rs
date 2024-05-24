@@ -224,7 +224,7 @@ impl MaterializedInputState {
         } else {
             const CHUNK_SIZE: usize = 1024;
             let chunks = self.cache.output_batches(CHUNK_SIZE).collect_vec();
-            let mut state = func.create_state();
+            let mut state = func.create_state()?;
             for chunk in chunks {
                 func.update(&mut state, &chunk).await?;
             }

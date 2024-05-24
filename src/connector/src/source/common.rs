@@ -18,15 +18,13 @@ use risingwave_common::array::StreamChunk;
 
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::ParserConfig;
-use crate::source::{SourceContextRef, SourceMessage, SplitReader};
+use crate::source::{SourceContextRef, SourceMessage};
 
-pub(crate) trait CommonSplitReader: SplitReader + 'static {
-    fn into_data_stream(self) -> impl Stream<Item = ConnectorResult<Vec<SourceMessage>>> + Send;
-}
-
+/// Utility function to convert [`SourceMessage`] stream (got from specific connector's [`SplitReader`](super::SplitReader))
+/// into [`StreamChunk`] stream (by invoking [`ByteStreamSourceParserImpl`](crate::parser::ByteStreamSourceParserImpl)).
 #[try_stream(boxed, ok = StreamChunk, error = ConnectorError)]
 pub(crate) async fn into_chunk_stream(
-    reader: impl CommonSplitReader,
+    data_stream: impl Stream<Item = ConnectorResult<Vec<SourceMessage>>> + Send + 'static,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
 ) {
@@ -36,8 +34,7 @@ pub(crate) async fn into_chunk_stream(
     let source_name = source_ctx.source_name.to_string();
     let metrics = source_ctx.metrics.clone();
 
-    let data_stream = reader.into_data_stream();
-
+    // add metrics to the data stream
     let data_stream = data_stream
         .inspect_ok(move |data_batch| {
             let mut by_split_id = std::collections::HashMap::new();

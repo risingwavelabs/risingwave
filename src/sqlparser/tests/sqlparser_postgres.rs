@@ -342,6 +342,7 @@ fn parse_create_schema_if_not_exists() {
         Statement::CreateSchema {
             if_not_exists: true,
             schema_name,
+            ..
         } => assert_eq!("schema_name", schema_name.to_string()),
         _ => unreachable!(),
     }
@@ -909,7 +910,7 @@ fn parse_create_aggregate() {
             or_replace: true,
             name: ObjectName(vec![Ident::new_unchecked("sum")]),
             args: vec![OperateFunctionArg::unnamed(DataType::Int)],
-            returns: Some(DataType::BigInt),
+            returns: DataType::BigInt,
             append_only: true,
             params: CreateFunctionBody {
                 language: Some("python".into()),

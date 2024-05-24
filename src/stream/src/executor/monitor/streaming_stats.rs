@@ -75,6 +75,10 @@ pub struct StreamingMetrics {
     // Exchange (see also `compute::ExchangeServiceMetrics`)
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
 
+    // Streaming Merge (We break out this metric from `barrier_align_duration` because
+    // the alignment happens on different levels)
+    pub merge_barrier_align_duration: RelabeledGuardedHistogramVec<2>,
+
     // Backpressure
     pub actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
     pub actor_input_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
@@ -85,9 +89,11 @@ pub struct StreamingMetrics {
     pub join_insert_cache_miss_count: LabelGuardedIntCounterVec<5>,
     pub join_actor_input_waiting_duration_ns: LabelGuardedIntCounterVec<2>,
     pub join_match_duration_ns: LabelGuardedIntCounterVec<3>,
-    pub join_barrier_align_duration: RelabeledGuardedHistogramVec<3>,
     pub join_cached_entry_count: LabelGuardedIntGaugeVec<3>,
     pub join_matched_join_keys: RelabeledGuardedHistogramVec<3>,
+
+    // Streaming Join, Streaming Dynamic Filter and Streaming Union
+    pub barrier_align_duration: RelabeledGuardedHistogramVec<4>,
 
     // Streaming Aggregation
     pub agg_lookup_miss_count: GenericCounterVec<AtomicU64>,
@@ -398,6 +404,26 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let opts = histogram_opts!(
+            "stream_merge_barrier_align_duration",
+            "Duration of merge align barrier",
+            exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
+        );
+        let merge_barrier_align_duration = register_guarded_histogram_vec_with_registry!(
+            opts,
+            &["actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let merge_barrier_align_duration =
+            RelabeledGuardedHistogramVec::with_metric_level_relabel_n(
+                MetricLevel::Debug,
+                merge_barrier_align_duration,
+                level,
+                1,
+            );
+
         let join_lookup_miss_count = register_guarded_int_counter_vec_with_registry!(
             "stream_join_lookup_miss_count",
             "Join executor lookup miss duration",
@@ -457,20 +483,20 @@ impl StreamingMetrics {
         .unwrap();
 
         let opts = histogram_opts!(
-            "stream_join_barrier_align_duration",
+            "stream_barrier_align_duration",
             "Duration of join align barrier",
             exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
         );
-        let join_barrier_align_duration = register_guarded_histogram_vec_with_registry!(
+        let barrier_align_duration = register_guarded_histogram_vec_with_registry!(
             opts,
-            &["actor_id", "fragment_id", "wait_side"],
+            &["actor_id", "fragment_id", "wait_side", "executor"],
             registry
         )
         .unwrap();
 
-        let join_barrier_align_duration = RelabeledGuardedHistogramVec::with_metric_level_relabel_n(
+        let barrier_align_duration = RelabeledGuardedHistogramVec::with_metric_level_relabel_n(
             MetricLevel::Debug,
-            join_barrier_align_duration,
+            barrier_align_duration,
             level,
             1,
         );
@@ -1121,6 +1147,7 @@ impl StreamingMetrics {
             mview_input_row_count,
             sink_chunk_buffer_size,
             exchange_frag_recv_size,
+            merge_barrier_align_duration,
             actor_output_buffer_blocking_duration_ns,
             actor_input_buffer_blocking_duration_ns,
             join_lookup_miss_count,
@@ -1128,9 +1155,9 @@ impl StreamingMetrics {
             join_insert_cache_miss_count,
             join_actor_input_waiting_duration_ns,
             join_match_duration_ns,
-            join_barrier_align_duration,
             join_cached_entry_count,
             join_matched_join_keys,
+            barrier_align_duration,
             agg_lookup_miss_count,
             agg_total_lookup_count,
             agg_cached_entry_count,

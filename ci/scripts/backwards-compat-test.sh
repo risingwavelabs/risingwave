@@ -41,7 +41,7 @@ VERSION="$1"
 ENABLE_BUILD="$2"
 
 echo "--- Setting up cluster config"
-  if version_le "$VERSION" "1.9.0"; then
+  if version_le "$VERSION" "1.8.9"; then
     cat <<EOF > risedev-profiles.user.yml
 full-without-monitoring:
   steps:
@@ -53,6 +53,8 @@ full-without-monitoring:
     - use: compactor
 EOF
   else
+     # For versions >= 1.9.0, the default config will default to sql backend,
+     # breaking backwards compat, so we must specify meta-backend: etcd
      cat <<EOF > risedev-profiles.user.yml
 full-without-monitoring:
  steps:
