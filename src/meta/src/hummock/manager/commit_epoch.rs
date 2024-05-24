@@ -14,17 +14,14 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::iter::once;
-use std::ops::{Deref, DerefMut};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::build_version_delta_after_version;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
 };
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
-use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
     CompactionGroupId, ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableObjectId,
 };
@@ -34,14 +31,16 @@ use risingwave_pb::hummock::hummock_version_delta::ChangeLogDelta;
 use risingwave_pb::hummock::{GroupDelta, HummockSnapshot, IntraLevelDelta};
 
 use crate::hummock::error::Result;
+use crate::hummock::manager::transaction::{
+    HummockVersionStatsTransaction, HummockVersionTransaction,
+};
+use crate::hummock::manager::versioning::Versioning;
 use crate::hummock::manager::HISTORY_TABLE_INFO_STATISTIC_TIME;
 use crate::hummock::metrics_utils::{
-    get_or_create_local_table_stat, trigger_delta_log_stats, trigger_local_table_stat,
-    trigger_sst_stat, trigger_version_stat,
+    get_or_create_local_table_stat, trigger_local_table_stat, trigger_sst_stat,
 };
 use crate::hummock::sequence::next_sstable_object_id;
 use crate::hummock::{commit_multi_var, start_measure_real_process_timer, HummockManager};
-use crate::model::{BTreeMapEntryTransaction, VarTransaction};
 
 #[derive(Debug, Clone)]
 pub struct NewTableFragmentInfo {
@@ -111,7 +110,7 @@ impl HummockManager {
             return Ok(None);
         }
 
-        let versioning = versioning_guard.deref_mut();
+        let versioning: &mut Versioning = &mut versioning_guard;
         self.commit_epoch_sanity_check(
             epoch,
             &sstables,
@@ -126,17 +125,21 @@ impl HummockManager {
             add_prost_table_stats_map(&mut table_stats_change, &std::mem::take(&mut s.table_stats));
         }
 
-        let old_version: &HummockVersion = &versioning.current_version;
-        let mut new_version_delta = BTreeMapEntryTransaction::new_insert(
+        let mut version = HummockVersionTransaction::new(
+            &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
-            old_version.id + 1,
-            build_version_delta_after_version(old_version),
+            self.env.notification_manager(),
+            &self.metrics,
         );
+        let mut new_version_delta = version.new_delta();
+
         new_version_delta.max_committed_epoch = epoch;
         new_version_delta.new_table_watermarks = new_table_watermarks;
         new_version_delta.change_log_delta = change_log_delta;
 
-        let mut table_compaction_group_mapping = old_version.build_compaction_group_info();
+        let mut table_compaction_group_mapping = new_version_delta
+            .latest_version()
+            .build_compaction_group_info();
 
         // Add new table
         if let Some(new_fragment_table_info) = new_table_fragment_info {
@@ -169,7 +172,11 @@ impl HummockManager {
             let table_fragments_id = new_fragment_table_info.table_id;
 
             let (snapshot_group_delta, compaction_group_deltas) = self
-                .gen_register_table_fragments_delta(table_fragments_id, cg_table_ids, old_version)
+                .gen_register_table_fragments_delta(
+                    table_fragments_id,
+                    cg_table_ids,
+                    new_version_delta.latest_version(),
+                )
                 .await?;
 
             new_version_delta
@@ -186,7 +193,10 @@ impl HummockManager {
             ..
         } in &mut sstables
         {
-            let is_sst_belong_to_group_declared = match old_version.levels.get(compaction_group_id)
+            let is_sst_belong_to_group_declared = match new_version_delta
+                .latest_version()
+                .levels
+                .get(compaction_group_id)
             {
                 Some(compaction_group) => sst
                     .table_ids
@@ -293,14 +303,15 @@ impl HummockManager {
             group_deltas.push(group_delta);
         }
 
-        let mut new_hummock_version = old_version.clone();
-        // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
-        new_hummock_version.apply_version_delta(new_version_delta.deref());
+        new_version_delta.pre_apply();
 
         // Apply stats changes.
-        let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
+        let mut version_stats = HummockVersionStatsTransaction::new(
+            &mut versioning.version_stats,
+            self.env.notification_manager(),
+        );
         add_prost_table_stats_map(&mut version_stats.table_stats, &table_stats_change);
-        if purge_prost_table_stats(&mut version_stats.table_stats, &new_hummock_version) {
+        if purge_prost_table_stats(&mut version_stats.table_stats, version.latest_version()) {
             self.metrics.version_stats.reset();
             versioning.local_metrics.clear();
         }
@@ -326,8 +337,7 @@ impl HummockManager {
             );
             table_metrics.inc_write_throughput(stats_value as u64);
         }
-        commit_multi_var!(self.meta_store_ref(), new_version_delta, version_stats)?;
-        versioning.current_version = new_hummock_version;
+        commit_multi_var!(self.meta_store_ref(), version, version_stats)?;
 
         let snapshot = HummockSnapshot {
             committed_epoch: epoch,
@@ -337,7 +347,6 @@ impl HummockManager {
         assert!(prev_snapshot.committed_epoch < epoch);
         assert!(prev_snapshot.current_epoch < epoch);
 
-        trigger_version_stat(&self.metrics, &versioning.current_version);
         for compaction_group_id in &modified_compaction_groups {
             trigger_sst_stat(
                 &self.metrics,
@@ -349,9 +358,6 @@ impl HummockManager {
 
         tracing::trace!("new committed epoch {}", epoch);
 
-        self.notify_last_version_delta(versioning);
-        trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
-        self.notify_stats(&versioning.version_stats);
         let mut table_groups = HashMap::<u32, usize>::default();
         for group in versioning.current_version.levels.values() {
             for table_id in &group.member_table_ids {

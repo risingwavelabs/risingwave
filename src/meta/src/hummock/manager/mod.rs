@@ -36,7 +36,7 @@ use risingwave_pb::hummock::{
     CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot,
     HummockVersionStats, PbCompactionGroupInfo, SubscribeCompactionEventRequest,
 };
-use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_pb::meta::subscribe_response::Operation;
 use tokio::sync::mpsc::UnboundedSender;
 use tonic::Streaming;
 
@@ -53,7 +53,6 @@ use crate::rpc::metrics::MetaMetrics;
 mod compaction_group_manager;
 mod context;
 mod gc;
-#[cfg(test)]
 mod tests;
 mod versioning;
 pub use context::HummockVersionSafePoint;
@@ -63,6 +62,7 @@ mod commit_epoch;
 mod compaction;
 pub mod sequence;
 mod timer_task;
+mod transaction;
 mod utils;
 mod worker;
 
@@ -554,8 +554,8 @@ impl HummockManager {
     ) -> Result<(HummockVersion, Vec<CompactionGroupId>)> {
         let mut versioning_guard = self.versioning.write().await;
         // ensure the version id is ascending after replay
-        version_delta.id = versioning_guard.current_version.id + 1;
-        version_delta.prev_id = version_delta.id - 1;
+        version_delta.id = versioning_guard.current_version.next_version_id();
+        version_delta.prev_id = versioning_guard.current_version.id;
         versioning_guard
             .current_version
             .apply_version_delta(&version_delta);
@@ -573,45 +573,6 @@ impl HummockManager {
 
     pub fn metadata_manager(&self) -> &MetadataManager {
         &self.metadata_manager
-    }
-
-    fn notify_last_version_delta(&self, versioning: &Versioning) {
-        self.env
-            .notification_manager()
-            .notify_hummock_without_version(
-                Operation::Add,
-                Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
-                    version_deltas: vec![versioning
-                        .hummock_version_deltas
-                        .last_key_value()
-                        .unwrap()
-                        .1
-                        .to_protobuf()],
-                }),
-            );
-    }
-
-    fn notify_version_deltas(&self, versioning: &Versioning, last_version_id: u64) {
-        let start_version_id = last_version_id + 1;
-        let version_deltas = versioning
-            .hummock_version_deltas
-            .range(start_version_id..)
-            .map(|(_, delta)| delta.to_protobuf())
-            .collect_vec();
-        self.env
-            .notification_manager()
-            .notify_hummock_without_version(
-                Operation::Add,
-                Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
-                    version_deltas,
-                }),
-            );
-    }
-
-    fn notify_stats(&self, stats: &HummockVersionStats) {
-        self.env
-            .notification_manager()
-            .notify_frontend_without_version(Operation::Update, Info::HummockStats(stats.clone()));
     }
 }
 

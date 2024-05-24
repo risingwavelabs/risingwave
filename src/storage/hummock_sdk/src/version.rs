@@ -29,7 +29,7 @@ use risingwave_pb::hummock::{
 
 use crate::change_log::TableChangeLog;
 use crate::table_watermark::TableWatermarks;
-use crate::{CompactionGroupId, HummockSstableObjectId};
+use crate::{CompactionGroupId, HummockSstableObjectId, HummockVersionId};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SnapshotGroup {
@@ -181,6 +181,10 @@ impl HummockVersion {
                 .values()
                 .map(|table_watermark| table_watermark.estimated_encode_len())
                 .sum::<usize>()
+    }
+
+    pub fn next_version_id(&self) -> HummockVersionId {
+        self.id + 1
     }
 
     fn need_fill_backward_compatibility_snapshot_group(&self) -> bool {
