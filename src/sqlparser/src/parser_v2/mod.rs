@@ -57,7 +57,9 @@ where
     S: TokenStream,
 {
     preceded(
-        take_while(0.., |token| matches!(token.token, Token::Whitespace(_))),
+        take_while(0.., |token: TokenWithLocation| {
+            matches!(token.token, Token::Whitespace(_))
+        }),
         any_token,
     )
     .parse_next(input)
