@@ -39,6 +39,7 @@ use crate::hummock::{HummockManager, TASK_NORMAL};
 
 // This structure describes how hummock handles sst switching in a compaction group. A better sst cut will result in better data alignment, which in turn will improve the efficiency of the compaction.
 // By adopting certain rules, a better sst cut will lead to better data alignment and thus improve the efficiency of the compaction.
+#[derive(Debug)]
 enum TableAlignRule {
     // The table_id is not optimized for alignment.
     NoOptimization,
@@ -568,7 +569,9 @@ impl HummockManager {
 
         let mut is_high_write_throughput = false;
         let mut is_low_write_throughput = true;
+        let mut history_len = 0;
         if let Some(history) = table_write_throughput.get(table_id) {
+            history_len = history.len();
             if !is_creating_table {
                 if history.len() >= window_size {
                     is_high_write_throughput = history.iter().all(|throughput| {
@@ -607,6 +610,17 @@ impl HummockManager {
             }
         };
 
+        tracing::info!(
+            "DEBUG Table {} is_low_write_throughput {} state_table_size {} is_creating_table {} result {:?} checkpoint_secs {} history_len {}",
+            table_id,
+            is_low_write_throughput,
+            state_table_size,
+            is_creating_table,
+            result,
+            checkpoint_secs,
+            history_len,
+        );
+
         // 1. Avoid splitting a creating table
         // 2. Avoid splitting a is_low_write_throughput creating table
         // 3. Avoid splitting a non-high throughput medium-sized table
@@ -624,6 +638,13 @@ impl HummockManager {
             if rest_group_size < state_table_size
                 && rest_group_size < self.env.opts.min_table_split_size
             {
+                tracing::info!(
+                    "DEBUG do not split Table {} rest_group_size {} state_table_size {}",
+                    table_id,
+                    rest_group_size,
+                    state_table_size
+                );
+
                 return result;
             }
         }
