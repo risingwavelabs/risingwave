@@ -1480,7 +1480,7 @@ mod tests {
         uploader.add_imm(imm1_2.clone());
 
         // imm1 will be spilled first
-        let (await_start1, finish_tx1) = new_task_notifier(get_imm_ids([&imm1_2, &imm1_1]));
+        let (await_start1, finish_tx1) = new_task_notifier(get_imm_ids([&imm1_1, &imm1_2]));
         let (await_start2, finish_tx2) = new_task_notifier(get_imm_ids([&imm2]));
         uploader.may_flush();
         await_start1.await;
@@ -1492,7 +1492,7 @@ mod tests {
 
         finish_tx1.send(()).unwrap();
         if let UploaderEvent::DataSpilled(sst) = uploader.next_event().await {
-            assert_eq!(&get_imm_ids([&imm1_2, &imm1_1]), sst.imm_ids());
+            assert_eq!(&get_imm_ids([&imm1_1, &imm1_2]), sst.imm_ids());
             assert_eq!(&vec![epoch1], sst.epochs());
         } else {
             unreachable!("")
@@ -1578,7 +1578,7 @@ mod tests {
         assert_eq!(3, synced_data1.len());
         assert_eq!(&get_imm_ids([&imm1_4]), synced_data1[0].imm_ids());
         assert_eq!(&get_imm_ids([&imm1_3]), synced_data1[1].imm_ids());
-        assert_eq!(&get_imm_ids([&imm1_2, &imm1_1]), synced_data1[2].imm_ids());
+        assert_eq!(&get_imm_ids([&imm1_1, &imm1_2]), synced_data1[2].imm_ids());
 
         // current uploader state:
         // unsealed: epoch3: imm: imm3_3, uploading: [imm3_2], [imm3_1]
@@ -1628,7 +1628,7 @@ mod tests {
 
         uploader.seal_epoch(epoch4);
         let (await_start4_with_3_3, finish_tx4_with_3_3) =
-            new_task_notifier(get_imm_ids([&imm4, &imm3_3]));
+            new_task_notifier(get_imm_ids([&imm3_3, &imm4]));
         uploader.start_sync_epoch(epoch4);
         await_start4_with_3_3.await;
 
@@ -1648,7 +1648,7 @@ mod tests {
             assert_eq!(epoch4, epoch);
             assert_eq!(2, newly_upload_sst.len());
             assert_eq!(
-                &get_imm_ids([&imm4, &imm3_3]),
+                &get_imm_ids([&imm3_3, &imm4]),
                 newly_upload_sst[0].imm_ids()
             );
             assert_eq!(&get_imm_ids([&imm3_2]), newly_upload_sst[1].imm_ids());
@@ -1664,7 +1664,7 @@ mod tests {
             .staging_ssts;
         assert_eq!(3, synced_data4.len());
         assert_eq!(&vec![epoch3, epoch4], synced_data4[0].epochs());
-        assert_eq!(&get_imm_ids([&imm4, &imm3_3]), synced_data4[0].imm_ids());
+        assert_eq!(&get_imm_ids([&imm3_3, &imm4]), synced_data4[0].imm_ids());
         assert_eq!(&get_imm_ids([&imm3_2]), synced_data4[1].imm_ids());
         assert_eq!(&get_imm_ids([&imm3_1]), synced_data4[2].imm_ids());
 

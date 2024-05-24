@@ -130,14 +130,14 @@ async fn test_read_version_basic() {
         assert_eq!(6, staging.data.len());
         let batch_id_vec_for_clear = staging
             .data
-            .iter()
+            .values()
             .flat_map(|data| data.to_imm().map(|imm| imm.batch_id()))
             .take(3)
             .collect::<Vec<_>>();
 
         let epoch_id_vec_for_clear = staging
             .data
-            .iter()
+            .values()
             .flat_map(|data| data.to_imm())
             .map(|imm| imm.min_epoch())
             .take(3)
@@ -197,12 +197,10 @@ async fn test_read_version_basic() {
         // staging => {imm(3, 4, 5), sst[{sst_object_id: 1}, {sst_object_id: 2}]}
         let staging = read_version.staging();
         assert_eq!(4, read_version.staging().data.len());
-        let remain_batch_id_vec = staging
-            .data
+        let remain_batch_id_vec = staging.data.iter().collect::<Vec<_>>();
+        assert!(remain_batch_id_vec
             .iter()
-            .flat_map(|data| data.to_imm().map(|imm| imm.batch_id()))
-            .collect::<Vec<_>>();
-        assert!(remain_batch_id_vec.iter().any(|batch_id| *batch_id > 2));
+            .any(|&(batch_id, _)| *batch_id > 2));
     }
 
     {

@@ -781,10 +781,18 @@ impl HummockVersionReader {
                     staging_sst_iter_count += 1;
                 }
                 StagingData::Sst(info) => {
-                    for sstable_info in &info.sstable_infos {
+                    for local_sst in &info.sstable_infos {
+                        if !filter_single_sst(
+                            &local_sst.sst_info,
+                            read_options.table_id,
+                            &table_key_range,
+                        ) {
+                            continue;
+                        }
+
                         let table_holder = self
                             .sstable_store
-                            .sstable(&sstable_info.sst_info, local_stats)
+                            .sstable(&local_sst.sst_info, local_stats)
                             .await?;
 
                         if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
@@ -943,14 +951,23 @@ impl HummockVersionReader {
             // only use `table_key_range` to see whether all SSTs are filtered out
             // without looking at bloom filter because prefix_hint is not provided
             for staing_data in &data {
-                if let StagingData::ImmMem(imm) = staing_data {
-                    if imm.range_exists(&table_key_range) {
-                        return Ok(true);
+                match staing_data {
+                    StagingData::ImmMem(imm) => {
+                        if imm.range_exists(&table_key_range) {
+                            return Ok(true);
+                        }
                     }
-                } else {
-                    // uncommitted_ssts is already pruned by `table_key_range` so no extra check is
-                    // needed.
-                    return Ok(true);
+                    StagingData::Sst(local_ssts) => {
+                        for local_sst in &local_ssts.sstable_infos {
+                            if filter_single_sst(
+                                &local_sst.sst_info,
+                                read_options.table_id,
+                                &table_key_range,
+                            ) {
+                                return Ok(true);
+                            }
+                        }
+                    }
                 }
             }
 
