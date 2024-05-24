@@ -35,7 +35,7 @@ use thiserror_ext::AsReport;
 use tracing::error;
 
 use crate::error::{StorageError, StorageResult};
-use crate::hummock::iterator::{FromRustIterator, RustIteratorBuilder};
+use crate::hummock::iterator::{Backward, Forward, FromRustIterator, RustIteratorBuilder};
 use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchId};
 use crate::hummock::utils::{
     do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check, ENABLE_SANITY_CHECK,
@@ -78,6 +78,7 @@ type Result<T> = std::result::Result<T, Box<MemTableError>>;
 
 pub type MemTableStore = BTreeMap<TableKey<Bytes>, KeyOp>;
 pub struct MemTableIteratorBuilder;
+pub struct MemTableRevIteratorBuilder;
 
 fn map_to_hummock_value<'a>(
     (key, op): (&'a TableKey<Bytes>, &'a KeyOp),
@@ -91,7 +92,29 @@ fn map_to_hummock_value<'a>(
     )
 }
 
+impl RustIteratorBuilder for MemTableRevIteratorBuilder {
+    type Direction = Backward;
+    type Iterable = MemTableStore;
+
+    type RewindIter<'a> =
+        impl Iterator<Item = (TableKey<&'a [u8]>, HummockValue<&'a [u8]>)> + Send + 'a;
+    type SeekIter<'a> =
+        impl Iterator<Item = (TableKey<&'a [u8]>, HummockValue<&'a [u8]>)> + Send + 'a;
+
+    fn seek<'a>(iterable: &'a Self::Iterable, seek_key: TableKey<&[u8]>) -> Self::SeekIter<'a> {
+        iterable
+            .range::<[u8], _>((Unbounded, Included(seek_key.0)))
+            .rev()
+            .map(map_to_hummock_value)
+    }
+
+    fn rewind(iterable: &Self::Iterable) -> Self::RewindIter<'_> {
+        iterable.iter().rev().map(map_to_hummock_value)
+    }
+}
+
 impl RustIteratorBuilder for MemTableIteratorBuilder {
+    type Direction = Forward;
     type Iterable = MemTableStore;
 
     type RewindIter<'a> =
@@ -111,6 +134,7 @@ impl RustIteratorBuilder for MemTableIteratorBuilder {
 }
 
 pub type MemTableHummockIterator<'a> = FromRustIterator<'a, MemTableIteratorBuilder>;
+pub type MemTableHummockRevIterator<'a> = FromRustIterator<'a, MemTableRevIteratorBuilder>;
 
 impl MemTable {
     pub fn new(op_consistency_level: OpConsistencyLevel) -> Self {
@@ -317,6 +341,16 @@ impl MemTable {
         self.buffer.range(key_range)
     }
 
+    pub fn rev_iter<'a, R>(
+        &'a self,
+        key_range: R,
+    ) -> impl Iterator<Item = (&'a TableKey<Bytes>, &'a KeyOp)>
+    where
+        R: RangeBounds<TableKey<Bytes>> + 'a,
+    {
+        self.buffer.range(key_range).rev()
+    }
+
     fn sub_old_op_size(&mut self, old_op: Option<KeyOp>, key_len: usize) {
         if let Some(op) = old_op {
             self.kv_size.sub_val(&op);
@@ -462,6 +496,7 @@ impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
 
 impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalStateStore<S> {
     type Iter<'a> = impl StateStoreIter + 'a;
+    type RevIter<'a> = impl StateStoreIter + 'a;
 
     #[allow(clippy::unused_async)]
     async fn may_exist(
@@ -499,6 +534,26 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                 .await?;
             Ok(FromStreamStateStoreIter::new(Box::pin(merge_stream(
                 self.mem_table.iter(key_range),
+                iter.into_stream(to_owned_item),
+                self.table_id,
+                self.epoch(),
+            ))))
+        }
+    }
+
+    #[allow(clippy::manual_async_fn)]
+    fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_ {
+        async move {
+            let iter = self
+                .inner
+                .rev_iter(key_range.clone(), self.epoch(), read_options)
+                .await?;
+            Ok(FromStreamStateStoreIter::new(Box::pin(merge_stream(
+                self.mem_table.rev_iter(key_range),
                 iter.into_stream(to_owned_item),
                 self.table_id,
                 self.epoch(),
@@ -681,7 +736,7 @@ mod tests {
 
     use crate::hummock::iterator::HummockIterator;
     use crate::hummock::value::HummockValue;
-    use crate::mem_table::{KeyOp, MemTable, MemTableHummockIterator};
+    use crate::mem_table::{KeyOp, MemTable, MemTableHummockIterator, MemTableHummockRevIterator};
     use crate::store::{OpConsistencyLevel, CHECK_BYTES_EQUAL};
 
     #[tokio::test]
@@ -867,7 +922,7 @@ mod tests {
             TableKey(bytes.freeze())
         }
 
-        let ordered_test_data = (0..10000)
+        let mut ordered_test_data = (0..10000)
             .map(|i| {
                 let key_op = match rng.gen::<usize>() % 3 {
                     0 => KeyOp::Insert(Bytes::from("insert")),
@@ -901,8 +956,8 @@ mod tests {
         const TEST_TABLE_ID: TableId = TableId::new(233);
         const TEST_EPOCH: u64 = test_epoch(10);
 
-        async fn check_data(
-            iter: &mut MemTableHummockIterator<'_>,
+        async fn check_data<I: HummockIterator>(
+            iter: &mut I,
             test_data: &[(TableKey<Bytes>, KeyOp)],
         ) {
             let mut idx = 0;
@@ -913,7 +968,14 @@ mod tests {
                 let (expected_key, expected_value) = test_data[idx].clone();
                 assert_eq!(key.epoch_with_gap, EpochWithGap::new_from_epoch(TEST_EPOCH));
                 assert_eq!(key.user_key.table_id, TEST_TABLE_ID);
-                assert_eq!(key.user_key.table_key.0, expected_key.0.as_ref());
+                assert_eq!(
+                    key.user_key.table_key.0,
+                    expected_key.0.as_ref(),
+                    "failed at {}, {:?} != {:?}",
+                    idx,
+                    String::from_utf8(key.user_key.table_key.key_part().to_vec()).unwrap(),
+                    String::from_utf8(expected_key.key_part().to_vec()).unwrap(),
+                );
                 match expected_value {
                     KeyOp::Insert(expected_value) | KeyOp::Update((_, expected_value)) => {
                         assert_eq!(value, HummockValue::Put(expected_value.as_ref()));
@@ -1004,5 +1066,109 @@ mod tests {
         .await
         .unwrap();
         check_data(&mut iter, &[]).await;
+
+        // check reverse iterator
+        ordered_test_data.reverse();
+        drop(iter);
+        let mut iter = MemTableHummockRevIterator::new(
+            &mem_table.buffer,
+            EpochWithGap::new_from_epoch(TEST_EPOCH),
+            TEST_TABLE_ID,
+        );
+
+        // Test rewind
+        iter.rewind().await.unwrap();
+        check_data(&mut iter, &ordered_test_data).await;
+
+        // Test seek with a smaller table id
+        let smaller_table_id = TableId::new(TEST_TABLE_ID.table_id() - 1);
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: smaller_table_id,
+                table_key: TableKey(&get_key(ordered_test_data.len() + 10)),
+            },
+            epoch_with_gap: EpochWithGap::new_from_epoch(TEST_EPOCH),
+        })
+        .await
+        .unwrap();
+        check_data(&mut iter, &[]).await;
+
+        // Test seek with a greater table id
+        let greater_table_id = TableId::new(TEST_TABLE_ID.table_id() + 1);
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: greater_table_id,
+                table_key: TableKey(&get_key(0)),
+            },
+            epoch_with_gap: EpochWithGap::new_from_epoch(TEST_EPOCH),
+        })
+        .await
+        .unwrap();
+        check_data(&mut iter, &ordered_test_data).await;
+
+        // Test seek with a later epoch, the first key is skipped
+        let later_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH.next_epoch());
+        let seek_idx = 500;
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: TEST_TABLE_ID,
+                table_key: TableKey(&get_key(seek_idx)),
+            },
+            epoch_with_gap: later_epoch,
+        })
+        .await
+        .unwrap();
+        let rev_seek_idx = ordered_test_data.len() - seek_idx - 1;
+        check_data(&mut iter, &ordered_test_data[rev_seek_idx + 1..]).await;
+
+        // Test seek with a earlier epoch, the first key is not skipped
+        let early_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH.prev_epoch());
+        let seek_idx = 500;
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: TEST_TABLE_ID,
+                table_key: TableKey(&get_key(seek_idx)),
+            },
+            epoch_with_gap: early_epoch,
+        })
+        .await
+        .unwrap();
+        let rev_seek_idx = ordered_test_data.len() - seek_idx - 1;
+        check_data(&mut iter, &ordered_test_data[rev_seek_idx..]).await;
+
+        drop(iter);
+        mem_table.insert(get_key(10001), "value1".into()).unwrap();
+
+        let mut iter = MemTableHummockRevIterator::new(
+            &mem_table.buffer,
+            EpochWithGap::new_from_epoch(TEST_EPOCH),
+            TEST_TABLE_ID,
+        );
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: TEST_TABLE_ID,
+                table_key: TableKey(&get_key(10000)),
+            },
+            epoch_with_gap: early_epoch,
+        })
+        .await
+        .unwrap();
+        assert_eq!(iter.key().user_key.table_key, get_key(9999).to_ref());
+
+        let mut iter = MemTableHummockIterator::new(
+            &mem_table.buffer,
+            EpochWithGap::new_from_epoch(TEST_EPOCH),
+            TEST_TABLE_ID,
+        );
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: TEST_TABLE_ID,
+                table_key: TableKey(&get_key(10000)),
+            },
+            epoch_with_gap: later_epoch,
+        })
+        .await
+        .unwrap();
+        assert_eq!(iter.key().user_key.table_key, get_key(10001).to_ref());
     }
 }

@@ -251,6 +251,7 @@ impl PlanRoot {
                 order_by: self.required_order.column_orders,
                 filter: Condition::true_cond(),
                 direct_args: vec![],
+                user_defined: None,
             }],
             IndexSet::empty(),
             self.plan,

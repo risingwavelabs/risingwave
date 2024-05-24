@@ -341,7 +341,7 @@ async fn test_failpoints_backward_user_read_err() {
         i -= 1;
         let key = ui.key();
         let val = ui.value();
-        assert_eq!(key, &iterator_test_bytes_key_of(i));
+        assert_eq!(key, iterator_test_bytes_key_of(i).to_ref());
         assert_eq!(val, iterator_test_value_of(i).as_slice());
         let result = ui.next().await;
         if result.is_err() {
