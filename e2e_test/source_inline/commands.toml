@@ -42,45 +42,6 @@ else
 fi
 '''
 
-[tasks.kafka-topics]
-category = "RiseDev - Test - Source Test - Kafka"
-dependencies = ["check-kafka"]
-script = """
-#!/usr/bin/env sh
-set -e
-# TODO: no more kafka binaries with docker! 😭 Can we use rpk instead?
-${PREFIX_BIN}/kafka/bin/kafka-topics.sh --bootstrap-server ${RISEDEV_KAFKA_BOOTSTRAP_SERVERS} "$@"
-"""
-
-[tasks.kafka-produce]
-category = "RiseDev - Test - Source Test - Kafka"
-dependencies = ["check-kafka"]
-script = """
-#!/usr/bin/env sh
-set -e
-# TODO: no more kafka binaries with docker! 😭 Can we use rpk instead?
-${PREFIX_BIN}/kafka/bin/kafka-console-producer.sh --bootstrap-server ${RISEDEV_KAFKA_BOOTSTRAP_SERVERS} "$@"
-"""
-
-[tasks.kafka-consume]
-category = "RiseDev - Test - Source Test - Kafka"
-dependencies = ["check-kafka"]
-script = """
-#!/usr/bin/env sh
-set -e
-# TODO: no more kafka binaries with docker! 😭 Can we use rpk instead?
-${PREFIX_BIN}/kafka/bin/kafka-console-consumer.sh --bootstrap-server ${RISEDEV_KAFKA_BOOTSTRAP_SERVERS} "$@"
-"""
-
-[tasks.kafka-consumer-groups]
-category = "RiseDev - Test - Source Test - Kafka"
-dependencies = ["check-kafka"]
-script = """
-#!/usr/bin/env sh
-set -e
-${PREFIX_BIN}/kafka/bin/kafka-consumer-groups.sh --bootstrap-server ${RISEDEV_KAFKA_BOOTSTRAP_SERVERS} "$@"
-"""
-
 # rpk tools
 [tasks.rpk]
 category = "RiseDev - Test - Source Test - Kafka"
