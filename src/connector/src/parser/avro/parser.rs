@@ -159,14 +159,6 @@ impl AvroParserConfig {
         }
     }
 
-    pub fn extract_pks(&self) -> ConnectorResult<Vec<ColumnDesc>> {
-        avro_schema_to_column_descs(
-            self.key_schema
-                .as_deref()
-                .ok_or_else(|| anyhow::format_err!("key schema is required"))?,
-        )
-    }
-
     pub fn map_to_columns(&self) -> ConnectorResult<Vec<ColumnDesc>> {
         avro_schema_to_column_descs(self.schema.as_ref())
     }

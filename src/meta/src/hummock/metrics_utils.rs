@@ -109,17 +109,6 @@ pub fn trigger_local_table_stat(
     }
 }
 
-pub fn trigger_version_stat(metrics: &MetaMetrics, current_version: &HummockVersion) {
-    metrics
-        .max_committed_epoch
-        .set(current_version.max_committed_epoch as i64);
-    metrics
-        .version_size
-        .set(current_version.estimated_encode_len() as i64);
-    metrics.safe_epoch.set(current_version.safe_epoch as i64);
-    metrics.current_version_id.set(current_version.id as i64);
-}
-
 pub fn trigger_mv_stat(
     metrics: &MetaMetrics,
     version_stats: &HummockVersionStats,
@@ -427,16 +416,6 @@ pub fn trigger_pin_unpin_snapshot_state(
     }
 }
 
-pub fn trigger_safepoint_stat(metrics: &MetaMetrics, safepoints: &[HummockVersionId]) {
-    if let Some(sp) = safepoints.iter().min() {
-        metrics.min_safepoint_version_id.set(*sp as _);
-    } else {
-        metrics
-            .min_safepoint_version_id
-            .set(HummockVersionId::MAX as _);
-    }
-}
-
 pub fn trigger_gc_stat(
     metrics: &MetaMetrics,
     checkpoint: &HummockVersionCheckpoint,
@@ -472,10 +451,6 @@ pub fn trigger_gc_stat(
         .set(old_version_object_count as _);
     metrics.stale_object_size.set(stale_object_size as _);
     metrics.stale_object_count.set(stale_object_count as _);
-}
-
-pub fn trigger_delta_log_stats(metrics: &MetaMetrics, total_number: usize) {
-    metrics.delta_log_count.set(total_number as _);
 }
 
 // Triggers a report on compact_pending_bytes_needed
