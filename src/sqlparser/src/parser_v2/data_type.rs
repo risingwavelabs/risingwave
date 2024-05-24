@@ -207,7 +207,7 @@ where
         Keyword::NUMERIC | Keyword::DECIMAL | Keyword::DEC => cut_err(precision_and_scale()).map(|(precision, scale)| {
             DataType::Decimal(precision, scale)
         }),
-        _ =>  cut_err(fail),
+        _ =>  fail,
     };
 
     trace(
