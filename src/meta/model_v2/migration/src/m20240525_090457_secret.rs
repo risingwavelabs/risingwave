@@ -51,7 +51,6 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Replace the sample below with your own migration scripts
         drop_tables!(manager, Secret);
         manager
             .alter_table(
