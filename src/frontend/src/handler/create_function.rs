@@ -15,7 +15,7 @@
 use anyhow::Context;
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
-use risingwave_expr::sig::CreateFunctionOptions;
+use risingwave_expr::sig::{CreateFunctionOptions, UdfKind};
 use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 use risingwave_pb::catalog::Function;
 
@@ -152,11 +152,15 @@ pub async fn handle_create_function(
     let create_fn =
         risingwave_expr::sig::find_udf_impl(&language, runtime.as_deref(), link)?.create_fn;
     let output = create_fn(CreateFunctionOptions {
+        kind: match kind {
+            Kind::Scalar(_) => UdfKind::Scalar,
+            Kind::Table(_) => UdfKind::Table,
+            Kind::Aggregate(_) => unreachable!(),
+        },
         name: &function_name,
         arg_names: &arg_names,
         arg_types: &arg_types,
         return_type: &return_type,
-        is_table_function: matches!(kind, Kind::Table(_)),
         as_: params.as_.as_ref().map(|s| s.as_str()),
         using_link: link,
         using_base64_decoded: base64_decoded.as_deref(),

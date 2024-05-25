@@ -253,6 +253,10 @@ impl<'a, T> VarTransaction<'a, T> {
             orig_value_ref: val_ref,
         }
     }
+
+    pub fn has_new_value(&self) -> bool {
+        self.new_value.is_some()
+    }
 }
 
 impl<'a, T> Deref for VarTransaction<'a, T> {

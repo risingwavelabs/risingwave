@@ -53,6 +53,7 @@ pub mod alter_user;
 pub mod cancel_job;
 pub mod close_cursor;
 mod comment;
+pub mod create_aggregate;
 pub mod create_connection;
 mod create_database;
 pub mod create_function;
@@ -280,7 +281,6 @@ pub async fn handle(
                     .real_value()
                     .eq_ignore_ascii_case("sql")
             {
-                // User defined function with external source (e.g., language [ python / java ])
                 create_function::handle_create_function(
                     handler_args,
                     or_replace,
@@ -304,6 +304,24 @@ pub async fn handle(
                 )
                 .await
             }
+        }
+        Statement::CreateAggregate {
+            or_replace,
+            name,
+            args,
+            returns,
+            params,
+            ..
+        } => {
+            create_aggregate::handle_create_aggregate(
+                handler_args,
+                or_replace,
+                name,
+                args,
+                returns,
+                params,
+            )
+            .await
         }
         Statement::CreateTable {
             name,
@@ -506,7 +524,18 @@ pub async fn handle(
             if_exists,
             func_desc,
             option,
-        } => drop_function::handle_drop_function(handler_args, if_exists, func_desc, option).await,
+        } => {
+            drop_function::handle_drop_function(handler_args, if_exists, func_desc, option, false)
+                .await
+        }
+        Statement::DropAggregate {
+            if_exists,
+            func_desc,
+            option,
+        } => {
+            drop_function::handle_drop_function(handler_args, if_exists, func_desc, option, true)
+                .await
+        }
         Statement::Query(_)
         | Statement::Insert { .. }
         | Statement::Delete { .. }

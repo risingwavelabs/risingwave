@@ -2595,9 +2595,7 @@ impl ScaleController {
         // We trace the upstreams of each downstream under the hierarchy until we reach the top
         // for every no_shuffle relation.
         while let Some(fragment_id) = queue.pop_front() {
-            if !no_shuffle_target_fragment_ids.contains(&fragment_id)
-                && !no_shuffle_source_fragment_ids.contains(&fragment_id)
-            {
+            if !no_shuffle_target_fragment_ids.contains(&fragment_id) {
                 continue;
             }
 
