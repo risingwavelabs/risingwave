@@ -9,8 +9,8 @@ mod m20240410_082733_with_version_column_migration;
 mod m20240410_154406_session_params;
 mod m20240417_062305_subscription_internal_table_name;
 mod m20240418_142249_function_runtime;
-mod m20240422_090457_secret;
 mod m20240506_112555_subscription_partial_ckpt;
+mod m20240525_090457_secret;
 
 pub struct Migrator;
 
@@ -25,7 +25,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20240410_154406_session_params::Migration),
             Box::new(m20240417_062305_subscription_internal_table_name::Migration),
             Box::new(m20240418_142249_function_runtime::Migration),
-            Box::new(m20240422_090457_secret::Migration),
+            Box::new(m20240525_090457_secret::Migration),
             Box::new(m20240506_112555_subscription_partial_ckpt::Migration),
         ]
     }
