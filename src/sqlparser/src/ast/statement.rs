@@ -883,6 +883,11 @@ impl fmt::Display for CreateSecretStatement {
         let mut v: Vec<String> = vec![];
         impl_fmt_display!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], v, self);
         impl_fmt_display!(secret_name, v, self);
+        impl_fmt_display!(with_properties, v, self);
+        if self.credential != Value::Null {
+            v.push("AS".to_string());
+            impl_fmt_display!(credential, v, self);
+        }
         v.iter().join(" ").fmt(f)
     }
 }
