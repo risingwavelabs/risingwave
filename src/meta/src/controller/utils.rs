@@ -23,8 +23,8 @@ use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
-    object_dependency, schema, sink, source, subscription, table, user, user_privilege, view,
-    ActorId, DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId,
+    object_dependency, schema, secret, sink, source, subscription, table, user, user_privilege,
+    view, ActorId, DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId,
     PrivilegeId, SchemaId, SourceId, StreamNode, UserId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction, PbSecret, PbSubscription};
@@ -420,7 +420,7 @@ where
             object::Column::DatabaseId
                 .eq(pb_secret.database_id as DatabaseId)
                 .and(object::Column::SchemaId.eq(pb_secret.schema_id as SchemaId))
-                .and(connection::Column::Name.eq(&pb_secret.name)),
+                .and(secret::Column::Name.eq(&pb_secret.name)),
         )
         .count(db)
         .await?;
