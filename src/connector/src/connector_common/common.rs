@@ -24,7 +24,6 @@ use aws_sdk_kinesis::Client as KinesisClient;
 use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
 use pulsar::{Authentication, Pulsar, TokioExecutor};
 use rdkafka::ClientConfig;
-use mongodb::Client;
 use risingwave_common::bail;
 use serde_derive::Deserialize;
 use serde_with::json::JsonString;
@@ -757,4 +756,12 @@ pub struct MongodbCommon {
     /// for more information.
     #[serde(rename = "collection.name")]
     pub collection_name: String,
+}
+
+impl MongodbCommon {
+    pub(crate) async fn build_client(&self) -> ConnectorResult<mongodb::Client> {
+        let client = mongodb::Client::with_uri_str(&self.connect_uri).await?;
+
+        Ok(client)
+    }
 }
