@@ -332,17 +332,24 @@ impl MonitoredStreamingUploader {
         let operation_type_str = operation_type.as_str();
         let data_len = data.len();
 
-        let _timer = self
-            .object_store_metrics
-            .operation_latency
-            .with_label_values(&[self.media_type, operation_type_str])
-            .start_timer();
+        let res = if self.media_type == "s3" {
+            // TODO: we should avoid this special case after fully migrating to opeandal for s3.
+            self.inner
+                .write_bytes(data)
+                .verbose_instrument_await(operation_type_str)
+                .await
+        } else {
+            let _timer = self
+                .object_store_metrics
+                .operation_latency
+                .with_label_values(&[self.media_type, operation_type_str])
+                .start_timer();
 
-        let res = self
-            .inner
-            .write_bytes(data)
-            .verbose_instrument_await(operation_type_str)
-            .await;
+            self.inner
+                .write_bytes(data)
+                .verbose_instrument_await(operation_type_str)
+                .await
+        };
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
 
@@ -361,17 +368,25 @@ impl MonitoredStreamingUploader {
     pub async fn finish(self) -> ObjectResult<()> {
         let operation_type = OperationType::StreamingUploadFinish;
         let operation_type_str = operation_type.as_str();
-        let _timer = self
-            .object_store_metrics
-            .operation_latency
-            .with_label_values(&[self.media_type, operation_type_str])
-            .start_timer();
 
-        let res = self
-            .inner
-            .finish()
-            .verbose_instrument_await(operation_type_str)
-            .await;
+        let res = if self.media_type == "s3" {
+            // TODO: we should avoid this special case after fully migrating to opeandal for s3.
+            self.inner
+                .finish()
+                .verbose_instrument_await(operation_type_str)
+                .await
+        } else {
+            let _timer = self
+                .object_store_metrics
+                .operation_latency
+                .with_label_values(&[self.media_type, operation_type_str])
+                .start_timer();
+
+            self.inner
+                .finish()
+                .verbose_instrument_await(operation_type_str)
+                .await
+        };
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
         self.object_store_metrics
@@ -561,6 +576,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
+
         Ok(MonitoredStreamingUploader::new(
             media_type,
             res?,
