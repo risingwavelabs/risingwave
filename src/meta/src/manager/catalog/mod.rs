@@ -516,32 +516,21 @@ impl CatalogManager {
         let user_core = &mut core.user;
         let mut secrets = BTreeMapTransaction::new(&mut database_core.secrets);
 
-        match database_core.relation_ref_count.get(&secret_id) {
-            Some(ref_count) => {
-                let connection_name = secrets
-                    .get(&secret_id)
-                    .ok_or_else(|| anyhow!("connection not found"))?
-                    .name
-                    .clone();
-                Err(MetaError::permission_denied(format!(
-                    "Fail to delete secret {} because {} other relation(s) depend on it",
-                    connection_name, ref_count
-                )))
-            }
-            None => {
-                let secret = secrets
-                    .remove(secret_id)
-                    .ok_or_else(|| anyhow!("secret not found"))?;
+        // todo: impl a ref count check for secret
+        // if secret is used by other relations, not found in the catalog or do not have the privilege to drop, return error
+        // else: commit the change and notify frontend
 
-                commit_meta!(self, secrets)?;
-                user_core.decrease_ref(secret.owner);
+        let secret = secrets
+            .remove(secret_id)
+            .ok_or_else(|| anyhow!("secret not found"))?;
 
-                let version = self
-                    .notify_frontend(Operation::Delete, Info::Secret(secret))
-                    .await;
-                Ok(version)
-            }
-        }
+        commit_meta!(self, secrets)?;
+        user_core.decrease_ref(secret.owner);
+
+        let version = self
+            .notify_frontend(Operation::Delete, Info::Secret(secret))
+            .await;
+        Ok(version)
     }
 
     pub async fn create_connection(

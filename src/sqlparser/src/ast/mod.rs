@@ -1874,7 +1874,7 @@ impl fmt::Display for Statement {
             Statement::DeclareCursor { stmt } => write!(f, "DECLARE {}", stmt,),
             Statement::FetchCursor { stmt } => write!(f, "FETCH {}", stmt),
             Statement::CloseCursor { stmt } => write!(f, "CLOSE {}", stmt),
-            Statement::CreateSecret { stmt } => write!(f, "CREATE SECRET {}", stmt, ),
+            Statement::CreateSecret { stmt } => write!(f, "CREATE SECRET {}", stmt),
             Statement::AlterDatabase { name, operation } => {
                 write!(f, "ALTER DATABASE {} {}", name, operation)
             }
