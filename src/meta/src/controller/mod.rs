@@ -202,8 +202,8 @@ impl From<ObjectModel<source::Model>> for PbSource {
 impl From<ObjectModel<sink::Model>> for PbSink {
     fn from(value: ObjectModel<sink::Model>) -> Self {
         let mut secret_ref_hashmap: HashMap<String, u32> = HashMap::new();
-        if let Some(secret_ref) = value.0.secret_ref.as_ref() {
-            secret_ref_hashmap.clone_from(secret_ref.inner_ref())
+        if let Some(secret_ref) = value.0.secret_ref {
+            secret_ref_hashmap = secret_ref.into_inner();
         }
         Self {
             id: value.0.sink_id as _,
