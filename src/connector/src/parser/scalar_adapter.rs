@@ -182,7 +182,7 @@ impl ScalarAdapter {
                     vec.push(match datum {
                         Some(ScalarRefImpl::Int256(s)) => Some(string_to_pg_numeric(&s.to_string())),
                         Some(ScalarRefImpl::Decimal(s)) => Some(rw_numeric_to_pg_numeric(s)),
-                        Some(ScalarRefImpl::Utf8(s)) => Some(string_to_pg_numeric(&s.to_string())),
+                        Some(ScalarRefImpl::Utf8(s)) => Some(string_to_pg_numeric(s)),
                         None => None,
                         _ => {
                             unreachable!("Currently, only rw-numeric[], rw_int256[] and varchar[] are supported to convert to pg-numeric[]");
@@ -244,14 +244,14 @@ impl ScalarAdapter {
                             if pg_numeric_is_special(&numeric) {
                                 return None;
                             } else {
-                                ScalarAdapter::Numeric(numeric).into_scalar(&dtype)
+                                ScalarAdapter::Numeric(numeric).into_scalar(dtype)
                             }
                         }
                         (Some(numeric), box DataType::Int256 | box DataType::Decimal) => {
                             if pg_numeric_is_special(&numeric) {
                                 return None;
                             } else {
-                                match ScalarAdapter::Numeric(numeric).into_scalar(&dtype) {
+                                match ScalarAdapter::Numeric(numeric).into_scalar(dtype) {
                                     Some(scalar) => Some(scalar),
                                     None => {
                                         return None;
@@ -330,7 +330,7 @@ fn pg_numeric_to_rw_numeric(val: &PgNumeric) -> Option<ScalarImpl> {
                 Ok(num) => Some(ScalarImpl::from(num)),
                 Err(err) => {
                     tracing::error!(error = %err.as_report(), "parse pg-numeric as rw-numeric failed (likely out-of-range");
-                    return None;
+                    None
                 }
             }
         }
