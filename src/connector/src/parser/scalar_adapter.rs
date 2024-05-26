@@ -240,11 +240,23 @@ impl ScalarAdapter {
                 let mut builder = dtype.create_array_builder(0);
                 for val in vec {
                     let scalar = match (val, &dtype) {
-                        (Some(numeric), box DataType::Varchar | box DataType::Int256 | box DataType::Decimal) => {
+                        (Some(numeric), box DataType::Varchar) => {
                             if pg_numeric_is_special(&numeric) {
                                 return None;
                             } else {
                                 ScalarAdapter::Numeric(numeric).into_scalar(&dtype)
+                            }
+                        }
+                        (Some(numeric), box DataType::Int256 | box DataType::Decimal) => {
+                            if pg_numeric_is_special(&numeric) {
+                                return None;
+                            } else {
+                                match ScalarAdapter::Numeric(numeric).into_scalar(&dtype) {
+                                    Some(scalar) => Some(scalar),
+                                    None => {
+                                        return None;
+                                    }
+                                }
                             }
                         }
                         (Some(_), _) => unreachable!(

@@ -196,13 +196,128 @@ select id, my_bytea from list_with_null_shared order by id;
 6 NULL
 
 query TTTTTTT
-SELECT * FROM postgres_all_types order by c_boolean,c_bigint,c_date;
+SELECT c_boolean, c_smallint, c_integer, c_bigint, c_decimal, c_real, c_double_precision
+FROM postgres_all_types
+ORDER BY c_boolean, c_bigint, c_date;
 ----
-f -32767 -2147483647 -9223372036854775807 -10.0 -10000 -10000 (empty) \x00 0001-01-01 00:00:00 2001-01-01 00:00:00 2001-01-01 08:00:00+00:00 00:00:00 {} bb488f9b-330d-4012-b849-12adeb49e57e happy {f} {-32767} {-2147483647} {-9223372036854775807} {-10.0} {-10000} {-10000} {""} {"\\x00"} {0001-01-01} {00:00:00} {"2001-01-01 00:00:00"} {"2001-01-01 08:00:00+00:00"} NULL {"{}"} {bb488f9b-330d-4012-b849-12adeb49e57e} NULL
-f 0 0 0 0 0 0 (empty) \x00 0001-01-01 00:00:00 2001-01-01 00:00:00 2001-01-01 08:00:00+00:00 00:00:00 {} NULL sad {} {} {} {} {} {} {} {} {} {} {} {} {} NULL {} {} {}
-f NULL NULL 1 NULL NULL NULL NULL NULL 0024-05-19 NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL
-f 1 123 1234567890 123.45 123.45 123.456 example \xdeadbeef 0024-01-01 12:34:56 2024-05-19 12:34:56 2024-05-19 12:34:56+00:00 1 day {"key": "value"} 123e4567-e89b-12d3-a456-426614174000 happy {NULL,t} {NULL,1} {NULL,123} {NULL,1234567890} {NULL,123.45} {NULL,123.45} {NULL,123.456} {NULL,example} {NULL,"\\xdeadbeef"} {NULL,2024-05-19} {NULL,12:34:56} {NULL,"2024-05-19 12:34:56"} {NULL,"2024-05-19 12:34:56+00:00"} NULL {NULL,"{\"key\": \"value\"}"} {NULL,123e4567-e89b-12d3-a456-426614174000} NULL
-t -32767 -2147483647 -9223372036854775807 -10.0 -10000 -10000 (empty) \x00 0001-01-01 00:00:00 2001-01-01 00:00:00 2001-01-01 08:00:00+00:00 00:00:00 {} bb488f9b-330d-4012-b849-12adeb49e57e happy {f} {-32767} {-2147483647} {-9223372036854775807} {-10.0} {-10000} {-10000} {""} {"\\x00"} {0001-01-01} {00:00:00} {"2001-01-01 00:00:00"} {"2001-01-01 08:00:00+00:00"} NULL {"{}"} {bb488f9b-330d-4012-b849-12adeb49e57e} NULL
-t 0 0 0 0 0 0 (empty) \x00 0001-01-01 00:00:00 2001-01-01 00:00:00 2001-01-01 08:00:00+00:00 00:00:00 {} NULL sad {} {} {} {} {} {} {} {} {} {} {} {} {} NULL {} {} {}
-t NULL NULL 1 NULL NULL NULL NULL NULL 0024-05-19 NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL
-t 1 123 1234567890 123.45 123.45 123.456 example \xdeadbeef 0024-01-01 12:34:56 2024-05-19 12:34:56 2024-05-19 12:34:56+00:00 1 day {"key": "value"} 123e4567-e89b-12d3-a456-426614174000 happy {NULL,t} {NULL,1} {NULL,123} {NULL,1234567890} {NULL,123.45} {NULL,123.45} {NULL,123.456} {NULL,example} {NULL,"\\xdeadbeef"} {NULL,2024-05-19} {NULL,12:34:56} {NULL,"2024-05-19 12:34:56"} {NULL,"2024-05-19 12:34:56+00:00"} NULL {NULL,"{\"key\": \"value\"}"} {NULL,123e4567-e89b-12d3-a456-426614174000} NULL
+f -32767 -2147483647 -9223372036854775807 -10.0 -10000 -10000
+f 0      0           0                    0      0      0
+f NULL   NULL        1                    NULL   NULL   NULL
+f 1      123         1234567890           123.45 123.45 123.456
+t -32767 -2147483647 -9223372036854775807 -10.0  -10000 -10000
+t 0      0           0                    0      0      0
+t NULL   NULL        1                    NULL   NULL   NULL
+t 1      123         1234567890           123.45 123.45 123.456
+
+query TTTTTTT
+SELECT c_varchar, c_bytea
+FROM postgres_all_types
+ORDER BY c_boolean, c_bigint, c_date;
+----
+NULL    \x00
+NULL    \x00
+NULL    NULL
+example \xdeadbeef
+NULL    \x00
+NULL    \x00
+NULL    NULL
+example \xdeadbeef
+
+query TTTTTTT
+SELECT c_date, c_time, c_timestamp, c_timestamptz, c_interval
+FROM postgres_all_types
+ORDER BY c_boolean, c_bigint, c_date;
+----
+0001-01-01 00:00:00 2001-01-01 00:00:00 2001-01-01 08:00:00+00:00 00:00:00
+0001-01-01 00:00:00 2001-01-01 00:00:00 2001-01-01 08:00:00+00:00 00:00:00
+0024-05-19 NULL     NULL                  NULL                    NULL
+0024-01-01 12:34:56 2024-05-19 12:34:56   2024-05-19 12:34:56+00:00 1 day
+0001-01-01 00:00:00 0001-01-01 00:00:00 2001-01-01 08:00:00+00:00 00:00:00
+0001-01-01 00:00:00 0001-01-01 00:00:00 2001-01-01 08:00:00+00:00 00:00:00
+0024-05-19 NULL     NULL                  NULL                    NULL
+0024-01-01 12:34:56 2024-05-19 12:34:56   2024-05-19 12:34:56+00:00 1 day
+
+query TTTTTTT
+SELECT c_jsonb, c_uuid, c_enum
+FROM postgres_all_types
+ORDER BY c_boolean, c_bigint, c_date;
+----
+{}               bb488f9b-330d-4012-b849-12adeb49e57e happy
+{}               NULL                                 sad
+NULL             NULL                                 NULL
+{"key": "value"} 123e4567-e89b-12d3-a456-426614174000 happy
+{}               bb488f9b-330d-4012-b849-12adeb49e57e happy
+{}               NULL                                 sad
+NULL             NULL                                 NULL
+{"key": "value"} 123e4567-e89b-12d3-a456-426614174000 happy
+
+query TTTTTTT
+SELECT c_boolean_array, c_smallint_array, c_integer_array, c_bigint_array
+FROM postgres_all_types
+ORDER BY c_boolean, c_bigint, c_date;
+----
+{f}        {-32767}       {-2147483647}     {-9223372036854775807}
+{}         {}             {}                {}
+NULL       NULL           NULL              NULL
+{NULL,t}   {NULL,1}       {NULL,123}        {NULL,1234567890}
+{f}        {-32767}       {-2147483647}     {-9223372036854775807}
+{}         {}             {}                {}
+NULL       NULL           NULL              NULL
+{NULL,t}   {NULL,1}       {NULL,123}        {NULL,1234567890}
+
+
+query TTTTTTT
+SELECT c_decimal_array, c_real_array, c_double_precision_array
+FROM postgres_all_types
+ORDER BY c_boolean, c_bigint, c_date;
+----
+{-10.0}        {-10000}       {-10000}
+{}             {}             {}
+NULL           NULL           NULL
+{NULL,123.45}  {NULL,123.45}  {NULL,123.456}
+{-10.0}        {-10000}       {-10000}
+{}             {}             {}
+NULL           NULL           NULL
+{NULL,123.45}  {NULL,123.45}  {NULL,123.456}
+
+query TTTTTTT
+SELECT c_varchar_array, c_bytea_array
+FROM postgres_all_types
+ORDER BY c_boolean, c_bigint, c_date;
+----
+{""}           {"\\x00"}
+{}             {}
+NULL           NULL
+{NULL,example} {NULL,"\\xdeadbeef"}
+{""}           {"\\x00"}
+{}             {}
+NULL           NULL
+{NULL,example} {NULL,"\\xdeadbeef"}
+
+query TTTTTTT
+SELECT c_date_array, c_time_array, c_timestamp_array, c_timestamptz_array, c_interval_array
+FROM postgres_all_types
+ORDER BY c_boolean, c_bigint, c_date;
+----
+{0001-01-01}      {00:00:00}      {"2001-01-01 00:00:00"}      {"2001-01-01 08:00:00+00:00"}      NULL
+{}                {}              {}                           {}                                 NULL
+NULL              NULL            NULL                         NULL                               NULL
+{NULL,2024-05-19} {NULL,12:34:56} {NULL,"2024-05-19 12:34:56"} {NULL,"2024-05-19 12:34:56+00:00"} NULL
+{0001-01-01}      {00:00:00}      {"0001-12-29 23:42:28 BC"}   {"2001-01-01 08:00:00+00:00"}      NULL
+{}                {}              {}                           {}                                 NULL
+NULL              NULL            NULL                         NULL                               NULL
+{NULL,2024-05-19} {NULL,12:34:56} {NULL,"2024-05-19 12:34:56"} {NULL,"2024-05-19 12:34:56+00:00"} NULL
+
+query TTTTTTT
+SELECT c_jsonb_array, c_uuid_array, c_enum_array
+FROM postgres_all_types
+ORDER BY c_boolean, c_bigint, c_date;
+----
+{"{}"}                        {bb488f9b-330d-4012-b849-12adeb49e57e}      NULL
+{}                            {}                                          {}
+NULL                          NULL                                        NULL
+{NULL,"{\"key\": \"value\"}"} {NULL,123e4567-e89b-12d3-a456-426614174000} NULL
+{"{}"}                        {bb488f9b-330d-4012-b849-12adeb49e57e}      NULL
+{}                            {}                                          {}
+NULL                          NULL                                        NULL
+{NULL,"{\"key\": \"value\"}"} {NULL,123e4567-e89b-12d3-a456-426614174000} NULL
