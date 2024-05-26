@@ -247,7 +247,7 @@ fn encode_datum_to_json(
     fields: &[Datum],
     field_names: Option<Vec<String>>,
     msg_full_name: Option<String>,
-) -> serde_json::Value {
+) -> AccessResult<serde_json::Value> {
     // Note that the key is of no order
     let mut ret: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
 
@@ -294,6 +294,7 @@ fn encode_datum_to_json(
                 if key.is_empty() {
                     key = "Bytea".to_string();
                 }
+                // FIXME: why assume it's utf8???
                 let s = String::from_utf8(v.to_vec()).unwrap();
                 ret.insert(key, serde_json::Value::String(s));
             }
@@ -303,9 +304,10 @@ fn encode_datum_to_json(
                 }
                 ret.insert(
                     key,
-                    serde_json::Value::Number(
-                        serde_json::Number::from_f64(v.into_inner() as f64).unwrap(),
-                    ),
+                    match serde_json::Number::from_f64(v.into_inner() as f64) {
+                        Some(n) => serde_json::Value::Number(n),
+                        None => serde_json::Value::Null,
+                    },
                 );
             }
             Some(ScalarImpl::Float64(v)) => {
@@ -314,9 +316,10 @@ fn encode_datum_to_json(
                 }
                 ret.insert(
                     key,
-                    serde_json::Value::Number(
-                        serde_json::Number::from_f64(v.into_inner()).unwrap(),
-                    ),
+                    match serde_json::Number::from_f64(v) {
+                        Some(n) => serde_json::Value::Number(n),
+                        None => serde_json::Value::Null,
+                    },
                 );
             }
             Some(ScalarImpl::Utf8(v)) => {
@@ -329,7 +332,7 @@ fn encode_datum_to_json(
                 if key.is_empty() {
                     key = "Struct".to_string();
                 }
-                ret.insert(key, encode_datum_to_json(v.fields(), None, None));
+                ret.insert(key, encode_datum_to_json(v.fields(), None, None)?);
             }
             Some(ScalarImpl::Jsonb(v)) => {
                 if key.is_empty() {
@@ -337,11 +340,11 @@ fn encode_datum_to_json(
                 }
                 ret.insert(key, v.take());
             }
-            r#type => panic!("Not yet support ScalarImpl type: {:?}", r#type),
+            r#type => bail_uncategorized!("failed to encode google.protobuf.Any to jsonb: Not yet support conversion to jsonb: {:?}", r#type),
         }
     }
 
-    serde_json::Value::Object(ret)
+    Ok(serde_json::Value::Object(ret))
 }
 
 pub fn from_protobuf_value(
@@ -429,7 +432,7 @@ pub fn from_protobuf_value(
                     v.fields(),
                     Some(field_names),
                     Some(msg_full_name),
-                ))))
+                )?)))
             } else {
                 let mut rw_values = Vec::with_capacity(dyn_msg.descriptor().fields().len());
                 // fields is a btree map in descriptor

@@ -24,7 +24,7 @@ use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::bail;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{
-    DataType, Date, Datum, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
+    DataType, Date, Datum, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz, ToText,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use thiserror_ext::AsReport;
@@ -282,6 +282,7 @@ impl<'a> AvroParseOptions<'a> {
                         err: err.to_report_string(),
                     }
                 })?;
+                debug_assert!(json_val.is_object());
                 JsonbVal::from(json_val).into()
             }
 
@@ -356,6 +357,98 @@ pub(crate) fn avro_decimal_to_rust_decimal(
         negative,
         scale as u32,
     ))
+}
+
+//             Value::Date(d) => Ok(Self::Number(d.into())),
+//             Value::Decimal(ref d) => <Vec<u8>>::try_from(d)
+//                 .map(|vec| Self::Array(vec.into_iter().map(|v| v.into()).collect())),
+//             Value::TimeMillis(t) => Ok(Self::Number(t.into())),
+//             Value::TimeMicros(t) => Ok(Self::Number(t.into())),
+//             Value::TimestampMillis(t) => Ok(Self::Number(t.into())),
+//             Value::TimestampMicros(t) => Ok(Self::Number(t.into())),
+//             Value::LocalTimestampMillis(t) => Ok(Self::Number(t.into())),
+//             Value::LocalTimestampMicros(t) => Ok(Self::Number(t.into())),
+//             Value::Duration(d) => Ok(Self::Array(
+//                 <[u8; 12]>::from(d).iter().map(|&v| v.into()).collect(),
+//             )),
+//             Value::Uuid(uuid) => Ok(Self::String(uuid.as_hyphenated().to_string())),
+//         }
+//     }
+// }
+fn avro_to_jsonb(avro: Value, builder: &mut jsonbb::Builder) -> AccessResult<()> {
+    match avro {
+        Value::Null => builder.add_null(),
+        Value::Boolean(b) => builder.add_bool(b),
+        Value::Int(i) => builder.add_i64(i as i64),
+        Value::Long(l) => builder.add_i64(l),
+        Value::Float(f) => {
+            if f.is_nan() || f.is_infinite() {
+                // XXX: pad null or return err here?
+                builder.add_null()
+            } else {
+                builder.add_f64(f as f64)
+            }
+        }
+        Value::Double(f) => {
+            if f.is_nan() || f.is_infinite() {
+                // XXX: pad null or return err here?
+                builder.add_null()
+            } else {
+                builder.add_f64(f)
+            }
+        }
+        // XXX: What encoding to use?
+        // ToText is \x plus hex string.
+        Value::Bytes(b) => builder.add_string(&ToText::to_text(&b.as_slice())),
+        Value::String(s) => builder.add_string(&s),
+        Value::Uuid(id) => builder.add_string(&id.as_hyphenated().to_string()),
+        Value::Map(m) => {
+            builder.begin_object();
+            for (k, v) in m {
+                builder.add_string(&k);
+                avro_to_jsonb(v, builder)?;
+            }
+            builder.end_object()
+        }
+        // same representation as map
+        Value::Record(r) => {
+            builder.begin_object();
+            for (k, v) in r {
+                builder.add_string(&k);
+                avro_to_jsonb(v, builder)?;
+            }
+            builder.end_object()
+        }
+        Value::Array(a) => {
+            builder.begin_array();
+            for v in a {
+                avro_to_jsonb(v, builder)?;
+            }
+            builder.end_array()
+        }
+        Value::Enum(_, symbol) => {
+            builder.add_string(&symbol);
+        }
+        Value::Union(_, v) => avro_to_jsonb(*v, builder)?,
+
+        // XXX: pad null or return err here?
+        v @ (Value::Fixed(_, _)
+        | Value::Date(_)
+        | Value::Decimal(_)
+        | Value::TimeMillis(_)
+        | Value::TimeMicros(_)
+        | Value::TimestampMillis(_)
+        | Value::TimestampMicros(_)
+        | Value::LocalTimestampMillis(_)
+        | Value::LocalTimestampMicros(_)
+        | Value::Duration(_)) => {
+            bail_uncategorized!(
+                "unimplemented conversion from avro to jsonb: {:?}",
+                ValueKind::from(v)
+            )
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn extract_decimal(bytes: Vec<u8>) -> AccessResult<(u32, u32, u32)> {
