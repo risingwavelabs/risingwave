@@ -243,26 +243,26 @@ fn extract_any_info(dyn_msg: &DynamicMessage) -> (String, Value) {
 /// Possible solution, maintaining a global id map, for the same types
 /// In the same level of fields, add the unique id at the tail of the name.
 /// e.g., "Int32.1" & "Int32.2" in the above example
-fn recursive_parse_json(
+fn encode_datum_to_json(
     fields: &[Datum],
-    full_name_vec: Option<Vec<String>>,
-    full_name: Option<String>,
+    field_names: Option<Vec<String>>,
+    msg_full_name: Option<String>,
 ) -> serde_json::Value {
     // Note that the key is of no order
     let mut ret: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
 
     // The hidden type hint for user's convenience
     // i.e., `"_type": message.full_name()`
-    if let Some(full_name) = full_name {
+    if let Some(full_name) = msg_full_name {
         ret.insert("_type".to_string(), serde_json::Value::String(full_name));
     }
 
     for (idx, field) in fields.iter().enumerate() {
         let mut key;
-        if let Some(k) = full_name_vec.as_ref() {
+        if let Some(k) = field_names.as_ref() {
             key = k[idx].to_string();
         } else {
-            key = "".to_string();
+            key = String::new();
         }
 
         match field.clone() {
@@ -329,7 +329,7 @@ fn recursive_parse_json(
                 if key.is_empty() {
                     key = "Struct".to_string();
                 }
-                ret.insert(key, recursive_parse_json(v.fields(), None, None));
+                ret.insert(key, encode_datum_to_json(v.fields(), None, None));
             }
             Some(ScalarImpl::Jsonb(v)) => {
                 if key.is_empty() {
@@ -404,15 +404,15 @@ pub fn from_protobuf_value(
                         uncategorized!("message `{type_url}` not found in descriptor pool")
                     })?;
 
-                let f = msg_desc
+                let field_names = msg_desc
                     .clone()
                     .fields()
                     .map(|f| f.name().to_string())
                     .collect::<Vec<String>>();
 
-                let full_name = msg_desc.clone().full_name().to_string();
+                let msg_full_name = msg_desc.clone().full_name().to_string();
 
-                // Decode the payload based on the `msg_desc`
+                // Decode the payload based on the `msg_desc` into a ScalarImpl::Struct
                 let decoded_value = DynamicMessage::decode(msg_desc, payload.as_ref()).unwrap();
                 let decoded_value = from_protobuf_value(
                     field_desc,
@@ -420,16 +420,15 @@ pub fn from_protobuf_value(
                     descriptor_pool,
                 )?
                 .unwrap();
-
-                // Extract the struct value
                 let ScalarImpl::Struct(v) = decoded_value else {
                     panic!("Expect ScalarImpl::Struct");
                 };
 
-                ScalarImpl::Jsonb(JsonbVal::from(serde_json::json!(recursive_parse_json(
+                // Encode the struct into a jsonb
+                ScalarImpl::Jsonb(JsonbVal::from(serde_json::json!(encode_datum_to_json(
                     v.fields(),
-                    Some(f),
-                    Some(full_name),
+                    Some(field_names),
+                    Some(msg_full_name),
                 ))))
             } else {
                 let mut rw_values = Vec::with_capacity(dyn_msg.descriptor().fields().len());
