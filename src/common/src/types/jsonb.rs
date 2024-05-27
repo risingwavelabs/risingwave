@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
+use std::fmt::{self, Write};
 use std::hash::Hash;
 
-use bytes::{Buf, BytesMut};
+use bytes::{Buf, BufMut, BytesMut};
 use jsonbb::{Value, ValueRef};
 use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
 use risingwave_common_estimate_size::EstimateSize;
@@ -548,23 +548,27 @@ impl ToSql for JsonbVal {
 
     fn to_sql(
         &self,
-        ty: &Type,
+        _ty: &Type,
         out: &mut BytesMut,
     ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>>
     where
         Self: Sized,
     {
-        serde_json::Value::from(self.0.clone()).to_sql(ty, out)
+        out.put_u8(1);
+        write!(out, "{}", self.0).unwrap();
+        Ok(IsNull::No)
     }
 }
 
 impl<'a> FromSql<'a> for JsonbVal {
     fn from_sql(
-        ty: &Type,
-        raw: &'a [u8],
+        _ty: &Type,
+        mut raw: &'a [u8],
     ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
-        let instant = serde_json::Value::from_sql(ty, raw)?;
-        Ok(JsonbVal::from(instant))
+        if raw.is_empty() || raw.get_u8() != 1 {
+            return Err("invalid jsonb encoding".into());
+        }
+        Ok(JsonbVal::from(Value::from_text(raw)?))
     }
 
     fn accepts(ty: &Type) -> bool {

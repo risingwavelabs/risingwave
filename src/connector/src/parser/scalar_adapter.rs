@@ -84,6 +84,8 @@ pub(crate) enum ScalarAdapter {
     Enum(EnumString),
     NumericList(Vec<Option<PgNumeric>>),
     EnumList(Vec<Option<EnumString>>),
+    // UuidList is covered by List, while NumericList and EnumList are special cases.
+    // Note: The IntervalList is not supported.
     List(Vec<Option<ScalarAdapter>>),
 }
 
@@ -120,6 +122,8 @@ impl<'a> FromSql<'a> for ScalarAdapter {
         match ty.kind() {
             Kind::Simple => match *ty {
                 Type::UUID => Ok(ScalarAdapter::Uuid(uuid::Uuid::from_sql(ty, raw)?)),
+                // In order to cover the decimal beyond RustDecimal(only 28 digits are supported),
+                // we use the PgNumeric to handle decimal from postgres.
                 Type::NUMERIC => Ok(ScalarAdapter::Numeric(PgNumeric::from_sql(ty, raw)?)),
                 _ => Ok(ScalarAdapter::Builtin(ScalarImpl::from_sql(ty, raw)?)),
             },
@@ -185,7 +189,7 @@ impl ScalarAdapter {
                         Some(ScalarRefImpl::Utf8(s)) => Some(string_to_pg_numeric(s)),
                         None => None,
                         _ => {
-                            unreachable!("Currently, only rw-numeric[], rw_int256[] and varchar[] are supported to convert to pg-numeric[]");
+                            unreachable!("Only rw-numeric[], rw_int256[] and varchar[] are supported to convert to pg-numeric[]");
                         }
                     })
                 }
@@ -240,6 +244,8 @@ impl ScalarAdapter {
                 let mut builder = dtype.create_array_builder(0);
                 for val in vec {
                     let scalar = match (val, &dtype) {
+                        // A numeric array contains special values like NaN, Inf, -Inf, which are not supported in Debezium,
+                        // when we encounter these special values, we fallback the array to NULL, returning None directly.
                         (Some(numeric), box DataType::Varchar) => {
                             if pg_numeric_is_special(&numeric) {
                                 return None;
@@ -251,6 +257,9 @@ impl ScalarAdapter {
                             if pg_numeric_is_special(&numeric) {
                                 return None;
                             } else {
+                                // A PgNumeric can sometimes exceeds the range of Int256 and RwNumeric.
+                                // In our json parsing, we fallback the array to NULL in this case.
+                                // Here we keep the behavior consistent and return None directly.
                                 match ScalarAdapter::Numeric(numeric).into_scalar(dtype) {
                                     Some(scalar) => Some(scalar),
                                     None => {
@@ -260,8 +269,9 @@ impl ScalarAdapter {
                             }
                         }
                         (Some(_), _) => unreachable!(
-                            "into_scalar_in_list should only be called with ScalarAdapter::Numeric types"
+                            "Only rw-numeric[], rw_int256[] and varchar[] are supported to convert to pg-numeric[]"
                         ),
+                        // This item is NULL, continue to handle next item.
                         (None, _) => None,
                     };
                     builder.append(scalar);
