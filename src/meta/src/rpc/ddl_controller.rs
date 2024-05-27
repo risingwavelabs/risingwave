@@ -27,7 +27,7 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::stream_graph_visitor::{
-    visit_fragment, visit_stream_node, visit_stream_node_cont,
+    visit_fragment, visit_stream_node, visit_stream_node_cont_mut,
 };
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::dispatch_source_prop;
@@ -1162,7 +1162,7 @@ impl DdlController {
             if let Some(node) = &mut actor.nodes {
                 let fields = node.fields.clone();
 
-                visit_stream_node_cont(node, |node| {
+                visit_stream_node_cont_mut(node, |node| {
                     if let Some(NodeBody::Union(_)) = &mut node.node_body {
                         for input in &mut node.input {
                             if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body
