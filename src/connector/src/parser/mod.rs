@@ -57,6 +57,7 @@ use crate::parser::util::{
     extract_header_inner_from_meta, extract_headers_from_meta, extreact_timestamp_from_meta,
 };
 use crate::schema::schema_registry::SchemaRegistryAuth;
+use crate::schema::InvalidOptionError;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
     extract_source_struct, BoxSourceStream, ChunkSourceStream, SourceColumnDesc, SourceColumnType,
@@ -983,6 +984,36 @@ pub struct AvroProperties {
     pub record_name: Option<String>,
     pub key_record_name: Option<String>,
     pub name_strategy: PbSchemaRegistryNameStrategy,
+    pub map_handling: Option<MapHandling>,
+}
+
+/// How to convert the map type from the input encoding to RisingWave's datatype.
+///
+/// XXX: Should this be `avro.map.handling.mode`? Can it be shared between Avro and Protobuf?
+#[derive(Debug, Copy, Clone)]
+pub enum MapHandling {
+    Jsonb,
+    // TODO: <https://github.com/risingwavelabs/risingwave/issues/13387>
+    // Map
+}
+
+impl MapHandling {
+    pub const OPTION_KEY: &'static str = "map.handling.mode";
+
+    pub fn from_options(
+        options: &std::collections::BTreeMap<String, String>,
+    ) -> Result<Option<Self>, InvalidOptionError> {
+        let mode = match options.get(Self::OPTION_KEY).map(std::ops::Deref::deref) {
+            Some("jsonb") => Self::Jsonb,
+            Some(v) => {
+                return Err(InvalidOptionError {
+                    message: format!("unrecognized {} value {}", Self::OPTION_KEY, v),
+                })
+            }
+            None => return Ok(None),
+        };
+        Ok(Some(mode))
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -1089,6 +1120,7 @@ impl SpecificParserConfig {
                         .unwrap(),
                     use_schema_registry: info.use_schema_registry,
                     row_schema_location: info.row_schema_location.clone(),
+                    map_handling: MapHandling::from_options(&info.format_encode_options)?,
                     ..Default::default()
                 };
                 if format == SourceFormat::Upsert {

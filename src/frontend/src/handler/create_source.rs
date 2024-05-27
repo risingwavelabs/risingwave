@@ -32,8 +32,8 @@ use risingwave_connector::parser::additional_columns::{
     build_additional_column_catalog, COMPATIBLE_ADDITIONAL_COLUMNS,
 };
 use risingwave_connector::parser::{
-    schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
-    SpecificParserConfig, TimestamptzHandling, DEBEZIUM_IGNORE_KEY,
+    schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig, MapHandling,
+    ProtobufParserConfig, SpecificParserConfig, TimestamptzHandling, DEBEZIUM_IGNORE_KEY,
 };
 use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
@@ -402,6 +402,17 @@ pub(crate) async fn bind_columns_from_source(
             stream_source_info.name_strategy =
                 name_strategy.unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32);
 
+            // Parse the value but throw it away.
+            // It would be too late to report error in `SpecificParserConfig::new`,
+            // which leads to recovery loop.
+            // XXX: Really?
+            MapHandling::from_options(&format_encode_options_to_consume)
+                .map_err(|err| InvalidInputSyntax(err.message))?;
+            try_consume_string_from_options(
+                &mut format_encode_options_to_consume,
+                MapHandling::OPTION_KEY,
+            );
+
             Some(
                 extract_avro_table_schema(
                     &stream_source_info,
@@ -446,6 +457,7 @@ pub(crate) async fn bind_columns_from_source(
                 // Parse the value but throw it away.
                 // It would be too late to report error in `SpecificParserConfig::new`,
                 // which leads to recovery loop.
+                // XXX: Really?
                 TimestamptzHandling::from_options(&format_encode_options_to_consume)
                     .map_err(|err| InvalidInputSyntax(err.message))?;
                 try_consume_string_from_options(

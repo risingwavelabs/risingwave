@@ -24,14 +24,19 @@ use risingwave_pb::plan_common::{AdditionalColumn, ColumnDesc, ColumnDescVersion
 
 use crate::error::ConnectorResult;
 use crate::parser::unified::bail_uncategorized;
-use crate::parser::AccessError;
+use crate::parser::{AccessError, MapHandling};
 
-pub fn avro_schema_to_column_descs(schema: &Schema) -> ConnectorResult<Vec<ColumnDesc>> {
+pub fn avro_schema_to_column_descs(
+    schema: &Schema,
+    map_handling: Option<MapHandling>,
+) -> ConnectorResult<Vec<ColumnDesc>> {
     if let Schema::Record(RecordSchema { fields, .. }) = schema {
         let mut index = 0;
         let fields = fields
             .iter()
-            .map(|field| avro_field_to_column_desc(&field.name, &field.schema, &mut index))
+            .map(|field| {
+                avro_field_to_column_desc(&field.name, &field.schema, &mut index, map_handling)
+            })
             .collect::<ConnectorResult<Vec<_>>>()?;
         Ok(fields)
     } else {
@@ -46,8 +51,9 @@ fn avro_field_to_column_desc(
     name: &str,
     schema: &Schema,
     index: &mut i32,
+    map_handling: Option<MapHandling>,
 ) -> ConnectorResult<ColumnDesc> {
-    let data_type = avro_type_mapping(schema)?;
+    let data_type = avro_type_mapping(schema, map_handling)?;
     match schema {
         Schema::Record(RecordSchema {
             name: schema_name,
@@ -56,7 +62,7 @@ fn avro_field_to_column_desc(
         }) => {
             let vec_column = fields
                 .iter()
-                .map(|f| avro_field_to_column_desc(&f.name, &f.schema, index))
+                .map(|f| avro_field_to_column_desc(&f.name, &f.schema, index, map_handling))
                 .collect::<ConnectorResult<Vec<_>>>()?;
             *index += 1;
             Ok(ColumnDesc {
@@ -86,7 +92,10 @@ fn avro_field_to_column_desc(
     }
 }
 
-fn avro_type_mapping(schema: &Schema) -> ConnectorResult<DataType> {
+fn avro_type_mapping(
+    schema: &Schema,
+    map_handling: Option<MapHandling>,
+) -> ConnectorResult<DataType> {
     let data_type = match schema {
         Schema::String => DataType::Varchar,
         Schema::Int => DataType::Int32,
@@ -128,13 +137,13 @@ fn avro_type_mapping(schema: &Schema) -> ConnectorResult<DataType> {
 
             let struct_fields = fields
                 .iter()
-                .map(|f| avro_type_mapping(&f.schema))
+                .map(|f| avro_type_mapping(&f.schema, map_handling))
                 .collect::<ConnectorResult<Vec<_>>>()?;
             let struct_names = fields.iter().map(|f| f.name.clone()).collect_vec();
             DataType::new_struct(struct_fields, struct_names)
         }
         Schema::Array(item_schema) => {
-            let item_type = avro_type_mapping(item_schema.as_ref())?;
+            let item_type = avro_type_mapping(item_schema.as_ref(), map_handling)?;
             DataType::List(Box::new(item_type))
         }
         Schema::Union(union_schema) => {
@@ -144,7 +153,7 @@ fn avro_type_mapping(schema: &Schema) -> ConnectorResult<DataType> {
                 .find_or_first(|s| !matches!(s, Schema::Null))
                 .ok_or_else(|| anyhow::format_err!("unsupported Avro type: {:?}", union_schema))?;
 
-            avro_type_mapping(nested_schema)?
+            avro_type_mapping(nested_schema, map_handling)?
         }
         Schema::Ref { name } => {
             if name.name == DBZ_VARIABLE_SCALE_DECIMAL_NAME
@@ -157,14 +166,20 @@ fn avro_type_mapping(schema: &Schema) -> ConnectorResult<DataType> {
         }
         Schema::Map(value_schema) => {
             // TODO: support native map type
-            // TODO: make the target type configurable
-            if supported_avro_to_json_type(value_schema) {
-                DataType::Jsonb
-            } else {
-                bail!(
-                    "unsupported Avro type, cannot convert map to jsonb: {:?}",
-                    schema
-                )
+            match map_handling {
+                Some(MapHandling::Jsonb) => {
+                    if supported_avro_to_json_type(value_schema) {
+                        DataType::Jsonb
+                    } else {
+                        bail!(
+                            "unsupported Avro type, cannot convert map to jsonb: {:?}",
+                            schema
+                        )
+                    }
+                }
+                None => {
+                    bail!("`map.handling.mode` not specified in ENCODE AVRO (...). Currently supported modes: `jsonb`")
+                }
             }
         }
         Schema::Null | Schema::Fixed(_) | Schema::Uuid => {
@@ -186,7 +201,7 @@ fn supported_avro_to_json_type(schema: &Schema) -> bool {
         Schema::Union(union_schema) => union_schema
             .variants()
             .iter()
-            .all(|s| supported_avro_to_json_type(s)),
+            .all(supported_avro_to_json_type),
         Schema::Record(RecordSchema { fields, .. }) => fields
             .iter()
             .all(|f| supported_avro_to_json_type(&f.schema)),
@@ -218,11 +233,11 @@ pub(crate) fn avro_to_jsonb(
         Value::Boolean(b) => builder.add_bool(*b),
         Value::Int(i) => builder.add_i64(*i as i64),
         Value::Long(l) => builder.add_i64(*l),
-        Value::String(s) => builder.add_string(&s),
+        Value::String(s) => builder.add_string(s),
         Value::Map(m) => {
             builder.begin_object();
             for (k, v) in m {
-                builder.add_string(&k);
+                builder.add_string(k);
                 avro_to_jsonb(v, builder)?;
             }
             builder.end_object()
@@ -231,7 +246,7 @@ pub(crate) fn avro_to_jsonb(
         Value::Record(r) => {
             builder.begin_object();
             for (k, v) in r {
-                builder.add_string(&k);
+                builder.add_string(k);
                 avro_to_jsonb(v, builder)?;
             }
             builder.end_object()
@@ -243,7 +258,7 @@ pub(crate) fn avro_to_jsonb(
             }
             builder.end_array()
         }
-        Value::Union(_, v) => avro_to_jsonb(&v, builder)?,
+        Value::Union(_, v) => avro_to_jsonb(v, builder)?,
 
         // TODO: figure out where the following encoding is reasonable before enabling them.
         // Value::Float(f) => {
