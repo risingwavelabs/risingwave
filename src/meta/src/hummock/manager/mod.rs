@@ -3437,6 +3437,11 @@ fn gen_version_delta<'a>(
     version_delta
 }
 
+/// This function, `write_exclusive_cluster_id`, is used to check if it is a new cluster during meta startup.
+///
+/// The determination of a new or old cluster is based on whether the file "0.data" in the `data_directory/cluster_id` path has been written.
+///
+/// In all other cases, the function returns a boolean variable indicating whether it is a new cluster.
 async fn write_exclusive_cluster_id(
     state_store_dir: &str,
     cluster_id: ClusterId,

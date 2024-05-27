@@ -81,15 +81,9 @@ impl HummockServiceOpts {
                 bail!(MESSAGE);
             }
         };
-        let devide_object_prefix = match env::var("RW_OBJECT_STORE_devide_object_prefix") {
+        let devide_object_prefix = match env::var("RW_OBJECT_STORE_DEVIDE_OBJECT_PREFIX") {
             Ok(devide_object_prefix) => devide_object_prefix == "true",
-            Err(_) => {
-                const MESSAGE: &str =
-                    "env variable `RW_OBJECT_STORE_devide_object_prefix` not found.
-
-                ";
-                bail!(MESSAGE);
-            }
+            _ => true,
         };
 
         Ok(Self {

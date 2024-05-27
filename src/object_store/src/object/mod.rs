@@ -88,7 +88,7 @@ pub trait StreamingUploader: Send {
 /// The implementation must be thread-safe.
 #[async_trait::async_trait]
 pub trait ObjectStore: Send + Sync {
-    /// Get the key prefix for object
+    /// Get the key prefix for object, the prefix is determined by the type of object store and `devise_object_prefix`.
     fn get_object_prefix(&self, obj_id: u64, devide_object_prefix: bool) -> String;
 
     /// Uploads the object to `ObjectStore`.

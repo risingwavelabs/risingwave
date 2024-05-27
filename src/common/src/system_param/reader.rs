@@ -138,7 +138,7 @@ where
     }
 
     fn is_new_cluster(&self) -> bool {
-        self.inner().is_new_cluster.unwrap()
+        self.inner().is_new_cluster.unwrap_or(true)
     }
 
     fn backup_storage_url(&self) -> &str {
