@@ -13,12 +13,12 @@
 // limitations under the License.
 
 use std::io::Read;
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::Path;
 use std::thread::sleep;
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context as _, Result};
 use console::style;
 
 pub fn wait(
@@ -75,7 +75,7 @@ pub fn wait(
             });
         }
 
-        sleep(Duration::from_millis(30));
+        sleep(Duration::from_millis(100));
     }
 }
 
@@ -84,7 +84,10 @@ pub fn wait_tcp_available(
     timeout: Option<std::time::Duration>,
 ) -> anyhow::Result<()> {
     let server = server.as_ref();
-    let addr = server.parse()?;
+    let addr = server
+        .to_socket_addrs()?
+        .next()
+        .with_context(|| format!("failed to resolve {}", server))?;
     let start_time = std::time::Instant::now();
 
     loop {
@@ -101,6 +104,6 @@ pub fn wait_tcp_available(
             }
         }
 
-        sleep(Duration::from_millis(50));
+        sleep(Duration::from_millis(100));
     }
 }

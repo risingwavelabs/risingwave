@@ -55,7 +55,7 @@ fn create_wasm(opts: CreateFunctionOptions<'_>) -> Result<CreateFunctionOutput> 
         opts.name,
         opts.arg_types,
         opts.return_type,
-        opts.is_table_function,
+        opts.kind.is_table(),
     );
     let identifier = find_wasm_identifier_v2(&runtime, &identifier_v1)?;
     let compressed_binary = Some(zstd::stream::encode_all(&*wasm_binary, 0)?);
@@ -74,7 +74,7 @@ fn create_rust(opts: CreateFunctionOptions<'_>) -> Result<CreateFunctionOutput> 
         opts.name,
         opts.arg_types,
         opts.return_type,
-        opts.is_table_function,
+        opts.kind.is_table(),
     );
     // if the function returns a struct, users need to add `#[function]` macro by themselves.
     // otherwise, we add it automatically. the code should start with `fn ...`.

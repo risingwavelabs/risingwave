@@ -54,6 +54,7 @@ impl Rule for AggGroupBySimplifyRule {
                         order_by: vec![],
                         filter: Condition::true_cond(),
                         direct_args: vec![],
+                        user_defined: None,
                     });
                 }
             }

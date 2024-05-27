@@ -258,6 +258,7 @@ pub mod verify {
     impl<A: StateStoreRead, E: StateStoreRead> StateStoreRead for VerifyStateStore<A, E> {
         type ChangeLogIter = impl StateStoreReadChangeLogIter;
         type Iter = impl StateStoreReadIter;
+        type RevIter = impl StateStoreReadIter;
 
         async fn get(
             &self,
@@ -292,6 +293,28 @@ pub mod verify {
                     .await?;
                 let expected = if let Some(expected) = &self.expected {
                     Some(expected.iter(key_range, epoch, read_options).await?)
+                } else {
+                    None
+                };
+
+                Ok(verify_iter::<StateStoreIterItem>(actual, expected))
+            }
+        }
+
+        #[allow(clippy::manual_async_fn)]
+        fn rev_iter(
+            &self,
+            key_range: TableKeyRange,
+            epoch: u64,
+            read_options: ReadOptions,
+        ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
+            async move {
+                let actual = self
+                    .actual
+                    .rev_iter(key_range.clone(), epoch, read_options.clone())
+                    .await?;
+                let expected = if let Some(expected) = &self.expected {
+                    Some(expected.rev_iter(key_range, epoch, read_options).await?)
                 } else {
                     None
                 };
@@ -381,6 +404,7 @@ pub mod verify {
 
     impl<A: LocalStateStore, E: LocalStateStore> LocalStateStore for VerifyStateStore<A, E> {
         type Iter<'a> = impl StateStoreIter + 'a;
+        type RevIter<'a> = impl StateStoreIter + 'a;
 
         // We don't verify `may_exist` across different state stores because
         // the return value of `may_exist` is implementation specific and may not
@@ -419,6 +443,27 @@ pub mod verify {
                     .await?;
                 let expected = if let Some(expected) = &self.expected {
                     Some(expected.iter(key_range, read_options).await?)
+                } else {
+                    None
+                };
+
+                Ok(verify_iter::<StateStoreIterItem>(actual, expected))
+            }
+        }
+
+        #[allow(clippy::manual_async_fn)]
+        fn rev_iter(
+            &self,
+            key_range: TableKeyRange,
+            read_options: ReadOptions,
+        ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_ {
+            async move {
+                let actual = self
+                    .actual
+                    .rev_iter(key_range.clone(), read_options.clone())
+                    .await?;
+                let expected = if let Some(expected) = &self.expected {
+                    Some(expected.rev_iter(key_range, read_options).await?)
                 } else {
                     None
                 };
@@ -826,6 +871,13 @@ pub mod boxed_state_store {
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIter>;
 
+        async fn rev_iter(
+            &self,
+            key_range: TableKeyRange,
+            epoch: u64,
+            read_options: ReadOptions,
+        ) -> StorageResult<BoxStateStoreReadIter>;
+
         async fn iter_log(
             &self,
             epoch_range: (u64, u64),
@@ -852,6 +904,17 @@ pub mod boxed_state_store {
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIter> {
             Ok(Box::new(self.iter(key_range, epoch, read_options).await?))
+        }
+
+        async fn rev_iter(
+            &self,
+            key_range: TableKeyRange,
+            epoch: u64,
+            read_options: ReadOptions,
+        ) -> StorageResult<BoxStateStoreReadIter> {
+            Ok(Box::new(
+                self.rev_iter(key_range, epoch, read_options).await?,
+            ))
         }
 
         async fn iter_log(
@@ -883,6 +946,12 @@ pub mod boxed_state_store {
         ) -> StorageResult<Option<Bytes>>;
 
         async fn iter(
+            &self,
+            key_range: TableKeyRange,
+            read_options: ReadOptions,
+        ) -> StorageResult<BoxLocalStateStoreIterStream<'_>>;
+
+        async fn rev_iter(
             &self,
             key_range: TableKeyRange,
             read_options: ReadOptions,
@@ -938,6 +1007,14 @@ pub mod boxed_state_store {
             Ok(Box::new(self.iter(key_range, read_options).await?))
         }
 
+        async fn rev_iter(
+            &self,
+            key_range: TableKeyRange,
+            read_options: ReadOptions,
+        ) -> StorageResult<BoxLocalStateStoreIterStream<'_>> {
+            Ok(Box::new(self.rev_iter(key_range, read_options).await?))
+        }
+
         fn insert(
             &mut self,
             key: TableKey<Bytes>,
@@ -984,6 +1061,7 @@ pub mod boxed_state_store {
 
     impl LocalStateStore for BoxDynamicDispatchedLocalStateStore {
         type Iter<'a> = BoxLocalStateStoreIterStream<'a>;
+        type RevIter<'a> = BoxLocalStateStoreIterStream<'a>;
 
         fn may_exist(
             &self,
@@ -1007,6 +1085,14 @@ pub mod boxed_state_store {
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_ {
             self.deref().iter(key_range, read_options)
+        }
+
+        fn rev_iter(
+            &self,
+            key_range: TableKeyRange,
+            read_options: ReadOptions,
+        ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_ {
+            self.deref().rev_iter(key_range, read_options)
         }
 
         fn insert(
@@ -1103,6 +1189,7 @@ pub mod boxed_state_store {
     impl StateStoreRead for BoxDynamicDispatchedStateStore {
         type ChangeLogIter = BoxStateStoreReadChangeLogIter;
         type Iter = BoxStateStoreReadIter;
+        type RevIter = BoxStateStoreReadIter;
 
         fn get(
             &self,
@@ -1120,6 +1207,15 @@ pub mod boxed_state_store {
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
             self.deref().iter(key_range, epoch, read_options)
+        }
+
+        fn rev_iter(
+            &self,
+            key_range: TableKeyRange,
+            epoch: u64,
+            read_options: ReadOptions,
+        ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
+            self.deref().rev_iter(key_range, epoch, read_options)
         }
 
         fn iter_log(

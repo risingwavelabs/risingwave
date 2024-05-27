@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use arrow_schema::{DataType, Field};
 use arrow_udf_js::{CallMode, Runtime};
 use futures_util::StreamExt;
 use risingwave_common::array::arrow::{ToArrow, UdfArrowConvert};
@@ -31,20 +32,32 @@ static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
         })
     },
     build_fn: |opts| {
-        let body = format!(
-            "export function{} {}({}) {{ {} }}",
-            if opts.table_function { "*" } else { "" },
-            opts.identifier,
-            opts.arg_names.join(","),
-            opts.body.context("body is required")?,
-        );
         let mut runtime = Runtime::new()?;
-        runtime.add_function(
-            opts.identifier,
-            UdfArrowConvert::default().to_arrow_field("", opts.return_type)?,
-            CallMode::CalledOnNullInput,
-            &body,
-        )?;
+        if opts.kind.is_aggregate() {
+            runtime.add_aggregate(
+                opts.identifier,
+                Field::new("state", DataType::Binary, true).with_metadata(
+                    [("ARROW:extension:name".into(), "arrowudf.json".into())].into(),
+                ),
+                UdfArrowConvert::default().to_arrow_field("", opts.return_type)?,
+                CallMode::CalledOnNullInput,
+                opts.body.context("body is required")?,
+            )?;
+        } else {
+            let body = format!(
+                "export function{} {}({}) {{ {} }}",
+                if opts.kind.is_table() { "*" } else { "" },
+                opts.identifier,
+                opts.arg_names.join(","),
+                opts.body.context("body is required")?,
+            );
+            runtime.add_function(
+                opts.identifier,
+                UdfArrowConvert::default().to_arrow_field("", opts.return_type)?,
+                CallMode::CalledOnNullInput,
+                &body,
+            )?;
+        }
         Ok(Box::new(QuickJsFunction {
             runtime,
             identifier: opts.identifier.to_string(),
@@ -71,5 +84,23 @@ impl UdfImpl for QuickJsFunction {
         self.runtime
             .call_table_function(&self.identifier, input, 1024)
             .map(|s| futures_util::stream::iter(s).boxed())
+    }
+
+    fn call_agg_create_state(&self) -> Result<ArrayRef> {
+        self.runtime.create_state(&self.identifier)
+    }
+
+    fn call_agg_accumulate_or_retract(
+        &self,
+        state: &ArrayRef,
+        ops: &BooleanArray,
+        input: &RecordBatch,
+    ) -> Result<ArrayRef> {
+        self.runtime
+            .accumulate_or_retract(&self.identifier, state, ops, input)
+    }
+
+    fn call_agg_finish(&self, state: &ArrayRef) -> Result<ArrayRef> {
+        self.runtime.finish(&self.identifier, state)
     }
 }
