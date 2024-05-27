@@ -573,7 +573,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 &this.agg_calls,
                 this.watermark_epoch.clone(),
                 &this.distinct_dedup_tables,
-                this.actor_ctx.clone(),
+                &this.actor_ctx,
             ),
             buffered_watermarks: vec![None; this.group_key_indices.len()],
             window_watermark: None,

@@ -267,7 +267,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             metrics.clone(),
             join_table_id,
             actor_id,
-            &format!("hash join {}", side),
+            format!("hash join {}", side),
         );
 
         let cache =

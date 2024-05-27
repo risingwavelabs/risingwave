@@ -106,9 +106,9 @@ pub struct StreamingMetrics {
     agg_chunk_total_lookup_count: LabelGuardedIntCounterVec<3>,
     agg_dirty_groups_count: LabelGuardedIntGaugeVec<3>,
     agg_dirty_groups_heap_size: LabelGuardedIntGaugeVec<3>,
-    pub agg_distinct_cache_miss_count: LabelGuardedIntCounterVec<3>,
-    pub agg_distinct_total_cache_count: LabelGuardedIntCounterVec<3>,
-    pub agg_distinct_cached_entry_count: LabelGuardedIntGaugeVec<3>,
+    agg_distinct_cache_miss_count: LabelGuardedIntCounterVec<3>,
+    agg_distinct_total_cache_count: LabelGuardedIntCounterVec<3>,
+    agg_distinct_cached_entry_count: LabelGuardedIntGaugeVec<3>,
 
     // Streaming TopN
     pub group_top_n_cache_miss_count: LabelGuardedIntCounterVec<3>,
@@ -1507,6 +1507,30 @@ impl StreamingMetrics {
         }
     }
 
+    pub fn new_agg_distinct_dedup_metrics(
+        &self,
+        table_id: u32,
+        actor_id: ActorId,
+        fragment_id: FragmentId,
+    ) -> AggDistinctDedupMetrics {
+        let label_list: &[&str; 3] = &[
+            &table_id.to_string(),
+            &actor_id.to_string(),
+            &fragment_id.to_string(),
+        ];
+        AggDistinctDedupMetrics {
+            agg_distinct_cache_miss_count: self
+                .agg_distinct_cache_miss_count
+                .with_guarded_label_values(label_list),
+            agg_distinct_total_cache_count: self
+                .agg_distinct_total_cache_count
+                .with_guarded_label_values(label_list),
+            agg_distinct_cached_entry_count: self
+                .agg_distinct_cached_entry_count
+                .with_guarded_label_values(label_list),
+        }
+    }
+
     pub fn new_temporal_join_metrics(
         &self,
         table_id: TableId,
@@ -1680,6 +1704,12 @@ pub struct HashAggMetrics {
     pub agg_chunk_total_lookup_count: LabelGuardedIntCounter<3>,
     pub agg_dirty_groups_count: LabelGuardedIntGauge<3>,
     pub agg_dirty_groups_heap_size: LabelGuardedIntGauge<3>,
+}
+
+pub struct AggDistinctDedupMetrics {
+    pub agg_distinct_cache_miss_count: LabelGuardedIntCounter<3>,
+    pub agg_distinct_total_cache_count: LabelGuardedIntCounter<3>,
+    pub agg_distinct_cached_entry_count: LabelGuardedIntGauge<3>,
 }
 
 pub struct TemporalJoinMetrics {

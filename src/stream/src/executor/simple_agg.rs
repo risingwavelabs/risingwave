@@ -236,7 +236,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             &this.agg_calls,
             this.watermark_epoch.clone(),
             &this.distinct_dedup_tables,
-            this.actor_ctx.clone(),
+            &this.actor_ctx,
         );
         distinct_dedup.dedup_caches_mut().for_each(|cache| {
             cache.update_epoch(barrier.epoch.curr);
