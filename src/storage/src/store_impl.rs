@@ -616,6 +616,11 @@ impl StateStoreImpl {
                             .with_thread_name("foyer.meta.runtime")
                             .build(),
                     );
+                if opts.meta_file_cache_insert_rate_limit_mb > 0 {
+                    builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
+                        opts.meta_file_cache_insert_rate_limit_mb * MB,
+                    )));
+                }
             }
 
             builder.build().await.map_err(HummockError::foyer_error)?
@@ -623,7 +628,7 @@ impl StateStoreImpl {
 
         let block_cache_v2 = {
             let mut builder = HybridCacheBuilder::new()
-                .with_name("foyer.block")
+                .with_name("foyer.data")
                 .memory(opts.block_cache_capacity_mb * MB)
                 .with_shards(opts.block_cache_shard_num)
                 .with_eviction_config(opts.block_cache_eviction_config.clone())
@@ -634,7 +639,7 @@ impl StateStoreImpl {
                 })
                 .storage();
 
-            if !opts.meta_file_cache_dir.is_empty() {
+            if !opts.data_file_cache_dir.is_empty() {
                 builder = builder
                     .with_device_config(
                         DirectFsDeviceOptionsBuilder::new(&opts.data_file_cache_dir)
@@ -643,9 +648,6 @@ impl StateStoreImpl {
                             .build(),
                     )
                     .with_indexer_shards(opts.data_file_cache_indexer_shards)
-                    .with_admission_picker(Arc::new(RateLimitPicker::new(
-                        opts.data_file_cache_insert_rate_limit_mb * MB,
-                    )))
                     .with_flushers(opts.data_file_cache_flushers)
                     .with_reclaimers(opts.data_file_cache_reclaimers)
                     .with_clean_region_threshold(
@@ -660,9 +662,14 @@ impl StateStoreImpl {
                     )
                     .with_runtime_config(
                         RuntimeConfigBuilder::new()
-                            .with_thread_name("foyer.block.runtime")
+                            .with_thread_name("foyer.data.runtime")
                             .build(),
                     );
+                if opts.data_file_cache_insert_rate_limit_mb > 0 {
+                    builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
+                        opts.data_file_cache_insert_rate_limit_mb * MB,
+                    )));
+                }
             }
 
             builder.build().await.map_err(HummockError::foyer_error)?

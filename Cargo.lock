@@ -5012,8 +5012,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6ca8e518354d589e868a1404430b22ab5f4f65fde04fc1cfb21a77565f598e4"
+source = "git+https://github.com/mrcroxx/foyer?rev=68fab9a#68fab9a229527c048155a9e0563b41b8d5b42f08"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -5028,8 +5027,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b190f529d6d31caa7b862a104b851d150566114a2e86af65f2d5b442043cf51f"
+source = "git+https://github.com/mrcroxx/foyer?rev=68fab9a#68fab9a229527c048155a9e0563b41b8d5b42f08"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -5047,8 +5045,7 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "906d9b0fd1c6a80f9b8cb98aabf5b5d3de74749ae957e6b4c5436119eb7dbb25"
+source = "git+https://github.com/mrcroxx/foyer?rev=68fab9a#68fab9a229527c048155a9e0563b41b8d5b42f08"
 dependencies = [
  "itertools 0.13.0",
  "memoffset",
@@ -5057,8 +5054,7 @@ dependencies = [
 [[package]]
 name = "foyer-memory"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bdf54c7ec7d4d97c6ae56fd300d45cf32af896448a8bacec59ae607af0950131"
+source = "git+https://github.com/mrcroxx/foyer?rev=68fab9a#68fab9a229527c048155a9e0563b41b8d5b42f08"
 dependencies = [
  "ahash 0.8.11",
  "bitflags 2.5.0",
@@ -5078,8 +5074,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "488baeee426e81be8503dfce8fee0fda8adc6b4703b8d53b11bedb63893a6048"
+source = "git+https://github.com/mrcroxx/foyer?rev=68fab9a#68fab9a229527c048155a9e0563b41b8d5b42f08"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
