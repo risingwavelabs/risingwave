@@ -278,6 +278,7 @@ pub struct KafkaConfig {
     pub controller_port: u16,
     pub listen_address: String,
 
+    pub image: String,
     pub persist_data: bool,
     pub node_id: u32,
 
