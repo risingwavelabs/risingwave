@@ -309,9 +309,12 @@ pub struct MetaConfig {
     #[serde(default)]
     pub do_not_config_object_storage_lifecycle: bool,
 
+    /// Count of partition in split group. Meta will assign this value to every new group when it splits from default-group by automatically.
+    /// Each partition contains aligned data of `VirtualNode::COUNT / partition_vnode_count` consecutive virtual-nodes of one state table.
     #[serde(default = "default::meta::partition_vnode_count")]
     pub partition_vnode_count: u32,
 
+    /// The threshold of write throughput to trigger a group split. Increase this configuration value to avoid split too many groups with few data write.
     #[serde(default = "default::meta::table_write_throughput_threshold")]
     pub table_write_throughput_threshold: u64,
 
@@ -334,8 +337,23 @@ pub struct MetaConfig {
     #[config_doc(nested)]
     pub compaction_config: CompactionConfig,
 
-    #[serde(default = "default::meta::hybird_partition_vnode_count")]
-    pub hybird_partition_vnode_count: u32,
+    /// Count of partitions of tables in default group and materialized view group.
+    /// The meta node will decide according to some strategy whether to cut the boundaries of the file according to the vnode alignment.
+    /// Each partition contains aligned data of `VirtualNode::COUNT / hybrid_partition_vnode_count` consecutive virtual-nodes of one state table.
+    /// Set it zero to disable this feature.
+    #[serde(default = "default::meta::hybrid_partition_vnode_count")]
+    pub hybrid_partition_vnode_count: u32,
+
+    /// The threshold of table size in one compact task to decide whether to partition one table into `hybrid_partition_vnode_count` parts, which belongs to default group and materialized view group.
+    /// Set it max value of 64-bit number to disable this feature.
+    #[serde(default = "default::meta::compact_task_table_size_partition_threshold_low")]
+    pub compact_task_table_size_partition_threshold_low: u64,
+
+    /// The threshold of table size in one compact task to decide whether to partition one table into `partition_vnode_count` parts, which belongs to default group and materialized view group.
+    /// Set it max value of 64-bit number to disable this feature.
+    #[serde(default = "default::meta::compact_task_table_size_partition_threshold_high")]
+    pub compact_task_table_size_partition_threshold_high: u64,
+
     #[serde(default = "default::meta::event_log_enabled")]
     pub event_log_enabled: bool,
     /// Keeps the latest N events per channel.
@@ -674,6 +692,9 @@ pub struct StorageConfig {
     /// Number of SST ids fetched from meta per RPC
     #[serde(default = "default::storage::sstable_id_remote_fetch_number")]
     pub sstable_id_remote_fetch_number: u32,
+
+    #[serde(default = "default::storage::min_sstable_size_mb")]
+    pub min_sstable_size_mb: u32,
 
     #[serde(default)]
     pub data_file_cache: FileCacheConfig,
@@ -1260,8 +1281,16 @@ pub mod default {
             1024 * 1024 * 1024 // 1GB
         }
 
-        pub fn hybird_partition_vnode_count() -> u32 {
+        pub fn hybrid_partition_vnode_count() -> u32 {
             4
+        }
+
+        pub fn compact_task_table_size_partition_threshold_low() -> u64 {
+            128 * 1024 * 1024 // 128MB
+        }
+
+        pub fn compact_task_table_size_partition_threshold_high() -> u64 {
+            512 * 1024 * 1024 // 512MB
         }
 
         pub fn event_log_enabled() -> bool {
@@ -1399,6 +1428,10 @@ pub mod default {
 
         pub fn sstable_id_remote_fetch_number() -> u32 {
             10
+        }
+
+        pub fn min_sstable_size_mb() -> u32 {
+            32
         }
 
         pub fn min_sst_size_for_streaming_upload() -> u64 {
