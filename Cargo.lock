@@ -11410,10 +11410,8 @@ version = "1.9.0-alpha"
 dependencies = [
  "anyhow",
  "console",
- "futures",
  "itertools 0.12.1",
  "libtest-mimic 0.7.0",
- "madsim-tokio",
  "matches",
  "serde",
  "serde_with",

@@ -35,21 +35,11 @@ workspace-hack = { path = "../workspace-hack" }
 [dev-dependencies]
 anyhow = "1"
 console = "0.15"
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
 libtest-mimic = "0.7"
 matches = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_with = "3"
 serde_yaml = "0.9"
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-    "fs",
-] }
 walkdir = "2"
 
 [package.metadata.release]
