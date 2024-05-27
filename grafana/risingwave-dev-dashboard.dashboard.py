@@ -2722,16 +2722,6 @@ def section_hummock_tiered_cache(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_bytes(
-                    "Size",
-                    "",
-                    [
-                        panels.target(
-                            f"sum({metric('foyer_storage_total_bytes')}) by (foyer, {NODE_LABEL})",
-                            "{{foyer}} size @ {{%s}}" % NODE_LABEL,
-                        ),
-                    ],
-                ),
                 panels.timeseries_ops(
                     "Inheritance - Parent Meta Lookup Ops",
                     "",
