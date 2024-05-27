@@ -11409,7 +11409,7 @@ name = "risingwave_sqlparser"
 version = "1.9.0-alpha"
 dependencies = [
  "anyhow",
- "console",
+ "expect-test",
  "itertools 0.12.1",
  "libtest-mimic 0.7.0",
  "matches",
