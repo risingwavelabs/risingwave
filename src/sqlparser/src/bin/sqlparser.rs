@@ -12,5 +12,14 @@ fn main() {
     let mut buffer = String::new();
     io::stdin().read_line(&mut buffer).unwrap();
     let result = Parser::parse_sql(&buffer);
-    println!("{:#?}", result);
+    match result {
+        Ok(statements) => {
+            for statement in statements {
+                println!("{:#?}", statement);
+            }
+        }
+        Err(e) => {
+            println!("{}", e);
+        }
+    }
 }

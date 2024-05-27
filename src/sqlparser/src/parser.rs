@@ -24,7 +24,7 @@ use core::fmt;
 
 use itertools::Itertools;
 use tracing::{debug, instrument};
-use winnow::combinator::{alt, opt, preceded, separated};
+use winnow::combinator::{alt, fail, opt, preceded, separated, trace};
 use winnow::error::FromExternalError;
 use winnow::{PResult, Parser as _};
 
@@ -52,7 +52,7 @@ impl ParserError {
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
-pub(crate) struct StrError(pub String);
+pub struct StrError(pub String);
 
 // Use `Parser::expected` instead, if possible
 #[macro_export]
@@ -66,8 +66,8 @@ macro_rules! parser_err {
     };
 }
 
-impl From<ParserError> for winnow::error::ErrMode<winnow::error::ContextError> {
-    fn from(e: ParserError) -> Self {
+impl From<StrError> for winnow::error::ErrMode<winnow::error::ContextError> {
+    fn from(e: StrError) -> Self {
         winnow::error::ErrMode::Cut(winnow::error::ContextError::from_external_error(
             &Parser::default(),
             winnow::error::ErrorKind::Fail,
@@ -202,15 +202,16 @@ impl Parser<'_> {
         let mut tokenizer = Tokenizer::new(sql);
         let tokens = tokenizer.tokenize_with_location()?;
         let mut parser = Parser(&tokens);
-        let ast = separated(.., Parser::parse_statement, Token::SemiColon)
+        let stmts: Vec<Option<Statement>> = separated(
+                ..,
+                opt(trace("statement", Parser::parse_statement)),
+                Token::SemiColon,
+            )
             .parse(parser)
             .map_err(|e| {
             // append SQL context to the error message, e.g.:
             // LINE 1: SELECT 1::int(2);
-            //                      ^
-            // XXX: the cursor location is not accurate
-            //      it may be offset one token forward because the error token has been consumed
-            let loc = match parser.tokens.get(parser.index) {
+            let loc = match tokens.get(e.offset()) {
                 Some(token) => token.location.clone(),
                 None => {
                     // get location of EOF
@@ -225,38 +226,14 @@ impl Parser<'_> {
             let cursor = " ".repeat(prefix.len() + loc.column as usize - 1);
             ParserError::ParserError(format!(
                 "{}\n{}{}\n{}^",
-                e.inner_msg(),
+                e.inner().to_string().replace('\n', ": "),
                 prefix,
                 sql_line,
                 cursor
             ))
         })?;
-        Ok(ast)
-    }
-
-    /// Parse a list of semicolon-separated SQL statements.
-    pub fn parse_statements(&mut self) -> Result<Vec<Statement>, ParserError> {
-        let mut stmts = Vec::new();
-        let mut expecting_statement_delimiter = false;
-        loop {
-            // ignore empty statements (between successive statement delimiters)
-            while self.consume_token(&Token::SemiColon) {
-                expecting_statement_delimiter = false;
-            }
-
-            if self.peek_token() == Token::EOF {
-                break;
-            }
-            if expecting_statement_delimiter {
-                return self.expected("end of statement", self.peek_token());
-            }
-
-            let statement = self.parse_statement()?;
-            stmts.push(statement);
-            expecting_statement_delimiter = true;
-        }
         debug!("parsed statements:\n{:#?}", stmts);
-        Ok(stmts)
+        Ok(stmts.into_iter().flatten().collect())
     }
 
     /// Parse a single top-level statement (such as SELECT, INSERT, CREATE, etc.),
@@ -316,18 +293,13 @@ impl Parser<'_> {
                 Keyword::FLUSH => Ok(Statement::Flush),
                 Keyword::WAIT => Ok(Statement::Wait),
                 Keyword::RECOVER => Ok(Statement::Recover),
-                _ => self.expected(
-                    "an SQL statement",
-                    Token::Word(w).with_location(token.location),
-                ),
+                _ => fail(self),
             },
             Token::LParen => {
                 *self = checkpoint;
                 Ok(Statement::Query(Box::new(self.parse_query()?)))
             }
-            unexpected => {
-                self.expected("an SQL statement", unexpected.with_location(token.location))
-            }
+            _ => fail(self),
         }
     }
 
@@ -1906,9 +1878,7 @@ impl Parser<'_> {
                 Some(Token::Whitespace(_)) => continue,
                 _ => {
                     if n == 0 {
-                        return token
-                            .cloned()
-                            .unwrap_or(TokenWithLocation::wrap(Token::EOF));
+                        return token.cloned().unwrap_or(TokenWithLocation::eof());
                     }
                     n -= 1;
                 }
@@ -1922,7 +1892,7 @@ impl Parser<'_> {
     pub fn next_token(&mut self) -> TokenWithLocation {
         loop {
             let Some(token) = self.0.first() else {
-                return TokenWithLocation::wrap(Token::EOF);
+                return TokenWithLocation::eof();
             };
             self.0 = &self.0[1..];
             match token.token {
@@ -1945,7 +1915,7 @@ impl Parser<'_> {
 
     /// Report unexpected token
     pub fn expected<T>(&self, expected: &str, found: TokenWithLocation) -> PResult<T> {
-        parser_err!("expected {}, found: {}", expected, found)
+        parser_err!("expected {}, found: {}", expected, found.token)
     }
 
     /// Look for an expected keyword and consume it if it exists
@@ -3057,10 +3027,10 @@ impl Parser<'_> {
                     }
                 }
                 Token::Number(s) => {
-                    let num = s.parse::<u64>().map_err(|e| {
-                        ParserError::ParserError(format!("Could not parse '{}' as u64: {}", s, e))
-                    });
-                    Ok(Some(Since::TimestampMsNum(num?)))
+                    let num = s
+                        .parse::<u64>()
+                        .map_err(|e| StrError(format!("Could not parse '{}' as u64: {}", s, e)))?;
+                    Ok(Some(Since::TimestampMsNum(num)))
                 }
                 unexpected => self.expected(
                     "proctime(), begin() , now(), Number",

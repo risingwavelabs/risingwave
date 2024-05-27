@@ -60,7 +60,7 @@ pub use crate::ast::ddl::{
     AlterViewOperation,
 };
 use crate::keywords::Keyword;
-use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError};
+use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError, StrError};
 
 pub type RedactSqlOptionKeywordsRef = Arc<HashSet<String>>;
 
@@ -3008,7 +3008,7 @@ impl CreateFunctionWithOptions {
 
 /// TODO(kwannoel): Generate from the struct definition instead.
 impl TryFrom<Vec<SqlOption>> for CreateFunctionWithOptions {
-    type Error = ParserError;
+    type Error = StrError;
 
     fn try_from(with_options: Vec<SqlOption>) -> Result<Self, Self::Error> {
         let mut always_retry_on_network_error = None;
@@ -3016,10 +3016,7 @@ impl TryFrom<Vec<SqlOption>> for CreateFunctionWithOptions {
             if option.name.to_string().to_lowercase() == "always_retry_on_network_error" {
                 always_retry_on_network_error = Some(option.value == Value::Boolean(true));
             } else {
-                return Err(ParserError::ParserError(format!(
-                    "Unsupported option: {}",
-                    option.name
-                )));
+                return Err(StrError(format!("Unsupported option: {}", option.name)));
             }
         }
         Ok(Self {

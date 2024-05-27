@@ -368,8 +368,8 @@ impl TokenWithLocation {
         }
     }
 
-    pub fn wrap(token: Token) -> TokenWithLocation {
-        TokenWithLocation::new(token, 0, 0)
+    pub fn eof() -> TokenWithLocation {
+        TokenWithLocation::new(Token::EOF, 0, 0)
     }
 }
 
@@ -388,7 +388,7 @@ impl PartialEq<TokenWithLocation> for Token {
 impl fmt::Display for TokenWithLocation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.token == Token::EOF {
-            write!(f, "EOF at the end")
+            write!(f, "end of input")
         } else {
             write!(
                 f,
