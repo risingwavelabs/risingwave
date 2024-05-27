@@ -27,7 +27,8 @@ use risingwave_pb::connector_service::{SourceType, ValidateSourceRequest, Valida
 
 use crate::error::ConnectorResult;
 use crate::source::cdc::{
-    CdcProperties, CdcSourceTypeTrait, Citus, DebeziumCdcSplit, Mongodb, Mysql, Postgres,
+    table_schema_exclude_additional_columns, CdcProperties, CdcSourceTypeTrait, Citus,
+    DebeziumCdcSplit, Mongodb, Mysql, Postgres,
 };
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
@@ -77,7 +78,7 @@ where
                 source_id: source_id as u64,
                 source_type: props.get_source_type_pb() as _,
                 properties: props.properties,
-                table_schema: Some(props.table_schema),
+                table_schema: Some(table_schema_exclude_additional_columns(&props.table_schema)),
                 is_source_job: props.is_cdc_source_job,
                 is_backfill_table: props.is_backfill_table,
             };

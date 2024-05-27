@@ -99,6 +99,22 @@ pub struct CdcProperties<T: CdcSourceTypeTrait> {
     pub _phantom: PhantomData<T>,
 }
 
+pub fn table_schema_exclude_additional_columns(table_schema: &TableSchema) -> TableSchema {
+    TableSchema {
+        columns: table_schema
+            .columns
+            .iter()
+            .filter(|col| {
+                col.additional_column
+                    .as_ref()
+                    .is_some_and(|val| val.column_type.is_none())
+            })
+            .cloned()
+            .collect(),
+        pk_indices: table_schema.pk_indices.clone(),
+    }
+}
+
 impl<T: CdcSourceTypeTrait> TryFromHashmap for CdcProperties<T> {
     fn try_from_hashmap(
         properties: HashMap<String, String>,
