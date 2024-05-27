@@ -214,11 +214,11 @@ SELECT c_varchar, c_bytea
 FROM postgres_all_types
 ORDER BY c_boolean, c_bigint, c_date;
 ----
-'d'     \x00
+d       \x00
 (empty) \x00
 NULL    NULL
 example \xdeadbeef
-'d'     \x00
+d       \x00
 (empty) \x00
 NULL    NULL
 example \xdeadbeef
