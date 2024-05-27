@@ -743,7 +743,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
     with_version_column: Option<String>,
     include_column_options: IncludeOption,
 ) -> Result<(PlanRef, PbTable)> {
-    if constraints.iter().any(|c| {
+    if !constraints.iter().any(|c| {
         matches!(
             c,
             TableConstraint::Unique {
