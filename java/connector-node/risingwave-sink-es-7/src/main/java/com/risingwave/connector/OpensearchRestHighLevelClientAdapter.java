@@ -30,7 +30,7 @@ import org.opensearch.client.RestClientBuilder;
 import org.opensearch.client.RestHighLevelClient;
 import org.opensearch.core.action.ActionListener;
 
-public class OpensearchRestHighLevelClientAdapter implements RestHighLevelClientAdapter {
+public class OpensearchRestHighLevelClientAdapter implements AutoCloseable {
     RestHighLevelClient opensearchClient;
 
     private static RestClientBuilder configureRestClientBuilder(

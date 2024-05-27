@@ -29,6 +29,7 @@ import com.risingwave.proto.Data.DataType.TypeName;
 import com.risingwave.proto.Data.Op;
 import java.io.IOException;
 import java.util.Map;
+import org.apache.http.HttpHost;
 import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.client.RequestOptions;
@@ -52,15 +53,14 @@ public class EsSinkTest {
 
     public void testEsSink(ElasticsearchContainer container, String username, String password)
             throws IOException {
-        EsSink sink =
-                new EsSink(
-                        new EsSinkConfig(container.getHttpHostAddress())
-                                .setConnector("elasticsearch")
-                                .withIndex("test")
-                                .withDelimiter("$")
-                                .withUsername(username)
-                                .withPassword(password),
-                        getTestTableSchema());
+        EsSinkConfig config =
+                new EsSinkConfig(container.getHttpHostAddress())
+                        .withIndex("test")
+                        .withDelimiter("$")
+                        .withUsername(username)
+                        .withPassword(password);
+        config.setConnector("elasticsearch");
+        EsSink sink = new EsSink(config, getTestTableSchema());
         sink.write(
                 Iterators.forArray(
                         new ArraySinkRow(
@@ -75,8 +75,9 @@ public class EsSinkTest {
             fail(e.getMessage());
         }
 
+        HttpHost host = HttpHost.create(config.getUrl());
         ElasticRestHighLevelClientAdapter client =
-                (ElasticRestHighLevelClientAdapter) sink.getClient();
+                new ElasticRestHighLevelClientAdapter(host, config);
         SearchRequest searchRequest = new SearchRequest("test");
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
         searchSourceBuilder.query(QueryBuilders.matchAllQuery());

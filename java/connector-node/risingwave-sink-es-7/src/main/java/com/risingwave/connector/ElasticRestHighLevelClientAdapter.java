@@ -34,7 +34,7 @@ import org.elasticsearch.client.RestClientBuilder;
 import org.elasticsearch.client.RestHighLevelClient;
 import org.elasticsearch.client.RestHighLevelClientBuilder;
 
-public class ElasticRestHighLevelClientAdapter implements RestHighLevelClientAdapter {
+public class ElasticRestHighLevelClientAdapter implements AutoCloseable {
     RestHighLevelClient esClient;
 
     private static RestClientBuilder configureRestClientBuilder(
