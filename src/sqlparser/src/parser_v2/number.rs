@@ -43,6 +43,22 @@ where
     token_number.try_map(|s| s.parse::<u64>()).parse_next(input)
 }
 
+/// Consume an unsigned literal integer
+pub fn literal_u32<S>(input: &mut S) -> PResult<u32>
+where
+    S: TokenStream,
+{
+    token_number.try_map(|s| s.parse::<u32>()).parse_next(input)
+}
+
+/// Consume an literal integer
+pub fn literal_i64<S>(input: &mut S) -> PResult<i64>
+where
+    S: TokenStream,
+{
+    token_number.try_map(|s| s.parse::<i64>()).parse_next(input)
+}
+
 /// Consume a precision definition in some types, e.g. `FLOAT(32)`.
 ///
 /// The precision must be in the given range.

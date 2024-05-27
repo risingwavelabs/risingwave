@@ -12,7 +12,7 @@
 
 use winnow::combinator::{preceded, separated, trace};
 use winnow::error::{ContextError, StrContext};
-use winnow::stream::{Location, Stream, StreamIsPartial};
+use winnow::stream::{Stream, StreamIsPartial};
 use winnow::token::{any, take_while};
 use winnow::{PResult, Parser, Stateful};
 
@@ -30,15 +30,9 @@ pub(crate) use number::*;
 /// Bundle trait requirements from winnow, so that we don't need to write them everywhere.
 ///
 /// All combinators should accept a generic `S` that implements `TokenStream`.
-pub trait TokenStream:
-    Stream<Token = TokenWithLocation> + StreamIsPartial + Location + Default
-{
-}
+pub trait TokenStream: Stream<Token = TokenWithLocation> + StreamIsPartial + Default {}
 
-impl<S> TokenStream for S where
-    S: Stream<Token = TokenWithLocation> + StreamIsPartial + Location + Default
-{
-}
+impl<S> TokenStream for S where S: Stream<Token = TokenWithLocation> + StreamIsPartial + Default {}
 
 /// Consume any token, including whitespaces. In almost all cases, you should use [`token`] instead.
 fn any_token<S>(input: &mut S) -> PResult<TokenWithLocation>

@@ -20,14 +20,15 @@ use std::fmt;
 use itertools::Itertools as _;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use winnow::PResult;
 
 use crate::ast::{
     AstString, AstVec, ConnectorSchema, Encode, Format, Ident, ObjectName, ParseTo, SqlOption,
     Value,
 };
 use crate::keywords::Keyword;
-use crate::parser::{Parser, ParserError};
-use crate::{impl_fmt_display, impl_parse_to};
+use crate::parser::Parser;
+use crate::{impl_fmt_display, impl_parse_to, parser_err};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -64,12 +65,10 @@ impl From<ConnectorSchema> for CompatibleSourceSchema {
     }
 }
 
-pub fn parse_source_schema(p: &mut Parser<'_>) -> Result<CompatibleSourceSchema, ParserError> {
+pub fn parse_source_schema(p: &mut Parser<'_>) -> PResult<CompatibleSourceSchema> {
     if let Some(schema_v2) = p.parse_schema()? {
         if schema_v2.key_encode.is_some() {
-            return Err(ParserError::ParserError(
-                "key encode clause is not supported in source schema".to_string(),
-            ));
+            parser_err!("key encode clause is not supported in source schema");
         }
         Ok(CompatibleSourceSchema::V2(schema_v2))
     } else if p.peek_nth_any_of_keywords(0, &[Keyword::ROW])
@@ -109,11 +108,10 @@ pub fn parse_source_schema(p: &mut Parser<'_>) -> Result<CompatibleSourceSchema,
             }
             "BYTES" => SourceSchema::Bytes,
             _ => {
-                return Err(ParserError::ParserError(
+                parser_err!(
                     "expected JSON | UPSERT_JSON | PROTOBUF | DEBEZIUM_JSON | DEBEZIUM_AVRO \
                     | AVRO | UPSERT_AVRO | MAXWELL | CANAL_JSON | BYTES | NATIVE after ROW FORMAT"
-                        .to_string(),
-                ));
+                );
             }
         };
         Ok(CompatibleSourceSchema::RowFormat(schema))
@@ -286,7 +284,7 @@ pub struct ProtobufSchema {
 }
 
 impl ParseTo for ProtobufSchema {
-    fn parse_to(p: &mut Parser<'_>) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
         impl_parse_to!([Keyword::MESSAGE], p);
         impl_parse_to!(message_name: AstString, p);
         impl_parse_to!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], p);
@@ -324,7 +322,7 @@ pub struct AvroSchema {
 }
 
 impl ParseTo for AvroSchema {
-    fn parse_to(p: &mut Parser<'_>) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
         impl_parse_to!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], p);
         impl_parse_to!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], p);
         impl_parse_to!(row_schema_location: AstString, p);
@@ -371,7 +369,7 @@ impl fmt::Display for DebeziumAvroSchema {
 }
 
 impl ParseTo for DebeziumAvroSchema {
-    fn parse_to(p: &mut Parser<'_>) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
         impl_parse_to!(
             [
                 Keyword::ROW,
@@ -397,19 +395,19 @@ pub struct CsvInfo {
     pub has_header: bool,
 }
 
-pub fn get_delimiter(chars: &str) -> Result<u8, ParserError> {
+pub fn get_delimiter(chars: &str) -> PResult<u8> {
     match chars {
         "," => Ok(b','),   // comma
         "\t" => Ok(b'\t'), // tab
-        other => Err(ParserError::ParserError(format!(
+        other => parser_err!(
             "The delimiter should be one of ',', E'\\t', but got {:?}",
             other
-        ))),
+        ),
     }
 }
 
 impl ParseTo for CsvInfo {
-    fn parse_to(p: &mut Parser<'_>) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
         impl_parse_to!(without_header => [Keyword::WITHOUT, Keyword::HEADER], p);
         impl_parse_to!([Keyword::DELIMITED, Keyword::BY], p);
         impl_parse_to!(delimiter: AstString, p);
