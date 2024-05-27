@@ -17,7 +17,7 @@ use std::ops::AddAssign;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::ParallelUnitId;
+use risingwave_common::hash::{ParallelUnitId, WorkerSlotId};
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -207,17 +207,20 @@ impl TableFragments {
     pub fn new(
         table_id: TableId,
         fragments: BTreeMap<FragmentId, Fragment>,
-        actor_locations: &BTreeMap<ActorId, ParallelUnit>,
+        actor_locations: &BTreeMap<ActorId, WorkerSlotId>,
         ctx: StreamContext,
         table_parallelism: TableParallelism,
     ) -> Self {
         let actor_status = actor_locations
             .iter()
-            .map(|(&actor_id, parallel_unit)| {
+            .map(|(&actor_id, WorkerSlotId(worker_id, slot_id))| {
                 (
                     actor_id,
                     ActorStatus {
-                        parallel_unit: Some(parallel_unit.clone()),
+                        parallel_unit: Some(ParallelUnit {
+                            id: *worker_id << 10 | *slot_id,
+                            worker_node_id: *worker_id,
+                        }),
                         state: ActorState::Inactive as i32,
                     },
                 )

@@ -784,7 +784,12 @@ mod tests {
     use std::time::Duration;
 
     use futures::{Stream, TryStreamExt};
+
+    use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
+
     use risingwave_common::hash::ParallelUnitMapping;
+
     use risingwave_common::system_param::reader::SystemParamsRead;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::add_worker_node_request::Property;
@@ -1089,7 +1094,7 @@ mod tests {
             let locations = {
                 let StreamingClusterInfo {
                     worker_nodes,
-                    parallel_units,
+                    parallel_units: _,
                     unschedulable_parallel_units: _,
                 }: StreamingClusterInfo = self
                     .global_stream_manager
@@ -1097,12 +1102,14 @@ mod tests {
                     .get_streaming_cluster_info()
                     .await?;
 
+                let (worker_id, _worker_node) = worker_nodes.iter().exactly_one().unwrap();
+
                 let actor_locations = fragments
                     .values()
                     .flat_map(|f| &f.actors)
                     .sorted_by(|a, b| a.actor_id.cmp(&b.actor_id))
                     .enumerate()
-                    .map(|(idx, a)| (a.actor_id, parallel_units[&(idx as u32)].clone()))
+                    .map(|(idx, a)| (a.actor_id, WorkerSlotId(*worker_id, idx as u32)))
                     .collect();
 
                 Locations {
@@ -1191,15 +1198,26 @@ mod tests {
         let table_id = TableId::new(0);
         let actors = make_mview_stream_actors(&table_id, 4);
 
-        let StreamingClusterInfo { parallel_units, .. } = services
+        let StreamingClusterInfo { worker_nodes, .. } = services
             .global_stream_manager
             .metadata_manager
             .get_streaming_cluster_info()
             .await?;
 
-        let parallel_unit_ids = parallel_units.keys().cloned().sorted().collect_vec();
+        let worker_slots = worker_nodes
+            .iter()
+            .flat_map(|(worker_id, worker)| {
+                (0..worker.get_parallel_units().len())
+                    .map(|slot_id| WorkerSlotId(*worker_id, slot_id as u32))
+            })
+            .collect_vec();
+
+        let worker_slot_mapping = WorkerSlotMapping::new_uniform(worker_slots.into_iter());
+
+        let parallel_unit_mapping = worker_slot_mapping.to_fake_mapping();
 
         let mut fragments = BTreeMap::default();
+
         fragments.insert(
             0,
             Fragment {
@@ -1208,9 +1226,7 @@ mod tests {
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
                 state_table_ids: vec![0],
-                vnode_mapping: Some(
-                    ParallelUnitMapping::new_uniform(parallel_unit_ids.into_iter()).to_protobuf(),
-                ),
+                vnode_mapping: Some(parallel_unit_mapping.to_protobuf()),
                 ..Default::default()
             },
         );
@@ -1268,7 +1284,9 @@ mod tests {
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
                 state_table_ids: vec![0],
-                vnode_mapping: Some(ParallelUnitMapping::new_single(0).to_protobuf()),
+                vnode_mapping: Some(
+                    risingwave_common::hash::ParallelUnitMapping::new_single(0).to_protobuf(),
+                ),
                 ..Default::default()
             },
         );
