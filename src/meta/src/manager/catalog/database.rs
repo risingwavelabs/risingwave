@@ -83,6 +83,9 @@ pub struct DatabaseManager {
     /// Relation reference count mapping.
     // TODO(zehua): avoid key conflicts after distinguishing table's and source's id generator.
     pub(super) relation_ref_count: HashMap<RelationId, usize>,
+
+    /// Secret reference count mapping
+    pub(super) secret_ref_count: HashMap<SecretId, usize>,
     // In-progress creation tracker.
     pub(super) in_progress_creation_tracker: HashSet<RelationKey>,
     // In-progress creating streaming job tracker: this is a temporary workaround to avoid clean up
@@ -107,6 +110,7 @@ impl DatabaseManager {
         let secrets = Secret::list(env.meta_store().as_kv()).await?;
 
         let mut relation_ref_count = HashMap::new();
+        let mut _secret_ref_count = HashMap::new();
 
         let databases = BTreeMap::from_iter(
             databases
@@ -150,6 +154,8 @@ impl DatabaseManager {
         let functions = BTreeMap::from_iter(functions.into_iter().map(|f| (f.id, f)));
         let connections = BTreeMap::from_iter(connections.into_iter().map(|c| (c.id, c)));
 
+        // todo: scan over stream source info and sink to update secret ref count `_secret_ref_count`
+
         Ok(Self {
             databases,
             schemas,
@@ -163,6 +169,7 @@ impl DatabaseManager {
             connections,
             relation_ref_count,
             secrets,
+            secret_ref_count: _secret_ref_count,
             in_progress_creation_tracker: HashSet::default(),
             in_progress_creation_streaming_job: HashMap::default(),
             in_progress_creating_tables: HashMap::default(),
@@ -474,6 +481,22 @@ impl DatabaseManager {
 
     pub fn decrease_ref_count(&mut self, relation_id: RelationId) {
         match self.relation_ref_count.entry(relation_id) {
+            Entry::Occupied(mut o) => {
+                *o.get_mut() -= 1;
+                if *o.get() == 0 {
+                    o.remove_entry();
+                }
+            }
+            Entry::Vacant(_) => unreachable!(),
+        }
+    }
+
+    pub fn increase_secret_ref_count(&mut self, secret_id: SecretId) {
+        *self.secret_ref_count.entry(secret_id).or_insert(0) += 1;
+    }
+
+    pub fn decrease_secret_ref_count(&mut self, secret_id: SecretId) {
+        match self.secret_ref_count.entry(secret_id) {
             Entry::Occupied(mut o) => {
                 *o.get_mut() -= 1;
                 if *o.get() == 0 {
