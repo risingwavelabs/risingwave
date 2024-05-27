@@ -599,7 +599,7 @@ message SystemParams {
   optional bool pause_on_next_bootstrap = 13;
   optional string wasm_storage_url = 14 [deprecated = true];
   optional bool enable_tracing = 15;
-  optional bool is_new_cluster = 16;
+  optional bool use_new_object_prefix_strategy = 16;
 }
 
 message GetSystemParamsRequest {}

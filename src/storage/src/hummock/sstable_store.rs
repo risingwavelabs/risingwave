@@ -225,7 +225,7 @@ pub struct SstableStore {
     ///   1. The specific object store type.
     ///   2. Whether the existing cluster is a new cluster.
     ///
-    /// The value of 'devide_object_prefix' is determined by the 'is_new_cluster' field in the system parameters.
+    /// The value of 'devide_object_prefix' is determined by the 'use_new_object_prefix_strategy' field in the system parameters.
     /// For a new cluster, 'devide_object_prefix' is set to True.
     /// For an old cluster, 'devide_object_prefix' is set to False.
     /// The final decision of whether to divide prefixes is based on this field and the specific object store type, this approach is implemented to ensure backward compatibility.

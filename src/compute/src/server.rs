@@ -193,7 +193,7 @@ pub async fn compute_node_serve(
         storage_metrics.clone(),
         compactor_metrics.clone(),
         await_tree_config.clone(),
-        system_params.is_new_cluster(),
+        system_params.use_new_object_prefix_strategy(),
     )
     .await
     .unwrap();

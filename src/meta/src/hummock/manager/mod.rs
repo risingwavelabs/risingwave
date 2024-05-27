@@ -388,21 +388,34 @@ impl HummockManager {
         // Skip this check in e2e compaction test, which needs to start a secondary cluster with
         // same bucket
         if !deterministic_mode {
-            let is_new_cluster = write_exclusive_cluster_id(
+            let use_new_object_prefix_strategy = write_exclusive_cluster_id(
                 state_store_dir,
                 env.cluster_id().clone(),
                 object_store.clone(),
             )
             .await?;
-            if is_new_cluster {
+            if use_new_object_prefix_strategy {
                 match env.system_params_manager_impl_ref() {
                     SystemParamsManagerImpl::Kv(mgr) => {
-                        mgr.set_param("is_new_cluster", Some("true".to_owned()))
+                        mgr.set_param("use_new_object_prefix_strategy", Some("true".to_owned()))
                             .await
                             .unwrap();
                     }
                     SystemParamsManagerImpl::Sql(mgr) => {
-                        mgr.set_param("is_new_cluster", Some("true".to_owned()))
+                        mgr.set_param("use_new_object_prefix_strategy", Some("true".to_owned()))
+                            .await
+                            .unwrap();
+                    }
+                };
+            } else {
+                match env.system_params_manager_impl_ref() {
+                    SystemParamsManagerImpl::Kv(mgr) => {
+                        mgr.set_param("use_new_object_prefix_strategy", Some("false".to_owned()))
+                            .await
+                            .unwrap();
+                    }
+                    SystemParamsManagerImpl::Sql(mgr) => {
+                        mgr.set_param("use_new_object_prefix_strategy", Some("false".to_owned()))
                             .await
                             .unwrap();
                     }
@@ -3437,11 +3450,11 @@ fn gen_version_delta<'a>(
     version_delta
 }
 
-/// This function, `write_exclusive_cluster_id`, is used to check if it is a new cluster during meta startup.
+/// This function, `write_exclusive_cluster_id`, is used to check if it is a new cluster during meta startup:
+/// For new clusters, the name of the object store needs to be prefixed according to the object id.
+/// For old clusters, the prefix is ​​not divided for the sake of compatibility.
 ///
-/// The determination of a new or old cluster is based on whether the file "0.data" in the `data_directory/cluster_id` path has been written.
-///
-/// In all other cases, the function returns a boolean variable indicating whether it is a new cluster.
+/// The return value of this function represents whether to adopt the new object prefix strategy.
 async fn write_exclusive_cluster_id(
     state_store_dir: &str,
     cluster_id: ClusterId,
