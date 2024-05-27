@@ -2676,11 +2676,9 @@ impl CatalogController {
         let inner = self.inner.read().await;
 
         // created table ids.
-        let mut table_ids: Vec<TableId> = Table::find()
+        let mut table_ids: Vec<TableId> = StreamingJob::find()
             .select_only()
-            .column(table::Column::TableId)
-            .join(JoinType::LeftJoin, table::Relation::Object1.def())
-            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
+            .column(streaming_job::Column::JobId)
             .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
             .into_tuple()
             .all(&inner.db)
