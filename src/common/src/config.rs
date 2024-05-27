@@ -1685,10 +1685,17 @@ pub mod default {
         }
 
         pub fn redact_sql_option_keywords() -> Vec<String> {
-            ["password", "secret", "credential", "token"]
-                .into_iter()
-                .map(str::to_string)
-                .collect()
+            [
+                "credential",
+                "key",
+                "password",
+                "private",
+                "secret",
+                "token",
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect()
         }
     }
 
