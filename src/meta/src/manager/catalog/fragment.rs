@@ -21,7 +21,9 @@ use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping};
-use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_cont};
+use risingwave_common::util::stream_graph_visitor::{
+    visit_stream_node, visit_stream_node_cont, visit_stream_node_cont_mut,
+};
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model_v2::SourceId;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -645,12 +647,12 @@ impl FragmentManager {
 
         let mut dirty_downstream_table_ids = HashMap::new();
 
-        for (table_id, table_fragment) in table_fragments.tree_mut() {
+        for (table_id, table_fragment) in table_fragments.tree_ref() {
             if to_delete_table_ids.contains(table_id) {
                 continue;
             }
 
-            for fragment in table_fragment.fragments.values_mut() {
+            for fragment in table_fragment.fragments.values() {
                 if fragment
                     .get_upstream_fragment_ids()
                     .iter()
@@ -659,11 +661,11 @@ impl FragmentManager {
                     continue;
                 }
 
-                for actor in &mut fragment.actors {
-                    visit_stream_node_cont(actor.nodes.as_mut().unwrap(), |node| {
+                for actor in &fragment.actors {
+                    visit_stream_node_cont(actor.nodes.as_ref().unwrap(), |node| {
                         if let Some(NodeBody::Union(_)) = node.node_body {
-                            for input in &mut node.input {
-                                if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body
+                            for input in &node.input {
+                                if let Some(NodeBody::Merge(merge_node)) = &input.node_body
                                     && !all_fragment_ids.contains(&merge_node.upstream_fragment_id)
                                 {
                                     dirty_downstream_table_ids
@@ -693,7 +695,7 @@ impl FragmentManager {
                 .retain(|upstream_fragment_id| all_fragment_ids.contains(upstream_fragment_id));
 
             for actor in &mut fragment.actors {
-                visit_stream_node_cont(actor.nodes.as_mut().unwrap(), |node| {
+                visit_stream_node_cont_mut(actor.nodes.as_mut().unwrap(), |node| {
                     if let Some(NodeBody::Union(_)) = node.node_body {
                         node.input.retain_mut(|input| {
                             if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body

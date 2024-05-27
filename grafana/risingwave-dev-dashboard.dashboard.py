@@ -532,8 +532,8 @@ def section_object_storage(outer_panels):
     operation_duration_blacklist = "type!~'streaming_upload_write_bytes|streaming_read'"
     write_op_filter = "type=~'upload|delete'"
     read_op_filter = "type=~'read|readv|list|metadata'"
-    request_cost_op1 = "type=~'read|streaming_read_start|delete'"
-    request_cost_op2 = "type=~'upload|streaming_upload_start|s3_upload_part|streaming_upload_finish|delete_objects|list'"
+    s3_request_cost_op1 = "type=~'read|streaming_read_start|streaming_read_init'"
+    s3_request_cost_op2 = "type=~'upload|streaming_upload|streaming_upload_start|s3_upload_part|streaming_upload_finish|list'"
     return [
         outer_panels.row_collapsed(
             "Object Storage",
@@ -641,11 +641,11 @@ def section_object_storage(outer_panels):
                             True,
                         ),
                         panels.target(
-                            f"sum({metric('object_store_operation_latency_count', request_cost_op1)}) * 0.0004 / 1000",
+                            f"sum({metric('object_store_operation_latency_count', s3_request_cost_op1)}) * 0.0004 / 1000",
                             "GET, SELECT, and all other Requests Cost",
                         ),
                         panels.target(
-                            f"sum({metric('object_store_operation_latency_count', request_cost_op2)}) * 0.005 / 1000",
+                            f"sum({metric('object_store_operation_latency_count', s3_request_cost_op2)}) * 0.005 / 1000",
                             "PUT, COPY, POST, LIST Requests Cost",
                         ),
                     ],
@@ -3697,22 +3697,26 @@ def section_memory_manager(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_count(
-                    "LRU manager watermark steps",
+                panels.timeseries(
+                    "LRU manager eviction policy",
                     "",
                     [
                         panels.target(
-                            f"{metric('lru_watermark_step')}",
+                            f"{metric('lru_eviction_policy')}",
                             "",
                         ),
                     ],
                 ),
-                panels.timeseries_ms(
-                    "LRU manager diff between watermark_time and now (ms)",
-                    "watermark_time is the current lower watermark of cached data. physical_now is the current time of the machine. The diff (physical_now - watermark_time) shows how much data is cached.",
+                panels.timeseries(
+                    "LRU manager sequence",
+                    "",
                     [
                         panels.target(
-                            f"{metric('lru_physical_now_ms')} - {metric('lru_current_watermark_time_ms')}",
+                            f"{metric('lru_latest_sequence')}",
+                            "",
+                        ),
+                        panels.target(
+                            f"{metric('lru_watermark_sequence')}",
                             "",
                         ),
                     ],
